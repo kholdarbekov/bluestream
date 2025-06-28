@@ -14,7 +14,7 @@ COPY requirements.txt /requirements.txt
 RUN pip install --upgrade pip --progress-bar off && pip install -r /requirements.txt --progress-bar off
 
 COPY . /app
-COPY ./scripts/start-gunicorn.sh /start-gunicorn.sh
+COPY ./app/scripts/start-gunicorn.sh /start-gunicorn.sh
 RUN chmod u+x /start-gunicorn.sh
 
 CMD ["/start-gunicorn.sh"]

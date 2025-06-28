@@ -1,7 +1,8 @@
 #! /usr/bin/env sh
 
 set -e
-APP_MODULE='/app/app'
+
+APP_MODULE='app.wsgi:app'
 
 cpu_count=$(grep -c ^processor /proc/cpuinfo)
 #workers=$((1 * $cpu_count))

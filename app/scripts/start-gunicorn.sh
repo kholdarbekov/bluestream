@@ -19,7 +19,7 @@ threads=4
 
 # NOTE: gunicorn workers in GPU is taking longer, with 3 workers it takes ~7 min to startup the app
 
-echo "***** GUNICORN workers" $workers ", threads" $threads
+echo "***** GUNICORN workers" $workers ", threads" $threads ", APP_MODULE: " $APP_MODULE
 
 #echo "APPLYING MIGRATIONS"
 

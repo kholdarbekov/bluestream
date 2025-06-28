@@ -2,7 +2,7 @@
 
 set -e
 
-APP_MODULE='app.wsgi:app'
+APP_MODULE='wsgi:app'
 
 cpu_count=$(grep -c ^processor /proc/cpuinfo)
 #workers=$((1 * $cpu_count))

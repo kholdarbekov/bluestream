@@ -837,7 +837,8 @@ Contact our support team at +998901234567 or email info@aquapure.uz
 def main():
     """Main function"""
     bot = WaterBusinessBot()
-    asyncio.run(bot.run_bot())
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(bot.run_bot())
 
 if __name__ == "__main__":
     main()

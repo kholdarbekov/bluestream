@@ -17,12 +17,44 @@ services:
     #      size: 134217728 # 128*2^20 bytes = 128Mb
     volumes:
       - db-data:/var/lib/postgresql/data/pgdata
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
     env_file:
       - .env
     environment:
       - PGDATA=/var/lib/postgresql/data/pgdata
     expose:
       - 5432
-
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d bluestream_db"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+  redis:
+    image: redis:8-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+  telegram_bot:
+    build: ./telegram_bot
+    depends_on:
+      - db
+      - redis
+      - app
+    environment:
+      - BOT_TOKEN=${BOT_TOKEN}
+      - REDIS_URL=redis://redis:6379
+      - BUSINESS_APP_URL=http://app:5000
+      - WEBHOOK_URL=${WEBHOOK_URL}
+      - PAYMENT_TOKEN=${PAYMENT_TOKEN}
+      - SMS_API_KEY=${SMS_API_KEY}
+      - EMAIL_API_KEY=${EMAIL_API_KEY}
+    env_file:
+      - .env
+    volumes:
+      - ./uploads:/app/uploads
+      - ./logs:/app/logs
+    restart: unless-stopped
 volumes:
   db-data:
+  redis_data:

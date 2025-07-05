@@ -837,7 +837,8 @@ Contact our support team at +998901234567 or email info@aquapure.uz
     def run_bot_sync(self):
         """Run the bot"""
         try:
-            asyncio.run(self.init_connections())
+            loop = asyncio.get_event_loop()
+            loop.run_until_complete(self.init_connections())
 
             # Create application
             application = ApplicationBuilder().token(self.bot_token).build()
@@ -855,6 +856,7 @@ Contact our support team at +998901234567 or email info@aquapure.uz
 
             # Start periodic tasks
             # asyncio.create_task(self.setup_periodic_tasks())
+            loop.run_until_complete(self.setup_periodic_tasks())
             
             # Start the bot
             application.run_polling(drop_pending_updates=True)

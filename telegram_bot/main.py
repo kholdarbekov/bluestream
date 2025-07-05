@@ -833,13 +833,39 @@ Contact our support team at +998901234567 or email info@aquapure.uz
                 await self.redis_client.aclose()
             if self.http_client:
                 await self.http_client.aclose()
+    
+    def run_bot_sync(self):
+        """Run the bot"""
+        try:
+            # Create application
+            application = ApplicationBuilder().token(self.bot_token).build()
+            
+            # Add handlers
+            application.add_handler(CommandHandler("start", self.start_command))
+            application.add_handler(CommandHandler("help", self.help_command))
+            application.add_handler(CallbackQueryHandler(self.button_handler))
+            application.add_handler(MessageHandler(filters.LOCATION, self.location_handler))
+            application.add_handler(MessageHandler(filters.PHOTO, self.photo_handler))
+            application.add_handler(MessageHandler(filters.CONTACT, self.contact_handler))
+            
+            # Error handler
+            application.add_error_handler(self.error_handler)
+            
+            # Start the bot
+            application.run_polling(drop_pending_updates=True)
+            
+        except Exception as e:
+            logger.error(f"Error running bot: {e}")
+            raise
 
 def main():
     """Main function"""
     bot = WaterBusinessBot()
     # asyncio.run(bot.run_bot())
-    loop = asyncio.get_running_loop()
-    loop.run_until_complete(bot.run_bot())
+    # loop = asyncio.get_running_loop()
+    # loop = asyncio.get_event_loop()
+    # loop.run_until_complete(bot.run_bot())
+    bot.run_bot_sync()
 
 if __name__ == "__main__":
     main()

@@ -6,7 +6,7 @@ services:
     ports:
       - "5000:80"
   db:
-    image: postgres:17.5
+    image: postgis/postgis:17-3.5
     restart: always
     shm_size: 128mb
     # or set shared memory limit when deploy via swarm stack
@@ -17,7 +17,7 @@ services:
     #      size: 134217728 # 128*2^20 bytes = 128Mb
     volumes:
       - db-data:/var/lib/postgresql/data/pgdata
-      - app/schema.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./app/schema.sql:/docker-entrypoint-initdb.d/init.sql
     env_file:
       - .env
     environment:

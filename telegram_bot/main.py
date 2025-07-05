@@ -773,6 +773,9 @@ Contact our support team at +998901234567 or email info@aquapure.uz
                     
         except Exception as e:
             logger.error(f"Error processing subscription renewals: {e}")
+    
+    async def update_loyalty_points(sefl):
+        pass
 
     async def send_delivery_reminders(self):
         """Send delivery reminders"""
@@ -825,9 +828,9 @@ Contact our support team at +998901234567 or email info@aquapure.uz
             raise
         finally:
             if self.db_pool:
-                await self.db_pool.close()
+                await self.db_pool.aclose()
             if self.redis_client:
-                await self.redis_client.close()
+                await self.redis_client.aclose()
             if self.http_client:
                 await self.http_client.aclose()
 

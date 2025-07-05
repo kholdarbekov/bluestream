@@ -42,7 +42,6 @@ services:
       - redis
       - app
     environment:
-      - BOT_TOKEN=${BOT_TOKEN}
       - REDIS_URL=redis://redis:6379
       - BUSINESS_APP_URL=http://app:5000
       - WEBHOOK_URL=${WEBHOOK_URL}

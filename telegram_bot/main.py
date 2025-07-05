@@ -8,7 +8,7 @@ import json
 import asyncpg
 import redis.asyncio as redis
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup
-from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 from telegram.constants import ParseMode
 import httpx
 from dotenv import load_dotenv
@@ -804,7 +804,7 @@ Contact our support team at +998901234567 or email info@aquapure.uz
             await self.init_connections()
             
             # Create application
-            application = Application.builder().token(self.bot_token).build()
+            application = ApplicationBuilder().token(self.bot_token).build()
             
             # Add handlers
             application.add_handler(CommandHandler("start", self.start_command))
@@ -821,7 +821,7 @@ Contact our support team at +998901234567 or email info@aquapure.uz
             asyncio.create_task(self.setup_periodic_tasks())
             
             # Start the bot
-            await application.run_polling(drop_pending_updates=True)
+            application.run_polling(drop_pending_updates=True)
             
         except Exception as e:
             logger.error(f"Error running bot: {e}")

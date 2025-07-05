@@ -4,17 +4,8 @@
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 -- CREATE EXTENSION IF NOT EXISTS "postgis";
 
-DROP TABLE IF EXISTS user;
-DROP TABLE IF EXISTS post;
-
-CREATE TABLE post (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  author_id INTEGER NOT NULL,
-  created TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  title TEXT NOT NULL,
-  body TEXT NOT NULL,
-  FOREIGN KEY (author_id) REFERENCES user (id)
-);
+DROP TABLE IF EXISTS "user";
+DROP TABLE IF EXISTS "post";
 
 -- Enums
 CREATE TYPE user_role AS ENUM ('customer', 'admin', 'delivery', 'manager');
@@ -44,6 +35,15 @@ CREATE TABLE users (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     last_activity TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     password TEXT NOT NULL
+);
+
+CREATE TABLE post (
+  id SERIAL PRIMARY KEY,
+  author_id UUID NOT NULL,
+  created TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  title TEXT NOT NULL,
+  body TEXT NOT NULL,
+  FOREIGN KEY (author_id) REFERENCES users (id)
 );
 
 -- Addresses table

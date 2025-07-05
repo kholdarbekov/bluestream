@@ -837,6 +837,8 @@ Contact our support team at +998901234567 or email info@aquapure.uz
     def run_bot_sync(self):
         """Run the bot"""
         try:
+            asyncio.run(self.init_connections())
+
             # Create application
             application = ApplicationBuilder().token(self.bot_token).build()
             
@@ -850,6 +852,9 @@ Contact our support team at +998901234567 or email info@aquapure.uz
             
             # Error handler
             application.add_error_handler(self.error_handler)
+
+            # Start periodic tasks
+            asyncio.create_task(self.setup_periodic_tasks())
             
             # Start the bot
             application.run_polling(drop_pending_updates=True)
@@ -857,6 +862,13 @@ Contact our support team at +998901234567 or email info@aquapure.uz
         except Exception as e:
             logger.error(f"Error running bot: {e}")
             raise
+        finally:
+            if self.db_pool:
+                asyncio.run(self.db_pool.close())
+            if self.redis_client:
+                asyncio.run(self.redis_client.aclose())
+            if self.http_client:
+                asyncio.run(self.http_client.aclose())
 
 def main():
     """Main function"""

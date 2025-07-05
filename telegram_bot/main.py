@@ -854,7 +854,7 @@ Contact our support team at +998901234567 or email info@aquapure.uz
             application.add_error_handler(self.error_handler)
 
             # Start periodic tasks
-            asyncio.create_task(self.setup_periodic_tasks())
+            # asyncio.create_task(self.setup_periodic_tasks())
             
             # Start the bot
             application.run_polling(drop_pending_updates=True)

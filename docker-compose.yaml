@@ -17,7 +17,7 @@ services:
     #      size: 134217728 # 128*2^20 bytes = 128Mb
     volumes:
       - db-data:/var/lib/postgresql/data/pgdata
-      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+      - app/schema.sql:/docker-entrypoint-initdb.d/init.sql
     env_file:
       - .env
     environment:

@@ -801,7 +801,7 @@ Contact our support team at +998901234567 or email info@aquapure.uz
     async def run_bot(self):
         """Run the bot"""
         try:
-            await self.init_connections()
+            # await self.init_connections()
             
             # Create application
             application = ApplicationBuilder().token(self.bot_token).build()
@@ -818,7 +818,7 @@ Contact our support team at +998901234567 or email info@aquapure.uz
             application.add_error_handler(self.error_handler)
             
             # Start periodic tasks
-            asyncio.create_task(self.setup_periodic_tasks())
+            # asyncio.create_task(self.setup_periodic_tasks())
             
             # Start the bot
             application.run_polling(drop_pending_updates=True)
@@ -837,8 +837,7 @@ Contact our support team at +998901234567 or email info@aquapure.uz
 def main():
     """Main function"""
     bot = WaterBusinessBot()
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(bot.run_bot())
+    asyncio.run(bot.run_bot())
 
 if __name__ == "__main__":
     main()

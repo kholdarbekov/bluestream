@@ -41,7 +41,9 @@ services:
       db:
         condition: service_healthy
       redis:
+        condition: service_started
       app:
+        condition: service_started
     environment:
       - REDIS_URL=redis://redis:6379
       - BUSINESS_APP_URL=http://app:5000

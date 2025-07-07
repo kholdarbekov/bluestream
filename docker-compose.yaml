@@ -38,9 +38,10 @@ services:
   telegram_bot:
     build: ./telegram_bot
     depends_on:
-      - db
-      - redis
-      - app
+      db:
+        condition: service_healthy
+      redis:
+      app:
     environment:
       - REDIS_URL=redis://redis:6379
       - BUSINESS_APP_URL=http://app:5000

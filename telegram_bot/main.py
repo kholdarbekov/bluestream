@@ -12,6 +12,7 @@ from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, Cal
 from telegram.constants import ParseMode
 import httpx
 from dotenv import load_dotenv
+load_dotenv()
 
 from services import (
     NotificationService,
@@ -24,8 +25,6 @@ from services import (
     ProductService,
     SubscriptionService,
 )
-
-load_dotenv()
 
 # Configure logging
 logging.basicConfig(
@@ -115,7 +114,7 @@ class WaterBusinessBot:
             logger.info("HTTP client initialized")
 
             # --- Instantiate services ---
-            self.notification_service = NotificationService(self.redis_client, self.db_pool)
+            # self.notification_service = NotificationService(self.redis_client, self.db_pool)
             self.payment_service = PaymentService(self.redis_client, self.db_pool)
             self.delivery_service = DeliveryService(self.redis_client, self.db_pool)
             self.analytics_service = AnalyticsService(self.db_pool)
@@ -846,7 +845,7 @@ Contact our support team at +998901234567 or email info@aquapure.uz
                     elif payment_method == 'loyalty':
                         await self.payment_service.process_loyalty_payment(user['id'], total)
                     # Notification
-                    await self.notification_service.send_order_notification(user['id'], order, 'order_confirmed')
+                    # await self.notification_service.send_order_notification(user['id'], order, 'order_confirmed')
                     # Loyalty points
                     await self.payment_service.add_loyalty_points(user['id'], int(total*0.05))
                     await query.edit_message_text("✅ Order placed successfully! You will be notified about delivery.")

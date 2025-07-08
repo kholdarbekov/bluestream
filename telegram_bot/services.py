@@ -1,11 +1,15 @@
 import os
 import asyncio
 import logging
+import aiohttp
+import hmac
+import hashlib
 from datetime import datetime, timedelta, date
 from typing import Dict, List, Optional, Any
 import json
 import uuid
 from decimal import Decimal
+from enum import Enum
 
 import asyncpg
 import redis.asyncio as redis
@@ -17,6 +21,30 @@ from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import Mail
 
 logger = logging.getLogger(__name__)
+
+# Data classes and enums
+class DeliveryStatus(Enum):
+    PENDING = "pending"
+    SCHEDULED = "scheduled"
+    OUT_FOR_DELIVERY = "out_for_delivery"
+    DELIVERED = "delivered"
+    CANCELLED = "cancelled"
+    FAILED = "failed"
+
+class DeliverySlot:
+    def __init__(self, slot_id: str, start_time: datetime, end_time: datetime, available: bool = True):
+        self.slot_id = slot_id
+        self.start_time = start_time
+        self.end_time = end_time
+        self.available = available
+
+class DeliveryRoute:
+    def __init__(self, route_id: str, driver_id: str, orders: List[str], estimated_duration: int, total_distance: float):
+        self.route_id = route_id
+        self.driver_id = driver_id
+        self.orders = orders
+        self.estimated_duration = estimated_duration
+        self.total_distance = total_distance
 
 class NotificationService:
     """Handle all notification services"""
@@ -206,6 +234,8 @@ class DeliveryService:
         self.redis_client = redis_client
         self.db_pool = db_pool
         self.geolocator = Nominatim(user_agent="aquapure_delivery")
+        self.maps_api_key = os.getenv('GOOGLE_MAPS_API_KEY')
+        self.time_slots = self._generate_time_slots()
     
     async def calculate_delivery_fee(self, user_location: Dict, warehouse_location: Dict) -> Decimal:
         """Calculate delivery fee based on distance"""
@@ -234,11 +264,36 @@ class DeliveryService:
                        WHERE u.role = 'delivery'
                        AND u.id NOT IN (
                            SELECT delivery_person_id FROM deliveries
-                           WHERE scheduled_date = $1 AND scheduled_
-                    """
+                           WHERE scheduled_date = $1 AND scheduled_time = $2
+                       )
+                       LIMIT 1""",
+                    delivery_date, time_slot
                 )
-        except Exception as exc:
-            pass
+                
+                if not delivery_person:
+                    logger.warning(f"No available delivery person for {delivery_date} {time_slot}")
+                    return False
+                
+                # Create delivery record
+                await conn.execute(
+                    """INSERT INTO deliveries (order_id, delivery_person_id, scheduled_date, 
+                       scheduled_time, status, created_at)
+                       VALUES ($1, $2, $3, $4, 'scheduled', CURRENT_TIMESTAMP)""",
+                    order_id, delivery_person['id'], delivery_date, time_slot
+                )
+                
+                # Update order status
+                await conn.execute(
+                    "UPDATE orders SET delivery_status = 'scheduled' WHERE id = $1",
+                    order_id
+                )
+                
+                logger.info(f"Delivery scheduled for order {order_id} on {delivery_date} at {time_slot}")
+                return True
+                
+        except Exception as e:
+            logger.error(f"Error scheduling delivery: {e}")
+            return False
     
     def _generate_time_slots(self) -> List[DeliverySlot]:
         """Generate available delivery time slots"""
@@ -278,29 +333,7 @@ class DeliveryService:
             
             return available_slots[:20]  # Return next 20 available slots
     
-    async def schedule_delivery(self, order_id: str, slot_id: str, address: str) -> bool:
-        """Schedule delivery for an order"""
-        try:
-            async with self.db_pool.acquire() as conn:
-                # Update order with delivery details
-                await conn.execute(
-                    """UPDATE orders 
-                       SET delivery_slot = $1, delivery_address = $2, delivery_status = 'scheduled'
-                       WHERE order_id = $3""",
-                    slot_id, address, order_id
-                )
-                
-                # Log delivery event
-                await conn.execute(
-                    """INSERT INTO delivery_events (order_id, event_type, event_time, description)
-                       VALUES ($1, 'scheduled', $2, $3)""",
-                    order_id, datetime.now(), f"Delivery scheduled for slot {slot_id}"
-                )
-                
-                return True
-        except Exception as e:
-            logger.error(f"Delivery scheduling failed: {e}")
-            return False
+
     
     async def optimize_route(self, driver_id: str, order_ids: List[str]) -> DeliveryRoute:
         """Optimize delivery route for multiple orders"""
@@ -607,3 +640,135 @@ class AdminService:
             )
             
             return stats
+
+class OrderService:
+    """Handle order operations"""
+    
+    def __init__(self, db_pool: asyncpg.Pool, redis_client):
+        self.db_pool = db_pool
+        self.redis_client = redis_client
+    
+    async def create_order(self, user_id: str, items: List[Dict], delivery_address: str, 
+                          payment_method: str = 'cash') -> Dict:
+        """Create a new order"""
+        try:
+            async with self.db_pool.acquire() as conn:
+                # Calculate total amount
+                total_amount = sum(item['price'] * item['quantity'] for item in items)
+                
+                # Generate order ID
+                order_id = f"ORD{datetime.now().strftime('%Y%m%d%H%M%S')}{uuid.uuid4().hex[:8]}"
+                
+                # Create order
+                order = await conn.fetchrow(
+                    """INSERT INTO orders (order_id, user_id, items, total_amount, 
+                       delivery_address, payment_method, status, created_at)
+                       VALUES ($1, $2, $3, $4, $5, $6, 'pending', CURRENT_TIMESTAMP)
+                       RETURNING *""",
+                    order_id, user_id, json.dumps(items), total_amount, 
+                    delivery_address, payment_method
+                )
+                
+                return dict(order)
+        except Exception as e:
+            logger.error(f"Error creating order: {e}")
+            raise
+    
+    async def get_user_orders(self, user_id: str, limit: int = 10) -> List[Dict]:
+        """Get user's order history"""
+        async with self.db_pool.acquire() as conn:
+            orders = await conn.fetch(
+                """SELECT * FROM orders WHERE user_id = $1 
+                   ORDER BY created_at DESC LIMIT $2""",
+                user_id, limit
+            )
+            return [dict(order) for order in orders]
+    
+    async def get_order_details(self, order_id: str) -> Optional[Dict]:
+        """Get detailed order information"""
+        async with self.db_pool.acquire() as conn:
+            order = await conn.fetchrow(
+                "SELECT * FROM orders WHERE order_id = $1",
+                order_id
+            )
+            return dict(order) if order else None
+
+class ProductService:
+    """Handle product operations"""
+    
+    def __init__(self, db_pool: asyncpg.Pool):
+        self.db_pool = db_pool
+    
+    async def get_available_products(self) -> List[Dict]:
+        """Get all available products"""
+        async with self.db_pool.acquire() as conn:
+            products = await conn.fetch(
+                "SELECT * FROM products WHERE is_available = true ORDER BY name"
+            )
+            return [dict(product) for product in products]
+    
+    async def get_product_by_id(self, product_id: str) -> Optional[Dict]:
+        """Get product by ID"""
+        async with self.db_pool.acquire() as conn:
+            product = await conn.fetchrow(
+                "SELECT * FROM products WHERE id = $1 AND is_available = true",
+                product_id
+            )
+            return dict(product) if product else None
+    
+    async def update_product_stock(self, product_id: str, quantity: int):
+        """Update product stock"""
+        async with self.db_pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE products SET stock_quantity = stock_quantity - $1 WHERE id = $2",
+                quantity, product_id
+            )
+
+class SubscriptionService:
+    """Handle subscription operations"""
+    
+    def __init__(self, db_pool: asyncpg.Pool):
+        self.db_pool = db_pool
+    
+    async def create_subscription(self, user_id: str, product_id: str, 
+                                frequency_days: int, quantity: int) -> Dict:
+        """Create a new subscription"""
+        try:
+            async with self.db_pool.acquire() as conn:
+                subscription = await conn.fetchrow(
+                    """INSERT INTO subscriptions (user_id, product_id, frequency_days, 
+                       quantity, next_delivery_date, status, created_at)
+                       VALUES ($1, $2, $3, $4, CURRENT_DATE + INTERVAL '$3 days', 'active', CURRENT_TIMESTAMP)
+                       RETURNING *""",
+                    user_id, product_id, frequency_days, quantity
+                )
+                return dict(subscription)
+        except Exception as e:
+            logger.error(f"Error creating subscription: {e}")
+            raise
+    
+    async def get_user_subscriptions(self, user_id: str) -> List[Dict]:
+        """Get user's active subscriptions"""
+        async with self.db_pool.acquire() as conn:
+            subscriptions = await conn.fetch(
+                """SELECT s.*, p.name as product_name, p.price 
+                   FROM subscriptions s
+                   JOIN products p ON s.product_id = p.id
+                   WHERE s.user_id = $1 AND s.status = 'active'
+                   ORDER BY s.next_delivery_date""",
+                user_id
+            )
+            return [dict(sub) for sub in subscriptions]
+    
+    async def cancel_subscription(self, subscription_id: str) -> bool:
+        """Cancel a subscription"""
+        try:
+            async with self.db_pool.acquire() as conn:
+                await conn.execute(
+                    "UPDATE subscriptions SET status = 'cancelled' WHERE id = $1",
+                    subscription_id
+                )
+                return True
+        except Exception as e:
+            logger.error(f"Error cancelling subscription: {e}")
+            return False

@@ -7,11 +7,23 @@ import json
 
 import asyncpg
 import redis.asyncio as redis
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 from telegram.constants import ParseMode
 import httpx
 from dotenv import load_dotenv
+
+from telegram_bot.services import (
+    NotificationService,
+    PaymentService,
+    DeliveryService,
+    AnalyticsService,
+    SecurityService,
+    AdminService,
+    OrderService,
+    ProductService,
+    SubscriptionService,
+)
 
 load_dotenv()
 
@@ -21,6 +33,15 @@ logging.basicConfig(
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
+
+ORDER_STATE = {
+    'SELECT_PRODUCT': 'select_product',
+    'SELECT_QUANTITY': 'select_quantity',
+    'CART': 'cart',
+    'DELIVERY_SLOT': 'delivery_slot',
+    'PAYMENT_METHOD': 'payment_method',
+    'CONFIRM': 'confirm',
+}
 
 class WaterBusinessBot:
     def __init__(self):
@@ -32,6 +53,16 @@ class WaterBusinessBot:
         self.db_pool = None
         self.redis_client = None
         self.http_client = None
+        # Service attributes (will be set after connections)
+        self.notification_service = None
+        self.payment_service = None
+        self.delivery_service = None
+        self.analytics_service = None
+        self.security_service = None
+        self.admin_service = None
+        self.order_service = None
+        self.product_service = None
+        self.subscription_service = None
         
         # User states for conversation flow
         self.user_states = {}
@@ -82,7 +113,18 @@ class WaterBusinessBot:
             # HTTP client
             self.http_client = httpx.AsyncClient(base_url=self.business_app_url)
             logger.info("HTTP client initialized")
-            
+
+            # --- Instantiate services ---
+            self.notification_service = NotificationService(self.redis_client, self.db_pool)
+            self.payment_service = PaymentService(self.redis_client, self.db_pool)
+            self.delivery_service = DeliveryService(self.redis_client, self.db_pool)
+            self.analytics_service = AnalyticsService(self.db_pool)
+            self.security_service = SecurityService(self.db_pool)
+            self.admin_service = AdminService(self.db_pool)
+            self.order_service = OrderService(self.db_pool, self.redis_client)
+            self.product_service = ProductService(self.db_pool)
+            self.subscription_service = SubscriptionService(self.db_pool)
+            # --- End instantiate services ---
         except Exception as e:
             logger.error(f"Failed to initialize connections: {e}")
             raise
@@ -634,6 +676,188 @@ Contact our support team at +998901234567 or email info@aquapure.uz
             parse_mode=ParseMode.HTML
         )
 
+    async def order_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        user = update.effective_user
+        user_id = user.id
+        self.user_states[user_id] = {
+            'state': ORDER_STATE['SELECT_PRODUCT'],
+            'cart': [],
+        }
+        products = await self.product_service.get_available_products()
+        if not products:
+            await update.message.reply_text("No products available at the moment.")
+            return
+        keyboard = [
+            [InlineKeyboardButton(f"{p['name']} ({p['price']} UZS)", callback_data=f"order_product_{p['id']}")]
+            for p in products
+        ]
+        await update.message.reply_text(
+            "Select a product to order:",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
+    def get_cart_text(self, cart):
+        if not cart:
+            return "Your cart is empty."
+        lines = [f"{item['name']} x{item['quantity']} = {item['price']*item['quantity']} UZS" for item in cart]
+        total = sum(item['price']*item['quantity'] for item in cart)
+        return "\n".join(lines) + f"\n\nTotal: {total} UZS"
+
+    async def order_callback_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        query = update.callback_query
+        user_id = query.from_user.id
+        state = self.user_states.get(user_id, {})
+        await query.answer()
+        if not state:
+            await query.edit_message_text("Session expired. Please /order again.")
+            return
+        if state['state'] == ORDER_STATE['SELECT_PRODUCT']:
+            if query.data.startswith("order_product_"):
+                product_id = query.data.replace("order_product_", "")
+                product = await self.product_service.get_product_by_id(product_id)
+                if not product:
+                    await query.edit_message_text("Product not found.")
+                    return
+                state['selected_product'] = product
+                state['state'] = ORDER_STATE['SELECT_QUANTITY']
+                self.user_states[user_id] = state
+                keyboard = [
+                    [InlineKeyboardButton(str(q), callback_data=f"order_qty_{q}") for q in range(1, 6)]
+                ]
+                await query.edit_message_text(
+                    f"How many '{product['name']}' would you like to order?",
+                    reply_markup=InlineKeyboardMarkup(keyboard)
+                )
+        elif state['state'] == ORDER_STATE['SELECT_QUANTITY']:
+            if query.data.startswith("order_qty_"):
+                qty = int(query.data.replace("order_qty_", ""))
+                product = state['selected_product']
+                cart = state.get('cart', [])
+                cart.append({
+                    'id': product['id'],
+                    'name': product['name'],
+                    'price': product['price'],
+                    'quantity': qty
+                })
+                state['cart'] = cart
+                state['state'] = ORDER_STATE['CART']
+                self.user_states[user_id] = state
+                keyboard = [
+                    [InlineKeyboardButton("Add more", callback_data="order_add_more")],
+                    [InlineKeyboardButton("Proceed to Delivery", callback_data="order_delivery")],
+                    [InlineKeyboardButton("Cancel", callback_data="order_cancel")],
+                ]
+                await query.edit_message_text(
+                    f"Cart:\n{self.get_cart_text(cart)}",
+                    reply_markup=InlineKeyboardMarkup(keyboard)
+                )
+        elif state['state'] == ORDER_STATE['CART']:
+            if query.data == "order_add_more":
+                state['state'] = ORDER_STATE['SELECT_PRODUCT']
+                self.user_states[user_id] = state
+                products = await self.product_service.get_available_products()
+                keyboard = [
+                    [InlineKeyboardButton(f"{p['name']} ({p['price']} UZS)", callback_data=f"order_product_{p['id']}")]
+                    for p in products
+                ]
+                await query.edit_message_text(
+                    "Select another product:",
+                    reply_markup=InlineKeyboardMarkup(keyboard)
+                )
+            elif query.data == "order_delivery":
+                state['state'] = ORDER_STATE['DELIVERY_SLOT']
+                self.user_states[user_id] = state
+                # For demo, use a static warehouse location
+                user = await self.get_or_create_user(update)
+                user_location = {'latitude': 41.2995, 'longitude': 69.2401} # fallback
+                if user.get('latitude') and user.get('longitude'):
+                    user_location = {'latitude': user['latitude'], 'longitude': user['longitude']}
+                warehouse_location = {'latitude': 41.2995, 'longitude': 69.2401}
+                fee = await self.delivery_service.calculate_delivery_fee(user_location, warehouse_location)
+                slots = await self.delivery_service.get_available_slots(user_location)
+                if not slots:
+                    await query.edit_message_text("No delivery slots available. Please try again later.")
+                    return
+                state['delivery_fee'] = float(fee)
+                state['slots'] = slots
+                keyboard = [
+                    [InlineKeyboardButton(slot.slot_id, callback_data=f"order_slot_{slot.slot_id}")]
+                    for slot in slots[:5]
+                ]
+                await query.edit_message_text(
+                    f"Select a delivery slot (Delivery fee: {fee} UZS):",
+                    reply_markup=InlineKeyboardMarkup(keyboard)
+                )
+            elif query.data == "order_cancel":
+                del self.user_states[user_id]
+                await query.edit_message_text("Order cancelled.")
+        elif state['state'] == ORDER_STATE['DELIVERY_SLOT']:
+            if query.data.startswith("order_slot_"):
+                slot_id = query.data.replace("order_slot_", "")
+                state['selected_slot'] = slot_id
+                state['state'] = ORDER_STATE['PAYMENT_METHOD']
+                self.user_states[user_id] = state
+                keyboard = [
+                    [InlineKeyboardButton("Cash", callback_data="order_pay_cash")],
+                    [InlineKeyboardButton("Card", callback_data="order_pay_card")],
+                    [InlineKeyboardButton("Loyalty Points", callback_data="order_pay_loyalty")],
+                ]
+                await query.edit_message_text(
+                    "Choose payment method:",
+                    reply_markup=InlineKeyboardMarkup(keyboard)
+                )
+        elif state['state'] == ORDER_STATE['PAYMENT_METHOD']:
+            payment_method = None
+            if query.data == "order_pay_cash":
+                payment_method = 'cash'
+            elif query.data == "order_pay_card":
+                payment_method = 'card'
+            elif query.data == "order_pay_loyalty":
+                payment_method = 'loyalty'
+            if payment_method:
+                state['payment_method'] = payment_method
+                state['state'] = ORDER_STATE['CONFIRM']
+                self.user_states[user_id] = state
+                cart = state['cart']
+                total = sum(item['price']*item['quantity'] for item in cart) + state.get('delivery_fee', 0)
+                await query.edit_message_text(
+                    f"Order summary:\n{self.get_cart_text(cart)}\nDelivery fee: {state.get('delivery_fee', 0)} UZS\nTotal: {total} UZS\n\nConfirm order?",
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton("Confirm", callback_data="order_confirm")],
+                        [InlineKeyboardButton("Cancel", callback_data="order_cancel")],
+                    ])
+                )
+        elif state['state'] == ORDER_STATE['CONFIRM']:
+            if query.data == "order_confirm":
+                # Place order
+                user = await self.get_or_create_user(update)
+                cart = state['cart']
+                address = user.get('address', 'No address')
+                payment_method = state['payment_method']
+                total = sum(item['price']*item['quantity'] for item in cart) + state.get('delivery_fee', 0)
+                try:
+                    order = await self.order_service.create_order(user['id'], cart, address, payment_method)
+                    # Schedule delivery
+                    await self.delivery_service.schedule_delivery(order['order_id'], slot_id=state['selected_slot'], address=address)
+                    # Payment
+                    if payment_method == 'card':
+                        payment = await self.payment_service.create_payment_intent(total, currency='uzs', metadata={'order_id': order['order_id']})
+                        # In production, send payment link or handle payment confirmation
+                    elif payment_method == 'loyalty':
+                        await self.payment_service.process_loyalty_payment(user['id'], total)
+                    # Notification
+                    await self.notification_service.send_order_notification(user['id'], order, 'order_confirmed')
+                    # Loyalty points
+                    await self.payment_service.add_loyalty_points(user['id'], int(total*0.05))
+                    await query.edit_message_text("✅ Order placed successfully! You will be notified about delivery.")
+                except Exception as e:
+                    logger.error(f"Order error: {e}")
+                    await query.edit_message_text("❌ Failed to place order. Please try again later.")
+                del self.user_states[user_id]
+            elif query.data == "order_cancel":
+                del self.user_states[user_id]
+                await query.edit_message_text("Order cancelled.")
+
     async def location_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle location messages"""
         location = update.message.location
@@ -813,6 +1037,8 @@ Contact our support team at +998901234567 or email info@aquapure.uz
             application.add_handler(MessageHandler(filters.LOCATION, self.location_handler))
             application.add_handler(MessageHandler(filters.PHOTO, self.photo_handler))
             application.add_handler(MessageHandler(filters.CONTACT, self.contact_handler))
+            application.add_handler(CommandHandler("order", self.order_command))
+            application.add_handler(CallbackQueryHandler(self.order_callback_handler, pattern="^order_"))
             
             # Error handler
             application.add_error_handler(self.error_handler)
@@ -850,10 +1076,28 @@ Contact our support team at +998901234567 or email info@aquapure.uz
             application.add_handler(MessageHandler(filters.LOCATION, self.location_handler))
             application.add_handler(MessageHandler(filters.PHOTO, self.photo_handler))
             application.add_handler(MessageHandler(filters.CONTACT, self.contact_handler))
+            application.add_handler(CommandHandler("order", self.order_command))
+            application.add_handler(CallbackQueryHandler(self.order_callback_handler, pattern="^order_"))
             
             # Error handler
             application.add_error_handler(self.error_handler)
 
+            # --- Subscription Management ---
+            application.add_handler(CommandHandler("subscribe", self.subscribe_command))
+            application.add_handler(CommandHandler("mysubscriptions", self.mysubscriptions_command))
+            application.add_handler(CallbackQueryHandler(self.subscribe_callback_handler, pattern="^sub_"))
+
+            # --- Order Tracking ---
+            application.add_handler(CommandHandler("track", self.track_command))
+            application.add_handler(CallbackQueryHandler(self.track_callback_handler, pattern="^track_"))
+
+            # --- Loyalty & Analytics ---
+            application.add_handler(CommandHandler("loyalty", self.loyalty_command))
+
+            # --- Admin Features ---
+            application.add_handler(CommandHandler("admin_orders", self.admin_orders_command))
+            application.add_handler(CommandHandler("admin_stats", self.admin_stats_command))
+            
             # # Start periodic tasks
             # logger.info("Creating periodic tasks")
             # task = asyncio.create_task(self.setup_periodic_tasks())
@@ -874,6 +1118,168 @@ Contact our support team at +998901234567 or email info@aquapure.uz
                 asyncio.run(self.redis_client.aclose())
             if self.http_client:
                 asyncio.run(self.http_client.aclose())
+
+    # --- Subscription Management ---
+    async def subscribe_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        user_id = update.effective_user.id
+        self.user_states[user_id] = {'state': 'subscribe_select_product'}
+        products = await self.product_service.get_available_products()
+        if not products:
+            await update.message.reply_text("No products available for subscription.")
+            return
+        keyboard = [
+            [InlineKeyboardButton(f"{p['name']} ({p['price']} UZS)", callback_data=f"sub_product_{p['id']}")]
+            for p in products
+        ]
+        await update.message.reply_text(
+            "Select a product to subscribe:",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
+    async def mysubscriptions_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        user = await self.get_or_create_user(update)
+        subs = await self.subscription_service.get_user_subscriptions(user['id'])
+        if not subs:
+            await update.message.reply_text("You have no active subscriptions.")
+            return
+        keyboard = [
+            [InlineKeyboardButton(f"{sub['product_name']} every {sub['frequency_days']}d x{sub['quantity']}", callback_data=f"sub_cancel_{sub['id']}")]
+            for sub in subs
+        ]
+        await update.message.reply_text(
+            "Your subscriptions (tap to cancel):",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
+    async def subscribe_callback_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        query = update.callback_query
+        user_id = query.from_user.id
+        state = self.user_states.get(user_id, {})
+        await query.answer()
+        if not state:
+            await query.edit_message_text("Session expired. Please /subscribe again.")
+            return
+        if state['state'] == 'subscribe_select_product':
+            if query.data.startswith("sub_product_"):
+                product_id = query.data.replace("sub_product_", "")
+                state['product_id'] = product_id
+                state['state'] = 'subscribe_frequency'
+                self.user_states[user_id] = state
+                keyboard = [
+                    [InlineKeyboardButton(f"Every {d} days", callback_data=f"sub_freq_{d}")] for d in [3, 7, 14, 30]
+                ]
+                await query.edit_message_text(
+                    "How often do you want delivery?",
+                    reply_markup=InlineKeyboardMarkup(keyboard)
+                )
+        elif state['state'] == 'subscribe_frequency':
+            if query.data.startswith("sub_freq_"):
+                freq = int(query.data.replace("sub_freq_", ""))
+                state['frequency_days'] = freq
+                state['state'] = 'subscribe_quantity'
+                self.user_states[user_id] = state
+                keyboard = [
+                    [InlineKeyboardButton(str(q), callback_data=f"sub_qty_{q}") for q in range(1, 6)]
+                ]
+                await query.edit_message_text(
+                    "How many units per delivery?",
+                    reply_markup=InlineKeyboardMarkup(keyboard)
+                )
+        elif state['state'] == 'subscribe_quantity':
+            if query.data.startswith("sub_qty_"):
+                qty = int(query.data.replace("sub_qty_", ""))
+                state['quantity'] = qty
+                user = await self.get_or_create_user(update)
+                try:
+                    sub = await self.subscription_service.create_subscription(
+                        user['id'], state['product_id'], state['frequency_days'], qty
+                    )
+                    await query.edit_message_text("✅ Subscription created! You will receive regular deliveries.")
+                except Exception as e:
+                    logger.error(f"Subscription error: {e}")
+                    await query.edit_message_text("❌ Failed to create subscription.")
+                del self.user_states[user_id]
+        # Cancel subscription from /mysubscriptions
+        elif query.data.startswith("sub_cancel_"):
+            sub_id = query.data.replace("sub_cancel_", "")
+            ok = await self.subscription_service.cancel_subscription(sub_id)
+            if ok:
+                await query.edit_message_text("Subscription cancelled.")
+            else:
+                await query.edit_message_text("Failed to cancel subscription.")
+
+    # --- Order Tracking ---
+    async def track_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        user = await self.get_or_create_user(update)
+        orders = await self.order_service.get_user_orders(user['id'], limit=5)
+        if not orders:
+            await update.message.reply_text("You have no recent orders.")
+            return
+        keyboard = [
+            [InlineKeyboardButton(f"Order {o['order_id']} ({o['status']})", callback_data=f"track_{o['order_id']}")]
+            for o in orders
+        ]
+        await update.message.reply_text(
+            "Your recent orders:",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
+    async def track_callback_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        query = update.callback_query
+        if query.data.startswith("track_"):
+            order_id = query.data.replace("track_", "")
+            tracking = await self.delivery_service.get_delivery_tracking(order_id)
+            events = tracking.get('events', [])
+            events_text = "\n".join([
+                f"{e['time']}: {e['type']} - {e['description']}" for e in events
+            ])
+            await query.edit_message_text(
+                f"Order {order_id}\nStatus: {tracking.get('status')}\nAddress: {tracking.get('address')}\nSlot: {tracking.get('slot')}\n\nEvents:\n{events_text or 'No events.'}"
+            )
+
+    # --- Loyalty & Analytics ---
+    async def loyalty_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        user = await self.get_or_create_user(update)
+        analytics = await self.analytics_service.get_customer_analytics(user['id'])
+        points = user.get('loyalty_points', 0)
+        text = (
+            f"🌟 Loyalty Points: {points}\n"
+            f"Total Orders: {analytics.get('total_orders', 0)}\n"
+            f"Total Spent: {analytics.get('total_spent', 0)} UZS\n"
+            f"Avg Order Value: {analytics.get('avg_order_value', 0)} UZS\n"
+            f"Favorite Products: {', '.join(str(p[0]) for p in analytics.get('favorite_products', []))}\n"
+            f"Last Order: {analytics.get('last_order_date', 'N/A')}"
+        )
+        await update.message.reply_text(text)
+
+    # --- Admin Features ---
+    async def admin_orders_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        user = await self.get_or_create_user(update)
+        if not await self.admin_service.is_admin(user['telegram_id']):
+            await update.message.reply_text("You are not an admin.")
+            return
+        orders = await self.admin_service.get_pending_orders()
+        if not orders:
+            await update.message.reply_text("No pending orders.")
+            return
+        text = "\n".join([
+            f"Order {o['order_id']} by {o['username']} ({o['phone']}) - {o['status']}" for o in orders
+        ])
+        await update.message.reply_text(f"Pending Orders:\n{text}")
+
+    async def admin_stats_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        user = await self.get_or_create_user(update)
+        if not await self.admin_service.is_admin(user['telegram_id']):
+            await update.message.reply_text("You are not an admin.")
+            return
+        stats = await self.admin_service.get_system_stats()
+        text = (
+            f"👥 Total Users: {stats.get('total_users', 0)}\n"
+            f"📦 Today's Orders: {stats.get('today_orders', 0)}\n"
+            f"⏳ Pending Orders: {stats.get('pending_orders', 0)}\n"
+            f"💰 Today's Revenue: {stats.get('today_revenue', 0)} UZS"
+        )
+        await update.message.reply_text(text)
 
 def main():
     """Main function"""

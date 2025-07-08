@@ -13,7 +13,7 @@ from telegram.constants import ParseMode
 import httpx
 from dotenv import load_dotenv
 
-from telegram_bot.services import (
+from services import (
     NotificationService,
     PaymentService,
     DeliveryService,
@@ -1106,7 +1106,7 @@ Contact our support team at +998901234567 or email info@aquapure.uz
             
             logger.info("Starting the bot")
             # Start the bot
-            application.run_polling(poll_interval=10, drop_pending_updates=True)
+            application.run_polling(poll_interval=2, drop_pending_updates=True)
             
         except Exception as e:
             logger.error(f"Error running bot: {e}")

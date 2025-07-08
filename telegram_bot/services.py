@@ -53,8 +53,8 @@ class NotificationService:
         self.redis_client = redis_client
         self.db_pool = db_pool
         self.twilio_client = TwilioClient(
-            account_sid=os.getenv('TWILIO_ACCOUNT_SID'),
-            auth_token=os.getenv('TWILIO_AUTH_TOKEN')
+            username=os.getenv('TWILIO_ACCOUNT_SID'),
+            password=os.getenv('TWILIO_AUTH_TOKEN')
         )
         self.sendgrid_client = SendGridAPIClient(api_key=os.getenv('SENDGRID_API_KEY'))
         self.geolocator = Nominatim(user_agent="aquapure_water_bot")

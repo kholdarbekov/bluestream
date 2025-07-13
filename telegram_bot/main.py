@@ -873,7 +873,7 @@ Contact our support team at +998901234567 or email info@aquapure.uz
                 state['state'] = ORDER_STATE['CONFIRM']
                 self.user_states[user_id] = state
                 cart = state['cart']
-                total = sum(item['price']*item['quantity'] for item in cart) + state.get('delivery_fee', 0)
+                total = float(sum(item['price']*item['quantity'] for item in cart)) + state.get('delivery_fee', 0)
                 await query.edit_message_text(
                     f"Order summary:\n{self.get_cart_text(cart)}\nDelivery fee: {state.get('delivery_fee', 0)} UZS\nTotal: {total} UZS\n\nConfirm order?",
                     reply_markup=InlineKeyboardMarkup([
@@ -888,7 +888,7 @@ Contact our support team at +998901234567 or email info@aquapure.uz
                 cart = state['cart']
                 address = user.get('address', 'No address')
                 payment_method = state['payment_method']
-                total = sum(item['price']*item['quantity'] for item in cart) + state.get('delivery_fee', 0)
+                total = float(sum(item['price']*item['quantity'] for item in cart)) + state.get('delivery_fee', 0)
                 try:
                     order = await self.order_service.create_order(user['id'], cart, address, payment_method)
                     # Schedule delivery

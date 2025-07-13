@@ -218,11 +218,19 @@ class WaterBusinessBot:
         user_id = user_data.get('telegram_id', update.effective_user.id)
         welcome_text = self.get_text('welcome', lang)
         keyboard = await self.get_main_keyboard(user_id, lang)
-        await update.message.reply_text(
-            welcome_text,
-            reply_markup=keyboard,
-            parse_mode=ParseMode.HTML
-        )
+        # Use reply_text only if update.message exists
+        if update.message:
+            await update.message.reply_text(
+                welcome_text,
+                reply_markup=keyboard,
+                parse_mode=ParseMode.HTML
+            )
+        elif update.callback_query:
+            await update.callback_query.edit_message_text(
+                welcome_text,
+                reply_markup=keyboard,
+                parse_mode=ParseMode.HTML
+            )
 
     async def help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /help command"""
@@ -694,9 +702,16 @@ Contact our support team at +998901234567 or email info@aquapure.uz
             await query.edit_message_text("Sorry, there was an error loading VIP information.")
 
     async def show_main_menu(self, update_or_query, lang: str = 'en'):
+        # Robustly handle both Update and CallbackQuery
         if isinstance(update_or_query, Update):
-            user_id = update_or_query.effective_user.id
-            send = update_or_query.message.reply_text
+            if update_or_query.message:
+                user_id = update_or_query.effective_user.id
+                send = update_or_query.message.reply_text
+            elif update_or_query.callback_query:
+                user_id = update_or_query.callback_query.from_user.id
+                send = update_or_query.callback_query.edit_message_text
+            else:
+                return
         else:
             user_id = update_or_query.from_user.id
             send = update_or_query.edit_message_text
@@ -715,16 +730,25 @@ Contact our support team at +998901234567 or email info@aquapure.uz
         }
         products = await self.product_service.get_available_products()
         if not products:
-            await update.message.reply_text("No products available at the moment.")
+            if update.message:
+                await update.message.reply_text("No products available at the moment.")
+            elif update.callback_query:
+                await update.callback_query.edit_message_text("No products available at the moment.")
             return
         keyboard = [
             [InlineKeyboardButton(f"{p['name']} ({p['price']} UZS)", callback_data=f"order_product_{p['id']}")]
             for p in products
         ]
-        await update.message.reply_text(
-            "Select a product to order:",
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
+        if update.message:
+            await update.message.reply_text(
+                "Select a product to order:",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+        elif update.callback_query:
+            await update.callback_query.edit_message_text(
+                "Select a product to order:",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
 
     def get_cart_text(self, cart):
         if not cart:
@@ -1155,31 +1179,49 @@ Contact our support team at +998901234567 or email info@aquapure.uz
         self.user_states[user_id] = {'state': 'subscribe_select_product'}
         products = await self.product_service.get_available_products()
         if not products:
-            await update.message.reply_text("No products available for subscription.")
+            if update.message:
+                await update.message.reply_text("No products available for subscription.")
+            elif update.callback_query:
+                await update.callback_query.edit_message_text("No products available for subscription.")
             return
         keyboard = [
             [InlineKeyboardButton(f"{p['name']} ({p['price']} UZS)", callback_data=f"sub_product_{p['id']}")]
             for p in products
         ]
-        await update.message.reply_text(
-            "Select a product to subscribe:",
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
+        if update.message:
+            await update.message.reply_text(
+                "Select a product to subscribe:",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+        elif update.callback_query:
+            await update.callback_query.edit_message_text(
+                "Select a product to subscribe:",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
 
     async def mysubscriptions_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user = await self.get_or_create_user(update)
         subs = await self.subscription_service.get_user_subscriptions(user['id'])
         if not subs:
-            await update.message.reply_text("You have no active subscriptions.")
+            if update.message:
+                await update.message.reply_text("You have no active subscriptions.")
+            elif update.callback_query:
+                await update.callback_query.edit_message_text("You have no active subscriptions.")
             return
         keyboard = [
             [InlineKeyboardButton(f"{sub['product_name']} every {sub['frequency_days']}d x{sub['quantity']}", callback_data=f"sub_cancel_{sub['id']}")]
             for sub in subs
         ]
-        await update.message.reply_text(
-            "Your subscriptions (tap to cancel):",
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
+        if update.message:
+            await update.message.reply_text(
+                "Your subscriptions (tap to cancel):",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+        elif update.callback_query:
+            await update.callback_query.edit_message_text(
+                "Your subscriptions (tap to cancel):",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
 
     async def subscribe_callback_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
@@ -1243,16 +1285,25 @@ Contact our support team at +998901234567 or email info@aquapure.uz
         user = await self.get_or_create_user(update)
         orders = await self.order_service.get_user_orders(user['id'], limit=5)
         if not orders:
-            await update.message.reply_text("You have no recent orders.")
+            if update.message:
+                await update.message.reply_text("You have no recent orders.")
+            elif update.callback_query:
+                await update.callback_query.edit_message_text("You have no recent orders.")
             return
         keyboard = [
             [InlineKeyboardButton(f"Order {o['order_id']} ({o['status']})", callback_data=f"track_{o['order_id']}")]
             for o in orders
         ]
-        await update.message.reply_text(
-            "Your recent orders:",
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
+        if update.message:
+            await update.message.reply_text(
+                "Your recent orders:",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+        elif update.callback_query:
+            await update.callback_query.edit_message_text(
+                "Your recent orders:",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
 
     async def track_callback_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
@@ -1280,27 +1331,42 @@ Contact our support team at +998901234567 or email info@aquapure.uz
             f"Favorite Products: {', '.join(str(p[0]) for p in analytics.get('favorite_products', []))}\n"
             f"Last Order: {analytics.get('last_order_date', 'N/A')}"
         )
-        await update.message.reply_text(text)
+        if update.message:
+            await update.message.reply_text(text)
+        elif update.callback_query:
+            await update.callback_query.edit_message_text(text)
 
     # --- Admin Features ---
     async def admin_orders_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user = await self.get_or_create_user(update)
         if not await self.admin_service.is_admin(user['telegram_id']):
-            await update.message.reply_text("You are not an admin.")
+            if update.message:
+                await update.message.reply_text("You are not an admin.")
+            elif update.callback_query:
+                await update.callback_query.edit_message_text("You are not an admin.")
             return
         orders = await self.admin_service.get_pending_orders()
         if not orders:
-            await update.message.reply_text("No pending orders.")
+            if update.message:
+                await update.message.reply_text("No pending orders.")
+            elif update.callback_query:
+                await update.callback_query.edit_message_text("No pending orders.")
             return
         text = "\n".join([
             f"Order {o['order_id']} by {o['username']} ({o['phone']}) - {o['status']}" for o in orders
         ])
-        await update.message.reply_text(f"Pending Orders:\n{text}")
+        if update.message:
+            await update.message.reply_text(f"Pending Orders:\n{text}")
+        elif update.callback_query:
+            await update.callback_query.edit_message_text(f"Pending Orders:\n{text}")
 
     async def admin_stats_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user = await self.get_or_create_user(update)
         if not await self.admin_service.is_admin(user['telegram_id']):
-            await update.message.reply_text("You are not an admin.")
+            if update.message:
+                await update.message.reply_text("You are not an admin.")
+            elif update.callback_query:
+                await update.callback_query.edit_message_text("You are not an admin.")
             return
         stats = await self.admin_service.get_system_stats()
         text = (
@@ -1309,7 +1375,10 @@ Contact our support team at +998901234567 or email info@aquapure.uz
             f"⏳ Pending Orders: {stats.get('pending_orders', 0)}\n"
             f"💰 Today's Revenue: {stats.get('today_revenue', 0)} UZS"
         )
-        await update.message.reply_text(text)
+        if update.message:
+            await update.message.reply_text(text)
+        elif update.callback_query:
+            await update.callback_query.edit_message_text(text)
 
 def main():
     """Main function"""

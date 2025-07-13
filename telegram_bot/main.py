@@ -892,10 +892,10 @@ Contact our support team at +998901234567 or email info@aquapure.uz
                 try:
                     order = await self.order_service.create_order(user['id'], cart, address, payment_method)
                     # Schedule delivery
-                    await self.delivery_service.schedule_delivery(order['order_id'], slot_id=state['selected_slot'], address=address)
+                    await self.delivery_service.schedule_delivery(order['id'], slot_id=state['selected_slot'], address=address)
                     # Payment
                     if payment_method == 'card':
-                        payment = await self.payment_service.create_payment_intent(total, currency='uzs', metadata={'order_id': order['order_id']})
+                        payment = await self.payment_service.create_payment_intent(total, currency='uzs', metadata={'order_id': order['id']})
                         # In production, send payment link or handle payment confirmation
                     elif payment_method == 'loyalty':
                         await self.payment_service.process_loyalty_payment(user['id'], total)
@@ -1291,7 +1291,7 @@ Contact our support team at +998901234567 or email info@aquapure.uz
                 await update.callback_query.edit_message_text("You have no recent orders.")
             return
         keyboard = [
-            [InlineKeyboardButton(f"Order {o['order_id']} ({o['status']})", callback_data=f"track_{o['order_id']}")]
+            [InlineKeyboardButton(f"Order {o['order_number']} ({o['status']})", callback_data=f"track_{o['id']}")]
             for o in orders
         ]
         if update.message:
@@ -1353,7 +1353,7 @@ Contact our support team at +998901234567 or email info@aquapure.uz
                 await update.callback_query.edit_message_text("No pending orders.")
             return
         text = "\n".join([
-            f"Order {o['order_id']} by {o['username']} ({o['phone']}) - {o['status']}" for o in orders
+            f"Order {o['order_number']} by {o['username']} ({o['phone']}) - {o['status']}" for o in orders
         ])
         if update.message:
             await update.message.reply_text(f"Pending Orders:\n{text}")

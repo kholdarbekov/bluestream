@@ -264,7 +264,7 @@ class DeliveryService:
                        WHERE u.role = 'delivery'
                        AND u.id NOT IN (
                            SELECT delivery_person_id FROM deliveries
-                           WHERE scheduled_date = $1 AND scheduled_time = $2
+                           WHERE scheduled_date = $1 AND scheduled_time_slot = $2
                        )
                        LIMIT 1""",
                     delivery_date, time_slot
@@ -277,14 +277,14 @@ class DeliveryService:
                 # Create delivery record
                 await conn.execute(
                     """INSERT INTO deliveries (order_id, delivery_person_id, scheduled_date, 
-                       scheduled_time, status, created_at)
+                       scheduled_time_slot, status, created_at)
                        VALUES ($1, $2, $3, $4, 'scheduled', CURRENT_TIMESTAMP)""",
                     order_id, delivery_person['id'], delivery_date, time_slot
                 )
                 
                 # Update order status
                 await conn.execute(
-                    "UPDATE orders SET status = 'scheduled' WHERE id = $1",
+                    "UPDATE orders SET status = 'confirmed' WHERE id = $1",
                     order_id
                 )
                 
@@ -393,42 +393,48 @@ class DeliveryService:
         """Update delivery status"""
         async with self.db_pool.acquire() as conn:
             await conn.execute(
-                "UPDATE orders SET status = $1 WHERE order_id = $2",
+                "UPDATE deliveries SET status = $1 WHERE order_id = $2",
                 status.value, order_id
             )
             
-            await conn.execute(
-                """INSERT INTO delivery_events (order_id, event_type, event_time, description)
-                   VALUES ($1, $2, $3, $4)""",
-                order_id, status.value, datetime.now(), notes
-            )
+            # Also update order status based on delivery status
+            if status == DeliveryStatus.DELIVERED:
+                await conn.execute(
+                    "UPDATE orders SET status = 'delivered' WHERE id = $1",
+                    order_id
+                )
     
     async def get_delivery_tracking(self, order_id: str) -> Dict:
         """Get delivery tracking information"""
         async with self.db_pool.acquire() as conn:
             order = await conn.fetchrow(
-                "SELECT * FROM orders WHERE order_id = $1",
+                "SELECT * FROM orders WHERE id = $1",
                 order_id
             )
             
-            events = await conn.fetch(
-                "SELECT * FROM delivery_events WHERE order_id = $1 ORDER BY event_time",
+            delivery = await conn.fetchrow(
+                "SELECT * FROM deliveries WHERE order_id = $1",
                 order_id
             )
             
             return {
                 "order_id": order_id,
-                "status": order['status'],
-                "address": order['delivery_address'],
-                "slot": order['delivery_time_slot'],
+                "status": delivery['status'] if delivery else 'pending',
+                "address": "Address from order",  # You might want to join with addresses table
+                "slot": delivery['scheduled_time_slot'] if delivery else None,
                 "events": [
                     {
-                        "type": event['event_type'],
-                        "time": event['event_time'],
-                        "description": event['description']
+                        "type": "order_created",
+                        "time": order['created_at'],
+                        "description": "Order created"
                     }
-                    for event in events
-                ]
+                ] + ([
+                    {
+                        "type": "delivery_scheduled",
+                        "time": delivery['created_at'],
+                        "description": f"Delivery scheduled for {delivery['scheduled_date']} at {delivery['scheduled_time_slot']}"
+                    }
+                ] if delivery else [])
             }
 
 class AnalyticsService:
@@ -656,18 +662,26 @@ class OrderService:
                 # Calculate total amount
                 total_amount = sum(item['price'] * item['quantity'] for item in items)
                 
-                # Generate order ID
-                order_id = f"ORD{datetime.now().strftime('%Y%m%d%H%M%S')}{uuid.uuid4().hex[:8]}"
+                # Generate order number
+                order_number = f"ORD{datetime.now().strftime('%Y%m%d%H%M%S')}{uuid.uuid4().hex[:8]}"
                 
                 # Create order
                 order = await conn.fetchrow(
-                    """INSERT INTO orders (order_id, user_id, items, total_amount, 
-                       delivery_address, payment_method, status, created_at)
-                       VALUES ($1, $2, $3, $4, $5, $6, 'pending', CURRENT_TIMESTAMP)
+                    """INSERT INTO orders (user_id, order_number, status, total_amount, 
+                       delivery_fee, special_instructions, created_at)
+                       VALUES ($1, $2, 'pending', $3, 0.00, $4, CURRENT_TIMESTAMP)
                        RETURNING *""",
-                    order_id, user_id, json.dumps(items), total_amount, 
-                    delivery_address, payment_method
+                    user_id, order_number, total_amount, f"Payment method: {payment_method}"
                 )
+                
+                # Insert order items
+                for item in items:
+                    await conn.execute(
+                        """INSERT INTO order_items (order_id, product_id, quantity, unit_price, total_price)
+                           VALUES ($1, $2, $3, $4, $5)""",
+                        order['id'], item['id'], item['quantity'], item['price'], 
+                        item['price'] * item['quantity']
+                    )
                 
                 return dict(order)
         except Exception as e:
@@ -678,8 +692,20 @@ class OrderService:
         """Get user's order history"""
         async with self.db_pool.acquire() as conn:
             orders = await conn.fetch(
-                """SELECT * FROM orders WHERE user_id = $1 
-                   ORDER BY created_at DESC LIMIT $2""",
+                """SELECT o.*, 
+                       json_agg(json_build_object(
+                           'product_id', oi.product_id,
+                           'product_name', p.name,
+                           'quantity', oi.quantity,
+                           'unit_price', oi.unit_price,
+                           'total_price', oi.total_price
+                       )) as items
+                   FROM orders o
+                   LEFT JOIN order_items oi ON o.id = oi.order_id
+                   LEFT JOIN products p ON oi.product_id = p.id
+                   WHERE o.user_id = $1 
+                   GROUP BY o.id
+                   ORDER BY o.created_at DESC LIMIT $2""",
                 user_id, limit
             )
             return [dict(order) for order in orders]
@@ -688,7 +714,19 @@ class OrderService:
         """Get detailed order information"""
         async with self.db_pool.acquire() as conn:
             order = await conn.fetchrow(
-                "SELECT * FROM orders WHERE order_id = $1",
+                """SELECT o.*, 
+                       json_agg(json_build_object(
+                           'product_id', oi.product_id,
+                           'product_name', p.name,
+                           'quantity', oi.quantity,
+                           'unit_price', oi.unit_price,
+                           'total_price', oi.total_price
+                       )) as items
+                   FROM orders o
+                   LEFT JOIN order_items oi ON o.id = oi.order_id
+                   LEFT JOIN products p ON oi.product_id = p.id
+                   WHERE o.id = $1
+                   GROUP BY o.id""",
                 order_id
             )
             return dict(order) if order else None

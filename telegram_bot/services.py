@@ -321,10 +321,10 @@ class DeliveryService:
         # Filter slots based on location and existing bookings
         async with self.db_pool.acquire() as conn:
             booked_slots = await conn.fetch(
-                "SELECT delivery_slot FROM orders WHERE delivery_status != 'delivered' AND delivery_status != 'cancelled'"
+                "SELECT delivery_time_slot FROM orders WHERE delivery_status != 'delivered' AND delivery_status != 'cancelled'"
             )
             
-            booked_slot_ids = {slot['delivery_slot'] for slot in booked_slots}
+            booked_slot_ids = {slot['delivery_time_slot'] for slot in booked_slots}
             
             available_slots = [
                 slot for slot in self.time_slots 
@@ -420,7 +420,7 @@ class DeliveryService:
                 "order_id": order_id,
                 "status": order['delivery_status'],
                 "address": order['delivery_address'],
-                "slot": order['delivery_slot'],
+                "slot": order['delivery_time_slot'],
                 "events": [
                     {
                         "type": event['event_type'],

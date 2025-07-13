@@ -175,15 +175,23 @@ class WaterBusinessBot:
         """Get translated text"""
         return self.translations.get(lang, {}).get(key, self.translations['en'].get(key, key))
 
-    def get_main_keyboard(self, lang: str = 'en') -> InlineKeyboardMarkup:
-        """Get main menu keyboard"""
+    async def get_main_keyboard(self, user_id: int, lang: str = 'en') -> InlineKeyboardMarkup:
+        is_admin = False
+        try:
+            is_admin = await self.admin_service.is_admin(user_id)
+        except Exception:
+            pass
         keyboard = [
             [
-                InlineKeyboardButton(f"ℹ️ {self.get_text('info_menu', lang)}", callback_data='info'),
-                InlineKeyboardButton(f"🛒 {self.get_text('order_menu', lang)}", callback_data='order')
+                InlineKeyboardButton(f"🛒 {self.get_text('order_menu', lang)}", callback_data='order'),
+                InlineKeyboardButton(f"📦 {self.get_text('track_menu', lang)}", callback_data='track')
             ],
             [
-                InlineKeyboardButton(f"📦 {self.get_text('track_menu', lang)}", callback_data='track'),
+                InlineKeyboardButton("🔄 My Subscriptions", callback_data='mysubscriptions'),
+                InlineKeyboardButton("➕ Subscribe", callback_data='subscribe')
+            ],
+            [
+                InlineKeyboardButton("🌟 Loyalty & Analytics", callback_data='loyalty'),
                 InlineKeyboardButton(f"👤 {self.get_text('account_menu', lang)}", callback_data='account')
             ],
             [
@@ -191,20 +199,25 @@ class WaterBusinessBot:
                 InlineKeyboardButton("📊 Analytics", callback_data='analytics')
             ],
             [
-                InlineKeyboardButton("🌐 Language", callback_data='language'),
+                InlineKeyboardButton("ℹ️ Info", callback_data='info'),
+                InlineKeyboardButton("🌐 Language", callback_data='language')
+            ],
+            [
                 InlineKeyboardButton("🎯 VIP Services", callback_data='vip')
             ]
         ]
+        if is_admin:
+            keyboard.append([
+                InlineKeyboardButton("🛠️ Admin Panel", callback_data='admin_panel')
+            ])
         return InlineKeyboardMarkup(keyboard)
 
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle /start command"""
         user_data = await self.get_or_create_user(update)
         lang = user_data.get('language_code', 'en')
-        
+        user_id = user_data.get('telegram_id', update.effective_user.id)
         welcome_text = self.get_text('welcome', lang)
-        keyboard = self.get_main_keyboard(lang)
-        
+        keyboard = await self.get_main_keyboard(user_id, lang)
         await update.message.reply_text(
             welcome_text,
             reply_markup=keyboard,
@@ -242,31 +255,47 @@ Contact our support team at +998901234567 or email info@aquapure.uz
         await update.message.reply_text(help_text, parse_mode=ParseMode.MARKDOWN)
 
     async def button_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle button callbacks"""
+        logger.info(f"button_handler: {update=}")
         query = update.callback_query
-        await query.answer()
-        
-        user_data = await self.get_or_create_user(update)
-        lang = user_data.get('language_code', 'en')
-        
-        if query.data == 'info':
-            await self.show_company_info(query, lang)
-        elif query.data == 'order':
-            await self.show_order_menu(query, lang)
-        elif query.data == 'track':
-            await self.show_track_menu(query, lang)
-        elif query.data == 'account':
+        logger.info(f"button_handler: {query=}")
+        user_id = query.from_user.id
+        logger.info(f"button_handler: {user_id=}")
+        lang = 'en'
+        user = await self.get_or_create_user(update)
+        logger.info(f"button_handler: {user=}")
+        if user:
+            lang = user.get('language_code', 'en')
+        data = query.data
+        logger.info(f"button_handler: {data=}")
+        if data == 'order':
+            await self.order_command(update, context)
+        elif data == 'track':
+            await self.track_command(update, context)
+        elif data == 'mysubscriptions':
+            await self.mysubscriptions_command(update, context)
+        elif data == 'subscribe':
+            await self.subscribe_command(update, context)
+        elif data == 'loyalty':
+            await self.loyalty_command(update, context)
+        elif data == 'account':
             await self.show_account_menu(query, lang)
-        elif query.data == 'notifications':
+        elif data == 'notifications':
             await self.show_notifications_menu(query, lang)
-        elif query.data == 'analytics':
+        elif data == 'analytics':
             await self.show_analytics_menu(query, lang)
-        elif query.data == 'language':
+        elif data == 'info':
+            await self.show_company_info(query, lang)
+        elif data == 'language':
             await self.show_language_menu(query, lang)
-        elif query.data == 'vip':
+        elif data == 'vip':
             await self.show_vip_menu(query, lang)
-        elif query.data == 'back_main':
+        elif data == 'admin_panel':
+            await query.edit_message_text("🛠️ Admin Panel:\n- /admin_orders\n- /admin_stats")
+        elif data == 'back_main':
             await self.show_main_menu(query, lang)
+        else:
+            await query.answer()
+            await query.edit_message_text("Unknown action.")
 
     async def show_company_info(self, query, lang: str):
         """Show company information"""
@@ -664,15 +693,17 @@ Contact our support team at +998901234567 or email info@aquapure.uz
             logger.error(f"Error showing VIP menu: {e}")
             await query.edit_message_text("Sorry, there was an error loading VIP information.")
 
-    async def show_main_menu(self, query, lang: str):
-        """Show main menu"""
-        text = f"{self.get_text('main_menu', lang)}\n\n{self.get_text('help_text', lang)}"
-        keyboard = self.get_main_keyboard(lang)
-        
-        await query.edit_message_text(
-            text,
-            reply_markup=keyboard,
-            parse_mode=ParseMode.HTML
+    async def show_main_menu(self, update_or_query, lang: str = 'en'):
+        if isinstance(update_or_query, Update):
+            user_id = update_or_query.effective_user.id
+            send = update_or_query.message.reply_text
+        else:
+            user_id = update_or_query.from_user.id
+            send = update_or_query.edit_message_text
+        keyboard = await self.get_main_keyboard(user_id, lang)
+        await send(
+            self.get_text('main_menu', lang),
+            reply_markup=keyboard
         )
 
     async def order_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):

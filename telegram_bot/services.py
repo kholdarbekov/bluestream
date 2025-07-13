@@ -284,7 +284,7 @@ class DeliveryService:
                 
                 # Update order status
                 await conn.execute(
-                    "UPDATE orders SET delivery_status = 'scheduled' WHERE id = $1",
+                    "UPDATE orders SET status = 'scheduled' WHERE id = $1",
                     order_id
                 )
                 
@@ -321,7 +321,7 @@ class DeliveryService:
         # Filter slots based on location and existing bookings
         async with self.db_pool.acquire() as conn:
             booked_slots = await conn.fetch(
-                "SELECT delivery_time_slot FROM orders WHERE delivery_status != 'delivered' AND delivery_status != 'cancelled'"
+                "SELECT delivery_time_slot FROM orders WHERE status != 'delivered' AND status != 'cancelled'"
             )
             
             booked_slot_ids = {slot['delivery_time_slot'] for slot in booked_slots}
@@ -393,7 +393,7 @@ class DeliveryService:
         """Update delivery status"""
         async with self.db_pool.acquire() as conn:
             await conn.execute(
-                "UPDATE orders SET delivery_status = $1 WHERE order_id = $2",
+                "UPDATE orders SET status = $1 WHERE order_id = $2",
                 status.value, order_id
             )
             
@@ -418,7 +418,7 @@ class DeliveryService:
             
             return {
                 "order_id": order_id,
-                "status": order['delivery_status'],
+                "status": order['status'],
                 "address": order['delivery_address'],
                 "slot": order['delivery_time_slot'],
                 "events": [

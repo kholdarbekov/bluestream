@@ -12,7 +12,7 @@ CREATE TYPE user_role AS ENUM ('customer', 'admin', 'delivery', 'manager');
 CREATE TYPE order_status AS ENUM ('pending', 'confirmed', 'preparing', 'out_for_delivery', 'delivered', 'cancelled');
 CREATE TYPE payment_status AS ENUM ('pending', 'paid', 'failed', 'refunded');
 CREATE TYPE subscription_status AS ENUM ('active', 'paused', 'cancelled', 'expired');
-CREATE TYPE delivery_status AS ENUM ('scheduled', 'in_transit', 'delivered', 'failed');
+CREATE TYPE delivery_status AS ENUM ('scheduled', 'in_transit', 'delivered', 'cancelled', 'failed');
 CREATE TYPE notification_type AS ENUM ('sms', 'email', 'telegram', 'push');
 
 -- Users table

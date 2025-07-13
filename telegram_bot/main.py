@@ -848,7 +848,18 @@ Contact our support team at +998901234567 or email info@aquapure.uz
         elif state['state'] == ORDER_STATE['DELIVERY_SLOT']:
             if query.data.startswith("order_slot_"):
                 slot_id = query.data.replace("order_slot_", "")
+                # slot_id format: DD.MM.YYYY HH:MM-HH:MM
+                try:
+                    delivery_date_str, hour_str = slot_id.split(' ')
+                    delivery_date = datetime.strptime(delivery_date_str, "%d.%m.%Y").date()
+                    time_slot = f"{hour_str}:00-{int(hour_str)+2}:00"
+                except Exception:
+                    # fallback if parsing fails
+                    delivery_date = datetime.now().date()
+                    time_slot = "09:00-11:00"
                 state['selected_slot'] = slot_id
+                state['delivery_date'] = delivery_date
+                state['time_slot'] = time_slot
                 state['state'] = ORDER_STATE['PAYMENT_METHOD']
                 self.user_states[user_id] = state
                 keyboard = [
@@ -891,8 +902,12 @@ Contact our support team at +998901234567 or email info@aquapure.uz
                 total = float(sum(item['price']*item['quantity'] for item in cart)) + state.get('delivery_fee', 0)
                 try:
                     order = await self.order_service.create_order(user['id'], cart, address, payment_method)
-                    # Schedule delivery
-                    await self.delivery_service.schedule_delivery(order['id'], slot_id=state['selected_slot'], address=address)
+                    # Schedule delivery with correct params
+                    await self.delivery_service.schedule_delivery(
+                        order['id'],
+                        state['delivery_date'],
+                        state['time_slot']
+                    )
                     # Payment
                     if payment_method == 'card':
                         payment = await self.payment_service.create_payment_intent(total, currency='uzs', metadata={'order_id': order['id']})

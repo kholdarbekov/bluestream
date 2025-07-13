@@ -305,7 +305,7 @@ class DeliveryService:
             for hour in range(9, 18):  # 9 AM to 6 PM
                 start_time = current_date.replace(hour=hour)
                 end_time = start_time + timedelta(hours=2)
-                slot_id = f"{current_date.strftime('%d.%m.%Y')} {hour:02d}:00-{hour+1:02d}:00"
+                slot_id = f"{current_date.strftime('%d.%m.%Y')} {hour:02d}:00-{hour+2:02d}:00"
                 
                 slots.append(DeliverySlot(
                     slot_id=slot_id,

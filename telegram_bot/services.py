@@ -703,7 +703,7 @@ class ProductService:
         """Get all available products"""
         async with self.db_pool.acquire() as conn:
             products = await conn.fetch(
-                "SELECT * FROM products WHERE is_available = true ORDER BY name"
+                "SELECT * FROM products WHERE is_active = true ORDER BY name"
             )
             return [dict(product) for product in products]
     
@@ -711,7 +711,7 @@ class ProductService:
         """Get product by ID"""
         async with self.db_pool.acquire() as conn:
             product = await conn.fetchrow(
-                "SELECT * FROM products WHERE id = $1 AND is_available = true",
+                "SELECT * FROM products WHERE id = $1 AND is_active = true",
                 product_id
             )
             return dict(product) if product else None

@@ -1126,12 +1126,12 @@ Contact our support team at +998901234567 or email info@aquapure.uz
             # Add handlers
             application.add_handler(CommandHandler("start", self.start_command))
             application.add_handler(CommandHandler("help", self.help_command))
+            application.add_handler(CallbackQueryHandler(self.order_callback_handler, pattern="^order_"))
             application.add_handler(CallbackQueryHandler(self.button_handler))
             application.add_handler(MessageHandler(filters.LOCATION, self.location_handler))
             application.add_handler(MessageHandler(filters.PHOTO, self.photo_handler))
             application.add_handler(MessageHandler(filters.CONTACT, self.contact_handler))
             application.add_handler(CommandHandler("order", self.order_command))
-            application.add_handler(CallbackQueryHandler(self.order_callback_handler, pattern="^order_"))
             
             # Error handler
             application.add_error_handler(self.error_handler)

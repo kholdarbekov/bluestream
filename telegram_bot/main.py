@@ -1162,6 +1162,7 @@ Contact our support team at +998901234567 or email info@aquapure.uz
 
             # --- Loyalty & Analytics ---
             application.add_handler(CommandHandler("loyalty", self.loyalty_command))
+            application.add_handler(CommandHandler("loyalty_history", self.loyalty_history_command))
 
             # --- Admin Features ---
             application.add_handler(CommandHandler("admin_orders", self.admin_orders_command))
@@ -1346,6 +1347,25 @@ Contact our support team at +998901234567 or email info@aquapure.uz
             f"Favorite Products: {', '.join(str(p[0]) for p in analytics.get('favorite_products', []))}\n"
             f"Last Order: {analytics.get('last_order_date', 'N/A')}"
         )
+        if update.message:
+            await update.message.reply_text(text)
+        elif update.callback_query:
+            await update.callback_query.edit_message_text(text)
+
+    async def loyalty_history_command(self, update, context):
+        user = await self.get_or_create_user(update)
+        transactions = await self.payment_service.get_loyalty_transactions(user['id'])
+        if not transactions:
+            if update.message:
+                await update.message.reply_text("No loyalty point transactions yet.")
+            elif update.callback_query:
+                await update.callback_query.edit_message_text("No loyalty point transactions yet.")
+            return
+        lines = [
+            f"{t['created_at'].strftime('%Y-%m-%d %H:%M')}: {t['transaction_type'].capitalize()} {t['points']} pts ({t['reason']})"
+            for t in transactions
+        ]
+        text = "Your loyalty transactions:\n" + "\n".join(lines)
         if update.message:
             await update.message.reply_text(text)
         elif update.callback_query:

@@ -203,12 +203,17 @@ class PaymentService:
                     "UPDATE users SET loyalty_points = loyalty_points - $1 WHERE id = $2",
                     int(amount), user_id
                 )
-                
+                # Log loyalty debit transaction
+                await conn.execute(
+                    """INSERT INTO loyalty_transactions (user_id, points, transaction_type, reason, created_at)
+                       VALUES ($1, $2, 'debit', $3, CURRENT_TIMESTAMP)""",
+                    user_id, int(amount), 'order_payment'
+                )
                 return True
         except Exception as e:
             logger.error(f"Error processing loyalty payment: {e}")
             return False
-    
+
     async def add_loyalty_points(self, user_id: str, points: int, reason: str = 'order_reward'):
         """Add loyalty points to user account"""
         try:
@@ -226,6 +231,14 @@ class PaymentService:
                 )
         except Exception as e:
             logger.error(f"Error adding loyalty points: {e}")
+
+    async def get_loyalty_transactions(self, user_id: str, limit: int = 20) -> list:
+        async with self.db_pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT * FROM loyalty_transactions WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2",
+                user_id, limit
+            )
+            return [dict(row) for row in rows]
 
 class DeliveryService:
     """Handle delivery operations"""

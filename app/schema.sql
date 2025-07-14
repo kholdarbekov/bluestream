@@ -14,6 +14,7 @@ CREATE TYPE payment_status AS ENUM ('pending', 'paid', 'failed', 'refunded');
 CREATE TYPE subscription_status AS ENUM ('active', 'paused', 'cancelled', 'expired');
 CREATE TYPE delivery_status AS ENUM ('scheduled', 'in_transit', 'delivered', 'cancelled', 'failed');
 CREATE TYPE notification_type AS ENUM ('sms', 'email', 'telegram', 'push');
+CREATE TYPE loyalty_transaction_type AS ENUM ('credit', 'debit');
 
 -- Users table
 CREATE TABLE users (
@@ -201,6 +202,15 @@ CREATE TABLE order_analytics (
     acquisition_channel VARCHAR(50),
     delivery_time_hours INTEGER,
     customer_satisfaction_score INTEGER
+);
+
+CREATE TABLE loyalty_transactions (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    points INTEGER NOT NULL,
+    transaction_type loyalty_transaction_type NOT NULL,
+    reason VARCHAR(255),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Indexes for performance

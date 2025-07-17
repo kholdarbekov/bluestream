@@ -525,6 +525,18 @@ class AnalyticsService:
                 "active_customers": active_customers['count']
             }
 
+    async def get_analytics_overview(self):
+        async with self.db_pool.acquire() as conn:
+            # Example: return some analytics
+            return await conn.fetchrow("SELECT COUNT(*) as total_orders, SUM(total_amount) as total_revenue FROM orders")
+
+    async def get_user_notifications(self, user_id, limit=10):
+        async with self.db_pool.acquire() as conn:
+            return await conn.fetch(
+                "SELECT * FROM notifications WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2",
+                user_id, limit
+            )
+
 class SecurityService:
     def __init__(self, db_pool: asyncpg.Pool):
         self.db_pool = db_pool
@@ -659,6 +671,17 @@ class AdminService:
             )
             
             return stats
+
+    async def get_recent_orders_for_user(self, telegram_id, limit=10):
+        async with self.db_pool.acquire() as conn:
+            return await conn.fetch(
+                '''SELECT o.*, p.status as payment_status 
+                   FROM orders o 
+                   LEFT JOIN payments p ON o.id = p.order_id 
+                   WHERE o.user_id = (SELECT id FROM users WHERE telegram_id = $1) 
+                   ORDER BY o.created_at DESC LIMIT $2''',
+                telegram_id, limit
+            )
 
 class OrderService:
     """Handle order operations"""
@@ -823,3 +846,41 @@ class SubscriptionService:
         except Exception as e:
             logger.error(f"Error cancelling subscription: {e}")
             return False
+
+class UserService:
+    def __init__(self, db_pool):
+        self.db_pool = db_pool
+
+    async def get_or_create_user(self, telegram_user):
+        async with self.db_pool.acquire() as conn:
+            existing_user = await conn.fetchrow(
+                "SELECT * FROM users WHERE telegram_id = $1", telegram_user.id
+            )
+            if existing_user:
+                await conn.execute(
+                    "UPDATE users SET last_activity = CURRENT_TIMESTAMP WHERE telegram_id = $1",
+                    telegram_user.id
+                )
+                return dict(existing_user)
+            else:
+                new_user = await conn.fetchrow(
+                    """INSERT INTO users (telegram_id, username, first_name, last_name, language_code)
+                       VALUES ($1, $2, $3, $4, $5) RETURNING *""",
+                    telegram_user.id, telegram_user.username, telegram_user.first_name, telegram_user.last_name, telegram_user.language_code
+                )
+                return dict(new_user)
+
+    async def get_user_language(self, telegram_id: int) -> str:
+        async with self.db_pool.acquire() as conn:
+            result = await conn.fetchrow(
+                "SELECT language_code FROM users WHERE telegram_id = $1",
+                telegram_id
+            )
+            return result['language_code'] if result else 'en'
+
+    async def set_user_language(self, telegram_id: int, language_code: str):
+        async with self.db_pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE users SET language_code = $1 WHERE telegram_id = $2",
+                language_code, telegram_id
+            )

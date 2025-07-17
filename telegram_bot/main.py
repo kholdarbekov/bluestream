@@ -24,6 +24,7 @@ from services import (
     OrderService,
     ProductService,
     SubscriptionService,
+    UserService,
 )
 
 # Configure logging
@@ -62,6 +63,7 @@ class WaterBusinessBot:
         self.order_service = None
         self.product_service = None
         self.subscription_service = None
+        self.user_service = None
         
         # User states for conversation flow
         self.user_states = {}
@@ -96,6 +98,130 @@ class WaterBusinessBot:
                 'help_text': "Как я могу помочь вам сегодня?"
             }
         }
+        # Add to self.translations in __init__
+        self.translations['en'].update({
+            'no_products_subscription': "No products available for subscription.",
+            'select_product_to_subscribe': "Select a product to subscribe:",
+            'your_subscriptions': "Your subscriptions (tap to cancel):",
+            'no_active_subscriptions': "You have no active subscriptions.",
+            'subscription_created': "✅ Subscription created! You will receive regular deliveries.",
+            'subscription_failed': "❌ Failed to create subscription.",
+            'subscription_cancelled': "Subscription cancelled.",
+            'subscription_cancel_failed': "Failed to cancel subscription.",
+            'no_recent_orders': "You have no recent orders.",
+            'your_recent_orders': "Your recent orders:",
+            'no_loyalty_transactions': "No loyalty point transactions yet.",
+            'pending_orders': "Pending Orders:",
+            'no_pending_orders': "No pending orders.",
+            'not_admin': "You are not an admin.",
+            'order_success': "✅ Order placed successfully! You will be notified about delivery.",
+            'order_error': "❌ Failed to place order. Please try again later.",
+            'order_cancelled': "Order cancelled.",
+            'cart_empty': "Your cart is empty.",
+            'select_product': "Select a product to order:",
+            'select_quantity': "How many '{product}' would you like to order?",
+            'cart': "Cart:",
+            'proceed_to_delivery': "Proceed to Delivery",
+            'add_more': "Add more",
+            'cancel': "Cancel",
+            'select_delivery_slot': "Select a delivery slot (Delivery fee: {fee} UZS):",
+            'choose_payment_method': "Choose payment method:",
+            'order_summary': "Order summary:\n{cart}\nDelivery fee: {fee} UZS\nTotal: {total} UZS\n\nConfirm order?",
+            'confirm': "Confirm",
+            'back_main': "Back to Main Menu",
+            'language_updated': "Language updated!",
+            'select_language': "🌐 Select your language:",
+            'no_products': "No products available at the moment.",
+            'select_product_to_order': "Select a product to order:",
+            'location_received': "📍 Location received! I'll use this for delivery.\n\nYou can now proceed with your order or save this address to your profile.",
+            'photo_received': "📸 Photo received! Thank you for the delivery confirmation.\n\nYour delivery has been marked as completed.",
+            'phone_saved': "📞 Phone number saved! This will help us with delivery coordination.\n\nYou can now place orders with delivery to your location.",
+            'error_saving_contact': "Sorry, there was an error saving your contact.",
+            'processing_payment': "💳 Processing payment...\n\nPlease wait while we process your payment securely.",
+            'error': "Sorry, something went wrong. Please try again or contact support if the problem persists.",
+        })
+        self.translations['uz'].update({
+            'no_products_subscription': "Obuna uchun mahsulotlar mavjud emas.",
+            'select_product_to_subscribe': "Obuna uchun mahsulotni tanlang:",
+            'your_subscriptions': "Sizning obunalaringiz (bekor qilish uchun bosing):",
+            'no_active_subscriptions': "Sizda faol obunalar yo'q.",
+            'subscription_created': "✅ Obuna yaratildi! Sizga muntazam yetkazib beriladi.",
+            'subscription_failed': "❌ Obuna yaratilmadi.",
+            'subscription_cancelled': "Obuna bekor qilindi.",
+            'subscription_cancel_failed': "Obunani bekor qilishda xatolik.",
+            'no_recent_orders': "Sizda so'nggi buyurtmalar yo'q.",
+            'your_recent_orders': "Sizning so'nggi buyurtmalaringiz:",
+            'no_loyalty_transactions': "Hali sodiqlik ballari tranzaksiyalari yo'q.",
+            'pending_orders': "Kutilayotgan buyurtmalar:",
+            'no_pending_orders': "Kutilayotgan buyurtmalar yo'q.",
+            'not_admin': "Siz admin emassiz.",
+            'order_success': "✅ Buyurtma muvaffaqiyatli qabul qilindi! Yetkazib berish haqida xabar beramiz.",
+            'order_error': "❌ Buyurtma qabul qilinmadi. Iltimos, keyinroq urinib ko'ring.",
+            'order_cancelled': "Buyurtma bekor qilindi.",
+            'cart_empty': "Savat bo'sh.",
+            'select_product': "Buyurtma uchun mahsulotni tanlang:",
+            'select_quantity': "Qancha '{product}' buyurtma qilmoqchisiz?",
+            'cart': "Savat:",
+            'proceed_to_delivery': "Yetkazib berishga o'tish",
+            'add_more': "Yana qo'shish",
+            'cancel': "Bekor qilish",
+            'select_delivery_slot': "Yetkazib berish vaqtini tanlang (Yetkazib berish narxi: {fee} UZS):",
+            'choose_payment_method': "To'lov usulini tanlang:",
+            'order_summary': "Buyurtma yakuni:\n{cart}\nYetkazib berish narxi: {fee} UZS\nJami: {total} UZS\n\nBuyurtmani tasdiqlaysizmi?",
+            'confirm': "Tasdiqlash",
+            'back_main': "Asosiy menyuga qaytish",
+            'language_updated': "Til yangilandi!",
+            'select_language': "🌐 Tilni tanlang:",
+            'no_products': "Hozircha mahsulotlar mavjud emas.",
+            'select_product_to_order': "Buyurtma uchun mahsulotni tanlang:",
+            'location_received': "📍 Manzil qabul qilindi! Yetkazib berish uchun ushbu manzildan foydalanaman.\n\nEndi buyurtma berishingiz yoki ushbu manzilni profilingizga saqlashingiz mumkin.",
+            'photo_received': "📸 Rasm qabul qilindi! Yetkazib berishni tasdiqlaganingiz uchun rahmat.\n\nYetkazib berish yakunlandi.",
+            'phone_saved': "📞 Telefon raqami saqlandi! Bu yetkazib berishni muvofiqlashtirishda yordam beradi.\n\nEndi manzilingizga buyurtma berishingiz mumkin.",
+            'error_saving_contact': "Kechirasiz, kontaktni saqlashda xatolik yuz berdi.",
+            'processing_payment': "💳 To'lov amalga oshirilmoqda...\n\nIltimos, to'lovingizni xavfsiz tarzda qayta ishlashimizni kuting.",
+            'error': "Kechirasiz, xatolik yuz berdi. Iltimos, qayta urinib ko'ring yoki muammolar bo'lsa, yordamga murojaat qiling.",
+        })
+        self.translations['ru'].update({
+            'no_products_subscription': "Нет доступных товаров для подписки.",
+            'select_product_to_subscribe': "Выберите товар для подписки:",
+            'your_subscriptions': "Ваши подписки (нажмите для отмены):",
+            'no_active_subscriptions': "У вас нет активных подписок.",
+            'subscription_created': "✅ Подписка создана! Вы будете получать регулярные доставки.",
+            'subscription_failed': "❌ Не удалось создать подписку.",
+            'subscription_cancelled': "Подписка отменена.",
+            'subscription_cancel_failed': "Не удалось отменить подписку.",
+            'no_recent_orders': "У вас нет недавних заказов.",
+            'your_recent_orders': "Ваши недавние заказы:",
+            'no_loyalty_transactions': "Пока нет транзакций по баллам лояльности.",
+            'pending_orders': "Ожидающие заказы:",
+            'no_pending_orders': "Нет ожидающих заказов.",
+            'not_admin': "Вы не администратор.",
+            'order_success': "✅ Заказ успешно оформлен! Мы уведомим вас о доставке.",
+            'order_error': "❌ Не удалось оформить заказ. Пожалуйста, попробуйте позже.",
+            'order_cancelled': "Заказ отменен.",
+            'cart_empty': "Ваша корзина пуста.",
+            'select_product': "Выберите товар для заказа:",
+            'select_quantity': "Сколько '{product}' вы хотите заказать?",
+            'cart': "Корзина:",
+            'proceed_to_delivery': "Перейти к доставке",
+            'add_more': "Добавить еще",
+            'cancel': "Отмена",
+            'select_delivery_slot': "Выберите время доставки (Стоимость: {fee} UZS):",
+            'choose_payment_method': "Выберите способ оплаты:",
+            'order_summary': "Сводка заказа:\n{cart}\nСтоимость доставки: {fee} UZS\nИтого: {total} UZS\n\nПодтвердить заказ?",
+            'confirm': "Подтвердить",
+            'back_main': "Назад в главное меню",
+            'language_updated': "Язык обновлен!",
+            'select_language': "🌐 Выберите язык:",
+            'no_products': "В данный момент нет доступных товаров.",
+            'select_product_to_order': "Выберите товар для заказа:",
+            'location_received': "📍 Местоположение получено! Я буду использовать его для доставки.\n\nТеперь вы можете оформить заказ или сохранить этот адрес в своем профиле.",
+            'photo_received': "📸 Фото получено! Спасибо за подтверждение доставки.\n\nВаша доставка отмечена как завершенная.",
+            'phone_saved': "📞 Телефон сохранен! Это поможет нам с координацией доставки.\n\nТеперь вы можете оформлять заказы с доставкой на этот адрес.",
+            'error_saving_contact': "Извините, произошла ошибка при сохранении контакта.",
+            'processing_payment': "💳 Обработка платежа...\n\nПожалуйста, подождите, пока мы безопасно обработаем ваш платеж.",
+            'error': "Извините, что-то пошло не так. Пожалуйста, попробуйте еще раз или обратитесь в поддержку, если проблема повторяется.",
+        })
 
     async def init_connections(self):
         """Initialize database and redis connections"""
@@ -123,52 +249,10 @@ class WaterBusinessBot:
             self.order_service = OrderService(self.db_pool, self.redis_client)
             self.product_service = ProductService(self.db_pool)
             self.subscription_service = SubscriptionService(self.db_pool)
+            self.user_service = UserService(self.db_pool)
             # --- End instantiate services ---
         except Exception as e:
             logger.error(f"Failed to initialize connections: {e}")
-            raise
-
-    async def get_user_language(self, user_id: int) -> str:
-        """Get user's preferred language"""
-        try:
-            async with self.db_pool.acquire() as conn:
-                result = await conn.fetchrow(
-                    "SELECT language_code FROM users WHERE telegram_id = $1",
-                    user_id
-                )
-                return result['language_code'] if result else 'en'
-        except Exception as e:
-            logger.error(f"Error getting user language: {e}")
-            return 'en'
-
-    async def get_or_create_user(self, update: Update) -> Dict[str, Any]:
-        """Get or create user in database"""
-        user = update.effective_user
-        try:
-            async with self.db_pool.acquire() as conn:
-                # Check if user exists
-                existing_user = await conn.fetchrow(
-                    "SELECT * FROM users WHERE telegram_id = $1",
-                    user.id
-                )
-                
-                if existing_user:
-                    # Update last activity
-                    await conn.execute(
-                        "UPDATE users SET last_activity = CURRENT_TIMESTAMP WHERE telegram_id = $1",
-                        user.id
-                    )
-                    return dict(existing_user)
-                else:
-                    # Create new user
-                    new_user = await conn.fetchrow(
-                        """INSERT INTO users (telegram_id, username, first_name, last_name, language_code)
-                           VALUES ($1, $2, $3, $4, $5) RETURNING *""",
-                        user.id, user.username, user.first_name, user.last_name, user.language_code
-                    )
-                    return dict(new_user)
-        except Exception as e:
-            logger.error(f"Error getting/creating user: {e}")
             raise
 
     def get_text(self, key: str, lang: str = 'en') -> str:
@@ -213,7 +297,7 @@ class WaterBusinessBot:
         return InlineKeyboardMarkup(keyboard)
 
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        user_data = await self.get_or_create_user(update)
+        user_data = await self.user_service.get_or_create_user(update.effective_user)
         lang = user_data.get('language_code', 'en')
         user_id = user_data.get('telegram_id', update.effective_user.id)
         welcome_text = self.get_text('welcome', lang)
@@ -263,14 +347,10 @@ Contact our support team at +998901234567 or email info@aquapure.uz
         await update.message.reply_text(help_text, parse_mode=ParseMode.MARKDOWN)
 
     async def button_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        logger.info(f"button_handler: {update=}")
         query = update.callback_query
-        logger.info(f"button_handler: {query=}")
         user_id = query.from_user.id
-        logger.info(f"button_handler: {user_id=}")
         lang = 'en'
-        user = await self.get_or_create_user(update)
-        logger.info(f"button_handler: {user=}")
+        user = await self.user_service.get_or_create_user(update.effective_user)
         if user:
             lang = user.get('language_code', 'en')
         data = query.data
@@ -295,6 +375,11 @@ Contact our support team at +998901234567 or email info@aquapure.uz
             await self.show_company_info(query, lang)
         elif data == 'language':
             await self.show_language_menu(query, lang)
+        elif data.startswith('lang_'):
+            new_lang = data.replace('lang_', '')
+            await self.user_service.set_user_language(user_id, new_lang)
+            await query.answer("Language updated!")
+            await self.show_main_menu(query, new_lang)
         elif data == 'vip':
             await self.show_vip_menu(query, lang)
         elif data == 'admin_panel':
@@ -386,26 +471,15 @@ Contact our support team at +998901234567 or email info@aquapure.uz
             await query.edit_message_text("Sorry, there was an error loading the order menu.")
 
     async def show_track_menu(self, query, lang: str):
-        """Show order tracking menu"""
         user_id = query.from_user.id
         try:
-            async with self.db_pool.acquire() as conn:
-                orders = await conn.fetch(
-                    """SELECT o.*, p.status as payment_status 
-                       FROM orders o 
-                       LEFT JOIN payments p ON o.id = p.order_id 
-                       WHERE o.user_id = (SELECT id FROM users WHERE telegram_id = $1) 
-                       ORDER BY o.created_at DESC LIMIT 10""",
-                    user_id
-                )
-            
+            orders = await self.admin_service.get_recent_orders_for_user(user_id)
             if not orders:
                 text = "📦 *Order Tracking*\n\nYou don't have any orders yet.\n\nStart by placing your first order!"
                 keyboard = [[InlineKeyboardButton("🛒 Order Now", callback_data='order')]]
             else:
                 text = "📦 *Your Recent Orders*\n\n"
                 keyboard = []
-                
                 for order in orders:
                     status_emoji = {
                         'pending': '⏳',
@@ -415,20 +489,16 @@ Contact our support team at +998901234567 or email info@aquapure.uz
                         'delivered': '📦',
                         'cancelled': '❌'
                     }
-                    
                     emoji = status_emoji.get(order['status'], '❓')
                     text += f"{emoji} Order #{order['order_number']}\n"
                     text += f"   Status: {order['status'].replace('_', ' ').title()}\n"
                     text += f"   Amount: {order['total_amount']:,.0f} UZS\n"
                     text += f"   Date: {order['created_at'].strftime('%d.%m.%Y')}\n\n"
-                    
                     keyboard.append([InlineKeyboardButton(
                         f"📱 Track #{order['order_number']}",
                         callback_data=f"track_{order['id']}"
                     )])
-            
             keyboard.append([InlineKeyboardButton("🔙 Back to Main Menu", callback_data='back_main')])
-            
             await query.edit_message_text(
                 text,
                 reply_markup=InlineKeyboardMarkup(keyboard),
@@ -608,7 +678,7 @@ Contact our support team at +998901234567 or email info@aquapure.uz
             )
         except Exception as e:
             logger.error(f"Error showing analytics menu: {e}")
-            await query.edit_message_text("Sorry, there was an error loading your analytics.")
+            await query.edit_message_text("Sorry, there was an error loading analytics.")
 
     async def show_language_menu(self, query, lang: str):
         """Show language selection menu"""
@@ -731,9 +801,9 @@ Contact our support team at +998901234567 or email info@aquapure.uz
         products = await self.product_service.get_available_products()
         if not products:
             if update.message:
-                await update.message.reply_text("No products available at the moment.")
+                await update.message.reply_text(self.get_text('no_products', lang))
             elif update.callback_query:
-                await update.callback_query.edit_message_text("No products available at the moment.")
+                await update.callback_query.edit_message_text(self.get_text('no_products', lang))
             return
         keyboard = [
             [InlineKeyboardButton(f"{p['name']} ({p['price']} UZS)", callback_data=f"order_product_{p['id']}")]
@@ -741,18 +811,18 @@ Contact our support team at +998901234567 or email info@aquapure.uz
         ]
         if update.message:
             await update.message.reply_text(
-                "Select a product to order:",
+                self.get_text('select_product', lang),
                 reply_markup=InlineKeyboardMarkup(keyboard)
             )
         elif update.callback_query:
             await update.callback_query.edit_message_text(
-                "Select a product to order:",
+                self.get_text('select_product', lang),
                 reply_markup=InlineKeyboardMarkup(keyboard)
             )
 
     def get_cart_text(self, cart):
         if not cart:
-            return "Your cart is empty."
+            return self.get_text('cart_empty', lang)
         lines = [f"{item['name']} x{item['quantity']} = {item['price']*item['quantity']} UZS" for item in cart]
         total = sum(item['price']*item['quantity'] for item in cart)
         return "\n".join(lines) + f"\n\nTotal: {total} UZS"
@@ -763,7 +833,7 @@ Contact our support team at +998901234567 or email info@aquapure.uz
         state = self.user_states.get(user_id, {})
         await query.answer()
         if not state:
-            await query.edit_message_text("Session expired. Please /order again.")
+            await query.edit_message_text(self.get_text('session_expired', lang))
             return
         if state['state'] == ORDER_STATE['SELECT_PRODUCT']:
             if query.data.startswith("order_product_"):
@@ -779,7 +849,7 @@ Contact our support team at +998901234567 or email info@aquapure.uz
                     [InlineKeyboardButton(str(q), callback_data=f"order_qty_{q}") for q in range(1, 6)]
                 ]
                 await query.edit_message_text(
-                    f"How many '{product['name']}' would you like to order?",
+                    self.get_text('select_quantity', lang).format(product['name']),
                     reply_markup=InlineKeyboardMarkup(keyboard)
                 )
         elif state['state'] == ORDER_STATE['SELECT_QUANTITY']:
@@ -797,12 +867,12 @@ Contact our support team at +998901234567 or email info@aquapure.uz
                 state['state'] = ORDER_STATE['CART']
                 self.user_states[user_id] = state
                 keyboard = [
-                    [InlineKeyboardButton("Add more", callback_data="order_add_more")],
-                    [InlineKeyboardButton("Proceed to Delivery", callback_data="order_delivery")],
-                    [InlineKeyboardButton("Cancel", callback_data="order_cancel")],
+                    [InlineKeyboardButton(self.get_text('add_more', lang), callback_data="order_add_more")],
+                    [InlineKeyboardButton(self.get_text('proceed_to_delivery', lang), callback_data="order_delivery")],
+                    [InlineKeyboardButton(self.get_text('cancel', lang), callback_data="order_cancel")],
                 ]
                 await query.edit_message_text(
-                    f"Cart:\n{self.get_cart_text(cart)}",
+                    self.get_text('cart', lang) + "\n" + self.get_cart_text(cart),
                     reply_markup=InlineKeyboardMarkup(keyboard)
                 )
         elif state['state'] == ORDER_STATE['CART']:
@@ -815,14 +885,14 @@ Contact our support team at +998901234567 or email info@aquapure.uz
                     for p in products
                 ]
                 await query.edit_message_text(
-                    "Select another product:",
+                    self.get_text('select_product', lang),
                     reply_markup=InlineKeyboardMarkup(keyboard)
                 )
             elif query.data == "order_delivery":
                 state['state'] = ORDER_STATE['DELIVERY_SLOT']
                 self.user_states[user_id] = state
                 # For demo, use a static warehouse location
-                user = await self.get_or_create_user(update)
+                user = await self.user_service.get_or_create_user(update.effective_user)
                 user_location = {'latitude': 41.2995, 'longitude': 69.2401} # fallback
                 if user.get('latitude') and user.get('longitude'):
                     user_location = {'latitude': user['latitude'], 'longitude': user['longitude']}
@@ -839,12 +909,12 @@ Contact our support team at +998901234567 or email info@aquapure.uz
                     for slot in slots[:5]
                 ]
                 await query.edit_message_text(
-                    f"Select a delivery slot (Delivery fee: {fee} UZS):",
+                    self.get_text('select_delivery_slot', lang).format(fee),
                     reply_markup=InlineKeyboardMarkup(keyboard)
                 )
             elif query.data == "order_cancel":
                 del self.user_states[user_id]
-                await query.edit_message_text("Order cancelled.")
+                await query.edit_message_text(self.get_text('order_cancelled', lang))
         elif state['state'] == ORDER_STATE['DELIVERY_SLOT']:
             if query.data.startswith("order_slot_"):
                 slot_id = query.data.replace("order_slot_", "")
@@ -863,12 +933,12 @@ Contact our support team at +998901234567 or email info@aquapure.uz
                 state['state'] = ORDER_STATE['PAYMENT_METHOD']
                 self.user_states[user_id] = state
                 keyboard = [
-                    [InlineKeyboardButton("Cash", callback_data="order_pay_cash")],
-                    [InlineKeyboardButton("Card", callback_data="order_pay_card")],
-                    [InlineKeyboardButton("Loyalty Points", callback_data="order_pay_loyalty")],
+                    [InlineKeyboardButton(self.get_text('cash', lang), callback_data="order_pay_cash")],
+                    [InlineKeyboardButton(self.get_text('card', lang), callback_data="order_pay_card")],
+                    [InlineKeyboardButton(self.get_text('loyalty_points', lang), callback_data="order_pay_loyalty")],
                 ]
                 await query.edit_message_text(
-                    "Choose payment method:",
+                    self.get_text('choose_payment_method', lang),
                     reply_markup=InlineKeyboardMarkup(keyboard)
                 )
         elif state['state'] == ORDER_STATE['PAYMENT_METHOD']:
@@ -886,16 +956,16 @@ Contact our support team at +998901234567 or email info@aquapure.uz
                 cart = state['cart']
                 total = float(sum(item['price']*item['quantity'] for item in cart)) + state.get('delivery_fee', 0)
                 await query.edit_message_text(
-                    f"Order summary:\n{self.get_cart_text(cart)}\nDelivery fee: {state.get('delivery_fee', 0)} UZS\nTotal: {total} UZS\n\nConfirm order?",
+                    self.get_text('order_summary', lang).format(cart=self.get_cart_text(cart), fee=state.get('delivery_fee', 0), total=total),
                     reply_markup=InlineKeyboardMarkup([
-                        [InlineKeyboardButton("Confirm", callback_data="order_confirm")],
-                        [InlineKeyboardButton("Cancel", callback_data="order_cancel")],
+                        [InlineKeyboardButton(self.get_text('confirm', lang), callback_data="order_confirm")],
+                        [InlineKeyboardButton(self.get_text('cancel', lang), callback_data="order_cancel")],
                     ])
                 )
         elif state['state'] == ORDER_STATE['CONFIRM']:
             if query.data == "order_confirm":
                 # Place order
-                user = await self.get_or_create_user(update)
+                user = await self.user_service.get_or_create_user(update.effective_user)
                 cart = state['cart']
                 address = user.get('address', 'No address')
                 payment_method = state['payment_method']
@@ -918,14 +988,14 @@ Contact our support team at +998901234567 or email info@aquapure.uz
                     # await self.notification_service.send_order_notification(user['id'], order, 'order_confirmed')
                     # Loyalty points
                     await self.payment_service.add_loyalty_points(user['id'], int(total*0.05))
-                    await query.edit_message_text("✅ Order placed successfully! You will be notified about delivery.")
+                    await query.edit_message_text(self.get_text('order_success', lang))
                 except Exception as e:
                     logger.error(f"Order error: {e}")
-                    await query.edit_message_text("❌ Failed to place order. Please try again later.")
+                    await query.edit_message_text(self.get_text('order_error', lang))
                 del self.user_states[user_id]
             elif query.data == "order_cancel":
                 del self.user_states[user_id]
-                await query.edit_message_text("Order cancelled.")
+                await query.edit_message_text(self.get_text('order_cancelled', lang))
 
     async def location_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle location messages"""
@@ -944,11 +1014,10 @@ Contact our support team at +998901234567 or email info@aquapure.uz
         )
         
         await update.message.reply_text(
-            "📍 Location received! I'll use this for delivery.\n\n"
-            "You can now proceed with your order or save this address to your profile.",
+            self.get_text('location_received', lang),
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🛒 Order Now", callback_data='order')],
-                [InlineKeyboardButton("💾 Save Address", callback_data='save_address')]
+                [InlineKeyboardButton(self.get_text('order_now', lang), callback_data='order')],
+                [InlineKeyboardButton(self.get_text('save_address', lang), callback_data='save_address')]
             ])
         )
 
@@ -962,8 +1031,7 @@ Contact our support team at +998901234567 or email info@aquapure.uz
         await file.download_to_drive(file_path)
         
         await update.message.reply_text(
-            "📸 Photo received! Thank you for the delivery confirmation.\n\n"
-            "Your delivery has been marked as completed."
+            self.get_text('photo_received', lang)
         )
 
     async def contact_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -979,15 +1047,14 @@ Contact our support team at +998901234567 or email info@aquapure.uz
                 )
             
             await update.message.reply_text(
-                "📞 Phone number saved! This will help us with delivery coordination.\n\n"
-                "You can now place orders with delivery to your location.",
+                self.get_text('phone_saved', lang),
                 reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("🛒 Order Now", callback_data='order')]
+                    [InlineKeyboardButton(self.get_text('order_now', lang), callback_data='order')]
                 ])
             )
         except Exception as e:
             logger.error(f"Error saving contact: {e}")
-            await update.message.reply_text("Sorry, there was an error saving your contact.")
+            await update.message.reply_text(self.get_text('error_saving_contact', lang))
 
     async def handle_payment_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle payment callbacks"""
@@ -999,10 +1066,9 @@ Contact our support team at +998901234567 or email info@aquapure.uz
         payment_data = query.data.replace('pay_', '')
         
         await query.edit_message_text(
-            "💳 Processing payment...\n\n"
-            "Please wait while we process your payment securely.",
+            self.get_text('processing_payment', lang),
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔙 Back to Orders", callback_data='track')]
+                [InlineKeyboardButton(self.get_text('back_orders', lang), callback_data='track')]
             ])
         )
 
@@ -1012,7 +1078,7 @@ Contact our support team at +998901234567 or email info@aquapure.uz
         
         if isinstance(update, Update) and update.effective_message:
             await update.effective_message.reply_text(
-                "Sorry, something went wrong. Please try again or contact support if the problem persists."
+                self.get_text('error', lang)
             )
 
     async def setup_periodic_tasks(self):
@@ -1191,14 +1257,16 @@ Contact our support team at +998901234567 or email info@aquapure.uz
 
     # --- Subscription Management ---
     async def subscribe_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        user = await self.user_service.get_or_create_user(update.effective_user)
+        lang = user.get('language_code', 'en')
         user_id = update.effective_user.id
         self.user_states[user_id] = {'state': 'subscribe_select_product'}
         products = await self.product_service.get_available_products()
         if not products:
             if update.message:
-                await update.message.reply_text("No products available for subscription.")
+                await update.message.reply_text(self.get_text('no_products_subscription', lang))
             elif update.callback_query:
-                await update.callback_query.edit_message_text("No products available for subscription.")
+                await update.callback_query.edit_message_text(self.get_text('no_products_subscription', lang))
             return
         keyboard = [
             [InlineKeyboardButton(f"{p['name']} ({p['price']} UZS)", callback_data=f"sub_product_{p['id']}")]
@@ -1206,23 +1274,24 @@ Contact our support team at +998901234567 or email info@aquapure.uz
         ]
         if update.message:
             await update.message.reply_text(
-                "Select a product to subscribe:",
+                self.get_text('select_product_to_subscribe', lang),
                 reply_markup=InlineKeyboardMarkup(keyboard)
             )
         elif update.callback_query:
             await update.callback_query.edit_message_text(
-                "Select a product to subscribe:",
+                self.get_text('select_product_to_subscribe', lang),
                 reply_markup=InlineKeyboardMarkup(keyboard)
             )
 
     async def mysubscriptions_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        user = await self.get_or_create_user(update)
+        user = await self.user_service.get_or_create_user(update.effective_user)
+        lang = user.get('language_code', 'en')
         subs = await self.subscription_service.get_user_subscriptions(user['id'])
         if not subs:
             if update.message:
-                await update.message.reply_text("You have no active subscriptions.")
+                await update.message.reply_text(self.get_text('no_active_subscriptions', lang))
             elif update.callback_query:
-                await update.callback_query.edit_message_text("You have no active subscriptions.")
+                await update.callback_query.edit_message_text(self.get_text('no_active_subscriptions', lang))
             return
         keyboard = [
             [InlineKeyboardButton(f"{sub['product_name']} every {sub['frequency_days']}d x{sub['quantity']}", callback_data=f"sub_cancel_{sub['id']}")]
@@ -1230,22 +1299,24 @@ Contact our support team at +998901234567 or email info@aquapure.uz
         ]
         if update.message:
             await update.message.reply_text(
-                "Your subscriptions (tap to cancel):",
+                self.get_text('your_subscriptions', lang),
                 reply_markup=InlineKeyboardMarkup(keyboard)
             )
         elif update.callback_query:
             await update.callback_query.edit_message_text(
-                "Your subscriptions (tap to cancel):",
+                self.get_text('your_subscriptions', lang),
                 reply_markup=InlineKeyboardMarkup(keyboard)
             )
 
     async def subscribe_callback_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
         user_id = query.from_user.id
+        user = await self.user_service.get_or_create_user(update.effective_user)
+        lang = user.get('language_code', 'en')
         state = self.user_states.get(user_id, {})
         await query.answer()
         if not state:
-            await query.edit_message_text("Session expired. Please /subscribe again.")
+            await query.edit_message_text(self.get_text('session_expired', lang))
             return
         if state['state'] == 'subscribe_select_product':
             if query.data.startswith("sub_product_"):
@@ -1257,7 +1328,7 @@ Contact our support team at +998901234567 or email info@aquapure.uz
                     [InlineKeyboardButton(f"Every {d} days", callback_data=f"sub_freq_{d}")] for d in [3, 7, 14, 30]
                 ]
                 await query.edit_message_text(
-                    "How often do you want delivery?",
+                    self.get_text('how_often_delivery', lang),
                     reply_markup=InlineKeyboardMarkup(keyboard)
                 )
         elif state['state'] == 'subscribe_frequency':
@@ -1270,41 +1341,42 @@ Contact our support team at +998901234567 or email info@aquapure.uz
                     [InlineKeyboardButton(str(q), callback_data=f"sub_qty_{q}") for q in range(1, 6)]
                 ]
                 await query.edit_message_text(
-                    "How many units per delivery?",
+                    self.get_text('how_many_units', lang),
                     reply_markup=InlineKeyboardMarkup(keyboard)
                 )
         elif state['state'] == 'subscribe_quantity':
             if query.data.startswith("sub_qty_"):
                 qty = int(query.data.replace("sub_qty_", ""))
                 state['quantity'] = qty
-                user = await self.get_or_create_user(update)
+                user = await self.user_service.get_or_create_user(update.effective_user)
                 try:
                     sub = await self.subscription_service.create_subscription(
                         user['id'], state['product_id'], state['frequency_days'], qty
                     )
-                    await query.edit_message_text("✅ Subscription created! You will receive regular deliveries.")
+                    await query.edit_message_text(self.get_text('subscription_created', lang))
                 except Exception as e:
                     logger.error(f"Subscription error: {e}")
-                    await query.edit_message_text("❌ Failed to create subscription.")
+                    await query.edit_message_text(self.get_text('subscription_failed', lang))
                 del self.user_states[user_id]
         # Cancel subscription from /mysubscriptions
         elif query.data.startswith("sub_cancel_"):
             sub_id = query.data.replace("sub_cancel_", "")
             ok = await self.subscription_service.cancel_subscription(sub_id)
             if ok:
-                await query.edit_message_text("Subscription cancelled.")
+                await query.edit_message_text(self.get_text('subscription_cancelled', lang))
             else:
-                await query.edit_message_text("Failed to cancel subscription.")
+                await query.edit_message_text(self.get_text('subscription_cancel_failed', lang))
 
     # --- Order Tracking ---
     async def track_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        user = await self.get_or_create_user(update)
+        user = await self.user_service.get_or_create_user(update.effective_user)
+        lang = user.get('language_code', 'en')
         orders = await self.order_service.get_user_orders(user['id'], limit=5)
         if not orders:
             if update.message:
-                await update.message.reply_text("You have no recent orders.")
+                await update.message.reply_text(self.get_text('no_recent_orders', lang))
             elif update.callback_query:
-                await update.callback_query.edit_message_text("You have no recent orders.")
+                await update.callback_query.edit_message_text(self.get_text('no_recent_orders', lang))
             return
         keyboard = [
             [InlineKeyboardButton(f"Order {o['order_number']} ({o['status']})", callback_data=f"track_{o['id']}")]
@@ -1312,12 +1384,12 @@ Contact our support team at +998901234567 or email info@aquapure.uz
         ]
         if update.message:
             await update.message.reply_text(
-                "Your recent orders:",
+                self.get_text('your_recent_orders', lang),
                 reply_markup=InlineKeyboardMarkup(keyboard)
             )
         elif update.callback_query:
             await update.callback_query.edit_message_text(
-                "Your recent orders:",
+                self.get_text('your_recent_orders', lang),
                 reply_markup=InlineKeyboardMarkup(keyboard)
             )
 
@@ -1336,7 +1408,8 @@ Contact our support team at +998901234567 or email info@aquapure.uz
 
     # --- Loyalty & Analytics ---
     async def loyalty_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        user = await self.get_or_create_user(update)
+        user = await self.user_service.get_or_create_user(update.effective_user)
+        lang = user.get('language_code', 'en')
         analytics = await self.analytics_service.get_customer_analytics(user['id'])
         points = user.get('loyalty_points', 0)
         text = (
@@ -1353,19 +1426,20 @@ Contact our support team at +998901234567 or email info@aquapure.uz
             await update.callback_query.edit_message_text(text)
 
     async def loyalty_history_command(self, update, context):
-        user = await self.get_or_create_user(update)
+        user = await self.user_service.get_or_create_user(update.effective_user)
+        lang = user.get('language_code', 'en')
         transactions = await self.payment_service.get_loyalty_transactions(user['id'])
         if not transactions:
             if update.message:
-                await update.message.reply_text("No loyalty point transactions yet.")
+                await update.message.reply_text(self.get_text('no_loyalty_transactions', lang))
             elif update.callback_query:
-                await update.callback_query.edit_message_text("No loyalty point transactions yet.")
+                await update.callback_query.edit_message_text(self.get_text('no_loyalty_transactions', lang))
             return
         lines = [
             f"{t['created_at'].strftime('%Y-%m-%d %H:%M')}: {t['transaction_type'].capitalize()} {t['points']} pts ({t['reason']})"
             for t in transactions
         ]
-        text = "Your loyalty transactions:\n" + "\n".join(lines)
+        text = self.get_text('loyalty_transactions_header', lang) + "\n" + "\n".join(lines)
         if update.message:
             await update.message.reply_text(text)
         elif update.callback_query:
@@ -1373,35 +1447,37 @@ Contact our support team at +998901234567 or email info@aquapure.uz
 
     # --- Admin Features ---
     async def admin_orders_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        user = await self.get_or_create_user(update)
+        user = await self.user_service.get_or_create_user(update.effective_user)
+        lang = user.get('language_code', 'en')
         if not await self.admin_service.is_admin(user['telegram_id']):
             if update.message:
-                await update.message.reply_text("You are not an admin.")
+                await update.message.reply_text(self.get_text('not_admin', lang))
             elif update.callback_query:
-                await update.callback_query.edit_message_text("You are not an admin.")
+                await update.callback_query.edit_message_text(self.get_text('not_admin', lang))
             return
         orders = await self.admin_service.get_pending_orders()
         if not orders:
             if update.message:
-                await update.message.reply_text("No pending orders.")
+                await update.message.reply_text(self.get_text('no_pending_orders', lang))
             elif update.callback_query:
-                await update.callback_query.edit_message_text("No pending orders.")
+                await update.callback_query.edit_message_text(self.get_text('no_pending_orders', lang))
             return
         text = "\n".join([
             f"Order {o['order_number']} by {o['username']} ({o['phone']}) - {o['status']}" for o in orders
         ])
         if update.message:
-            await update.message.reply_text(f"Pending Orders:\n{text}")
+            await update.message.reply_text(self.get_text('pending_orders', lang) + "\n" + text)
         elif update.callback_query:
-            await update.callback_query.edit_message_text(f"Pending Orders:\n{text}")
+            await update.callback_query.edit_message_text(self.get_text('pending_orders', lang) + "\n" + text)
 
     async def admin_stats_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        user = await self.get_or_create_user(update)
+        user = await self.user_service.get_or_create_user(update.effective_user)
+        lang = user.get('language_code', 'en')
         if not await self.admin_service.is_admin(user['telegram_id']):
             if update.message:
-                await update.message.reply_text("You are not an admin.")
+                await update.message.reply_text(self.get_text('not_admin', lang))
             elif update.callback_query:
-                await update.callback_query.edit_message_text("You are not an admin.")
+                await update.callback_query.edit_message_text(self.get_text('not_admin', lang))
             return
         stats = await self.admin_service.get_system_stats()
         text = (

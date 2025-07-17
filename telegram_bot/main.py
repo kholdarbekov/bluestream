@@ -356,7 +356,7 @@ Contact our support team at +998901234567 or email info@aquapure.uz
         data = query.data
         logger.info(f"button_handler: {data=}")
         if data == 'order':
-            await self.order_command(update, context)
+            await self.order_command(update, context, lang=lang)
         elif data == 'track':
             await self.track_command(update, context)
         elif data == 'mysubscriptions':
@@ -791,7 +791,7 @@ Contact our support team at +998901234567 or email info@aquapure.uz
             reply_markup=keyboard
         )
 
-    async def order_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def order_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str = "en"):
         user = update.effective_user
         user_id = user.id
         self.user_states[user_id] = {
@@ -820,7 +820,7 @@ Contact our support team at +998901234567 or email info@aquapure.uz
                 reply_markup=InlineKeyboardMarkup(keyboard)
             )
 
-    def get_cart_text(self, cart):
+    def get_cart_text(self, cart, lang):
         if not cart:
             return self.get_text('cart_empty', lang)
         lines = [f"{item['name']} x{item['quantity']} = {item['price']*item['quantity']} UZS" for item in cart]
@@ -831,6 +831,10 @@ Contact our support team at +998901234567 or email info@aquapure.uz
         query = update.callback_query
         user_id = query.from_user.id
         state = self.user_states.get(user_id, {})
+        lang = "en"
+        user = await self.user_service.get_or_create_user(update.effective_user)
+        if user:
+            lang = user.get('language_code', 'en')
         await query.answer()
         if not state:
             await query.edit_message_text(self.get_text('session_expired', lang))
@@ -872,7 +876,7 @@ Contact our support team at +998901234567 or email info@aquapure.uz
                     [InlineKeyboardButton(self.get_text('cancel', lang), callback_data="order_cancel")],
                 ]
                 await query.edit_message_text(
-                    self.get_text('cart', lang) + "\n" + self.get_cart_text(cart),
+                    self.get_text('cart', lang) + "\n" + self.get_cart_text(cart, lang=lang),
                     reply_markup=InlineKeyboardMarkup(keyboard)
                 )
         elif state['state'] == ORDER_STATE['CART']:
@@ -956,7 +960,7 @@ Contact our support team at +998901234567 or email info@aquapure.uz
                 cart = state['cart']
                 total = float(sum(item['price']*item['quantity'] for item in cart)) + state.get('delivery_fee', 0)
                 await query.edit_message_text(
-                    self.get_text('order_summary', lang).format(cart=self.get_cart_text(cart), fee=state.get('delivery_fee', 0), total=total),
+                    self.get_text('order_summary', lang).format(cart=self.get_cart_text(cart, lang=lang), fee=state.get('delivery_fee', 0), total=total),
                     reply_markup=InlineKeyboardMarkup([
                         [InlineKeyboardButton(self.get_text('confirm', lang), callback_data="order_confirm")],
                         [InlineKeyboardButton(self.get_text('cancel', lang), callback_data="order_cancel")],
@@ -1001,6 +1005,11 @@ Contact our support team at +998901234567 or email info@aquapure.uz
         """Handle location messages"""
         location = update.message.location
         user_id = update.effective_user.id
+
+        lang = "en"
+        user = await self.user_service.get_or_create_user(update.effective_user)
+        if user:
+            lang = user.get('language_code', 'en')
         
         # Store location in redis for order processing
         await self.redis_client.setex(
@@ -1030,6 +1039,11 @@ Contact our support team at +998901234567 or email info@aquapure.uz
         file_path = f"uploads/delivery_photos/{photo.file_id}.jpg"
         await file.download_to_drive(file_path)
         
+        lang = "en"
+        user = await self.user_service.get_or_create_user(update.effective_user)
+        if user:
+            lang = user.get('language_code', 'en')
+
         await update.message.reply_text(
             self.get_text('photo_received', lang)
         )
@@ -1038,6 +1052,11 @@ Contact our support team at +998901234567 or email info@aquapure.uz
         """Handle contact sharing"""
         contact = update.message.contact
         user_id = update.effective_user.id
+
+        lang = "en"
+        user = await self.user_service.get_or_create_user(update.effective_user)
+        if user:
+            lang = user.get('language_code', 'en')
         
         try:
             async with self.db_pool.acquire() as conn:
@@ -1062,6 +1081,11 @@ Contact our support team at +998901234567 or email info@aquapure.uz
         # For now, we'll simulate payment processing
         query = update.callback_query
         await query.answer()
+
+        lang = "en"
+        user = await self.user_service.get_or_create_user(update.effective_user)
+        if user:
+            lang = user.get('language_code', 'en')
         
         payment_data = query.data.replace('pay_', '')
         
@@ -1075,6 +1099,11 @@ Contact our support team at +998901234567 or email info@aquapure.uz
     async def error_handler(self, update: object, context: ContextTypes.DEFAULT_TYPE):
         """Handle errors"""
         logger.error(f"Exception while handling an update: {context.error}")
+
+        lang = "en"
+        user = await self.user_service.get_or_create_user(update.effective_user)
+        if user:
+            lang = user.get('language_code', 'en')
         
         if isinstance(update, Update) and update.effective_message:
             await update.effective_message.reply_text(

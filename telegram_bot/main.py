@@ -865,7 +865,7 @@ Contact our support team at +998901234567 or email info@aquapure.uz
                 product_id = query.data.replace("order_product_", "")
                 product = await self.product_service.get_product_by_id(product_id)
                 if not product:
-                    await query.edit_message_text("Product not found.")
+                    await query.edit_message_text(self.get_text('no_products', lang))
                     return
                 state['selected_product'] = product
                 state['state'] = ORDER_STATE['SELECT_QUANTITY']
@@ -874,7 +874,7 @@ Contact our support team at +998901234567 or email info@aquapure.uz
                     [InlineKeyboardButton(str(q), callback_data=f"order_qty_{q}") for q in range(1, 6)]
                 ]
                 await query.edit_message_text(
-                    self.get_text('select_quantity', lang).format(product['name']),
+                    self.get_text('select_quantity', lang).format(product=product['name']),
                     reply_markup=InlineKeyboardMarkup(keyboard)
                 )
         elif state['state'] == ORDER_STATE['SELECT_QUANTITY']:
@@ -934,7 +934,7 @@ Contact our support team at +998901234567 or email info@aquapure.uz
                     for slot in slots[:5]
                 ]
                 await query.edit_message_text(
-                    self.get_text('select_delivery_slot', lang).format(fee),
+                    self.get_text('select_delivery_slot', lang).format(fee=state['delivery_fee']),
                     reply_markup=InlineKeyboardMarkup(keyboard)
                 )
             elif query.data == "order_cancel":

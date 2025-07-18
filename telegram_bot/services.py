@@ -418,27 +418,38 @@ class DeliveryService:
                 )
     
     async def get_delivery_tracking(self, order_id: str) -> Dict:
-        """Get delivery tracking information"""
         async with self.db_pool.acquire() as conn:
             order = await conn.fetchrow(
-                "SELECT * FROM orders WHERE id = $1",
+                """
+                SELECT o.*, a.address_line1, a.city, a.state, a.postal_code
+                FROM orders o
+                LEFT JOIN addresses a ON o.delivery_address_id = a.id
+                WHERE o.id = $1
+                """,
                 order_id
             )
-            
             delivery = await conn.fetchrow(
                 "SELECT * FROM deliveries WHERE order_id = $1",
                 order_id
             )
-            
+            address = None
+            if order:
+                address_parts = [order.get('address_line1'), order.get('city'), order.get('state'), order.get('postal_code')]
+                address = ', '.join([part for part in address_parts if part])
+            slot = None
+            if delivery and delivery.get('scheduled_time_slot'):
+                slot = delivery['scheduled_time_slot']
+            elif order and order.get('delivery_time_slot'):
+                slot = order['delivery_time_slot']
             return {
                 "order_id": order_id,
-                "status": delivery['status'] if delivery else 'pending',
-                "address": "Address from order",  # You might want to join with addresses table
-                "slot": delivery['scheduled_time_slot'] if delivery else None,
+                "status": delivery['status'] if delivery else (order['status'] if order else 'pending'),
+                "address": address or "-",
+                "slot": slot or "-",
                 "events": [
                     {
                         "type": "order_created",
-                        "time": order['created_at'],
+                        "time": order['created_at'] if order else None,
                         "description": "Order created"
                     }
                 ] + ([

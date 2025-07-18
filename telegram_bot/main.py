@@ -1605,7 +1605,6 @@ Contact our support team at +998901234567 or email info@aquapure.uz
             application.add_handler(CallbackQueryHandler(self.order_callback_handler, pattern="^order_"))
             application.add_handler(CallbackQueryHandler(self.track_callback_handler, pattern="^track_"))
             application.add_handler(CallbackQueryHandler(self.subscribe_callback_handler, pattern="^sub_"))
-            application.add_handler(CallbackQueryHandler(self.button_handler))
             application.add_handler(MessageHandler(filters.LOCATION, self.location_handler))
             application.add_handler(MessageHandler(filters.PHOTO, self.photo_handler))
             application.add_handler(MessageHandler(filters.CONTACT, self.contact_handler))
@@ -1646,6 +1645,8 @@ Contact our support team at +998901234567 or email info@aquapure.uz
             # --- Admin Features ---
             application.add_handler(CommandHandler("admin_orders", self.admin_orders_command))
             application.add_handler(CommandHandler("admin_stats", self.admin_stats_command))
+
+            application.add_handler(CallbackQueryHandler(self.button_handler))
             
             # # Start periodic tasks
             # logger.info("Creating periodic tasks")

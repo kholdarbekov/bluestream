@@ -701,7 +701,7 @@ class OrderService:
         self.db_pool = db_pool
         self.redis_client = redis_client
     
-    async def create_order(self, user_id: str, items: List[Dict], delivery_address: str, 
+    async def create_order(self, user_id: str, items: List[Dict], delivery_address_id: str, 
                           payment_method: str = 'cash') -> Dict:
         """Create a new order"""
         try:
@@ -715,10 +715,10 @@ class OrderService:
                 # Create order
                 order = await conn.fetchrow(
                     """INSERT INTO orders (user_id, order_number, status, total_amount, 
-                       delivery_fee, special_instructions, created_at)
-                       VALUES ($1, $2, 'pending', $3, 0.00, $4, CURRENT_TIMESTAMP)
+                       delivery_fee, special_instructions, delivery_address_id, created_at)
+                       VALUES ($1, $2, 'pending', $3, 0.00, $4, $5, CURRENT_TIMESTAMP)
                        RETURNING *""",
-                    user_id, order_number, total_amount, f"Payment method: {payment_method}"
+                    user_id, order_number, total_amount, f"Payment method: {payment_method}", delivery_address_id
                 )
                 
                 # Insert order items
@@ -858,6 +858,63 @@ class SubscriptionService:
             logger.error(f"Error cancelling subscription: {e}")
             return False
 
+class AddressService:
+    def __init__(self, db_pool):
+        self.db_pool = db_pool
+
+    async def get_user_addresses(self, user_id):
+        async with self.db_pool.acquire() as conn:
+            return [dict(row) for row in await conn.fetch(
+                "SELECT * FROM addresses WHERE user_id = $1 ORDER BY is_default DESC, created_at DESC",
+                user_id
+            )]
+
+    async def get_address_by_id(self, address_id):
+        async with self.db_pool.acquire() as conn:
+            row = await conn.fetchrow("SELECT * FROM addresses WHERE id = $1", address_id)
+            return dict(row) if row else None
+
+    async def get_default_address(self, user_id):
+        async with self.db_pool.acquire() as conn:
+            row = await conn.fetchrow("SELECT * FROM addresses WHERE user_id = $1 AND is_default = TRUE LIMIT 1", user_id)
+            return dict(row) if row else None
+
+    async def add_address(self, user_id, label, address_line1, address_line2, city, state, postal_code, country, is_default, delivery_instructions):
+        async with self.db_pool.acquire() as conn:
+            address = await conn.fetchrow(
+                """INSERT INTO addresses (user_id, label, address_line1, address_line2, city, state, postal_code, country, is_default, delivery_instructions)
+                       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *""",
+                user_id, label, address_line1, address_line2, city, state, postal_code, country, is_default, delivery_instructions
+            )
+            if is_default:
+                await conn.execute(
+                    "UPDATE addresses SET is_default = FALSE WHERE user_id = $1 AND id != $2",
+                    user_id, address['id']
+                )
+            return dict(address)
+
+    async def update_address(self, address_id, **fields):
+        if not fields:
+            return
+        set_clause = ", ".join([f"{k} = ${i+2}" for i, k in enumerate(fields.keys())])
+        values = list(fields.values())
+        async with self.db_pool.acquire() as conn:
+            await conn.execute(
+                f"UPDATE addresses SET {set_clause} WHERE id = $1",
+                address_id, *values
+            )
+            row = await conn.fetchrow("SELECT * FROM addresses WHERE id = $1", address_id)
+            return dict(row) if row else None
+
+    async def delete_address(self, address_id):
+        async with self.db_pool.acquire() as conn:
+            await conn.execute("DELETE FROM addresses WHERE id = $1", address_id)
+
+    async def set_default_address(self, user_id, address_id):
+        async with self.db_pool.acquire() as conn:
+            await conn.execute("UPDATE addresses SET is_default = FALSE WHERE user_id = $1", user_id)
+            await conn.execute("UPDATE addresses SET is_default = TRUE WHERE id = $1", address_id)
+
 class UserService:
     def __init__(self, db_pool):
         self.db_pool = db_pool
@@ -894,4 +951,13 @@ class UserService:
             await conn.execute(
                 "UPDATE users SET language_code = $1 WHERE telegram_id = $2",
                 language_code, telegram_id
+            )
+
+    async def update_profile(self, telegram_id, **fields):
+        set_clause = ", ".join([f"{k} = ${i+2}" for i, k in enumerate(fields.keys())])
+        values = list(fields.values())
+        async with self.db_pool.acquire() as conn:
+            await conn.execute(
+                f"UPDATE users SET {set_clause} WHERE telegram_id = $1",
+                telegram_id, *values
             )

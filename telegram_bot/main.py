@@ -25,6 +25,7 @@ from services import (
     ProductService,
     SubscriptionService,
     UserService,
+    AddressService,
 )
 
 # Configure logging
@@ -64,6 +65,7 @@ class WaterBusinessBot:
         self.product_service = None
         self.subscription_service = None
         self.user_service = None
+        self.address_service = None
         
         # User states for conversation flow
         self.user_states = {}
@@ -146,6 +148,39 @@ class WaterBusinessBot:
             'slot': "Slot",
             'events': "Events",
             'no_events': "No events.",
+            'profile': "Profile",
+            'name': "Name",
+            'phone': "Phone",
+            'email': "Email",
+            'vip_status': "VIP Status",
+            'loyalty_points': "Loyalty Points",
+            'edit_profile': "Edit Profile",
+            'manage_addresses': "Manage Addresses",
+            'your_addresses': "Your addresses:",
+            'address': "Address",
+            'default': "Default",
+            'set_default': "Set Default",
+            'delete': "Delete",
+            'add_address': "Add Address",
+            'enter_address_line1': "Please enter the address line:",
+            'enter_city': "Please enter the city:",
+            'address_added': "Address added!",
+            'address_deleted': "Address deleted!",
+            'default_set': "Default address set!",
+            'select_address': "Select a delivery address:",
+            'no_addresses': "You have no saved addresses. Please add one to continue.",
+            'address_selected': "Address selected!",
+            'edit': "Edit",
+            'edit_address': "Edit Address",
+            'enter_label': "Enter address label (e.g. Home, Office):",
+            'enter_address_line2': "Enter address line 2 (or type '-' to skip):",
+            'enter_state': "Enter state/region (or type '-' to skip):",
+            'enter_postal_code': "Enter postal code (or type '-' to skip):",
+            'enter_country': "Enter country (default: UZ):",
+            'enter_instructions': "Enter delivery instructions (or type '-' to skip):",
+            'address_updated': "Address updated!",
+            'order_address': "Delivery Address:",
+            'change_address': "Change Address",
         })
         self.translations['uz'].update({
             'no_products_subscription': "Obuna uchun mahsulotlar mavjud emas.",
@@ -194,6 +229,39 @@ class WaterBusinessBot:
             'slot': "Vaqt oralig'i",
             'events': "Voqealar",
             'no_events': "Voqealar yo'q.",
+            'profile': "Profil",
+            'name': "Ism",
+            'phone': "Telefon raqami",
+            'email': "Elektron pochta",
+            'vip_status': "VIP Holati",
+            'loyalty_points': "Sodiqlik ballari",
+            'edit_profile': "Profilni tahrirlash",
+            'manage_addresses': "Manzillarni boshqarish",
+            'your_addresses': "Sizning manzillaringiz:",
+            'address': "Manzil",
+            'default': "Asosiy",
+            'set_default': "Asosiy qilish",
+            'delete': "O'chirish",
+            'add_address': "Manzil qo'shish",
+            'enter_address_line1': "Manzilni kiriting:",
+            'enter_city': "Shaharni kiriting:",
+            'address_added': "Manzil qo'shildi!",
+            'address_deleted': "Manzil o'chirildi!",
+            'default_set': "Asosiy manzil o'rnatildi!",
+            'select_address': "Yetkazib berish manzilini tanlang:",
+            'no_addresses': "Saqlangan manzilingiz yo'q. Davom etish uchun manzil qo'shing.",
+            'address_selected': "Manzil tanlandi!",
+            'edit': "Tahrirlash",
+            'edit_address': "Manzilni tahrirlash",
+            'enter_label': "Manzil yorlig'ini kiriting (masalan, Uy, Ish):",
+            'enter_address_line2': "Manzilning 2-qatorini kiriting (yoki o'tkazib yuborish uchun '-' yozing):",
+            'enter_state': "Viloyat/regionni kiriting (yoki o'tkazib yuborish uchun '-' yozing):",
+            'enter_postal_code': "Pochta indeksini kiriting (yoki o'tkazib yuborish uchun '-' yozing):",
+            'enter_country': "Mamlakatni kiriting (standart: UZ):",
+            'enter_instructions': "Yetkazib berish uchun ko'rsatmalarni kiriting (yoki o'tkazib yuborish uchun '-' yozing):",
+            'address_updated': "Manzil yangilandi!",
+            'order_address': "Yetkazib berish manzili:",
+            'change_address': "Manzilni o'zgartirish",
         })
         self.translations['ru'].update({
             'no_products_subscription': "Нет доступных товаров для подписки.",
@@ -242,6 +310,39 @@ class WaterBusinessBot:
             'slot': "Время",
             'events': "События",
             'no_events': "Нет событий.",
+            'profile': "Профиль",
+            'name': "Имя",
+            'phone': "Телефон",
+            'email': "Электронная почта",
+            'vip_status': "VIP Статус",
+            'loyalty_points': "Лояльность баллы",
+            'edit_profile': "Редактировать профиль",
+            'manage_addresses': "Управление адресами",
+            'your_addresses': "Ваши адреса:",
+            'address': "Адрес",
+            'default': "Основной",
+            'set_default': "Сделать основным",
+            'delete': "Удалить",
+            'add_address': "Добавить адрес",
+            'enter_address_line1': "Пожалуйста, введите адрес:",
+            'enter_city': "Пожалуйста, введите город:",
+            'address_added': "Адрес добавлен!",
+            'address_deleted': "Адрес удален!",
+            'default_set': "Основной адрес установлен!",
+            'select_address': "Выберите адрес доставки:",
+            'no_addresses': "У вас нет сохраненных адресов. Пожалуйста, добавьте адрес для продолжения.",
+            'address_selected': "Адрес выбран!",
+            'edit': "Редактировать",
+            'edit_address': "Редактировать адрес",
+            'enter_label': "Введите метку адреса (например, Дом, Офис):",
+            'enter_address_line2': "Введите вторую строку адреса (или '-' чтобы пропустить):",
+            'enter_state': "Введите область/регион (или '-' чтобы пропустить):",
+            'enter_postal_code': "Введите почтовый индекс (или '-' чтобы пропустить):",
+            'enter_country': "Введите страну (по умолчанию: UZ):",
+            'enter_instructions': "Введите инструкции для доставки (или '-' чтобы пропустить):",
+            'address_updated': "Адрес обновлен!",
+            'order_address': "Адрес доставки:",
+            'change_address': "Изменить адрес",
         })
 
     async def init_connections(self):
@@ -271,6 +372,7 @@ class WaterBusinessBot:
             self.product_service = ProductService(self.db_pool)
             self.subscription_service = SubscriptionService(self.db_pool)
             self.user_service = UserService(self.db_pool)
+            self.address_service = AddressService(self.db_pool)
             # --- End instantiate services ---
         except Exception as e:
             logger.error(f"Failed to initialize connections: {e}")
@@ -914,18 +1016,41 @@ Contact our support team at +998901234567 or email info@aquapure.uz
                     reply_markup=InlineKeyboardMarkup(keyboard)
                 )
             elif query.data == "order_delivery":
+                # Address selection step
+                addresses = await self.address_service.get_user_addresses(user['id'])
+                if not addresses:
+                    await query.edit_message_text(self.get_text('no_addresses', lang))
+                    return
+                state['state'] = 'SELECT_ADDRESS'
+                self.user_states[user_id] = state
+                keyboard = [
+                    [InlineKeyboardButton(f"{a['address_line1']}, {a['city']}", callback_data=f"select_addr_{a['id']}")]
+                    for a in addresses
+                ]
+                keyboard.append([InlineKeyboardButton(self.get_text('add_address', lang), callback_data='add_address')])
+                await query.edit_message_text(
+                    self.get_text('select_address', lang),
+                    reply_markup=InlineKeyboardMarkup(keyboard)
+                )
+            elif query.data == "order_cancel":
+                del self.user_states[user_id]
+                await query.edit_message_text(self.get_text('order_cancelled', lang))
+        elif state.get('state') == 'SELECT_ADDRESS':
+            if query.data.startswith('select_addr_'):
+                addr_id = query.data.replace('select_addr_', '')
+                state['selected_address_id'] = addr_id
                 state['state'] = ORDER_STATE['DELIVERY_SLOT']
                 self.user_states[user_id] = state
+                await query.edit_message_text(self.get_text('address_selected', lang))
+                # Now proceed to delivery slot selection (reuse existing logic)
                 # For demo, use a static warehouse location
                 user = await self.user_service.get_or_create_user(update.effective_user)
                 user_location = {'latitude': 41.2995, 'longitude': 69.2401} # fallback
-                if user.get('latitude') and user.get('longitude'):
-                    user_location = {'latitude': user['latitude'], 'longitude': user['longitude']}
                 warehouse_location = {'latitude': 41.2995, 'longitude': 69.2401}
                 fee = await self.delivery_service.calculate_delivery_fee(user_location, warehouse_location)
                 slots = await self.delivery_service.get_available_slots(user_location)
                 if not slots:
-                    await query.edit_message_text("No delivery slots available. Please try again later.")
+                    await query.edit_message_text(self.get_text('no_delivery_slots', lang))
                     return
                 state['delivery_fee'] = float(fee)
                 state['slots'] = slots
@@ -934,12 +1059,9 @@ Contact our support team at +998901234567 or email info@aquapure.uz
                     for slot in slots[:5]
                 ]
                 await query.edit_message_text(
-                    self.get_text('select_delivery_slot', lang).format(fee=state['delivery_fee']),
+                    self.get_text('select_delivery_slot', lang).format(fee=fee),
                     reply_markup=InlineKeyboardMarkup(keyboard)
                 )
-            elif query.data == "order_cancel":
-                del self.user_states[user_id]
-                await query.edit_message_text(self.get_text('order_cancelled', lang))
         elif state['state'] == ORDER_STATE['DELIVERY_SLOT']:
             if query.data.startswith("order_slot_"):
                 slot_id = query.data.replace("order_slot_", "")
@@ -992,11 +1114,11 @@ Contact our support team at +998901234567 or email info@aquapure.uz
                 # Place order
                 user = await self.user_service.get_or_create_user(update.effective_user)
                 cart = state['cart']
-                address = user.get('address', 'No address')
+                address_id = state.get('selected_address_id')
                 payment_method = state['payment_method']
                 total = float(sum(item['price']*item['quantity'] for item in cart)) + state.get('delivery_fee', 0)
                 try:
-                    order = await self.order_service.create_order(user['id'], cart, address, payment_method)
+                    order = await self.order_service.create_order(user['id'], cart, address_id, payment_method)
                     # Schedule delivery with correct params
                     await self.delivery_service.schedule_delivery(
                         order['id'],
@@ -1265,6 +1387,7 @@ Contact our support team at +998901234567 or email info@aquapure.uz
             application.add_handler(MessageHandler(filters.PHOTO, self.photo_handler))
             application.add_handler(MessageHandler(filters.CONTACT, self.contact_handler))
             application.add_handler(CommandHandler("order", self.order_command))
+            application.add_handler(CommandHandler("account", self.account_command))
             
             # Error handler
             application.add_error_handler(self.error_handler)
@@ -1550,6 +1673,204 @@ Contact our support team at +998901234567 or email info@aquapure.uz
             await update.message.reply_text(text)
         elif update.callback_query:
             await update.callback_query.edit_message_text(text)
+
+    async def account_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        user = await self.user_service.get_or_create_user(update.effective_user)
+        lang = user.get('language_code', 'en')
+        text = (
+            f"👤 <b>{self.get_text('profile', lang)}</b>\n"
+            f"<b>{self.get_text('name', lang)}:</b> {user.get('first_name', '')} {user.get('last_name', '')}\n"
+            f"<b>{self.get_text('phone', lang)}:</b> {user.get('phone', '-') }\n"
+            f"<b>{self.get_text('email', lang)}:</b> {user.get('email', '-') }\n"
+            f"<b>{self.get_text('language', lang)}:</b> {lang}\n"
+            f"<b>{self.get_text('vip_status', lang)}:</b> {'VIP' if user.get('is_vip') else 'Regular'}\n"
+            f"<b>{self.get_text('loyalty_points', lang)}:</b> {user.get('loyalty_points', 0)}\n"
+        )
+        keyboard = [
+            [InlineKeyboardButton(self.get_text('edit_profile', lang), callback_data='edit_profile')],
+            [InlineKeyboardButton(self.get_text('manage_addresses', lang), callback_data='manage_addresses')],
+            [InlineKeyboardButton(self.get_text('back_main', lang), callback_data='back_main')]
+        ]
+        if update.message:
+            await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.HTML)
+        elif update.callback_query:
+            await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.HTML)
+
+    async def show_address_menu(self, query, lang: str):
+        user = await self.user_service.get_or_create_user(query.from_user)
+        addresses = await self.address_service.get_user_addresses(user['id'])
+        text = self.get_text('your_addresses', lang) + "\n\n"
+        keyboard = []
+        for addr in addresses:
+            label = addr['label'] or self.get_text('address', lang)
+            addr_str = f"{label}: {addr['address_line1']}, {addr['city']}"
+            if addr['is_default']:
+                addr_str += f" ({self.get_text('default', lang)})"
+            text += f"• {addr_str}\n"
+            keyboard.append([
+                InlineKeyboardButton(self.get_text('set_default', lang), callback_data=f"set_default_addr_{addr['id']}"),
+                InlineKeyboardButton(self.get_text('edit', lang), callback_data=f"edit_addr_{addr['id']}"),
+                InlineKeyboardButton(self.get_text('delete', lang), callback_data=f"delete_addr_{addr['id']}")
+            ])
+        keyboard.append([InlineKeyboardButton(self.get_text('add_address', lang), callback_data='add_address')])
+        keyboard.append([InlineKeyboardButton(self.get_text('back_main', lang), callback_data='back_main')])
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+
+    async def address_callback_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        query = update.callback_query
+        user = await self.user_service.get_or_create_user(query.from_user)
+        lang = user.get('language_code', 'en')
+        data = query.data
+        if data == 'manage_addresses':
+            await self.show_address_menu(query, lang)
+        elif data == 'add_address':
+            self.user_states[user['telegram_id']] = {'state': 'add_address_label'}
+            await query.edit_message_text(self.get_text('enter_label', lang))
+        elif data.startswith('edit_addr_'):
+            addr_id = data.replace('edit_addr_', '')
+            addr = await self.address_service.get_address_by_id(addr_id)
+            self.user_states[user['telegram_id']] = {
+                'state': 'edit_address_label',
+                'edit_addr_id': addr_id,
+                'edit_addr': addr
+            }
+            await query.edit_message_text(self.get_text('enter_label', lang) + f" (current: {addr.get('label','') or '-'})")
+        elif data.startswith('set_default_addr_'):
+            addr_id = data.replace('set_default_addr_', '')
+            await self.address_service.set_default_address(user['id'], addr_id)
+            await query.answer(self.get_text('default_set', lang))
+            await self.show_address_menu(query, lang)
+        elif data.startswith('delete_addr_'):
+            addr_id = data.replace('delete_addr_', '')
+            await self.address_service.delete_address(addr_id)
+            await query.answer(self.get_text('address_deleted', lang))
+            await self.show_address_menu(query, lang)
+
+    async def address_message_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        user = await self.user_service.get_or_create_user(update.effective_user)
+        lang = user.get('language_code', 'en')
+        state = self.user_states.get(user['telegram_id'], {})
+        # Add address flow
+        if state.get('state') == 'add_address_label':
+            state['label'] = update.message.text
+            state['state'] = 'add_address_line1'
+            self.user_states[user['telegram_id']] = state
+            await update.message.reply_text(self.get_text('enter_address_line1', lang))
+        elif state.get('state') == 'add_address_line1':
+            state['address_line1'] = update.message.text
+            state['state'] = 'add_address_line2'
+            self.user_states[user['telegram_id']] = state
+            await update.message.reply_text(self.get_text('enter_address_line2', lang))
+        elif state.get('state') == 'add_address_line2':
+            val = update.message.text
+            state['address_line2'] = None if val.strip() == '-' else val
+            state['state'] = 'add_address_city'
+            self.user_states[user['telegram_id']] = state
+            await update.message.reply_text(self.get_text('enter_city', lang))
+        elif state.get('state') == 'add_address_city':
+            state['city'] = update.message.text
+            state['state'] = 'add_address_state'
+            self.user_states[user['telegram_id']] = state
+            await update.message.reply_text(self.get_text('enter_state', lang))
+        elif state.get('state') == 'add_address_state':
+            val = update.message.text
+            state['state'] = 'add_address_postal_code'
+            state['state_val'] = val
+            state['state_val_type'] = 'state'
+            state['state_val'] = None if val.strip() == '-' else val
+            self.user_states[user['telegram_id']] = state
+            await update.message.reply_text(self.get_text('enter_postal_code', lang))
+        elif state.get('state') == 'add_address_postal_code':
+            val = update.message.text
+            state['postal_code'] = None if val.strip() == '-' else val
+            state['state'] = 'add_address_country'
+            self.user_states[user['telegram_id']] = state
+            await update.message.reply_text(self.get_text('enter_country', lang))
+        elif state.get('state') == 'add_address_country':
+            val = update.message.text
+            state['country'] = val if val.strip() else 'UZ'
+            state['state'] = 'add_address_instructions'
+            self.user_states[user['telegram_id']] = state
+            await update.message.reply_text(self.get_text('enter_instructions', lang))
+        elif state.get('state') == 'add_address_instructions':
+            val = update.message.text
+            state['delivery_instructions'] = None if val.strip() == '-' else val
+            # Add address to DB
+            await self.address_service.add_address(
+                user['id'],
+                label=state.get('label'),
+                address_line1=state.get('address_line1'),
+                address_line2=state.get('address_line2'),
+                city=state.get('city'),
+                state=state.get('state_val'),
+                postal_code=state.get('postal_code'),
+                country=state.get('country'),
+                is_default=False,
+                delivery_instructions=state.get('delivery_instructions')
+            )
+            await update.message.reply_text(self.get_text('address_added', lang))
+            del self.user_states[user['telegram_id']]
+        # Edit address flow
+        elif state.get('state') == 'edit_address_label':
+            state['label'] = update.message.text
+            state['state'] = 'edit_address_line1'
+            self.user_states[user['telegram_id']] = state
+            await update.message.reply_text(self.get_text('enter_address_line1', lang) + f" (current: {state['edit_addr'].get('address_line1','') or '-'})")
+        elif state.get('state') == 'edit_address_line1':
+            state['address_line1'] = update.message.text
+            state['state'] = 'edit_address_line2'
+            self.user_states[user['telegram_id']] = state
+            await update.message.reply_text(self.get_text('enter_address_line2', lang) + f" (current: {state['edit_addr'].get('address_line2','') or '-'})")
+        elif state.get('state') == 'edit_address_line2':
+            val = update.message.text
+            state['address_line2'] = None if val.strip() == '-' else val
+            state['state'] = 'edit_address_city'
+            self.user_states[user['telegram_id']] = state
+            await update.message.reply_text(self.get_text('enter_city', lang) + f" (current: {state['edit_addr'].get('city','') or '-'})")
+        elif state.get('state') == 'edit_address_city':
+            state['city'] = update.message.text
+            state['state'] = 'edit_address_state'
+            self.user_states[user['telegram_id']] = state
+            await update.message.reply_text(self.get_text('enter_state', lang) + f" (current: {state['edit_addr'].get('state','') or '-'})")
+        elif state.get('state') == 'edit_address_state':
+            val = update.message.text
+            state['state_val'] = None if val.strip() == '-' else val
+            state['state'] = 'edit_address_postal_code'
+            self.user_states[user['telegram_id']] = state
+            await update.message.reply_text(self.get_text('enter_postal_code', lang) + f" (current: {state['edit_addr'].get('postal_code','') or '-'})")
+        elif state.get('state') == 'edit_address_postal_code':
+            val = update.message.text
+            state['postal_code'] = None if val.strip() == '-' else val
+            state['state'] = 'edit_address_country'
+            self.user_states[user['telegram_id']] = state
+            await update.message.reply_text(self.get_text('enter_country', lang) + f" (current: {state['edit_addr'].get('country','') or '-'})")
+        elif state.get('state') == 'edit_address_country':
+            val = update.message.text
+            state['country'] = val if val.strip() else 'UZ'
+            state['state'] = 'edit_address_instructions'
+            self.user_states[user['telegram_id']] = state
+            await update.message.reply_text(self.get_text('enter_instructions', lang) + f" (current: {state['edit_addr'].get('delivery_instructions','') or '-'})")
+        elif state.get('state') == 'edit_address_instructions':
+            val = update.message.text
+            state['delivery_instructions'] = None if val.strip() == '-' else val
+            # Update address in DB
+            await self.address_service.update_address(
+                state['edit_addr_id'],
+                label=state.get('label'),
+                address_line1=state.get('address_line1'),
+                address_line2=state.get('address_line2'),
+                city=state.get('city'),
+                state=state.get('state_val'),
+                postal_code=state.get('postal_code'),
+                country=state.get('country'),
+                delivery_instructions=state.get('delivery_instructions')
+            )
+            await update.message.reply_text(self.get_text('address_updated', lang))
+            del self.user_states[user['telegram_id']]
+
+    # In order confirmation, show full address summary and allow user to change address before confirming
+    # (Assume in order_callback_handler, before showing order summary)
+    # Fetch address by state['selected_address_id'] and show summary in confirmation message
 
 def main():
     """Main function"""

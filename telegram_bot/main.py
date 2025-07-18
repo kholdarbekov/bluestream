@@ -139,6 +139,13 @@ class WaterBusinessBot:
             'error_saving_contact': "Sorry, there was an error saving your contact.",
             'processing_payment': "💳 Processing payment...\n\nPlease wait while we process your payment securely.",
             'error': "Sorry, something went wrong. Please try again or contact support if the problem persists.",
+            'order_tracking': "Order Tracking",
+            'order_number': "Order Number",
+            'status': "Status",
+            'address': "Address",
+            'slot': "Slot",
+            'events': "Events",
+            'no_events': "No events.",
         })
         self.translations['uz'].update({
             'no_products_subscription': "Obuna uchun mahsulotlar mavjud emas.",
@@ -180,6 +187,13 @@ class WaterBusinessBot:
             'error_saving_contact': "Kechirasiz, kontaktni saqlashda xatolik yuz berdi.",
             'processing_payment': "💳 To'lov amalga oshirilmoqda...\n\nIltimos, to'lovingizni xavfsiz tarzda qayta ishlashimizni kuting.",
             'error': "Kechirasiz, xatolik yuz berdi. Iltimos, qayta urinib ko'ring yoki muammolar bo'lsa, yordamga murojaat qiling.",
+            'order_tracking': "Buyurtmani kuzatish",
+            'order_number': "Buyurtma raqami",
+            'status': "Holat",
+            'address': "Manzil",
+            'slot': "Vaqt oralig'i",
+            'events': "Voqealar",
+            'no_events': "Voqealar yo'q.",
         })
         self.translations['ru'].update({
             'no_products_subscription': "Нет доступных товаров для подписки.",
@@ -221,6 +235,13 @@ class WaterBusinessBot:
             'error_saving_contact': "Извините, произошла ошибка при сохранении контакта.",
             'processing_payment': "💳 Обработка платежа...\n\nПожалуйста, подождите, пока мы безопасно обработаем ваш платеж.",
             'error': "Извините, что-то пошло не так. Пожалуйста, попробуйте еще раз или обратитесь в поддержку, если проблема повторяется.",
+            'order_tracking': "Отслеживание заказа",
+            'order_number': "Номер заказа",
+            'status': "Статус",
+            'address': "Адрес",
+            'slot': "Время",
+            'events': "События",
+            'no_events': "Нет событий.",
         })
 
     async def init_connections(self):
@@ -1424,6 +1445,8 @@ Contact our support team at +998901234567 or email info@aquapure.uz
 
     async def track_callback_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
+        user = await self.user_service.get_or_create_user(update.effective_user)
+        lang = user.get('language_code', 'en')
         if query.data.startswith("track_"):
             order_id = query.data.replace("track_", "")
             tracking = await self.delivery_service.get_delivery_tracking(order_id)
@@ -1431,9 +1454,15 @@ Contact our support team at +998901234567 or email info@aquapure.uz
             events_text = "\n".join([
                 f"{e['time']}: {e['type']} - {e['description']}" for e in events
             ])
-            await query.edit_message_text(
-                f"Order {order_id}\nStatus: {tracking.get('status')}\nAddress: {tracking.get('address')}\nSlot: {tracking.get('slot')}\n\nEvents:\n{events_text or 'No events.'}"
+            text = (
+                f"{self.get_text('order_tracking', lang)}\n"
+                f"{self.get_text('order_number', lang)}: {tracking.get('order_id')}\n"
+                f"{self.get_text('status', lang)}: {tracking.get('status')}\n"
+                f"{self.get_text('address', lang)}: {tracking.get('address')}\n"
+                f"{self.get_text('slot', lang)}: {tracking.get('slot')}\n\n"
+                f"{self.get_text('events', lang)}:\n{events_text or self.get_text('no_events', lang)}"
             )
+            await query.edit_message_text(text)
 
     # --- Loyalty & Analytics ---
     async def loyalty_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):

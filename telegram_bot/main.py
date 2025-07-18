@@ -1258,6 +1258,8 @@ Contact our support team at +998901234567 or email info@aquapure.uz
             application.add_handler(CommandHandler("start", self.start_command))
             application.add_handler(CommandHandler("help", self.help_command))
             application.add_handler(CallbackQueryHandler(self.order_callback_handler, pattern="^order_"))
+            application.add_handler(CallbackQueryHandler(self.track_callback_handler, pattern="^track_"))
+            application.add_handler(CallbackQueryHandler(self.subscribe_callback_handler, pattern="^sub_"))
             application.add_handler(CallbackQueryHandler(self.button_handler))
             application.add_handler(MessageHandler(filters.LOCATION, self.location_handler))
             application.add_handler(MessageHandler(filters.PHOTO, self.photo_handler))
@@ -1270,11 +1272,11 @@ Contact our support team at +998901234567 or email info@aquapure.uz
             # --- Subscription Management ---
             application.add_handler(CommandHandler("subscribe", self.subscribe_command))
             application.add_handler(CommandHandler("mysubscriptions", self.mysubscriptions_command))
-            application.add_handler(CallbackQueryHandler(self.subscribe_callback_handler, pattern="^sub_"))
+            
 
             # --- Order Tracking ---
             application.add_handler(CommandHandler("track", self.track_command))
-            application.add_handler(CallbackQueryHandler(self.track_callback_handler, pattern="^track_"))
+            
 
             # --- Loyalty & Analytics ---
             application.add_handler(CommandHandler("loyalty", self.loyalty_command))

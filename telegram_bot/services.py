@@ -163,6 +163,22 @@ class NotificationService:
         except Exception as e:
             logger.error(f"Error storing notification: {e}")
 
+    async def get_user_preferences(self, user_id):
+        async with self.db_pool.acquire() as conn:
+            row = await conn.fetchrow("SELECT * FROM user_preferences WHERE user_id = $1", user_id)
+            return dict(row) if row else None
+    async def set_user_preferences(self, user_id, **prefs):
+        if not prefs:
+            return
+        set_clause = ", ".join([f"{k} = ${i+2}" for i, k in enumerate(prefs.keys())])
+        values = list(prefs.values())
+        async with self.db_pool.acquire() as conn:
+            await conn.execute(f"UPDATE user_preferences SET {set_clause} WHERE user_id = $1", user_id, *values)
+            return True
+    async def send_event_notification(self, user_id, event_type, data):
+        # Simulate sending notification
+        return True
+
 class PaymentService:
     """Handle payment processing"""
     
@@ -460,6 +476,46 @@ class DeliveryService:
                     }
                 ] if delivery else [])
             }
+
+    async def assign_delivery_person(self, order_id):
+        async with self.db_pool.acquire() as conn:
+            delivery_person = await conn.fetchrow(
+                "SELECT id FROM users WHERE role = 'delivery' ORDER BY RANDOM() LIMIT 1"
+            )
+            if not delivery_person:
+                return None
+            await conn.execute(
+                "UPDATE deliveries SET delivery_person_id = $1 WHERE order_id = $2",
+                delivery_person['id'], order_id
+            )
+            return delivery_person['id']
+
+    async def update_delivery_status(self, order_id, status, delivery_person_id=None):
+        async with self.db_pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE deliveries SET status = $1 WHERE order_id = $2",
+                status, order_id
+            )
+            if status == 'delivered':
+                await conn.execute(
+                    "UPDATE orders SET status = 'delivered' WHERE id = $1",
+                    order_id
+                )
+            return True
+
+    async def get_deliveries_for_person(self, delivery_person_id, status=None):
+        async with self.db_pool.acquire() as conn:
+            if status:
+                rows = await conn.fetch(
+                    "SELECT * FROM deliveries WHERE delivery_person_id = $1 AND status = $2 ORDER BY scheduled_date",
+                    delivery_person_id, status
+                )
+            else:
+                rows = await conn.fetch(
+                    "SELECT * FROM deliveries WHERE delivery_person_id = $1 ORDER BY scheduled_date",
+                    delivery_person_id
+                )
+            return [dict(row) for row in rows]
 
 class AnalyticsService:
     def __init__(self, db_pool: asyncpg.Pool):
@@ -858,6 +914,32 @@ class SubscriptionService:
             logger.error(f"Error cancelling subscription: {e}")
             return False
 
+    async def pause_subscription(self, sub_id):
+        async with self.db_pool.acquire() as conn:
+            await conn.execute("UPDATE subscriptions SET status = 'paused' WHERE id = $1", sub_id)
+            return True
+    async def resume_subscription(self, sub_id):
+        async with self.db_pool.acquire() as conn:
+            await conn.execute("UPDATE subscriptions SET status = 'active' WHERE id = $1", sub_id)
+            return True
+    async def edit_subscription(self, sub_id, **fields):
+        if not fields:
+            return
+        set_clause = ", ".join([f"{k} = ${i+2}" for i, k in enumerate(fields.keys())])
+        values = list(fields.values())
+        async with self.db_pool.acquire() as conn:
+            await conn.execute(f"UPDATE subscriptions SET {set_clause} WHERE id = $1", sub_id, *values)
+            row = await conn.fetchrow("SELECT * FROM subscriptions WHERE id = $1", sub_id)
+            return dict(row) if row else None
+    async def get_due_renewals(self):
+        async with self.db_pool.acquire() as conn:
+            return [dict(row) for row in await conn.fetch(
+                "SELECT * FROM subscriptions WHERE next_delivery_date <= CURRENT_DATE AND status = 'active'"
+            )]
+    async def notify_renewal(self, user_id, sub_id):
+        # Simulate notification
+        return True
+
 class AddressService:
     def __init__(self, db_pool):
         self.db_pool = db_pool
@@ -954,6 +1036,8 @@ class UserService:
             )
 
     async def update_profile(self, telegram_id, **fields):
+        if not fields:
+            return
         set_clause = ", ".join([f"{k} = ${i+2}" for i, k in enumerate(fields.keys())])
         values = list(fields.values())
         async with self.db_pool.acquire() as conn:
@@ -961,3 +1045,24 @@ class UserService:
                 f"UPDATE users SET {set_clause} WHERE telegram_id = $1",
                 telegram_id, *values
             )
+            row = await conn.fetchrow("SELECT * FROM users WHERE telegram_id = $1", telegram_id)
+            return dict(row) if row else None
+
+    async def start_phone_verification(self, telegram_id, phone):
+        # Simulate sending a code
+        code = "1234"  # In production, generate and send real code
+        # Store code in a cache or DB if needed
+        return code
+
+    async def verify_phone_code(self, telegram_id, code):
+        # Simulate always correct
+        return code == "1234"
+
+    async def start_email_verification(self, telegram_id, email):
+        # Simulate sending a code
+        code = "5678"  # In production, generate and send real code
+        return code
+
+    async def verify_email_code(self, telegram_id, code):
+        # Simulate always correct
+        return code == "5678"

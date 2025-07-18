@@ -181,6 +181,73 @@ class WaterBusinessBot:
             'address_updated': "Address updated!",
             'order_address': "Delivery Address:",
             'change_address': "Change Address",
+            'edit_profile_menu': "What would you like to edit?",
+            'edit_name': "Edit Name",
+            'edit_phone': "Edit Phone",
+            'edit_email': "Edit Email",
+            'edit_language': "Edit Language",
+            'enter_first_name': "Enter your first name:",
+            'enter_last_name': "Enter your last name:",
+            'enter_phone': "Enter your phone number:",
+            'enter_email': "Enter your email:",
+            'phone_verification_code': "Enter the code sent to your phone:",
+            'email_verification_code': "Enter the code sent to your email:",
+            'profile_updated': "Profile updated!",
+            'phone_verified': "Phone verified!",
+            'email_verified': "Email verified!",
+            'invalid_code': "Invalid code. Please try again.",
+            'send_location': "Send your location pin to autofill address.",
+            'address_invalid': "Address must have at least a street and city. Please try again.",
+            'out_of_stock': "Sorry, one or more products are out of stock. Please edit your cart.",
+            'card_payment_confirm': "Please confirm your card payment (simulated). Type 'paid' to continue:",
+            'order_cancelled_by_user': "Order cancelled.",
+            'orders_list': "Your Orders:",
+            'order_details': "Order Details:",
+            'cancel_order': "Cancel Order",
+            'order_already_delivered': "Order already delivered and cannot be cancelled.",
+            'order_cancel_success': "Order cancelled successfully.",
+            'my_deliveries': "My Deliveries:",
+            'update_status': "Update Status",
+            'mark_delivered': "Mark as Delivered",
+            'mark_in_transit': "Mark as In Transit",
+            'mark_failed': "Mark as Failed",
+            'status_updated': "Delivery status updated!",
+            'no_deliveries': "No deliveries assigned.",
+            'subscription_menu': "Your Subscription:",
+            'pause_subscription': "Pause Subscription",
+            'resume_subscription': "Resume Subscription",
+            'edit_subscription': "Edit Subscription",
+            'subscription_paused': "Subscription paused!",
+            'subscription_resumed': "Subscription resumed!",
+            'subscription_edited': "Subscription updated!",
+            'notify_renewal': "Your subscription will renew soon.",
+            'notification_prefs': "Notification Preferences:",
+            'sms_notifications': "SMS Notifications",
+            'email_notifications': "Email Notifications",
+            'telegram_notifications': "Telegram Notifications",
+            'marketing_communications': "Marketing Communications",
+            'prefs_updated': "Preferences updated!",
+            'my_deliveries': "My Deliveries:",
+            'update_status': "Update Status",
+            'mark_delivered': "Mark as Delivered",
+            'mark_in_transit': "Mark as In Transit",
+            'mark_failed': "Mark as Failed",
+            'status_updated': "Delivery status updated!",
+            'no_deliveries': "No deliveries assigned.",
+            'subscription_menu': "Your Subscription:",
+            'pause_subscription': "Pause Subscription",
+            'resume_subscription': "Resume Subscription",
+            'edit_subscription': "Edit Subscription",
+            'subscription_paused': "Subscription paused!",
+            'subscription_resumed': "Subscription resumed!",
+            'subscription_edited': "Subscription updated!",
+            'notify_renewal': "Your subscription will renew soon.",
+            'notification_prefs': "Notification Preferences:",
+            'sms_notifications': "SMS Notifications",
+            'email_notifications': "Email Notifications",
+            'telegram_notifications': "Telegram Notifications",
+            'marketing_communications': "Marketing Communications",
+            'prefs_updated': "Preferences updated!",
         })
         self.translations['uz'].update({
             'no_products_subscription': "Obuna uchun mahsulotlar mavjud emas.",
@@ -262,6 +329,73 @@ class WaterBusinessBot:
             'address_updated': "Manzil yangilandi!",
             'order_address': "Yetkazib berish manzili:",
             'change_address': "Manzilni o'zgartirish",
+            'edit_profile_menu': "Nimani tahrirlashni xohlaysiz?",
+            'edit_name': "Ismni tahrirlash",
+            'edit_phone': "Telefonni tahrirlash",
+            'edit_email': "Emailni tahrirlash",
+            'edit_language': "Tilni tahrirlash",
+            'enter_first_name': "Ismingizni kiriting:",
+            'enter_last_name': "Familiyangizni kiriting:",
+            'enter_phone': "Telefon raqamingizni kiriting:",
+            'enter_email': "Email manzilingizni kiriting:",
+            'phone_verification_code': "Telefoningizga yuborilgan kodni kiriting:",
+            'email_verification_code': "Emailga yuborilgan kodni kiriting:",
+            'profile_updated': "Profil yangilandi!",
+            'phone_verified': "Telefon tasdiqlandi!",
+            'email_verified': "Email tasdiqlandi!",
+            'invalid_code': "Kod noto'g'ri. Qayta urinib ko'ring.",
+            'send_location': "Manzilingizni avtomatik to'ldirish uchun lokatsiyani yuboring.",
+            'address_invalid': "Manzilda kamida ko'cha va shahar bo'lishi kerak. Qayta urinib ko'ring.",
+            'out_of_stock': "Kechirasiz, ba'zi mahsulotlar omborda yo'q. Savatingizni tahrirlang.",
+            'card_payment_confirm': "Karta to'lovini tasdiqlang (simulyatsiya). Davom etish uchun 'paid' deb yozing:",
+            'order_cancelled_by_user': "Buyurtma bekor qilindi.",
+            'orders_list': "Buyurtmalaringiz:",
+            'order_details': "Buyurtma tafsilotlari:",
+            'cancel_order': "Buyurtmani bekor qilish",
+            'order_already_delivered': "Buyurtma allaqachon yetkazilgan va bekor qilib bo'lmaydi.",
+            'order_cancel_success': "Buyurtma muvaffaqiyatli bekor qilindi.",
+            'my_deliveries': "Mening yetkazmalarim:",
+            'update_status': "Holatni yangilash",
+            'mark_delivered': "Yetkazildi deb belgilash",
+            'mark_in_transit': "Yo'lda deb belgilash",
+            'mark_failed': "Muvaffaqiyatsiz deb belgilash",
+            'status_updated': "Yetkazma holati yangilandi!",
+            'no_deliveries': "Sizga birorta yetkazma biriktirilmagan.",
+            'subscription_menu': "Sizning obunangiz:",
+            'pause_subscription': "Obunani to'xtatib turish",
+            'resume_subscription': "Obunani davom ettirish",
+            'edit_subscription': "Obunani tahrirlash",
+            'subscription_paused': "Obuna to'xtatildi!",
+            'subscription_resumed': "Obuna davom ettirildi!",
+            'subscription_edited': "Obuna yangilandi!",
+            'notify_renewal': "Obunangiz tez orada yangilanadi.",
+            'notification_prefs': "Bildirishnoma sozlamalari:",
+            'sms_notifications': "SMS bildirishnomalar",
+            'email_notifications': "Email bildirishnomalar",
+            'telegram_notifications': "Telegram bildirishnomalar",
+            'marketing_communications': "Marketing xabarlari",
+            'prefs_updated': "Sozlamalar yangilandi!",
+            'my_deliveries': "Mening yetkazmalarim:",
+            'update_status': "Holatni yangilash",
+            'mark_delivered': "Yetkazildi deb belgilash",
+            'mark_in_transit': "Yo'lda deb belgilash",
+            'mark_failed': "Muvaffaqiyatsiz deb belgilash",
+            'status_updated': "Yetkazma holati yangilandi!",
+            'no_deliveries': "Sizga birorta yetkazma biriktirilmagan.",
+            'subscription_menu': "Sizning obunangiz:",
+            'pause_subscription': "Obunani to'xtatib turish",
+            'resume_subscription': "Obunani davom ettirish",
+            'edit_subscription': "Obunani tahrirlash",
+            'subscription_paused': "Obuna to'xtatildi!",
+            'subscription_resumed': "Obuna davom ettirildi!",
+            'subscription_edited': "Obuna yangilandi!",
+            'notify_renewal': "Obunangiz tez orada yangilanadi.",
+            'notification_prefs': "Bildirishnoma sozlamalari:",
+            'sms_notifications': "SMS bildirishnomalar",
+            'email_notifications': "Email bildirishnomalar",
+            'telegram_notifications': "Telegram bildirishnomalar",
+            'marketing_communications': "Marketing xabarlari",
+            'prefs_updated': "Sozlamalar yangilandi!",
         })
         self.translations['ru'].update({
             'no_products_subscription': "Нет доступных товаров для подписки.",
@@ -343,7 +477,75 @@ class WaterBusinessBot:
             'address_updated': "Адрес обновлен!",
             'order_address': "Адрес доставки:",
             'change_address': "Изменить адрес",
+            'edit_profile_menu': "Что вы хотите изменить?",
+            'edit_name': "Изменить имя",
+            'edit_phone': "Изменить телефон",
+            'edit_email': "Изменить email",
+            'edit_language': "Изменить язык",
+            'enter_first_name': "Введите ваше имя:",
+            'enter_last_name': "Введите вашу фамилию:",
+            'enter_phone': "Введите ваш номер телефона:",
+            'enter_email': "Введите ваш email:",
+            'phone_verification_code': "Введите код, отправленный на ваш телефон:",
+            'email_verification_code': "Введите код, отправленный на ваш email:",
+            'profile_updated': "Профиль обновлен!",
+            'phone_verified': "Телефон подтвержден!",
+            'email_verified': "Email подтвержден!",
+            'invalid_code': "Неверный код. Пожалуйста, попробуйте еще раз.",
+            'send_location': "Отправьте свою геолокацию для автозаполнения адреса.",
+            'address_invalid': "В адресе должны быть как минимум улица и город. Попробуйте еще раз.",
+            'out_of_stock': "Извините, некоторые товары закончились на складе. Измените корзину.",
+            'card_payment_confirm': "Пожалуйста, подтвердите оплату картой (симуляция). Введите 'paid' для продолжения:",
+            'order_cancelled_by_user': "Заказ отменен.",
+            'orders_list': "Ваши заказы:",
+            'order_details': "Детали заказа:",
+            'cancel_order': "Отменить заказ",
+            'order_already_delivered': "Заказ уже доставлен и не может быть отменен.",
+            'order_cancel_success': "Заказ успешно отменен.",
+            'my_deliveries': "Мои доставки:",
+            'update_status': "Обновить статус",
+            'mark_delivered': "Отметить как доставлено",
+            'mark_in_transit': "Отметить как в пути",
+            'mark_failed': "Отметить как неудачно",
+            'status_updated': "Статус доставки обновлен!",
+            'no_deliveries': "Нет назначенных доставок.",
+            'subscription_menu': "Ваша подписка:",
+            'pause_subscription': "Приостановить подписку",
+            'resume_subscription': "Возобновить подписку",
+            'edit_subscription': "Редактировать подписку",
+            'subscription_paused': "Подписка приостановлена!",
+            'subscription_resumed': "Подписка возобновлена!",
+            'subscription_edited': "Подписка обновлена!",
+            'notify_renewal': "Ваша подписка скоро будет обновлена.",
+            'notification_prefs': "Настройки уведомлений:",
+            'sms_notifications': "SMS уведомления",
+            'email_notifications': "Email уведомления",
+            'telegram_notifications': "Telegram уведомления",
+            'marketing_communications': "Маркетинговые сообщения",
+            'prefs_updated': "Настройки обновлены!",
+            'my_deliveries': "Мои доставки:",
+            'update_status': "Обновить статус",
+            'mark_delivered': "Отметить как доставлено",
+            'mark_in_transit': "Отметить как в пути",
+            'mark_failed': "Отметить как неудачно",
+            'status_updated': "Статус доставки обновлен!",
+            'no_deliveries': "Нет назначенных доставок.",
+            'subscription_menu': "Ваша подписка:",
+            'pause_subscription': "Приостановить подписку",
+            'resume_subscription': "Возобновить подписку",
+            'edit_subscription': "Редактировать подписку",
+            'subscription_paused': "Подписка приостановлена!",
+            'subscription_resumed': "Подписка возобновлена!",
+            'subscription_edited': "Подписка обновлена!",
+            'notify_renewal': "Ваша подписка скоро будет обновлена.",
+            'notification_prefs': "Настройки уведомлений:",
+            'sms_notifications': "SMS уведомления",
+            'email_notifications': "Email уведомления",
+            'telegram_notifications': "Telegram уведомления",
+            'marketing_communications': "Маркетинговые сообщения",
+            'prefs_updated': "Настройки обновлены!",
         })
+
 
     async def init_connections(self):
         """Initialize database and redis connections"""
@@ -1117,6 +1319,18 @@ Contact our support team at +998901234567 or email info@aquapure.uz
                 address_id = state.get('selected_address_id')
                 payment_method = state['payment_method']
                 total = float(sum(item['price']*item['quantity'] for item in cart)) + state.get('delivery_fee', 0)
+                # Stock check
+                for item in cart:
+                    product = await self.product_service.get_product_by_id(item['id'])
+                    if product['stock_quantity'] < item['quantity']:
+                        await query.edit_message_text(self.get_text('out_of_stock', lang))
+                        return
+                # Card payment confirmation
+                if payment_method == 'card' and not state.get('card_paid'):
+                    state['card_paid'] = False
+                    self.user_states[user_id] = state
+                    await query.edit_message_text(self.get_text('card_payment_confirm', lang))
+                    return
                 try:
                     order = await self.order_service.create_order(user['id'], cart, address_id, payment_method)
                     # Schedule delivery with correct params
@@ -1143,6 +1357,15 @@ Contact our support team at +998901234567 or email info@aquapure.uz
             elif query.data == "order_cancel":
                 del self.user_states[user_id]
                 await query.edit_message_text(self.get_text('order_cancelled', lang))
+        # Card payment confirmation step
+        elif state['state'] == 'CARD_PAYMENT_CONFIRM':
+            if update.message.text.strip().lower() == 'paid':
+                state['card_paid'] = True
+                state['state'] = ORDER_STATE['CONFIRM']
+                self.user_states[user_id] = state
+                await self.order_callback_handler(update, context)
+            else:
+                await update.message.reply_text(self.get_text('card_payment_confirm', lang))
 
     async def location_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle location messages"""
@@ -1388,6 +1611,21 @@ Contact our support team at +998901234567 or email info@aquapure.uz
             application.add_handler(MessageHandler(filters.CONTACT, self.contact_handler))
             application.add_handler(CommandHandler("order", self.order_command))
             application.add_handler(CommandHandler("account", self.account_command))
+
+            # Register the /edit_profile command, callback, and message handler in run_bot
+            application.add_handler(CommandHandler("edit_profile", self.edit_profile_command))
+            application.add_handler(CallbackQueryHandler(self.edit_profile_callback_handler, pattern="^(edit_profile|edit_name|edit_phone|edit_email|edit_language)$"))
+            application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), self.edit_profile_message_handler))
+
+            # Register new handlers
+            application.add_handler(CommandHandler("orders", self.orders_command))
+            application.add_handler(CallbackQueryHandler(self.order_details_callback_handler, pattern="^(order_details_|cancel_order_).*"))
+            application.add_handler(CommandHandler("deliver", self.deliver_command))
+            application.add_handler(CallbackQueryHandler(self.deliver_callback_handler, pattern="^deliver_.*"))
+            application.add_handler(CommandHandler("subscription", self.subscription_menu))
+            application.add_handler(CallbackQueryHandler(self.subscription_callback_handler, pattern="^(pause_sub_|resume_sub_|edit_sub_).*$"))
+            application.add_handler(CommandHandler("notifications", self.notification_prefs_menu))
+            application.add_handler(CallbackQueryHandler(self.notification_prefs_callback_handler, pattern="^(toggle_sms|toggle_email|toggle_telegram|toggle_marketing)$"))
             
             # Error handler
             application.add_error_handler(self.error_handler)
@@ -1750,7 +1988,18 @@ Contact our support team at +998901234567 or email info@aquapure.uz
         user = await self.user_service.get_or_create_user(update.effective_user)
         lang = user.get('language_code', 'en')
         state = self.user_states.get(user['telegram_id'], {})
-        # Add address flow
+        # Location pin support
+        if update.message.location:
+            # Simulate reverse geocoding
+            state['address_line1'] = f"Street near {update.message.location.latitude:.4f},{update.message.location.longitude:.4f}"
+            state['city'] = "Tashkent"  # Simulate city
+            state['state'] = None
+            state['country'] = 'UZ'
+            state['state'] = 'add_address_label'
+            self.user_states[user['telegram_id']] = state
+            await update.message.reply_text(self.get_text('enter_label', lang) + f"\n{self.get_text('address_line1', lang)}: {state['address_line1']}\n{self.get_text('city', lang)}: {state['city']}")
+            return
+        # Add address flow (with validation)
         if state.get('state') == 'add_address_label':
             state['label'] = update.message.text
             state['state'] = 'add_address_line1'
@@ -1758,17 +2007,17 @@ Contact our support team at +998901234567 or email info@aquapure.uz
             await update.message.reply_text(self.get_text('enter_address_line1', lang))
         elif state.get('state') == 'add_address_line1':
             state['address_line1'] = update.message.text
+            if not state['address_line1']:
+                await update.message.reply_text(self.get_text('address_invalid', lang))
+                return
             state['state'] = 'add_address_line2'
             self.user_states[user['telegram_id']] = state
             await update.message.reply_text(self.get_text('enter_address_line2', lang))
-        elif state.get('state') == 'add_address_line2':
-            val = update.message.text
-            state['address_line2'] = None if val.strip() == '-' else val
-            state['state'] = 'add_address_city'
-            self.user_states[user['telegram_id']] = state
-            await update.message.reply_text(self.get_text('enter_city', lang))
         elif state.get('state') == 'add_address_city':
             state['city'] = update.message.text
+            if not state['city']:
+                await update.message.reply_text(self.get_text('address_invalid', lang))
+                return
             state['state'] = 'add_address_state'
             self.user_states[user['telegram_id']] = state
             await update.message.reply_text(self.get_text('enter_state', lang))
@@ -1871,6 +2120,249 @@ Contact our support team at +998901234567 or email info@aquapure.uz
     # In order confirmation, show full address summary and allow user to change address before confirming
     # (Assume in order_callback_handler, before showing order summary)
     # Fetch address by state['selected_address_id'] and show summary in confirmation message
+
+    async def edit_profile_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        user = await self.user_service.get_or_create_user(update.effective_user)
+        lang = user.get('language_code', 'en')
+        keyboard = [
+            [InlineKeyboardButton(self.get_text('edit_name', lang), callback_data='edit_name')],
+            [InlineKeyboardButton(self.get_text('edit_phone', lang), callback_data='edit_phone')],
+            [InlineKeyboardButton(self.get_text('edit_email', lang), callback_data='edit_email')],
+            [InlineKeyboardButton(self.get_text('edit_language', lang), callback_data='edit_language')],
+            [InlineKeyboardButton(self.get_text('back_main', lang), callback_data='back_main')]
+        ]
+        text = self.get_text('edit_profile_menu', lang)
+        if update.message:
+            await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+        elif update.callback_query:
+            await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+
+    async def edit_profile_callback_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        query = update.callback_query
+        user = await self.user_service.get_or_create_user(query.from_user)
+        lang = user.get('language_code', 'en')
+        data = query.data
+        if data == 'edit_profile':
+            await self.edit_profile_command(update, context)
+        elif data == 'edit_name':
+            self.user_states[user['telegram_id']] = {'state': 'edit_first_name'}
+            await query.edit_message_text(self.get_text('enter_first_name', lang))
+        elif data == 'edit_phone':
+            self.user_states[user['telegram_id']] = {'state': 'edit_phone'}
+            await query.edit_message_text(self.get_text('enter_phone', lang))
+        elif data == 'edit_email':
+            self.user_states[user['telegram_id']] = {'state': 'edit_email'}
+            await query.edit_message_text(self.get_text('enter_email', lang))
+        elif data == 'edit_language':
+            await self.show_language_menu(query, lang)
+
+    async def edit_profile_message_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        user = await self.user_service.get_or_create_user(update.effective_user)
+        lang = user.get('language_code', 'en')
+        state = self.user_states.get(user['telegram_id'], {})
+        if state.get('state') == 'edit_first_name':
+            state['first_name'] = update.message.text
+            state['state'] = 'edit_last_name'
+            self.user_states[user['telegram_id']] = state
+            await update.message.reply_text(self.get_text('enter_last_name', lang))
+        elif state.get('state') == 'edit_last_name':
+            state['last_name'] = update.message.text
+            await self.user_service.update_profile(user['telegram_id'], first_name=state['first_name'], last_name=state['last_name'])
+            await update.message.reply_text(self.get_text('profile_updated', lang))
+            del self.user_states[user['telegram_id']]
+        elif state.get('state') == 'edit_phone':
+            phone = update.message.text
+            code = await self.user_service.start_phone_verification(user['telegram_id'], phone)
+            state['phone'] = phone
+            state['state'] = 'verify_phone_code'
+            state['verification_code'] = code
+            self.user_states[user['telegram_id']] = state
+            await update.message.reply_text(self.get_text('phone_verification_code', lang))
+        elif state.get('state') == 'verify_phone_code':
+            code = update.message.text
+            if await self.user_service.verify_phone_code(user['telegram_id'], code):
+                await self.user_service.update_profile(user['telegram_id'], phone=state['phone'])
+                await update.message.reply_text(self.get_text('phone_verified', lang))
+                del self.user_states[user['telegram_id']]
+            else:
+                await update.message.reply_text(self.get_text('invalid_code', lang))
+        elif state.get('state') == 'edit_email':
+            email = update.message.text
+            code = await self.user_service.start_email_verification(user['telegram_id'], email)
+            state['email'] = email
+            state['state'] = 'verify_email_code'
+            state['verification_code'] = code
+            self.user_states[user['telegram_id']] = state
+            await update.message.reply_text(self.get_text('email_verification_code', lang))
+        elif state.get('state') == 'verify_email_code':
+            code = update.message.text
+            if await self.user_service.verify_email_code(user['telegram_id'], code):
+                await self.user_service.update_profile(user['telegram_id'], email=state['email'])
+                await update.message.reply_text(self.get_text('email_verified', lang))
+                del self.user_states[user['telegram_id']]
+            else:
+                await update.message.reply_text(self.get_text('invalid_code', lang))
+
+    # Order flow enhancements
+    async def orders_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        user = await self.user_service.get_or_create_user(update.effective_user)
+        lang = user.get('language_code', 'en')
+        orders = await self.order_service.get_user_orders(user['id'], limit=10)
+        if not orders:
+            await update.message.reply_text(self.get_text('no_recent_orders', lang))
+            return
+        keyboard = [
+            [InlineKeyboardButton(f"{self.get_text('order_number', lang)} {o['order_number']} ({o['status']})", callback_data=f"order_details_{o['id']}")]
+            for o in orders
+        ]
+        await update.message.reply_text(self.get_text('orders_list', lang), reply_markup=InlineKeyboardMarkup(keyboard))
+
+    async def order_details_callback_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        query = update.callback_query
+        user = await self.user_service.get_or_create_user(query.from_user)
+        lang = user.get('language_code', 'en')
+        if query.data.startswith('order_details_'):
+            order_id = query.data.replace('order_details_', '')
+            order = await self.order_service.get_order_details(order_id)
+            address = await self.address_service.get_address_by_id(order['delivery_address_id']) if order.get('delivery_address_id') else None
+            address_str = f"{address['label'] or ''}, {address['address_line1']}, {address['city']}" if address else '-'
+            items = order.get('items', [])
+            items_str = '\n'.join([f"{item['product_name']} x{item['quantity']} = {item['total_price']} UZS" for item in items])
+            text = (
+                f"{self.get_text('order_details', lang)}\n"
+                f"{self.get_text('order_number', lang)}: {order['order_number']}\n"
+                f"{self.get_text('status', lang)}: {order['status']}\n"
+                f"{self.get_text('order_address', lang)}: {address_str}\n"
+                f"{self.get_text('events', lang)}: {order['created_at']}\n"
+                f"{self.get_text('cart', lang)}:\n{items_str}\n"
+            )
+            keyboard = []
+            if order['status'] not in ['delivered', 'cancelled']:
+                keyboard.append([InlineKeyboardButton(self.get_text('cancel_order', lang), callback_data=f"cancel_order_{order_id}")])
+            keyboard.append([InlineKeyboardButton(self.get_text('back_main', lang), callback_data='back_main')])
+            await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+        elif query.data.startswith('cancel_order_'):
+            order_id = query.data.replace('cancel_order_', '')
+            order = await self.order_service.get_order_details(order_id)
+            if order['status'] == 'delivered':
+                await query.answer(self.get_text('order_already_delivered', lang))
+                return
+            await self.order_service.update_order_status(order_id, 'cancelled', user['id'])
+            await query.edit_message_text(self.get_text('order_cancel_success', lang))
+
+
+    # Step 4: Delivery Person Flow
+    async def deliver_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        user = await self.user_service.get_or_create_user(update.effective_user)
+        lang = user.get('language_code', 'en')
+        deliveries = await self.delivery_service.get_deliveries_for_person(user['id'], status='in_transit')
+        if not deliveries:
+            await update.message.reply_text(self.get_text('no_deliveries', lang))
+            return
+        keyboard = [
+            [InlineKeyboardButton(f"{self.get_text('order_number', lang)} {d['order_id']} ({d['status']})", callback_data=f"deliver_update_{d['order_id']}")]
+            for d in deliveries
+        ]
+        await update.message.reply_text(self.get_text('my_deliveries', lang), reply_markup=InlineKeyboardMarkup(keyboard))
+
+    async def deliver_callback_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        query = update.callback_query
+        user = await self.user_service.get_or_create_user(query.from_user)
+        lang = user.get('language_code', 'en')
+        if query.data.startswith('deliver_update_'):
+            order_id = query.data.replace('deliver_update_', '')
+            keyboard = [
+                [InlineKeyboardButton(self.get_text('mark_delivered', lang), callback_data=f"deliver_status_{order_id}_delivered")],
+                [InlineKeyboardButton(self.get_text('mark_in_transit', lang), callback_data=f"deliver_status_{order_id}_in_transit")],
+                [InlineKeyboardButton(self.get_text('mark_failed', lang), callback_data=f"deliver_status_{order_id}_failed")],
+            ]
+            await query.edit_message_text(self.get_text('update_status', lang), reply_markup=InlineKeyboardMarkup(keyboard))
+        elif query.data.startswith('deliver_status_'):
+            parts = query.data.split('_')
+            order_id = parts[2]
+            status = parts[3]
+            await self.delivery_service.update_delivery_status(order_id, status, delivery_person_id=user['id'])
+            await query.edit_message_text(self.get_text('status_updated', lang))
+
+    # Step 5: Subscriptions
+    async def subscription_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        user = await self.user_service.get_or_create_user(update.effective_user)
+        lang = user.get('language_code', 'en')
+        subs = await self.subscription_service.get_user_subscriptions(user['id'])
+        if not subs:
+            await update.message.reply_text(self.get_text('no_active_subscriptions', lang))
+            return
+        sub = subs[0]  # For simplicity, show first
+        keyboard = [
+            [InlineKeyboardButton(self.get_text('pause_subscription', lang), callback_data=f"pause_sub_{sub['id']}")],
+            [InlineKeyboardButton(self.get_text('resume_subscription', lang), callback_data=f"resume_sub_{sub['id']}")],
+            [InlineKeyboardButton(self.get_text('edit_subscription', lang), callback_data=f"edit_sub_{sub['id']}")],
+            [InlineKeyboardButton(self.get_text('back_main', lang), callback_data='back_main')]
+        ]
+        text = self.get_text('subscription_menu', lang) + f"\n{self.get_text('order_number', lang)}: {sub['id']}\nStatus: {sub['status']}"
+        await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+
+    async def subscription_callback_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        query = update.callback_query
+        user = await self.user_service.get_or_create_user(query.from_user)
+        lang = user.get('language_code', 'en')
+        if query.data.startswith('pause_sub_'):
+            sub_id = query.data.replace('pause_sub_', '')
+            await self.subscription_service.pause_subscription(sub_id)
+            await query.edit_message_text(self.get_text('subscription_paused', lang))
+        elif query.data.startswith('resume_sub_'):
+            sub_id = query.data.replace('resume_sub_', '')
+            await self.subscription_service.resume_subscription(sub_id)
+            await query.edit_message_text(self.get_text('subscription_resumed', lang))
+        elif query.data.startswith('edit_sub_'):
+            sub_id = query.data.replace('edit_sub_', '')
+            # For simplicity, just simulate edit
+            await self.subscription_service.edit_subscription(sub_id, frequency_days=7)
+            await query.edit_message_text(self.get_text('subscription_edited', lang))
+
+    # Simulate renewal notification in process_subscription_renewals
+    async def process_subscription_renewals(self):
+        try:
+            due_renewals = await self.subscription_service.get_due_renewals()
+            for sub in due_renewals:
+                await self.subscription_service.notify_renewal(sub['user_id'], sub['id'])
+        except Exception as e:
+            logger.error(f"Error processing subscription renewals: {e}")
+
+    # Step 6: Notification Preferences
+    async def notification_prefs_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        user = await self.user_service.get_or_create_user(update.effective_user)
+        lang = user.get('language_code', 'en')
+        prefs = await self.notification_service.get_user_preferences(user['id'])
+        keyboard = [
+            [InlineKeyboardButton(f"{self.get_text('sms_notifications', lang)}: {'✅' if prefs and prefs.get('notification_sms') else '❌'}", callback_data='toggle_sms')],
+            [InlineKeyboardButton(f"{self.get_text('email_notifications', lang)}: {'✅' if prefs and prefs.get('notification_email') else '❌'}", callback_data='toggle_email')],
+            [InlineKeyboardButton(f"{self.get_text('telegram_notifications', lang)}: {'✅' if prefs and prefs.get('notification_telegram') else '❌'}", callback_data='toggle_telegram')],
+            [InlineKeyboardButton(f"{self.get_text('marketing_communications', lang)}: {'✅' if prefs and prefs.get('marketing_communications') else '❌'}", callback_data='toggle_marketing')],
+            [InlineKeyboardButton(self.get_text('back_main', lang), callback_data='back_main')]
+        ]
+        await update.message.reply_text(self.get_text('notification_prefs', lang), reply_markup=InlineKeyboardMarkup(keyboard))
+
+    async def notification_prefs_callback_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        query = update.callback_query
+        user = await self.user_service.get_or_create_user(query.from_user)
+        lang = user.get('language_code', 'en')
+        prefs = await self.notification_service.get_user_preferences(user['id'])
+        data = query.data
+        updates = {}
+        if data == 'toggle_sms':
+            updates['notification_sms'] = not prefs.get('notification_sms', True)
+        elif data == 'toggle_email':
+            updates['notification_email'] = not prefs.get('notification_email', True)
+        elif data == 'toggle_telegram':
+            updates['notification_telegram'] = not prefs.get('notification_telegram', True)
+        elif data == 'toggle_marketing':
+            updates['marketing_communications'] = not prefs.get('marketing_communications', True)
+        if updates:
+            await self.notification_service.set_user_preferences(user['id'], **updates)
+        await self.notification_prefs_menu(update, context)
+        await query.answer(self.get_text('prefs_updated', lang))
+
 
 def main():
     """Main function"""

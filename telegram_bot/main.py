@@ -719,8 +719,7 @@ class WaterBusinessBot:
         return self.translations.get(lang, {}).get(key, self.translations['en'].get(key, key))
 
     # --- Main Menu ---
-    async def get_main_keyboard(self, user_id: int, lang: str = 'en') -> InlineKeyboardMarkup:
-        user = await self.user_service.get_or_create_user_by_telegram_id(user_id)
+    async def get_main_keyboard(self, user: dict, lang: str = 'en') -> InlineKeyboardMarkup:
         is_admin = user.get('role') == 'admin' if user else False
         is_delivery = user.get('role') == 'delivery' if user else False
         keyboard = [
@@ -743,9 +742,8 @@ class WaterBusinessBot:
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_data = await self.user_service.get_or_create_user(update.effective_user)
         lang = user_data.get('language_code', 'en')
-        user_id = user_data.get('telegram_id', update.effective_user.id)
         welcome_text = self.get_text('welcome', lang)
-        keyboard = await self.get_main_keyboard(user_id, lang)
+        keyboard = await self.get_main_keyboard(user_data, lang)
         # Use reply_text only if update.message exists
         if update.message:
             await update.message.reply_text(
@@ -836,7 +834,7 @@ Contact our support team at +998901234567 or email info@aquapure.uz
         elif data == 'my_deliveries':
             await self.deliver_command(update, context)
         elif data == 'back_main':
-            await self.show_main_menu(query, lang)
+            await self.show_main_menu(query, user, lang)
         else:
             await query.answer()
             await query.edit_message_text("Unknown action.")
@@ -1222,21 +1220,19 @@ Contact our support team at +998901234567 or email info@aquapure.uz
             logger.error(f"Error showing VIP menu: {e}")
             await query.edit_message_text("Sorry, there was an error loading VIP information.")
 
-    async def show_main_menu(self, update_or_query, lang: str = 'en'):
+    async def show_main_menu(self, update_or_query, user:dict, lang: str = 'en'):
         # Robustly handle both Update and CallbackQuery
         if isinstance(update_or_query, Update):
             if update_or_query.message:
-                user_id = update_or_query.effective_user.id
                 send = update_or_query.message.reply_text
             elif update_or_query.callback_query:
-                user_id = update_or_query.callback_query.from_user.id
                 send = update_or_query.callback_query.edit_message_text
             else:
                 return
         else:
-            user_id = update_or_query.from_user.id
             send = update_or_query.edit_message_text
-        keyboard = await self.get_main_keyboard(user_id, lang)
+        
+        keyboard = await self.get_main_keyboard(user, lang)
         await send(
             self.get_text('main_menu', lang),
             reply_markup=keyboard

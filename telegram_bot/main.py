@@ -607,7 +607,7 @@ class WaterBusinessBot:
     async def is_delivery_person(self, user):
         return user.get('role') == 'delivery'
     async def is_admin(self, user):
-        return user.get('is_admin', False)
+        return user.get('role') == 'admin'
 
     # --- Rate limiting wrapper ---
     async def check_rate_limit(self, user_id, action, limit=10):
@@ -720,8 +720,8 @@ class WaterBusinessBot:
 
     # --- Main Menu ---
     async def get_main_keyboard(self, user_id: int, lang: str = 'en') -> InlineKeyboardMarkup:
-        is_admin = await self.admin_service.is_admin(user_id)
         user = await self.user_service.get_or_create_user_by_telegram_id(user_id)
+        is_admin = user.get('role') == 'admin' if user else False
         is_delivery = user.get('role') == 'delivery' if user else False
         keyboard = [
             [InlineKeyboardButton(f"🛒 {self.get_text('order_menu', lang)}", callback_data='order')],
@@ -1972,35 +1972,23 @@ Contact our support team at +998901234567 or email info@aquapure.uz
     async def admin_orders_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user = await self.user_service.get_or_create_user(update.effective_user)
         lang = user.get('language_code', 'en')
-        if not await self.admin_service.is_admin(user['telegram_id']):
-            if update.message:
-                await update.message.reply_text(self.get_text('not_admin', lang))
-            elif update.callback_query:
-                await update.callback_query.edit_message_text(self.get_text('not_admin', lang))
+        if not await self.is_admin(user):
+            await update.message.reply_text(self.get_text('not_admin', lang))
             return
         orders = await self.admin_service.get_pending_orders()
         if not orders:
-            if update.message:
-                await update.message.reply_text(self.get_text('no_pending_orders', lang))
-            elif update.callback_query:
-                await update.callback_query.edit_message_text(self.get_text('no_pending_orders', lang))
+            await update.message.reply_text(self.get_text('no_pending_orders', lang))
             return
         text = "\n".join([
             f"Order {o['order_number']} by {o['username']} ({o['phone']}) - {o['status']}" for o in orders
         ])
-        if update.message:
-            await update.message.reply_text(self.get_text('pending_orders', lang) + "\n" + text)
-        elif update.callback_query:
-            await update.callback_query.edit_message_text(self.get_text('pending_orders', lang) + "\n" + text)
+        await update.message.reply_text(self.get_text('pending_orders', lang) + "\n" + text)
 
     async def admin_stats_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user = await self.user_service.get_or_create_user(update.effective_user)
         lang = user.get('language_code', 'en')
-        if not await self.admin_service.is_admin(user['telegram_id']):
-            if update.message:
-                await update.message.reply_text(self.get_text('not_admin', lang))
-            elif update.callback_query:
-                await update.callback_query.edit_message_text(self.get_text('not_admin', lang))
+        if not await self.is_admin(user):
+            await update.message.reply_text(self.get_text('not_admin', lang))
             return
         stats = await self.admin_service.get_system_stats()
         text = (
@@ -2009,10 +1997,22 @@ Contact our support team at +998901234567 or email info@aquapure.uz
             f"⏳ Pending Orders: {stats.get('pending_orders', 0)}\n"
             f"💰 Today's Revenue: {stats.get('today_revenue', 0)} UZS"
         )
-        if update.message:
-            await update.message.reply_text(text)
-        elif update.callback_query:
-            await update.callback_query.edit_message_text(text)
+        await update.message.reply_text(text)
+
+    async def optimize_route_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        user = await self.user_service.get_or_create_user(update.effective_user)
+        lang = user.get('language_code', 'en')
+        if not await self.is_admin(user):
+            await update.message.reply_text(self.get_text('not_admin', lang))
+            return
+        deliveries = await self.delivery_service.get_deliveries_for_person(user['id'], status='in_transit')
+        order_ids = [d['order_id'] for d in deliveries]
+        if not order_ids:
+            await update.message.reply_text(self.get_text('no_deliveries', lang))
+            return
+        route = await self.delivery_service.optimize_route(user['id'], order_ids)
+        text = f"Optimized Route: {route.orders}\nEstimated Duration: {route.estimated_duration} min"
+        await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(self.get_text('back_main', lang), callback_data='back_main')]]))
 
     async def account_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user = await self.user_service.get_or_create_user(update.effective_user)
@@ -2485,28 +2485,17 @@ Contact our support team at +998901234567 or email info@aquapure.uz
     async def optimize_route_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user = await self.user_service.get_or_create_user(update.effective_user)
         lang = user.get('language_code', 'en')
-        is_admin = await self.is_admin(user)
-        is_delivery = user.get('role') == 'delivery'
-        if not (is_admin or is_delivery):
-            if update.message:
-                await update.message.reply_text(self.get_text('not_admin', lang))
-            elif update.callback_query:
-                await update.callback_query.edit_message_text(self.get_text('not_admin', lang))
+        if not await self.is_admin(user):
+            await update.message.reply_text(self.get_text('not_admin', lang))
             return
         deliveries = await self.delivery_service.get_deliveries_for_person(user['id'], status='in_transit')
         order_ids = [d['order_id'] for d in deliveries]
         if not order_ids:
-            if update.message:
-                await update.message.reply_text(self.get_text('no_deliveries', lang))
-            elif update.callback_query:
-                await update.callback_query.edit_message_text(self.get_text('no_deliveries', lang))
+            await update.message.reply_text(self.get_text('no_deliveries', lang))
             return
         route = await self.delivery_service.optimize_route(user['id'], order_ids)
         text = f"Optimized Route: {route.orders}\nEstimated Duration: {route.estimated_duration} min"
-        if update.message:
-            await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(self.get_text('back_main', lang), callback_data='back_main')]]))
-        elif update.callback_query:
-            await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(self.get_text('back_main', lang), callback_data='back_main')]]))
+        await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(self.get_text('back_main', lang), callback_data='back_main')]]))
 
 
     # 7. Use SecurityService.log_security_event for admin/delivery actions

@@ -248,6 +248,11 @@ class WaterBusinessBot:
             'telegram_notifications': "Telegram Notifications",
             'marketing_communications': "Marketing Communications",
             'prefs_updated': "Preferences updated!",
+            'not_enough_points': "You don't have enough points to redeem.",
+            'points_redeemed': "You redeemed {points} points for a {discount} UZS discount!",
+            'rate_limited': "You are sending requests too fast. Please try again later.",
+            'not_delivery_person': "You are not authorized as a delivery person.",
+            'map_link': "View on Map",
         })
         self.translations['uz'].update({
             'no_products_subscription': "Obuna uchun mahsulotlar mavjud emas.",
@@ -396,6 +401,11 @@ class WaterBusinessBot:
             'telegram_notifications': "Telegram bildirishnomalar",
             'marketing_communications': "Marketing xabarlari",
             'prefs_updated': "Sozlamalar yangilandi!",
+            'not_enough_points': "Ballarni yechib olish uchun yetarli ball yo'q.",
+            'points_redeemed': "{points} ball uchun {discount} UZS chegirma oldingiz!",
+            'rate_limited': "Siz juda tez so'rov yuboryapsiz. Iltimos, keyinroq urinib ko'ring.",
+            'not_delivery_person': "Siz yetkazib beruvchi sifatida ruxsat etilmagansiz.",
+            'map_link': "Xaritada ko'rish",
         })
         self.translations['ru'].update({
             'no_products_subscription': "Нет доступных товаров для подписки.",
@@ -544,6 +554,11 @@ class WaterBusinessBot:
             'telegram_notifications': "Telegram уведомления",
             'marketing_communications': "Маркетинговые сообщения",
             'prefs_updated': "Настройки обновлены!",
+            'not_enough_points': "У вас недостаточно баллов для списания.",
+            'points_redeemed': "Вы обменяли {points} баллов на скидку {discount} UZS!",
+            'rate_limited': "Вы отправляете запросы слишком быстро. Пожалуйста, попробуйте позже.",
+            'not_delivery_person': "У вас нет прав курьера.",
+            'map_link': "Посмотреть на карте",
         })
 
 
@@ -579,6 +594,125 @@ class WaterBusinessBot:
         except Exception as e:
             logger.error(f"Failed to initialize connections: {e}")
             raise
+
+    # --- Helper for Google Maps static link ---
+    def get_static_map_link(self, address, lat=None, lon=None):
+        if lat and lon:
+            return f"https://maps.google.com/?q={lat},{lon}"
+        elif address:
+            return f"https://maps.google.com/?q={address.replace(' ', '+')}"
+        return None
+
+    # --- Role check helpers ---
+    async def is_delivery_person(self, user):
+        return user.get('role') == 'delivery'
+    async def is_admin(self, user):
+        return user.get('is_admin', False)
+
+    # --- Rate limiting wrapper ---
+    async def check_rate_limit(self, user_id, action, limit=10):
+        allowed = await self.security_service.check_rate_limit(user_id, action, limit)
+        if not allowed:
+            return False
+        return True
+
+    # --- Loyalty points redemption flow ---
+    async def redeem_loyalty_points(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        user = await self.user_service.get_or_create_user(update.effective_user)
+        lang = user.get('language_code', 'en')
+        points = user.get('loyalty_points', 0)
+        if points < 100:
+            await update.message.reply_text(self.get_text('not_enough_points', lang))
+            return
+        discount = int(points / 100) * 1000  # 100 points = 1000 UZS discount
+        await self.payment_service.process_loyalty_payment(user['id'], points)
+        await update.message.reply_text(self.get_text('points_redeemed', lang).format(points=points, discount=discount))
+
+    # --- Order flow: add rate limit, notification, map link, loyalty redemption ---
+    async def order_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str = "en"):
+        user = await self.user_service.get_or_create_user(update.effective_user)
+        user_id = user['id']
+        if not await self.check_rate_limit(user_id, 'order', 5):
+            await update.message.reply_text(self.get_text('rate_limited', lang))
+            return
+        self.user_states[user_id] = {
+            'state': ORDER_STATE['SELECT_PRODUCT'],
+            'cart': [],
+        }
+        products = await self.product_service.get_available_products()
+        if not products:
+            if update.message:
+                await update.message.reply_text(self.get_text('no_products', lang))
+            elif update.callback_query:
+                await update.callback_query.edit_message_text(self.get_text('no_products', lang))
+            return
+        keyboard = [
+            [InlineKeyboardButton(f"{p['name']} ({p['price']} UZS)", callback_data=f"order_product_{p['id']}")]
+            for p in products
+        ]
+        if update.message:
+            await update.message.reply_text(
+                self.get_text('select_product', lang),
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+        elif update.callback_query:
+            await update.callback_query.edit_message_text(
+                self.get_text('select_product', lang),
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+
+    # --- Deliver command: restrict to delivery role ---
+    async def deliver_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        user = await self.user_service.get_or_create_user(update.effective_user)
+        lang = user.get('language_code', 'en')
+        if not await self.is_delivery_person(user):
+            await update.message.reply_text(self.get_text('not_delivery_person', lang))
+            return
+        deliveries = await self.delivery_service.get_deliveries_for_person(user['id'], status='in_transit')
+        if not deliveries:
+            await update.message.reply_text(self.get_text('no_deliveries', lang))
+            return
+        keyboard = [
+            [InlineKeyboardButton(f"{self.get_text('order_number', lang)} {d['order_id']} ({d['status']})", callback_data=f"deliver_update_{d['order_id']}")]
+            for d in deliveries
+        ]
+        await update.message.reply_text(self.get_text('my_deliveries', lang), reply_markup=InlineKeyboardMarkup(keyboard))
+
+    # --- Admin commands: restrict to admin ---
+    async def admin_orders_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        user = await self.user_service.get_or_create_user(update.effective_user)
+        lang = user.get('language_code', 'en')
+        if not await self.is_admin(user):
+            await update.message.reply_text(self.get_text('not_admin', lang))
+            return
+        orders = await self.admin_service.get_pending_orders()
+        if not orders:
+            await update.message.reply_text(self.get_text('no_pending_orders', lang))
+            return
+        text = "\n".join([
+            f"Order {o['order_number']} by {o['username']} ({o['phone']}) - {o['status']}" for o in orders
+        ])
+        await update.message.reply_text(self.get_text('pending_orders', lang) + "\n" + text)
+
+    # --- Payment confirmation stub ---
+    async def payment_confirmation_webhook(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        # Simulate webhook for payment confirmation
+        # In production, this would be a webhook endpoint
+        await update.message.reply_text("[Simulated] Payment confirmed!")
+
+    # --- Wire up notifications in order, delivery, subscription flows ---
+    # In order_callback_handler, after order is created:
+    # await self.notification_service.send_order_notification(user['id'], order, 'order_confirmed')
+    # In deliver_callback_handler, after status update:
+    # await self.notification_service.send_event_notification(user['id'], 'delivery_status', {'order_id': order_id, 'status': status})
+    # In process_subscription_renewals, after renewal:
+    # await self.notification_service.send_event_notification(sub['user_id'], 'subscription_renewal', {'sub_id': sub['id']})
+
+    # --- Map link in order summary and tracking ---
+    # In order_details_callback_handler and track_callback_handler, add map link to address
+    # In order summary, add map link if address has lat/lon
+
+    
 
     def get_text(self, key: str, lang: str = 'en') -> str:
         """Get translated text"""
@@ -1115,35 +1249,6 @@ Contact our support team at +998901234567 or email info@aquapure.uz
             self.get_text('main_menu', lang),
             reply_markup=keyboard
         )
-
-    async def order_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str = "en"):
-        user = update.effective_user
-        user_id = user.id
-        self.user_states[user_id] = {
-            'state': ORDER_STATE['SELECT_PRODUCT'],
-            'cart': [],
-        }
-        products = await self.product_service.get_available_products()
-        if not products:
-            if update.message:
-                await update.message.reply_text(self.get_text('no_products', lang))
-            elif update.callback_query:
-                await update.callback_query.edit_message_text(self.get_text('no_products', lang))
-            return
-        keyboard = [
-            [InlineKeyboardButton(f"{p['name']} ({p['price']} UZS)", callback_data=f"order_product_{p['id']}")]
-            for p in products
-        ]
-        if update.message:
-            await update.message.reply_text(
-                self.get_text('select_product', lang),
-                reply_markup=InlineKeyboardMarkup(keyboard)
-            )
-        elif update.callback_query:
-            await update.callback_query.edit_message_text(
-                self.get_text('select_product', lang),
-                reply_markup=InlineKeyboardMarkup(keyboard)
-            )
 
     def get_cart_text(self, cart, lang):
         if not cart:
@@ -2256,6 +2361,9 @@ Contact our support team at +998901234567 or email info@aquapure.uz
     async def deliver_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user = await self.user_service.get_or_create_user(update.effective_user)
         lang = user.get('language_code', 'en')
+        if not await self.is_delivery_person(user):
+            await update.message.reply_text(self.get_text('not_delivery_person', lang))
+            return
         deliveries = await self.delivery_service.get_deliveries_for_person(user['id'], status='in_transit')
         if not deliveries:
             await update.message.reply_text(self.get_text('no_deliveries', lang))

@@ -718,41 +718,26 @@ class WaterBusinessBot:
         """Get translated text"""
         return self.translations.get(lang, {}).get(key, self.translations['en'].get(key, key))
 
+    # --- Main Menu ---
     async def get_main_keyboard(self, user_id: int, lang: str = 'en') -> InlineKeyboardMarkup:
-        is_admin = False
-        try:
-            is_admin = await self.admin_service.is_admin(user_id)
-        except Exception:
-            pass
+        is_admin = await self.admin_service.is_admin(user_id)
+        user = await self.user_service.get_or_create_user_by_telegram_id(user_id)
+        is_delivery = user.get('role') == 'delivery' if user else False
         keyboard = [
-            [
-                InlineKeyboardButton(f"🛒 {self.get_text('order_menu', lang)}", callback_data='order'),
-                InlineKeyboardButton(f"📦 {self.get_text('track_menu', lang)}", callback_data='track')
-            ],
-            [
-                InlineKeyboardButton("🔄 My Subscriptions", callback_data='mysubscriptions'),
-                InlineKeyboardButton("➕ Subscribe", callback_data='subscribe')
-            ],
-            [
-                InlineKeyboardButton("🌟 Loyalty & Analytics", callback_data='loyalty'),
-                InlineKeyboardButton(f"👤 {self.get_text('account_menu', lang)}", callback_data='account')
-            ],
-            [
-                InlineKeyboardButton("🔔 Notifications", callback_data='notifications'),
-                InlineKeyboardButton("📊 Analytics", callback_data='analytics')
-            ],
-            [
-                InlineKeyboardButton("ℹ️ Info", callback_data='info'),
-                InlineKeyboardButton("🌐 Language", callback_data='language')
-            ],
-            [
-                InlineKeyboardButton("🎯 VIP Services", callback_data='vip')
-            ]
+            [InlineKeyboardButton(f"🛒 {self.get_text('order_menu', lang)}", callback_data='order')],
+            [InlineKeyboardButton(f"📦 {self.get_text('track_menu', lang)}", callback_data='track')],
+            [InlineKeyboardButton("🔄 My Subscriptions", callback_data='mysubscriptions'), InlineKeyboardButton("➕ Subscribe", callback_data='subscribe')],
+            [InlineKeyboardButton("🌟 Loyalty & Analytics", callback_data='loyalty')],
+            [InlineKeyboardButton(f"👤 {self.get_text('account_menu', lang)}", callback_data='account')],
+            [InlineKeyboardButton("🔔 Notifications", callback_data='notifications')],
+            [InlineKeyboardButton("📊 Analytics", callback_data='analytics')],
+            [InlineKeyboardButton("ℹ️ Info", callback_data='info'), InlineKeyboardButton("🌐 Language", callback_data='language')],
+            [InlineKeyboardButton("🎯 VIP Services", callback_data='vip')]
         ]
         if is_admin:
-            keyboard.append([
-                InlineKeyboardButton("🛠️ Admin Panel", callback_data='admin_panel')
-            ])
+            keyboard.append([InlineKeyboardButton("🛠️ Admin Panel", callback_data='admin_panel')])
+        if is_delivery:
+            keyboard.append([InlineKeyboardButton("🚚 My Deliveries", callback_data='my_deliveries')])
         return InlineKeyboardMarkup(keyboard)
 
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -823,7 +808,11 @@ Contact our support team at +998901234567 or email info@aquapure.uz
         elif data == 'subscribe':
             await self.subscribe_command(update, context)
         elif data == 'loyalty':
-            await self.loyalty_command(update, context)
+            await self.show_loyalty_menu(query, lang)
+        elif data == 'redeem_points':
+            await self.redeem_loyalty_points(update, context)
+        elif data == 'loyalty_history':
+            await self.loyalty_history_command(update, context)
         elif data == 'account':
             await self.show_account_menu(query, lang)
         elif data == 'notifications':
@@ -834,15 +823,18 @@ Contact our support team at +998901234567 or email info@aquapure.uz
             await self.show_company_info(query, lang)
         elif data == 'language':
             await self.show_language_menu(query, lang)
-        elif data.startswith('lang_'):
-            new_lang = data.replace('lang_', '')
-            await self.user_service.set_user_language(user_id, new_lang)
-            await query.answer("Language updated!")
-            await self.show_main_menu(query, new_lang)
         elif data == 'vip':
             await self.show_vip_menu(query, lang)
         elif data == 'admin_panel':
-            await query.edit_message_text("🛠️ Admin Panel:\n- /admin_orders\n- /admin_stats")
+            await self.show_admin_panel(query, lang)
+        elif data == 'admin_orders':
+            await self.admin_orders_command(update, context)
+        elif data == 'admin_stats':
+            await self.admin_stats_command(update, context)
+        elif data == 'optimize_route':
+            await self.optimize_route_command(update, context)
+        elif data == 'my_deliveries':
+            await self.deliver_command(update, context)
         elif data == 'back_main':
             await self.show_main_menu(query, lang)
         else:
@@ -1710,6 +1702,9 @@ Contact our support team at +998901234567 or email info@aquapure.uz
             application.add_handler(CallbackQueryHandler(self.order_callback_handler, pattern="^order_"))
             application.add_handler(CallbackQueryHandler(self.track_callback_handler, pattern="^track_"))
             application.add_handler(CallbackQueryHandler(self.subscribe_callback_handler, pattern="^sub_"))
+            application.add_handler(CommandHandler("redeem_points", self.redeem_loyalty_points))
+            application.add_handler(CommandHandler("payment_confirm", self.payment_confirmation_webhook))
+            application.add_handler(CommandHandler("optimize_route", self.optimize_route_command))
             application.add_handler(MessageHandler(filters.LOCATION, self.location_handler))
             application.add_handler(MessageHandler(filters.PHOTO, self.photo_handler))
             application.add_handler(MessageHandler(filters.CONTACT, self.contact_handler))
@@ -1744,7 +1739,7 @@ Contact our support team at +998901234567 or email info@aquapure.uz
             
 
             # --- Loyalty & Analytics ---
-            application.add_handler(CommandHandler("loyalty", self.loyalty_command))
+            application.add_handler(CommandHandler("loyalty", self.show_loyalty_menu))
             application.add_handler(CommandHandler("loyalty_history", self.loyalty_history_command))
 
             # --- Admin Features ---
@@ -1934,9 +1929,8 @@ Contact our support team at +998901234567 or email info@aquapure.uz
             await query.edit_message_text(text)
 
     # --- Loyalty & Analytics ---
-    async def loyalty_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        user = await self.user_service.get_or_create_user(update.effective_user)
-        lang = user.get('language_code', 'en')
+    async def show_loyalty_menu(self, query, lang: str):
+        user = await self.user_service.get_or_create_user(query.from_user)
         analytics = await self.analytics_service.get_customer_analytics(user['id'])
         points = user.get('loyalty_points', 0)
         text = (
@@ -1947,10 +1941,12 @@ Contact our support team at +998901234567 or email info@aquapure.uz
             f"Favorite Products: {', '.join(str(p[0]) for p in analytics.get('favorite_products', []))}\n"
             f"Last Order: {analytics.get('last_order_date', 'N/A')}"
         )
-        if update.message:
-            await update.message.reply_text(text)
-        elif update.callback_query:
-            await update.callback_query.edit_message_text(text)
+        keyboard = [
+            [InlineKeyboardButton("🎁 Redeem Points", callback_data='redeem_points')],
+            [InlineKeyboardButton("📜 View History", callback_data='loyalty_history')],
+            [InlineKeyboardButton(self.get_text('back_main', lang), callback_data='back_main')]
+        ]
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
 
     async def loyalty_history_command(self, update, context):
         user = await self.user_service.get_or_create_user(update.effective_user)
@@ -2471,6 +2467,52 @@ Contact our support team at +998901234567 or email info@aquapure.uz
             await self.notification_service.set_user_preferences(user['id'], **updates)
         await self.notification_prefs_menu(update, context)
         await query.answer(self.get_text('prefs_updated', lang))
+
+
+    # 4. Wire up NotificationService in order placement, delivery, subscription
+    # In order_callback_handler, after order is created:
+    # await self.notification_service.send_order_notification(user['id'], order, 'order_confirmed')
+    # In deliver_callback_handler, after status update:
+    # await self.notification_service.send_event_notification(user['id'], 'delivery_status', {'order_id': order_id, 'status': status})
+    # In process_subscription_renewals, after renewal:
+    # await self.notification_service.send_event_notification(sub['user_id'], 'subscription_renewal', {'sub_id': sub['id']})
+
+    # 5. Add map links to order summary, tracking, and delivery messages
+    # In order_details_callback_handler and track_callback_handler, add map link to address
+    # In order summary, add map link if address has lat/lon
+
+    # 6. Add /optimize_route command for delivery staff/admin
+    async def optimize_route_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        user = await self.user_service.get_or_create_user(update.effective_user)
+        lang = user.get('language_code', 'en')
+        is_admin = await self.is_admin(user)
+        is_delivery = user.get('role') == 'delivery'
+        if not (is_admin or is_delivery):
+            if update.message:
+                await update.message.reply_text(self.get_text('not_admin', lang))
+            elif update.callback_query:
+                await update.callback_query.edit_message_text(self.get_text('not_admin', lang))
+            return
+        deliveries = await self.delivery_service.get_deliveries_for_person(user['id'], status='in_transit')
+        order_ids = [d['order_id'] for d in deliveries]
+        if not order_ids:
+            if update.message:
+                await update.message.reply_text(self.get_text('no_deliveries', lang))
+            elif update.callback_query:
+                await update.callback_query.edit_message_text(self.get_text('no_deliveries', lang))
+            return
+        route = await self.delivery_service.optimize_route(user['id'], order_ids)
+        text = f"Optimized Route: {route.orders}\nEstimated Duration: {route.estimated_duration} min"
+        if update.message:
+            await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(self.get_text('back_main', lang), callback_data='back_main')]]))
+        elif update.callback_query:
+            await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(self.get_text('back_main', lang), callback_data='back_main')]]))
+
+
+    # 7. Use SecurityService.log_security_event for admin/delivery actions
+    # In admin_orders_command and deliver_command, log security events
+    # await self.security_service.log_security_event('admin_access', user['id'], 'Accessed admin orders')
+    # await self.security_service.log_security_event('delivery_access', user['id'], 'Accessed deliveries')
 
 
 def main():

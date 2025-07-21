@@ -837,7 +837,7 @@ Contact our support team at +998901234567 or email info@aquapure.uz
             await self.show_main_menu(query, user, lang)
         else:
             await query.answer()
-            await query.edit_message_text("Unknown action.")
+            await query.edit_message_text("This action is not available. Please use the menu.")
 
     async def show_company_info(self, query, lang: str):
         """Show company information"""
@@ -1684,76 +1684,52 @@ Contact our support team at +998901234567 or email info@aquapure.uz
                 await self.http_client.aclose()
     
     def run_bot_sync(self):
-        """Run the bot"""
         try:
             loop = asyncio.get_event_loop()
             loop.run_until_complete(self.init_connections())
 
-            # Create application
             application = ApplicationBuilder().token(self.bot_token).build()
-            
-            # Add handlers
+
+            # Register specific pattern-based handlers first
             application.add_handler(CommandHandler("start", self.start_command))
             application.add_handler(CommandHandler("help", self.help_command))
             application.add_handler(CallbackQueryHandler(self.order_callback_handler, pattern="^order_"))
             application.add_handler(CallbackQueryHandler(self.track_callback_handler, pattern="^track_"))
             application.add_handler(CallbackQueryHandler(self.subscribe_callback_handler, pattern="^sub_"))
-            application.add_handler(CommandHandler("redeem_points", self.redeem_loyalty_points))
-            application.add_handler(CommandHandler("payment_confirm", self.payment_confirmation_webhook))
-            application.add_handler(CommandHandler("optimize_route", self.optimize_route_command))
+            application.add_handler(CallbackQueryHandler(self.order_details_callback_handler, pattern="^(order_details_|cancel_order_).*"))
+            application.add_handler(CallbackQueryHandler(self.deliver_callback_handler, pattern="^deliver_.*"))
+            application.add_handler(CallbackQueryHandler(self.subscription_callback_handler, pattern="^(pause_sub_|resume_sub_|edit_sub_).*$"))
+            application.add_handler(CallbackQueryHandler(self.notification_prefs_callback_handler, pattern="^(toggle_sms|toggle_email|toggle_telegram|toggle_marketing)$"))
+            application.add_handler(CallbackQueryHandler(self.edit_profile_callback_handler, pattern="^(edit_profile|edit_name|edit_phone|edit_email|edit_language)$"))
+            # ... any other specific patterns ...
+            # Register the generic button handler last
+            application.add_handler(CallbackQueryHandler(self.button_handler))
+
             application.add_handler(MessageHandler(filters.LOCATION, self.location_handler))
             application.add_handler(MessageHandler(filters.PHOTO, self.photo_handler))
             application.add_handler(MessageHandler(filters.CONTACT, self.contact_handler))
             application.add_handler(CommandHandler("order", self.order_command))
             application.add_handler(CommandHandler("account", self.account_command))
-
-            # Register the /edit_profile command, callback, and message handler in run_bot
+            application.add_handler(CommandHandler("redeem_points", self.redeem_loyalty_points))
+            application.add_handler(CommandHandler("payment_confirm", self.payment_confirmation_webhook))
+            application.add_handler(CommandHandler("optimize_route", self.optimize_route_command))
             application.add_handler(CommandHandler("edit_profile", self.edit_profile_command))
-            application.add_handler(CallbackQueryHandler(self.edit_profile_callback_handler, pattern="^(edit_profile|edit_name|edit_phone|edit_email|edit_language)$"))
             application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), self.edit_profile_message_handler))
-
-            # Register new handlers
             application.add_handler(CommandHandler("orders", self.orders_command))
-            application.add_handler(CallbackQueryHandler(self.order_details_callback_handler, pattern="^(order_details_|cancel_order_).*"))
             application.add_handler(CommandHandler("deliver", self.deliver_command))
-            application.add_handler(CallbackQueryHandler(self.deliver_callback_handler, pattern="^deliver_.*"))
             application.add_handler(CommandHandler("subscription", self.subscription_menu))
-            application.add_handler(CallbackQueryHandler(self.subscription_callback_handler, pattern="^(pause_sub_|resume_sub_|edit_sub_).*$"))
             application.add_handler(CommandHandler("notifications", self.notification_prefs_menu))
-            application.add_handler(CallbackQueryHandler(self.notification_prefs_callback_handler, pattern="^(toggle_sms|toggle_email|toggle_telegram|toggle_marketing)$"))
-            
-            # Error handler
-            application.add_error_handler(self.error_handler)
-
-            # --- Subscription Management ---
             application.add_handler(CommandHandler("subscribe", self.subscribe_command))
             application.add_handler(CommandHandler("mysubscriptions", self.mysubscriptions_command))
-            
-
-            # --- Order Tracking ---
             application.add_handler(CommandHandler("track", self.track_command))
-            
-
-            # --- Loyalty & Analytics ---
             application.add_handler(CommandHandler("loyalty", self.show_loyalty_menu))
             application.add_handler(CommandHandler("loyalty_history", self.loyalty_history_command))
-
-            # --- Admin Features ---
             application.add_handler(CommandHandler("admin_orders", self.admin_orders_command))
             application.add_handler(CommandHandler("admin_stats", self.admin_stats_command))
 
-            application.add_handler(CallbackQueryHandler(self.button_handler))
-            
-            # # Start periodic tasks
-            # logger.info("Creating periodic tasks")
-            # task = asyncio.create_task(self.setup_periodic_tasks())
-            # logger.info("periodic tasks created")
-            # loop.run_until_complete(task)
-            
-            logger.info("Starting the bot")
-            # Start the bot
+            application.add_error_handler(self.error_handler)
+            # asyncio.create_task(self.setup_periodic_tasks())
             application.run_polling(poll_interval=2, drop_pending_updates=True)
-            
         except Exception as e:
             logger.error(f"Error running bot: {e}")
             raise
@@ -1914,6 +1890,7 @@ Contact our support team at +998901234567 or email info@aquapure.uz
             events_text = "\n".join([
                 f"{e['time']}: {e['type']} - {e['description']}" for e in events
             ])
+            map_link = self.get_static_map_link(tracking.get('address')) if tracking.get('address') else None
             text = (
                 f"{self.get_text('order_tracking', lang)}\n"
                 f"{self.get_text('order_number', lang)}: {tracking.get('order_id')}\n"
@@ -1922,7 +1899,9 @@ Contact our support team at +998901234567 or email info@aquapure.uz
                 f"{self.get_text('slot', lang)}: {tracking.get('slot')}\n\n"
                 f"{self.get_text('events', lang)}:\n{events_text or self.get_text('no_events', lang)}"
             )
-            await query.edit_message_text(text)
+            if map_link:
+                text += f"\n[{self.get_text('map_link', lang)}]({map_link})"
+            await query.edit_message_text(text, parse_mode=ParseMode.MARKDOWN)
 
     # --- Loyalty & Analytics ---
     async def show_loyalty_menu(self, query, lang: str):
@@ -1998,17 +1977,28 @@ Contact our support team at +998901234567 or email info@aquapure.uz
     async def optimize_route_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user = await self.user_service.get_or_create_user(update.effective_user)
         lang = user.get('language_code', 'en')
-        if not await self.is_admin(user):
-            await update.message.reply_text(self.get_text('not_admin', lang))
+        is_admin = await self.is_admin(user)
+        is_delivery = await self.is_delivery_person(user)
+        if not (is_admin or is_delivery):
+            if update.message:
+                await update.message.reply_text(self.get_text('not_admin', lang))
+            elif update.callback_query:
+                await update.callback_query.edit_message_text(self.get_text('not_admin', lang))
             return
         deliveries = await self.delivery_service.get_deliveries_for_person(user['id'], status='in_transit')
         order_ids = [d['order_id'] for d in deliveries]
         if not order_ids:
-            await update.message.reply_text(self.get_text('no_deliveries', lang))
+            if update.message:
+                await update.message.reply_text(self.get_text('no_deliveries', lang))
+            elif update.callback_query:
+                await update.callback_query.edit_message_text(self.get_text('no_deliveries', lang))
             return
         route = await self.delivery_service.optimize_route(user['id'], order_ids)
         text = f"Optimized Route: {route.orders}\nEstimated Duration: {route.estimated_duration} min"
-        await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(self.get_text('back_main', lang), callback_data='back_main')]]))
+        if update.message:
+            await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(self.get_text('back_main', lang), callback_data='back_main')]]))
+        elif update.callback_query:
+            await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(self.get_text('back_main', lang), callback_data='back_main')]]))
 
     async def account_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user = await self.user_service.get_or_create_user(update.effective_user)
@@ -2326,6 +2316,7 @@ Contact our support team at +998901234567 or email info@aquapure.uz
             address_str = f"{address['label'] or ''}, {address['address_line1']}, {address['city']}" if address else '-'
             items = order.get('items', [])
             items_str = '\n'.join([f"{item['product_name']} x{item['quantity']} = {item['total_price']} UZS" for item in items])
+            map_link = self.get_static_map_link(address_str) if address else None
             text = (
                 f"{self.get_text('order_details', lang)}\n"
                 f"{self.get_text('order_number', lang)}: {order['order_number']}\n"
@@ -2334,11 +2325,13 @@ Contact our support team at +998901234567 or email info@aquapure.uz
                 f"{self.get_text('events', lang)}: {order['created_at']}\n"
                 f"{self.get_text('cart', lang)}:\n{items_str}\n"
             )
+            if map_link:
+                text += f"\n[{self.get_text('map_link', lang)}]({map_link})"
             keyboard = []
             if order['status'] not in ['delivered', 'cancelled']:
                 keyboard.append([InlineKeyboardButton(self.get_text('cancel_order', lang), callback_data=f"cancel_order_{order_id}")])
             keyboard.append([InlineKeyboardButton(self.get_text('back_main', lang), callback_data='back_main')])
-            await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+            await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN)
         elif query.data.startswith('cancel_order_'):
             order_id = query.data.replace('cancel_order_', '')
             order = await self.order_service.get_order_details(order_id)
@@ -2383,6 +2376,8 @@ Contact our support team at +998901234567 or email info@aquapure.uz
             order_id = parts[2]
             status = parts[3]
             await self.delivery_service.update_delivery_status(order_id, status, delivery_person_id=user['id'])
+            # Enable notification
+            # await self.notification_service.send_event_notification(user['id'], 'delivery_status', {'order_id': order_id, 'status': status})
             await query.edit_message_text(self.get_text('status_updated', lang))
 
     # Step 5: Subscriptions
@@ -2427,6 +2422,7 @@ Contact our support team at +998901234567 or email info@aquapure.uz
             due_renewals = await self.subscription_service.get_due_renewals()
             for sub in due_renewals:
                 await self.subscription_service.notify_renewal(sub['user_id'], sub['id'])
+                # await self.notification_service.send_event_notification(sub['user_id'], 'subscription_renewal', {'sub_id': sub['id']})
         except Exception as e:
             logger.error(f"Error processing subscription renewals: {e}")
 
@@ -2481,17 +2477,28 @@ Contact our support team at +998901234567 or email info@aquapure.uz
     async def optimize_route_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user = await self.user_service.get_or_create_user(update.effective_user)
         lang = user.get('language_code', 'en')
-        if not await self.is_admin(user):
-            await update.message.reply_text(self.get_text('not_admin', lang))
+        is_admin = await self.is_admin(user)
+        is_delivery = await self.is_delivery_person(user)
+        if not (is_admin or is_delivery):
+            if update.message:
+                await update.message.reply_text(self.get_text('not_admin', lang))
+            elif update.callback_query:
+                await update.callback_query.edit_message_text(self.get_text('not_admin', lang))
             return
         deliveries = await self.delivery_service.get_deliveries_for_person(user['id'], status='in_transit')
         order_ids = [d['order_id'] for d in deliveries]
         if not order_ids:
-            await update.message.reply_text(self.get_text('no_deliveries', lang))
+            if update.message:
+                await update.message.reply_text(self.get_text('no_deliveries', lang))
+            elif update.callback_query:
+                await update.callback_query.edit_message_text(self.get_text('no_deliveries', lang))
             return
         route = await self.delivery_service.optimize_route(user['id'], order_ids)
         text = f"Optimized Route: {route.orders}\nEstimated Duration: {route.estimated_duration} min"
-        await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(self.get_text('back_main', lang), callback_data='back_main')]]))
+        if update.message:
+            await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(self.get_text('back_main', lang), callback_data='back_main')]]))
+        elif update.callback_query:
+            await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(self.get_text('back_main', lang), callback_data='back_main')]]))
 
 
     # 7. Use SecurityService.log_security_event for admin/delivery actions

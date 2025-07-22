@@ -1701,13 +1701,6 @@ Contact our support team at +998901234567 or email info@aquapure.uz
             application.add_handler(CallbackQueryHandler(self.subscription_callback_handler, pattern="^(pause_sub_|resume_sub_|edit_sub_).*$"))
             application.add_handler(CallbackQueryHandler(self.notification_prefs_callback_handler, pattern="^(toggle_sms|toggle_email|toggle_telegram|toggle_marketing)$"))
             application.add_handler(CallbackQueryHandler(self.edit_profile_callback_handler, pattern="^(edit_profile|edit_name|edit_phone|edit_email|edit_language)$"))
-            # ... any other specific patterns ...
-            # Register the generic button handler last
-            application.add_handler(CallbackQueryHandler(self.button_handler))
-
-            application.add_handler(MessageHandler(filters.LOCATION, self.location_handler))
-            application.add_handler(MessageHandler(filters.PHOTO, self.photo_handler))
-            application.add_handler(MessageHandler(filters.CONTACT, self.contact_handler))
             application.add_handler(CommandHandler("order", self.order_command))
             application.add_handler(CommandHandler("account", self.account_command))
             application.add_handler(CommandHandler("redeem_points", self.redeem_loyalty_points))
@@ -1726,6 +1719,14 @@ Contact our support team at +998901234567 or email info@aquapure.uz
             application.add_handler(CommandHandler("loyalty_history", self.loyalty_history_command))
             application.add_handler(CommandHandler("admin_orders", self.admin_orders_command))
             application.add_handler(CommandHandler("admin_stats", self.admin_stats_command))
+            # ... any other specific patterns ...
+            # Register the generic button handler last
+            application.add_handler(CallbackQueryHandler(self.button_handler))
+
+            application.add_handler(MessageHandler(filters.LOCATION, self.location_handler))
+            application.add_handler(MessageHandler(filters.PHOTO, self.photo_handler))
+            application.add_handler(MessageHandler(filters.CONTACT, self.contact_handler))
+            
 
             application.add_error_handler(self.error_handler)
             # asyncio.create_task(self.setup_periodic_tasks())

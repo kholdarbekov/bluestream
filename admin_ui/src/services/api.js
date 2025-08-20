@@ -2,8 +2,9 @@ import axios from 'axios';
 import toast from 'react-hot-toast';
 
 // Create axios instance with cookie support
+console.log('API URL:', process.env.REACT_APP_API_URL);
 const api = axios.create({
-  baseURL: process.env.REACT_APP_API_URL || 'http://localhost:5000/api/v1',
+  baseURL: process.env.REACT_APP_API_URL || 'https://bluestream.uz/api/v1',
   timeout: 10000,
   withCredentials: true  // Enable sending cookies with requests
 });

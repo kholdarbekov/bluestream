@@ -1,0 +1,447 @@
+"""
+Centralized service factory for consistent service initialization
+"""
+import logging
+from typing import Dict, Any, Optional, Type, TypeVar
+from flask import g, current_app
+from functools import wraps
+import threading
+
+logger = logging.getLogger(__name__)
+
+# Type variable for service classes
+T = TypeVar('T')
+
+
+class ServiceFactory:
+    """Factory for creating and managing service instances"""
+    
+    _instances: Dict[str, Any] = {}
+    _lock = threading.Lock()
+    
+    @classmethod
+    def get_service(cls, service_class: Type[T], service_name: str = None) -> T:
+        """
+        Get or create a service instance with proper caching
+        
+        Args:
+            service_class: The service class to instantiate
+            service_name: Optional custom name for the service (defaults to class name)
+        
+        Returns:
+            Service instance
+        """
+        if service_name is None:
+            service_name = service_class.__name__.lower()
+        
+        # Check if service is already cached in request context
+        if hasattr(g, service_name):
+            return getattr(g, service_name)
+        
+        try:
+            # Create new service instance
+            service_instance = service_class()
+            
+            # Cache in request context
+            setattr(g, service_name, service_instance)
+            
+            logger.debug(f"Created new {service_class.__name__} instance")
+            return service_instance
+            
+        except Exception as e:
+            logger.error(f"Failed to create {service_class.__name__}: {e}")
+            raise
+    
+    @classmethod
+    def get_singleton_service(cls, service_class: Type[T], service_name: str = None) -> T:
+        """
+        Get or create a singleton service instance (app-level caching)
+        
+        Args:
+            service_class: The service class to instantiate
+            service_name: Optional custom name for the service
+        
+        Returns:
+            Singleton service instance
+        """
+        if service_name is None:
+            service_name = service_class.__name__.lower()
+        
+        with cls._lock:
+            if service_name not in cls._instances:
+                try:
+                    cls._instances[service_name] = service_class()
+                    logger.debug(f"Created singleton {service_class.__name__} instance")
+                except Exception as e:
+                    logger.error(f"Failed to create singleton {service_class.__name__}: {e}")
+                    raise
+            
+            return cls._instances[service_name]
+    
+    @classmethod
+    def clear_request_services(cls):
+        """Clear all request-scoped services"""
+        service_attrs = [attr for attr in dir(g) if attr.endswith('_service') and not attr.startswith('_')]
+        for attr in service_attrs:
+            if hasattr(g, attr):
+                try:
+                    delattr(g, attr)
+                except AttributeError:
+                    # Service was already removed or never existed
+                    pass
+    
+    @classmethod
+    def clear_singleton_services(cls):
+        """Clear all singleton services (for testing)"""
+        with cls._lock:
+            cls._instances.clear()
+
+
+# Service getter functions for common services
+def get_auth_service():
+    """Get AuthService instance"""
+    from business_app.services.auth_service import AuthService
+    return ServiceFactory.get_service(AuthService, 'auth_service')
+
+
+def get_order_service():
+    """Get OrderService instance"""
+    from business_app.services.order_service import OrderService
+    return ServiceFactory.get_service(OrderService, 'order_service')
+
+
+def get_payment_service():
+    """Get PaymentService instance"""
+    from business_app.services.payment_service import PaymentService
+    return ServiceFactory.get_service(PaymentService, 'payment_service')
+
+
+def get_delivery_service():
+    """Get DeliveryService instance"""
+    from business_app.services.delivery_service import DeliveryService
+    return ServiceFactory.get_service(DeliveryService, 'delivery_service')
+
+
+def get_notification_service():
+    """Get NotificationService instance"""
+    from business_app.services.notification_service import NotificationService
+    return ServiceFactory.get_service(NotificationService, 'notification_service')
+
+
+def get_loyalty_service():
+    """Get LoyaltyService instance"""
+    from business_app.services.loyalty_service import LoyaltyService
+    return ServiceFactory.get_service(LoyaltyService, 'loyalty_service')
+
+
+def get_analytics_service():
+    """Get AnalyticsService instance"""
+    from business_app.services.analytics_service import AnalyticsService
+    return ServiceFactory.get_service(AnalyticsService, 'analytics_service')
+
+
+def get_subscription_service():
+    """Get SubscriptionService instance"""
+    from business_app.services.subscription_service import SubscriptionService
+    return ServiceFactory.get_service(SubscriptionService, 'subscription_service')
+
+
+def get_file_storage_service():
+    """Get FileStorageService instance"""
+    from business_app.services.file_storage_service import FileStorageService
+    return ServiceFactory.get_service(FileStorageService, 'file_storage_service')
+
+
+def get_maps_service():
+    """Get MapsService instance"""
+    from business_app.services.maps_service import MapsService
+    return ServiceFactory.get_service(MapsService, 'maps_service')
+
+
+def get_inventory_service():
+    """Get InventoryService instance"""
+    from business_app.services.inventory_service import InventoryService
+    return ServiceFactory.get_singleton_service(InventoryService, 'inventory_service')
+
+
+def get_token_service():
+    """Get TokenService instance"""
+    from business_app.services.token_service import TokenService
+    return ServiceFactory.get_singleton_service(TokenService, 'token_service')
+
+
+# Decorator for automatic service injection
+def inject_services(*service_names):
+    """
+    Decorator to automatically inject services into function arguments
+    
+    Usage:
+        @inject_services('auth_service', 'order_service')
+        def my_function(user_id, auth_service, order_service):
+            # Services are automatically injected
+            pass
+    """
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            # Service mapping
+            service_map = {
+                'auth_service': get_auth_service,
+                'order_service': get_order_service,
+                'payment_service': get_payment_service,
+                'delivery_service': get_delivery_service,
+                'notification_service': get_notification_service,
+                'loyalty_service': get_loyalty_service,
+                'analytics_service': get_analytics_service,
+                'subscription_service': get_subscription_service,
+                'file_storage_service': get_file_storage_service,
+                'maps_service': get_maps_service,
+                'inventory_service': get_inventory_service,
+                'token_service': get_token_service,
+            }
+            
+            # Inject requested services
+            for service_name in service_names:
+                if service_name in service_map and service_name not in kwargs:
+                    kwargs[service_name] = service_map[service_name]()
+            
+            return func(*args, **kwargs)
+        return wrapper
+    return decorator
+
+
+class ServiceConfig:
+    """Configuration validator for services"""
+    
+    @staticmethod
+    def validate_service_config(service_class: Type, required_config: Dict[str, Any]) -> bool:
+        """
+        Validate that required configuration is available for a service
+        
+        Args:
+            service_class: The service class
+            required_config: Dict of config keys and their types/validators
+        
+        Returns:
+            True if all required config is valid
+        """
+        missing_config = []
+        invalid_config = []
+        
+        for config_key, validator in required_config.items():
+            try:
+                value = current_app.config.get(config_key)
+                
+                if value is None:
+                    missing_config.append(config_key)
+                    continue
+                
+                # Validate type if validator is a type
+                if isinstance(validator, type):
+                    if not isinstance(value, validator):
+                        invalid_config.append(f"{config_key}: expected {validator.__name__}, got {type(value).__name__}")
+                
+                # Validate with function if validator is callable
+                elif callable(validator):
+                    if not validator(value):
+                        invalid_config.append(f"{config_key}: validation failed")
+                        
+            except Exception as e:
+                invalid_config.append(f"{config_key}: validation error - {e}")
+        
+        if missing_config or invalid_config:
+            error_msg = f"Service {service_class.__name__} configuration validation failed:"
+            if missing_config:
+                error_msg += f"\nMissing: {', '.join(missing_config)}"
+            if invalid_config:
+                error_msg += f"\nInvalid: {'; '.join(invalid_config)}"
+            
+            logger.error(error_msg)
+            return False
+        
+        return True
+    
+    @staticmethod
+    def get_notification_service_config():
+        """Get required config for NotificationService"""
+        return {
+            'SENDGRID_API_KEY': str,
+            'TWILIO_ACCOUNT_SID': str,
+            'TWILIO_AUTH_TOKEN': str,
+            'TWILIO_PHONE_NUMBER': str,
+        }
+    
+    @staticmethod
+    def get_payment_service_config():
+        """Get required config for PaymentService"""
+        return {
+            'PAYME_MERCHANT_ID': str,
+            'PAYME_SECRET_KEY': str,
+            'CLICK_MERCHANT_ID': str,
+            'CLICK_SECRET_KEY': str,
+        }
+    
+    @staticmethod
+    def get_maps_service_config():
+        """Get required config for MapsService"""
+        return {
+            'MAPS_PROVIDER': str,
+            'GOOGLE_MAPS_API_KEY': str,
+        }
+
+
+class ServiceHealthChecker:
+    """Health checker for services"""
+    
+    @staticmethod
+    def check_service_health(service_instance: Any) -> Dict[str, Any]:
+        """
+        Check health of a service instance
+        
+        Args:
+            service_instance: The service instance to check
+        
+        Returns:
+            Health status dictionary
+        """
+        service_name = service_instance.__class__.__name__
+        health_status = {
+            'service': service_name,
+            'healthy': True,
+            'checks': {},
+            'errors': []
+        }
+        
+        try:
+            # Check if service has a health_check method
+            if hasattr(service_instance, 'health_check'):
+                health_result = service_instance.health_check()
+                health_status['checks'].update(health_result)
+            
+            # Check Redis connectivity for services that use it
+            if hasattr(service_instance, 'redis_client'):
+                try:
+                    if service_instance.redis_client:
+                        service_instance.redis_client.ping()
+                        health_status['checks']['redis'] = 'healthy'
+                    else:
+                        health_status['checks']['redis'] = 'not_configured'
+                except Exception as e:
+                    health_status['checks']['redis'] = 'unhealthy'
+                    health_status['errors'].append(f"Redis connection failed: {e}")
+                    health_status['healthy'] = False
+            
+            # Check database connectivity for services that use it
+            if hasattr(service_instance, 'db') or 'Service' in service_name:
+                try:
+                    from business_app import db
+                    db.session.execute('SELECT 1')
+                    health_status['checks']['database'] = 'healthy'
+                except Exception as e:
+                    health_status['checks']['database'] = 'unhealthy'
+                    health_status['errors'].append(f"Database connection failed: {e}")
+                    health_status['healthy'] = False
+            
+        except Exception as e:
+            health_status['healthy'] = False
+            health_status['errors'].append(f"Health check failed: {e}")
+        
+        return health_status
+    
+    @staticmethod
+    def check_all_services_health() -> Dict[str, Dict[str, Any]]:
+        """Check health of all initialized services"""
+        health_results = {}
+        
+        # Check request-scoped services
+        for attr_name in dir(g):
+            if not attr_name.startswith('_') and attr_name.endswith('_service'):
+                service_instance = getattr(g, attr_name)
+                health_results[attr_name] = ServiceHealthChecker.check_service_health(service_instance)
+        
+        # Check singleton services
+        for service_name, service_instance in ServiceFactory._instances.items():
+            health_results[service_name] = ServiceHealthChecker.check_service_health(service_instance)
+        
+        return health_results
+
+
+# Flask integration
+def init_service_factory(app):
+    """Initialize service factory with Flask app"""
+    
+    @app.teardown_appcontext
+    def cleanup_services(exception):
+        """Clean up request-scoped services"""
+        if exception:
+            logger.warning(f"Request ended with exception: {exception}")
+        ServiceFactory.clear_request_services()
+    
+    @app.route('/api/services/health')
+    def services_health_check():
+        """Health check endpoint for all services"""
+        from flask import jsonify
+        try:
+            health_results = ServiceHealthChecker.check_all_services_health()
+            overall_health = all(result['healthy'] for result in health_results.values())
+            
+            return jsonify({
+                'overall_health': overall_health,
+                'services': health_results,
+                'timestamp': current_app.config.get('HEALTH_CHECK_TIMESTAMP', 'N/A')
+            }), 200 if overall_health else 503
+            
+        except Exception as e:
+            logger.error(f"Service health check failed: {e}")
+            return jsonify({
+                'overall_health': False,
+                'error': str(e),
+                'services': {}
+            }), 500
+
+
+# Utility functions for service management
+def validate_all_service_configs():
+    """Validate configuration for all services"""
+    validation_results = {}
+    
+    service_configs = {
+        'NotificationService': ServiceConfig.get_notification_service_config(),
+        'PaymentService': ServiceConfig.get_payment_service_config(),
+        'MapsService': ServiceConfig.get_maps_service_config(),
+    }
+    
+    for service_name, config_requirements in service_configs.items():
+        try:
+            # Import service class dynamically
+            module_name = f"business_app.services.{service_name.lower().replace('service', '_service')}"
+            module = __import__(module_name, fromlist=[service_name])
+            service_class = getattr(module, service_name)
+            
+            is_valid = ServiceConfig.validate_service_config(service_class, config_requirements)
+            validation_results[service_name] = is_valid
+            
+        except ImportError:
+            validation_results[service_name] = False
+            logger.warning(f"Could not import {service_name} for validation")
+        except Exception as e:
+            validation_results[service_name] = False
+            logger.error(f"Error validating {service_name} config: {e}")
+    
+    return validation_results
+
+
+def get_service_metrics():
+    """Get metrics about service usage"""
+    metrics = {
+        'request_services': len([attr for attr in dir(g) if attr.endswith('_service')]),
+        'singleton_services': len(ServiceFactory._instances),
+        'available_services': [
+            'auth_service', 'order_service', 'payment_service', 'delivery_service',
+            'notification_service', 'loyalty_service', 'analytics_service',
+            'subscription_service', 'file_storage_service', 'maps_service',
+            'inventory_service', 'token_service'
+        ]
+    }
+    
+    return metrics

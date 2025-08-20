@@ -1,0 +1,54 @@
+{% extends "frontend/base.html" %}
+
+{% block title %}{{ 'About Us'|translate }} - {{ company_name }}{% endblock %}
+
+{% block content %}
+        <!-- page-title -->
+        <section class="page-title">
+            <div class="bg-layer" style="background-image: url({{ url_for('static', filename='images/background/page-title.jpg') }});"></div>
+            <div class="auto-container">
+                <div class="content-box">
+                    <h1>{{ 'About Us'|translate }}</h1>
+                    <ul class="bread-crumb clearfix">
+                        <li><a href="{{ url_for('frontend.index') }}">{{ 'Home'|translate }}</a></li>
+                        <li>{{ 'About'|translate }}</li>
+                    </ul>
+                </div>
+            </div>
+        </section>
+        <!-- page-title end -->
+
+        <!-- about-section -->
+        <section class="about-section">
+            <div class="auto-container">
+                <div class="row align-items-center clearfix">
+                    <div class="col-lg-6 col-md-12 col-sm-12 image-column">
+                        <div class="image_block_2">
+                            <div class="image-box">
+                                <figure class="image image-1 clearfix"><img src="{{ url_for('static', filename='images/resource/about-2.png') }}" alt="{{ 'About Us'|translate }}"></figure>
+                                <figure class="image image-2"><img src="{{ url_for('static', filename='images/resource/about-3.png') }}" alt="{{ 'Quality Water'|translate }}"></figure>
+                                <div class="text">
+                                    <h2>10+</h2>
+                                    <h6>{{ 'Years Experience'|translate }}</h6>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-lg-6 col-md-12 col-sm-12 content-column">
+                        <div class="content_block_1">
+                            <div class="content-box">
+                                <div class="sec-title">
+                                    <h2>{{ 'Leading Water Delivery Service in Uzbekistan'|translate }}</h2>
+                                </div>
+                                <div class="text">
+                                    <p>{{ 'Blue Stream Group has been serving communities across Uzbekistan with premium water delivery services for over a decade. Our commitment to quality, reliability, and customer satisfaction has made us the trusted choice for thousands of families and businesses.'|translate }}</p>
+                                    <p>{{ 'We use state-of-the-art filtration technology and maintain the highest standards of hygiene and safety in our production and delivery processes.'|translate }}</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+        <!-- about-section end -->
+{% endblock %}

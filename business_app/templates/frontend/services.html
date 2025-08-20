@@ -1,0 +1,66 @@
+{% extends "frontend/base.html" %}
+
+{% block title %}{{ 'Services'|translate }} - {{ company_name }}{% endblock %}
+
+{% block content %}
+        <!-- page-title -->
+        <section class="page-title">
+            <div class="bg-layer" style="background-image: url({{ url_for('static', filename='images/background/page-title.jpg') }});"></div>
+            <div class="auto-container">
+                <div class="content-box">
+                    <h1>{{ 'Our Services'|translate }}</h1>
+                    <ul class="bread-crumb clearfix">
+                        <li><a href="{{ url_for('frontend.index') }}">{{ 'Home'|translate }}</a></li>
+                        <li>{{ 'Services'|translate }}</li>
+                    </ul>
+                </div>
+            </div>
+        </section>
+        <!-- page-title end -->
+
+        <!-- service-section -->
+        <section class="service-section">
+            <div class="auto-container">
+                <div class="sec-title centred">
+                    <h2>{{ 'Premium Water Delivery Services'|translate }}</h2>
+                    <p>{{ 'We provide comprehensive water solutions for homes and businesses'|translate }}</p>
+                </div>
+                <div class="row clearfix">
+                    <div class="col-lg-4 col-md-6 col-sm-12 service-block">
+                        <div class="service-block-one">
+                            <div class="inner-box">
+                                <div class="icon-box">
+                                    <i class="flaticon-delivery-truck"></i>
+                                </div>
+                                <h4>{{ 'Home Delivery'|translate }}</h4>
+                                <p>{{ 'Fast and reliable water delivery to your doorstep with flexible scheduling options.'|translate }}</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-lg-4 col-md-6 col-sm-12 service-block">
+                        <div class="service-block-one">
+                            <div class="inner-box">
+                                <div class="icon-box">
+                                    <i class="flaticon-office-building"></i>
+                                </div>
+                                <h4>{{ 'Office Solutions'|translate }}</h4>
+                                <p>{{ 'Complete water solutions for offices including dispensers and regular delivery schedules.'|translate }}</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-lg-4 col-md-6 col-sm-12 service-block">
+                        <div class="service-block-one">
+                            <div class="inner-box">
+                                <div class="icon-box">
+                                    <i class="flaticon-subscription"></i>
+                                </div>
+                                <h4>{{ 'Subscription Plans'|translate }}</h4>
+                                <p>{{ 'Convenient subscription plans with automatic delivery and special discounts.'|translate }}</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+        <!-- service-section end -->
+{% endblock %}

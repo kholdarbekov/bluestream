@@ -1,0 +1,82 @@
+groups:
+  - name: bluestream_alerts
+    rules:
+      # High CPU usage
+      - alert: HighCPUUsage
+        expr: rate(cpu_usage_total[5m]) > 0.8
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High CPU usage detected"
+          description: "CPU usage is above 80% for more than 5 minutes"
+
+      # High memory usage
+      - alert: HighMemoryUsage
+        expr: (memory_usage_bytes / memory_limit_bytes) > 0.9
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High memory usage detected"
+          description: "Memory usage is above 90% for more than 2 minutes"
+
+      # Database connection issues
+      - alert: DatabaseConnectionIssues
+        expr: up{job="postgres"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Database is down"
+          description: "PostgreSQL database is not responding"
+
+      # Redis connection issues
+      - alert: RedisConnectionIssues
+        expr: up{job="redis"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Redis is down"
+          description: "Redis cache server is not responding"
+
+      # Application health check failures
+      - alert: ApplicationDown
+        expr: up{job="business_app"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Business application is down"
+          description: "Main business application is not responding to health checks"
+
+      # High error rate
+      - alert: HighErrorRate
+        expr: rate(http_requests_total{status=~"5.."}[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High error rate detected"
+          description: "HTTP 5xx error rate is above 10% for more than 5 minutes"
+
+      # Disk space usage
+      - alert: DiskSpaceUsage
+        expr: (disk_used_bytes / disk_total_bytes) > 0.85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High disk usage"
+          description: "Disk usage is above 85%"
+
+      # Celery queue backup
+      - alert: CeleryQueueBackup
+        expr: celery_queue_length > 1000
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Celery queue backup"
+          description: "Celery queue has more than 1000 pending tasks"

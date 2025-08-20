@@ -1,0 +1,92 @@
+/**
+ * Custom Base Template Styles
+ * Water Delivery Business Platform
+ */
+
+/* Loyalty Badge Styles */
+.loyalty-badge {
+    background: linear-gradient(45deg, #007bff, #0056b3);
+    color: white;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.points-balance {
+    color: #007bff;
+    font-weight: 600;
+}
+
+/* Product Grid */
+.product-grid .product-item {
+    margin-bottom: 30px;
+}
+
+/* Cart Counter - Use theme default styling for .cart-box span */
+
+/* Language Selector */
+.language-selector {
+    margin-left: 10px;
+}
+
+.language-selector .btn {
+    border-color: #333;
+    color: #333;
+    background: rgba(255, 255, 255, 0.9);
+    font-weight: 600;
+    min-width: 45px;
+}
+
+.language-selector .btn:hover {
+    background: #333;
+    color: white;
+    border-color: #333;
+}
+
+.language-selector .btn:focus {
+    box-shadow: 0 0 0 0.2rem rgba(0, 0, 0, 0.25);
+}
+
+/* Sticky header language selector */
+.sticky-header .language-selector .btn {
+    background: rgba(255, 255, 255, 0.95);
+    border-color: #555;
+    color: #555;
+}
+
+/* User Menu */
+.user-menu {
+    position: relative;
+}
+
+/* Notification Dot */
+.notification-dot {
+    width: 8px;
+    height: 8px;
+    background: #ff6b35;
+    border-radius: 50%;
+    position: absolute;
+    top: 5px;
+    right: 5px;
+}
+
+/* Header Improvements */
+.sticky-header .nav-right {
+    display: flex;
+    align-items: center;
+}
+
+.sticky-header .nav-right li {
+    margin-left: 15px;
+}
+
+.sticky-header .cart-box {
+    position: relative;
+}
+
+/* Login button styling */
+.account-info .theme-btn {
+    padding: 8px 16px;
+    font-size: 13px;
+}

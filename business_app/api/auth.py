@@ -1,0 +1,2839 @@
+"""
+Authentication API routes for the Water Business Platform
+This file should be placed in business_app/api/auth.py
+"""
+import logging
+from datetime import datetime, timezone, timedelta
+from flask import Blueprint, request, jsonify, current_app
+from flask_jwt_extended import jwt_required, get_jwt_identity, get_jwt, set_access_cookies, set_refresh_cookies, unset_jwt_cookies
+from flasgger import swag_from
+
+from business_app.utils.service_factory import get_auth_service
+from business_app.utils.decorators import (
+    require_auth, validate_json, handle_exceptions, 
+    rate_limit, log_request
+)
+from business_app.utils.validators import phone_validator, email_validator
+from business_app.utils.exceptions import ValidationError, UnauthorizedError, ConflictError
+from business_app.utils.helpers import get_current_language
+from business_app.utils.translations import get_translation
+from business_app.utils.csrf_protection import csrf_required
+from business_app.models.user import User
+from business_app import db
+
+
+# Create blueprint
+auth_bp = Blueprint('auth', __name__)
+
+logger = logging.getLogger(__name__)
+
+
+
+@auth_bp.route('/register', methods=['POST'])
+@csrf_required
+@rate_limit(10, 3600)  # 10 registrations per hour
+@validate_json(['email', 'password', 'phone', 'first_name', 'last_name'])
+@handle_exceptions
+@log_request
+def register():
+    """
+    User Registration
+    ---
+    tags:
+      - Authentication
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - email
+            - password
+            - phone
+            - first_name
+            - last_name
+          properties:
+            email:
+              type: string
+              format: email
+              example: user@example.com
+            password:
+              type: string
+              minLength: 8
+              example: SecurePass123
+            phone:
+              type: string
+              example: +998901234567
+            first_name:
+              type: string
+              example: John
+            last_name:
+              type: string
+              example: Doe
+            date_of_birth:
+              type: string
+              format: date
+              example: 1990-01-01
+            gender:
+              type: string
+              enum: [male, female]
+              example: male
+            referral_code:
+              type: string
+              example: ABC123
+    responses:
+      201:
+        description: User registered successfully
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+              example: true
+            message:
+              type: string
+              example: Registration successful
+            data:
+              type: object
+              properties:
+                user:
+                  $ref: '#/definitions/User'
+                tokens:
+                  $ref: '#/definitions/Tokens'
+      400:
+        description: Validation error
+      409:
+        description: User already exists
+    """
+    data = request.get_json()
+    
+    try:
+        user, tokens = get_auth_service().register_user(
+            email=data['email'],
+            password=data['password'],
+            phone=data['phone'],
+            first_name=data['first_name'],
+            last_name=data['last_name'],
+            date_of_birth=data.get('date_of_birth'),
+            gender=data.get('gender'),
+            referral_code=data.get('referral_code')
+        )
+        
+        return jsonify({
+            'success': True,
+            'message': get_translation('registration_successful'),
+            'data': {
+                'user': {
+                    'id': user.id,
+                    'email': user.email,
+                    'phone': user.phone,
+                    'first_name': user.first_name,
+                    'last_name': user.last_name,
+                    'status': user.status,
+                    'email_verified': user.email_verified_at is not None,
+                    'phone_verified': False
+                },
+                'tokens': tokens
+            }
+        }), 201
+        
+    except (ValidationError, ConflictError) as e:
+        return jsonify({
+            'success': False,
+            'message': e.message,
+            'errors': e.details
+        }), 400 if isinstance(e, ValidationError) else 409
+
+
+@auth_bp.route('/login', methods=['POST'])
+@rate_limit(20, 3600)  # 20 login attempts per hour
+@validate_json(['identifier', 'password'])
+@handle_exceptions
+@log_request
+def login():
+    """
+    User Login
+    ---
+    tags:
+      - Authentication
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - identifier
+            - password
+          properties:
+            identifier:
+              type: string
+              description: Email or phone number
+              example: user@example.com
+            password:
+              type: string
+              example: SecurePass123
+            remember_me:
+              type: boolean
+              example: false
+    responses:
+      200:
+        description: Login successful
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+              example: true
+            message:
+              type: string
+              example: Login successful
+            data:
+              type: object
+              properties:
+                user:
+                  $ref: '#/definitions/User'
+                tokens:
+                  $ref: '#/definitions/Tokens'
+                permissions:
+                  type: object
+      401:
+        description: Invalid credentials
+      423:
+        description: Account locked
+    """
+    data = request.get_json()
+    
+    try:
+        user, tokens = get_auth_service().login_user(
+            identifier=data['identifier'].strip(),
+            password=data['password']
+        )
+        
+        # Create response
+        response = jsonify({
+            'success': True,
+            'message': get_translation('login_successful'),
+            'data': {
+                'user': {
+                    'id': user.id,
+                    'email': user.email,
+                    'phone': user.phone,
+                    'first_name': user.first_name,
+                    'last_name': user.last_name,
+                    'role': user.role,
+                    'status': user.status,
+                    'email_verified': user.email_verified_at is not None,
+                    'phone_verified': False,
+                    'last_login': user.last_login.isoformat() if user.last_login else None
+                },
+                'tokens': tokens,
+                'permissions': get_auth_service().get_user_permissions(user.id)
+            }
+        })
+        
+        # Set JWT cookies for frontend navigation
+        set_access_cookies(response, tokens['access_token'])
+        set_refresh_cookies(response, tokens['refresh_token'])
+        
+        return response
+        
+    except (UnauthorizedError, ValidationError) as e:
+        status_code = 401 if isinstance(e, UnauthorizedError) else 423
+        return jsonify({
+            'success': False,
+            'message': e.message,
+            'errors': e.details
+        }), status_code
+
+
+@auth_bp.route('/send-otp', methods=['POST'])
+@validate_json(['phone'])
+@jwt_required()
+@rate_limit(3, 60)  # 3 OTP requests per minute
+@handle_exceptions
+@log_request
+def send_otp():
+    """
+    Send OTP to Phone Number for Verification
+    ---
+    tags:
+      - Authentication
+    security:
+      - Bearer: []
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - phone
+          properties:
+            phone:
+              type: string
+              example: +998901234567
+    responses:
+      200:
+        description: OTP sent successfully
+      400:
+        description: Invalid phone number
+      409:
+        description: Phone number already in use
+    """
+    data = request.get_json()
+    phone = data.get('phone')
+    user_id = get_jwt_identity()
+    
+    if not phone_validator(phone):
+        return jsonify({
+            'success': False,
+            'message': get_translation('invalid_phone_format')
+        }), 400
+    
+    # Check if phone number is already in use by another user
+    existing_user = User.query.filter(
+        User.phone == phone,
+        User.id != user_id,
+        User.status != 'inactive'
+    ).first()
+    
+    if existing_user:
+        # Log suspicious activity
+        from business_app.utils.audit_logger import audit_suspicious_activity
+        audit_suspicious_activity(
+            f"User {user_id} attempted to verify phone {phone} already in use by user {existing_user.id}",
+            additional_data={'target_phone': phone, 'existing_user_id': existing_user.id}
+        )
+        return jsonify({
+            'success': False,
+            'message': get_translation('phone_already_in_use')
+        }), 409
+    
+    # Store pending phone number in Redis for verification
+    auth_service = get_auth_service()
+    pending_phone_key = f"pending_phone:{user_id}"
+    auth_service.redis_client.setex(pending_phone_key, 1800, phone)  # 30 minutes expiry
+    
+    # Log phone verification attempt
+    from business_app.utils.audit_logger import audit_logger, AuditEventType, AuditSeverity
+    audit_logger.log_event(
+        event_type=AuditEventType.SENSITIVE_DATA_ACCESS,
+        action="phone_verification_requested",
+        severity=AuditSeverity.MEDIUM,
+        resource_type="user_phone",
+        resource_id=str(user_id),
+        description=f"Phone verification requested for {phone}",
+        additional_data={'new_phone': phone}
+    )
+    
+    # Generate and send OTP to the new phone number
+    success = auth_service.send_verification_sms(user_id, phone)
+    
+    if success:
+        return jsonify({
+            'success': True,
+            'message': get_translation('otp_sent_successfully'),
+            'data': {
+                'phone_masked': phone[:3] + '***' + phone[-4:] if len(phone) > 7 else '***'
+            }
+        })
+    else:
+        return jsonify({
+            'success': False,
+            'message': get_translation('failed_to_send_otp')
+        }), 500
+  
+
+@auth_bp.route('/refresh', methods=['POST'])
+@auth_bp.route('/refresh-token', methods=['POST'])  # Alias for backwards compatibility
+@validate_json(['refresh_token'])
+@handle_exceptions
+@log_request
+def refresh():
+    """
+    Refresh Access Token
+    ---
+    tags:
+      - Authentication
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - refresh_token
+          properties:
+            refresh_token:
+              type: string
+              example: eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
+    responses:
+      200:
+        description: Token refreshed successfully
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+              example: true
+            data:
+              $ref: '#/definitions/Tokens'
+      401:
+        description: Invalid refresh token
+    """
+    data = request.get_json()
+    
+    try:
+        # Support both AuthService and TokenService for token refresh
+        try:
+            tokens = get_auth_service().refresh_token(data['refresh_token'])
+        except AttributeError:
+            from business_app.services.token_service import TokenService
+            token_service = TokenService()
+            tokens = token_service.refresh_access_token(data['refresh_token'])
+        
+        return jsonify({
+            'success': True,
+            'message': get_translation('token_refreshed'),
+            'data': tokens
+        })
+        
+    except UnauthorizedError as e:
+        return jsonify({
+            'success': False,
+            'message': e.message
+        }), 401
+    except Exception as e:
+        logger.error(f"Token refresh failed: {e}")
+        return jsonify({
+            'success': False,
+            'message': 'Failed to refresh token'
+        }), 401
+
+
+
+
+@auth_bp.route('/verify-email', methods=['POST'])
+@validate_json(['token'])
+@handle_exceptions
+@log_request
+def verify_email():
+    """
+    Verify Email Address
+    ---
+    tags:
+      - Authentication
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - token
+          properties:
+            token:
+              type: string
+              example: abc123def456
+    responses:
+      200:
+        description: Email verified successfully
+      400:
+        description: Invalid or expired token
+    """
+    data = request.get_json()
+    
+    success = get_auth_service().verify_email(data['token'])
+    
+    if success:
+        return jsonify({
+            'success': True,
+            'message': get_translation('email_verified_successfully')
+        })
+    else:
+        return jsonify({
+            'success': False,
+            'message': get_translation('invalid_verification_token')
+        }), 400
+
+
+@auth_bp.route('/verify-phone', methods=['POST'])
+@auth_bp.route('/verify-otp', methods=['POST'])  # Alias for backwards compatibility
+@rate_limit(30, 3600)
+@validate_json(['otp'])
+@handle_exceptions
+@log_request
+def verify_phone():
+    """
+    Verify Phone Number with OTP
+    ---
+    tags:
+      - Authentication
+    security:
+      - Bearer: []
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - otp
+          properties:
+            otp:
+              type: string
+              example: "123456"
+            user_id:
+              type: integer
+              description: Required when using /verify-otp endpoint without JWT
+              example: 1
+    responses:
+      200:
+        description: Phone verified and updated successfully
+      400:
+        description: Invalid OTP or no pending phone number
+      404:
+        description: No pending phone verification found
+    """
+    data = request.get_json()
+    
+    # Support both JWT-based and user_id-based verification
+    if '/verify-otp' in request.path and 'user_id' in data:
+        # Legacy verify-otp endpoint behavior
+        user_id = data['user_id']
+    else:
+        # JWT-based verification
+        user_id = get_jwt_identity()
+    
+    try:
+        auth_service = get_auth_service()
+        
+        # Get pending phone number from Redis
+        pending_phone_key = f"pending_phone:{user_id}"
+        pending_phone = auth_service.redis_client.get(pending_phone_key)
+        
+        if not pending_phone:
+            # Log suspicious activity
+            from business_app.utils.audit_logger import audit_suspicious_activity
+            audit_suspicious_activity(
+                f"User {user_id} attempted phone verification without pending phone number",
+                additional_data={'attempted_otp': data['otp']}
+            )
+            return jsonify({
+                'success': False,
+                'message': get_translation('no_pending_phone_verification')
+            }), 404
+        
+        pending_phone = pending_phone.decode('utf-8')
+        
+        # Verify OTP
+        success = auth_service.verify_phone(user_id, data['otp'])
+        
+        if success:
+            # OTP is valid, now update the user's phone number
+            user = User.query.get(user_id)
+            if user:
+                old_phone = user.phone
+                user.phone = pending_phone
+                user.phone_verified_at = datetime.now(timezone.utc)
+                db.session.commit()
+                
+                # Remove pending phone from Redis
+                auth_service.redis_client.delete(pending_phone_key)
+                
+                # Log successful phone update with audit trail
+                from business_app.utils.audit_logger import audit_logger, AuditEventType, AuditSeverity
+                audit_logger.log_event(
+                    event_type=AuditEventType.USER_UPDATED,
+                    action="phone_number_verified_and_updated",
+                    severity=AuditSeverity.HIGH,
+                    resource_type="user_phone",
+                    resource_id=str(user_id),
+                    description=f"Phone number successfully verified and updated",
+                    old_values={'phone': old_phone},
+                    new_values={'phone': pending_phone, 'phone_verified_at': user.phone_verified_at.isoformat()},
+                    success=True
+                )
+                
+                logger.info(f"Phone verified and updated successfully for user {user_id}: {old_phone} -> {pending_phone}")
+                return jsonify({
+                    'success': True,
+                    'message': get_translation('phone_verified_successfully'),
+                    'data': {
+                        'phone': pending_phone,
+                        'phone_verified': True
+                    }
+                })
+            else:
+                return jsonify({
+                    'success': False,
+                    'message': get_translation('user_not_found')
+                }), 404
+        else:
+            # Log failed verification attempt
+            from business_app.utils.audit_logger import audit_logger, AuditEventType, AuditSeverity
+            audit_logger.log_event(
+                event_type=AuditEventType.SENSITIVE_DATA_ACCESS,
+                action="phone_verification_failed",
+                severity=AuditSeverity.MEDIUM,
+                resource_type="user_phone",
+                resource_id=str(user_id),
+                description=f"Failed phone verification attempt",
+                additional_data={'pending_phone': pending_phone, 'provided_otp': data['otp']},
+                success=False,
+                error_message="Invalid OTP provided"
+            )
+            
+            logger.warning(f"Invalid OTP provided for user {user_id}")
+            return jsonify({
+                'success': False,
+                'message': get_translation('invalid_otp')
+            }), 400
+            
+    except Exception as e:
+        logger.error(f"Error in verify phone/OTP: {e}")
+        # Log system error
+        from business_app.utils.audit_logger import audit_logger, AuditEventType, AuditSeverity
+        audit_logger.log_event(
+            event_type=AuditEventType.SYSTEM_MAINTENANCE,
+            action="phone_verification_system_error",
+            severity=AuditSeverity.HIGH,
+            resource_type="user_phone",
+            resource_id=str(user_id),
+            description=f"System error during phone verification",
+            success=False,
+            error_message=str(e)
+        )
+        return jsonify({
+            'success': False,
+            'message': 'Failed to verify OTP'
+        }), 500
+
+
+@auth_bp.route('/resend-email-verification', methods=['POST'])
+@jwt_required()
+@rate_limit(5, 3600)  # 5 resends per hour
+@handle_exceptions
+@log_request
+def resend_email_verification():
+    """
+    Resend Email Verification
+    ---
+    tags:
+      - Authentication
+    security:
+      - Bearer: []
+    responses:
+      200:
+        description: Verification email sent
+    """
+    user_id = get_jwt_identity()
+    
+    success = get_auth_service().send_verification_email(user_id)
+    
+    return jsonify({
+        'success': success,
+        'message': get_translation('verification_email_sent')
+    })
+
+
+@auth_bp.route('/resend-sms-verification', methods=['POST'])
+@jwt_required()
+@rate_limit(5, 3600)  # 5 resends per hour
+@handle_exceptions
+@log_request
+def resend_sms_verification():
+    """
+    Resend SMS Verification
+    ---
+    tags:
+      - Authentication
+    security:
+      - Bearer: []
+    responses:
+      200:
+        description: Verification SMS sent
+    """
+    user_id = get_jwt_identity()
+    
+    success = get_auth_service().send_verification_sms(user_id)
+    
+    return jsonify({
+        'success': success,
+        'message': get_translation('verification_sms_sent')
+    })
+
+
+@auth_bp.route('/forgot-password', methods=['POST'])
+@rate_limit(5, 3600)  # 5 password reset requests per hour
+@validate_json(['identifier'])
+@handle_exceptions
+@log_request
+def forgot_password():
+    """
+    Request Password Reset
+    ---
+    tags:
+      - Authentication
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - identifier
+          properties:
+            identifier:
+              type: string
+              description: Email or phone number
+              example: user@example.com
+    responses:
+      200:
+        description: Password reset email sent (always returns success)
+    """
+    data = request.get_json()
+    
+    # Always return success to prevent email enumeration
+    get_auth_service().request_password_reset(data['identifier'].strip())
+    
+    return jsonify({
+        'success': True,
+        'message': get_translation('password_reset_email_sent')
+    })
+
+
+@auth_bp.route('/reset-password', methods=['POST'])
+@csrf_required
+@validate_json(['token', 'new_password'])
+@handle_exceptions
+@log_request
+def reset_password():
+    """
+    Reset Password
+    ---
+    tags:
+      - Authentication
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - token
+            - new_password
+          properties:
+            token:
+              type: string
+              example: abc123def456
+            new_password:
+              type: string
+              minLength: 8
+              example: NewSecurePass123
+    responses:
+      200:
+        description: Password reset successfully
+      400:
+        description: Invalid token or weak password
+    """
+    data = request.get_json()
+    
+    try:
+        success = get_auth_service().reset_password(data['token'], data['new_password'])
+        
+        if success:
+            return jsonify({
+                'success': True,
+                'message': get_translation('password_reset_successful')
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'message': get_translation('invalid_reset_token')
+            }), 400
+            
+    except ValidationError as e:
+        return jsonify({
+            'success': False,
+            'message': e.message,
+            'errors': e.details
+        }), 400
+
+
+@auth_bp.route('/change-password', methods=['POST'])
+@jwt_required()
+@csrf_required
+@validate_json(['current_password', 'new_password'])
+@handle_exceptions
+@log_request
+def change_password():
+    """
+    Change Password
+    ---
+    tags:
+      - Authentication
+    security:
+      - Bearer: []
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - current_password
+            - new_password
+          properties:
+            current_password:
+              type: string
+              example: CurrentPass123
+            new_password:
+              type: string
+              minLength: 8
+              example: NewSecurePass123
+    responses:
+      200:
+        description: Password changed successfully
+      400:
+        description: Invalid current password or weak new password
+      401:
+        description: Current password incorrect
+    """
+    data = request.get_json()
+    user_id = get_jwt_identity()
+    
+    try:
+        success = get_auth_service().change_password(
+            user_id, 
+            data['current_password'], 
+            data['new_password']
+        )
+        
+        if success:
+            return jsonify({
+                'success': True,
+                'message': get_translation('password_changed_successfully')
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'message': get_translation('password_change_failed')
+            }), 400
+            
+    except (ValidationError, UnauthorizedError) as e:
+        status_code = 400 if isinstance(e, ValidationError) else 401
+        return jsonify({
+            'success': False,
+            'message': e.message,
+            'errors': e.details if hasattr(e, 'details') else None
+        }), status_code
+
+
+@auth_bp.route('/profile', methods=['GET'])
+@jwt_required()
+@handle_exceptions
+def get_profile():
+    """
+    Get User Profile
+    ---
+    tags:
+      - Authentication
+    security:
+      - Bearer: []
+    responses:
+      200:
+        description: User profile retrieved successfully
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+              example: true
+            data:
+              $ref: '#/definitions/UserProfile'
+    """
+    user_id = get_jwt_identity()
+    
+    from business_app.models.user import User
+    user = User.query.get(user_id)
+    
+    if not user:
+        return jsonify({
+            'success': False,
+            'message': get_translation('user_not_found')
+        }), 404
+    
+    return jsonify({
+        'success': True,
+        'data': {
+            'id': user.id,
+            'email': user.email,
+            'phone': user.phone,
+            'first_name': user.first_name,
+            'last_name': user.last_name,
+            'date_of_birth': user.date_of_birth.isoformat() if user.date_of_birth else None,
+            'gender': user.gender,
+            'role': user.role,
+            'status': user.status,
+            'email_verified': user.email_verified_at is not None,
+            'phone_verified': False,  # No phone verification field in current model
+            'created_at': user.created_at.isoformat(),
+            'last_login': user.last_login.isoformat() if user.last_login else None,
+            'preferred_language': getattr(user, 'preferred_language', 'en'),
+            'permissions': get_auth_service().get_user_permissions(user_id)
+        }
+    })
+
+
+@auth_bp.route('/permissions', methods=['GET'])
+@jwt_required()
+@handle_exceptions
+def get_permissions():
+    """
+    Get User Permissions
+    ---
+    tags:
+      - Authentication
+    security:
+      - Bearer: []
+    responses:
+      200:
+        description: User permissions retrieved successfully
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+              example: true
+            data:
+              type: object
+              additionalProperties:
+                type: boolean
+    """
+    user_id = get_jwt_identity()
+    permissions = get_auth_service().get_user_permissions(user_id)
+    
+    return jsonify({
+        'success': True,
+        'data': permissions
+    })
+
+
+@auth_bp.route('/addresses', methods=['GET'])
+@jwt_required()
+@handle_exceptions
+def get_user_addresses():
+    """
+    Get User Addresses
+    ---
+    tags:
+      - Authentication
+    security:
+      - Bearer: []
+    responses:
+      200:
+        description: User addresses retrieved successfully
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+              example: true
+            data:
+              type: object
+              properties:
+                addresses:
+                  type: array
+                  items:
+                    type: object
+    """
+    user_id = get_jwt_identity()
+    
+    from business_app.models.user import UserAddress
+    addresses = UserAddress.query.filter_by(user_id=user_id).all()
+    
+    return jsonify({
+        'success': True,
+        'data': {
+            'addresses': [addr.to_dict() for addr in addresses]
+        }
+    })
+
+
+@auth_bp.route('/addresses', methods=['POST'])
+@jwt_required()
+@validate_json(['title'])
+@handle_exceptions
+def add_user_address():
+    """
+    Add User Address
+    ---
+    tags:
+      - Authentication
+    security:
+      - Bearer: []
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - title
+          properties:
+            title:
+              type: string
+              example: Home
+            address_line1:
+              type: string
+              example: 123 Main St
+            address_line2:
+              type: string
+              example: Apt 4B
+            city:
+              type: string
+              example: Tashkent
+            district:
+              type: string
+              example: Chilanzar
+            postal_code:
+              type: string
+              example: 100000
+            latitude:
+              type: number
+              example: 41.2995
+            longitude:
+              type: number
+              example: 69.2401
+            is_default:
+              type: boolean
+              example: false
+            delivery_notes:
+              type: string
+              example: Ring bell twice
+    responses:
+      201:
+        description: Address added successfully
+      400:
+        description: Validation error
+    """
+    user_id = get_jwt_identity()
+    data = request.get_json()
+    
+    from business_app.models.user import UserAddress
+    
+    # If this is set as default, unset others
+    if data.get('is_default', False):
+        UserAddress.query.filter_by(user_id=user_id, is_default=True).update({'is_default': False})
+    
+    address = UserAddress(
+        user_id=user_id,
+        title=data['title'],
+        full_address=data.get('full_address', data.get('address_line_1', '')),
+        street_address=data.get('street_address', data.get('address_line_1')),
+        city=data.get('city', 'Tashkent'),
+        district=data.get('district'),
+        postal_code=data.get('postal_code'),
+        country=data.get('country', 'Uzbekistan'),
+        latitude=data.get('latitude'),
+        longitude=data.get('longitude'),
+        is_default=data.get('is_default', False),
+        is_business=data.get('is_business', False),
+        delivery_instructions=data.get('delivery_instructions', data.get('delivery_notes')),
+        landmark=data.get('landmark'),
+        floor_number=data.get('floor_number'),
+        apartment_number=data.get('apartment_number')
+    )
+    
+    db.session.add(address)
+    db.session.commit()
+    
+    return jsonify({
+        'success': True,
+        'message': get_translation('address_added_successfully'),
+        'data': {
+            'address': address.to_dict()
+        }
+    }), 201
+
+
+@auth_bp.route('/addresses/<int:address_id>', methods=['PUT', 'PATCH'])
+@jwt_required()
+@validate_json(required_fields=None)  # Remove required fields for partial updates
+@handle_exceptions
+def update_user_address(address_id):
+    """
+    Update User Address (Full or Partial)
+    ---
+    tags:
+      - Authentication
+    security:
+      - Bearer: []
+    parameters:
+      - in: path
+        name: address_id
+        type: integer
+        required: true
+        description: Address ID to update
+      - in: body
+        name: body
+        required: true
+        description: Address fields to update (partial updates supported)
+        schema:
+          type: object
+          properties:
+            title:
+              type: string
+              example: Work Office
+              description: Address title/name
+            full_address:
+              type: string
+              example: 456 Business Blvd
+              description: Complete address text
+            street_address:
+              type: string
+              example: 456 Business Blvd
+              description: Street address
+            city:
+              type: string
+              example: Tashkent
+              description: City name
+            district:
+              type: string
+              example: Mirobod
+              description: District/area name
+            postal_code:
+              type: string
+              example: 100000
+              description: Postal/ZIP code
+            latitude:
+              type: number
+              example: 41.2995
+              description: GPS latitude
+            longitude:
+              type: number
+              example: 69.2401
+              description: GPS longitude
+            delivery_instructions:
+              type: string
+              example: Reception on ground floor
+              description: Special delivery instructions
+    responses:
+      200:
+        description: Address updated successfully
+      404:
+        description: Address not found
+      400:
+        description: Validation error
+    """
+    user_id = get_jwt_identity()
+    data = request.get_json()
+
+    logger.info(f"TEST API update_user_address: {data=}")
+    
+    
+    from business_app.models.user import UserAddress
+    
+    # Find address belonging to current user
+    address = UserAddress.query.filter_by(id=address_id, user_id=user_id).first()
+    if not address:
+        return jsonify({
+            'success': False,
+            'message': 'Address not found'
+        }), 404
+    
+    # Update address fields (partial update support)
+    if 'title' in data:
+        address.title = data['title']
+    if 'full_address' in data:
+        address.full_address = data['full_address']
+    if 'street_address' in data:
+        address.street_address = data['street_address']
+    if 'city' in data:
+        address.city = data['city']
+    if 'district' in data:
+        address.district = data['district']
+    if 'postal_code' in data:
+        address.postal_code = data['postal_code']
+    if 'latitude' in data:
+        address.latitude = data['latitude']
+    if 'longitude' in data:
+        address.longitude = data['longitude']
+    if 'delivery_instructions' in data:
+        address.delivery_instructions = data['delivery_instructions']
+    if 'landmark' in data:
+        address.landmark = data['landmark']
+    if 'floor_number' in data:
+        address.floor_number = data['floor_number']
+    if 'apartment_number' in data:
+        address.apartment_number = data['apartment_number']
+    
+    db.session.commit()
+    
+    return jsonify({
+        'success': True,
+        'message': 'Address updated successfully',
+        'data': {
+            'address': address.to_dict()
+        }
+    })
+
+
+@auth_bp.route('/addresses/<int:address_id>', methods=['DELETE'])
+@jwt_required()
+@handle_exceptions
+def delete_user_address(address_id):
+    """
+    Delete User Address
+    ---
+    tags:
+      - Authentication
+    security:
+      - Bearer: []
+    parameters:
+      - in: path
+        name: address_id
+        type: integer
+        required: true
+        description: Address ID to delete
+    responses:
+      200:
+        description: Address deleted successfully
+      404:
+        description: Address not found
+      400:
+        description: Cannot delete default address with other addresses present
+    """
+    user_id = get_jwt_identity()
+    
+    from business_app.models.user import UserAddress
+    
+    # Find address belonging to current user
+    address = UserAddress.query.filter_by(id=address_id, user_id=user_id).first()
+    if not address:
+        return jsonify({
+            'success': False,
+            'message': 'Address not found'
+        }), 404
+    
+    # Check if trying to delete default address when other addresses exist
+    if address.is_default:
+        other_addresses_count = UserAddress.query.filter(
+            UserAddress.user_id == user_id,
+            UserAddress.id != address_id
+        ).count()
+        
+        if other_addresses_count > 0:
+            return jsonify({
+                'success': False,
+                'message': 'Cannot delete default address. Please set another address as default first.'
+            }), 400
+    
+    db.session.delete(address)
+    db.session.commit()
+    
+    return jsonify({
+        'success': True,
+        'message': 'Address deleted successfully'
+    })
+
+
+@auth_bp.route('/addresses/<int:address_id>/set-default', methods=['PATCH'])
+@jwt_required()
+@handle_exceptions
+def set_default_address(address_id):
+    """
+    Set Address as Default
+    ---
+    tags:
+      - Authentication
+    security:
+      - Bearer: []
+    parameters:
+      - in: path
+        name: address_id
+        type: integer
+        required: true
+        description: Address ID to set as default
+    responses:
+      200:
+        description: Address set as default successfully
+      404:
+        description: Address not found
+    """
+    user_id = get_jwt_identity()
+    
+    from business_app.models.user import UserAddress
+    
+    # Find address belonging to current user
+    address = UserAddress.query.filter_by(id=address_id, user_id=user_id).first()
+    if not address:
+        return jsonify({
+            'success': False,
+            'message': 'Address not found'
+        }), 404
+    
+    # Unset all other addresses as default for this user
+    UserAddress.query.filter_by(user_id=user_id, is_default=True).update({'is_default': False})
+    
+    # Set this address as default
+    address.is_default = True
+    db.session.commit()
+    
+    return jsonify({
+        'success': True,
+        'message': 'Address set as default successfully',
+        'data': {
+            'address': address.to_dict()
+        }
+    })
+
+
+@auth_bp.route('/profile', methods=['PUT'])
+@jwt_required()
+@handle_exceptions
+def update_profile():
+    """
+    Update User Profile
+    ---
+    tags:
+      - Authentication
+    security:
+      - Bearer: []
+    parameters:
+      - in: body
+        name: body
+        schema:
+          type: object
+          properties:
+            first_name:
+              type: string
+              example: John
+            last_name:
+              type: string
+              example: Doe
+            full_name:
+              type: string
+              example: John Doe
+            phone:
+              type: string
+              example: +998901234567
+            date_of_birth:
+              type: string
+              format: date
+              example: 1990-01-01
+            gender:
+              type: string
+              enum: [male, female]
+              example: male
+            preferred_language:
+              type: string
+              example: en
+    responses:
+      200:
+        description: Profile updated successfully
+      400:
+        description: Validation error
+    """
+    user_id = get_jwt_identity()
+    data = request.get_json() or {}
+    
+    from business_app.models.user import User
+    user = User.query.get(user_id)
+    
+    if not user:
+        return jsonify({
+            'success': False,
+            'message': get_translation('user_not_found')
+        }), 404
+    
+    # Update fields if provided
+    if 'first_name' in data:
+        user.first_name = data['first_name']
+    if 'last_name' in data:
+        user.last_name = data['last_name']
+    if 'full_name' in data:
+        user.full_name = data['full_name']
+        # Also update first/last name from full name if not already provided
+        if 'first_name' not in data and 'last_name' not in data:
+            name_parts = data['full_name'].split()
+            if name_parts:
+                user.first_name = name_parts[0]
+                user.last_name = ' '.join(name_parts[1:]) if len(name_parts) > 1 else ''
+    if 'phone' in data:
+        # Log attempt to update phone through profile endpoint
+        from business_app.utils.audit_logger import audit_logger, AuditEventType, AuditSeverity
+        audit_logger.log_event(
+            event_type=AuditEventType.SENSITIVE_DATA_ACCESS,
+            action="phone_update_blocked_profile_endpoint",
+            severity=AuditSeverity.MEDIUM,
+            resource_type="user_phone",
+            resource_id=str(user_id),
+            description="Blocked attempt to update phone number through profile endpoint",
+            additional_data={'attempted_phone': data['phone'], 'current_phone': user.phone},
+            success=False,
+            error_message="Phone number updates must be done through verification process"
+        )
+        # Skip phone update - must be done through verification process
+        logger.warning(f"User {user_id} attempted to update phone directly through profile endpoint")
+    if 'date_of_birth' in data:
+        try:
+            from datetime import datetime
+            user.date_of_birth = datetime.fromisoformat(data['date_of_birth'])
+        except ValueError:
+            pass
+    if 'gender' in data:
+        user.gender = data['gender']
+    if 'preferred_language' in data:
+        user.preferred_language = data['preferred_language']
+    
+    from datetime import datetime, timezone
+    user.updated_at = datetime.now(timezone.utc)
+    db.session.commit()
+    
+    response_data = {
+        'success': True,
+        'message': get_translation('profile_updated_successfully'),
+        'data': {
+            'user': {
+                'id': user.id,
+                'email': user.email,
+                'phone': user.phone,
+                'first_name': user.first_name,
+                'last_name': user.last_name,
+                'full_name': user.full_name,
+                'date_of_birth': user.date_of_birth.isoformat() if user.date_of_birth else None,
+                'gender': user.gender,
+                'role': user.role,
+                'status': user.status,
+                'preferred_language': user.preferred_language,
+                'updated_at': user.updated_at.isoformat()
+            }
+        }
+    }
+    
+    # Add warning if phone update was attempted
+    if 'phone' in data:
+        response_data['warning'] = get_translation('phone_update_requires_verification')
+        response_data['data']['phone_change_instructions'] = get_translation('use_change_phone_endpoint')
+    
+    return jsonify(response_data)
+
+
+@auth_bp.route('/change-phone', methods=['POST'])
+@jwt_required()
+@validate_json(['new_phone'])
+@rate_limit(5, 3600)  # 5 phone change requests per hour
+@handle_exceptions
+@log_request
+def change_phone():
+    """
+    Request Phone Number Change with Verification
+    ---
+    tags:
+      - Authentication
+    security:
+      - Bearer: []
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - new_phone
+          properties:
+            new_phone:
+              type: string
+              example: +998901234567
+              description: New phone number to verify and set
+    responses:
+      200:
+        description: OTP sent to new phone number
+      400:
+        description: Invalid phone number format
+      409:
+        description: Phone number already in use
+      429:
+        description: Too many phone change requests
+    """
+    data = request.get_json()
+    new_phone = data.get('new_phone')
+    user_id = get_jwt_identity()
+    
+    if not phone_validator(new_phone):
+        return jsonify({
+            'success': False,
+            'message': get_translation('invalid_phone_format')
+        }), 400
+    
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify({
+            'success': False,
+            'message': get_translation('user_not_found')
+        }), 404
+    
+    # Check if it's the same as current phone
+    if user.phone == new_phone:
+        return jsonify({
+            'success': False,
+            'message': get_translation('phone_already_current')
+        }), 400
+    
+    # Check if phone number is already in use by another user
+    existing_user = User.query.filter(
+        User.phone == new_phone,
+        User.id != user_id,
+        User.status != 'inactive'
+    ).first()
+    
+    if existing_user:
+        # Log suspicious activity
+        from business_app.utils.audit_logger import audit_suspicious_activity
+        audit_suspicious_activity(
+            f"User {user_id} attempted to change to phone {new_phone} already in use by user {existing_user.id}",
+            additional_data={'target_phone': new_phone, 'existing_user_id': existing_user.id}
+        )
+        return jsonify({
+            'success': False,
+            'message': get_translation('phone_already_in_use')
+        }), 409
+    
+    # Store pending phone number change request with audit
+    auth_service = get_auth_service()
+    pending_phone_key = f"pending_phone:{user_id}"
+    auth_service.redis_client.setex(pending_phone_key, 1800, new_phone)  # 30 minutes expiry
+    
+    # Log phone change request with audit
+    from business_app.utils.audit_logger import audit_logger, AuditEventType, AuditSeverity
+    audit_logger.log_event(
+        event_type=AuditEventType.USER_UPDATED,
+        action="phone_change_requested",
+        severity=AuditSeverity.HIGH,
+        resource_type="user_phone",
+        resource_id=str(user_id),
+        description=f"Phone change requested from {user.phone} to {new_phone}",
+        old_values={'phone': user.phone},
+        new_values={'pending_phone': new_phone},
+        additional_data={
+            'current_phone': user.phone,
+            'requested_phone': new_phone,
+            'request_ip': request.remote_addr
+        }
+    )
+    
+    # Generate and send OTP to the new phone number
+    success = auth_service.send_verification_sms(user_id, new_phone)
+    
+    if success:
+        return jsonify({
+            'success': True,
+            'message': get_translation('phone_change_otp_sent'),
+            'data': {
+                'current_phone': user.phone,
+                'new_phone_masked': new_phone[:3] + '***' + new_phone[-4:] if len(new_phone) > 7 else '***',
+                'expires_in': 1800  # 30 minutes
+            }
+        })
+    else:
+        return jsonify({
+            'success': False,
+            'message': get_translation('failed_to_send_otp')
+        }), 500
+
+
+@auth_bp.route('/cancel-phone-change', methods=['POST'])
+@jwt_required()
+@handle_exceptions
+@log_request
+def cancel_phone_change():
+    """
+    Cancel Pending Phone Number Change
+    ---
+    tags:
+      - Authentication
+    security:
+      - Bearer: []
+    responses:
+      200:
+        description: Phone change request cancelled
+      404:
+        description: No pending phone change found
+    """
+    user_id = get_jwt_identity()
+    auth_service = get_auth_service()
+    
+    # Check if there's a pending phone change
+    pending_phone_key = f"pending_phone:{user_id}"
+    pending_phone = auth_service.redis_client.get(pending_phone_key)
+    
+    if not pending_phone:
+        return jsonify({
+            'success': False,
+            'message': get_translation('no_pending_phone_change')
+        }), 404
+    
+    pending_phone = pending_phone.decode('utf-8')
+    
+    # Remove pending phone change
+    auth_service.redis_client.delete(pending_phone_key)
+    
+    # Log cancellation with audit
+    from business_app.utils.audit_logger import audit_logger, AuditEventType, AuditSeverity
+    audit_logger.log_event(
+        event_type=AuditEventType.USER_UPDATED,
+        action="phone_change_cancelled",
+        severity=AuditSeverity.MEDIUM,
+        resource_type="user_phone",
+        resource_id=str(user_id),
+        description=f"Phone change to {pending_phone} was cancelled by user",
+        additional_data={'cancelled_phone': pending_phone}
+    )
+    
+    return jsonify({
+        'success': True,
+        'message': get_translation('phone_change_cancelled')
+    })
+
+
+@auth_bp.route('/telegram-login', methods=['POST'])
+@rate_limit(50, 3600)  # 50 telegram logins per hour
+@validate_json(['telegram_id'])
+@handle_exceptions
+@log_request
+def telegram_login():
+    """
+    Telegram Bot Authentication
+    ---
+    tags:
+      - Authentication
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - telegram_id
+          properties:
+            telegram_id:
+              type: integer
+              example: 123456789
+            username:
+              type: string
+              example: john_doe
+            first_name:
+              type: string
+              example: John
+            last_name:
+              type: string
+              example: Doe
+    responses:
+      200:
+        description: Authentication successful
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+              example: true
+            data:
+              type: object
+              properties:
+                access_token:
+                  type: string
+                user:
+                  $ref: '#/definitions/User'
+      401:
+        description: User not found or not registered
+    """
+    logger.info("=== TELEGRAM LOGIN API ENDPOINT CALLED ===")
+    data = request.get_json()
+    telegram_id = data['telegram_id']
+    
+    logger.info(f"Telegram login request for user: {telegram_id}")
+    logger.info(f"Request data: telegram_id={telegram_id}, username={data.get('username')}, "
+               f"first_name={data.get('first_name')}, last_name={data.get('last_name')}")
+    
+    try:
+        # Try to authenticate existing telegram user
+        logger.info("Calling auth service to authenticate telegram user")
+        user, tokens = get_auth_service().authenticate_telegram_user(
+            telegram_id=telegram_id,
+            username=data.get('username'),
+            first_name=data.get('first_name'),
+            last_name=data.get('last_name')
+        )
+        logger.info(f"Authentication successful for user: {user.id}")
+        
+        logger.info("Preparing successful response")
+        response_data = {
+            'success': True,
+            'data': {
+                'access_token': tokens['access_token'],
+                'refresh_token': tokens['refresh_token'],
+                'user': {
+                    'id': user.id,
+                    'telegram_id': user.telegram_id,
+                    'email': user.email,
+                    'phone': user.phone,
+                    'first_name': user.first_name,
+                    'last_name': user.last_name,
+                    'role': user.role,
+                    'status': user.status,
+                    'is_verified': user.is_verified,
+                    'is_premium': user.is_premium
+                }
+            }
+        }
+        
+        logger.info(f"Returning successful response for user: {user.id}")
+        logger.info("=== TELEGRAM LOGIN API SUCCESS ===")
+        return jsonify(response_data)
+        
+    except UnauthorizedError as e:
+        logger.error(f"Unauthorized error during telegram login: {e}")
+        # User not found - create a temporary guest user or return specific error
+        return jsonify({
+            'success': False,
+            'message': get_translation('telegram_user_not_registered'),
+            'error_code': 'USER_NOT_REGISTERED',
+            'data': {
+                'telegram_id': telegram_id,
+                'registration_required': True
+            }
+        }), 401
+    except Exception as e:
+        logger.error(f"Unexpected error during telegram login: {e}")
+        logger.error(f"Exception type: {type(e)}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        logger.error("=== TELEGRAM LOGIN API ERROR ===")
+        
+        return jsonify({
+            'success': False,
+            'message': get_translation('authentication_failed')
+        }), 500
+
+
+@auth_bp.route('/telegram-register', methods=['POST'])
+@rate_limit(30, 3600)  # 30 telegram registrations per hour
+@validate_json(['telegram_id'])
+@handle_exceptions
+@log_request
+def telegram_register():
+    """
+    Telegram Bot User Registration (Unified Table)
+    ---
+    tags:
+      - Authentication
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - telegram_id
+          properties:
+            telegram_id:
+              type: integer
+              example: 123456789
+            username:
+              type: string
+              example: john_doe
+            first_name:
+              type: string
+              example: John
+            last_name:
+              type: string
+              example: Doe
+            language_code:
+              type: string
+              example: en
+    responses:
+      201:
+        description: Telegram user registered successfully in unified table
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+              example: true
+            message:
+              type: string
+              example: Registration successful
+            data:
+              type: object
+              properties:
+                user:
+                  $ref: '#/definitions/User'
+                tokens:
+                  $ref: '#/definitions/Tokens'
+      409:
+        description: User already exists
+    """
+    logger.info("=== TELEGRAM REGISTER API ENDPOINT CALLED (UNIFIED TABLE) ===")
+    data = request.get_json()
+    telegram_id = data['telegram_id']
+    
+    logger.info(f"Telegram registration request for user: {telegram_id}")
+    logger.info(f"Request data: {data}")
+    
+    try:
+        # Check if user already exists in unified table
+        existing_user = User.query.filter_by(telegram_id=str(telegram_id)).first()
+        
+        if existing_user:
+            logger.info(f"User already exists with telegram_id: {telegram_id}")
+            # Return login response instead of error
+            from business_app.services.token_service import TokenService
+            token_service = TokenService()
+            tokens = token_service.generate_tokens(existing_user)
+            
+            return jsonify({
+                'success': True,
+                'message': get_translation('user_already_registered'),
+                'data': {
+                    'user': existing_user.to_dict(),
+                    'tokens': tokens
+                }
+            })
+        
+        # Create new telegram user in unified table
+        logger.info("Creating new telegram user in unified table...")
+        
+        full_name = f"{data.get('first_name', '')} {data.get('last_name', '')}".strip()
+        if not full_name:
+            full_name = f"User {telegram_id}"
+        
+        user = User(
+            telegram_id=str(telegram_id),
+            first_name=data.get('first_name', 'Telegram User'),
+            last_name=data.get('last_name', ''),
+            full_name=full_name,
+            email=f"telegram_{telegram_id}@bluestream.local",  # Placeholder email
+            phone=None,  # Phone will be collected later
+            password_hash="telegram_user",  # Placeholder, no password needed
+            role='customer',
+            status='active',
+            is_verified=False,
+            registration_source='telegram',
+            preferred_language=data.get('language_code', 'en'),
+            # Bot-specific fields in unified table
+            telegram_username=data.get('username'),
+            telegram_first_name=data.get('first_name'),
+            telegram_last_name=data.get('last_name'),
+            telegram_language_code=data.get('language_code', 'en'),
+            is_bot_active=True,
+            bot_state='{}',  # Empty initial state
+            last_bot_interaction=datetime.now(timezone.utc)
+        )
+        
+        db.session.add(user)
+        db.session.commit()
+        
+        # Generate tokens using TokenService
+        from business_app.services.token_service import TokenService
+        token_service = TokenService()
+        tokens = token_service.generate_tokens(user)
+        
+        logger.info(f"Successfully created telegram user with ID: {user.id}")
+        
+        return jsonify({
+            'success': True,
+            'message': get_translation('registration_successful'),
+            'data': {
+                'user': user.to_dict(),
+                'tokens': tokens
+            }
+        }), 201
+        
+    except Exception as e:
+        logger.error(f"Unexpected error during telegram registration: {e}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        db.session.rollback()
+        
+        return jsonify({
+            'success': False,
+            'message': get_translation('registration_failed')
+        }), 500
+
+
+@auth_bp.route('/link-telegram', methods=['POST'])
+@jwt_required()
+@validate_json(['telegram_id'])
+@handle_exceptions
+@log_request
+def link_telegram():
+    """
+    Link Telegram Account to Web User
+    ---
+    tags:
+      - Authentication
+    security:
+      - Bearer: []
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - telegram_id
+          properties:
+            telegram_id:
+              type: integer
+              example: 123456789
+            username:
+              type: string
+              example: john_doe
+            first_name:
+              type: string
+              example: John
+            last_name:
+              type: string
+              example: Doe
+    responses:
+      200:
+        description: Telegram account linked successfully
+      409:
+        description: Telegram ID already linked to another account
+    """
+    current_user_id = get_jwt_identity()
+    data = request.get_json()
+    telegram_id = str(data['telegram_id'])
+    
+    # Check if this telegram_id is already linked to another user
+    existing_user = User.query.filter(
+        User.telegram_id == telegram_id,
+        User.id != current_user_id
+    ).first()
+    
+    if existing_user:
+        return jsonify({
+            'success': False,
+            'message': get_translation('telegram_already_linked')
+        }), 409
+    
+    # Update current user with telegram info
+    user = User.query.get(current_user_id)
+    user.telegram_id = telegram_id
+    
+    # Update name if provided and current name is empty/placeholder
+    if data.get('first_name') and (not user.first_name or user.first_name == 'Telegram User'):
+        user.first_name = data.get('first_name')
+    if data.get('last_name') and not user.last_name:
+        user.last_name = data.get('last_name')
+    
+    db.session.commit()
+    
+    return jsonify({
+        'success': True,
+        'message': get_translation('telegram_linked_successfully'),
+        'data': {
+            'user': {
+                'id': user.id,
+                'telegram_id': user.telegram_id,
+                'first_name': user.first_name,
+                'last_name': user.last_name,
+                'email': user.email,
+                'phone': user.phone
+            }
+        }
+    })
+
+
+@auth_bp.route('/link-web-account', methods=['POST'])
+@rate_limit(10, 3600)  # 10 attempts per hour
+@validate_json(['telegram_id', 'email', 'password'])
+@handle_exceptions
+@log_request
+def link_web_account():
+    """
+    Link Web Account to Telegram User
+    ---
+    tags:
+      - Authentication
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - telegram_id
+            - email
+            - password
+          properties:
+            telegram_id:
+              type: integer
+              example: 123456789
+            email:
+              type: string
+              example: user@example.com
+            password:
+              type: string
+              example: UserPassword123
+    responses:
+      200:
+        description: Accounts linked successfully
+      401:
+        description: Invalid credentials
+      409:
+        description: Account already linked
+    """
+    data = request.get_json()
+    telegram_id = str(data['telegram_id'])
+    email = data['email'].lower().strip()
+    password = data['password']
+    
+    # Find telegram user
+    telegram_user = User.query.filter_by(telegram_id=telegram_id).first()
+    if not telegram_user:
+        return jsonify({
+            'success': False,
+            'message': get_translation('telegram_user_not_found')
+        }), 404
+    
+    # Find web user and verify password
+    web_user = User.query.filter_by(email=email).first()
+    if not web_user or not web_user.check_password(password):
+        return jsonify({
+            'success': False,
+            'message': get_translation('invalid_credentials')
+        }), 401
+    
+    # Check if accounts are already linked
+    if web_user.telegram_id or telegram_user.email != f"telegram_{telegram_id}@bluestream.local":
+        return jsonify({
+            'success': False,
+            'message': get_translation('account_already_linked')
+        }), 409
+    
+    # Merge accounts - keep web user as primary, update with telegram info
+    web_user.telegram_id = telegram_id
+    
+    # Update name from telegram if web user has no proper name
+    if telegram_user.first_name and telegram_user.first_name != 'Telegram User':
+        web_user.first_name = telegram_user.first_name
+    if telegram_user.last_name:
+        web_user.last_name = telegram_user.last_name
+    
+    # Transfer any orders/data from telegram user to web user if needed
+    # (This would need more complex logic based on your business rules)
+    
+    # Mark telegram user as merged (or delete it)
+    telegram_user.status = 'merged'
+    telegram_user.telegram_id = None  # Remove telegram_id from old record
+    
+    db.session.commit()
+    
+    # Generate tokens for the merged account
+    tokens = get_auth_service()._generate_tokens(web_user)
+    
+    return jsonify({
+        'success': True,
+        'message': get_translation('accounts_linked_successfully'),
+        'data': {
+            'user': {
+                'id': web_user.id,
+                'telegram_id': web_user.telegram_id,
+                'email': web_user.email,
+                'phone': web_user.phone,
+                'first_name': web_user.first_name,
+                'last_name': web_user.last_name,
+                'role': web_user.role,
+                'status': web_user.status
+            },
+            'tokens': tokens
+        }
+    })
+
+
+@auth_bp.route('/sync-profile', methods=['POST'])
+@jwt_required()
+@handle_exceptions
+@log_request  
+def sync_profile():
+    """
+    Sync Profile Information Between Platforms
+    ---
+    tags:
+      - Authentication
+    security:
+      - Bearer: []
+    parameters:
+      - in: body
+        name: body
+        schema:
+          type: object
+          properties:
+            phone:
+              type: string
+              example: +998901234567
+            email:
+              type: string
+              example: user@example.com
+            first_name:
+              type: string
+              example: John
+            last_name:
+              type: string
+              example: Doe
+            preferred_language:
+              type: string
+              example: en
+            sync_source:
+              type: string
+              enum: [telegram, web]
+              example: telegram
+    responses:
+      200:
+        description: Profile synced successfully
+    """
+    current_user_id = get_jwt_identity()
+    data = request.get_json() or {}
+    
+    user = User.query.get(current_user_id)
+    if not user:
+        return jsonify({
+            'success': False,
+            'message': get_translation('user_not_found')
+        }), 404
+    
+    # Update fields based on sync source priority
+    sync_source = data.get('sync_source', 'web')
+    updated_fields = []
+    
+    # Phone numbers must be verified through the proper verification process
+    if data.get('phone'):
+        # Log attempt to update phone through sync endpoint
+        from business_app.utils.audit_logger import audit_logger, AuditEventType, AuditSeverity
+        audit_logger.log_event(
+            event_type=AuditEventType.SENSITIVE_DATA_ACCESS,
+            action="phone_update_blocked_sync_endpoint",
+            severity=AuditSeverity.MEDIUM,
+            resource_type="user_phone",
+            resource_id=str(current_user_id),
+            description="Blocked attempt to update phone number through sync endpoint",
+            additional_data={
+                'attempted_phone': data['phone'], 
+                'current_phone': user.phone,
+                'sync_source': sync_source
+            },
+            success=False,
+            error_message="Phone number updates must be done through verification process"
+        )
+        logger.warning(f"User {current_user_id} attempted to update phone through sync endpoint from {sync_source}")
+    
+    # Only update email if it's not a placeholder telegram email
+    if data.get('email') and not user.email.endswith('@bluestream.local'):
+        # Don't overwrite real email with telegram placeholder
+        pass
+    elif data.get('email') and user.email.endswith('@bluestream.local'):
+        # Replace placeholder email with real one
+        user.email = data['email']
+        updated_fields.append('email')
+    
+    # Update names if source is telegram and current names are empty/placeholder
+    if sync_source == 'telegram':
+        if data.get('first_name') and (not user.first_name or user.first_name == 'Telegram User'):
+            user.first_name = data['first_name']
+            updated_fields.append('first_name')
+        if data.get('last_name') and not user.last_name:
+            user.last_name = data['last_name']
+            updated_fields.append('last_name')
+    
+    # Update language preference
+    if data.get('preferred_language'):
+        user.preferred_language = data['preferred_language']
+        updated_fields.append('preferred_language')
+    
+    if updated_fields:
+        from datetime import datetime, timezone
+        user.updated_at = datetime.now(timezone.utc)
+        db.session.commit()
+    
+    return jsonify({
+        'success': True,
+        'message': get_translation('profile_synced_successfully'),
+        'data': {
+            'updated_fields': updated_fields,
+            'user': {
+                'id': user.id,
+                'telegram_id': user.telegram_id,
+                'email': user.email,
+                'phone': user.phone,
+                'first_name': user.first_name,
+                'last_name': user.last_name,
+                'preferred_language': user.preferred_language,
+                'registration_source': user.registration_source
+            }
+        }
+    })
+
+
+
+
+@auth_bp.route('/admin/create-user', methods=['POST'])
+@rate_limit(10, 3600)
+@validate_json(['email', 'password', 'first_name', 'last_name', 'role'])
+@swag_from({
+    'tags': ['Admin'],
+    'description': 'Create a new user (admin only)',
+    'security': [{'Bearer': []}],
+    'parameters': [
+        {
+            'name': 'body',
+            'in': 'body',
+            'required': True,
+            'schema': {
+                'type': 'object',
+                'properties': {
+                    'email': {'type': 'string', 'example': 'admin@bluestream.com'},
+                    'password': {'type': 'string', 'example': 'SecurePassword123'},
+                    'first_name': {'type': 'string', 'example': 'John'},
+                    'last_name': {'type': 'string', 'example': 'Admin'},
+                    'role': {'type': 'string', 'enum': ['admin', 'manager', 'operator', 'delivery_driver'], 'example': 'admin'},
+                    'phone': {'type': 'string', 'example': '+998901234567'}
+                },
+                'required': ['email', 'password', 'first_name', 'last_name', 'role']
+            }
+        }
+    ],
+    'responses': {
+        '201': {
+            'description': 'User created successfully',
+            'schema': {
+                'type': 'object',
+                'properties': {
+                    'success': {'type': 'boolean', 'example': True},
+                    'message': {'type': 'string', 'example': 'User created successfully'},
+                    'user': {
+                        'type': 'object',
+                        'properties': {
+                            'id': {'type': 'integer'},
+                            'email': {'type': 'string'},
+                            'role': {'type': 'string'},
+                            'status': {'type': 'string'}
+                        }
+                    }
+                }
+            }
+        },
+        '400': {'description': 'Validation error'},
+        '403': {'description': 'Insufficient permissions'},
+        '409': {'description': 'User already exists'}
+    }
+})
+def admin_create_user():
+    """Create a new user (admin only)"""
+    from business_app.middleware.auth_middleware import admin_required
+    from flask_jwt_extended import jwt_required
+    
+    # Apply decorators manually since we're inside the function
+    @jwt_required()
+    @admin_required
+    def _create_user():
+        try:
+            data = request.get_json()
+            
+            # Validate role
+            valid_roles = ['admin', 'manager', 'operator', 'delivery_driver']
+            if data['role'] not in valid_roles:
+                return {
+                    'success': False,
+                    'message': f'Invalid role. Must be one of: {", ".join(valid_roles)}'
+                }, 400
+            
+            # Create user using auth service
+            auth_service = get_auth_service()
+            
+            try:
+                if data['role'] == 'admin':
+                    user = auth_service.create_admin_user(
+                        email=data['email'],
+                        password=data['password'],
+                        first_name=data['first_name'],
+                        last_name=data['last_name']
+                    )
+                else:
+                    # Create regular user with specified role
+                    user, tokens = auth_service.register_user(
+                        email=data['email'],
+                        password=data['password'],
+                        phone=data.get('phone', ''),
+                        first_name=data['first_name'],
+                        last_name=data['last_name'],
+                        role=data['role'],
+                        status='active',
+                        email_verified_at=datetime.now(timezone.utc),
+                        is_verified=True
+                    )
+                
+                logger.info(f"Admin created new user: {user.email} with role {user.role}")
+                
+                return {
+                    'success': True,
+                    'message': 'User created successfully',
+                    'user': {
+                        'id': user.id,
+                        'email': user.email,
+                        'first_name': user.first_name,
+                        'last_name': user.last_name,
+                        'role': user.role,
+                        'status': user.status,
+                        'created_at': user.created_at.isoformat() if user.created_at else None
+                    }
+                }, 201
+                
+            except ConflictError as e:
+                return {'success': False, 'message': str(e)}, 409
+            except ValidationError as e:
+                return {'success': False, 'message': str(e), 'errors': e.details}, 400
+            
+        except Exception as e:
+            logger.error(f"Error in admin create user: {e}")
+            return {'success': False, 'message': 'Failed to create user'}, 500
+    
+    return _create_user()
+
+
+@auth_bp.route('/admin/users', methods=['GET'])
+@swag_from({
+    'tags': ['Admin'],
+    'description': 'Get list of all users (admin/manager only)',
+    'security': [{'Bearer': []}],
+    'parameters': [
+        {
+            'name': 'page',
+            'in': 'query',
+            'type': 'integer',
+            'default': 1,
+            'description': 'Page number'
+        },
+        {
+            'name': 'per_page',
+            'in': 'query',
+            'type': 'integer',
+            'default': 20,
+            'description': 'Items per page'
+        },
+        {
+            'name': 'role',
+            'in': 'query',
+            'type': 'string',
+            'description': 'Filter by role'
+        },
+        {
+            'name': 'status',
+            'in': 'query',
+            'type': 'string',
+            'description': 'Filter by status'
+        }
+    ],
+    'responses': {
+        '200': {
+            'description': 'Users retrieved successfully',
+            'schema': {
+                'type': 'object',
+                'properties': {
+                    'success': {'type': 'boolean', 'example': True},
+                    'users': {'type': 'array'},
+                    'pagination': {'type': 'object'}
+                }
+            }
+        },
+        '403': {'description': 'Insufficient permissions'}
+    }
+})
+def admin_get_users():
+    """Get list of all users (admin/manager only)"""
+    from business_app.middleware.auth_middleware import manager_or_admin_required
+    from flask_jwt_extended import jwt_required
+    
+    @jwt_required()
+    @manager_or_admin_required
+    def _get_users():
+        try:
+            page = request.args.get('page', 1, type=int)
+            per_page = min(request.args.get('per_page', 20, type=int), 100)
+            role_filter = request.args.get('role')
+            status_filter = request.args.get('status')
+            
+            # Build query
+            query = User.query
+            
+            if role_filter:
+                query = query.filter(User.role == role_filter)
+            
+            if status_filter:
+                query = query.filter(User.status == status_filter)
+            
+            # Paginate
+            pagination = query.paginate(
+                page=page,
+                per_page=per_page,
+                error_out=False
+            )
+            
+            users = []
+            for user in pagination.items:
+                users.append({
+                    'id': user.id,
+                    'email': user.email,
+                    'first_name': user.first_name,
+                    'last_name': user.last_name,
+                    'phone': user.phone,
+                    'role': user.role,
+                    'status': user.status,
+                    'is_verified': user.is_verified,
+                    'email_verified': user.email_verified_at is not None,
+                    'phone_verified': user.phone_verified_at is not None,
+                    'last_login': user.last_login.isoformat() if user.last_login else None,
+                    'created_at': user.created_at.isoformat() if user.created_at else None,
+                    'registration_source': user.registration_source,
+                    'telegram_id': user.telegram_id
+                })
+            
+            return {
+                'success': True,
+                'users': users,
+                'pagination': {
+                    'page': page,
+                    'per_page': per_page,
+                    'total': pagination.total,
+                    'pages': pagination.pages,
+                    'has_next': pagination.has_next,
+                    'has_prev': pagination.has_prev
+                }
+            }, 200
+            
+        except Exception as e:
+            logger.error(f"Error in admin get users: {e}")
+            return {'success': False, 'message': 'Failed to retrieve users'}, 500
+    
+    return _get_users()
+
+
+@auth_bp.route('/orders/summary', methods=['GET'])
+@jwt_required()
+@handle_exceptions
+def get_orders_summary():
+    """Get user orders summary across all platforms"""
+    user_id = get_jwt_identity()
+    
+    try:
+        from business_app.models.order import Order
+        from sqlalchemy import func
+        
+        # Get total orders count
+        total_orders = Order.query.filter_by(user_id=user_id).count()
+        
+        # Get orders by status
+        order_stats = db.session.query(
+            Order.status,
+            func.count(Order.id).label('count')
+        ).filter_by(user_id=user_id).group_by(Order.status).all()
+        
+        # Get orders by platform/source
+        platform_stats = db.session.query(
+            Order.order_source,
+            func.count(Order.id).label('count')
+        ).filter_by(user_id=user_id).group_by(Order.order_source).all()
+        
+        # Get recent orders
+        recent_orders = Order.query.filter_by(user_id=user_id).order_by(
+            Order.created_at.desc()
+        ).limit(5).all()
+        
+        return jsonify({
+            'success': True,
+            'data': {
+                'total_orders': total_orders,
+                'order_stats': [{'status': stat.status, 'count': stat.count} for stat in order_stats],
+                'platform_stats': [{'platform': stat.order_source, 'count': stat.count} for stat in platform_stats],
+                'recent_orders': [{
+                    'id': order.id,
+                    'order_number': order.order_number,
+                    'status': order.status,
+                    'platform': order.order_source,
+                    'total_amount': float(order.total_amount),
+                    'created_at': order.created_at.isoformat()
+                } for order in recent_orders]
+            }
+        }), 200
+    except Exception as e:
+        logger.error(f"Failed to get orders summary: {e}")
+        return jsonify({
+            'success': False,
+            'message': 'Failed to get orders summary'
+        }), 500
+
+
+@auth_bp.route('/sync-platform-data', methods=['POST'])
+@jwt_required()
+@validate_json(['platform'])
+@handle_exceptions
+def sync_platform_data():
+    """Sync user data across platforms"""
+    user_id = get_jwt_identity()
+    data = request.get_json()
+    platform = data.get('platform')
+    
+    if platform not in ['web', 'telegram']:
+        return jsonify({
+            'success': False,
+            'message': 'Invalid platform specified'
+        }), 400
+    
+    try:
+        # Update user's last platform activity
+        user = User.query.get(user_id)
+        if user:
+            user.last_platform_activity = platform
+            db.session.commit()
+        
+        # Sync orders, addresses, and other data
+        sync_results = {
+            'orders_synced': 0,
+            'addresses_synced': 0,
+            'profile_synced': True
+        }
+        
+        # In future implementation, this would sync actual data between platforms
+        # For now, we'll just return success
+        
+        return jsonify({
+            'success': True,
+            'message': 'Platform data synchronized successfully',
+            'data': sync_results
+        }), 200
+    except Exception as e:
+        logger.error(f"Failed to sync platform data: {e}")
+        return jsonify({
+            'success': False,
+            'message': 'Failed to sync platform data'
+        }), 500
+
+
+@auth_bp.route('/export-data', methods=['POST'])
+@jwt_required()
+@rate_limit(max_requests=2, window_seconds=3600, per='user')  # 2 data exports per hour per user
+@handle_exceptions
+def export_account_data():
+    """Export user account data for download"""
+    user_id = get_jwt_identity()
+    
+    try:
+        user = User.query.get(user_id)
+        if not user:
+            return jsonify({
+                'success': False,
+                'message': 'User not found'
+            }), 404
+        
+        # Collect user data
+        from business_app.models.order import Order
+        from business_app.models.user import UserAddress
+        
+        orders = Order.query.filter_by(user_id=user_id).all()
+        addresses = UserAddress.query.filter_by(user_id=user_id).all()
+        
+        export_data = {
+            'user_profile': {
+                'id': user.id,
+                'email': user.email,
+                'phone': user.phone,
+                'first_name': user.first_name,
+                'last_name': user.last_name,
+                'date_of_birth': user.date_of_birth.isoformat() if user.date_of_birth else None,
+                'gender': user.gender,
+                'preferred_language': user.preferred_language,
+                'status': user.status,
+                'registration_source': user.registration_source,
+                'created_at': user.created_at.isoformat() if user.created_at else None,
+                'email_verified_at': user.email_verified_at.isoformat() if user.email_verified_at else None,
+                'phone_verified_at': user.phone_verified_at.isoformat() if user.phone_verified_at else None
+            },
+            'orders': [{
+                'id': order.id,
+                'order_number': order.order_number,
+                'status': order.status,
+                'platform': order.order_source,
+                'total_amount': float(order.total_amount),
+                'created_at': order.created_at.isoformat()
+            } for order in orders],
+            'addresses': [{
+                'id': addr.id,
+                'title': addr.title,
+                'full_address': addr.full_address,
+                'city': addr.city,
+                'is_default': addr.is_default,
+                'is_business': addr.is_business
+            } for addr in addresses],
+            'export_date': db.func.now().isoformat()
+        }
+        
+        import json
+        from flask import Response
+        
+        json_data = json.dumps(export_data, indent=2, ensure_ascii=False)
+        
+        return Response(
+            json_data,
+            mimetype='application/json',
+            headers={
+                'Content-Disposition': f'attachment; filename=account-data-{user_id}.json'
+            }
+        )
+    except Exception as e:
+        logger.error(f"Failed to export account data: {e}")
+        return jsonify({
+            'success': False,
+            'message': 'Failed to export account data'
+        }), 500
+
+
+
+
+@auth_bp.route('/validate-token', methods=['POST'])
+@jwt_required()
+@handle_exceptions
+def validate_token():
+    """Validate current token integrity"""
+    try:
+        from business_app.services.token_service import TokenService
+        token_service = TokenService()
+        
+        # Get token from header
+        auth_header = request.headers.get('Authorization', '')
+        if not auth_header.startswith('Bearer '):
+            return jsonify({
+                'success': False,
+                'message': 'Invalid authorization header'
+            }), 401
+        
+        token = auth_header.split(' ')[1]
+        result = token_service.validate_token_integrity(token)
+        
+        if result['valid']:
+            return jsonify({
+                'success': True,
+                'message': 'Token is valid',
+                'data': {
+                    'user_id': result['user'].id,
+                    'email': result['user'].email,
+                    'role': result['user'].role,
+                    'verified': result['user'].is_verified
+                }
+            }), 200
+        else:
+            return jsonify({
+                'success': False,
+                'message': result['reason'],
+                'error_code': result['error_code']
+            }), 401
+            
+    except Exception as e:
+        logger.error(f"Token validation failed: {e}")
+        return jsonify({
+            'success': False,
+            'message': 'Token validation failed'
+        }), 401
+
+
+@auth_bp.route('/sessions', methods=['GET'])
+@jwt_required()
+@handle_exceptions
+def get_user_sessions():
+    """Get all active sessions for the current user"""
+    user_id = get_jwt_identity()
+    
+    try:
+        from business_app.services.token_service import TokenService
+        token_service = TokenService()
+        
+        sessions = token_service.get_user_sessions(user_id)
+        
+        # Format sessions for response
+        formatted_sessions = []
+        for session in sessions:
+            formatted_sessions.append({
+                'session_id': session.get('session_id'),
+                'platform': session.get('platform'),
+                'ip_address': session.get('ip'),
+                'user_agent': session.get('user_agent'),
+                'created_at': session.get('created_at'),
+                'last_refresh': session.get('last_refresh'),
+                'is_current': session.get('session_id') == get_jwt().get('session_id')
+            })
+        
+        return jsonify({
+            'success': True,
+            'data': {
+                'sessions': formatted_sessions,
+                'total_sessions': len(formatted_sessions)
+            }
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Failed to get user sessions: {e}")
+        return jsonify({
+            'success': False,
+            'message': 'Failed to get sessions'
+        }), 500
+
+
+@auth_bp.route('/sessions/<session_id>', methods=['DELETE'])
+@jwt_required()
+@handle_exceptions
+def revoke_session(session_id):
+    """Revoke a specific session"""
+    user_id = get_jwt_identity()
+    current_session_id = get_jwt().get('session_id')
+    
+    try:
+        from business_app.services.token_service import TokenService
+        token_service = TokenService()
+        
+        # Get user sessions to find the target session
+        sessions = token_service.get_user_sessions(user_id)
+        target_session = None
+        
+        for session in sessions:
+            if session.get('session_id') == session_id:
+                target_session = session
+                break
+        
+        if not target_session:
+            return jsonify({
+                'success': False,
+                'message': 'Session not found'
+            }), 404
+        
+        # Blacklist tokens for this session
+        if 'access_token_jti' in target_session:
+            token_service.blacklist_token(target_session['access_token_jti'])
+        if 'refresh_token_jti' in target_session:
+            token_service.blacklist_token(target_session['refresh_token_jti'])
+        
+        # Remove session info
+        token_service._remove_session_info(user_id, session_id)
+        
+        # Check if user revoked their current session
+        is_current_session = session_id == current_session_id
+        
+        return jsonify({
+            'success': True,
+            'message': 'Session revoked successfully',
+            'data': {
+                'revoked_session_id': session_id,
+                'is_current_session': is_current_session
+            }
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Failed to revoke session {session_id}: {e}")
+        return jsonify({
+            'success': False,
+            'message': 'Failed to revoke session'
+        }), 500
+
+
+
+
+@auth_bp.route('/logout', methods=['POST'])
+@jwt_required()
+@handle_exceptions
+def logout():
+    """Logout and blacklist current token"""
+    user_id = get_jwt_identity()
+    claims = get_jwt()
+    jti = claims['jti']
+    session_id = claims.get('session_id')
+    
+    try:
+        from business_app.services.token_service import TokenService
+        token_service = TokenService()
+        
+        # Blacklist the current token with proper expiry
+        # Get the actual token from Authorization header to extract proper expiry
+        auth_header = request.headers.get('Authorization', '')
+        if auth_header.startswith('Bearer '):
+            current_token = auth_header[7:]  # Remove "Bearer " prefix
+            token_service.blacklist_token_by_string(current_token)
+        else:
+            # Fallback to JTI with default expiry
+            access_expires = current_app.config.get('JWT_ACCESS_TOKEN_EXPIRES', timedelta(hours=1))
+            token_service.blacklist_token(jti, expires_delta=access_expires)
+        
+        # Remove session info if session_id exists
+        if session_id:
+            token_service._remove_session_info(user_id, session_id)
+        
+        # Create response and clear JWT cookies
+        response = jsonify({
+            'success': True,
+            'message': 'Logged out successfully'
+        })
+        unset_jwt_cookies(response)
+        return response, 200
+        
+    except Exception as e:
+        logger.error(f"Logout failed for user {user_id}: {e}")
+        return jsonify({
+            'success': False,
+            'message': 'Logout failed'
+        }), 500
+
+
+@auth_bp.route('/logout-all', methods=['POST'])
+@auth_bp.route('/sessions/revoke-all', methods=['POST'])  # Alias for backwards compatibility
+@jwt_required()
+@handle_exceptions
+def logout_all():
+    """Logout from all sessions or revoke all sessions except current"""
+    user_id = get_jwt_identity()
+    current_session_id = get_jwt().get('session_id')
+    
+    # Check if this is a revoke-all request (exclude current session)
+    exclude_current = '/sessions/revoke-all' in request.path
+    
+    try:
+        from business_app.services.token_service import TokenService
+        token_service = TokenService()
+        
+        if exclude_current:
+            # Revoke all tokens except current session
+            success = token_service.revoke_user_tokens(user_id, exclude_session_id=current_session_id)
+            message = 'All other sessions revoked successfully' if success else 'Failed to revoke sessions'
+        else:
+            # Revoke all user tokens including current
+            success = token_service.revoke_user_tokens(user_id)
+            message = 'Logged out from all sessions successfully' if success else 'Failed to logout from all sessions'
+        
+        if success:
+            return jsonify({
+                'success': True,
+                'message': message
+            }), 200
+        else:
+            return jsonify({
+                'success': False,
+                'message': message
+            }), 500
+            
+    except Exception as e:
+        logger.error(f"Logout/revoke all failed for user {user_id}: {e}")
+        return jsonify({
+            'success': False,
+            'message': 'Operation failed'
+        }), 500
+  

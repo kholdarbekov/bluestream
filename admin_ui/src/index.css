@@ -1,0 +1,276 @@
+@import '~antd/dist/reset.css';
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background-color: #f5f5f5;
+}
+
+code {
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
+    monospace;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f1f1f1;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #c1c1c1;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #a8a8a8;
+}
+
+/* Layout styles */
+.admin-layout {
+  min-height: 100vh;
+}
+
+.admin-header {
+  background: #fff;
+  border-bottom: 1px solid #e8e8e8;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
+.admin-sider {
+  background: #fff;
+  border-right: 1px solid #e8e8e8;
+}
+
+.admin-content {
+  padding: 24px;
+  min-height: calc(100vh - 64px);
+  background: #f5f5f5;
+}
+
+/* Dashboard card styles */
+.dashboard-card {
+  margin-bottom: 16px;
+}
+
+.stat-card {
+  text-align: center;
+}
+
+.stat-value {
+  font-size: 28px;
+  font-weight: bold;
+  margin: 8px 0;
+  color: #1890ff;
+}
+
+.stat-title {
+  color: #666;
+  font-size: 14px;
+}
+
+.stat-trend {
+  font-size: 12px;
+  margin-top: 8px;
+}
+
+.trend-up {
+  color: #52c41a;
+}
+
+.trend-down {
+  color: #ff4d4f;
+}
+
+/* Chart container */
+.chart-container {
+  padding: 16px;
+  background: #fff;
+  border-radius: 6px;
+  margin-bottom: 16px;
+}
+
+/* Table styles */
+.admin-table {
+  background: #fff;
+  border-radius: 6px;
+}
+
+.table-actions {
+  margin-bottom: 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+/* Status badges */
+.status-active {
+  color: #52c41a;
+}
+
+.status-inactive {
+  color: #ff4d4f;
+}
+
+.status-pending {
+  color: #faad14;
+}
+
+/* Responsive design */
+@media (max-width: 1200px) {
+  .admin-content {
+    padding: 20px;
+  }
+}
+
+@media (max-width: 992px) {
+  .admin-content {
+    padding: 16px;
+  }
+  
+  .stat-value {
+    font-size: 24px;
+  }
+  
+  .chart-container {
+    padding: 12px;
+  }
+}
+
+@media (max-width: 768px) {
+  .admin-content {
+    padding: 16px;
+  }
+  
+  .table-actions {
+    flex-direction: column;
+    gap: 8px;
+    align-items: stretch;
+  }
+  
+  .stat-value {
+    font-size: 20px;
+  }
+  
+  .stat-title {
+    font-size: 12px;
+  }
+  
+  .chart-container {
+    padding: 8px;
+  }
+  
+  .ant-modal {
+    margin: 0;
+    max-width: 100vw;
+    top: 0;
+  }
+  
+  .ant-modal-content {
+    border-radius: 0;
+  }
+  
+  .ant-table-wrapper {
+    overflow-x: auto;
+  }
+}
+
+@media (max-width: 576px) {
+  .admin-content {
+    padding: 12px;
+  }
+  
+  .stat-value {
+    font-size: 18px;
+  }
+  
+  .chart-container {
+    padding: 4px;
+  }
+  
+  .table-actions {
+    gap: 4px;
+  }
+  
+  .ant-card-body {
+    padding: 12px;
+  }
+  
+  .ant-statistic-title {
+    font-size: 11px;
+  }
+  
+  .ant-statistic-content {
+    font-size: 16px;
+  }
+}
+
+/* Tablet specific styles */
+@media (min-width: 768px) and (max-width: 1024px) {
+  .admin-content {
+    padding: 18px;
+  }
+  
+  .table-actions {
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+}
+
+/* Large screen optimizations */
+@media (min-width: 1400px) {
+  .admin-content {
+    padding: 32px;
+  }
+  
+  .chart-container {
+    padding: 24px;
+  }
+}
+
+/* Touch device optimizations */
+@media (hover: none) and (pointer: coarse) {
+  .ant-btn {
+    min-height: 44px;
+  }
+  
+  .ant-input {
+    min-height: 44px;
+  }
+  
+  .ant-select-selector {
+    min-height: 44px;
+  }
+}
+
+/* Animation classes */
+.fade-in {
+  animation: fadeIn 0.3s ease-in-out;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Loading spinner */
+.loading-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 200px;
+}
+
+/* Error message */
+.error-message {
+  text-align: center;
+  color: #ff4d4f;
+  padding: 20px;
+}

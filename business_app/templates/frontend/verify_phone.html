@@ -1,0 +1,281 @@
+{% extends "frontend/base.html" %}
+
+{% block title %}{{ 'Verify Phone Number'|translate }} - {{ company_name }}{% endblock %}
+
+{% block content %}
+        <!-- page-title -->
+        <section class="page-title">
+            <div class="bg-layer" style="background-image: url({{ url_for('static', filename='images/background/page-title.jpg') }});"></div>
+            <div class="auto-container">
+                <div class="content-box">
+                    <h1>{{ 'Verify Phone Number'|translate }}</h1>
+                    <ul class="bread-crumb clearfix">
+                        <li><a href="{{ url_for('frontend.index') }}">{{ 'Home'|translate }}</a></li>
+                        <li>{{ 'Verify Phone'|translate }}</li>
+                    </ul>
+                </div>
+            </div>
+        </section>
+        <!-- page-title end -->
+
+        <!-- phone-verification-section -->
+        <section class="contact-section">
+            <div class="auto-container">
+                <div class="row clearfix">
+                    <div class="col-lg-8 col-md-12 col-sm-12 offset-lg-2">
+                        <div class="form-inner">
+                            <div class="sec-title centred">
+                                <h2>{{ 'Verify Your Phone Number'|translate }}</h2>
+                                <p>{{ 'Please enter your phone number to receive a verification code'|translate }}</p>
+                            </div>
+                            
+                            <!-- Phone Number Form -->
+                            <form id="phoneForm" class="default-form" style="display: block;">
+                                <div class="row clearfix">
+                                    <div class="col-lg-12 col-md-12 col-sm-12 form-group">
+                                        <input type="tel" name="phone" placeholder="{{ 'Phone Number (+998XXXXXXXXX)'|translate }}" required>
+                                        <small class="text-muted">{{ 'Enter your phone number with country code'|translate }}</small>
+                                    </div>
+                                    <div class="col-lg-12 col-md-12 col-sm-12 form-group message-btn">
+                                        <button type="submit" class="theme-btn btn-one">{{ 'Send Verification Code'|translate }}</button>
+                                    </div>
+                                </div>
+                            </form>
+                            
+                            <!-- OTP Verification Form -->
+                            <form id="otpForm" class="default-form" style="display: none;">
+                                <div class="row clearfix">
+                                    <div class="col-lg-12 col-md-12 col-sm-12 form-group">
+                                        <div class="alert alert-info">
+                                            <i class="far fa-info-circle"></i>
+                                            {{ 'We sent a verification code to'|translate }} <strong id="sentToPhone"></strong>
+                                        </div>
+                                    </div>
+                                    <div class="col-lg-12 col-md-12 col-sm-12 form-group">
+                                        <input type="text" name="otp" placeholder="{{ 'Enter 6-digit verification code'|translate }}" maxlength="6" required>
+                                    </div>
+                                    <div class="col-lg-12 col-md-12 col-sm-12 form-group">
+                                        <div class="timer-display">
+                                            <small class="text-muted">{{ 'Code expires in'|translate }}: <span id="timer">05:00</span></small>
+                                        </div>
+                                    </div>
+                                    <div class="col-lg-12 col-md-12 col-sm-12 form-group message-btn">
+                                        <button type="submit" class="theme-btn btn-one">{{ 'Verify Code'|translate }}</button>
+                                    </div>
+                                    <div class="col-lg-12 col-md-12 col-sm-12 form-group">
+                                        <div class="other-option centred">
+                                            <p><a href="#" id="resendCode">{{ 'Resend Code'|translate }}</a></p>
+                                            <p><a href="#" id="changePhone">{{ 'Change Phone Number'|translate }}</a></p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </form>
+                            
+                            <!-- Success Message -->
+                            <div id="successMessage" class="alert alert-success" style="display: none;">
+                                <i class="far fa-check-circle"></i>
+                                {{ 'Phone number verified successfully! You can now use all features.'|translate }}
+                                <div class="mt-3">
+                                    <a href="{{ url_for('frontend.my_account') }}" class="theme-btn btn-one btn-sm">{{ 'Go to My Account'|translate }}</a>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+        <!-- phone-verification-section end -->
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let currentUserId = null;
+let currentPhone = null;
+let timerInterval = null;
+
+// Phone form submission
+document.getElementById('phoneForm').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    
+    const formData = new FormData(this);
+    const phone = formData.get('phone');
+    
+    if (!phone) {
+        showNotification('{{ "Please enter a valid phone number"|translate }}', 'error');
+        return;
+    }
+    
+    try {
+        // Get current user ID (you'll need to get this from your auth system)
+        const token = getAuthToken();
+        if (!token) {
+            showNotification('{{ "Please log in first"|translate }}', 'error');
+            window.location.href = '{{ url_for("frontend.login") }}';
+            return;
+        }
+        
+        const response = await apiRequest('/auth/send-otp', {
+            method: 'POST',
+            body: JSON.stringify({ 
+                phone: phone,
+                user_id: CURRENT_USER ? CURRENT_USER.id : null 
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (response.ok) {
+            currentUserId = result.user_id;
+            currentPhone = phone;
+            
+            // Show OTP form and hide phone form
+            document.getElementById('phoneForm').style.display = 'none';
+            document.getElementById('otpForm').style.display = 'block';
+            document.getElementById('sentToPhone').textContent = phone;
+            
+            // Start countdown timer
+            startTimer(300); // 5 minutes
+            
+            showNotification('{{ "Verification code sent successfully!"|translate }}', 'success');
+        } else {
+            showNotification(result.message || '{{ "Failed to send verification code"|translate }}', 'error');
+        }
+    } catch (error) {
+        showNotification('{{ "Network error. Please try again."|translate }}', 'error');
+    }
+});
+
+// OTP form submission
+document.getElementById('otpForm').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    
+    const formData = new FormData(this);
+    const otp = formData.get('otp');
+    
+    if (!otp || otp.length !== 6) {
+        showNotification('{{ "Please enter a valid 6-digit code"|translate }}', 'error');
+        return;
+    }
+    
+    try {
+        const response = await apiRequest('/auth/verify-otp', {
+            method: 'POST',
+            body: JSON.stringify({
+                user_id: currentUserId,
+                otp: otp
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (response.ok) {
+            // Hide OTP form and show success message
+            document.getElementById('otpForm').style.display = 'none';
+            document.getElementById('successMessage').style.display = 'block';
+            
+            // Clear timer
+            clearInterval(timerInterval);
+            
+            showNotification('{{ "Phone number verified successfully!"|translate }}', 'success');
+        } else {
+            showNotification(result.message || '{{ "Invalid verification code"|translate }}', 'error');
+        }
+    } catch (error) {
+        showNotification('{{ "Network error. Please try again."|translate }}', 'error');
+    }
+});
+
+// Resend code
+document.getElementById('resendCode').addEventListener('click', async function(e) {
+    e.preventDefault();
+    
+    if (!currentPhone) {
+        showNotification('{{ "No phone number available"|translate }}', 'error');
+        return;
+    }
+    
+    try {
+        const response = await apiRequest('/auth/send-otp', {
+            method: 'POST',
+            body: JSON.stringify({
+                phone: currentPhone,
+                user_id: currentUserId
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (response.ok) {
+            startTimer(300);
+            showNotification('{{ "Verification code resent successfully!"|translate }}', 'success');
+        } else {
+            showNotification(result.message || '{{ "Failed to resend code"|translate }}', 'error');
+        }
+    } catch (error) {
+        showNotification('{{ "Network error. Please try again."|translate }}', 'error');
+    }
+});
+
+// Change phone number
+document.getElementById('changePhone').addEventListener('click', function(e) {
+    e.preventDefault();
+    
+    // Show phone form and hide OTP form
+    document.getElementById('phoneForm').style.display = 'block';
+    document.getElementById('otpForm').style.display = 'none';
+    
+    // Clear timer
+    clearInterval(timerInterval);
+    
+    // Clear form
+    document.getElementById('phoneForm').reset();
+});
+
+// Timer function
+function startTimer(seconds) {
+    clearInterval(timerInterval);
+    
+    const timerElement = document.getElementById('timer');
+    let timeLeft = seconds;
+    
+    timerInterval = setInterval(function() {
+        const minutes = Math.floor(timeLeft / 60);
+        const seconds = timeLeft % 60;
+        
+        timerElement.textContent = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+        
+        if (timeLeft <= 0) {
+            clearInterval(timerInterval);
+            timerElement.textContent = '00:00';
+            showNotification('{{ "Verification code expired. Please request a new one."|translate }}', 'warning');
+        }
+        
+        timeLeft--;
+    }, 1000);
+}
+
+// Format phone number input
+document.querySelector('input[name="phone"]').addEventListener('input', function() {
+    let value = this.value.replace(/\D/g, '');
+    
+    // Add country code if not present
+    if (value.length > 0 && !value.startsWith('998')) {
+        if (value.startsWith('0')) {
+            value = '998' + value.substring(1);
+        } else {
+            value = '998' + value;
+        }
+    }
+    
+    // Format with + prefix
+    if (value.length > 0) {
+        this.value = '+' + value;
+    }
+});
+
+// Auto-focus and format OTP input
+document.querySelector('input[name="otp"]').addEventListener('input', function() {
+    this.value = this.value.replace(/\D/g, ''); // Only digits
+});
+</script>
+{% endblock %}

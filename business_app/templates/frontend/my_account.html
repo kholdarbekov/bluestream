@@ -1,0 +1,630 @@
+{% extends "frontend/base.html" %}
+
+{% block title %}{{ 'My Account'|translate }} - {{ company_name }}{% endblock %}
+
+{% block content %}
+        <!-- page-title -->
+        <section class="page-title">
+            <div class="bg-layer" style="background-image: url({{ url_for('static', filename='images/background/page-title.jpg') }});"></div>
+            <div class="auto-container">
+                <div class="content-box">
+                    <h1>{{ 'My Account'|translate }}</h1>
+                    <ul class="bread-crumb clearfix">
+                        <li><a href="{{ url_for('frontend.index') }}">{{ 'Home'|translate }}</a></li>
+                        <li>{{ 'My Account'|translate }}</li>
+                    </ul>
+                </div>
+            </div>
+        </section>
+        <!-- page-title end -->
+
+        <!-- account-section -->
+        <section class="account-section">
+            <div class="auto-container">
+                <div class="row clearfix">
+                    <!-- Account Sidebar -->
+                    <div class="col-lg-3 col-md-4 col-sm-12">
+                        <div class="account-sidebar">
+                            <div class="profile-box">
+                                <div class="profile-info text-center">
+                                    <div class="profile-avatar">
+                                        <i class="far fa-user-circle" style="font-size: 60px; color: #1890ff;"></i>
+                                    </div>
+                                    <h4>{{ user.first_name }} {{ user.last_name }}</h4>
+                                    <p class="text-muted">{{ user.email }}</p>
+                                    <div class="verification-badges">
+                                        {% if user.email_verified_at %}
+                                        <span class="badge badge-success"><i class="far fa-check-circle"></i> {{ 'Email Verified'|translate }}</span>
+                                        {% else %}
+                                        <span class="badge badge-warning"><i class="far fa-exclamation-circle"></i> {{ 'Email Pending'|translate }}</span>
+                                        {% endif %}
+                                        
+                                        {% if user.phone_verified_at %}
+                                        <span class="badge badge-success"><i class="far fa-check-circle"></i> {{ 'Phone Verified'|translate }}</span>
+                                        {% else %}
+                                        <span class="badge badge-warning"><i class="far fa-exclamation-circle"></i> {{ 'Phone Pending'|translate }}</span>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="account-menu">
+                                <ul class="list-unstyled">
+                                    <li class="active">
+                                        <a href="{{ url_for('frontend.my_account') }}">
+                                            <i class="far fa-tachometer-alt"></i> {{ 'Dashboard'|translate }}
+                                        </a>
+                                    </li>
+                                    <li>
+                                        <a href="{{ url_for('frontend.profile_settings') }}">
+                                            <i class="far fa-user-edit"></i> {{ 'Profile Settings'|translate }}
+                                        </a>
+                                    </li>
+                                    <li>
+                                        <a href="{{ url_for('frontend.orders') }}">
+                                            <i class="far fa-shopping-bag"></i> {{ 'My Orders'|translate }}
+                                        </a>
+                                    </li>
+                                    <li>
+                                        <a href="{{ url_for('frontend.addresses') }}">
+                                            <i class="far fa-map-marker-alt"></i> {{ 'Addresses'|translate }}
+                                        </a>
+                                    </li>
+                                    <li>
+                                        <a href="{{ url_for('frontend.subscriptions') }}">
+                                            <i class="far fa-sync-alt"></i> {{ 'Subscriptions'|translate }}
+                                        </a>
+                                    </li>
+                                    <li>
+                                        <a href="{{ url_for('frontend.loyalty') }}">
+                                            <i class="far fa-star"></i> {{ 'Loyalty Program'|translate }}
+                                        </a>
+                                    </li>
+                                    <li>
+                                        <a href="{{ url_for('frontend.account_security') }}">
+                                            <i class="far fa-shield-alt"></i> {{ 'Security'|translate }}
+                                        </a>
+                                    </li>
+                                    <li>
+                                        <a href="#" onclick="logout()">
+                                            <i class="far fa-sign-out-alt"></i> {{ 'Logout'|translate }}
+                                        </a>
+                                    </li>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Account Content -->
+                    <div class="col-lg-9 col-md-8 col-sm-12">
+                        <div class="account-content">
+                            <!-- Welcome Section -->
+                            <div class="welcome-section mb-4">
+                                <div class="card bg-gradient-primary text-white">
+                                    <div class="card-body">
+                                        <div class="row align-items-center">
+                                            <div class="col-md-8">
+                                                <h3>{{ 'Welcome back'|translate }}, {{ user.first_name }}!</h3>
+                                                <p class="mb-0">{{ 'Manage your account, orders, and preferences from your unified dashboard.'|translate }}</p>
+                                                <small>{{ 'Connected platforms'|translate }}: {{ 'Web App'|translate }}{% if user.telegram_id %}, {{ 'Telegram Bot'|translate }}{% endif %}</small>
+                                            </div>
+                                            <div class="col-md-4 text-center">
+                                                <div class="sync-status">
+                                                    <i class="far fa-sync-alt" style="font-size: 2rem;"></i>
+                                                    <div class="mt-2">
+                                                        <small id="syncStatus">{{ 'Synchronized'|translate }}</small>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Quick Stats -->
+                            <div class="stats-section mb-4">
+                                <div class="row">
+                                    <div class="col-lg-3 col-md-6 col-sm-6">
+                                        <div class="stat-card clickable" onclick="window.location.href='{{ url_for('frontend.orders') }}'">
+                                            <div class="card text-center">
+                                                <div class="card-body">
+                                                    <i class="far fa-shopping-bag text-primary" style="font-size: 2rem;"></i>
+                                                    <h4 class="mt-2" id="totalOrdersCount">{{ recent_orders|length }}</h4>
+                                                    <p class="text-muted">{{ 'Total Orders'|translate }}</p>
+                                                    <small class="text-primary">{{ 'View All'|translate }}</small>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="col-lg-3 col-md-6 col-sm-6">
+                                        <div class="stat-card clickable" onclick="window.location.href='{{ url_for('frontend.subscriptions') }}'">
+                                            <div class="card text-center">
+                                                <div class="card-body">
+                                                    <i class="far fa-sync-alt text-success" style="font-size: 2rem;"></i>
+                                                    <h4 class="mt-2">{{ active_subscriptions|length }}</h4>
+                                                    <p class="text-muted">{{ 'Active Subscriptions'|translate }}</p>
+                                                    <small class="text-success">{{ 'Manage'|translate }}</small>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="col-lg-3 col-md-6 col-sm-6">
+                                        <div class="stat-card clickable" onclick="window.location.href='{{ url_for('frontend.loyalty') }}'">
+                                            <div class="card text-center">
+                                                <div class="card-body">
+                                                    <i class="far fa-star text-warning" style="font-size: 2rem;"></i>
+                                                    <h4 class="mt-2">{{ loyalty_account.current_balance if loyalty_account else 0 }}</h4>
+                                                    <p class="text-muted">{{ 'Loyalty Points'|translate }}</p>
+                                                    <small class="text-warning">{{ 'Tier'|translate }}: {{ loyalty_account.current_tier if loyalty_account else 'Bronze' }}</small>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="col-lg-3 col-md-6 col-sm-6">
+                                        <div class="stat-card clickable" onclick="window.location.href='{{ url_for('frontend.addresses') }}'">
+                                            <div class="card text-center">
+                                                <div class="card-body">
+                                                    <i class="far fa-map-marker-alt text-info" style="font-size: 2rem;"></i>
+                                                    <h4 class="mt-2" id="addressesCount">0</h4>
+                                                    <p class="text-muted">{{ 'Saved Addresses'|translate }}</p>
+                                                    <small class="text-info">{{ 'Manage'|translate }}</small>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Recent Orders -->
+                            <div class="recent-orders-section mb-4">
+                                <div class="card">
+                                    <div class="card-header d-flex justify-content-between align-items-center">
+                                        <h5>{{ 'Recent Orders'|translate }}</h5>
+                                        <a href="{{ url_for('frontend.orders') }}" class="btn btn-outline-primary btn-sm">{{ 'View All'|translate }}</a>
+                                    </div>
+                                    <div class="card-body">
+                                        {% if recent_orders %}
+                                        <div class="table-responsive">
+                                            <table class="table table-hover">
+                                                <thead>
+                                                    <tr>
+                                                        <th>{{ 'Order #'|translate }}</th>
+                                                        <th>{{ 'Date'|translate }}</th>
+                                                        <th>{{ 'Status'|translate }}</th>
+                                                        <th>{{ 'Total'|translate }}</th>
+                                                        <th>{{ 'Actions'|translate }}</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {% for order in recent_orders %}
+                                                    <tr>
+                                                        <td><strong>#{{ order.order_number }}</strong></td>
+                                                        <td>{{ order.created_at.strftime('%Y-%m-%d') }}</td>
+                                                        <td>
+                                                            <span class="badge badge-{{ 'success' if order.status == 'delivered' else 'primary' if order.status == 'confirmed' else 'warning' }}">
+                                                                {{ order.status|title }}
+                                                            </span>
+                                                        </td>
+                                                        <td>${{ "%.2f"|format(order.total_amount) }}</td>
+                                                        <td>
+                                                            <a href="{{ url_for('frontend.order_detail', order_id=order.id) }}" class="btn btn-sm btn-outline-primary">{{ 'View'|translate }}</a>
+                                                        </td>
+                                                    </tr>
+                                                    {% endfor %}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                        {% else %}
+                                        <div class="text-center py-4">
+                                            <i class="far fa-shopping-bag" style="font-size: 3rem; color: #ccc;"></i>
+                                            <h5 class="mt-3">{{ 'No orders yet'|translate }}</h5>
+                                            <p class="text-muted">{{ 'Start shopping to see your orders here'|translate }}</p>
+                                            <a href="{{ url_for('frontend.shop') }}" class="btn btn-primary">{{ 'Start Shopping'|translate }}</a>
+                                        </div>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Active Subscriptions -->
+                            {% if active_subscriptions %}
+                            <div class="subscriptions-section mb-4">
+                                <div class="card">
+                                    <div class="card-header d-flex justify-content-between align-items-center">
+                                        <h5>{{ 'Active Subscriptions'|translate }}</h5>
+                                        <a href="{{ url_for('frontend.subscriptions') }}" class="btn btn-outline-primary btn-sm">{{ 'Manage All'|translate }}</a>
+                                    </div>
+                                    <div class="card-body">
+                                        <div class="row">
+                                            {% for subscription in active_subscriptions %}
+                                            <div class="col-md-6">
+                                                <div class="subscription-card">
+                                                    <div class="card">
+                                                        <div class="card-body">
+                                                            <h6>{{ subscription.plan.name }}</h6>
+                                                            <p class="text-muted">{{ subscription.plan.description }}</p>
+                                                            <div class="d-flex justify-content-between align-items-center">
+                                                                <span class="text-primary">${{ "%.2f"|format(subscription.plan.price) }}/{{ subscription.plan.frequency }}</span>
+                                                                <span class="badge badge-success">{{ 'Active'|translate }}</span>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            {% endfor %}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            {% endif %}
+
+                            <!-- Account Activity Summary -->
+                            <div class="activity-summary-section mb-4">
+                                <div class="card">
+                                    <div class="card-header">
+                                        <h5><i class="far fa-chart-line"></i> {{ 'Account Activity'|translate }}</h5>
+                                    </div>
+                                    <div class="card-body">
+                                        <div class="row">
+                                            <div class="col-md-6">
+                                                <div class="activity-item">
+                                                    <h6>{{ 'Platform Usage'|translate }}</h6>
+                                                    <div class="platform-usage">
+                                                        <div class="platform-item">
+                                                            <span class="platform-name">{{ 'Web App'|translate }}</span>
+                                                            <span class="badge badge-success">{{ 'Active'|translate }}</span>
+                                                        </div>
+                                                        {% if user.telegram_id %}
+                                                        <div class="platform-item">
+                                                            <span class="platform-name">{{ 'Telegram Bot'|translate }}</span>
+                                                            <span class="badge badge-success">{{ 'Connected'|translate }}</span>
+                                                        </div>
+                                                        {% else %}
+                                                        <div class="platform-item">
+                                                            <span class="platform-name">{{ 'Telegram Bot'|translate }}</span>
+                                                            <button class="btn btn-sm btn-outline-primary" onclick="connectTelegram()">{{ 'Connect'|translate }}</button>
+                                                        </div>
+                                                        {% endif %}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div class="col-md-6">
+                                                <div class="activity-item">
+                                                    <h6>{{ 'Recent Activity'|translate }}</h6>
+                                                    <ul class="recent-activity-list">
+                                                        <li><i class="far fa-sign-in-alt text-success"></i> {{ 'Last login'|translate }}: {{ user.last_login.strftime('%Y-%m-%d %H:%M') if user.last_login else 'Today' }}</li>
+                                                        <li><i class="far fa-user-edit text-info"></i> {{ 'Profile updated'|translate }}: {{ user.updated_at.strftime('%Y-%m-%d') if user.updated_at else 'Never' }}</li>
+                                                        <li><i class="far fa-shopping-bag text-primary"></i> {{ 'Last order'|translate }}: {{ recent_orders[0].created_at.strftime('%Y-%m-%d') if recent_orders else 'No orders yet' }}</li>
+                                                    </ul>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Quick Actions -->
+                            <div class="quick-actions-section">
+                                <div class="card">
+                                    <div class="card-header">
+                                        <h5><i class="far fa-bolt"></i> {{ 'Quick Actions'|translate }}</h5>
+                                    </div>
+                                    <div class="card-body">
+                                        <div class="row">
+                                            <div class="col-md-3">
+                                                <a href="{{ url_for('frontend.shop') }}" class="btn btn-outline-primary btn-block action-btn">
+                                                    <i class="far fa-shopping-cart"></i>
+                                                    {{ 'Shop Products'|translate }}
+                                                </a>
+                                            </div>
+                                            <div class="col-md-3">
+                                                <a href="{{ url_for('frontend.profile_settings') }}" class="btn btn-outline-secondary btn-block action-btn">
+                                                    <i class="far fa-user-edit"></i>
+                                                    {{ 'Edit Profile'|translate }}
+                                                </a>
+                                            </div>
+                                            <div class="col-md-3">
+                                                <a href="{{ url_for('frontend.addresses') }}" class="btn btn-outline-info btn-block action-btn">
+                                                    <i class="far fa-map-marker-alt"></i>
+                                                    {{ 'Manage Addresses'|translate }}
+                                                </a>
+                                            </div>
+                                            <div class="col-md-3">
+                                                <button class="btn btn-outline-warning btn-block action-btn" onclick="downloadAccountData()">
+                                                    <i class="far fa-download"></i>
+                                                    {{ 'Export Data'|translate }}
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+        <!-- account-section end -->
+{% endblock %}
+
+{% block extra_css %}
+<style>
+.account-sidebar {
+    background: #fff;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    padding: 20px;
+    margin-bottom: 20px;
+}
+
+.profile-box {
+    margin-bottom: 30px;
+    padding-bottom: 20px;
+    border-bottom: 1px solid #eee;
+}
+
+.verification-badges {
+    margin-top: 15px;
+}
+
+.verification-badges .badge {
+    display: block;
+    margin: 5px 0;
+    padding: 5px 10px;
+}
+
+.account-menu ul li {
+    margin-bottom: 10px;
+}
+
+.account-menu ul li a {
+    display: block;
+    padding: 12px 15px;
+    color: #666;
+    text-decoration: none;
+    border-radius: 6px;
+    transition: all 0.3s;
+}
+
+.account-menu ul li a:hover,
+.account-menu ul li.active a {
+    background: #1890ff;
+    color: #fff;
+    text-decoration: none;
+}
+
+.account-menu ul li a i {
+    width: 20px;
+    margin-right: 10px;
+}
+
+.stat-card .card {
+    border: none;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    transition: transform 0.3s;
+}
+
+.stat-card .card:hover {
+    transform: translateY(-5px);
+}
+
+.stat-card.clickable {
+    cursor: pointer;
+}
+
+.bg-gradient-primary {
+    background: linear-gradient(135deg, #1890ff 0%, #096dd9 100%);
+}
+
+.sync-status {
+    animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+    0% { opacity: 1; }
+    50% { opacity: 0.5; }
+    100% { opacity: 1; }
+}
+
+.platform-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+    padding: 8px 0;
+    border-bottom: 1px solid #eee;
+}
+
+.platform-item:last-child {
+    border-bottom: none;
+}
+
+.recent-activity-list {
+    list-style: none;
+    padding: 0;
+}
+
+.recent-activity-list li {
+    padding: 8px 0;
+    border-bottom: 1px solid #eee;
+}
+
+.recent-activity-list li:last-child {
+    border-bottom: none;
+}
+
+.recent-activity-list i {
+    margin-right: 10px;
+    width: 20px;
+}
+
+.action-btn {
+    margin-bottom: 10px;
+    padding: 12px 10px;
+}
+
+.card {
+    border: none;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    margin-bottom: 20px;
+}
+
+.card-header {
+    background: #f8f9fa;
+    border-bottom: 1px solid #eee;
+    border-radius: 8px 8px 0 0 !important;
+}
+
+.subscription-card .card {
+    height: 100%;
+}
+
+.quick-actions-section .btn {
+    margin-bottom: 10px;
+}
+
+@media (max-width: 768px) {
+    .account-sidebar {
+        margin-bottom: 30px;
+    }
+    
+    .stats-section .col-lg-3 {
+        margin-bottom: 15px;
+    }
+}
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// Initialize unified account dashboard
+document.addEventListener('DOMContentLoaded', function() {
+    // Check verification status and show prompts if needed
+    checkVerificationStatus();
+    
+    // Load real-time dashboard data
+    loadDashboardData();
+    
+    // Update real-time data periodically
+    setInterval(updateDashboardData, 300000); // 5 minutes
+    
+    // Initialize sync status monitoring
+    monitorSyncStatus();
+});
+
+function checkVerificationStatus() {
+    {% if not user.email_verified_at %}
+    showNotification('{{ "Please verify your email address to access all features"|translate }}', 'warning');
+    {% endif %}
+    
+    {% if not user.phone_verified_at %}
+    showNotification('{{ "Please verify your phone number for enhanced security"|translate }}', 'info');
+    {% endif %}
+}
+
+async function loadDashboardData() {
+    try {
+        // Load addresses count
+        const addressResponse = await apiRequest('/auth/addresses');
+        const addressResult = await addressResponse.json();
+        if (addressResponse.ok && addressResult.success) {
+            document.getElementById('addressesCount').textContent = addressResult.data.addresses.length;
+        }
+        
+        // Load total orders count
+        const ordersResponse = await apiRequest('/orders/summary');
+        const ordersResult = await ordersResponse.json();
+        if (ordersResponse.ok && ordersResult.success) {
+            document.getElementById('totalOrdersCount').textContent = ordersResult.data.total_orders || {{ recent_orders|length }};
+        }
+    } catch (error) {
+        console.error('Failed to load dashboard data:', error);
+    }
+}
+
+function updateDashboardData() {
+    // Fetch updated user stats and refresh relevant sections
+    loadDashboardData();
+    
+    apiRequest('/auth/profile')
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                // Update sync status
+                updateSyncStatus('synchronized');
+                console.log('Profile data updated');
+            }
+        })
+        .catch(error => {
+            console.error('Failed to update dashboard data:', error);
+            updateSyncStatus('error');
+        });
+}
+
+function monitorSyncStatus() {
+    // Check cross-platform sync status
+    setInterval(() => {
+        const syncElement = document.getElementById('syncStatus');
+        if (syncElement) {
+            // Simulate sync check (in real implementation, this would check actual sync status)
+            updateSyncStatus('synchronized');
+        }
+    }, 60000); // 1 minute
+}
+
+function updateSyncStatus(status) {
+    const syncElement = document.getElementById('syncStatus');
+    if (syncElement) {
+        switch (status) {
+            case 'synchronized':
+                syncElement.textContent = '{{ "Synchronized"|translate }}';
+                syncElement.className = 'text-success';
+                break;
+            case 'syncing':
+                syncElement.textContent = '{{ "Syncing..."|translate }}';
+                syncElement.className = 'text-warning';
+                break;
+            case 'error':
+                syncElement.textContent = '{{ "Sync Error"|translate }}';
+                syncElement.className = 'text-danger';
+                break;
+        }
+    }
+}
+
+function connectTelegram() {
+    showNotification('{{ "Telegram connection feature coming soon!"|translate }}', 'info');
+    // In future implementation, this would generate a connection link/QR code
+}
+
+async function downloadAccountData() {
+    try {
+        showNotification('{{ "Preparing your account data for download..."|translate }}', 'info');
+        
+        const response = await apiRequest('/auth/export-data', {
+            method: 'POST'
+        });
+        
+        if (response.ok) {
+            const blob = await response.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.style.display = 'none';
+            a.href = url;
+            a.download = 'account-data.json';
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            showNotification('{{ "Account data downloaded successfully!"|translate }}', 'success');
+        } else {
+            throw new Error('Failed to download data');
+        }
+    } catch (error) {
+        console.error('Failed to download account data:', error);
+        showNotification('{{ "Failed to download account data. Please try again."|translate }}', 'error');
+    }
+}
+</script>
+{% endblock %}

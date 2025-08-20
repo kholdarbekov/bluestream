@@ -1,0 +1,52 @@
+{
+  "parallel_execution": true,
+  "max_workers": 4,
+  "fail_fast": false,
+  "generate_html_report": true,
+  "send_notifications": false,
+  "strict_coverage": true,
+  "security_scan_enabled": true,
+  "performance_baseline_file": "tests/performance/baseline.json",
+  "test_environments": {
+    "development": {
+      "database_url": "sqlite:///test.db",
+      "redis_url": "redis://localhost:6379/15",
+      "external_services": false
+    },
+    "ci": {
+      "database_url": "postgresql://test_user:test_password@localhost:5432/test_db",
+      "redis_url": "redis://localhost:6379/15",
+      "external_services": false,
+      "parallel_execution": false,
+      "max_workers": 2
+    },
+    "staging": {
+      "database_url": "postgresql://staging_user:staging_password@staging-db:5432/staging_db",
+      "redis_url": "redis://staging-redis:6379/0",
+      "external_services": true
+    }
+  },
+  "coverage_requirements": {
+    "unit": 85,
+    "integration": 75,
+    "security": 90,
+    "api": 80,
+    "overall": 80
+  },
+  "performance_thresholds": {
+    "max_response_time": 2.0,
+    "min_throughput": 100,
+    "max_error_rate": 5.0,
+    "max_memory_increase": 50
+  },
+  "notification_settings": {
+    "slack_webhook": null,
+    "email_recipients": [],
+    "on_failure_only": true
+  },
+  "test_data": {
+    "create_test_users": 10,
+    "create_test_products": 50,
+    "create_test_orders": 20
+  }
+}

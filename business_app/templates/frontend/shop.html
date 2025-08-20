@@ -1,0 +1,201 @@
+{% extends "frontend/base.html" %}
+
+{% block title %}{{ 'Shop'|translate }} - {{ company_name }}{% endblock %}
+
+{% block content %}
+        <!-- page-title -->
+        <section class="page-title">
+            <div class="bg-layer" style="background-image: url({{ url_for('static', filename='images/background/page-title.jpg') }});"></div>
+            <div class="auto-container">
+                <div class="content-box">
+                    <h1>{{ 'Our Products'|translate }}</h1>
+                    <ul class="bread-crumb clearfix">
+                        <li><a href="{{ url_for('frontend.index') }}">{{ 'Home'|translate }}</a></li>
+                        <li>{{ 'Shop'|translate }}</li>
+                    </ul>
+                </div>
+            </div>
+        </section>
+        <!-- page-title end -->
+
+        <!-- shop-page-section -->
+        <section class="shop-page-section">
+            <div class="auto-container">
+                <div class="row clearfix">
+                    <div class="col-lg-3 col-md-12 col-sm-12 sidebar-side">
+                        <div class="shop-sidebar">
+                            <!-- Search Widget -->
+                            <div class="sidebar-widget search-widget">
+                                <div class="widget-title">
+                                    <h4>{{ 'Search Products'|translate }}</h4>
+                                </div>
+                                <div class="search-form">
+                                    <form method="get" action="{{ url_for('frontend.shop') }}">
+                                        <div class="form-group">
+                                            <input type="search" name="search" placeholder="{{ 'Search...'|translate }}" value="{{ search_query or '' }}">
+                                            <button type="submit"><i class="far fa-search"></i></button>
+                                        </div>
+                                    </form>
+                                </div>
+                            </div>
+
+                            <!-- Category Widget -->
+                            <div class="sidebar-widget category-widget">
+                                <div class="widget-title">
+                                    <h4>{{ 'Categories'|translate }}</h4>
+                                </div>
+                                <div class="widget-content">
+                                    <ul class="category-list clearfix">
+                                        <li class="{% if not current_category %}active{% endif %}">
+                                            <a href="{{ url_for('frontend.shop') }}">{{ 'All Products'|translate }}</a>
+                                        </li>
+                                        {% for category in categories %}
+                                        <li class="{% if current_category == category.id %}active{% endif %}">
+                                            <a href="{{ url_for('frontend.shop', category=category.id) }}">{{ category.name }}</a>
+                                        </li>
+                                        {% endfor %}
+                                    </ul>
+                                </div>
+                            </div>
+
+                            <!-- Price Range Widget -->
+                            <div class="sidebar-widget price-widget">
+                                <div class="widget-title">
+                                    <h4>{{ 'Price Range'|translate }}</h4>
+                                </div>
+                                <div class="price-range-slider">
+                                    <div id="slider-range"></div>
+                                    <div class="input">
+                                        <div class="input-group">
+                                            <input type="text" id="amount" readonly="">
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="col-lg-9 col-md-12 col-sm-12 content-side">
+                        <div class="shop-content">
+                            <div class="result-bar">
+                                <div class="left-column">
+                                    <p>{{ 'Showing %d-%d of %d results'|format(
+                                        (products.page - 1) * products.per_page + 1 if products.items else 0,
+                                        min(products.page * products.per_page, products.total),
+                                        products.total
+                                    )|translate }}</p>
+                                </div>
+                                <div class="right-column">
+                                    <div class="short-box">
+                                        <select class="selectmenu" onchange="sortProducts(this.value)">
+                                            <option value="newest">{{ 'Sort by Latest'|translate }}</option>
+                                            <option value="price_low">{{ 'Price: Low to High'|translate }}</option>
+                                            <option value="price_high">{{ 'Price: High to Low'|translate }}</option>
+                                            <option value="name">{{ 'Name: A to Z'|translate }}</option>
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="row clearfix product-grid">
+                                {% for product in products.items %}
+                                <div class="col-lg-4 col-md-6 col-sm-12 shop-block">
+                                    <div class="shop-block-one">
+                                        <div class="inner-box">
+                                            <figure class="image-box">
+                                                {% if product.image_url %}
+                                                <img src="{{ product.image_url }}" alt="{{ product.name }}">
+                                                {% else %}
+                                                <img src="{{ url_for('static', filename='images/resource/shop/shop-1.jpg') }}" alt="{{ product.name }}">
+                                                {% endif %}
+                                                {% if product.discount_percentage > 0 %}
+                                                <div class="sale-tag">-{{ product.discount_percentage }}%</div>
+                                                {% endif %}
+                                            </figure>
+                                            <div class="lower-content">
+                                                <div class="shape" style="background-image: url({{ url_for('static', filename='images/shape/shape-7.png') }});"></div>
+                                                <span>{{ product.volume }}L - {{ product.category.name if product.category else 'Water' }}</span>
+                                                <h4><a href="{{ url_for('frontend.product_detail', product_id=product.id) }}">{{ product.name }}</a></h4>
+                                                <div class="price">
+                                                    {% if product.discount_percentage > 0 %}
+                                                    <span class="old-price">{{ product.price|format_price }}</span>
+                                                    <span class="new-price">{{ (product.price * (100 - product.discount_percentage) / 100)|format_price }}</span>
+                                                    {% else %}
+                                                    <h6>{{ product.price|format_price }}</h6>
+                                                    {% endif %}
+                                                </div>
+                                                <p>{{ product.description[:60] }}{% if product.description|length > 60 %}...{% endif %}</p>
+                                                <div class="btn-box">
+                                                    <button onclick="addToCart({{ product.id }})" class="theme-btn btn-two">{{ 'Add to Cart'|translate }}</button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                {% endfor %}
+                            </div>
+
+                            <!-- Pagination -->
+                            {% if products.pages > 1 %}
+                            <div class="pagination-wrapper centred">
+                                <ul class="pagination clearfix">
+                                    {% if products.has_prev %}
+                                    <li><a href="{{ url_for('frontend.shop', page=products.prev_num, category=current_category, search=search_query) }}"><i class="far fa-angle-left"></i></a></li>
+                                    {% endif %}
+                                    
+                                    {% for page_num in products.iter_pages() %}
+                                        {% if page_num %}
+                                            {% if page_num != products.page %}
+                                            <li><a href="{{ url_for('frontend.shop', page=page_num, category=current_category, search=search_query) }}">{{ page_num }}</a></li>
+                                            {% else %}
+                                            <li><a href="#" class="current">{{ page_num }}</a></li>
+                                            {% endif %}
+                                        {% else %}
+                                        <li><span>...</span></li>
+                                        {% endif %}
+                                    {% endfor %}
+                                    
+                                    {% if products.has_next %}
+                                    <li><a href="{{ url_for('frontend.shop', page=products.next_num, category=current_category, search=search_query) }}"><i class="far fa-angle-right"></i></a></li>
+                                    {% endif %}
+                                </ul>
+                            </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+        <!-- shop-page-section end -->
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// Price range slider
+$(function() {
+    $("#slider-range").slider({
+        range: true,
+        min: 0,
+        max: 500000,
+        values: [0, 500000],
+        slide: function(event, ui) {
+            $("#amount").val(ui.values[0] + " UZS - " + ui.values[1] + " UZS");
+        }
+    });
+    $("#amount").val($("#slider-range").slider("values", 0) + " UZS - " + $("#slider-range").slider("values", 1) + " UZS");
+});
+
+// Sort products
+function sortProducts(sortBy) {
+    const url = new URL(window.location.href);
+    url.searchParams.set('sort', sortBy);
+    url.searchParams.set('page', '1'); // Reset to first page
+    window.location.href = url.toString();
+}
+
+// Initialize select menu styling
+$(document).ready(function() {
+    $('.selectmenu').niceSelect();
+});
+</script>
+{% endblock %}

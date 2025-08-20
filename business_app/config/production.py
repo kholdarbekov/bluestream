@@ -1,0 +1,339 @@
+"""
+Production environment configuration
+"""
+import os
+from datetime import timedelta
+from .base import BaseConfig
+
+
+class ProductionConfig(BaseConfig):
+    """Production configuration with maximum security and performance"""
+    
+    DEBUG = False
+    
+    # Database Configuration
+    @property  
+    def SQLALCHEMY_DATABASE_URI(self):
+        uri = os.environ.get('DATABASE_URL')
+        if not uri:
+            db_user = os.environ.get('DB_USER', 'postgres')
+            db_password = os.environ.get('DB_PASSWORD')
+            db_host = os.environ.get('DB_HOST', 'localhost')
+            db_port = os.environ.get('DB_PORT', '5432')
+            db_name = os.environ.get('DB_NAME', 'bluestream_prod')
+            
+            if not db_password:
+                raise ValueError("DB_PASSWORD environment variable is required in production")
+            
+            uri = f'postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}'
+        return uri
+    
+    SQLALCHEMY_ECHO = False
+    
+    # Enhanced database configuration for production
+    SQLALCHEMY_ENGINE_OPTIONS = {
+        'pool_size': 50,  # Increased for production load
+        'pool_timeout': 30,
+        'pool_recycle': 3600,  # Recycle connections every hour
+        'max_overflow': 20,
+        'pool_pre_ping': True,
+        'connect_args': {
+            'sslmode': 'require',  # Require SSL for database connections
+            'connect_timeout': 10,
+            'application_name': 'bluestream_prod'
+        }
+    }
+    
+    # Redis Configuration
+    @property
+    def REDIS_URL(self):
+        redis_url = os.environ.get('REDIS_URL')
+        if not redis_url:
+            raise ValueError("REDIS_URL environment variable is required in production")
+        return redis_url
+    
+    # Rate Limiting Configuration - Strict in production
+    @property
+    def RATELIMIT_STORAGE_URL(self):
+        return self.REDIS_URL
+    
+    RATELIMIT_DEFAULT = os.environ.get('RATE_LIMIT_REQUESTS', '100/hour')
+    RATELIMIT_ENABLED = True
+    
+    # Celery Configuration
+    @property
+    def CELERY(self):
+        redis_url = self.REDIS_URL
+        return {
+            'broker_url': os.environ.get('CELERY_BROKER_URL', redis_url),
+            'result_backend': os.environ.get('CELERY_RESULT_BACKEND', redis_url),
+            'task_serializer': 'json',
+            'accept_content': ['json'],
+            'result_serializer': 'json',
+            'timezone': 'Asia/Tashkent',
+            'enable_utc': True,
+            'task_track_started': True,
+            'result_expires': 3600,
+            'worker_prefetch_multiplier': 1,
+            'task_acks_late': True,
+            'worker_disable_rate_limits': False,
+            'task_compression': 'gzip',
+            'result_compression': 'gzip',
+            'task_always_eager': False,
+            'worker_max_tasks_per_child': 1000,  # Prevent memory leaks
+            'broker_connection_retry_on_startup': True,
+        }
+    
+    # CORS Configuration - Production domains only
+    CORS_ORIGINS = [
+        'https://bluestream.uz',
+        'https://www.bluestream.uz',
+        'https://admin.bluestream.uz',
+        'https://api.bluestream.uz'
+    ]
+    
+    # Cache Configuration
+    @property
+    def CACHE_REDIS_URL(self):
+        return self.REDIS_URL
+    
+    CACHE_DEFAULT_TIMEOUT = 600  # Longer cache in production
+    
+    # JWT Configuration
+    JWT_ACCESS_TOKEN_EXPIRES = timedelta(minutes=30)  # Shorter tokens in production
+    JWT_REFRESH_TOKEN_EXPIRES = timedelta(days=7)
+    JWT_COOKIE_SECURE = True  # Force HTTPS
+    
+    # Session Configuration - Maximum security
+    SESSION_COOKIE_SECURE = True
+    SESSION_COOKIE_HTTPONLY = True
+    SESSION_COOKIE_SAMESITE = 'Strict'  # Stricter in production
+    SESSION_COOKIE_NAME = '__Secure-session'
+    PERMANENT_SESSION_LIFETIME = timedelta(hours=4)
+    
+    # Payment Gateway Configuration - Live mode
+    PAYME_TEST_MODE = False
+    PAYME_ENDPOINT_URL = 'https://checkout.paycom.uz'
+    CLICK_TEST_MODE = False
+    CLICK_ENDPOINT_URL = 'https://api.click.uz/v2/merchant'
+    
+    # Email Configuration
+    MAIL_BACKEND = 'smtp'
+    MAIL_SUBJECT_PREFIX = ''
+    
+    # File Storage - S3 production bucket
+    STORAGE_TYPE = 's3'
+    AWS_S3_BUCKET = os.environ.get('AWS_S3_BUCKET', 'bluestream-production')
+    UPLOAD_FOLDER = 'uploads/prod/'
+    
+    # Enhanced security for file uploads
+    ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'pdf'}  # Restricted set
+    MAX_CONTENT_LENGTH = 10 * 1024 * 1024  # 10MB limit
+    
+    # Logging Configuration
+    LOG_LEVEL = 'WARNING'
+    LOG_FILE = 'logs/production.log'
+    
+    # Error tracking - Optional in production
+    @property
+    def SENTRY_DSN(self):
+        return os.environ.get('SENTRY_DSN')
+    
+    SENTRY_ENVIRONMENT = 'production'
+    SENTRY_RELEASE = os.environ.get('SENTRY_RELEASE', 'unknown')
+    
+    # Monitoring Configuration
+    METRICS_ENABLED = True
+    
+    # Security Configuration - Maximum security
+    PASSWORD_MIN_LENGTH = 10  # Longer passwords in production
+    MAX_LOGIN_ATTEMPTS = 3  # Fewer attempts allowed
+    LOCKOUT_DURATION = 3600  # 1 hour lockout
+    
+    # Two-factor authentication
+    TWO_FACTOR_REQUIRED = os.environ.get('TWO_FACTOR_REQUIRED', 'False').lower() == 'true'
+    
+    # Swagger Configuration - Disabled in production
+    SWAGGER_UI_ENABLED = False
+    
+    # Content Security Policy - Strict
+    CONTENT_SECURITY_POLICY = {
+        'default-src': ["'self'"],
+        'script-src': ["'self'"],
+        'style-src': ["'self'", "https://fonts.googleapis.com"],
+        'font-src': ["'self'", "https://fonts.gstatic.com"],
+        'img-src': ["'self'", "data:", "https://bluestream.uz"],
+        'connect-src': ["'self'", "https://api.bluestream.uz"],
+        'object-src': ["'none'"],
+        'base-uri': ["'self'"],
+        'form-action': ["'self'"],
+        'frame-ancestors': ["'none'"],
+        'upgrade-insecure-requests': []
+    }
+    
+    # Security Headers - Maximum security
+    SECURITY_HEADERS = {
+        'X-Content-Type-Options': 'nosniff',
+        'X-Frame-Options': 'DENY',
+        'X-XSS-Protection': '1; mode=block',
+        'Strict-Transport-Security': 'max-age=63072000; includeSubDomains; preload',
+        'Referrer-Policy': 'strict-origin-when-cross-origin',
+        'Permissions-Policy': 'geolocation=(), microphone=(), camera=()'
+    }
+    
+    # Content Security Policy - Production settings
+    CSP_REPORT_ONLY = False  # Enforce CSP in production
+    CSP_SOURCES = {
+        'script-src': ["'self'"],  # No unsafe-inline in production
+        'style-src': ["'self'", "'unsafe-inline'", 'fonts.googleapis.com'],  # Allow Google Fonts
+        'img-src': ["'self'", 'data:', 'https:'],
+        'connect-src': ["'self'"],
+        'font-src': ["'self'", 'fonts.gstatic.com'],
+        'media-src': ["'self'"],
+        'object-src': ["'none'"],
+        'frame-src': ["'none'"]
+    }
+    
+    # Feature flags for production
+    FEATURE_FLAGS = {
+        'maintenance_mode': os.environ.get('MAINTENANCE_MODE', 'False').lower() == 'true',
+        'new_user_registration': os.environ.get('ALLOW_REGISTRATION', 'True').lower() == 'true',
+        'payment_processing': os.environ.get('ALLOW_PAYMENTS', 'True').lower() == 'true',
+    }
+    
+    @classmethod
+    def validate_debug_mode(cls):
+        """Ensure debug mode is disabled in production"""
+        if cls.DEBUG:
+            raise ValueError("DEBUG mode must be disabled in production environment")
+    
+    @classmethod
+    def validate_production_settings(cls):
+        """Validate production-specific settings"""
+        # Security validations
+        if not cls.SESSION_COOKIE_SECURE:
+            raise ValueError("SESSION_COOKIE_SECURE must be True in production")
+        if not cls.JWT_COOKIE_SECURE:
+            raise ValueError("JWT_COOKIE_SECURE must be True in production")
+        if cls.PAYME_TEST_MODE:
+            raise ValueError("PAYME_TEST_MODE must be False in production")
+        if cls.CLICK_TEST_MODE:
+            raise ValueError("CLICK_TEST_MODE must be False in production")
+        
+        # Required services validations
+        required_services = [
+            'REDIS_URL',
+            'SENTRY_DSN',
+            'AWS_ACCESS_KEY_ID',
+            'AWS_SECRET_ACCESS_KEY',
+            'SENDGRID_API_KEY'
+        ]
+        
+        missing_services = []
+        for service in required_services:
+            if not os.environ.get(service):
+                missing_services.append(service)
+        
+        if missing_services:
+            raise ValueError(f"Missing required production services: {', '.join(missing_services)}")
+    
+    @classmethod
+    def validate_required_env_vars(cls):
+        """Validate all required environment variables for production"""
+        required_vars = [
+            'SECRET_KEY',
+            'DB_PASSWORD',
+            'REDIS_URL',
+            'SENTRY_DSN',
+            'JWT_SECRET_KEY',
+            'SENDGRID_API_KEY'
+        ]
+        
+        missing_vars = []
+        for var in required_vars:
+            if not os.environ.get(var):
+                missing_vars.append(var)
+        
+        if missing_vars:
+            raise ValueError(f"Missing required environment variables: {', '.join(missing_vars)}")
+    
+    @classmethod
+    def init_app(cls, app):
+        """Initialize production-specific configuration"""
+        super().init_app(app)
+        cls.validate_production_settings()
+        
+        # Initialize Sentry for error tracking
+        try:
+            import sentry_sdk
+            from sentry_sdk.integrations.flask import FlaskIntegration
+            from sentry_sdk.integrations.sqlalchemy import SqlalchemyIntegration
+            from sentry_sdk.integrations.redis import RedisIntegration
+            from sentry_sdk.integrations.celery import CeleryIntegration
+            
+            sentry_sdk.init(
+                dsn=cls.SENTRY_DSN,
+                integrations=[
+                    FlaskIntegration(),
+                    SqlalchemyIntegration(),
+                    RedisIntegration(),
+                    CeleryIntegration(),
+                ],
+                environment=cls.SENTRY_ENVIRONMENT,
+                release=cls.SENTRY_RELEASE,
+                traces_sample_rate=0.01,  # Low sample rate in production
+                profiles_sample_rate=0.01,
+                debug=False,
+                attach_stacktrace=True,
+                send_default_pii=False  # Don't send PII to Sentry
+            )
+        except ImportError:
+            raise ImportError("Sentry SDK is required in production environment")
+        
+        # Add security headers middleware
+        @app.after_request
+        def add_security_headers(response):
+            for header, value in cls.SECURITY_HEADERS.items():
+                response.headers[header] = value
+            return response
+        
+        # Initialize Flask-Talisman for enhanced security
+        try:
+            from flask_talisman import Talisman
+            Talisman(
+                app,
+                force_https=True,
+                strict_transport_security=True,
+                strict_transport_security_max_age=63072000,
+                strict_transport_security_include_subdomains=True,
+                strict_transport_security_preload=True,
+                content_security_policy=cls.CONTENT_SECURITY_POLICY,
+                referrer_policy='strict-origin-when-cross-origin',
+                feature_policy=cls.SECURITY_HEADERS.get('Permissions-Policy', ''),
+                content_security_policy_nonce_in=['script-src', 'style-src']
+            )
+        except ImportError:
+            raise ImportError("Flask-Talisman is required in production environment")
+        
+        # Setup structured logging for production
+        import logging
+        import json
+        from pythonjsonlogger import jsonlogger
+        
+        class CustomJsonFormatter(jsonlogger.JsonFormatter):
+            def add_fields(self, log_record, record, message_dict):
+                super(CustomJsonFormatter, self).add_fields(log_record, record, message_dict)
+                log_record['environment'] = 'production'
+                log_record['service'] = 'bluestream'
+        
+        # Configure structured logging
+        formatter = CustomJsonFormatter(
+            '%(asctime)s %(name)s %(levelname)s %(message)s'
+        )
+        
+        handler = logging.StreamHandler()
+        handler.setFormatter(formatter)
+        app.logger.addHandler(handler)
+        app.logger.setLevel(getattr(logging, cls.LOG_LEVEL))
+        
+        # Note: Health check endpoint is defined in the main app factory

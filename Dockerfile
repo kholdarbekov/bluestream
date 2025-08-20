@@ -1,20 +1,98 @@
-FROM python:3.13
+# Multi-stage Dockerfile for Water Business Platform
 
-ENV PYTHONUNBUFFERED 1
+# Base Python image
+FROM python:3.13-slim AS base
 
-WORKDIR /app/
+# Set environment variables
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    FLASK_ENV=production \
+    DEBUG=False
 
-RUN apt-get update && \
-    apt-get install -y python3-dev cmake curl gcc build-essential && \
-    apt-get clean && rm -rf /var/lib/apt/lists/*
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    gcc \
+    g++ \
+    libpq-dev \
+    curl \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-ENV PYTHONPATH=/app
+# Set work directory
+WORKDIR /app
 
-COPY requirements.txt /requirements.txt
-RUN pip install --upgrade pip --progress-bar off && pip install -r /requirements.txt --progress-bar off
+# Copy and install Python dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
-COPY . /app
-COPY ./app/scripts/start-gunicorn.sh /start-gunicorn.sh
+# Copy shared code
+COPY shared/ ./shared/
+
+# Business App Stage
+FROM base AS business_app
+
+# Copy business app code
+COPY business_app/ ./business_app/
+
+# Create uploads directory
+RUN mkdir -p /app/uploads
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:80/health || exit 1
+
+COPY scripts/start-gunicorn.sh /start-gunicorn.sh
 RUN chmod u+x /start-gunicorn.sh
 
+# Start command
 CMD ["/start-gunicorn.sh"]
+
+# Telegram Bot Stage
+FROM base AS telegram_bot
+
+# Copy telegram bot code
+COPY telegram_bot/ ./telegram_bot/
+
+# Set work directory to telegram_bot for module imports
+WORKDIR /app/telegram_bot
+
+# Start command
+CMD ["python", "bot.py"]
+
+# Celery Worker Stage
+FROM base AS celery_worker
+
+# Copy business app code (needed for tasks)
+COPY business_app/ ./business_app/
+
+# Create uploads directory
+RUN mkdir -p /app/uploads
+
+# Start command will be overridden in docker-compose
+CMD ["celery", "-A", "business_app.tasks.celery_app", "worker", "--loglevel=info"]
+
+# Celery Beat Stage
+FROM base AS celery_beat
+
+# Copy business app code (needed for tasks)
+COPY business_app/ ./business_app/
+
+# Start command will be overridden in docker-compose
+CMD ["celery", "-A", "business_app.tasks.celery_app", "beat", "--loglevel=info"]
+
+# Development Stage (for local development)
+FROM base AS development
+
+# Override production environment variables for development
+ENV FLASK_ENV=development \
+    DEBUG=True
+
+# Install development dependencies
+RUN pip install --no-cache-dir pytest pytest-cov black flake8 mypy
+
+# Copy all code
+COPY . .
+
+# Start command for development
+CMD ["python", "-m", "business_app.app"]

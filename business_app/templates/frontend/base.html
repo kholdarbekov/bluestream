@@ -1,0 +1,678 @@
+<!DOCTYPE html>
+<html lang="{{ current_language }}">
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0">
+    
+    <title>{% block title %}{{ company_name }}{% endblock %}</title>
+    
+    <!-- Fav Icon -->
+    <link rel="icon" href="{{ url_for('static', filename='images/favicon.ico') }}" type="image/x-icon">
+    
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Spartan:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Open+Sans:ital,wght@0,300;0,400;0,600;0,700;0,800;1,300;1,400;1,600;1,700;1,800&display=swap" rel="stylesheet">
+    
+    <!-- Stylesheets -->
+    <link href="{{ url_for('static', filename='css/font-awesome-all.css') }}" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/flaticon.css') }}" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/owl.css') }}" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/bootstrap.css') }}" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/jquery.fancybox.min.css') }}" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/animate.css') }}" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/jquery-ui.css') }}" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/color.css') }}" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/responsive.css') }}" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/custom-base.css') }}" rel="stylesheet">
+    
+    {% block extra_head %}{% endblock %}
+</head>
+
+<body>
+    <div class="boxed_wrapper">
+        
+        <!-- preloader -->
+        <div class="loader-wrap">
+            <div class="preloader">
+                <div class="preloader-close">{{ 'Preloader Close'|translate }}</div>
+                <div id="handle-preloader" class="handle-preloader">
+                    <div class="animation-preloader">
+                        <div class="spinner"></div>
+                        <div class="txt-loading">
+                            {% for letter in "bluestream" %}
+                            <span data-text-preloader="{{ letter }}" class="letters-loading">{{ letter }}</span>
+                            {% endfor %}
+                        </div>
+                    </div>  
+                </div>
+            </div>
+        </div>
+        <!-- preloader end -->
+
+        <!-- main header -->
+        <header class="main-header header-style-two">
+            <!-- header-lower -->
+            <div class="header-lower">
+                <div class="outer-box">
+                    <div class="logo-box">
+                        <figure class="logo">
+                            <a href="{{ url_for('frontend.index') }}">
+                                <img src="{{ url_for('static', filename='images/logo.png') }}" alt="{{ company_name }}">
+                            </a>
+                        </figure>
+                    </div>
+                    <div class="menu-area clearfix">
+                        <!--Mobile Navigation Toggler-->
+                        <div class="mobile-nav-toggler">
+                            <i class="icon-bar"></i>
+                            <i class="icon-bar"></i>
+                            <i class="icon-bar"></i>
+                        </div>
+                        <nav class="main-menu navbar-expand-md navbar-light">
+                            <div class="collapse navbar-collapse show clearfix" id="navbarSupportedContent">
+                                <ul class="navigation clearfix">
+                                    <li class="{% if request.endpoint == 'frontend.index' %}current{% endif %}">
+                                        <a href="{{ url_for('frontend.index') }}">{{ 'Home'|translate }}</a>
+                                    </li>
+                                    <li class="dropdown {% if request.endpoint in ['frontend.shop', 'frontend.product_detail'] %}current{% endif %}">
+                                        <a href="{{ url_for('frontend.shop') }}">{{ 'Shop'|translate }}</a>
+                                        {% if nav_categories %}
+                                        <ul>
+                                            {% for category in nav_categories[:6] %}
+                                            <li><a href="{{ url_for('frontend.shop', category=category.id) }}">{{ category.name }}</a></li>
+                                            {% endfor %}
+                                        </ul>
+                                        {% endif %}
+                                    </li>
+                                    <li class="{% if request.endpoint == 'frontend.subscriptions' %}current{% endif %}">
+                                        <a href="{{ url_for('frontend.subscriptions') }}">{{ 'Subscriptions'|translate }}</a>
+                                    </li>
+                                    <li class="{% if request.endpoint == 'frontend.services' %}current{% endif %}">
+                                        <a href="{{ url_for('frontend.services') }}">{{ 'Services'|translate }}</a>
+                                    </li>
+                                    <li class="dropdown">
+                                        <a href="#">{{ 'Pages'|translate }}</a>
+                                        <ul>
+                                            <li><a href="{{ url_for('frontend.about') }}">{{ 'About Us'|translate }}</a></li>
+                                            <li><a href="{{ url_for('frontend.gallery') }}">{{ 'Gallery'|translate }}</a></li>
+                                            <li><a href="{{ url_for('frontend.contact') }}">{{ 'Contact'|translate }}</a></li>
+                                        </ul>
+                                    </li>
+                                </ul>
+                            </div>
+                        </nav>
+                    </div>
+                    <ul class="nav-right">
+                        <li class="search-box-outer">
+                            <div class="dropdown">
+                                <button class="search-box-btn" type="button" id="dropdownMenu3" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                                    <i class="far fa-search"></i>
+                                </button>
+                                <div class="dropdown-menu search-panel" aria-labelledby="dropdownMenu3">
+                                    <div class="form-container">
+                                        <form method="get" action="{{ url_for('frontend.shop') }}">
+                                            <div class="form-group">
+                                                <input type="search" name="search" placeholder="{{ 'Search products...'|translate }}" required>
+                                                <button type="submit" class="search-btn"><span class="fas fa-search"></span></button>
+                                            </div>
+                                        </form>
+                                    </div>
+                                </div>
+                            </div>
+                        </li>
+                        
+                        <!-- Language Selector -->
+                        <li class="language-selector">
+                            <div class="dropdown">
+                                <button class="btn btn-outline-dark btn-sm dropdown-toggle" type="button" data-toggle="dropdown">
+                                    {% if current_language == 'uz' %}UZ{% elif current_language == 'ru' %}RU{% else %}EN{% endif %}
+                                </button>
+                                <div class="dropdown-menu">
+                                    <a class="dropdown-item" href="{{ url_for('frontend.set_language', language='en') }}">English</a>
+                                    <a class="dropdown-item" href="{{ url_for('frontend.set_language', language='uz') }}">O'zbek</a>
+                                    <a class="dropdown-item" href="{{ url_for('frontend.set_language', language='ru') }}">Русский</a>
+                                </div>
+                            </div>
+                        </li>
+                        
+                        <!-- Shopping Cart -->
+                        <li class="cart-box">
+                            <a href="{{ url_for('frontend.cart') }}">
+                                <i class="fal fa-shopping-cart"></i>
+                                <span id="cart-count">0</span>
+                            </a>
+                        </li>
+                        
+                        <!-- User Menu -->
+                        {% if current_user %}
+                        <li class="user-menu">
+                            <div class="dropdown">
+                                <button class="btn btn-outline-light btn-sm dropdown-toggle" type="button" data-toggle="dropdown">
+                                    <i class="far fa-user"></i> {{ current_user.name.split()[0] }}
+                                </button>
+                                <div class="dropdown-menu">
+                                    <a class="dropdown-item" href="{{ url_for('frontend.my_account') }}">
+                                        <i class="far fa-user-circle"></i> {{ 'My Account'|translate }}
+                                    </a>
+                                    <a class="dropdown-item" href="{{ url_for('frontend.orders') }}">
+                                        <i class="far fa-list"></i> {{ 'My Orders'|translate }}
+                                    </a>
+                                    <a class="dropdown-item" href="{{ url_for('frontend.loyalty') }}">
+                                        <i class="far fa-star"></i> {{ 'Loyalty Program'|translate }}
+                                    </a>
+                                    <div class="dropdown-divider"></div>
+                                    <a class="dropdown-item" href="#" onclick="logout()">
+                                        <i class="far fa-sign-out"></i> {{ 'Logout'|translate }}
+                                    </a>
+                                </div>
+                            </div>
+                        </li>
+                        {% else %}
+                        <li class="account-info">
+                            <a href="{{ url_for('frontend.login') }}" class="theme-btn btn-one btn-sm">
+                                <i class="far fa-user"></i> {{ 'Login'|translate }}
+                            </a>
+                        </li>
+                        {% endif %}
+                    </ul>
+                </div>
+            </div>
+
+            <!--sticky Header-->
+            <div class="sticky-header">
+                <div class="outer-box">
+                    <div class="logo-box">
+                        <figure class="logo"><a href="{{ url_for('frontend.index') }}"><img src="{{ url_for('static', filename='images/logo.png') }}" alt="{{ company_name }}"></a></figure>
+                    </div>
+                    <div class="menu-area clearfix">
+                        <nav class="main-menu clearfix">
+                            <!--Keep This Empty / Menu will come through Javascript-->
+                        </nav>
+                    </div>
+                    <ul class="nav-right">
+                        <li class="search-box-outer">
+                            <div class="dropdown">
+                                <button class="search-box-btn" type="button" id="dropdownMenu4" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                                    <i class="far fa-search"></i>
+                                </button>
+                                <div class="dropdown-menu search-panel" aria-labelledby="dropdownMenu4">
+                                    <div class="form-container">
+                                        <form method="get" action="{{ url_for('frontend.shop') }}">
+                                            <div class="form-group">
+                                                <input type="search" name="search" placeholder="{{ 'Search products...'|translate }}" required>
+                                                <button type="submit" class="search-btn"><span class="fas fa-search"></span></button>
+                                            </div>
+                                        </form>
+                                    </div>
+                                </div>
+                            </div>
+                        </li>
+                        
+                        <!-- Language Selector -->
+                        <li class="language-selector">
+                            <div class="dropdown">
+                                <button class="btn btn-outline-dark btn-sm dropdown-toggle" type="button" data-toggle="dropdown">
+                                    {% if current_language == 'uz' %}UZ{% elif current_language == 'ru' %}RU{% else %}EN{% endif %}
+                                </button>
+                                <div class="dropdown-menu">
+                                    <a class="dropdown-item" href="{{ url_for('frontend.set_language', language='en') }}">English</a>
+                                    <a class="dropdown-item" href="{{ url_for('frontend.set_language', language='uz') }}">O'zbek</a>
+                                    <a class="dropdown-item" href="{{ url_for('frontend.set_language', language='ru') }}">Русский</a>
+                                </div>
+                            </div>
+                        </li>
+                        
+                        <!-- Shopping Cart -->
+                        <li class="cart-box">
+                            <a href="{{ url_for('frontend.cart') }}">
+                                <i class="fal fa-shopping-cart"></i>
+                                <span id="cart-count-sticky">0</span>
+                            </a>
+                        </li>
+                        
+                        <!-- User Menu -->
+                        {% if current_user %}
+                        <li class="user-menu">
+                            <div class="dropdown">
+                                <button class="btn btn-outline-light btn-sm dropdown-toggle" type="button" data-toggle="dropdown">
+                                    <i class="far fa-user"></i> {{ current_user.name.split()[0] }}
+                                </button>
+                                <div class="dropdown-menu">
+                                    <a class="dropdown-item" href="{{ url_for('frontend.my_account') }}">
+                                        <i class="far fa-user-circle"></i> {{ 'My Account'|translate }}
+                                    </a>
+                                    <a class="dropdown-item" href="{{ url_for('frontend.orders') }}">
+                                        <i class="far fa-list"></i> {{ 'My Orders'|translate }}
+                                    </a>
+                                    <a class="dropdown-item" href="{{ url_for('frontend.loyalty') }}">
+                                        <i class="far fa-star"></i> {{ 'Loyalty Program'|translate }}
+                                    </a>
+                                    <div class="dropdown-divider"></div>
+                                    <a class="dropdown-item" href="#" onclick="logout()">
+                                        <i class="far fa-sign-out"></i> {{ 'Logout'|translate }}
+                                    </a>
+                                </div>
+                            </div>
+                        </li>
+                        {% else %}
+                        <li class="account-info">
+                            <a href="{{ url_for('frontend.login') }}" class="theme-btn btn-one btn-sm">
+                                <i class="far fa-user"></i> {{ 'Login'|translate }}
+                            </a>
+                        </li>
+                        {% endif %}
+                    </ul>
+                </div>
+            </div>
+        </header>
+        <!-- main-header end -->
+
+        <!-- Mobile Menu  -->
+        <div class="mobile-menu">
+            <div class="menu-backdrop"></div>
+            <div class="close-btn"><i class="fas fa-times"></i></div>
+            
+            <nav class="menu-box">
+                <div class="nav-logo"><a href="{{ url_for('frontend.index') }}"><img src="{{ url_for('static', filename='images/logo.png') }}" alt="{{ company_name }}" title="{{ company_name }}"></a></div>
+                <div class="menu-outer"><!--Here Menu Will Come Automatically Via Javascript / Same Menu as in Header--></div>
+                <div class="contact-info">
+                    <h4>{{ 'Contact Info'|translate }}</h4>
+                    <ul>
+                        <li>{{ company_phone }}</li>
+                        <li>{{ company_email }}</li>
+                    </ul>
+                </div>
+                <div class="social-links">
+                    <ul class="clearfix">
+                        <li><a href="#"><span class="fab fa-twitter"></span></a></li>
+                        <li><a href="#"><span class="fab fa-facebook-square"></span></a></li>
+                        <li><a href="#"><span class="fab fa-pinterest-p"></span></a></li>
+                        <li><a href="#"><span class="fab fa-instagram"></span></a></li>
+                        <li><a href="#"><span class="fab fa-youtube"></span></a></li>
+                    </ul>
+                </div>
+            </nav>
+        </div><!-- End Mobile Menu -->
+
+        <!-- Page Content -->
+        {% block content %}{% endblock %}
+
+        <!-- main-footer -->
+        <footer class="main-footer">
+            <div class="pattern-layer">
+                <div class="pattern-1" style="background-image: url({{ url_for('static', filename='images/shape/shape-12.png') }});"></div>
+                <div class="pattern-2" style="background-image: url({{ url_for('static', filename='images/shape/shape-13.png') }});"></div>
+                <div class="pattern-3" style="background-image: url({{ url_for('static', filename='images/shape/shape-14.png') }});"></div>
+            </div>
+            <div class="auto-container">
+                <div class="footer-top clearfix">
+                    <div class="line-shape" style="background-image: url({{ url_for('static', filename='images/shape/shape-11.png') }});"></div>
+                    <div class="text pull-left">
+                        <h2>{{ 'Please'|translate }} <span>{{ 'Call Us'|translate }}</span> {{ 'to Take an Extraordinary Service'|translate }}</h2>
+                    </div>
+                    <div class="support-box pull-right">
+                        <a href="tel:{{ company_phone }}"><i class="fas fa-phone"></i>{{ company_phone }}</a>
+                    </div>
+                </div>
+                <div class="widget-section">
+                    <div class="row clearfix">
+                        <div class="col-lg-3 col-md-6 col-sm-12 footer-column">
+                            <div class="footer-widget logo-widget">
+                                <figure class="footer-logo"><a href="{{ url_for('frontend.index') }}"><img src="{{ url_for('static', filename='images/footer-logo.png') }}" alt="{{ company_name }}"></a></figure>
+                                <div class="text">
+                                    <p>{{ 'Premium water delivery services with a commitment to quality and customer satisfaction.'|translate }}</p>
+                                </div>
+                                <div class="schedule-box">
+                                    <h6>{{ 'Open Hours:'|translate }}</h6>
+                                    <ul class="list clearfix">
+                                        <li>{{ 'Mon - Sat: 9AM - 6PM.'|translate }}</li>
+                                        <li>{{ 'Sunday: Closed'|translate }}</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-lg-3 col-md-6 col-sm-12 footer-column">
+                            <div class="footer-widget contact-widget ml-70">
+                                <div class="widget-title">
+                                    <h4>{{ 'Address'|translate }}</h4>
+                                </div>
+                                <div class="widget-content">
+                                    <ul class="info-list clearfix">
+                                        <li><i class="fal fa-map-marker-alt"></i>{{ 'Tashkent, Uzbekistan'|translate }}</li>
+                                        <li><i class="fal fa-phone"></i>{{ 'Call Us:'|translate }} <a href="tel:{{ company_phone }}">{{ company_phone }}</a></li>
+                                        <li><i class="fal fa-envelope-open-text"></i><a href="mailto:{{ company_email }}">{{ company_email }}</a></li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-lg-3 col-md-6 col-sm-12 footer-column">
+                            <div class="footer-widget links-widget ml-70">
+                                <div class="widget-title">
+                                    <h4>{{ 'Useful Links'|translate }}</h4>
+                                </div>
+                                <div class="widget-content">
+                                    <ul class="links-list clearfix">
+                                        <li><a href="{{ url_for('frontend.about') }}">{{ 'About Company'|translate }}</a></li>
+                                        <li><a href="{{ url_for('frontend.services') }}">{{ 'Services'|translate }}</a></li>
+                                        <li><a href="{{ url_for('frontend.shop') }}">{{ 'Our Products'|translate }}</a></li>
+                                        <li><a href="#">{{ 'Our Blog'|translate }}</a></li>
+                                        <li><a href="{{ url_for('frontend.contact') }}">{{ 'Contact Us'|translate }}</a></li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-lg-3 col-md-6 col-sm-12 footer-column">
+                            <div class="footer-widget subscribe-widget">
+                                <div class="widget-title">
+                                    <h4>{{ 'Subscribe'|translate }}</h4>
+                                </div>
+                                <div class="widget-content">
+                                    <p>{{ 'Stay updated with our latest news, offers, and water delivery tips.'|translate }}</p>
+                                    <div class="form-inner">
+                                        <form action="{{ url_for('frontend.contact') }}" method="post">
+                                            <div class="form-group">
+                                                <input type="email" name="email" placeholder="{{ 'Your Email'|translate }}" required="">
+                                                <button type="submit"><i class="far fa-long-arrow-alt-right"></i></button>
+                                            </div>
+                                        </form>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="footer-bottom">
+                <div class="auto-container">
+                    <div class="bottom-inner">
+                        <div class="copyright">
+                            <p><a href="/">Blue Stream Group</a> &copy; 2025 All Rights Reserved</p>
+                        </div>
+                        <ul class="social-links clearfix">
+                            <li><a href="#"><i class="fab fa-facebook-f"></i></a></li>
+                            <li><a href="#"><i class="fab fa-twitter"></i></a></li>
+                            <li><a href="#"><i class="fab fa-linkedin-in"></i></a></li>
+                            <li><a href="#"><i class="fab fa-instagram"></i></a></li>
+                        </ul>
+                        <ul class="footer-nav clearfix">
+                            <li><a href="#">{{ 'Terms of Service'|translate }}</a></li>
+                            <li><a href="#">{{ 'Privacy Policy'|translate }}</a></li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </footer>
+        <!-- main-footer end -->
+
+        <!--Scroll to top-->
+        <button class="scroll-top scroll-to-target" data-target="html">
+            <span class="far fa-angle-up"></span>
+        </button>
+    </div>
+
+    <!-- jequery plugins -->
+    <script src="{{ url_for('static', filename='js/jquery.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/popper.min.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/bootstrap.min.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/owl.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/wow.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/validation.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/jquery.fancybox.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/appear.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/scrollbar.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/jquery-ui.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+
+    <!-- Custom JavaScript -->
+    <script>
+        // Global variables
+        const API_BASE_URL = '{{ request.url_root }}api/v1';
+        const CURRENT_USER = {{ current_user|tojson if current_user else 'null' }};
+        
+        // Authentication token handling (now using httpOnly cookies)
+        function getAuthToken() {
+            // Tokens are now stored in httpOnly cookies and sent automatically
+            // No need to manually retrieve tokens from localStorage
+            return null;
+        }
+        
+        function setAuthToken(token, refreshToken = null) {
+            // Tokens are now set as httpOnly cookies by the server
+            // No need to manually store tokens in localStorage
+            console.warn('setAuthToken called but tokens are now handled via httpOnly cookies');
+        }
+        
+        function getRefreshToken() {
+            // Refresh tokens are now stored in httpOnly cookies
+            return null;
+        }
+        
+        function removeAuthTokens() {
+            // Clear any remaining localStorage data (migration cleanup)
+            localStorage.removeItem('access_token');
+            localStorage.removeItem('refresh_token');
+            localStorage.removeItem('user_session_id');
+            // Actual token removal is handled by the server during logout
+        }
+        
+        // Enhanced logout function with API call
+        async function logout() {
+            try {
+                // Call logout API to clear httpOnly cookies on server
+                await apiRequest('/auth/logout', {
+                    method: 'POST',
+                    credentials: 'include'  // Include cookies in request
+                });
+            } catch (error) {
+                console.error('Logout API call failed:', error);
+                // Continue with client-side logout even if API fails
+            }
+            
+            // Clear local storage
+            removeAuthTokens();
+            cart = [];
+            localStorage.removeItem('cart');
+            
+            // Show logout message
+            showNotification('{{ "Logged out successfully"|translate }}', 'success');
+            
+            // Redirect to login
+            setTimeout(() => {
+                window.location.href = '{{ url_for("frontend.login") }}';
+            }, 1000);
+        }
+        
+        // Logout from all sessions
+        async function logoutAll() {
+            const token = getAuthToken();
+            
+            try {
+                if (token) {
+                    await apiRequest('/auth/logout-all', {
+                        method: 'POST'
+                    });
+                }
+            } catch (error) {
+                console.error('Logout all API call failed:', error);
+            }
+            
+            // Clear local storage
+            removeAuthTokens();
+            cart = [];
+            localStorage.removeItem('cart');
+            
+            showNotification('{{ "Logged out from all sessions"|translate }}', 'success');
+            
+            setTimeout(() => {
+                window.location.href = '{{ url_for("frontend.login") }}';
+            }, 1000);
+        }
+        
+        // Token refresh function
+        async function refreshToken() {
+            const refreshTokenValue = getRefreshToken();
+            
+            if (!refreshTokenValue) {
+                logout();
+                return null;
+            }
+            
+            try {
+                const response = await fetch(API_BASE_URL + '/auth/refresh-token', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        refresh_token: refreshTokenValue
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok && result.success) {
+                    setAuthToken(result.data.access_token);
+                    return result.data.access_token;
+                } else {
+                    // Refresh failed, need to login again
+                    logout();
+                    return null;
+                }
+            } catch (error) {
+                console.error('Token refresh failed:', error);
+                logout();
+                return null;
+            }
+        }
+        
+        // Cart management
+        let cart = JSON.parse(localStorage.getItem('cart') || '[]');
+        
+        function updateCartCount() {
+            const count = cart.reduce((sum, item) => sum + item.quantity, 0);
+            const cartCounters = document.querySelectorAll('#cart-count, #cart-count-sticky, .cart-box span');
+            
+            cartCounters.forEach(counter => {
+                counter.textContent = count;
+                counter.style.display = count > 0 ? 'inline' : 'none';
+            });
+        }
+        
+        function addToCart(productId, quantity = 1) {
+            const existingItem = cart.find(item => item.product_id === productId);
+            if (existingItem) {
+                existingItem.quantity += quantity;
+            } else {
+                cart.push({ product_id: productId, quantity: quantity });
+            }
+            localStorage.setItem('cart', JSON.stringify(cart));
+            updateCartCount();
+            showNotification('{{ "Product added to cart"|translate }}', 'success');
+        }
+        
+        function removeFromCart(productId) {
+            cart = cart.filter(item => item.product_id !== productId);
+            localStorage.setItem('cart', JSON.stringify(cart));
+            updateCartCount();
+        }
+        
+        // Notification system
+        function showNotification(message, type = 'info') {
+            // You can implement a toast/notification system here
+            alert(message); // Simple implementation for now
+        }
+        
+        // Enhanced API helper functions with httpOnly cookie authentication
+        async function apiRequest(url, options = {}) {
+            const headers = {
+                'Content-Type': 'application/json',
+                ...options.headers
+            };
+            
+            // Add platform header for cross-platform tracking
+            headers['X-Platform'] = 'web';
+            
+            const response = await fetch(API_BASE_URL + url, {
+                ...options,
+                headers,
+                credentials: 'include'  // Always include cookies
+            });
+            
+            // Handle 401 (unauthorized) - attempt token refresh
+            if (response.status === 401 && !url.includes('/auth/refresh-token')) {
+                try {
+                    // Attempt token refresh via API call (server will handle cookie refresh)
+                    const refreshResponse = await fetch(API_BASE_URL + '/auth/refresh-token', {
+                        method: 'POST',
+                        credentials: 'include'
+                    });
+                    
+                    if (refreshResponse.ok) {
+                        // Retry the original request with refreshed cookies
+                        return fetch(API_BASE_URL + url, {
+                            ...options,
+                            headers,
+                            credentials: 'include'
+                        });
+                    }
+                } catch (error) {
+                    console.error('Token refresh failed:', error);
+                }
+                
+                // If refresh fails, redirect to login
+                window.location.href = '{{ url_for("frontend.login") }}';
+                return response;
+            }
+            
+            return response;
+        }
+        
+        // Session management
+        async function validateSession() {
+            const token = getAuthToken();
+            
+            if (!token) {
+                return false;
+            }
+            
+            try {
+                const response = await apiRequest('/auth/validate-token', {
+                    method: 'POST'
+                });
+                
+                const result = await response.json();
+                return response.ok && result.success;
+            } catch (error) {
+                console.error('Session validation failed:', error);
+                return false;
+            }
+        }
+        
+        // Check session periodically
+        function startSessionMonitoring() {
+            // Validate session every 15 minutes
+            setInterval(async () => {
+                const isValid = await validateSession();
+                if (!isValid) {
+                    showNotification('{{ "Your session has expired. Please login again."|translate }}', 'warning');
+                    setTimeout(logout, 3000);
+                }
+            }, 15 * 60 * 1000);
+        }
+        
+        // Initialize on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            updateCartCount();
+            
+            // Start session monitoring if user is logged in
+            if (getAuthToken()) {
+                startSessionMonitoring();
+            }
+        });
+    </script>
+    
+    {% block extra_js %}{% endblock %}
+</body>
+</html>

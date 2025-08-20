@@ -411,7 +411,7 @@ class AuthService:
                          last_name: str = "User") -> User:
         """Create admin user"""
         # Check if admin already exists
-        existing_admin = User.query.filter_by(role=UserRole.ADMIN).first()
+        existing_admin = User.query.filter_by(role=UserRole.ADMIN.value).first()
         if existing_admin:
             raise ConflictError("Admin user already exists")
         

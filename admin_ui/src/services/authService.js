@@ -10,7 +10,7 @@ class AuthService {
       };
 
       const response = await api.post('/auth/login', loginData);
-      const { access_token, user } = response.data;
+      const { user, tokens, permissions } = response.data.data;
 
       // Check if user has admin/manager role (no registration allowed, only predefined admin users)
       const allowedRoles = ['admin', 'manager'];
@@ -18,12 +18,7 @@ class AuthService {
         throw new Error('Access denied. Administrative privileges required.');
       }
 
-      // Verify user has admin panel access permission
-      const permissionsResponse = await api.get('/auth/permissions', {
-        headers: { Authorization: `Bearer ${access_token}` }
-      });
-      
-      const permissions = permissionsResponse.data.data;
+      // Check admin panel access permission directly from login response
       if (!permissions.can_view_admin_panel) {
         throw new Error('Access denied. Admin panel access not permitted.');
       }
@@ -33,7 +28,7 @@ class AuthService {
       localStorage.setItem('admin_user', JSON.stringify(user));
       localStorage.setItem('admin_permissions', JSON.stringify(permissions));
 
-      return { user, permissions };
+      return { user, tokens, permissions }; // Include tokens in return if needed
     } catch (error) {
       // Clear any stored auth data on failed login
       this.clearStoredAuth();

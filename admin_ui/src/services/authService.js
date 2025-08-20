@@ -2,6 +2,7 @@ import api from './api';
 
 class AuthService {
   async login(credentials) {
+    // Cannot read properties of undefined (reading 'role')
     try {
       // Use identifier instead of email to support both email and phone
       const loginData = {
@@ -10,6 +11,7 @@ class AuthService {
       };
 
       const response = await api.post('/auth/login', loginData);
+      console.log(response.data.data)
       const { user, tokens, permissions } = response.data.data;
 
       // Check if user has admin/manager role (no registration allowed, only predefined admin users)

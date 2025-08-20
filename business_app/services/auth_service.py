@@ -451,7 +451,7 @@ class AuthService:
             'can_manage_translations': False,
         }
         
-        if user.role in [UserRole.ADMIN, UserRole.MANAGER]:
+        if user.role in [UserRole.ADMIN.value, UserRole.MANAGER.value]:
             permissions.update({
                 'can_view_analytics': True,
                 'can_manage_users': True,
@@ -462,13 +462,13 @@ class AuthService:
                 'can_manage_settings': user.role == UserRole.ADMIN,
                 'can_manage_translations': user.role == UserRole.ADMIN,
             })
-        elif user.role == UserRole.OPERATOR:
+        elif user.role == UserRole.OPERATOR.value:
             permissions.update({
                 'can_view_analytics': True,
                 'can_manage_orders': True,
                 'can_view_admin_panel': True,
             })
-        elif user.role == UserRole.DELIVERY_DRIVER:
+        elif user.role == UserRole.DELIVERY_DRIVER.value:
             permissions.update({
                 'can_manage_delivery': True,
                 'can_view_admin_panel': True,

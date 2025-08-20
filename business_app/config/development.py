@@ -28,7 +28,7 @@ class DevelopmentConfig(BaseConfig):
     SQLALCHEMY_ECHO = True  # Log all SQL statements
     
     # Redis Configuration
-    REDIS_URL = os.environ.get('REDIS_URL', 'redis://localhost:6379/0')
+    REDIS_URL = os.environ.get('REDIS_URL', 'redis://redis:6379/0')
     
     # Rate Limiting Configuration - More lenient for development
     RATELIMIT_STORAGE_URL = REDIS_URL

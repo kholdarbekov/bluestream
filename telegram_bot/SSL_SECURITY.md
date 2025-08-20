@@ -31,7 +31,7 @@ BUSINESS_APP_URL=https://api.bluestream.uz
 ```bash
 # For development with self-signed certificates ONLY
 BUSINESS_API_SSL_VERIFY=false
-BUSINESS_APP_URL=http://localhost:5000
+BUSINESS_APP_URL=http://localhost:80
 ```
 
 ## Security Implications

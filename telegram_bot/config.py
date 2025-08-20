@@ -239,7 +239,7 @@ class BotConfig:
         )
         
         self.business_api = BusinessAPIConfig(
-            base_url=os.getenv('BUSINESS_APP_URL', 'http://business_app:5000'),
+            base_url=os.getenv('BUSINESS_APP_URL', 'http://business_app:80'),
             ssl_verify=os.getenv('BUSINESS_API_SSL_VERIFY', 'true').lower() == 'true',
             ssl_cert_path=os.getenv('BUSINESS_API_SSL_CERT_PATH'),
             timeout=int(os.getenv('BUSINESS_API_TIMEOUT', '30')),

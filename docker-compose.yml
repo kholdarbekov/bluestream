@@ -4,7 +4,7 @@ services:
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-bluestream_db}
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-dummy_password
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-dummy_password}
       POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256
     volumes:
       - postgres_data_new:/var/lib/postgresql/data
@@ -67,7 +67,7 @@ services:
       target: business_app
     environment:
       - FLASK_ENV=${FLASK_ENV:-production}
-      - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-dummy_password@postgres:5432/${POSTGRES_DB:-bluestream_db}
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-dummy_password}@postgres:5432/${POSTGRES_DB:-bluestream_db}
       - REDIS_URL=redis://redis:6379/0
       - SECRET_KEY=${SECRET_KEY}
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
@@ -132,13 +132,13 @@ services:
       dockerfile: Dockerfile
       target: telegram_bot
     environment:
-      - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-dummy_password@postgres:5432/${POSTGRES_DB:-bluestream_db}
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-dummy_password}@postgres:5432/${POSTGRES_DB:-bluestream_db}
       - REDIS_URL=redis://redis:6379/1
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
       - JWT_SECRET_KEY=${JWT_SECRET_KEY}
       - USE_SECRETS_FALLBACK=true
       # - WEBHOOK_URL=${WEBHOOK_URL}
-      - BUSINESS_APP_URL=http://business_app:80
+      # - BUSINESS_APP_URL=http://business_app:80
     env_file:
       - .env
     volumes:
@@ -179,7 +179,7 @@ services:
       dockerfile: Dockerfile
       target: celery_worker
     environment:
-      - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-dummy_password@postgres:5432/${POSTGRES_DB:-bluestream_db}
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-dummy_password}@postgres:5432/${POSTGRES_DB:-bluestream_db}
       - REDIS_URL=redis://redis:6379/0
       - SECRET_KEY=${SECRET_KEY}
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
@@ -235,7 +235,7 @@ services:
       dockerfile: Dockerfile
       target: celery_beat
     environment:
-      - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-dummy_password@postgres:5432/${POSTGRES_DB:-bluestream_db}
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-dummy_password}@postgres:5432/${POSTGRES_DB:-bluestream_db}
       - REDIS_URL=redis://redis:6379/0
       - SECRET_KEY=${SECRET_KEY}
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}

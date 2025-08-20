@@ -450,7 +450,7 @@ class AuthService:
             'can_manage_settings': False,
             'can_manage_translations': False,
         }
-        
+        logger.info(f"USER.ROLE: {user.role}, ADMIN ROLES: {[UserRole.ADMIN.value, UserRole.MANAGER.value]}")
         if user.role in [UserRole.ADMIN.value, UserRole.MANAGER.value]:
             permissions.update({
                 'can_view_analytics': True,

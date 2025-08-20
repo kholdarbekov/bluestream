@@ -27,4 +27,5 @@ admin_credentials.txt
 .env.production
 .env.staging
 
+telegram_bot/.env
 logs/

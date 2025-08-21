@@ -95,7 +95,7 @@ def get_admin_dashboard():
         ).count()
         
         # Subscription metrics
-        active_subscriptions = Subscription.query.filter_by(is_active=True).count()
+        active_subscriptions = Subscription.query.filter_by(status=SubscriptionStatus.ACTIVE.value).count()
         subscription_revenue_month = db.session.query(func.sum(Subscription.billing_amount)).filter(
             Subscription.status == SubscriptionStatus.ACTIVE.value
         ).scalar() or 0

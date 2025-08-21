@@ -178,7 +178,7 @@ def get_users():
         if status:
             try:
                 user_status = UserStatus(status)
-                query = query.filter_by(status=user_status)
+                query = query.filter_by(status=user_status.value)
             except ValueError:
                 return jsonify({'error': 'Invalid status value'}), 400
         
@@ -316,8 +316,8 @@ def update_user_status(user_id):
         
         # Prevent privilege escalation - operators cannot modify admin/manager accounts
         current_user = g.current_user
-        if (current_user.role == UserRole.OPERATOR and 
-            user.role in [UserRole.ADMIN, UserRole.MANAGER]):
+        if (current_user.role == UserRole.OPERATOR.value and 
+            user.role in [UserRole.ADMIN.value, UserRole.MANAGER.value]):
             return jsonify({'error': 'Insufficient permissions to modify this user'}), 403
         
         # Prevent self-modification of critical status
@@ -330,7 +330,7 @@ def update_user_status(user_id):
             return jsonify({'error': 'Invalid status value'}), 400
         
         old_status = user.status
-        user.status = user_status
+        user.status = user_status.value
         user.updated_at = datetime.now(UTC)
         
         # Log the status change (placeholder until admin_service is implemented)
@@ -345,7 +345,7 @@ def update_user_status(user_id):
         db.session.commit()
         
         # Send notification to user if status changed to suspended/banned
-        if user_status in [UserStatus.SUSPENDED, UserStatus.BANNED]:
+        if user_status.value in [UserStatus.BANNED.value]:
             get_notification_service().send_notification(
                 user_id,
                 'account_status_changed',
@@ -389,7 +389,7 @@ def get_orders():
         if status:
             try:
                 order_status = OrderStatus(status)
-                query = query.filter_by(status=order_status)
+                query = query.filter_by(status=order_status.value)
             except ValueError:
                 return jsonify({'error': 'Invalid status value'}), 400
         
@@ -496,7 +496,7 @@ def update_order_status(order_id):
         
         # Placeholder implementation until admin_service is implemented
         old_status = order.status
-        order.status = order_status
+        order.status = order_status.value
         order.updated_at = datetime.now(UTC)
         db.session.commit()
         success = True

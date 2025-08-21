@@ -10,7 +10,7 @@ from typing import List, Optional, Callable, Any
 import redis
 
 from .exceptions import UnauthorizedError, ForbiddenError, RateLimitError
-from .constants import UserRole
+from .constants import UserRole, UserStatus
 from .rbac import (
     rbac, require_permission, require_role, require_admin, require_manager_or_admin,
     require_staff, require_own_resource_or_staff, audit_access, Permission, AccessLevel
@@ -163,11 +163,11 @@ def validate_admin_action(required_permissions: List[str] = None):
                 raise ForbiddenError("User not found")
             
             # Check if user has admin privileges
-            if user.role not in [UserRole.ADMIN, UserRole.MANAGER, UserRole.OPERATOR]:
+            if user.role not in [UserRole.ADMIN.value, UserRole.MANAGER.value, UserRole.OPERATOR.value]:
                 raise ForbiddenError("Administrative access required")
             
             # Check account status
-            if user.status != 'active':
+            if user.status != UserStatus.ACTIVE.value:
                 raise ForbiddenError("Account suspended or inactive")
             
             # Check specific permissions if provided
@@ -176,14 +176,14 @@ def validate_admin_action(required_permissions: List[str] = None):
                 # For now, we'll implement basic role-based checks
                 user_permissions = []
                 
-                if user.role == UserRole.ADMIN:
+                if user.role == UserRole.ADMIN.value:
                     user_permissions = ['all']  # Admin has all permissions
-                elif user.role == UserRole.MANAGER:
+                elif user.role == UserRole.MANAGER.value:
                     user_permissions = [
                         'view_users', 'manage_orders', 'view_reports', 
                         'manage_products', 'view_analytics'
                     ]
-                elif user.role == UserRole.OPERATOR:
+                elif user.role == UserRole.OPERATOR.value:
                     user_permissions = [
                         'view_orders', 'update_orders', 'view_products'
                     ]
@@ -196,7 +196,7 @@ def validate_admin_action(required_permissions: List[str] = None):
                 
                 if not has_permission:
                     current_app.logger.warning(
-                        f"Permission denied for user {user_id} ({user.role.value}). "
+                        f"Permission denied for user {user_id} ({user.role}). "
                         f"Required: {required_permissions}, Has: {user_permissions}"
                     )
                     raise ForbiddenError("Insufficient permissions for this action")

@@ -59,7 +59,7 @@ class InventoryService:
     def __init__(self):
         self.redis_client = None
         self._reservation_ttl = None
-        self._low_stock_threshold_percentage = None
+        self._min_stock_level_percentage = None
         
         # Redis client and config will be initialized lazily
     
@@ -75,15 +75,15 @@ class InventoryService:
         return self._reservation_ttl
     
     @property 
-    def low_stock_threshold_percentage(self):
+    def min_stock_level_percentage(self):
         """Get low stock threshold with lazy initialization"""
-        if self._low_stock_threshold_percentage is None:
+        if self._min_stock_level_percentage is None:
             try:
                 from flask import current_app
-                self._low_stock_threshold_percentage = current_app.config.get('LOW_STOCK_THRESHOLD_PERCENTAGE', 10)
+                self._min_stock_level_percentage = current_app.config.get('min_stock_level_PERCENTAGE', 10)
             except RuntimeError:
-                self._low_stock_threshold_percentage = 10  # Default fallback
-        return self._low_stock_threshold_percentage
+                self._min_stock_level_percentage = 10  # Default fallback
+        return self._min_stock_level_percentage
     
     def _get_redis_client(self):
         """Get Redis client with lazy initialization"""

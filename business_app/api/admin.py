@@ -33,7 +33,7 @@ from business_app.utils.query_optimization import (
     PaginationOptimizer, AggregationOptimizer
 )
 from business_app.services.inventory_service import get_inventory_service, InventoryOperationType
-from business_app.utils.constants import UserRole, OrderStatus, DeliveryStatus, UserStatus
+from business_app.utils.constants import UserRole, SubscriptionStatus, OrderStatus, DeliveryStatus, UserStatus
 # from business_app.tasks.admin_tasks import send_bulk_email_task, generate_report_task
 from business_app import db
 
@@ -80,7 +80,7 @@ def get_admin_dashboard():
         # Product metrics
         total_products = Product.query.filter_by(is_active=True).count()
         low_stock_products = Product.query.filter(
-            and_(Product.stock_quantity <= Product.low_stock_threshold, Product.track_inventory == True)
+            and_(Product.stock_quantity <= Product.min_stock_level, Product.track_inventory == True)
         ).count()
         
         # Delivery metrics
@@ -97,7 +97,7 @@ def get_admin_dashboard():
         # Subscription metrics
         active_subscriptions = Subscription.query.filter_by(is_active=True).count()
         subscription_revenue_month = db.session.query(func.sum(Subscription.billing_amount)).filter(
-            Subscription.is_active == True
+            Subscription.status == SubscriptionStatus.ACTIVE.value
         ).scalar() or 0
         
         dashboard_data = {
@@ -550,7 +550,7 @@ def get_products_admin():
             query = query.filter(
                 and_(
                     Product.track_inventory == True,
-                    Product.stock_quantity <= Product.low_stock_threshold
+                    Product.stock_quantity <= Product.min_stock_level
                 )
             )
         

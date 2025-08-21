@@ -212,7 +212,7 @@ def update_inventory_after_order(self, order_id: int):
                     })
                     
                     # Send low stock alert if needed
-                    if product.stock_quantity <= product.low_stock_threshold:
+                    if product.stock_quantity <= product.min_stock_level:
                         send_low_stock_alert.delay(product.id)
                 
             except Exception as e:
@@ -260,7 +260,7 @@ def send_low_stock_alert(self, product_id: int):
                     'product_id': product.id,
                     'product_name': product.name,
                     'current_stock': product.stock_quantity,
-                    'low_stock_threshold': product.low_stock_threshold,
+                    'min_stock_level': product.min_stock_level,
                     'suggested_reorder_quantity': product.reorder_quantity or 100
                 }
             )

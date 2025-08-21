@@ -80,6 +80,7 @@ class Product(db.Model, TimestampMixin):
     requires_prescription = Column(Boolean, default=False)
     
     # Inventory
+    track_inventory = Column(Boolean, default=True)
     stock_quantity = Column(Integer, default=0)
     min_stock_level = Column(Integer, default=0)
     max_stock_level = Column(Integer, default=1000)
@@ -136,6 +137,7 @@ class Product(db.Model, TimestampMixin):
             'is_active': self.is_active,
             'is_featured': self.is_featured,
             'requires_prescription': self.requires_prescription,
+            'track_inventory': self.track_inventory,
             'stock_quantity': self.stock_quantity,
             'images': self.images or [],
             'nutrition_facts': self.nutrition_facts or {},

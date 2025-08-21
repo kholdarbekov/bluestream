@@ -177,7 +177,7 @@ class ProductAdminSchema(BaseModel):
     current_price: Decimal
     cost_price: Optional[Decimal] = None
     stock_quantity: Optional[int] = None
-    low_stock_threshold: Optional[int] = None
+    min_stock_level: Optional[int] = None
     is_active: bool = Field(default=True)
     is_featured: bool = Field(default=False)
     track_inventory: bool = Field(default=True)
@@ -689,7 +689,7 @@ def serialize_product_admin(product) -> Dict[str, Any]:
             'current_price': float(getattr(product, 'current_price', product.base_price)),
             'cost_price': float(product.cost_price) if product.cost_price else None,
             'stock_quantity': product.stock_quantity if product.track_inventory else None,
-            'low_stock_threshold': product.low_stock_threshold,
+            'min_stock_level': product.min_stock_level,
             'is_active': product.is_active,
             'is_featured': product.is_featured,
             'track_inventory': product.track_inventory,
@@ -713,7 +713,7 @@ def serialize_product_admin(product) -> Dict[str, Any]:
             data['stock_status'] = 'not_tracked'
         elif product.stock_quantity == 0:
             data['stock_status'] = 'out_of_stock'
-        elif product.stock_quantity <= (product.low_stock_threshold or 0):
+        elif product.stock_quantity <= (product.min_stock_level or 0):
             data['stock_status'] = 'low_stock'
         else:
             data['stock_status'] = 'in_stock'

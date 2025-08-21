@@ -17,7 +17,7 @@ class Subscription(db.Model, TimestampMixin):
     id = Column(Integer, primary_key=True)
     subscription_number = Column(String(50), unique=True, nullable=False, index=True)
     user_id = Column(Integer, ForeignKey('users.id'), nullable=False, index=True)
-    status = Column(Enum(SubscriptionStatus), default=SubscriptionStatus.ACTIVE, index=True)
+    status = Column(Enum(SubscriptionStatus), default=SubscriptionStatus.ACTIVE.value, index=True)
     
     # Subscription details
     name = Column(String(200), nullable=False)

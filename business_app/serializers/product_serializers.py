@@ -62,7 +62,7 @@ class ProductInventorySchema(BaseModel):
     """Product inventory information"""
     stock_quantity: Optional[int] = None
     track_inventory: bool = Field(default=True)
-    low_stock_threshold: Optional[int] = None
+    min_stock_level: Optional[int] = None
     is_low_stock: bool = Field(default=False)
     is_in_stock: bool = Field(default=True)
     restock_date: Optional[datetime] = None
@@ -234,7 +234,7 @@ class CreateProductRequest(BaseModel):
     brand: Optional[str] = None
     stock_quantity: Optional[int] = Field(None, ge=0)
     track_inventory: bool = Field(default=True)
-    low_stock_threshold: Optional[int] = Field(None, ge=0)
+    min_stock_level: Optional[int] = Field(None, ge=0)
     is_active: bool = Field(default=True)
     is_featured: bool = Field(default=False)
     
@@ -260,7 +260,7 @@ class UpdateProductRequest(BaseModel):
     brand: Optional[str] = None
     stock_quantity: Optional[int] = Field(None, ge=0)
     track_inventory: Optional[bool] = None
-    low_stock_threshold: Optional[int] = Field(None, ge=0)
+    min_stock_level: Optional[int] = Field(None, ge=0)
     is_active: Optional[bool] = None
     is_featured: Optional[bool] = None
     
@@ -376,7 +376,7 @@ def serialize_product(product, language: str = 'uz', user=None, quantity: int = 
             'inventory': {
                 'stock_quantity': product.stock_quantity if product.track_inventory else None,
                 'track_inventory': product.track_inventory,
-                'low_stock_threshold': product.low_stock_threshold,
+                'min_stock_level': product.min_stock_level,
                 'is_low_stock': is_product_low_stock(product),
                 'is_in_stock': is_product_in_stock(product),
                 'restock_date': product.restock_date.isoformat() if product.restock_date else None
@@ -529,7 +529,7 @@ def is_product_low_stock(product) -> bool:
     """Check if product is low in stock"""
     if not product.track_inventory:
         return False
-    return (product.stock_quantity or 0) <= (product.low_stock_threshold or 0)
+    return (product.stock_quantity or 0) <= (product.min_stock_level or 0)
 
 
 def is_product_in_stock(product) -> bool:

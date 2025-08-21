@@ -62,14 +62,14 @@ def get_admin_dashboard():
         new_users_week = User.query.filter(
             User.created_at >= last_week
         ).count()
-        active_users = User.query.filter_by(status=UserStatus.ACTIVE).count()
+        active_users = User.query.filter_by(status=UserStatus.ACTIVE.value).count()
         
         # Order metrics
         total_orders = Order.query.count()
         orders_today = Order.query.filter(
             func.date(Order.created_at) == today
         ).count()
-        pending_orders = Order.query.filter_by(status=OrderStatus.PENDING).count()
+        pending_orders = Order.query.filter_by(status=OrderStatus.PENDING.value).count()
         revenue_today = db.session.query(func.sum(Order.total_amount)).filter(
             func.date(Order.created_at) == today
         ).scalar() or 0
@@ -85,11 +85,11 @@ def get_admin_dashboard():
         
         # Delivery metrics
         active_deliveries = Delivery.query.filter(
-            Delivery.status.in_([DeliveryStatus.ASSIGNED, DeliveryStatus.PICKED_UP, DeliveryStatus.IN_TRANSIT])
+            Delivery.status.in_([DeliveryStatus.ASSIGNED.value, DeliveryStatus.PICKED_UP.value, DeliveryStatus.IN_TRANSIT.value])
         ).count()
         failed_deliveries_today = Delivery.query.filter(
             and_(
-                Delivery.status == DeliveryStatus.FAILED,
+                Delivery.status == DeliveryStatus.FAILED.value,
                 func.date(Delivery.created_at) == today
             )
         ).count()

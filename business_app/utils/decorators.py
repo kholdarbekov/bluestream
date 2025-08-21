@@ -93,7 +93,7 @@ def manager_or_higher_required(f):
         except (ValueError, TypeError):
             raise ForbiddenError("Invalid user role")
         
-        if role_enum not in [UserRole.ADMIN, UserRole.MANAGER]:
+        if role_enum.value not in [UserRole.ADMIN.value, UserRole.MANAGER.value]:
             raise ForbiddenError("Manager or admin access required")
         
         # Additional validation
@@ -103,12 +103,12 @@ def manager_or_higher_required(f):
             raise ForbiddenError("Active account required")
         
         # Check if user still has the claimed role
-        if user.role != role_enum:
+        if user.role != role_enum.value:
             current_app.logger.warning(f"Role mismatch for user {user_id}: JWT claims {user_role}, DB has {user.role}")
             raise ForbiddenError("Role validation failed")
         
         g.current_user_id = user_id
-        g.current_user_role = role_enum
+        g.current_user_role = role_enum.value
         g.current_user = user
         return f(*args, **kwargs)
     return decorated_function
@@ -128,7 +128,7 @@ def staff_or_higher_required(f):
         except (ValueError, TypeError):
             raise ForbiddenError("Invalid user role")
         
-        if role_enum not in [UserRole.ADMIN, UserRole.MANAGER, UserRole.OPERATOR]:
+        if role_enum.value not in [UserRole.ADMIN.value, UserRole.MANAGER.value, UserRole.OPERATOR.value]:
             raise ForbiddenError("Staff access required")
         
         # Additional validation
@@ -138,12 +138,12 @@ def staff_or_higher_required(f):
             raise ForbiddenError("Active account required")
         
         # Check if user still has the claimed role
-        if user.role != role_enum:
+        if user.role != role_enum.value:
             current_app.logger.warning(f"Role mismatch for user {user_id}: JWT claims {user_role}, DB has {user.role}")
             raise ForbiddenError("Role validation failed")
         
         g.current_user_id = user_id
-        g.current_user_role = role_enum
+        g.current_user_role = role_enum.value
         g.current_user = user
         return f(*args, **kwargs)
     return decorated_function

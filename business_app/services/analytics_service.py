@@ -5,7 +5,7 @@ Provides business intelligence, reporting, and predictive analytics
 from datetime import datetime, timedelta, UTC
 from typing import Dict, Any, List, Optional, Tuple
 from flask import current_app
-from sqlalchemy import func, and_, or_, text
+from sqlalchemy import func, and_, or_, text, case
 import pandas as pd
 import numpy as np
 from sklearn.linear_model import LinearRegression
@@ -518,7 +518,7 @@ class AnalyticsService:
         delivery_stats = db.session.query(
             Order.user_id,
             func.count(Delivery.id).label('total_deliveries'),
-            func.sum(func.case([(Delivery.status == DeliveryStatus.FAILED, 1)], else_=0)).label('failed_deliveries')
+            func.sum(case((Delivery.status == DeliveryStatus.FAILED, 1), else_=0)).label('failed_deliveries')
         ).join(Delivery).filter(Order.user_id.in_(user_ids)).group_by(Order.user_id).all()
         
         # Combine all statistics

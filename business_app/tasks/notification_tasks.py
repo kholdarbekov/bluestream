@@ -293,12 +293,12 @@ def process_notification_analytics():
         ).count()
         
         # Success rate by channel
-        from sqlalchemy import func
+        from sqlalchemy import func, case
         channel_stats = db.session.query(
             Notification.channels,
             func.count(Notification.id),
             func.avg(
-                func.case(
+                case(
                     [(Notification.status == 'sent', 1)],
                     else_=0
                 ).label('success_rate')

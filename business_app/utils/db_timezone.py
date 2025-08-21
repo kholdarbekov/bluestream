@@ -2,7 +2,7 @@
 Database timezone utilities for consistent datetime handling
 """
 from datetime import datetime
-from sqlalchemy import func, and_, text
+from sqlalchemy import func, and_, text, case
 from sqlalchemy.orm import Query
 from typing import Optional, Union, List
 import logging
@@ -183,19 +183,19 @@ class TimezoneAwareQuery:
                 'latest': func.max(local_time),
                 'count': func.count(date_column),
                 'count_today': func.sum(
-                    func.case(
+                    case(
                         [(func.date(local_time) == func.current_date(), 1)],
                         else_=0
                     )
                 ),
                 'count_this_week': func.sum(
-                    func.case(
+                    case(
                         [(func.date_trunc('week', local_time) == func.date_trunc('week', func.now()), 1)],
                         else_=0
                     )
                 ),
                 'count_this_month': func.sum(
-                    func.case(
+                    case(
                         [(func.date_trunc('month', local_time) == func.date_trunc('month', func.now()), 1)],
                         else_=0
                     )

@@ -4,7 +4,7 @@ Query optimization utilities for SQLAlchemy eager loading and performance improv
 from typing import Dict, List, Optional, Any, Type, Union
 from sqlalchemy.orm import joinedload, selectinload, subqueryload, contains_eager, Query
 from sqlalchemy.orm.strategy_options import Load
-from sqlalchemy import func, text
+from sqlalchemy import func, text, case
 class EagerLoadingStrategy:
     """Central strategy for eager loading commonly accessed relationships"""
     
@@ -270,7 +270,7 @@ class AggregationOptimizer:
             delivery_stats = db.session.query(
                 Order.user_id,
                 func.count(Delivery.id).label('delivery_count'),
-                func.sum(func.case([(Delivery.status == 'delivered', 1)], else_=0)).label('successful_deliveries')
+                func.sum(case((Delivery.status == 'delivered', 1), else_=0)).label('successful_deliveries')
             ).join(
                 Delivery, Order.id == Delivery.order_id
             ).filter(

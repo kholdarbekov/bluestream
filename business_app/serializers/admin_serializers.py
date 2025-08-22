@@ -564,7 +564,8 @@ def serialize_user_admin(user, include_statistics: bool = False) -> Dict[str, An
             'login_attempts': getattr(user, 'login_attempts', 0),
             'is_locked': getattr(user, 'is_locked', False),
             'locked_until': getattr(user, 'locked_until', None),
-            'two_factor_enabled': getattr(user, 'two_factor_enabled', False)
+            'two_factor_enabled': getattr(user, 'two_factor_enabled', False),
+            'registration_source': user.registration_source
         }
         
         if include_statistics:

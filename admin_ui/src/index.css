@@ -1,5 +1,18 @@
 @import '~antd/dist/reset.css';
 
+/* ==========================================================================
+   2025 Mobile-First Responsive Admin UI Styles
+   Based on modern responsive design best practices
+   ========================================================================== */
+
+/* ==========================================================================
+   Base Styles - Mobile First (360px+)
+   ========================================================================== */
+
+* {
+  box-sizing: border-box;
+}
+
 body {
   margin: 0;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
@@ -8,6 +21,8 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   background-color: #f5f5f5;
+  font-size: 14px;
+  line-height: 1.5;
 }
 
 code {
@@ -15,9 +30,13 @@ code {
     monospace;
 }
 
-/* Custom scrollbar */
+/* ==========================================================================
+   Scrollbar Customization
+   ========================================================================== */
+
 ::-webkit-scrollbar {
   width: 6px;
+  height: 6px;
 }
 
 ::-webkit-scrollbar-track {
@@ -33,52 +52,94 @@ code {
   background: #a8a8a8;
 }
 
-/* Layout styles */
+/* ==========================================================================
+   Layout Base Styles (Mobile-First)
+   ========================================================================== */
+
 .admin-layout {
   min-height: 100vh;
 }
 
+/* Mobile Header Styles */
 .admin-header {
   background: #fff;
   border-bottom: 1px solid #e8e8e8;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  position: sticky;
+  top: 0;
+  z-index: 100;
 }
 
+.mobile-header {
+  padding: 8px 12px !important;
+  height: auto !important;
+  min-height: 56px !important;
+}
+
+/* Mobile Sider/Drawer Styles */
 .admin-sider {
   background: #fff;
   border-right: 1px solid #e8e8e8;
 }
 
-.admin-content {
-  padding: 24px;
-  min-height: calc(100vh - 64px);
-  background: #f5f5f5;
+.mobile-navigation-drawer .ant-drawer-body {
+  padding: 0;
 }
 
-/* Dashboard card styles */
+.mobile-navigation-drawer .ant-menu {
+  border: none;
+}
+
+.mobile-navigation-drawer .ant-menu-item {
+  height: 48px;
+  line-height: 48px;
+  font-size: 16px;
+  margin: 0;
+  border-radius: 0;
+}
+
+/* Content Area */
+.admin-content {
+  background: #f5f5f5;
+  padding: 8px;
+  min-height: calc(100vh - 56px);
+}
+
+.mobile-content {
+  padding: 8px !important;
+}
+
+/* ==========================================================================
+   Component Styles - Mobile First
+   ========================================================================== */
+
+/* Dashboard Cards */
 .dashboard-card {
-  margin-bottom: 16px;
+  margin-bottom: 12px;
 }
 
 .stat-card {
   text-align: center;
+  padding: 16px;
 }
 
 .stat-value {
-  font-size: 28px;
+  font-size: 20px;
   font-weight: bold;
   margin: 8px 0;
   color: #1890ff;
+  line-height: 1.2;
 }
 
 .stat-title {
   color: #666;
-  font-size: 14px;
+  font-size: 12px;
+  line-height: 1.3;
 }
 
 .stat-trend {
-  font-size: 12px;
-  margin-top: 8px;
+  font-size: 11px;
+  margin-top: 6px;
 }
 
 .trend-up {
@@ -89,28 +150,37 @@ code {
   color: #ff4d4f;
 }
 
-/* Chart container */
+/* Chart Container */
 .chart-container {
-  padding: 16px;
+  padding: 8px;
   background: #fff;
   border-radius: 6px;
-  margin-bottom: 16px;
+  margin-bottom: 12px;
 }
 
-/* Table styles */
+/* Table Styles - Mobile First */
 .admin-table {
   background: #fff;
   border-radius: 6px;
+  overflow: hidden;
 }
 
 .table-actions {
-  margin-bottom: 16px;
+  margin-bottom: 12px;
   display: flex;
-  justify-content: space-between;
-  align-items: center;
+  flex-direction: column;
+  gap: 8px;
+  align-items: stretch;
 }
 
-/* Status badges */
+.table-actions .ant-input-search,
+.table-actions .ant-select,
+.table-actions .ant-btn {
+  width: 100%;
+  min-height: 44px; /* Touch-friendly on mobile */
+}
+
+/* Status Badges */
 .status-active {
   color: #52c41a;
 }
@@ -123,294 +193,561 @@ code {
   color: #faad14;
 }
 
-/* Mobile-first responsive design */
-@media (max-width: 1200px) {
-  .admin-content {
-    padding: 20px;
-  }
+/* Card Improvements for Mobile */
+.ant-card {
+  margin-bottom: 12px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
-@media (max-width: 992px) {
-  .admin-content {
-    padding: 16px;
-  }
-  
-  .stat-value {
-    font-size: 24px;
-  }
-  
-  .chart-container {
-    padding: 12px;
-  }
+.ant-card-head {
+  padding: 12px 16px;
+  min-height: 44px;
+  border-bottom: 1px solid #f0f0f0;
 }
 
-@media (max-width: 768px) {
-  /* Mobile header adjustments */
-  .admin-header {
-    height: auto !important;
-    min-height: 64px;
-    padding: 0 16px !important;
-  }
-
-  .admin-header .ant-layout-header {
-    height: auto;
-  }
-  
-  .admin-content {
-    padding: 12px;
-  }
-  
-  /* Mobile sidebar - hide desktop sider completely */
-  .ant-layout-sider {
-    display: none !important;
-  }
-  
-  /* Mobile drawer styling */
-  .ant-drawer-body {
-    padding: 0;
-  }
-  
-  .ant-drawer-header {
-    padding: 16px 24px;
-    border-bottom: 1px solid #e8e8e8;
-  }
-  
-  /* Table responsive improvements */
-  .table-actions {
-    flex-direction: column;
-    gap: 8px;
-    align-items: stretch;
-  }
-  
-  .table-actions .ant-btn {
-    width: 100%;
-  }
-  
-  .table-actions .ant-input-search {
-    width: 100% !important;
-  }
-  
-  /* Statistics cards mobile layout */
-  .stat-value {
-    font-size: 20px;
-  }
-  
-  .stat-title {
-    font-size: 12px;
-  }
-  
-  .chart-container {
-    padding: 8px;
-    margin-bottom: 12px;
-  }
-  
-  /* Modal improvements for mobile */
-  .ant-modal {
-    margin: 16px;
-    max-width: calc(100vw - 32px);
-    width: calc(100vw - 32px) !important;
-    top: 16px !important;
-  }
-  
-  .ant-modal-content {
-    border-radius: 8px;
-  }
-  
-  .ant-modal-body {
-    padding: 16px;
-    max-height: calc(100vh - 200px);
-    overflow-y: auto;
-  }
-  
-  /* Table horizontal scrolling */
-  .ant-table-wrapper {
-    overflow-x: auto;
-  }
-  
-  .ant-table {
-    min-width: 600px;
-  }
-  
-  /* Form improvements for mobile */
-  .ant-form-item-label {
-    text-align: left !important;
-    padding-bottom: 4px;
-  }
-  
-  .ant-form-item {
-    margin-bottom: 16px;
-  }
-  
-  /* Card improvements */
-  .ant-card {
-    margin-bottom: 12px;
-  }
-  
-  .ant-card-head {
-    padding: 0 16px;
-    min-height: 48px;
-  }
-  
-  .ant-card-head-title {
-    font-size: 16px;
-    padding: 12px 0;
-  }
-  
-  /* Row and column spacing adjustments */
-  .ant-row {
-    margin-left: -8px !important;
-    margin-right: -8px !important;
-  }
-  
-  .ant-col {
-    padding-left: 8px !important;
-    padding-right: 8px !important;
-  }
-  
-  /* Date picker and select improvements */
-  .ant-picker {
-    width: 100%;
-  }
-  
-  .ant-select {
-    width: 100% !important;
-  }
+.ant-card-head-title {
+  font-size: 14px;
+  font-weight: 600;
+  padding: 8px 0;
 }
 
-@media (max-width: 576px) {
-  .admin-content {
-    padding: 8px;
-  }
-  
-  /* Header mobile improvements */
-  .admin-header {
-    padding: 0 12px !important;
-  }
-  
-  .admin-header .ant-typography {
-    font-size: 14px !important;
-  }
-  
-  /* Smaller stats on very small screens */
-  .stat-value {
-    font-size: 18px;
-  }
-  
-  .chart-container {
-    padding: 4px;
-  }
-  
-  .table-actions {
-    gap: 4px;
-  }
-  
-  .ant-card-body {
-    padding: 12px;
-  }
-  
-  .ant-statistic-title {
-    font-size: 11px;
-  }
-  
-  .ant-statistic-content {
-    font-size: 16px;
-  }
-  
-  /* Further space optimization on mobile */
-  .ant-space-item {
-    margin-bottom: 8px !important;
-  }
-  
-  /* Smaller buttons on mobile */
-  .ant-btn-sm {
-    height: 32px;
-    font-size: 12px;
-  }
-  
-  /* Column layout adjustments */
-  .ant-row {
-    margin-left: -4px !important;
-    margin-right: -4px !important;
-  }
-  
-  .ant-col {
-    padding-left: 4px !important;
-    padding-right: 4px !important;
-  }
-  
-  /* Dashboard controls mobile optimization */
-  .ant-picker-range {
-    width: 100% !important;
-  }
-  
-  .ant-space {
-    width: 100%;
-  }
-  
-  .ant-space-horizontal.ant-space-wrap .ant-space-item {
-    margin-bottom: 8px;
-  }
+.ant-card-body {
+  padding: 12px;
 }
 
-/* Tablet specific styles */
-@media (min-width: 768px) and (max-width: 1024px) {
-  .admin-content {
-    padding: 18px;
-  }
-  
-  .table-actions {
-    flex-wrap: wrap;
-    gap: 12px;
-  }
+/* Form Improvements for Mobile */
+.ant-form-item {
+  margin-bottom: 16px;
 }
 
-/* Large screen optimizations */
-@media (min-width: 1400px) {
-  .admin-content {
-    padding: 32px;
-  }
-  
-  .chart-container {
-    padding: 24px;
-  }
+.ant-form-item-label {
+  text-align: left !important;
+  padding-bottom: 4px;
 }
 
-/* Touch device optimizations */
-@media (hover: none) and (pointer: coarse) {
-  .ant-btn {
-    min-height: 44px;
-  }
-  
-  .ant-input {
-    min-height: 44px;
-  }
-  
-  .ant-select-selector {
-    min-height: 44px;
-  }
+.ant-form-item-label > label {
+  font-size: 14px;
+  font-weight: 500;
 }
 
-/* Animation classes */
+/* Input and Select Improvements */
+.ant-input,
+.ant-select-selector,
+.ant-picker {
+  min-height: 44px;
+  font-size: 16px; /* Prevent zoom on iOS */
+  border-radius: 6px;
+}
+
+.ant-btn {
+  min-height: 44px;
+  border-radius: 6px;
+  font-weight: 500;
+}
+
+.ant-btn-sm {
+  min-height: 36px;
+  font-size: 14px;
+}
+
+/* Modal Improvements for Mobile */
+.ant-modal {
+  margin: 16px;
+  max-width: calc(100vw - 32px);
+  width: calc(100vw - 32px) !important;
+  top: 16px !important;
+}
+
+.ant-modal-content {
+  border-radius: 8px;
+}
+
+.ant-modal-header {
+  border-radius: 8px 8px 0 0;
+  padding: 16px;
+}
+
+.ant-modal-body {
+  padding: 16px;
+  max-height: calc(100vh - 200px);
+  overflow-y: auto;
+}
+
+.ant-modal-footer {
+  padding: 12px 16px;
+  text-align: center;
+}
+
+.ant-modal-footer .ant-btn {
+  margin: 0 4px;
+}
+
+/* Table Responsive Wrapper */
+.ant-table-wrapper {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.ant-table {
+  min-width: 600px;
+}
+
+.ant-table-thead > tr > th {
+  font-weight: 600;
+  background-color: #fafafa;
+  font-size: 13px;
+  padding: 12px 8px;
+}
+
+.ant-table-tbody > tr > td {
+  padding: 12px 8px;
+  font-size: 14px;
+}
+
+/* Pagination Mobile Improvements */
+.ant-pagination {
+  text-align: center;
+  margin-top: 16px;
+}
+
+.ant-pagination-item,
+.ant-pagination-prev,
+.ant-pagination-next {
+  min-width: 44px;
+  height: 44px;
+  line-height: 44px;
+  margin: 0 2px;
+}
+
+/* Row and Column Spacing */
+.ant-row {
+  margin-left: -8px !important;
+  margin-right: -8px !important;
+}
+
+.ant-col {
+  padding-left: 8px !important;
+  padding-right: 8px !important;
+}
+
+/* Space Component Adjustments */
+.ant-space {
+  flex-wrap: wrap;
+  width: 100%;
+}
+
+.ant-space-item {
+  margin-bottom: 8px;
+}
+
+/* Animation */
 .fade-in {
   animation: fadeIn 0.3s ease-in-out;
 }
 
 @keyframes fadeIn {
-  from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: translateY(0); }
+  from { 
+    opacity: 0; 
+    transform: translateY(10px); 
+  }
+  to { 
+    opacity: 1; 
+    transform: translateY(0); 
+  }
 }
 
-/* Loading spinner */
+/* Loading and Error States */
 .loading-container {
   display: flex;
   justify-content: center;
   align-items: center;
   height: 200px;
+  padding: 20px;
 }
 
-/* Error message */
 .error-message {
   text-align: center;
   color: #ff4d4f;
   padding: 20px;
+  font-size: 14px;
+}
+
+/* ==========================================================================
+   Mobile Large (430px+) - Large Modern Smartphones
+   ========================================================================== */
+
+@media (min-width: 430px) {
+  .admin-content {
+    padding: 12px;
+  }
+  
+  .mobile-header {
+    padding: 12px 16px !important;
+    min-height: 64px !important;
+  }
+  
+  .stat-value {
+    font-size: 22px;
+  }
+  
+  .chart-container {
+    padding: 12px;
+  }
+  
+  .ant-card-body {
+    padding: 16px;
+  }
+  
+  .table-actions {
+    gap: 12px;
+  }
+  
+  /* Better spacing for larger mobile screens */
+  .ant-row {
+    margin-left: -12px !important;
+    margin-right: -12px !important;
+  }
+  
+  .ant-col {
+    padding-left: 12px !important;
+    padding-right: 12px !important;
+  }
+}
+
+/* ==========================================================================
+   Tablet Portrait (768px+)
+   ========================================================================== */
+
+@media (min-width: 768px) {
+  body {
+    font-size: 16px;
+  }
+  
+  .admin-content {
+    padding: 16px;
+  }
+  
+  .desktop-header {
+    height: 64px !important;
+    padding: 0 24px !important;
+  }
+  
+  .stat-value {
+    font-size: 28px;
+  }
+  
+  .stat-title {
+    font-size: 14px;
+  }
+  
+  .stat-trend {
+    font-size: 12px;
+  }
+  
+  .chart-container {
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+  
+  .dashboard-card {
+    margin-bottom: 16px;
+  }
+  
+  /* Table Actions - Horizontal layout */
+  .table-actions {
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 16px;
+  }
+  
+  .table-actions .ant-input-search {
+    width: 300px !important;
+  }
+  
+  .table-actions .ant-select {
+    width: 150px !important;
+  }
+  
+  .table-actions .ant-btn {
+    width: auto !important;
+  }
+  
+  /* Modal improvements for tablet */
+  .ant-modal {
+    margin: 24px auto;
+    max-width: 800px;
+    width: auto !important;
+    top: 24px !important;
+  }
+  
+  .ant-modal-body {
+    padding: 24px;
+    max-height: calc(100vh - 200px);
+  }
+  
+  /* Better column spacing */
+  .ant-row {
+    margin-left: -16px !important;
+    margin-right: -16px !important;
+  }
+  
+  .ant-col {
+    padding-left: 16px !important;
+    padding-right: 16px !important;
+  }
+  
+  /* Pagination improvements */
+  .ant-table-pagination {
+    padding: 16px;
+  }
+  
+  /* Touch target improvements for tablet */
+  .ant-btn,
+  .ant-input,
+  .ant-select-selector {
+    min-height: 40px;
+  }
+  
+  .ant-btn-sm {
+    min-height: 32px;
+  }
+}
+
+/* ==========================================================================
+   Tablet Landscape (1024px+)
+   ========================================================================== */
+
+@media (min-width: 1024px) {
+  .admin-content {
+    padding: 20px;
+  }
+  
+  .desktop-content {
+    padding: 24px !important;
+  }
+  
+  .stat-value {
+    font-size: 32px;
+  }
+  
+  .chart-container {
+    padding: 20px;
+    margin-bottom: 20px;
+  }
+  
+  .dashboard-card {
+    margin-bottom: 20px;
+  }
+  
+  .table-actions {
+    gap: 20px;
+  }
+  
+  .ant-card-head {
+    padding: 16px 24px;
+    min-height: 56px;
+  }
+  
+  .ant-card-body {
+    padding: 20px;
+  }
+  
+  /* Desktop-like interactions */
+  .ant-btn,
+  .ant-input,
+  .ant-select-selector {
+    min-height: 36px;
+  }
+  
+  .ant-pagination-item,
+  .ant-pagination-prev,
+  .ant-pagination-next {
+    min-width: 32px;
+    height: 32px;
+    line-height: 32px;
+  }
+}
+
+/* ==========================================================================
+   Desktop (1366px+) - Standard Desktop
+   ========================================================================== */
+
+@media (min-width: 1366px) {
+  .admin-content {
+    padding: 24px;
+  }
+  
+  .desktop-content {
+    padding: 32px !important;
+  }
+  
+  .chart-container {
+    padding: 24px;
+    margin-bottom: 24px;
+  }
+  
+  .dashboard-card {
+    margin-bottom: 24px;
+  }
+  
+  .ant-card-body {
+    padding: 24px;
+  }
+  
+  .table-actions {
+    margin-bottom: 24px;
+  }
+  
+  /* Better spacing for large screens */
+  .ant-row {
+    margin-left: -24px !important;
+    margin-right: -24px !important;
+  }
+  
+  .ant-col {
+    padding-left: 24px !important;
+    padding-right: 24px !important;
+  }
+}
+
+/* ==========================================================================
+   Large Desktop (1920px+) - 4K and Ultra-wide
+   ========================================================================== */
+
+@media (min-width: 1920px) {
+  .admin-content {
+    padding: 32px;
+  }
+  
+  .desktop-content {
+    padding: 48px !important;
+  }
+  
+  .chart-container {
+    padding: 32px;
+  }
+  
+  .ant-card-body {
+    padding: 32px;
+  }
+  
+  /* Ultra-wide specific adjustments */
+  .stat-value {
+    font-size: 36px;
+  }
+  
+  .ant-card-head-title {
+    font-size: 18px;
+  }
+}
+
+/* ==========================================================================
+   Touch Device Optimizations (Any Size)
+   ========================================================================== */
+
+@media (hover: none) and (pointer: coarse) {
+  /* Ensure all interactive elements are touch-friendly */
+  .ant-btn,
+  .ant-input,
+  .ant-select-selector,
+  .ant-pagination-item,
+  .ant-pagination-prev,
+  .ant-pagination-next {
+    min-height: 44px;
+  }
+  
+  /* Increase spacing for touch targets */
+  .ant-menu-item {
+    height: 48px;
+    line-height: 48px;
+  }
+  
+  /* Better touch feedback */
+  .ant-btn:active,
+  .ant-menu-item:active,
+  .ant-dropdown-menu-item:active {
+    background-color: #f5f5f5;
+  }
+}
+
+/* ==========================================================================
+   High DPI Display Optimizations
+   ========================================================================== */
+
+@media (-webkit-min-device-pixel-ratio: 2), (min-resolution: 192dpi) {
+  /* Sharper borders and shadows for retina displays */
+  .ant-card {
+    box-shadow: 0 0.5px 1.5px rgba(0, 0, 0, 0.1);
+  }
+  
+  .admin-header {
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+  }
+  
+  /* Crisp text rendering */
+  body {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+}
+
+/* ==========================================================================
+   Print Styles
+   ========================================================================== */
+
+@media print {
+  .admin-header,
+  .admin-sider,
+  .mobile-navigation-drawer,
+  .ant-pagination,
+  .table-actions,
+  .ant-modal-mask,
+  .ant-modal-wrap {
+    display: none !important;
+  }
+  
+  .admin-content {
+    padding: 0;
+    background: white;
+  }
+  
+  .ant-table {
+    font-size: 12px;
+  }
+  
+  .ant-card {
+    border: 1px solid #d9d9d9;
+    box-shadow: none;
+    break-inside: avoid;
+  }
+}
+
+/* ==========================================================================
+   Dark Mode Support (Future Enhancement)
+   ========================================================================== */
+
+@media (prefers-color-scheme: dark) {
+  /* Placeholder for dark mode styles */
+  /* This can be expanded when implementing dark mode */
+}
+
+/* ==========================================================================
+   Reduced Motion Support (Accessibility)
+   ========================================================================== */
+
+@media (prefers-reduced-motion: reduce) {
+  .fade-in {
+    animation: none;
+  }
+  
+  .ant-spin {
+    animation-duration: 0.01ms !important;
+  }
+  
+  * {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
 }

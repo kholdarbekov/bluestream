@@ -14,6 +14,7 @@ import LineChart from '../components/charts/LineChart';
 import BarChart from '../components/charts/BarChart';
 import PieChart from '../components/charts/PieChart';
 import adminService from '../services/adminService';
+import useResponsive from '../hooks/useResponsive';
 
 const { Title } = Typography;
 const { RangePicker } = DatePicker;
@@ -25,6 +26,7 @@ const Dashboard = () => {
     moment()
   ]);
   const [refreshInterval, setRefreshInterval] = useState(30000); // 30 seconds
+  const responsive = useResponsive();
 
   // Fetch dashboard data
   const { data: dashboardData, isLoading, refetch } = useQuery(
@@ -85,49 +87,92 @@ const Dashboard = () => {
     }
   };
 
+  // Get chart height based on device
+  const getChartHeight = (mobileHeight = 200, tabletHeight = 250, desktopHeight = 300) => {
+    if (responsive.isMobileDevice) return mobileHeight;
+    if (responsive.isTabletDevice) return tabletHeight;
+    return desktopHeight;
+  };
+
   const dashboard = dashboardData?.dashboard || {};
 
   return (
     <div>
-      {/* Header Controls */}
-      <Row justify="space-between" align="top" style={{ marginBottom: 24 }} gutter={[16, 16]}>
-        <Col xs={24} sm={24} md={12} lg={8}>
-          <Title level={3} style={{ margin: 0 }}>Dashboard Overview</Title>
+      {/* Header Controls - Responsive Layout */}
+      <Row 
+        justify={responsive.isMobileDevice ? "center" : "space-between"} 
+        align="top" 
+        style={{ marginBottom: responsive.isMobileDevice ? 16 : 24 }} 
+        gutter={[16, 16]}
+      >
+        <Col xs={24} sm={24} md={12} lg={8} xl={6}>
+          <Title 
+            level={responsive.isMobileDevice ? 4 : 3} 
+            style={{ 
+              margin: 0,
+              textAlign: responsive.isMobileDevice ? 'center' : 'left',
+              fontSize: responsive.getFontSize('18px', '20px', '24px')
+            }}
+          >
+            Dashboard Overview
+          </Title>
         </Col>
-        <Col xs={24} sm={24} md={12} lg={16}>
-          <Space direction="vertical" size="small" style={{ width: '100%' }}>
-            <Space wrap size="small" style={{ width: '100%', justifyContent: 'flex-end' }}>
-              <RangePicker
-                value={dateRange}
-                onChange={handleDateRangeChange}
-                format="YYYY-MM-DD"
-                style={{ width: '100%', minWidth: 200 }}
-              />
-              <Select
-                value={refreshInterval}
-                onChange={setRefreshInterval}
-                style={{ width: 120 }}
-              >
-                <Option value={10000}>10s</Option>
-                <Option value={30000}>30s</Option>
-                <Option value={60000}>1m</Option>
-                <Option value={0}>Off</Option>
-              </Select>
-              <Button
-                type="primary"
-                icon={<ReloadOutlined />}
-                onClick={handleRefresh}
-                loading={isLoading}
-              >
-                Refresh
-              </Button>
-            </Space>
-          </Space>
+        
+        <Col xs={24} sm={24} md={12} lg={16} xl={18}>
+          <div style={{ 
+            display: 'flex', 
+            flexDirection: responsive.isMobileDevice ? 'column' : 'row',
+            gap: responsive.isMobileDevice ? '8px' : '12px',
+            justifyContent: responsive.isMobileDevice ? 'stretch' : 'flex-end',
+            alignItems: responsive.isMobileDevice ? 'stretch' : 'center'
+          }}>
+            <RangePicker
+              value={dateRange}
+              onChange={handleDateRangeChange}
+              format="YYYY-MM-DD"
+              style={{ 
+                width: responsive.isMobileDevice ? '100%' : '220px',
+                minHeight: responsive.isTouchDevice ? '44px' : '32px'
+              }}
+            />
+            <Select
+              value={refreshInterval}
+              onChange={setRefreshInterval}
+              style={{ 
+                width: responsive.isMobileDevice ? '100%' : '120px',
+                minHeight: responsive.isTouchDevice ? '44px' : '32px'
+              }}
+            >
+              <Option value={10000}>10s</Option>
+              <Option value={30000}>30s</Option>
+              <Option value={60000}>1m</Option>
+              <Option value={0}>Off</Option>
+            </Select>
+            <Button
+              type="primary"
+              icon={<ReloadOutlined />}
+              onClick={handleRefresh}
+              loading={isLoading}
+              style={{
+                minHeight: responsive.isTouchDevice ? '44px' : '32px'
+              }}
+            >
+              {responsive.isMobile ? '' : 'Refresh'}
+            </Button>
+          </div>
         </Col>
       </Row>
 
-      {/* Key Metrics */}
-      <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
+      {/* Key Metrics - Responsive Grid */}
+      <Row 
+        gutter={[
+          responsive.isMobileDevice ? 8 : 16, 
+          responsive.isMobileDevice ? 8 : 16
+        ]} 
+        style={{ 
+          marginBottom: responsive.isMobileDevice ? 16 : 24 
+        }}
+      >
         <Col xs={24} sm={12} lg={6}>
           <StatCard
             title="Total Users"
@@ -175,81 +220,170 @@ const Dashboard = () => {
         </Col>
       </Row>
 
-      {/* Charts Section */}
-      <Row gutter={[16, 16]}>
+      {/* Charts Section - Responsive Layout */}
+      <Row gutter={[
+        responsive.isMobileDevice ? 8 : 16, 
+        responsive.isMobileDevice ? 8 : 16
+      ]}>
         {/* Revenue Trend */}
-        <Col xs={24} lg={12} xl={12}>
-          <Card title="Revenue Trend" className="chart-container">
+        <Col xs={24} lg={12}>
+          <Card 
+            title="Revenue Trend" 
+            className="chart-container"
+            headStyle={{ 
+              fontSize: responsive.getFontSize('14px', '16px', '16px'),
+              padding: responsive.isMobileDevice ? '12px' : '16px 24px'
+            }}
+          >
             <LineChart
               data={revenueData}
-              height={window.innerWidth < 768 ? 250 : 300}
+              height={getChartHeight(200, 250, 300)}
               fill={true}
             />
           </Card>
         </Col>
 
         {/* Order Status Distribution */}
-        <Col xs={24} lg={12} xl={12}>
-          <Card title="Order Status Distribution" className="chart-container">
+        <Col xs={24} lg={12}>
+          <Card 
+            title="Order Status Distribution" 
+            className="chart-container"
+            headStyle={{ 
+              fontSize: responsive.getFontSize('14px', '16px', '16px'),
+              padding: responsive.isMobileDevice ? '12px' : '16px 24px'
+            }}
+          >
             <PieChart
               data={orderStatusData}
-              height={window.innerWidth < 768 ? 250 : 300}
+              height={getChartHeight(200, 250, 300)}
               doughnut={true}
             />
           </Card>
         </Col>
 
-        {/* Sales Performance */}
+        {/* Sales Performance - Full Width */}
         <Col xs={24}>
-          <Card title="Sales Performance" className="chart-container">
+          <Card 
+            title="Sales Performance" 
+            className="chart-container"
+            headStyle={{ 
+              fontSize: responsive.getFontSize('14px', '16px', '16px'),
+              padding: responsive.isMobileDevice ? '12px' : '16px 24px'
+            }}
+          >
             <LineChart
               data={salesTrendData}
-              height={window.innerWidth < 768 ? 250 : 350}
+              height={getChartHeight(220, 280, 350)}
             />
           </Card>
         </Col>
 
-        {/* Top Products */}
+        {/* Top Products - Full Width */}
         <Col xs={24}>
-          <Card title="Top Products" className="chart-container">
+          <Card 
+            title="Top Products" 
+            className="chart-container"
+            headStyle={{ 
+              fontSize: responsive.getFontSize('14px', '16px', '16px'),
+              padding: responsive.isMobileDevice ? '12px' : '16px 24px'
+            }}
+          >
             <BarChart
               data={topProductsData}
-              height={window.innerWidth < 768 ? 200 : 300}
+              height={getChartHeight(180, 220, 300)}
             />
           </Card>
         </Col>
       </Row>
 
-      {/* Quick Stats */}
-      <Row gutter={[16, 16]} style={{ marginTop: 24 }}>
+      {/* Quick Stats - Responsive Three Column Layout */}
+      <Row 
+        gutter={[
+          responsive.isMobileDevice ? 8 : 16, 
+          responsive.isMobileDevice ? 8 : 16
+        ]} 
+        style={{ 
+          marginTop: responsive.isMobileDevice ? 16 : 24 
+        }}
+      >
         <Col xs={24} sm={12} md={8}>
-          <Card>
-            <div style={{ textAlign: 'center' }}>
-              <Title level={4}>Pending Orders</Title>
-              <Title level={2} style={{ color: '#faad14', margin: 0 }}>
-                {dashboard.orders?.pending || 0}
-              </Title>
-            </div>
+          <Card bodyStyle={{ 
+            textAlign: 'center',
+            padding: responsive.isMobileDevice ? '16px' : '20px'
+          }}>
+            <Title 
+              level={responsive.isMobileDevice ? 5 : 4}
+              style={{ 
+                marginBottom: responsive.isMobileDevice ? 8 : 16,
+                fontSize: responsive.getFontSize('14px', '16px', '18px')
+              }}
+            >
+              Pending Orders
+            </Title>
+            <Title 
+              level={responsive.isMobileDevice ? 3 : 2} 
+              style={{ 
+                color: '#faad14', 
+                margin: 0,
+                fontSize: responsive.getFontSize('24px', '32px', '36px')
+              }}
+            >
+              {dashboard.orders?.pending || 0}
+            </Title>
           </Card>
         </Col>
+        
         <Col xs={24} sm={12} md={8}>
-          <Card>
-            <div style={{ textAlign: 'center' }}>
-              <Title level={4}>Low Stock Products</Title>
-              <Title level={2} style={{ color: '#ff4d4f', margin: 0 }}>
-                {dashboard.products?.low_stock || 0}
-              </Title>
-            </div>
+          <Card bodyStyle={{ 
+            textAlign: 'center',
+            padding: responsive.isMobileDevice ? '16px' : '20px'
+          }}>
+            <Title 
+              level={responsive.isMobileDevice ? 5 : 4}
+              style={{ 
+                marginBottom: responsive.isMobileDevice ? 8 : 16,
+                fontSize: responsive.getFontSize('14px', '16px', '18px')
+              }}
+            >
+              Low Stock Products
+            </Title>
+            <Title 
+              level={responsive.isMobileDevice ? 3 : 2} 
+              style={{ 
+                color: '#ff4d4f', 
+                margin: 0,
+                fontSize: responsive.getFontSize('24px', '32px', '36px')
+              }}
+            >
+              {dashboard.products?.low_stock || 0}
+            </Title>
           </Card>
         </Col>
+        
         <Col xs={24} sm={24} md={8}>
-          <Card>
-            <div style={{ textAlign: 'center' }}>
-              <Title level={4}>Active Subscriptions</Title>
-              <Title level={2} style={{ color: '#52c41a', margin: 0 }}>
-                {dashboard.subscriptions?.active || 0}
-              </Title>
-            </div>
+          <Card bodyStyle={{ 
+            textAlign: 'center',
+            padding: responsive.isMobileDevice ? '16px' : '20px'
+          }}>
+            <Title 
+              level={responsive.isMobileDevice ? 5 : 4}
+              style={{ 
+                marginBottom: responsive.isMobileDevice ? 8 : 16,
+                fontSize: responsive.getFontSize('14px', '16px', '18px')
+              }}
+            >
+              Active Subscriptions
+            </Title>
+            <Title 
+              level={responsive.isMobileDevice ? 3 : 2} 
+              style={{ 
+                color: '#52c41a', 
+                margin: 0,
+                fontSize: responsive.getFontSize('24px', '32px', '36px')
+              }}
+            >
+              {dashboard.subscriptions?.active || 0}
+            </Title>
           </Card>
         </Col>
       </Row>

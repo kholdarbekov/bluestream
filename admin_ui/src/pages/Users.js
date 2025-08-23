@@ -10,7 +10,9 @@ import {
   Modal,
   Form,
   Select,
-  message
+  message,
+  Row,
+  Col
 } from 'antd';
 import {
   SearchOutlined,
@@ -24,6 +26,7 @@ import {
 } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from 'react-query';
 import adminService from '../services/adminService';
+import useResponsive from '../hooks/useResponsive';
 
 const { Option } = Select;
 
@@ -33,6 +36,7 @@ const Users = () => {
   const [selectedUser, setSelectedUser] = useState(null);
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [pagination, setPagination] = useState({ page: 1, per_page: 20 });
+  const responsive = useResponsive();
 
   const queryClient = useQueryClient();
 
@@ -69,67 +73,85 @@ const Users = () => {
       title: 'User',
       dataIndex: 'first_name',
       key: 'user',
+      width: responsive.isMobileDevice ? 200 : 300,
       render: (text, record) => (
-        <Space>
-          <UserOutlined style={{ color: '#1890ff' }} />
-          <div>
-            <div>
+        <Space direction="vertical" size={4}>
+          <div style={{ 
+            display: 'flex', 
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: '4px'
+          }}>
+            <UserOutlined style={{ color: '#1890ff' }} />
+            <span style={{ 
+              fontWeight: 600,
+              fontSize: responsive.getFontSize('14px', '14px', '14px')
+            }}>
               {`${record.first_name} ${record.last_name}`}
-              {record.telegram_id && (
-                <Tag
-                  color="blue"
-                  icon={<MessageOutlined />}
-                  style={{ marginLeft: 8, fontSize: '11px' }}
-                >
-                  Telegram
-                </Tag>
-              )}
-              {record.is_verified && (
-                <CheckCircleOutlined 
-                  style={{ color: '#52c41a', marginLeft: 4 }} 
-                  title="Verified"
-                />
-              )}
-            </div>
-            <small style={{ color: '#666' }}>{record.email}</small>
+            </span>
             {record.telegram_id && (
-              <div>
-                <small style={{ color: '#1890ff' }}>
-                  Telegram ID: {record.telegram_id}
-                  {record.telegram_username && ` (@${record.telegram_username})`}
-                </small>
-              </div>
+              <Tag
+                color="blue"
+                icon={<MessageOutlined />}
+                size="small"
+              >
+                {responsive.isMobileDevice ? 'TG' : 'Telegram'}
+              </Tag>
+            )}
+            {record.is_verified && (
+              <CheckCircleOutlined 
+                style={{ color: '#52c41a' }} 
+                title="Verified"
+              />
             )}
           </div>
+          <div style={{ 
+            fontSize: '12px', 
+            color: '#666',
+            wordBreak: 'break-word'
+          }}>
+            {record.email}
+          </div>
+          {record.telegram_id && (
+            <div style={{ 
+              fontSize: '11px', 
+              color: '#1890ff'
+            }}>
+              TG: {record.telegram_id}
+              {record.telegram_username && ` (@${record.telegram_username})`}
+            </div>
+          )}
         </Space>
       )
     },
     {
       title: 'Contact',
       key: 'contact',
+      width: responsive.isMobileDevice ? 150 : 200,
       render: (text, record) => (
-        <div>
-          {record.phone && <div>{record.phone}</div>}
-          <div style={{ fontSize: '12px', color: '#666' }}>
-            Registered via: 
+        <Space direction="vertical" size={4}>
+          {record.phone && (
+            <div style={{ fontSize: '14px' }}>{record.phone}</div>
+          )}
+          <div>
             <Tag 
               color={record.registration_source === 'telegram' ? 'blue' : 'green'}
               size="small"
-              style={{ marginLeft: 4 }}
               icon={record.registration_source === 'telegram' ? <MessageOutlined /> : <GlobalOutlined />}
             >
               {record.registration_source === 'telegram' ? 'Telegram' : 'Web'}
             </Tag>
           </div>
-        </div>
+        </Space>
       )
     },
     {
       title: 'Role',
       dataIndex: 'role',
       key: 'role',
+      width: 80,
       render: (role) => (
-        <Tag color={role === 'admin' ? 'red' : 'blue'}>
+        <Tag color={role === 'admin' ? 'red' : 'blue'} size="small">
           {role.toUpperCase()}
         </Tag>
       )
@@ -138,6 +160,7 @@ const Users = () => {
       title: 'Status',
       dataIndex: 'status',
       key: 'status',
+      width: responsive.isMobileDevice ? 100 : 120,
       render: (status, record) => {
         const colors = {
           active: 'green',
@@ -146,41 +169,44 @@ const Users = () => {
           banned: 'red'
         };
         return (
-          <div>
-            <Tag color={colors[status]}>{status.toUpperCase()}</Tag>
+          <Space direction="vertical" size={2}>
+            <Tag color={colors[status]} size="small">
+              {status.toUpperCase()}
+            </Tag>
             {record.is_bot_active && record.telegram_id && (
-              <div>
-                <Tag color="processing" size="small">
-                  Bot Active
-                </Tag>
-              </div>
+              <Tag color="processing" size="small">
+                Bot
+              </Tag>
             )}
-          </div>
+          </Space>
         );
       }
     },
     {
       title: 'Activity',
       key: 'activity',
+      width: responsive.isMobileDevice ? 120 : 150,
       render: (text, record) => (
-        <div>
-          <div style={{ fontSize: '12px' }}>
+        <Space direction="vertical" size={2}>
+          <div style={{ fontSize: '11px' }}>
             Created: {new Date(record.created_at).toLocaleDateString()}
           </div>
-          <div style={{ fontSize: '12px' }}>
-            Last Login: {record.last_login ? new Date(record.last_login).toLocaleDateString() : 'Never'}
+          <div style={{ fontSize: '11px' }}>
+            Login: {record.last_login ? new Date(record.last_login).toLocaleDateString() : 'Never'}
           </div>
           {record.last_bot_interaction && (
-            <div style={{ fontSize: '12px', color: '#1890ff' }}>
-              Bot Activity: {new Date(record.last_bot_interaction).toLocaleDateString()}
+            <div style={{ fontSize: '11px', color: '#1890ff' }}>
+              Bot: {new Date(record.last_bot_interaction).toLocaleDateString()}
             </div>
           )}
-        </div>
+        </Space>
       )
     },
     {
       title: 'Actions',
       key: 'actions',
+      width: 60,
+      fixed: 'right',
       render: (_, record) => (
         <Dropdown
           menu={{
@@ -213,7 +239,11 @@ const Users = () => {
           }}
           trigger={['click']}
         >
-          <Button type="text" icon={<MoreOutlined />} />
+          <Button 
+            type="text" 
+            icon={<MoreOutlined />} 
+            size={responsive.isMobileDevice ? 'large' : 'middle'}
+          />
         </Dropdown>
       )
     }
@@ -258,21 +288,37 @@ const Users = () => {
   return (
     <div>
       <Card>
-        {/* Header */}
-        <div className="table-actions">
-          <Space direction="vertical" size="small" style={{ width: '100%' }}>
-            <Space wrap size="small" style={{ width: '100%' }}>
+        {/* Header - Responsive Layout */}
+        <Row 
+          gutter={[16, 16]} 
+          align="middle"
+          justify="space-between"
+          style={{ marginBottom: 16 }}
+        >
+          {/* Search and Filters */}
+          <Col xs={24} md={16} lg={14}>
+            <Space 
+              direction={responsive.isMobileDevice ? 'vertical' : 'horizontal'}
+              size="middle" 
+              style={{ width: '100%' }}
+            >
               <Input.Search
                 placeholder="Search users..."
                 allowClear
                 onSearch={handleSearch}
-                style={{ minWidth: 200, flex: 1 }}
+                style={{ 
+                  width: responsive.isMobileDevice ? '100%' : '280px',
+                  minHeight: responsive.isTouchDevice ? '44px' : '32px'
+                }}
               />
               <Select
                 placeholder="Filter by status"
                 allowClear
                 onChange={handleStatusFilter}
-                style={{ minWidth: 120 }}
+                style={{ 
+                  width: responsive.isMobileDevice ? '100%' : '150px',
+                  minHeight: responsive.isTouchDevice ? '44px' : '32px'
+                }}
               >
                 <Option value="active">Active</Option>
                 <Option value="inactive">Inactive</Option>
@@ -280,17 +326,40 @@ const Users = () => {
                 <Option value="banned">Banned</Option>
               </Select>
             </Space>
+          </Col>
 
-            <Space wrap size="small" style={{ width: '100%', justifyContent: 'flex-end' }}>
-              <Button icon={<ExportOutlined />}>
+          {/* Action Buttons */}
+          <Col xs={24} md={8} lg={10}>
+            <Space 
+              direction={responsive.isMobileDevice ? 'vertical' : 'horizontal'}
+              size="middle" 
+              style={{ 
+                width: '100%',
+                justifyContent: responsive.isMobileDevice ? 'stretch' : 'flex-end'
+              }}
+            >
+              <Button 
+                icon={<ExportOutlined />}
+                style={{ 
+                  width: responsive.isMobileDevice ? '100%' : 'auto',
+                  minHeight: responsive.isTouchDevice ? '44px' : '32px'
+                }}
+              >
                 Export
               </Button>
-              <Button type="primary" icon={<PlusOutlined />}>
+              <Button 
+                type="primary" 
+                icon={<PlusOutlined />}
+                style={{ 
+                  width: responsive.isMobileDevice ? '100%' : 'auto',
+                  minHeight: responsive.isTouchDevice ? '44px' : '32px'
+                }}
+              >
                 Add User
               </Button>
             </Space>
-          </Space>
-        </div>
+          </Col>
+        </Row>
 
         {/* Table */}
         <Table
@@ -302,32 +371,37 @@ const Users = () => {
             current: pagination.page,
             pageSize: pagination.per_page,
             total: data?.pagination?.total || 0,
-            showSizeChanger: window.innerWidth >= 768,
-            showQuickJumper: window.innerWidth >= 768,
+            showSizeChanger: !responsive.isMobileDevice,
+            showQuickJumper: !responsive.isMobileDevice,
             showTotal: (total, range) =>
-              window.innerWidth >= 576 
-                ? `${range[0]}-${range[1]} of ${total} users`
-                : `${total} total`
+              responsive.isMobileDevice 
+                ? `${total} total`
+                : `${range[0]}-${range[1]} of ${total} users`,
+            size: responsive.isMobileDevice ? 'small' : 'default'
           }}
           onChange={handleTableChange}
           className="admin-table"
-          scroll={{ x: 800 }}
+          scroll={{ 
+            x: responsive.isMobileDevice ? 800 : 'auto',
+            y: responsive.isMobileDevice ? 400 : undefined
+          }}
+          size={responsive.isMobileDevice ? 'small' : 'middle'}
         />
       </Card>
 
-      {/* User Details Modal */}
+      {/* User Details Modal - Responsive */}
       <Modal
         title={
-          <Space wrap>
+          <Space wrap size="small">
             <UserOutlined />
-            User Details
+            <span>User Details</span>
             {selectedUser?.telegram_id && (
-              <Tag color="blue" icon={<MessageOutlined />}>
-                Telegram User
+              <Tag color="blue" icon={<MessageOutlined />} size="small">
+                Telegram
               </Tag>
             )}
             {selectedUser?.is_verified && (
-              <Tag color="success" icon={<CheckCircleOutlined />}>
+              <Tag color="success" icon={<CheckCircleOutlined />} size="small">
                 Verified
               </Tag>
             )}
@@ -336,108 +410,145 @@ const Users = () => {
         open={isModalVisible}
         onCancel={() => setIsModalVisible(false)}
         footer={null}
-        width={window.innerWidth < 768 ? '95%' : 700}
-        style={{ maxWidth: window.innerWidth < 768 ? 'none' : 700 }}
+        width={responsive.isMobileDevice ? '95%' : 700}
+        style={{ 
+          maxWidth: responsive.isMobileDevice ? 'none' : 700,
+          top: responsive.isMobileDevice ? 20 : 100
+        }}
       >
         {selectedUser && (
           <div>
             {/* Basic Info */}
-            <Card title="Basic Information" style={{ marginBottom: 16 }}>
-              <div style={{ 
-                display: 'grid', 
-                gridTemplateColumns: window.innerWidth < 768 ? '1fr' : '1fr 1fr', 
-                gap: '16px' 
-              }}>
-                <div>
-                  <p><strong>Name:</strong> {selectedUser.first_name} {selectedUser.last_name}</p>
-                  <p><strong>Full Name:</strong> {selectedUser.full_name || 'N/A'}</p>
-                  <p><strong>Email:</strong> <span style={{ wordBreak: 'break-word' }}>{selectedUser.email}</span></p>
-                  <p><strong>Phone:</strong> {selectedUser.phone || 'N/A'}</p>
-                </div>
-                <div>
-                  <p><strong>Role:</strong> 
+            <Card 
+              title="Basic Information" 
+              size="small"
+              style={{ marginBottom: 12 }}
+            >
+              <Row gutter={[16, 12]}>
+                <Col xs={24} sm={12}>
+                  <div style={{ marginBottom: 8 }}>
+                    <strong>Name:</strong> {selectedUser.first_name} {selectedUser.last_name}
+                  </div>
+                  <div style={{ marginBottom: 8 }}>
+                    <strong>Full Name:</strong> {selectedUser.full_name || 'N/A'}
+                  </div>
+                  <div style={{ marginBottom: 8 }}>
+                    <strong>Email:</strong> 
+                    <div style={{ 
+                      wordBreak: 'break-word', 
+                      fontSize: '13px',
+                      marginTop: '2px'
+                    }}>
+                      {selectedUser.email}
+                    </div>
+                  </div>
+                  <div style={{ marginBottom: 8 }}>
+                    <strong>Phone:</strong> {selectedUser.phone || 'N/A'}
+                  </div>
+                </Col>
+                <Col xs={24} sm={12}>
+                  <div style={{ marginBottom: 8 }}>
+                    <strong>Role:</strong> 
                     <Tag color={selectedUser.role === 'admin' ? 'red' : 'blue'} style={{ marginLeft: 8 }}>
                       {selectedUser.role.toUpperCase()}
                     </Tag>
-                  </p>
-                  <p><strong>Status:</strong> 
+                  </div>
+                  <div style={{ marginBottom: 8 }}>
+                    <strong>Status:</strong> 
                     <Tag color="green" style={{ marginLeft: 8 }}>
                       {selectedUser.status.toUpperCase()}
                     </Tag>
-                  </p>
-                  <p><strong>Registration Source:</strong> 
+                  </div>
+                  <div style={{ marginBottom: 8 }}>
+                    <strong>Registration Source:</strong> 
                     <Tag 
                       color={selectedUser.registration_source === 'telegram' ? 'blue' : 'green'}
                       style={{ marginLeft: 8 }}
                       icon={selectedUser.registration_source === 'telegram' ? <MessageOutlined /> : <GlobalOutlined />}
+                      size="small"
                     >
                       {selectedUser.registration_source === 'telegram' ? 'Telegram' : 'Web'}
                     </Tag>
-                  </p>
-                  <p><strong>Preferred Language:</strong> {selectedUser.preferred_language || 'N/A'}</p>
-                </div>
-              </div>
+                  </div>
+                  <div style={{ marginBottom: 8 }}>
+                    <strong>Language:</strong> {selectedUser.preferred_language || 'N/A'}
+                  </div>
+                </Col>
+              </Row>
             </Card>
 
             {/* Telegram Info */}
             {selectedUser.telegram_id && (
-              <Card title="Telegram Information" style={{ marginBottom: 16 }}>
-                <div style={{ 
-                  display: 'grid', 
-                  gridTemplateColumns: window.innerWidth < 768 ? '1fr' : '1fr 1fr', 
-                  gap: '16px' 
-                }}>
-                  <div>
-                    <p><strong>Telegram ID:</strong> {selectedUser.telegram_id}</p>
-                    <p><strong>Username:</strong> {selectedUser.telegram_username ? `@${selectedUser.telegram_username}` : 'N/A'}</p>
-                    <p><strong>Telegram Name:</strong> {selectedUser.telegram_first_name || 'N/A'} {selectedUser.telegram_last_name || ''}</p>
-                  </div>
-                  <div>
-                    <p><strong>Bot Active:</strong> 
+              <Card 
+                title="Telegram Information" 
+                size="small"
+                style={{ marginBottom: 12 }}
+              >
+                <Row gutter={[16, 12]}>
+                  <Col xs={24} sm={12}>
+                    <div style={{ marginBottom: 8 }}>
+                      <strong>Telegram ID:</strong> {selectedUser.telegram_id}
+                    </div>
+                    <div style={{ marginBottom: 8 }}>
+                      <strong>Username:</strong> {selectedUser.telegram_username ? `@${selectedUser.telegram_username}` : 'N/A'}
+                    </div>
+                    <div style={{ marginBottom: 8 }}>
+                      <strong>Telegram Name:</strong> {selectedUser.telegram_first_name || 'N/A'} {selectedUser.telegram_last_name || ''}
+                    </div>
+                  </Col>
+                  <Col xs={24} sm={12}>
+                    <div style={{ marginBottom: 8 }}>
+                      <strong>Bot Active:</strong> 
                       <Tag color={selectedUser.is_bot_active ? 'processing' : 'default'} style={{ marginLeft: 8 }}>
                         {selectedUser.is_bot_active ? 'Active' : 'Inactive'}
                       </Tag>
-                    </p>
-                    <p><strong>Language Code:</strong> {selectedUser.telegram_language_code || 'N/A'}</p>
-                    <p><strong>Last Bot Interaction:</strong> 
-                      <span style={{ fontSize: '12px', display: 'block' }}>
+                    </div>
+                    <div style={{ marginBottom: 8 }}>
+                      <strong>Language Code:</strong> {selectedUser.telegram_language_code || 'N/A'}
+                    </div>
+                    <div style={{ marginBottom: 8 }}>
+                      <strong>Last Bot Interaction:</strong> 
+                      <div style={{ fontSize: '12px', marginTop: '2px' }}>
                         {selectedUser.last_bot_interaction ? new Date(selectedUser.last_bot_interaction).toLocaleString() : 'Never'}
-                      </span>
-                    </p>
-                  </div>
-                </div>
+                      </div>
+                    </div>
+                  </Col>
+                </Row>
               </Card>
             )}
 
             {/* Activity Info */}
-            <Card title="Activity Information">
-              <div style={{ 
-                display: 'grid', 
-                gridTemplateColumns: window.innerWidth < 768 ? '1fr' : '1fr 1fr', 
-                gap: '16px' 
-              }}>
-                <div>
-                  <p><strong>Created:</strong> 
-                    <span style={{ fontSize: '12px', display: 'block' }}>
+            <Card title="Activity Information" size="small">
+              <Row gutter={[16, 12]}>
+                <Col xs={24} sm={12}>
+                  <div style={{ marginBottom: 8 }}>
+                    <strong>Created:</strong> 
+                    <div style={{ fontSize: '12px', marginTop: '2px' }}>
                       {new Date(selectedUser.created_at).toLocaleString()}
-                    </span>
-                  </p>
-                  <p><strong>Updated:</strong> 
-                    <span style={{ fontSize: '12px', display: 'block' }}>
+                    </div>
+                  </div>
+                  <div style={{ marginBottom: 8 }}>
+                    <strong>Updated:</strong> 
+                    <div style={{ fontSize: '12px', marginTop: '2px' }}>
                       {selectedUser.updated_at ? new Date(selectedUser.updated_at).toLocaleString() : 'N/A'}
-                    </span>
-                  </p>
-                </div>
-                <div>
-                  <p><strong>Last Login:</strong> 
-                    <span style={{ fontSize: '12px', display: 'block' }}>
+                    </div>
+                  </div>
+                </Col>
+                <Col xs={24} sm={12}>
+                  <div style={{ marginBottom: 8 }}>
+                    <strong>Last Login:</strong> 
+                    <div style={{ fontSize: '12px', marginTop: '2px' }}>
                       {selectedUser.last_login ? new Date(selectedUser.last_login).toLocaleString() : 'Never'}
-                    </span>
-                  </p>
-                  <p><strong>Email Verified:</strong> {selectedUser.email_verified ? 'Yes' : 'No'}</p>
-                  <p><strong>Phone Verified:</strong> {selectedUser.phone_verified ? 'Yes' : 'No'}</p>
-                </div>
-              </div>
+                    </div>
+                  </div>
+                  <div style={{ marginBottom: 8 }}>
+                    <strong>Email Verified:</strong> {selectedUser.email_verified ? 'Yes' : 'No'}
+                  </div>
+                  <div style={{ marginBottom: 8 }}>
+                    <strong>Phone Verified:</strong> {selectedUser.phone_verified ? 'Yes' : 'No'}
+                  </div>
+                </Col>
+              </Row>
             </Card>
           </div>
         )}

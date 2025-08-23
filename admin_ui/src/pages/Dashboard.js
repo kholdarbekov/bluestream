@@ -90,35 +90,38 @@ const Dashboard = () => {
   return (
     <div>
       {/* Header Controls */}
-      <Row justify="space-between" align="middle" style={{ marginBottom: 24 }}>
-        <Col>
+      <Row justify="space-between" align="top" style={{ marginBottom: 24 }} gutter={[16, 16]}>
+        <Col xs={24} sm={24} md={12} lg={8}>
           <Title level={3} style={{ margin: 0 }}>Dashboard Overview</Title>
         </Col>
-        <Col>
-          <Space>
-            <RangePicker
-              value={dateRange}
-              onChange={handleDateRangeChange}
-              format="YYYY-MM-DD"
-            />
-            <Select
-              value={refreshInterval}
-              onChange={setRefreshInterval}
-              style={{ width: 120 }}
-            >
-              <Option value={10000}>10s</Option>
-              <Option value={30000}>30s</Option>
-              <Option value={60000}>1m</Option>
-              <Option value={0}>Off</Option>
-            </Select>
-            <Button
-              type="primary"
-              icon={<ReloadOutlined />}
-              onClick={handleRefresh}
-              loading={isLoading}
-            >
-              Refresh
-            </Button>
+        <Col xs={24} sm={24} md={12} lg={16}>
+          <Space direction="vertical" size="small" style={{ width: '100%' }}>
+            <Space wrap size="small" style={{ width: '100%', justifyContent: 'flex-end' }}>
+              <RangePicker
+                value={dateRange}
+                onChange={handleDateRangeChange}
+                format="YYYY-MM-DD"
+                style={{ width: '100%', minWidth: 200 }}
+              />
+              <Select
+                value={refreshInterval}
+                onChange={setRefreshInterval}
+                style={{ width: 120 }}
+              >
+                <Option value={10000}>10s</Option>
+                <Option value={30000}>30s</Option>
+                <Option value={60000}>1m</Option>
+                <Option value={0}>Off</Option>
+              </Select>
+              <Button
+                type="primary"
+                icon={<ReloadOutlined />}
+                onClick={handleRefresh}
+                loading={isLoading}
+              >
+                Refresh
+              </Button>
+            </Space>
           </Space>
         </Col>
       </Row>
@@ -175,22 +178,22 @@ const Dashboard = () => {
       {/* Charts Section */}
       <Row gutter={[16, 16]}>
         {/* Revenue Trend */}
-        <Col xs={24} lg={12}>
+        <Col xs={24} lg={12} xl={12}>
           <Card title="Revenue Trend" className="chart-container">
             <LineChart
               data={revenueData}
-              height={300}
+              height={window.innerWidth < 768 ? 250 : 300}
               fill={true}
             />
           </Card>
         </Col>
 
         {/* Order Status Distribution */}
-        <Col xs={24} lg={12}>
+        <Col xs={24} lg={12} xl={12}>
           <Card title="Order Status Distribution" className="chart-container">
             <PieChart
               data={orderStatusData}
-              height={300}
+              height={window.innerWidth < 768 ? 250 : 300}
               doughnut={true}
             />
           </Card>
@@ -201,7 +204,7 @@ const Dashboard = () => {
           <Card title="Sales Performance" className="chart-container">
             <LineChart
               data={salesTrendData}
-              height={350}
+              height={window.innerWidth < 768 ? 250 : 350}
             />
           </Card>
         </Col>
@@ -211,7 +214,7 @@ const Dashboard = () => {
           <Card title="Top Products" className="chart-container">
             <BarChart
               data={topProductsData}
-              height={300}
+              height={window.innerWidth < 768 ? 200 : 300}
             />
           </Card>
         </Col>
@@ -219,7 +222,7 @@ const Dashboard = () => {
 
       {/* Quick Stats */}
       <Row gutter={[16, 16]} style={{ marginTop: 24 }}>
-        <Col xs={24} sm={8}>
+        <Col xs={24} sm={12} md={8}>
           <Card>
             <div style={{ textAlign: 'center' }}>
               <Title level={4}>Pending Orders</Title>
@@ -229,7 +232,7 @@ const Dashboard = () => {
             </div>
           </Card>
         </Col>
-        <Col xs={24} sm={8}>
+        <Col xs={24} sm={12} md={8}>
           <Card>
             <div style={{ textAlign: 'center' }}>
               <Title level={4}>Low Stock Products</Title>
@@ -239,7 +242,7 @@ const Dashboard = () => {
             </div>
           </Card>
         </Col>
-        <Col xs={24} sm={8}>
+        <Col xs={24} sm={24} md={8}>
           <Card>
             <div style={{ textAlign: 'center' }}>
               <Title level={4}>Active Subscriptions</Title>

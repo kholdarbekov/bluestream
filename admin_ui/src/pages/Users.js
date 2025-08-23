@@ -260,33 +260,35 @@ const Users = () => {
       <Card>
         {/* Header */}
         <div className="table-actions">
-          <Space>
-            <Input.Search
-              placeholder="Search users..."
-              allowClear
-              onSearch={handleSearch}
-              style={{ width: 300 }}
-            />
-            <Select
-              placeholder="Filter by status"
-              allowClear
-              onChange={handleStatusFilter}
-              style={{ width: 150 }}
-            >
-              <Option value="active">Active</Option>
-              <Option value="inactive">Inactive</Option>
-              <Option value="suspended">Suspended</Option>
-              <Option value="banned">Banned</Option>
-            </Select>
-          </Space>
+          <Space direction="vertical" size="small" style={{ width: '100%' }}>
+            <Space wrap size="small" style={{ width: '100%' }}>
+              <Input.Search
+                placeholder="Search users..."
+                allowClear
+                onSearch={handleSearch}
+                style={{ minWidth: 200, flex: 1 }}
+              />
+              <Select
+                placeholder="Filter by status"
+                allowClear
+                onChange={handleStatusFilter}
+                style={{ minWidth: 120 }}
+              >
+                <Option value="active">Active</Option>
+                <Option value="inactive">Inactive</Option>
+                <Option value="suspended">Suspended</Option>
+                <Option value="banned">Banned</Option>
+              </Select>
+            </Space>
 
-          <Space>
-            <Button icon={<ExportOutlined />}>
-              Export
-            </Button>
-            <Button type="primary" icon={<PlusOutlined />}>
-              Add User
-            </Button>
+            <Space wrap size="small" style={{ width: '100%', justifyContent: 'flex-end' }}>
+              <Button icon={<ExportOutlined />}>
+                Export
+              </Button>
+              <Button type="primary" icon={<PlusOutlined />}>
+                Add User
+              </Button>
+            </Space>
           </Space>
         </div>
 
@@ -300,20 +302,23 @@ const Users = () => {
             current: pagination.page,
             pageSize: pagination.per_page,
             total: data?.pagination?.total || 0,
-            showSizeChanger: true,
-            showQuickJumper: true,
+            showSizeChanger: window.innerWidth >= 768,
+            showQuickJumper: window.innerWidth >= 768,
             showTotal: (total, range) =>
-              `${range[0]}-${range[1]} of ${total} users`
+              window.innerWidth >= 576 
+                ? `${range[0]}-${range[1]} of ${total} users`
+                : `${total} total`
           }}
           onChange={handleTableChange}
           className="admin-table"
+          scroll={{ x: 800 }}
         />
       </Card>
 
       {/* User Details Modal */}
       <Modal
         title={
-          <Space>
+          <Space wrap>
             <UserOutlined />
             User Details
             {selectedUser?.telegram_id && (
@@ -331,17 +336,22 @@ const Users = () => {
         open={isModalVisible}
         onCancel={() => setIsModalVisible(false)}
         footer={null}
-        width={700}
+        width={window.innerWidth < 768 ? '95%' : 700}
+        style={{ maxWidth: window.innerWidth < 768 ? 'none' : 700 }}
       >
         {selectedUser && (
           <div>
             {/* Basic Info */}
             <Card title="Basic Information" style={{ marginBottom: 16 }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+              <div style={{ 
+                display: 'grid', 
+                gridTemplateColumns: window.innerWidth < 768 ? '1fr' : '1fr 1fr', 
+                gap: '16px' 
+              }}>
                 <div>
                   <p><strong>Name:</strong> {selectedUser.first_name} {selectedUser.last_name}</p>
                   <p><strong>Full Name:</strong> {selectedUser.full_name || 'N/A'}</p>
-                  <p><strong>Email:</strong> {selectedUser.email}</p>
+                  <p><strong>Email:</strong> <span style={{ wordBreak: 'break-word' }}>{selectedUser.email}</span></p>
                   <p><strong>Phone:</strong> {selectedUser.phone || 'N/A'}</p>
                 </div>
                 <div>
@@ -372,7 +382,11 @@ const Users = () => {
             {/* Telegram Info */}
             {selectedUser.telegram_id && (
               <Card title="Telegram Information" style={{ marginBottom: 16 }}>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                <div style={{ 
+                  display: 'grid', 
+                  gridTemplateColumns: window.innerWidth < 768 ? '1fr' : '1fr 1fr', 
+                  gap: '16px' 
+                }}>
                   <div>
                     <p><strong>Telegram ID:</strong> {selectedUser.telegram_id}</p>
                     <p><strong>Username:</strong> {selectedUser.telegram_username ? `@${selectedUser.telegram_username}` : 'N/A'}</p>
@@ -385,7 +399,11 @@ const Users = () => {
                       </Tag>
                     </p>
                     <p><strong>Language Code:</strong> {selectedUser.telegram_language_code || 'N/A'}</p>
-                    <p><strong>Last Bot Interaction:</strong> {selectedUser.last_bot_interaction ? new Date(selectedUser.last_bot_interaction).toLocaleString() : 'Never'}</p>
+                    <p><strong>Last Bot Interaction:</strong> 
+                      <span style={{ fontSize: '12px', display: 'block' }}>
+                        {selectedUser.last_bot_interaction ? new Date(selectedUser.last_bot_interaction).toLocaleString() : 'Never'}
+                      </span>
+                    </p>
                   </div>
                 </div>
               </Card>
@@ -393,13 +411,29 @@ const Users = () => {
 
             {/* Activity Info */}
             <Card title="Activity Information">
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+              <div style={{ 
+                display: 'grid', 
+                gridTemplateColumns: window.innerWidth < 768 ? '1fr' : '1fr 1fr', 
+                gap: '16px' 
+              }}>
                 <div>
-                  <p><strong>Created:</strong> {new Date(selectedUser.created_at).toLocaleString()}</p>
-                  <p><strong>Updated:</strong> {selectedUser.updated_at ? new Date(selectedUser.updated_at).toLocaleString() : 'N/A'}</p>
+                  <p><strong>Created:</strong> 
+                    <span style={{ fontSize: '12px', display: 'block' }}>
+                      {new Date(selectedUser.created_at).toLocaleString()}
+                    </span>
+                  </p>
+                  <p><strong>Updated:</strong> 
+                    <span style={{ fontSize: '12px', display: 'block' }}>
+                      {selectedUser.updated_at ? new Date(selectedUser.updated_at).toLocaleString() : 'N/A'}
+                    </span>
+                  </p>
                 </div>
                 <div>
-                  <p><strong>Last Login:</strong> {selectedUser.last_login ? new Date(selectedUser.last_login).toLocaleString() : 'Never'}</p>
+                  <p><strong>Last Login:</strong> 
+                    <span style={{ fontSize: '12px', display: 'block' }}>
+                      {selectedUser.last_login ? new Date(selectedUser.last_login).toLocaleString() : 'Never'}
+                    </span>
+                  </p>
                   <p><strong>Email Verified:</strong> {selectedUser.email_verified ? 'Yes' : 'No'}</p>
                   <p><strong>Phone Verified:</strong> {selectedUser.phone_verified ? 'Yes' : 'No'}</p>
                 </div>

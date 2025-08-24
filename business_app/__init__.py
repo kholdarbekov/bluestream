@@ -7,10 +7,10 @@ import logging
 from logging.handlers import RotatingFileHandler
 from datetime import datetime, UTC
 from sqlalchemy import text
-from flask import Flask, jsonify, render_template, request, g
+from flask import Flask, jsonify, render_template, request, g, session
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
-from flask_jwt_extended import JWTManager
+from flask_jwt_extended import JWTManager, verify_jwt_in_request, get_jwt_identity
 from flask_cors import CORS
 from flask_limiter import Limiter
 from flask_caching import Cache
@@ -127,12 +127,39 @@ def setup_request_handlers(app):
         # Set request start time for performance monitoring
         g.start_time = datetime.now(UTC)
         
-        # Set language from request
-        lang = request.headers.get('Accept-Language', app.config['DEFAULT_LANGUAGE'])
-        if lang and lang[:2] in app.config['LANGUAGES']:
-            set_language(lang[:2])
+        # Set language - prioritize session, then user preference, then browser, then default
+        lang = None
+        
+        # 1. Check session language (set by language switcher)
+        if 'language' in session:
+            lang = session['language']
         else:
-            set_language(app.config['DEFAULT_LANGUAGE'])
+            # 2. Check if user is logged in and has a preferred language
+            try:
+                verify_jwt_in_request(optional=True)
+                current_user_id = get_jwt_identity()
+                if current_user_id:
+                    from business_app.models.user import User
+                    user = User.query.get(current_user_id)
+                    if user and user.preferred_language:
+                        lang = user.preferred_language
+                        # Store in session for future requests
+                        session['language'] = lang
+            except:
+                pass
+            
+            # 3. Fall back to browser Accept-Language header
+            if not lang:
+                browser_lang = request.headers.get('Accept-Language', '')
+                if browser_lang and browser_lang[:2] in app.config['LANGUAGES']:
+                    lang = browser_lang[:2]
+        
+        # 4. Use default language if nothing else worked
+        if not lang or lang not in app.config['LANGUAGES']:
+            lang = app.config['DEFAULT_LANGUAGE']
+        
+        # Set the language in request context
+        set_language(lang)
     
     @app.after_request
     def after_request(response):

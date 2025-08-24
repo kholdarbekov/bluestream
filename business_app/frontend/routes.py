@@ -471,7 +471,8 @@ def inject_global_vars():
 def translate_filter(key, language=None):
     """Template filter for translations"""
     if language is None:
-        language = session.get('language', 'en')
+        from business_app.utils.helpers import get_current_language
+        language = get_current_language()
     return get_translation(key, language)
 
 

@@ -418,7 +418,7 @@ def inject_global_vars():
         'current_user': user_info,
         'company_name': 'Blue Stream Group',
         'company_phone': '+998 71 234 56 78',
-        'company_email': 'info@bluestreamgroup.uz',
+        'company_email': 'info@bluestreamg.uz',
         'moment': lambda: MomentJS(),
         'min': min,
         'max': max

@@ -98,19 +98,19 @@ const Dashboard = () => {
 
   return (
     <div>
-      {/* Header Controls - Responsive Layout */}
+      {/* Header Controls - Universal Responsive Layout */}
       <Row 
-        justify={responsive.isMobileDevice ? "center" : "space-between"} 
-        align="top" 
-        style={{ marginBottom: responsive.isMobileDevice ? 16 : 24 }} 
+        justify="space-between" 
+        align="middle" 
+        style={{ marginBottom: 24 }} 
         gutter={[16, 16]}
       >
-        <Col xs={24} sm={24} md={12} lg={8} xl={6}>
+        {/* Title Section */}
+        <Col xs={24} sm={24} md={8} lg={6}>
           <Title 
-            level={responsive.isMobileDevice ? 4 : 3} 
+            level={3} 
             style={{ 
               margin: 0,
-              textAlign: responsive.isMobileDevice ? 'center' : 'left',
               fontSize: responsive.getFontSize('18px', '20px', '24px')
             }}
           >
@@ -118,29 +118,31 @@ const Dashboard = () => {
           </Title>
         </Col>
         
-        <Col xs={24} sm={24} md={12} lg={16} xl={18}>
-          <div style={{ 
-            display: 'flex', 
-            flexDirection: responsive.isMobileDevice ? 'column' : 'row',
-            gap: responsive.isMobileDevice ? '8px' : '12px',
-            justifyContent: responsive.isMobileDevice ? 'stretch' : 'flex-end',
-            alignItems: responsive.isMobileDevice ? 'stretch' : 'center'
-          }}>
+        {/* Controls Section */}
+        <Col xs={24} sm={24} md={16} lg={18}>
+          <Space 
+            wrap 
+            size="middle" 
+            style={{ 
+              width: '100%',
+              justifyContent: responsive.isMobileDevice ? 'center' : 'flex-end'
+            }}
+          >
             <RangePicker
               value={dateRange}
               onChange={handleDateRangeChange}
               format="YYYY-MM-DD"
               style={{ 
-                width: responsive.isMobileDevice ? '100%' : '220px',
-                minHeight: responsive.isTouchDevice ? '44px' : '32px'
+                minWidth: responsive.isMobileDevice ? '200px' : '220px',
+                minHeight: responsive.isTouchDevice ? '40px' : '32px'
               }}
             />
             <Select
               value={refreshInterval}
               onChange={setRefreshInterval}
               style={{ 
-                width: responsive.isMobileDevice ? '100%' : '120px',
-                minHeight: responsive.isTouchDevice ? '44px' : '32px'
+                width: '120px',
+                minHeight: responsive.isTouchDevice ? '40px' : '32px'
               }}
             >
               <Option value={10000}>10s</Option>
@@ -154,12 +156,12 @@ const Dashboard = () => {
               onClick={handleRefresh}
               loading={isLoading}
               style={{
-                minHeight: responsive.isTouchDevice ? '44px' : '32px'
+                minHeight: responsive.isTouchDevice ? '40px' : '32px'
               }}
             >
-              {responsive.isMobile ? '' : 'Refresh'}
+              Refresh
             </Button>
-          </div>
+          </Space>
         </Col>
       </Row>
 

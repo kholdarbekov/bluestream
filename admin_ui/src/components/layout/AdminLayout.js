@@ -22,8 +22,7 @@ import {
   BarChartOutlined,
   SettingOutlined,
   LogoutOutlined,
-  MenuOutlined,
-  CloseOutlined
+  MenuOutlined
 } from '@ant-design/icons';
 import { useAuthStore } from '../../stores/authStore';
 import { useRealTimeWithFallback } from '../../hooks/useRealTimeUpdates';
@@ -34,6 +33,7 @@ const { Title, Text } = Typography;
 
 const AdminLayout = ({ children }) => {
   const [mobileDrawerVisible, setMobileDrawerVisible] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
   const { user, logout } = useAuthStore();
@@ -140,6 +140,10 @@ const AdminLayout = ({ children }) => {
     setMobileDrawerVisible(prev => !prev);
   }, []);
 
+  const toggleSidebar = useCallback(() => {
+    setSidebarCollapsed(prev => !prev);
+  }, []);
+
   const closeMobileDrawer = useCallback(() => {
     setMobileDrawerVisible(false);
   }, []);
@@ -158,14 +162,14 @@ const AdminLayout = ({ children }) => {
       alignItems: 'center',
       justifyContent: 'center',
       borderBottom: '1px solid #e8e8e8',
-      padding: responsive.isMobileDevice ? '0 16px' : '0 24px'
+      padding: '0 16px'
     }}>
       <Title 
         level={collapsed ? 4 : 3} 
         style={{ 
           margin: 0, 
           color: '#1890ff',
-          fontSize: responsive.isMobileDevice ? '18px' : (collapsed ? '16px' : '20px')
+          fontSize: collapsed ? '16px' : '20px'
         }}
       >
         {collapsed ? 'BS' : 'Blue Stream'}
@@ -182,16 +186,15 @@ const AdminLayout = ({ children }) => {
       onClick={handleMenuClick}
       style={{ 
         border: 'none',
-        fontSize: responsive.isMobileDevice ? '16px' : '14px'
+        fontSize: '14px'
       }}
     />
   );
 
-  // Mobile drawer implementation
-  if (responsive.shouldUseDrawerNavigation) {
-    return (
-      <Layout style={{ minHeight: '100vh' }}>
-        {/* Mobile Drawer */}
+  return (
+    <Layout style={{ minHeight: '100vh' }}>
+      {/* Mobile Drawer - Only shown on mobile */}
+      {responsive.shouldUseDrawerNavigation && (
         <Drawer
           title={<LogoComponent />}
           placement="left"
@@ -204,213 +207,101 @@ const AdminLayout = ({ children }) => {
         >
           <NavigationMenu />
         </Drawer>
+      )}
 
-        {/* Main Layout */}
-        <Layout>
-          {/* Mobile Header */}
-          <Header 
-            className="admin-header mobile-header"
-            style={{ 
-              padding: responsive.getContainerPadding(),
-              height: 'auto',
-              minHeight: '64px'
-            }}
-          >
-            <div style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              height: '100%'
-            }}>
-              {/* Left side - Menu button and title */}
-              <Space size={12}>
-                <Button
-                  type="text"
-                  icon={<MenuOutlined />}
-                  onClick={toggleMobileDrawer}
-                  size={responsive.isMobile ? 'large' : 'middle'}
-                  style={{ 
-                    fontSize: '18px',
-                    width: '44px',
-                    height: '44px'
-                  }}
-                />
-                {!responsive.isMobile && (
-                  <Title 
-                    level={4} 
-                    style={{ 
-                      margin: 0,
-                      fontSize: responsive.getFontSize('16px', '18px', '18px')
-                    }}
-                  >
-                    {getPageTitle()}
-                  </Title>
-                )}
-              </Space>
+      {/* Desktop/Tablet Sidebar - Only shown on larger screens */}
+      {!responsive.shouldUseDrawerNavigation && (
+        <Sider
+          trigger={null}
+          collapsible
+          collapsed={sidebarCollapsed}
+          className="admin-sider desktop-sider"
+          width={280}
+          collapsedWidth={80}
+          style={{
+            background: '#fff',
+            borderRight: '1px solid #e8e8e8'
+          }}
+        >
+          <LogoComponent collapsed={sidebarCollapsed} />
+          <NavigationMenu />
+        </Sider>
+      )}
 
-              {/* Right side - User menu */}
-              <Space size={responsive.isMobile ? 8 : 12}>
-                {/* Notifications - hidden on very small screens */}
-                {!responsive.isMobile && (
-                  <Badge count={0} size="small">
-                    <Button 
-                      type="text" 
-                      icon={<BellOutlined />}
-                      size="large"
-                    />
-                  </Badge>
-                )}
-
-                {/* User Dropdown */}
-                <Dropdown
-                  menu={{ items: userMenuItems }}
-                  placement="bottomRight"
-                  trigger={['click']}
-                >
-                  <Space style={{ cursor: 'pointer' }}>
-                    <Avatar
-                      icon={<UserOutlined />}
-                      src={user?.avatar}
-                      size={responsive.isMobile ? 32 : 40}
-                      style={{ backgroundColor: '#1890ff' }}
-                    />
-                    {!responsive.isMobile && (
-                      <div style={{ textAlign: 'left' }}>
-                        <Text 
-                          strong 
-                          style={{ 
-                            fontSize: '14px',
-                            display: 'block',
-                            lineHeight: '1.2'
-                          }}
-                        >
-                          {user?.first_name} {user?.last_name}
-                        </Text>
-                        <Text 
-                          type="secondary" 
-                          style={{ 
-                            fontSize: '12px',
-                            lineHeight: '1.2'
-                          }}
-                        >
-                          {user?.role === 'super_admin' ? 'Super Admin' : 'Admin'}
-                        </Text>
-                      </div>
-                    )}
-                  </Space>
-                </Dropdown>
-              </Space>
-            </div>
-
-            {/* Mobile page title below header */}
-            {responsive.isMobile && (
-              <div style={{ 
-                textAlign: 'center',
-                paddingTop: '8px',
-                borderTop: '1px solid #f0f0f0',
-                marginTop: '8px'
-              }}>
-                <Text 
-                  strong 
-                  style={{ 
-                    fontSize: '16px',
-                    color: '#262626'
-                  }}
-                >
-                  {getPageTitle()}
-                </Text>
-              </div>
-            )}
-          </Header>
-
-          {/* Mobile Content */}
-          <Content 
-            className="admin-content mobile-content"
-            style={{ 
-              padding: responsive.getContainerPadding(),
-              minHeight: 'calc(100vh - 64px)',
-              background: '#f5f5f5'
-            }}
-          >
-            <div className="fade-in">
-              {children}
-            </div>
-          </Content>
-        </Layout>
-      </Layout>
-    );
-  }
-
-  // Desktop/Tablet Layout
-  return (
-    <Layout style={{ minHeight: '100vh' }}>
-      {/* Desktop Sidebar */}
-      <Sider
-        trigger={null}
-        collapsible
-        collapsed={responsive.shouldCollapseSidebar}
-        className="admin-sider desktop-sider"
-        width={280}
-        collapsedWidth={80}
-        breakpoint="lg"
-        onBreakpoint={(broken) => {
-          // This handles the automatic collapse on smaller screens
-          console.log('Breakpoint triggered:', broken);
-        }}
-        style={{
-          background: '#fff',
-          borderRight: '1px solid #e8e8e8'
-        }}
-      >
-        <LogoComponent collapsed={responsive.shouldCollapseSidebar} />
-        <NavigationMenu />
-      </Sider>
-
-      {/* Desktop Layout */}
+      {/* Main Layout */}
       <Layout>
-        {/* Desktop Header */}
+        {/* Header - Responsive for all devices */}
         <Header 
-          className="admin-header desktop-header"
+          className={`admin-header ${responsive.shouldUseDrawerNavigation ? 'mobile-header' : 'desktop-header'}`}
           style={{ 
-            padding: `0 ${responsive.getContainerPadding()}`,
+            padding: responsive.shouldUseDrawerNavigation 
+              ? responsive.getContainerPadding() 
+              : `0 ${responsive.getContainerPadding()}`,
+            height: responsive.shouldUseDrawerNavigation ? 'auto' : '64px',
+            minHeight: responsive.shouldUseDrawerNavigation ? '64px' : '64px',
             background: '#fff',
             borderBottom: '1px solid #e8e8e8',
-            boxShadow: '0 2px 8px rgba(0, 0, 0, 0.06)'
+            boxShadow: '0 2px 8px rgba(0, 0, 0, 0.06)',
+            display: 'flex',
+            alignItems: 'center'
           }}
         >
           <div style={{
             display: 'flex',
             justifyContent: 'space-between',
             alignItems: 'center',
-            height: '100%'
+            width: '100%'
           }}>
-            {/* Page Title */}
-            <Title 
-              level={3} 
-              style={{ 
-                margin: 0,
-                color: '#262626'
-              }}
-            >
-              {getPageTitle()}
-            </Title>
-
-            {/* Desktop Header Actions */}
-            <Space size={16}>
-              {/* Connection Status Indicator */}
-              <Badge 
-                status={isConnected ? 'processing' : 'default'} 
-                text={connectionType || 'Offline'}
+            {/* Left side */}
+            <Space size={responsive.isMobileDevice ? 12 : 16}>
+              {/* Menu button for mobile OR collapse button for desktop */}
+              <Button
+                type="text"
+                icon={<MenuOutlined />}
+                onClick={responsive.shouldUseDrawerNavigation ? toggleMobileDrawer : toggleSidebar}
+                style={{ 
+                  fontSize: '16px',
+                  width: responsive.isTouchDevice ? '44px' : '40px',
+                  height: responsive.isTouchDevice ? '44px' : '40px'
+                }}
               />
+              
+              {/* Page Title - Always visible on desktop, conditional on mobile */}
+              <Title 
+                level={responsive.isMobileDevice ? 4 : 3} 
+                style={{ 
+                  margin: 0,
+                  fontSize: responsive.getFontSize('16px', '18px', '20px'),
+                  display: responsive.isMobile ? 'none' : 'block'
+                }}
+              >
+                {getPageTitle()}
+              </Title>
+            </Space>
 
-              {/* Notifications */}
-              <Badge count={0} size="small">
-                <Button 
-                  type="text" 
-                  icon={<BellOutlined />}
-                  size="large"
+            {/* Right side */}
+            <Space size={responsive.isMobileDevice ? 8 : 16}>
+              {/* Connection Status - Desktop only */}
+              {!responsive.isMobileDevice && (
+                <Badge 
+                  status={isConnected ? 'processing' : 'default'} 
+                  text={connectionType || 'Offline'}
                 />
-              </Badge>
+              )}
+
+              {/* Notifications - Hidden on very small screens */}
+              {!responsive.isMobile && (
+                <Badge count={0} size="small">
+                  <Button 
+                    type="text" 
+                    icon={<BellOutlined />}
+                    style={{
+                      width: responsive.isTouchDevice ? '44px' : '40px',
+                      height: responsive.isTouchDevice ? '44px' : '40px'
+                    }}
+                  />
+                </Badge>
+              )}
 
               {/* User Dropdown */}
               <Dropdown
@@ -422,42 +313,70 @@ const AdminLayout = ({ children }) => {
                   <Avatar
                     icon={<UserOutlined />}
                     src={user?.avatar}
-                    size={40}
+                    size={responsive.isMobileDevice ? 32 : 40}
                     style={{ backgroundColor: '#1890ff' }}
                   />
-                  <div style={{ textAlign: 'left' }}>
-                    <Text 
-                      strong 
-                      style={{ 
-                        fontSize: '14px',
-                        display: 'block',
-                        lineHeight: '1.2'
-                      }}
-                    >
-                      {user?.first_name} {user?.last_name}
-                    </Text>
-                    <Text 
-                      type="secondary" 
-                      style={{ 
-                        fontSize: '12px',
-                        lineHeight: '1.2'
-                      }}
-                    >
-                      {user?.role === 'super_admin' ? 'Super Admin' : 'Admin'}
-                    </Text>
-                  </div>
+                  {!responsive.isMobileDevice && (
+                    <div style={{ textAlign: 'left' }}>
+                      <Text 
+                        strong 
+                        style={{ 
+                          fontSize: '14px',
+                          display: 'block',
+                          lineHeight: '1.2'
+                        }}
+                      >
+                        {user?.first_name} {user?.last_name}
+                      </Text>
+                      <Text 
+                        type="secondary" 
+                        style={{ 
+                          fontSize: '12px',
+                          lineHeight: '1.2'
+                        }}
+                      >
+                        {user?.role === 'super_admin' ? 'Super Admin' : 'Admin'}
+                      </Text>
+                    </div>
+                  )}
                 </Space>
               </Dropdown>
             </Space>
           </div>
+
+          {/* Mobile page title below header - Only on very small screens */}
+          {responsive.isMobile && (
+            <div style={{ 
+              position: 'absolute',
+              bottom: '-32px',
+              left: '50%',
+              transform: 'translateX(-50%)',
+              textAlign: 'center',
+              width: '100%',
+              padding: '8px 16px',
+              background: '#fff',
+              borderBottom: '1px solid #f0f0f0'
+            }}>
+              <Text 
+                strong 
+                style={{ 
+                  fontSize: '16px',
+                  color: '#262626'
+                }}
+              >
+                {getPageTitle()}
+              </Text>
+            </div>
+          )}
         </Header>
 
-        {/* Desktop Content */}
+        {/* Content Area */}
         <Content 
-          className="admin-content desktop-content"
+          className={`admin-content ${responsive.shouldUseDrawerNavigation ? 'mobile-content' : 'desktop-content'}`}
           style={{ 
             padding: responsive.getContainerPadding(),
-            minHeight: 'calc(100vh - 64px)',
+            marginTop: responsive.isMobile ? '32px' : '0', // Account for mobile title
+            minHeight: `calc(100vh - 64px - ${responsive.isMobile ? '32px' : '0px'})`,
             background: '#f5f5f5'
           }}
         >

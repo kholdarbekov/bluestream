@@ -60,7 +60,7 @@ code {
   min-height: 100vh;
 }
 
-/* Mobile Header Styles */
+/* Universal Header Styles */
 .admin-header {
   background: #fff;
   border-bottom: 1px solid #e8e8e8;
@@ -68,12 +68,16 @@ code {
   position: sticky;
   top: 0;
   z-index: 100;
+  height: 64px;
 }
 
 .mobile-header {
-  padding: 8px 12px !important;
   height: auto !important;
-  min-height: 56px !important;
+  min-height: 64px !important;
+}
+
+.desktop-header {
+  height: 64px !important;
 }
 
 /* Mobile Sider/Drawer Styles */
@@ -424,12 +428,15 @@ code {
   }
   
   .admin-content {
-    padding: 16px;
+    padding: 20px;
+  }
+  
+  .desktop-content {
+    padding: 24px !important;
   }
   
   .desktop-header {
     height: 64px !important;
-    padding: 0 24px !important;
   }
   
   .stat-value {

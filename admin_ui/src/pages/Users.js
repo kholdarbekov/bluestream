@@ -288,17 +288,17 @@ const Users = () => {
   return (
     <div>
       <Card>
-        {/* Header - Responsive Layout */}
+        {/* Header - Universal Responsive Layout */}
         <Row 
           gutter={[16, 16]} 
           align="middle"
           justify="space-between"
-          style={{ marginBottom: 16 }}
+          style={{ marginBottom: 20 }}
         >
           {/* Search and Filters */}
-          <Col xs={24} md={16} lg={14}>
+          <Col xs={24} sm={24} md={14} lg={14} xl={16}>
             <Space 
-              direction={responsive.isMobileDevice ? 'vertical' : 'horizontal'}
+              wrap
               size="middle" 
               style={{ width: '100%' }}
             >
@@ -307,8 +307,9 @@ const Users = () => {
                 allowClear
                 onSearch={handleSearch}
                 style={{ 
-                  width: responsive.isMobileDevice ? '100%' : '280px',
-                  minHeight: responsive.isTouchDevice ? '44px' : '32px'
+                  minWidth: '240px',
+                  maxWidth: responsive.isMobileDevice ? '100%' : '300px',
+                  minHeight: responsive.isTouchDevice ? '40px' : '32px'
                 }}
               />
               <Select
@@ -316,8 +317,8 @@ const Users = () => {
                 allowClear
                 onChange={handleStatusFilter}
                 style={{ 
-                  width: responsive.isMobileDevice ? '100%' : '150px',
-                  minHeight: responsive.isTouchDevice ? '44px' : '32px'
+                  width: '150px',
+                  minHeight: responsive.isTouchDevice ? '40px' : '32px'
                 }}
               >
                 <Option value="active">Active</Option>
@@ -329,20 +330,19 @@ const Users = () => {
           </Col>
 
           {/* Action Buttons */}
-          <Col xs={24} md={8} lg={10}>
+          <Col xs={24} sm={24} md={10} lg={10} xl={8}>
             <Space 
-              direction={responsive.isMobileDevice ? 'vertical' : 'horizontal'}
+              wrap
               size="middle" 
               style={{ 
                 width: '100%',
-                justifyContent: responsive.isMobileDevice ? 'stretch' : 'flex-end'
+                justifyContent: responsive.isMobileDevice ? 'center' : 'flex-end'
               }}
             >
               <Button 
                 icon={<ExportOutlined />}
                 style={{ 
-                  width: responsive.isMobileDevice ? '100%' : 'auto',
-                  minHeight: responsive.isTouchDevice ? '44px' : '32px'
+                  minHeight: responsive.isTouchDevice ? '40px' : '32px'
                 }}
               >
                 Export
@@ -351,8 +351,7 @@ const Users = () => {
                 type="primary" 
                 icon={<PlusOutlined />}
                 style={{ 
-                  width: responsive.isMobileDevice ? '100%' : 'auto',
-                  minHeight: responsive.isTouchDevice ? '44px' : '32px'
+                  minHeight: responsive.isTouchDevice ? '40px' : '32px'
                 }}
               >
                 Add User

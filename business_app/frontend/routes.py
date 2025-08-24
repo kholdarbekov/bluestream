@@ -160,6 +160,44 @@ def subscriptions():
     return render_template('frontend/subscriptions.html', plans=plans)
 
 
+@frontend_bp.route('/my-subscriptions')
+@jwt_required()
+def my_subscriptions():
+    """User subscriptions management page"""
+    current_user_id = get_jwt_identity()
+    user = User.query.get(current_user_id)
+    
+    # Get user's subscriptions
+    subscriptions = Subscription.query.filter_by(user_id=current_user_id).order_by(
+        desc(Subscription.created_at)
+    ).all()
+    
+    # Get active subscriptions count
+    active_subscriptions = [s for s in subscriptions if s.status == 'active']
+    
+    # Get subscription overview data
+    subscription_service = SubscriptionService()
+    try:
+        overview_data = {
+            'active_count': len(active_subscriptions),
+            'deliveries_this_month': subscription_service.get_monthly_deliveries_count(current_user_id),
+            'monthly_savings': subscription_service.calculate_monthly_savings(current_user_id)
+        }
+    except Exception as e:
+        print(f"Error getting subscription overview: {e}")
+        overview_data = {
+            'active_count': len(active_subscriptions),
+            'deliveries_this_month': 0,
+            'monthly_savings': 0
+        }
+    
+    return render_template('frontend/my_subscriptions.html',
+                         user=user,
+                         subscriptions=subscriptions,
+                         active_subscriptions=active_subscriptions,
+                         overview_data=overview_data)
+
+
 @frontend_bp.route('/my-account')
 @jwt_required()
 def my_account():

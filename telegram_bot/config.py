@@ -105,14 +105,14 @@ class BusinessAPIConfig:
     ssl_cert_path: Optional[str] = None  # Path to custom SSL certificate
     
     # API endpoints
-    auth_endpoint: str = "/api/auth"
-    products_endpoint: str = "/api/products"
-    orders_endpoint: str = "/api/orders"
-    payments_endpoint: str = "/api/payments"
-    delivery_endpoint: str = "/api/delivery"
-    subscriptions_endpoint: str = "/api/subscriptions"
-    loyalty_endpoint: str = "/api/loyalty"
-    analytics_endpoint: str = "/api/analytics"
+    auth_endpoint: str = "/api/v1/auth"
+    products_endpoint: str = "/api/v1/products"
+    orders_endpoint: str = "/api/v1/orders"
+    payments_endpoint: str = "/api/v1/payments"
+    delivery_endpoint: str = "/api/v1/delivery"
+    subscriptions_endpoint: str = "/api/v1/subscriptions"
+    loyalty_endpoint: str = "/api/v1/loyalty"
+    analytics_endpoint: str = "/api/v1/analytics"
 
 
 @dataclass

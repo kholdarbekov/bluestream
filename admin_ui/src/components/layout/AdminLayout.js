@@ -347,7 +347,7 @@ const AdminLayout = ({ children }) => {
                           fontSize: '14px',
                           display: 'block',
                           lineHeight: '1.2',
-                          whiteSpace: 'nowrap',
+                          whiteSpace: 'wrap',
                           overflow: 'hidden',
                           textOverflow: 'ellipsis',
                           maxWidth: '120px'

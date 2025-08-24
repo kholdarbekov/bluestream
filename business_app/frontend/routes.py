@@ -241,11 +241,12 @@ def my_account():
                          loyalty_stats=loyalty_stats)
 
 
-@frontend_bp.route('/loyalty')
+@frontend_bp.route('/my-loyalty')
 @jwt_required()
-def loyalty():
-    """Loyalty program page"""
+def my_loyalty():
+    """User loyalty program page"""
     current_user_id = get_jwt_identity()
+    user = User.query.get(current_user_id)
     
     loyalty_service = LoyaltyService()
     
@@ -260,24 +261,26 @@ def loyalty():
     transactions = loyalty_service.get_loyalty_history(current_user_id, page=1, per_page=10)
     
     return render_template('frontend/loyalty.html',
+                         user=user,
                          loyalty_account=loyalty_account,
                          tier_info=tier_info,
                          available_rewards=available_rewards,
                          transactions=transactions)
 
 
-@frontend_bp.route('/orders')
+@frontend_bp.route('/my-orders')
 @jwt_required()
-def orders():
+def my_orders():
     """User orders page"""
     current_user_id = get_jwt_identity()
+    user = User.query.get(current_user_id)
     page = request.args.get('page', 1, type=int)
     
     orders = Order.query.filter_by(user_id=current_user_id).order_by(
         desc(Order.created_at)
     ).paginate(page=page, per_page=10, error_out=False)
     
-    return render_template('frontend/orders.html', orders=orders)
+    return render_template('frontend/orders.html', user=user, orders=orders)
 
 
 @frontend_bp.route('/order/<int:order_id>')

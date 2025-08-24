@@ -61,7 +61,7 @@
                                         </a>
                                     </li>
                                     <li>
-                                        <a href="{{ url_for('frontend.orders') }}">
+                                        <a href="{{ url_for('frontend.my_orders') }}">
                                             <i class="far fa-shopping-bag"></i> {{ 'My Orders'|translate }}
                                         </a>
                                     </li>
@@ -76,7 +76,7 @@
                                         </a>
                                     </li>
                                     <li>
-                                        <a href="{{ url_for('frontend.loyalty') }}">
+                                        <a href="{{ url_for('frontend.my_loyalty') }}">
                                             <i class="far fa-star"></i> {{ 'Loyalty Program'|translate }}
                                         </a>
                                     </li>
@@ -125,7 +125,7 @@
                             <div class="stats-section mb-4">
                                 <div class="row">
                                     <div class="col-lg-3 col-md-6 col-sm-6">
-                                        <div class="stat-card clickable" onclick="window.location.href='{{ url_for('frontend.orders') }}'">
+                                        <div class="stat-card clickable" onclick="window.location.href='{{ url_for('frontend.my_orders') }}'">
                                             <div class="card text-center">
                                                 <div class="card-body">
                                                     <i class="far fa-shopping-bag text-primary" style="font-size: 2rem;"></i>
@@ -149,7 +149,7 @@
                                         </div>
                                     </div>
                                     <div class="col-lg-3 col-md-6 col-sm-6">
-                                        <div class="stat-card clickable" onclick="window.location.href='{{ url_for('frontend.loyalty') }}'">
+                                        <div class="stat-card clickable" onclick="window.location.href='{{ url_for('frontend.my_loyalty') }}'">
                                             <div class="card text-center">
                                                 <div class="card-body">
                                                     <i class="far fa-star text-warning" style="font-size: 2rem;"></i>
@@ -180,7 +180,7 @@
                                 <div class="card">
                                     <div class="card-header d-flex justify-content-between align-items-center">
                                         <h5>{{ 'Recent Orders'|translate }}</h5>
-                                        <a href="{{ url_for('frontend.orders') }}" class="btn btn-outline-primary btn-sm">{{ 'View All'|translate }}</a>
+                                        <a href="{{ url_for('frontend.my_orders') }}" class="btn btn-outline-primary btn-sm">{{ 'View All'|translate }}</a>
                                     </div>
                                     <div class="card-body">
                                         {% if recent_orders %}

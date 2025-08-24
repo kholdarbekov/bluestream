@@ -279,13 +279,19 @@ const AdminLayout = ({ children }) => {
               </Title>
             </Space>
 
-            {/* Right side */}
-            <Space size={responsive.isMobileDevice ? 8 : 16}>
+            {/* Right side - Proper UX alignment */}
+            <div style={{ 
+              display: 'flex', 
+              alignItems: 'center',
+              gap: responsive.isMobileDevice ? '8px' : '16px',
+              marginLeft: 'auto' // Ensures right alignment
+            }}>
               {/* Connection Status - Desktop only */}
               {!responsive.isMobileDevice && (
                 <Badge 
                   status={isConnected ? 'processing' : 'default'} 
                   text={connectionType || 'Offline'}
+                  style={{ whiteSpace: 'nowrap' }}
                 />
               )}
 
@@ -297,7 +303,10 @@ const AdminLayout = ({ children }) => {
                     icon={<BellOutlined />}
                     style={{
                       width: responsive.isTouchDevice ? '44px' : '40px',
-                      height: responsive.isTouchDevice ? '44px' : '40px'
+                      height: responsive.isTouchDevice ? '44px' : '40px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center'
                     }}
                   />
                 </Badge>
@@ -309,7 +318,18 @@ const AdminLayout = ({ children }) => {
                 placement="bottomRight"
                 trigger={['click']}
               >
-                <Space style={{ cursor: 'pointer' }}>
+                <div style={{ 
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  padding: '4px 8px',
+                  borderRadius: '6px',
+                  transition: 'background-color 0.2s',
+                  ':hover': {
+                    backgroundColor: '#f5f5f5'
+                  }
+                }}>
                   <Avatar
                     icon={<UserOutlined />}
                     src={user?.avatar}
@@ -317,13 +337,20 @@ const AdminLayout = ({ children }) => {
                     style={{ backgroundColor: '#1890ff' }}
                   />
                   {!responsive.isMobileDevice && (
-                    <div style={{ textAlign: 'left' }}>
+                    <div style={{ 
+                      textAlign: 'left',
+                      minWidth: '120px' // Prevents layout shift
+                    }}>
                       <Text 
                         strong 
                         style={{ 
                           fontSize: '14px',
                           display: 'block',
-                          lineHeight: '1.2'
+                          lineHeight: '1.2',
+                          whiteSpace: 'nowrap',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          maxWidth: '120px'
                         }}
                       >
                         {user?.first_name} {user?.last_name}
@@ -332,16 +359,17 @@ const AdminLayout = ({ children }) => {
                         type="secondary" 
                         style={{ 
                           fontSize: '12px',
-                          lineHeight: '1.2'
+                          lineHeight: '1.2',
+                          whiteSpace: 'nowrap'
                         }}
                       >
                         {user?.role === 'super_admin' ? 'Super Admin' : 'Admin'}
                       </Text>
                     </div>
                   )}
-                </Space>
+                </div>
               </Dropdown>
-            </Space>
+            </div>
           </div>
 
           {/* Mobile page title below header - Only on very small screens */}

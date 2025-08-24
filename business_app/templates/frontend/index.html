@@ -265,7 +265,7 @@
                                 <strong class="points-balance">{{ loyalty_data.points_balance }} {{ 'Points'|translate }}</strong>
                             </div>
                         </div>
-                        <a href="{{ url_for('frontend.loyalty') }}" class="theme-btn btn-one btn-sm">{{ 'View Rewards'|translate }}</a>
+                        <a href="{{ url_for('frontend.my_loyalty') }}" class="theme-btn btn-one btn-sm">{{ 'View Rewards'|translate }}</a>
                     </div>
                 </div>
                 {% endif %}
@@ -277,7 +277,7 @@
                                 <div class="icon-box">
                                     <i class="flaticon-star"></i>
                                 </div>
-                                <h4><a href="{{ url_for('frontend.loyalty') }}">{{ reward.name }}</a></h4>
+                                <h4><a href="{{ url_for('frontend.my_loyalty') }}">{{ reward.name }}</a></h4>
                                 <p>{{ reward.description[:50] }}{% if reward.description|length > 50 %}...{% endif %}</p>
                                 <div class="points-required">
                                     <strong>{{ reward.points_cost }} {{ 'Points'|translate }}</strong>
@@ -288,7 +288,7 @@
                     {% endfor %}
                 </div>
                 <div class="more-btn text-center">
-                    <a href="{{ url_for('frontend.loyalty') }}" class="theme-btn btn-one">{{ 'Join Loyalty Program'|translate }}</a>
+                    <a href="{{ url_for('frontend.my_loyalty') }}" class="theme-btn btn-one">{{ 'Join Loyalty Program'|translate }}</a>
                 </div>
             </div>
         </section>

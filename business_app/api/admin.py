@@ -1309,7 +1309,7 @@ def get_translation(translation_id):
 @admin_bp.route('/translations', methods=['POST'])
 @jwt_required()
 @manager_or_higher_required
-@validate_json
+@validate_json()
 def create_translation():
     """Create a new translation"""
     try:
@@ -1369,7 +1369,7 @@ def create_translation():
 @admin_bp.route('/translations/<int:translation_id>', methods=['PUT'])
 @jwt_required()
 @manager_or_higher_required
-@validate_json
+@validate_json()
 def update_translation(translation_id):
     """Update an existing translation"""
     try:
@@ -1470,7 +1470,7 @@ def get_translatable_entities():
 @admin_bp.route('/translations/sync/<entity_type>', methods=['POST'])
 @jwt_required()
 @manager_or_higher_required
-@validate_json
+@validate_json()
 def sync_entity_translations(entity_type):
     """Sync translations for all entities of a specific type"""
     try:
@@ -1593,7 +1593,7 @@ def export_translations():
 @admin_bp.route('/translations/import', methods=['POST'])
 @jwt_required()
 @admin_required  # Require admin for imports
-@validate_json
+@validate_json()
 def import_translations():
     """Import translations from uploaded data"""
     try:

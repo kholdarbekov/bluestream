@@ -12,12 +12,13 @@ from business_app.models.review import Review
 from business_app.models.user import User
 # from business_app.services.recommendation_service import RecommendationService
 from business_app.utils.service_factory import get_analytics_service
+from business_app.utils.helpers import get_current_language
 # Basic serializer functions - replace with proper serializers later
 def product_to_dict(product, language='uz', user=None, quantity=1):
     return {
         'id': product.id,
-        'name': product.name,
-        'description': product.description,
+        'name': product.get_translated('name', language),
+        'description': product.get_translated('description', language),
         'sku': product.sku,
         'base_price': product.base_price,
         'current_price': product.current_price,
@@ -33,8 +34,8 @@ def product_to_dict(product, language='uz', user=None, quantity=1):
 def product_category_to_dict(category, language='uz'):
     return {
         'id': category.id,
-        'name': category.name,
-        'description': category.description,
+        'name': category.get_translated('name', language),
+        'description': category.get_translated('description', language),
         'icon_url': category.icon_url,
         'is_active': category.is_active,
         'sort_order': category.sort_order
@@ -531,7 +532,7 @@ def get_search_suggestions():
             suggestions.append({
                 'type': 'product',
                 'id': product.id,
-                'name': getattr(product, f'name_{language}', product.name) or product.name,
+                'name': product.get_translated('name', language),
                 'image_url': product.image_urls[0] if product.image_urls else None
             })
         
@@ -540,7 +541,7 @@ def get_search_suggestions():
             suggestions.append({
                 'type': 'category',
                 'id': category.id,
-                'name': getattr(category, f'name_{language}', category.name) or category.name,
+                'name': category.get_translated('name', language),
                 'icon_url': category.icon_url
             })
         

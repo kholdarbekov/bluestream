@@ -16,6 +16,7 @@ from business_app.services.order_service import OrderService
 from business_app.services.notification_service import NotificationService
 from business_app.services.analytics_service import AnalyticsService
 from business_app.utils.constants import OrderStatus, UserRole
+from business_app.utils.helpers import get_current_language
 from business_app import db
 
 logger = get_task_logger(__name__)
@@ -206,7 +207,7 @@ def update_inventory_after_order(self, order_id: int):
                     
                     inventory_updates.append({
                         'product_id': product.id,
-                        'product_name': product.name,
+                        'product_name': product.get_translated('name', get_current_language()),
                         'quantity_reduced': item.quantity,
                         'new_stock': product.stock_quantity
                     })
@@ -258,7 +259,7 @@ def send_low_stock_alert(self, product_id: int):
                 'low_stock_alert',
                 template_data={
                     'product_id': product.id,
-                    'product_name': product.name,
+                    'product_name': product.get_translated('name', get_current_language()),
                     'current_stock': product.stock_quantity,
                     'min_stock_level': product.min_stock_level,
                     'suggested_reorder_quantity': product.reorder_quantity or 100

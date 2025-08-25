@@ -18,6 +18,7 @@ from business_app.models.order import Order
 from business_app.models.user import User
 from business_app.models.subscription import Subscription
 from business_app.utils.service_factory import get_payment_service, get_notification_service
+from business_app.utils.helpers import get_current_language
 from business_app.serializers.payment_serializers import (
     serialize_payment, serialize_payment_list, serialize_credit_card,
     get_available_payment_methods, PaymentSchema, CreditCardSchema,
@@ -220,12 +221,12 @@ def create_subscription_payment():
             'amount': subscription.billing_amount,
             'currency': 'UZS',
             'payment_method': PaymentMethodType(payment_method),
-            'description': f'Subscription payment for {subscription.name}',
+            'description': f'Subscription payment for {subscription.get_translated("name", get_current_language())}',
             'is_recurring': True,
             'return_url': data.get('return_url'),
             'cancel_url': data.get('cancel_url'),
             'metadata': {
-                'subscription_name': subscription.name,
+                'subscription_name': subscription.get_translated('name', get_current_language()),
                 'billing_cycle': subscription.billing_cycle
             }
         }

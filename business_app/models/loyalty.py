@@ -8,6 +8,7 @@ from flask_sqlalchemy import SQLAlchemy
 import uuid
 from business_app import db
 from business_app.models import TimestampMixin
+from business_app.models.translatable import TranslatableMixin, translatable
 
 
 class LoyaltyTransaction(db.Model, TimestampMixin):
@@ -181,7 +182,8 @@ class LoyaltyPoints(db.Model, TimestampMixin):
         }
 
 
-class LoyaltyReward(db.Model, TimestampMixin):
+@translatable('name', 'description')
+class LoyaltyReward(db.Model, TimestampMixin, TranslatableMixin):
     """Available loyalty rewards for redemption"""
     __tablename__ = 'loyalty_rewards'
     
@@ -189,8 +191,8 @@ class LoyaltyReward(db.Model, TimestampMixin):
     program_id = Column(Integer, ForeignKey('loyalty_programs.id'), nullable=False)
     
     # Reward details
-    name = Column(String(200), nullable=False)
-    description = Column(Text, nullable=True)
+    name = Column(String(200), nullable=False)      # Default/fallback name (Uzbek)
+    description = Column(Text, nullable=True)       # Default/fallback description (Uzbek)
     reward_type = Column(String(50), nullable=False)  # discount, free_product, free_delivery, voucher
     
     # Redemption requirements
@@ -256,19 +258,20 @@ class LoyaltyReward(db.Model, TimestampMixin):
         
         return True, "Available"
     
-    def to_dict(self):
-        return {
-            'id': self.id,
+    def to_dict(self, language=None, include_all_translations=False):
+        """Convert to dictionary with multilingual support"""
+        result = self.to_dict_multilingual(language, include_all_translations)
+        
+        # Add reward-specific fields
+        result.update({
             'program_id': self.program_id,
-            'name': self.name,
-            'description': self.description,
             'reward_type': self.reward_type,
             'points_cost': self.points_cost,
-            'min_order_value': self.min_order_value,
+            'min_order_value': float(self.min_order_value) if self.min_order_value else None,
             'max_uses_per_user': self.max_uses_per_user,
             'max_redemptions': self.max_redemptions,
             'discount_type': self.discount_type,
-            'discount_value': self.discount_value,
+            'discount_value': float(self.discount_value) if self.discount_value else None,
             'free_product_id': self.free_product_id,
             'voucher_code': self.voucher_code,
             'is_active': self.is_active,
@@ -280,9 +283,10 @@ class LoyaltyReward(db.Model, TimestampMixin):
             'applicable_categories': self.applicable_categories,
             'terms_conditions': self.terms_conditions,
             'image_url': self.image_url,
-            'sort_order': self.sort_order,
-            'created_at': self.created_at.isoformat() if self.created_at else None
-        }
+            'sort_order': self.sort_order
+        })
+        
+        return result
 
 
 class ReferralProgram(db.Model, TimestampMixin):

@@ -7,6 +7,7 @@ from flask_sqlalchemy import SQLAlchemy
 import uuid
 from business_app import db
 from business_app.models import TimestampMixin
+from business_app.models.translatable import TranslatableMixin, translatable
 
 
 class Notification(db.Model, TimestampMixin):
@@ -74,34 +75,25 @@ class Notification(db.Model, TimestampMixin):
         }
 
 
-class NotificationTemplate(db.Model, TimestampMixin):
+@translatable('name', 'subject', 'content')
+class NotificationTemplate(db.Model, TimestampMixin, TranslatableMixin):
     """Notification template for different types and channels"""
     __tablename__ = 'notification_templates'
     
     id = Column(Integer, primary_key=True)
-    name = Column(String(100), nullable=False)
+    name = Column(String(100), nullable=False)          # Default/fallback name (Uzbek)
     notification_type = Column(String(50), nullable=False)
-    channel = Column(String(20), nullable=False)  # email, sms, push, in_app
-    language = Column(String(5), default='uz')
-    subject = Column(String(255), nullable=True)
-    content = Column(Text, nullable=False)
+    channel = Column(String(20), nullable=False)        # email, sms, push, in_app
+    subject = Column(String(255), nullable=True)        # Default/fallback subject (Uzbek)
+    content = Column(Text, nullable=False)              # Default/fallback content (Uzbek)
     is_active = Column(Boolean, default=True)
     
     def __repr__(self):
         return f'<NotificationTemplate {self.name}:{self.channel}>'
     
-    def to_dict(self):
-        return {
-            'id': self.id,
-            'name': self.name,
-            'notification_type': self.notification_type,
-            'channel': self.channel,
-            'language': self.language,
-            'subject': self.subject,
-            'content': self.content,
-            'is_active': self.is_active,
-            'created_at': self.created_at.isoformat() if self.created_at else None
-        }
+    def to_dict(self, language=None, include_all_translations=False):
+        """Convert to dictionary with multilingual support"""
+        return self.to_dict_multilingual(language, include_all_translations)
 
 
 class NotificationPreference(db.Model, TimestampMixin):
@@ -164,14 +156,15 @@ class PushNotificationToken(db.Model, TimestampMixin):
         }
 
 
-class NotificationChannel(db.Model, TimestampMixin):
+@translatable('display_name', 'description')
+class NotificationChannel(db.Model, TimestampMixin, TranslatableMixin):
     """Notification delivery channels configuration"""
     __tablename__ = 'notification_channels'
     
     id = Column(Integer, primary_key=True)
     name = Column(String(50), nullable=False, unique=True)
-    display_name = Column(String(100), nullable=False)
-    description = Column(Text, nullable=True)
+    display_name = Column(String(100), nullable=False)  # Default/fallback display name (Uzbek)
+    description = Column(Text, nullable=True)           # Default/fallback description (Uzbek)
     
     # Channel configuration
     is_active = Column(Boolean, default=True)
@@ -182,16 +175,18 @@ class NotificationChannel(db.Model, TimestampMixin):
     # Provider settings (JSON)
     provider_settings = Column(JSON, default={})
     
-    def to_dict(self):
-        return {
-            'id': self.id,
+    def to_dict(self, language=None, include_all_translations=False):
+        """Convert to dictionary with multilingual support"""
+        result = self.to_dict_multilingual(language, include_all_translations)
+        
+        # Add channel-specific fields
+        result.update({
             'name': self.name,
-            'display_name': self.display_name,
-            'description': self.description,
             'is_active': self.is_active,
             'requires_confirmation': self.requires_confirmation,
             'rate_limit_per_hour': self.rate_limit_per_hour,
             'priority': self.priority,
-            'provider_settings': self.provider_settings,
-            'created_at': self.created_at.isoformat() if self.created_at else None
-        }
+            'provider_settings': self.provider_settings
+        })
+        
+        return result

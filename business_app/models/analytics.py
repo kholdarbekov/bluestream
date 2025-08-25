@@ -5,14 +5,16 @@ from sqlalchemy.orm import relationship
 from business_app import db
 from business_app.utils.constants import OrderStatus
 from business_app.models import TimestampMixin
+from business_app.models.translatable import TranslatableMixin, translatable
 
 
-class CustomerSegment(db.Model, TimestampMixin):
+@translatable('name', 'description')
+class CustomerSegment(db.Model, TimestampMixin, TranslatableMixin):
     __tablename__ = 'customer_segments'
     
     id = Column(Integer, primary_key=True)
-    name = Column(String(100), nullable=False)
-    description = Column(Text, nullable=True)
+    name = Column(String(100), nullable=False)        # Default/fallback name (Uzbek)
+    description = Column(Text, nullable=True)         # Default/fallback description (Uzbek)
     
     # Segment criteria
     criteria = Column(JSON, nullable=False)  # Complex rules for segmentation
@@ -26,25 +28,29 @@ class CustomerSegment(db.Model, TimestampMixin):
     discount_percentage = Column(Float, default=0.0)
     auto_loyalty_multiplier = Column(Float, default=1.0)
     
-    def to_dict(self):
-        return {
-            'id': self.id,
-            'name': self.name,
-            'description': self.description,
+    def to_dict(self, language=None, include_all_translations=False):
+        """Convert to dictionary with multilingual support"""
+        result = self.to_dict_multilingual(language, include_all_translations)
+        
+        # Add segment-specific fields
+        result.update({
             'criteria': self.criteria,
             'customer_count': self.customer_count,
             'auto_apply_discount': self.auto_apply_discount,
             'discount_percentage': self.discount_percentage,
             'auto_loyalty_multiplier': self.auto_loyalty_multiplier,
             'last_updated': self.last_updated.isoformat() if self.last_updated else None
-        }
+        })
+        
+        return result
 
-class PromotionalCampaign(db.Model, TimestampMixin):
+@translatable('name', 'description')
+class PromotionalCampaign(db.Model, TimestampMixin, TranslatableMixin):
     __tablename__ = 'promotional_campaigns'
     
     id = Column(Integer, primary_key=True)
-    name = Column(String(200), nullable=False)
-    description = Column(Text, nullable=True)
+    name = Column(String(200), nullable=False)        # Default/fallback name (Uzbek)
+    description = Column(Text, nullable=True)         # Default/fallback description (Uzbek)
     
     # Campaign type
     campaign_type = Column(String(50), nullable=False)  # discount, loyalty_bonus, free_delivery
@@ -102,15 +108,16 @@ class PromotionalCampaign(db.Model, TimestampMixin):
         
         return customer_usage < self.usage_limit_per_customer
     
-    def to_dict(self):
-        return {
-            'id': self.id,
-            'name': self.name,
-            'description': self.description,
+    def to_dict(self, language=None, include_all_translations=False):
+        """Convert to dictionary with multilingual support"""
+        result = self.to_dict_multilingual(language, include_all_translations)
+        
+        # Add campaign-specific fields
+        result.update({
             'campaign_type': self.campaign_type,
             'discount_type': self.discount_type,
-            'discount_value': self.discount_value,
-            'min_order_value': self.min_order_value,
+            'discount_value': float(self.discount_value) if self.discount_value else None,
+            'min_order_value': float(self.min_order_value) if self.min_order_value else None,
             'promo_code': self.promo_code,
             'is_active': self.is_active,
             'start_date': self.start_date.isoformat() if self.start_date else None,
@@ -118,7 +125,9 @@ class PromotionalCampaign(db.Model, TimestampMixin):
             'usage_limit': self.usage_limit,
             'total_uses': self.total_uses,
             'is_valid': self.is_valid()
-        }
+        })
+        
+        return result
 
 
 class CampaignUsage(db.Model, TimestampMixin):
@@ -435,13 +444,14 @@ class RevenueMetric(db.Model, TimestampMixin):
         }
 
 
-class UserSegment(db.Model, TimestampMixin):
+@translatable('name', 'description')
+class UserSegment(db.Model, TimestampMixin, TranslatableMixin):
     """User segments for targeted analytics and marketing"""
     __tablename__ = 'user_segments'
     
     id = Column(Integer, primary_key=True)
-    name = Column(String(100), nullable=False)
-    description = Column(Text, nullable=True)
+    name = Column(String(100), nullable=False)        # Default/fallback name (Uzbek)
+    description = Column(Text, nullable=True)         # Default/fallback description (Uzbek)
     
     # Segment criteria (stored as JSON)
     criteria = Column(JSON, nullable=False)
@@ -454,15 +464,17 @@ class UserSegment(db.Model, TimestampMixin):
     is_active = Column(Boolean, default=True)
     auto_update = Column(Boolean, default=True)
     
-    def to_dict(self):
-        return {
-            'id': self.id,
-            'name': self.name,
-            'description': self.description,
+    def to_dict(self, language=None, include_all_translations=False):
+        """Convert to dictionary with multilingual support"""
+        result = self.to_dict_multilingual(language, include_all_translations)
+        
+        # Add segment-specific fields
+        result.update({
             'criteria': self.criteria,
             'user_count': self.user_count,
             'last_calculated': self.last_calculated.isoformat() if self.last_calculated else None,
             'is_active': self.is_active,
-            'auto_update': self.auto_update,
-            'created_at': self.created_at.isoformat() if self.created_at else None
-        }
+            'auto_update': self.auto_update
+        })
+        
+        return result

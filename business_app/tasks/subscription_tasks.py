@@ -17,6 +17,7 @@ from business_app.services.notification_service import NotificationService
 from business_app.services.order_service import OrderService
 from business_app.services.payment_service import PaymentService
 from business_app.utils.constants import SubscriptionStatus, OrderStatus, UserRole
+from business_app.utils.helpers import get_current_language
 from business_app import db
 
 logger = get_task_logger(__name__)
@@ -174,9 +175,10 @@ def send_renewal_reminders():
         
         for subscription in upcoming_renewals:
             try:
+                language = get_current_language()
                 template_data = {
                     'subscription_id': subscription.id,
-                    'plan_name': subscription.plan.name if subscription.plan else 'Standard',
+                    'plan_name': subscription.plan.get_translated('name', language) if subscription.plan else 'Standard',
                     'renewal_date': subscription.next_billing_date.isoformat(),
                     'amount': subscription.total_amount,
                     'frequency': subscription.frequency.value
@@ -410,7 +412,8 @@ def process_subscription_upgrades_downgrades():
                     logger.error(f"New plan not found for subscription {subscription.id}")
                     continue
                 
-                old_plan_name = subscription.plan.name if subscription.plan else 'Unknown'
+                language = get_current_language()
+                old_plan_name = subscription.plan.get_translated('name', language) if subscription.plan else 'Unknown'
                 
                 # Update subscription plan
                 subscription.plan_id = new_plan.id
@@ -435,14 +438,14 @@ def process_subscription_upgrades_downgrades():
                     template_data={
                         'subscription_id': subscription.id,
                         'old_plan': old_plan_name,
-                        'new_plan': new_plan.name,
+                        'new_plan': new_plan.get_translated('name', language),
                         'new_amount': new_total,
                         'effective_date': datetime.now(timezone.utc).date().isoformat()
                     }
                 )
                 
                 processed_count += 1
-                logger.info(f"Plan change processed for subscription {subscription.id}: {old_plan_name} -> {new_plan.name}")
+                logger.info(f"Plan change processed for subscription {subscription.id}: {old_plan_name} -> {new_plan.get_translated('name', language)}")
                 
             except Exception as e:
                 logger.error(f"Failed to process plan change for subscription {subscription.id}: {e}")
@@ -491,7 +494,7 @@ def cleanup_expired_trials():
                         'trial_converted',
                         template_data={
                             'subscription_id': subscription.id,
-                            'plan_name': subscription.plan.name if subscription.plan else 'Standard'
+                            'plan_name': subscription.plan.get_translated('name', get_current_language()) if subscription.plan else 'Standard'
                         }
                     )
                     
@@ -562,7 +565,7 @@ def send_subscription_usage_summary(self, subscription_id: int):
                 'start_date': start_date.date().isoformat(),
                 'end_date': end_date.date().isoformat()
             },
-            'subscription_plan': subscription.plan.name if subscription.plan else 'Standard',
+            'subscription_plan': subscription.plan.get_translated('name', get_current_language()) if subscription.plan else 'Standard',
             'total_deliveries': total_deliveries,
             'total_items': total_items,
             'total_value': total_value,
@@ -702,7 +705,7 @@ def generate_subscription_churn_prediction():
                         'user_name': f"{subscription.user.first_name} {subscription.user.last_name}",
                         'risk_score': round(risk_score, 3),
                         'risk_level': risk_level,
-                        'plan_name': subscription.plan.name if subscription.plan else 'Standard',
+                        'plan_name': subscription.plan.get_translated('name', get_current_language()) if subscription.plan else 'Standard',
                         'monthly_value': subscription.total_amount
                     })
                 
@@ -833,7 +836,7 @@ def send_subscription_satisfaction_survey():
                 template_data = {
                     'subscription_id': subscription.id,
                     'customer_name': subscription.user.first_name,
-                    'plan_name': subscription.plan.name if subscription.plan else 'Standard',
+                    'plan_name': subscription.plan.get_translated('name', get_current_language()) if subscription.plan else 'Standard',
                     'survey_link': survey_link,
                     'subscription_duration': (datetime.now(timezone.utc) - subscription.created_at).days // 30  # months
                 }
@@ -891,7 +894,7 @@ def process_subscription_billing(self, subscription_id: int):
                 subscription.user_id,
                 'subscription_billed',
                 template_data={
-                    'subscription_name': subscription.name,
+                    'subscription_name': subscription.get_translated('name', get_current_language()),
                     'billing_amount': subscription.billing_amount,
                     'next_billing_date': subscription.next_billing_date.isoformat() if subscription.next_billing_date else None
                 }
@@ -915,7 +918,7 @@ def process_subscription_billing(self, subscription_id: int):
                 subscription.user_id,
                 'subscription_billing_failed',
                 template_data={
-                    'subscription_name': subscription.name,
+                    'subscription_name': subscription.get_translated('name', get_current_language()),
                     'billing_amount': subscription.billing_amount,
                     'error_message': billing_result.get('error', 'Unknown error')
                 }

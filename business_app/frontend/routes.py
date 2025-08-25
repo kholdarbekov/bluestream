@@ -15,15 +15,19 @@ from business_app.services.loyalty_service import LoyaltyService
 from business_app.services.order_service import OrderService
 from business_app.services.subscription_service import SubscriptionService
 from business_app.utils.translations import get_translation
+from business_app.utils.helpers import get_current_language
 from business_app import db
 
 
 @frontend_bp.route('/')
 def index():
     """Main homepage using index-4.html template"""
+    language = get_current_language()
+    
     # Get featured products (defensive)
     try:
         featured_products = Product.query.filter_by(is_featured=True, is_active=True).limit(8).all()
+        featured_products = [p.to_dict(language=language) for p in featured_products]
     except Exception as e:
         print(f"Error getting featured products: {e}")
         featured_products = []
@@ -31,6 +35,7 @@ def index():
     # Get product categories (defensive)
     try:
         categories = ProductCategory.query.filter_by(is_active=True).order_by(ProductCategory.sort_order).all()
+        categories = [c.to_dict(language=language) for c in categories]
     except Exception as e:
         print(f"Error getting categories: {e}")
         categories = []
@@ -38,6 +43,7 @@ def index():
     # Get subscription plans (defensive)
     try:
         subscription_plans = SubscriptionPlan.query.filter_by(is_active=True).order_by(SubscriptionPlan.sort_order).limit(3).all()
+        subscription_plans = [sp.to_dict(language=language) for sp in subscription_plans]
     except Exception as e:
         print(f"Error getting subscription plans: {e}")
         subscription_plans = []
@@ -45,6 +51,7 @@ def index():
     # Get loyalty rewards (defensive)
     try:
         featured_rewards = LoyaltyReward.query.filter_by(is_active=True, is_featured=True).limit(4).all()
+        featured_rewards = [fr.to_dict(language=language) for fr in featured_rewards]
     except Exception as e:
         print(f"Error getting loyalty rewards: {e}")
         featured_rewards = []
@@ -86,6 +93,7 @@ def index():
 @frontend_bp.route('/shop')
 def shop():
     """Shop page for browsing products"""
+    language = get_current_language()
     page = request.args.get('page', 1, type=int)
     category_id = request.args.get('category', type=int)
     search = request.args.get('search', '')
@@ -100,15 +108,19 @@ def shop():
         query = query.filter(Product.name.contains(search))
     
     # Paginate products
-    products = query.order_by(Product.created_at.desc()).paginate(
+    products_pagination = query.order_by(Product.created_at.desc()).paginate(
         page=page, per_page=12, error_out=False
     )
     
+    # Convert products to multilingual dict
+    products_pagination.items = [p.to_dict(language=language) for p in products_pagination.items]
+    
     # Get categories for filter
     categories = ProductCategory.query.filter_by(is_active=True).all()
+    categories = [c.to_dict(language=language) for c in categories]
     
     return render_template('frontend/shop.html',
-                         products=products,
+                         products=products_pagination,
                          categories=categories,
                          current_category=category_id,
                          search_query=search)
@@ -117,6 +129,7 @@ def shop():
 @frontend_bp.route('/product/<int:product_id>')
 def product_detail(product_id):
     """Product detail page"""
+    language = get_current_language()
     product = Product.query.get_or_404(product_id)
     
     # Get related products
@@ -127,8 +140,8 @@ def product_detail(product_id):
     ).limit(4).all()
     
     return render_template('frontend/product_detail.html',
-                         product=product,
-                         related_products=related_products)
+                         product=product.to_dict(language=language),
+                         related_products=[rp.to_dict(language=language) for rp in related_products])
 
 
 @frontend_bp.route('/cart')
@@ -155,7 +168,9 @@ def checkout():
 @frontend_bp.route('/subscriptions')
 def subscriptions():
     """Subscription plans page"""
+    language = get_current_language()
     plans = SubscriptionPlan.query.filter_by(is_active=True).order_by(SubscriptionPlan.sort_order).all()
+    plans = [plan.to_dict(language=language) for plan in plans]
     
     return render_template('frontend/subscriptions.html', plans=plans)
 
@@ -256,6 +271,7 @@ def my_loyalty():
     
     # Get available rewards
     available_rewards = LoyaltyReward.query.filter_by(is_active=True).all()
+    available_rewards = [reward.to_dict(language=get_current_language()) for reward in available_rewards]
     
     # Get recent transactions
     transactions = loyalty_service.get_loyalty_history(current_user_id, page=1, per_page=10)
@@ -436,6 +452,7 @@ def inject_global_vars():
     
     # Get categories for navigation
     categories = ProductCategory.query.filter_by(is_active=True).order_by(ProductCategory.sort_order).all()
+    categories = [cat.to_dict(language=language) for cat in categories]
     
     # Get user info if logged in
     user_info = None

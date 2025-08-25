@@ -20,6 +20,7 @@ import {
   GiftOutlined,
   BellOutlined,
   BarChartOutlined,
+  TranslationOutlined,
   SettingOutlined,
   LogoutOutlined,
   MenuOutlined
@@ -44,7 +45,7 @@ const AdminLayout = ({ children }) => {
     enableWebSocket: true,
     enablePolling: true,
     pollingInterval: 30000,
-    queries: ['dashboard', 'orders', 'users', 'products', 'deliveries'],
+    queries: ['dashboard', 'orders', 'users', 'products', 'deliveries', 'translations'],
     onConnect: () => console.log('Real-time updates connected'),
     onDisconnect: () => console.log('Real-time updates disconnected'),
     onError: (error) => console.error('Real-time updates error:', error)
@@ -91,6 +92,11 @@ const AdminLayout = ({ children }) => {
       key: '/analytics',
       icon: <BarChartOutlined />,
       label: 'Analytics'
+    },
+    {
+      key: '/translations',
+      icon: <TranslationOutlined />,
+      label: 'Translations'
     },
     {
       key: '/settings',

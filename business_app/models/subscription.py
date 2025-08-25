@@ -9,9 +9,11 @@ import uuid
 from business_app import db
 from business_app.utils.constants import SubscriptionStatus, PaymentMethod
 from business_app.models import TimestampMixin
+from business_app.models.translatable import TranslatableMixin, translatable
 
 
-class Subscription(db.Model, TimestampMixin):
+@translatable('name', 'description')
+class Subscription(db.Model, TimestampMixin, TranslatableMixin):
     __tablename__ = 'subscriptions'
     
     id = Column(Integer, primary_key=True)
@@ -20,8 +22,8 @@ class Subscription(db.Model, TimestampMixin):
     status = Column(Enum(SubscriptionStatus), default=SubscriptionStatus.ACTIVE.value, index=True)
     
     # Subscription details
-    name = Column(String(200), nullable=False)
-    description = Column(Text, nullable=True)
+    name = Column(String(200), nullable=False)        # Default/fallback name (Uzbek)
+    description = Column(Text, nullable=True)         # Default/fallback description (Uzbek)
     
     # Billing cycle
     billing_cycle = Column(String(20), nullable=False)  # daily, weekly, monthly
@@ -168,15 +170,16 @@ class Subscription(db.Model, TimestampMixin):
         discount = total * (self.discount_percentage / 100)
         return total - discount
     
-    def to_dict(self):
-        return {
-            'id': self.id,
+    def to_dict(self, language=None, include_all_translations=False):
+        """Convert to dictionary with multilingual support"""
+        result = self.to_dict_multilingual(language, include_all_translations)
+        
+        # Add subscription-specific fields
+        result.update({
             'subscription_number': self.subscription_number,
             'status': self.status.value,
-            'name': self.name,
-            'description': self.description,
             'billing_cycle': self.billing_cycle,
-            'billing_amount': self.billing_amount,
+            'billing_amount': float(self.billing_amount),
             'next_billing_date': self.next_billing_date.isoformat() if self.next_billing_date else None,
             'delivery_frequency': self.delivery_frequency,
             'delivery_time_slot': self.delivery_time_slot,
@@ -186,11 +189,12 @@ class Subscription(db.Model, TimestampMixin):
             'auto_payment': self.auto_payment,
             'discount_percentage': self.discount_percentage,
             'total_orders_generated': self.total_orders_generated,
-            'total_amount_billed': self.total_amount_billed,
-            'created_at': self.created_at.isoformat() if self.created_at else None,
-            'subscription_items': [item.to_dict() for item in self.subscription_items],
+            'total_amount_billed': float(self.total_amount_billed),
+            'subscription_items': [item.to_dict(language) for item in self.subscription_items],
             'delivery_address': self.delivery_address.to_dict() if self.delivery_address else None
-        }
+        })
+        
+        return result
 
 class SubscriptionItem(db.Model):
     __tablename__ = 'subscription_items'
@@ -215,16 +219,16 @@ class SubscriptionItem(db.Model):
         self.total_price = self.unit_price * self.quantity
         return self.total_price
     
-    def to_dict(self):
+    def to_dict(self, language=None):
         return {
             'id': self.id,
             'product_id': self.product_id,
             'product_name': self.product_name,
             'product_sku': self.product_sku,
             'quantity': self.quantity,
-            'unit_price': self.unit_price,
-            'total_price': self.total_price,
-            'product': self.product.to_dict() if self.product else None
+            'unit_price': float(self.unit_price),
+            'total_price': float(self.total_price),
+            'product': self.product.to_dict(language=language) if self.product else None
         }
 
 class SubscriptionLog(db.Model, TimestampMixin):
@@ -254,13 +258,14 @@ class SubscriptionLog(db.Model, TimestampMixin):
         }
 
 
-class SubscriptionPlan(db.Model, TimestampMixin):
+@translatable('name', 'description')
+class SubscriptionPlan(db.Model, TimestampMixin, TranslatableMixin):
     """Predefined subscription plans"""
     __tablename__ = 'subscription_plans'
     
     id = Column(Integer, primary_key=True)
-    name = Column(String(100), nullable=False)
-    description = Column(Text, nullable=True)
+    name = Column(String(100), nullable=False)        # Default/fallback name (Uzbek)
+    description = Column(Text, nullable=True)         # Default/fallback description (Uzbek)
     
     # Plan details
     price = Column(Numeric(precision=10, scale=2), nullable=False)
@@ -294,22 +299,24 @@ class SubscriptionPlan(db.Model, TimestampMixin):
         else:
             return self.price
     
-    def to_dict(self):
-        return {
-            'id': self.id,
-            'name': self.name,
-            'description': self.description,
-            'price': self.price,
+    def to_dict(self, language=None, include_all_translations=False):
+        """Convert to dictionary with multilingual support"""
+        result = self.to_dict_multilingual(language, include_all_translations)
+        
+        # Add plan-specific fields
+        result.update({
+            'price': float(self.price),
             'billing_cycle': self.billing_cycle,
             'delivery_frequency': self.delivery_frequency,
             'features': self.features,
             'max_items_per_delivery': self.max_items_per_delivery,
             'free_delivery': self.free_delivery,
             'discount_percentage': self.discount_percentage,
-            'is_active': self.is_active,
             'is_popular': self.is_popular,
-            'monthly_equivalent_price': self.calculate_monthly_price(),
+            'monthly_equivalent_price': float(self.calculate_monthly_price()),
             'minimum_commitment_months': self.minimum_commitment_months,
             'available_for_new_customers': self.available_for_new_customers,
             'available_for_existing_customers': self.available_for_existing_customers
-        }
+        })
+        
+        return result

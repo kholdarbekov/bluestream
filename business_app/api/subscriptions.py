@@ -14,6 +14,7 @@ from business_app.models.order import Order
 from business_app.utils.service_factory import (
     get_subscription_service, get_payment_service, get_notification_service
 )
+from business_app.utils.helpers import get_current_language
 from business_app.serializers.subscription_serializers import (
     serialize_subscription, serialize_subscription_item, serialize_subscription_billing_info,
     serialize_subscription_statistics, serialize_subscription_preview, serialize_subscription_log,
@@ -158,6 +159,7 @@ def create_subscription():
             return create_error_response('Invalid delivery address', 404)
         
         # Create subscription using validated data
+        language = get_current_language()
         subscription_data = {
             'user_id': current_user_id,
             'name': validated_data.name,
@@ -183,7 +185,7 @@ def create_subscription():
             user.id,
             'subscription_created',
             template_data={
-                'subscription_name': subscription.name,
+                'subscription_name': subscription.get_translated('name', language),
                 'billing_amount': subscription.billing_amount,
                 'billing_cycle': subscription.billing_cycle,
                 'next_billing_date': subscription.next_billing_date.strftime('%Y-%m-%d')
@@ -321,11 +323,12 @@ def pause_subscription(subscription_id):
         db.session.commit()
         
         # Send notification
+        language = get_current_language()
         get_notification_service().send_notification(
             current_user_id,
             'subscription_paused',
             template_data={
-                'subscription_name': subscription.name,
+                'subscription_name': subscription.get_translated('name', language),
                 'pause_reason': reason,
                 'resume_date': resume_date.strftime('%Y-%m-%d') if resume_date else 'Manual resume required'
             }
@@ -376,11 +379,12 @@ def resume_subscription(subscription_id):
         db.session.commit()
         
         # Send notification
+        language = get_current_language()
         get_notification_service().send_notification(
             current_user_id,
             'subscription_resumed',
             template_data={
-                'subscription_name': subscription.name,
+                'subscription_name': subscription.get_translated('name', language),
                 'next_billing_date': subscription.next_billing_date.strftime('%Y-%m-%d')
             }
         )
@@ -439,11 +443,12 @@ def cancel_subscription(subscription_id):
         
         # Send notification
         template = 'subscription_cancelled' if immediate else 'subscription_cancellation_scheduled'
+        language = get_current_language()
         get_notification_service().send_notification(
             current_user_id,
             template,
             template_data={
-                'subscription_name': subscription.name,
+                'subscription_name': subscription.get_translated('name', language),
                 'cancellation_reason': reason,
                 'effective_date': subscription.end_date.strftime('%Y-%m-%d') if subscription.end_date else 'Immediate'
             }
@@ -528,12 +533,13 @@ def add_subscription_item(subscription_id):
             return create_error_response('Product already exists in subscription', 409)
         
         # Add new item
+        language = get_current_language()
         item = SubscriptionItem(
             subscription_id=subscription_id,
             product_id=product_id,
             quantity=quantity,
             unit_price=product.current_price,
-            product_name=product.name,
+            product_name=product.get_translated('name', language),
             product_sku=product.sku,
             special_instructions=validated_data.special_instructions
         )
@@ -546,10 +552,11 @@ def add_subscription_item(subscription_id):
         subscription.updated_at = datetime.now(UTC)
         
         # Log the change
+        product_name = product.get_translated('name', language)
         log = SubscriptionLog(
             subscription_id=subscription_id,
             action='item_added',
-            details=f"Added {quantity}x {product.name}",
+            details=f"Added {quantity}x {product_name}",
             user_id=current_user_id
         )
         db.session.add(log)
@@ -1027,11 +1034,12 @@ def skip_next_delivery(subscription_id):
         db.session.commit()
         
         # Send notification
+        language = get_current_language()
         get_notification_service().send_notification(
             current_user_id,
             'delivery_skipped',
             template_data={
-                'subscription_name': subscription.name,
+                'subscription_name': subscription.get_translated('name', language),
                 'skipped_date': current_next_delivery.strftime('%Y-%m-%d'),
                 'next_delivery_date': new_next_delivery.strftime('%Y-%m-%d'),
                 'reason': reason
@@ -1092,11 +1100,12 @@ def change_payment_method(subscription_id):
         db.session.commit()
         
         # Send notification
+        language = get_current_language()
         get_notification_service().send_notification(
             current_user_id,
             'payment_method_changed',
             template_data={
-                'subscription_name': subscription.name,
+                'subscription_name': subscription.get_translated('name', language),
                 'old_method': old_payment_method.value,
                 'new_method': new_payment_method.value
             }

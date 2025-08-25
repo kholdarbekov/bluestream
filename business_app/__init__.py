@@ -22,6 +22,7 @@ import click
 from business_app.config import get_config
 from business_app.utils.exceptions import ValidationError, NotFoundError, UnauthorizedError
 from business_app.utils.helpers import set_language
+from business_app.utils.template_helpers import register_multilingual_filters, register_multilingual_globals
 
 # Initialize extensions
 db = SQLAlchemy()
@@ -331,6 +332,10 @@ def create_app(config_class=None):
     
     # Register blueprints
     register_blueprints(app)
+    
+    # Register multilingual template helpers
+    register_multilingual_filters(app)
+    register_multilingual_globals(app)
     
     # Register error handlers
     register_error_handlers(app)

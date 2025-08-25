@@ -11,6 +11,7 @@ import Delivery from './pages/Delivery';
 import Loyalty from './pages/Loyalty';
 import Notifications from './pages/Notifications';
 import Analytics from './pages/Analytics';
+import Translations from './pages/Translations';
 import Settings from './pages/Settings';
 import { useAuthStore } from './stores/authStore';
 import ProtectedRoute from './components/common/ProtectedRoute';
@@ -40,6 +41,7 @@ function App() {
                   <Route path="/loyalty" element={<Loyalty />} />
                   <Route path="/notifications" element={<Notifications />} />
                   <Route path="/analytics" element={<Analytics />} />
+                  <Route path="/translations" element={<Translations />} />
                   <Route path="/settings" element={<Settings />} />
                 </Routes>
               </AdminLayout>

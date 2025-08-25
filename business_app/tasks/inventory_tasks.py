@@ -11,6 +11,7 @@ from business_app.services.inventory_service import get_inventory_service
 from business_app.models.product import Product
 from business_app.services.notification_service import NotificationService
 from business_app.utils.audit_logger import audit_logger, AuditEventType, AuditSeverity
+from business_app.utils.helpers import get_current_language
 from business_app import db
 
 logger = logging.getLogger(__name__)
@@ -68,9 +69,10 @@ def send_low_stock_alert_task(self, product_id: int):
         inventory_status = get_inventory_service().get_inventory_status(product_id)
         
         # Prepare notification data
+        language = get_current_language()
         notification_data = {
             'product_id': product.id,
-            'product_name': product.name,
+            'product_name': product.get_translated('name', language),
             'sku': product.sku,
             'current_stock': inventory_status['current_stock'],
             'available_quantity': inventory_status['available_quantity'],
@@ -89,7 +91,7 @@ def send_low_stock_alert_task(self, product_id: int):
                     recipient_email=email,
                     template='low_stock_alert',
                     template_data=notification_data,
-                    subject=f"Low Stock Alert: {product.name}"
+                    subject=f"Low Stock Alert: {product.get_translated('name', language)}"
                 )
             except Exception as e:
                 logger.error(f"Failed to send low stock email to {email}: {e}")
@@ -100,7 +102,7 @@ def send_low_stock_alert_task(self, product_id: int):
             if telegram_chat_id:
                 message = (
                     f"🚨 LOW STOCK ALERT\n\n"
-                    f"Product: {product.name}\n"
+                    f"Product: {product.get_translated('name', language)}\n"
                     f"SKU: {product.sku or 'N/A'}\n"
                     f"Current Stock: {inventory_status['current_stock']}\n"
                     f"Available: {inventory_status['available_quantity']}\n"
@@ -124,7 +126,7 @@ def send_low_stock_alert_task(self, product_id: int):
             severity=AuditSeverity.MEDIUM,
             resource_type="product_inventory",
             resource_id=str(product_id),
-            description=f"Low stock alert sent for {product.name}",
+            description=f"Low stock alert sent for {product.get_translated('name', language)}"/
             additional_data=notification_data
         )
         
@@ -158,14 +160,14 @@ def generate_inventory_report_task(self, report_type: str = 'daily'):
                 if inventory_status['is_out_of_stock']:
                     out_of_stock_products.append({
                         'id': product.id,
-                        'name': product.name,
+                        'name': product.get_translated('name', language),
                         'sku': product.sku,
                         'stock': inventory_status['current_stock']
                     })
                 elif inventory_status['is_low_stock']:
                     low_stock_products.append({
                         'id': product.id,
-                        'name': product.name,
+                        'name': product.get_translated('name', language),
                         'sku': product.sku,
                         'stock': inventory_status['current_stock'],
                         'min_level': inventory_status['min_stock_level']
@@ -268,7 +270,7 @@ def auto_reorder_products_task(self):
                     
                     products_to_reorder.append({
                         'product_id': product.id,
-                        'product_name': product.name,
+                        'product_name': product.get_translated('name', language),
                         'sku': product.sku,
                         'current_stock': inventory_status['current_stock'],
                         'available_quantity': inventory_status['available_quantity'],

@@ -11,6 +11,7 @@ from business_app.models.loyalty import LoyaltyProgram, LoyaltyPoints, LoyaltyRe
 from business_app.models.user import User
 from business_app.models.order import Order
 from business_app.utils.service_factory import get_loyalty_service, get_notification_service
+from business_app.utils.helpers import get_current_language
 from business_app.serializers.loyalty_serializers import (
     serialize_user_loyalty, serialize_loyalty_reward, serialize_referral, serialize_challenge,
     serialize_loyalty_transaction, serialize_loyalty_program,
@@ -300,11 +301,12 @@ def redeem_reward(reward_id):
         )
         
         # Send notification
+        language = get_current_language()
         get_notification_service().send_notification(
             current_user_id,
             'reward_redeemed',
             template_data={
-                'reward_name': reward.name,
+                'reward_name': reward.get_translated('name', language),
                 'points_spent': reward.points_cost,
                 'remaining_points': loyalty_points.current_balance - reward.points_cost
             }
@@ -314,7 +316,7 @@ def redeem_reward(reward_id):
             'message': 'Reward redeemed successfully',
             'redemption': {
                 'id': redemption.id,
-                'reward_name': reward.name,
+                'reward_name': reward.get_translated('name', language),
                 'points_spent': reward.points_cost,
                 'status': redemption.status.value,
                 'redemption_code': redemption.redemption_code,

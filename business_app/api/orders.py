@@ -16,6 +16,7 @@ from business_app.utils.service_factory import (
     get_order_service, get_payment_service, get_delivery_service, 
     get_notification_service, get_analytics_service
 )
+from business_app.utils.helpers import get_current_language
 from business_app.serializers.order_serializers import (
     serialize_order, serialize_order_item, serialize_order_delivery, serialize_order_payment,
     serialize_order_statistics, serialize_cart_estimate, serialize_delivery_slot,
@@ -255,29 +256,29 @@ def get_quick_reorder_suggestions():
         
         frequent_items = db.session.query(
             OrderItem.product_id,
-            Product.name,
-            Product.current_price,
-            Product.image_urls,
             func.sum(OrderItem.quantity).label('total_quantity'),
             func.count(OrderItem.id).label('order_count'),
             func.max(Order.created_at).label('last_ordered')
-        ).join(Order).join(Product).filter(
+        ).join(Order).filter(
             Order.user_id == current_user_id,
             Order.created_at >= three_months_ago,
             Order.status.in_([OrderStatus.DELIVERED, OrderStatus.CONFIRMED])
         ).group_by(
-            OrderItem.product_id, Product.name, Product.current_price, Product.image_urls
+            OrderItem.product_id
         ).order_by(
             desc('order_count'), desc('total_quantity')
         ).limit(limit).all()
         
+        language = get_current_language()
         suggestions = []
         for item in frequent_items:
-            suggestions.append({
-                'product_id': item.product_id,
-                'name': item.name,
-                'current_price': item.current_price,
-                'image_url': item.image_urls[0] if item.image_urls else None,
+            product = Product.query.get(item.product_id)
+            if product:
+                suggestions.append({
+                    'product_id': item.product_id,
+                    'name': product.get_translated('name', language),
+                    'current_price': product.current_price,
+                    'image_url': product.image_urls[0] if product.image_urls else None,
                 'suggested_quantity': min(int(item.total_quantity / item.order_count), 10),
                 'order_frequency': item.order_count,
                 'last_ordered': item.last_ordered.isoformat()
@@ -626,11 +627,12 @@ def validate_promo_code():
         # Calculate discount
         discount = get_order_service().calculate_promo_discount(campaign, cart_total)
         
+        language = get_current_language()
         return jsonify({
             'valid': True,
             'campaign': {
-                'name': campaign.name,
-                'description': campaign.description,
+                'name': campaign.get_translated('name', language),
+                'description': campaign.get_translated('description', language),
                 'discount_type': campaign.discount_type,
                 'discount_value': campaign.discount_value,
                 'min_order_value': campaign.min_order_value

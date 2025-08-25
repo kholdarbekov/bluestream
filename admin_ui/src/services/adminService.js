@@ -243,6 +243,65 @@ class AdminService {
     });
     return response.data;
   }
+
+  // Translation Management
+  async getTranslations(params = {}) {
+    const response = await api.get('/admin/translations', { params });
+    return response.data;
+  }
+
+  async getTranslation(id) {
+    const response = await api.get(`/admin/translations/${id}`);
+    return response.data;
+  }
+
+  async createTranslation(translationData) {
+    const response = await api.post('/admin/translations', translationData);
+    return response.data;
+  }
+
+  async updateTranslation({ id, data }) {
+    const response = await api.put(`/admin/translations/${id}`, data);
+    return response.data;
+  }
+
+  async deleteTranslation(id) {
+    const response = await api.delete(`/admin/translations/${id}`);
+    return response.data;
+  }
+
+  async getTranslatableEntities() {
+    const response = await api.get('/admin/translations/entities');
+    return response.data;
+  }
+
+  async syncEntityTranslations({ entityType, data }) {
+    const response = await api.post(`/admin/translations/sync/${entityType}`, data);
+    return response.data;
+  }
+
+  async exportTranslations(params = {}) {
+    const response = await api.get('/admin/translations/export', { 
+      params,
+      responseType: 'blob'
+    });
+    return response.data;
+  }
+
+  async importTranslations(data) {
+    const response = await api.post('/admin/translations/import', data);
+    return response.data;
+  }
+
+  async getTranslationCompletion(params = {}) {
+    const response = await api.get('/admin/translations/completion', { params });
+    return response.data;
+  }
+
+  async getMissingTranslations(params = {}) {
+    const response = await api.get('/admin/translations/missing', { params });
+    return response.data;
+  }
 }
 
 export default new AdminService();

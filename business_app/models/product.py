@@ -8,6 +8,7 @@ from flask_sqlalchemy import SQLAlchemy
 from business_app import db
 from business_app.utils.constants import PriceRuleType
 from business_app.models import TimestampMixin
+from business_app.models.translatable import TranslatableMixin, translatable
 import enum
 
 class ProductCategoryEnum(enum.Enum):
@@ -26,41 +27,30 @@ class ProductSizeEnum(enum.Enum):
     SIZE_19L = '19L'
 
 
-class ProductCategory(db.Model, TimestampMixin):
+@translatable('name', 'description')
+class ProductCategory(db.Model, TimestampMixin, TranslatableMixin):
     __tablename__ = 'product_categories'
     
     id = Column(Integer, primary_key=True)
-    name = Column(String(100), nullable=False)
-    name_ru = Column(String(100), nullable=True)
-    name_en = Column(String(100), nullable=True)
-    description = Column(Text, nullable=True)
-    description_ru = Column(Text, nullable=True)
-    description_en = Column(Text, nullable=True)
+    name = Column(String(100), nullable=False)  # Default/fallback name (Uzbek)
+    description = Column(Text, nullable=True)   # Default/fallback description (Uzbek)
     is_active = Column(Boolean, default=True)
     sort_order = Column(Integer, default=0)
     icon_url = Column(String(255), nullable=True)
     
-    def to_dict(self, language='uz'):
-        return {
-            'id': self.id,
-            'name': self.name,
-            'name_ru': self.name_ru,
-            'name_en': self.name_en,
-            'description': self.description,
-            'description_ru': self.description_ru,
-            'description_en': self.description_en,
-            'is_active': self.is_active,
-            'sort_order': self.sort_order,
-            'icon_url': self.icon_url
-        }
+    
+    def to_dict(self, language=None, include_all_translations=False):
+        """Convert to dictionary with multilingual support"""
+        return self.to_dict_multilingual(language, include_all_translations)
 
-class Product(db.Model, TimestampMixin):
+@translatable('name', 'description', 'short_description', 'ingredients', 'meta_title', 'meta_description')
+class Product(db.Model, TimestampMixin, TranslatableMixin):
     __tablename__ = 'products'
     
     id = Column(Integer, primary_key=True)
-    name = Column(String(200), nullable=False)
-    description = Column(Text, nullable=True)
-    short_description = Column(String(500), nullable=True)
+    name = Column(String(200), nullable=False)           # Default/fallback name (Uzbek)
+    description = Column(Text, nullable=True)            # Default/fallback description (Uzbek)
+    short_description = Column(String(500), nullable=True)  # Default/fallback short description (Uzbek)
     sku = Column(String(100), nullable=True)
     
     # Pricing
@@ -90,13 +80,13 @@ class Product(db.Model, TimestampMixin):
     
     # Content
     nutrition_facts = Column(JSON, default={})
-    ingredients = Column(Text, nullable=True)
+    ingredients = Column(Text, nullable=True)           # Default/fallback ingredients (Uzbek)
     barcode = Column(String(100), nullable=True)
     
     # SEO and metadata
     slug = Column(String(255), nullable=True)
-    meta_title = Column(String(200), nullable=True)
-    meta_description = Column(Text, nullable=True)
+    meta_title = Column(String(200), nullable=True)     # Default/fallback meta title (Uzbek)
+    meta_description = Column(Text, nullable=True)      # Default/fallback meta description (Uzbek)
     
     # Relationships
     category = relationship('ProductCategory', backref='products')
@@ -116,47 +106,36 @@ class Product(db.Model, TimestampMixin):
         # TODO: Implement when reviews relationship is properly configured
         pass
         
-    def to_dict(self, user=None, quantity=1):
-        return {
-            'id': self.id,
-            'name': self.name,
-            'description': self.description,
-            'short_description': self.short_description,
-            'sku': self.sku,
+    def to_dict(self, user=None, quantity=1, language=None, include_all_translations=False):
+        """Convert to dictionary with multilingual support"""
+        result = self.to_dict_multilingual(language, include_all_translations)
+        
+        # Add product-specific fields
+        result.update({
             'base_price': float(self.base_price) if self.base_price else 0,
             'current_price': float(self.calculate_price(user, quantity)),
             'cost_price': float(self.cost_price) if self.cost_price else None,
             'discount_price': float(self.discount_price) if self.discount_price else None,
-            'category_id': self.category_id,
-            'category': self.category.to_dict() if self.category else None,
+            'category': self.category.to_dict(language) if self.category else None,
             'size': self.size.value if self.size else None,
             'volume': float(self.volume) if self.volume else None,
-            'volume_unit': self.volume_unit,
             'weight': float(self.weight) if self.weight else None,
-            'weight_unit': self.weight_unit,
-            'is_active': self.is_active,
-            'is_featured': self.is_featured,
-            'requires_prescription': self.requires_prescription,
-            'track_inventory': self.track_inventory,
-            'stock_quantity': self.stock_quantity,
             'images': self.images or [],
             'nutrition_facts': self.nutrition_facts or {},
-            'ingredients': self.ingredients,
-            'barcode': self.barcode,
-            'slug': self.slug,
-            'meta_title': self.meta_title,
-            'meta_description': self.meta_description
-        }
+        })
+        
+        return result
     
 
-class PriceRule(db.Model, TimestampMixin):
+@translatable('name', 'description')
+class PriceRule(db.Model, TimestampMixin, TranslatableMixin):
     __tablename__ = 'price_rules'
     
     id = Column(Integer, primary_key=True)
     product_id = Column(Integer, ForeignKey('products.id'), nullable=False, index=True)
     rule_type = Column(Enum(PriceRuleType), nullable=False)
-    name = Column(String(100), nullable=False)
-    description = Column(Text, nullable=True)
+    name = Column(String(100), nullable=False)        # Default/fallback name (Uzbek)
+    description = Column(Text, nullable=True)         # Default/fallback description (Uzbek)
     
     # Rule conditions
     min_quantity = Column(Integer, default=1)

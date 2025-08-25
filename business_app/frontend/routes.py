@@ -448,7 +448,13 @@ def inject_global_vars():
             return datetime.now().strftime(fmt)
     
     # Get current language
-    language = session.get('language', 'en')
+    from business_app.utils.helpers import get_current_language
+    language = get_current_language()
+    
+    # Debug logging
+    from flask import current_app
+    if current_app.debug:
+        current_app.logger.debug(f"Context processor - current language: {language}")
     
     # Get categories for navigation
     categories = ProductCategory.query.filter_by(is_active=True).order_by(ProductCategory.sort_order).all()

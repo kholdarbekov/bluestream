@@ -40,6 +40,9 @@ class TranslationService:
         Returns:
             Translated string
         """
+        # Debug logging
+        if current_app.debug:
+            current_app.logger.debug(f"Translation requested: '{key}' in language '{language}'")
         # Try cache first
         cached_translation = self._get_cached_translation(key, language)
         if cached_translation:
@@ -100,9 +103,16 @@ class TranslationService:
                 is_active=True
             ).first()
             
+            # Debug logging
+            if current_app.debug:
+                if translation:
+                    current_app.logger.debug(f"DB translation found for '{key}' [{language}]: {translation.value[:50]}...")
+                else:
+                    current_app.logger.debug(f"No DB translation found for '{key}' [{language}]")
+            
             return translation.value if translation else None
         except Exception as e:
-            current_app.logger.error(f"Error getting translation: {e}")
+            current_app.logger.error(f"Error getting translation for '{key}' [{language}]: {e}")
             return None
     
     def _format_translation(self, translation: str, **kwargs) -> str:

@@ -113,6 +113,64 @@ class Translation(db.Model):
                     db.session.add(new_translation)
         
         db.session.commit()
+    
+    # Entity Translation Methods (for TranslatableContent functionality)
+    
+    @classmethod
+    def get_entity_translation(cls, entity_type: str, entity_id: int, field_name: str, language: str = 'en'):
+        """Get translation for entity field using key format: EntityType.field.ID"""
+        key = f"{entity_type}.{field_name}.{entity_id}"
+        return cls.get_translation(key, language)
+    
+    @classmethod
+    def set_entity_translation(cls, entity_type: str, entity_id: int, field_name: str, 
+                             language: str, value: str, user_id: int = None):
+        """Set translation for entity field using key format: EntityType.field.ID"""
+        key = f"{entity_type}.{field_name}.{entity_id}"
+        category = f"entity_{entity_type.lower()}"
+        
+        existing = cls.query.filter_by(key=key, language=language).first()
+        
+        if existing:
+            existing.value = value
+            existing.category = category
+            existing.is_active = True
+            existing.updated_by = user_id
+            existing.updated_at = datetime.now(UTC)
+        else:
+            new_translation = cls(
+                key=key,
+                language=language,
+                value=value,
+                category=category,
+                is_active=True,
+                created_by=user_id,
+                updated_by=user_id
+            )
+            db.session.add(new_translation)
+        
+        return True
+    
+    @classmethod
+    def get_all_entity_translations(cls, entity_type: str, entity_id: int, field_name: str):
+        """Get all translations for entity field"""
+        key = f"{entity_type}.{field_name}.{entity_id}"
+        translations = cls.query.filter_by(key=key, is_active=True).all()
+        return {t.language: t.value for t in translations}
+    
+    @classmethod
+    def bulk_set_entity_translations(cls, entity_type: str, entity_id: int, 
+                                   translations_dict: dict, user_id: int = None):
+        """
+        Bulk set entity translations
+        translations_dict: {field_name: {language: content}}
+        """
+        for field_name, translations in translations_dict.items():
+            for language, content in translations.items():
+                if content:  # Only set non-empty content
+                    cls.set_entity_translation(
+                        entity_type, entity_id, field_name, language, content, user_id
+                    )
 
 
 class TranslationCategory(db.Model):
@@ -286,7 +344,19 @@ def seed_translation_categories():
         {'name': 'subscription', 'description': 'Subscription-related text'},
         {'name': 'admin', 'description': 'Admin interface text'},
         {'name': 'telegram', 'description': 'Telegram bot messages'},
-        {'name': 'validation', 'description': 'Validation messages'}
+        {'name': 'validation', 'description': 'Validation messages'},
+        # Entity categories for merged translation system
+        {'name': 'entity_product', 'description': 'Product entity translations'},
+        {'name': 'entity_productcategory', 'description': 'ProductCategory entity translations'},
+        {'name': 'entity_subscription', 'description': 'Subscription entity translations'},
+        {'name': 'entity_subscriptionplan', 'description': 'SubscriptionPlan entity translations'},
+        {'name': 'entity_notificationtemplate', 'description': 'NotificationTemplate entity translations'},
+        {'name': 'entity_notificationchannel', 'description': 'NotificationChannel entity translations'},
+        {'name': 'entity_loyaltyreward', 'description': 'LoyaltyReward entity translations'},
+        {'name': 'entity_pricerule', 'description': 'PriceRule entity translations'},
+        {'name': 'entity_customersegment', 'description': 'CustomerSegment entity translations'},
+        {'name': 'entity_promotionalcampaign', 'description': 'PromotionalCampaign entity translations'},
+        {'name': 'entity_usersegment', 'description': 'UserSegment entity translations'}
     ]
     
     for cat_data in categories_data:

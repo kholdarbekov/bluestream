@@ -16,7 +16,7 @@ from business_app.models.subscription import Subscription
 from business_app.models.loyalty import LoyaltyProgram, LoyaltyReward
 from business_app.models.notification import NotificationTemplate
 from business_app.models.analytics import PromotionalCampaign, UserSegment
-from business_app.models.translatable import TranslatableContent
+# TranslatableContent replaced by unified Translation system
 from business_app.models.translation import Translation, TranslationCategory, Language
 # from business_app.services.admin_service import AdminService
 from business_app.utils.service_factory import get_notification_service
@@ -1185,11 +1185,41 @@ def create_backup():
 # TRANSLATION MANAGEMENT ROUTES
 # =============================================================================
 
+def parse_entity_key(key):
+    """Parse entity key format: EntityType.field.ID"""
+    parts = key.split('.')
+    if len(parts) == 3:
+        try:
+            entity_type, field_name, entity_id = parts
+            return entity_type, field_name, int(entity_id)
+        except ValueError:
+            return None, None, None
+    return None, None, None
+
+def format_entity_translation(translation):
+    """Convert Translation record to entity translation format for API compatibility"""
+    entity_type, field_name, entity_id = parse_entity_key(translation.key)
+    
+    if entity_type and field_name and entity_id:
+        return {
+            'id': translation.id,
+            'entity_type': entity_type,
+            'entity_id': entity_id,
+            'field_name': field_name,
+            'language': translation.language,
+            'content': translation.value,
+            'is_active': translation.is_active,
+            'version': 1,  # For compatibility
+            'created_at': translation.created_at.isoformat() if translation.created_at else None,
+            'updated_at': translation.updated_at.isoformat() if translation.updated_at else None
+        }
+    return None
+
 @admin_bp.route('/translations', methods=['GET'])
 @jwt_required()
 @manager_or_higher_required
 def get_translations():
-    """Get all translatable content with filtering and pagination"""
+    """Get all translations (both static and entity) with filtering and pagination"""
     try:
         # Get query parameters
         page = request.args.get('page', 1, type=int)
@@ -1199,60 +1229,71 @@ def get_translations():
         field_name = request.args.get('field_name')
         language = request.args.get('language')
         search = request.args.get('search')
+        translation_type = request.args.get('type')  # 'static' or 'entity'
         
-        # Build query
-        query = TranslatableContent.query
+        # Build base query
+        query = Translation.query
         
+        # Filter by translation type
+        if translation_type == 'static':
+            # Static translations have simple keys (no dots indicating EntityType.field.ID)
+            query = query.filter(~Translation.key.like('%.%.%'))
+        elif translation_type == 'entity' or entity_type or entity_id or field_name:
+            # Entity translations have EntityType.field.ID format
+            query = query.filter(Translation.key.like('%.%.%'))
+        
+        # Apply filters for entity translations
         if entity_type:
-            query = query.filter(TranslatableContent.entity_type == entity_type)
+            query = query.filter(Translation.category == f'entity_{entity_type.lower()}')
         if entity_id:
-            query = query.filter(TranslatableContent.entity_id == entity_id)
+            query = query.filter(Translation.key.like(f'%.%.{entity_id}'))
         if field_name:
-            query = query.filter(TranslatableContent.field_name == field_name)
+            query = query.filter(Translation.key.like(f'%.{field_name}.%'))
         if language:
-            query = query.filter(TranslatableContent.language == language)
+            query = query.filter(Translation.language == language)
         if search:
-            query = query.filter(TranslatableContent.content.ilike(f'%{search}%'))
+            query = query.filter(Translation.value.ilike(f'%{search}%'))
         
-        # Order by entity type, entity ID, field name, language
-        query = query.order_by(
-            TranslatableContent.entity_type,
-            TranslatableContent.entity_id,
-            TranslatableContent.field_name,
-            TranslatableContent.language
-        )
+        # Order by key and language for consistency
+        query = query.order_by(Translation.key, Translation.language)
         
         # Paginate
         pagination = query.paginate(
             page=page, per_page=per_page, error_out=False
         )
         
+        # Format results based on type
         translations = []
         for item in pagination.items:
-            translations.append({
-                'id': item.id,
-                'entity_type': item.entity_type,
-                'entity_id': item.entity_id,
-                'field_name': item.field_name,
-                'language': item.language,
-                'content': item.content,
-                'is_active': item.is_active,
-                'version': item.version,
-                'created_at': item.created_at.isoformat() if item.created_at else None,
-                'updated_at': item.updated_at.isoformat() if item.updated_at else None
-            })
+            if '.' in item.key and len(item.key.split('.')) == 3:
+                # Entity translation
+                entity_trans = format_entity_translation(item)
+                if entity_trans:
+                    translations.append(entity_trans)
+            else:
+                # Static translation
+                translations.append({
+                    'id': item.id,
+                    'key': item.key,
+                    'language': item.language,
+                    'value': item.value,
+                    'category': item.category,
+                    'description': item.description,
+                    'is_active': item.is_active,
+                    'created_at': item.created_at.isoformat() if item.created_at else None,
+                    'updated_at': item.updated_at.isoformat() if item.updated_at else None
+                })
         
         # Get statistics
-        total_translations = TranslatableContent.query.count()
-        language_stats = db.session.query(
-            TranslatableContent.language,
-            func.count(TranslatableContent.id).label('count')
-        ).group_by(TranslatableContent.language).all()
+        total_translations = Translation.query.count()
+        entity_translations = Translation.query.filter(Translation.key.like('%.%.%')).count()
+        static_translations = total_translations - entity_translations
         
-        entity_stats = db.session.query(
-            TranslatableContent.entity_type,
-            func.count(TranslatableContent.id).label('count')
-        ).group_by(TranslatableContent.entity_type).all()
+        # Language breakdown
+        language_stats = db.session.query(
+            Translation.language,
+            func.count(Translation.id).label('count')
+        ).group_by(Translation.language).all()
         
         return jsonify({
             'success': True,
@@ -1267,14 +1308,15 @@ def get_translations():
             },
             'statistics': {
                 'total_translations': total_translations,
-                'language_stats': [{'language': lang, 'count': count} for lang, count in language_stats],
-                'entity_stats': [{'entity_type': entity, 'count': count} for entity, count in entity_stats]
+                'entity_translations': entity_translations,
+                'static_translations': static_translations,
+                'language_stats': [{'language': lang, 'count': count} for lang, count in language_stats]
             }
         })
         
     except Exception as e:
-        current_app.logger.error(f"Get translations error: {e}")
-        return jsonify({'error': 'Failed to fetch translations'}), 500
+        current_app.logger.error(f"Error getting translations: {e}")
+        return jsonify({'error': 'Failed to get translations'}), 500
 
 
 @admin_bp.route('/translations/<int:translation_id>', methods=['GET'])
@@ -1283,27 +1325,33 @@ def get_translations():
 def get_translation(translation_id):
     """Get a specific translation by ID"""
     try:
-        translation = TranslatableContent.query.get_or_404(translation_id)
+        translation = Translation.query.get_or_404(translation_id)
         
+        # Check if it's an entity translation
+        if '.' in translation.key and len(translation.key.split('.')) == 3:
+            result = format_entity_translation(translation)
+            if result:
+                return jsonify({'success': True, 'translation': result})
+        
+        # Static translation
         return jsonify({
             'success': True,
             'translation': {
                 'id': translation.id,
-                'entity_type': translation.entity_type,
-                'entity_id': translation.entity_id,
-                'field_name': translation.field_name,
+                'key': translation.key,
                 'language': translation.language,
-                'content': translation.content,
+                'value': translation.value,
+                'category': translation.category,
+                'description': translation.description,
                 'is_active': translation.is_active,
-                'version': translation.version,
                 'created_at': translation.created_at.isoformat() if translation.created_at else None,
                 'updated_at': translation.updated_at.isoformat() if translation.updated_at else None
             }
         })
         
     except Exception as e:
-        current_app.logger.error(f"Get translation error: {e}")
-        return jsonify({'error': 'Failed to fetch translation'}), 500
+        current_app.logger.error(f"Error getting translation: {e}")
+        return jsonify({'error': 'Translation not found'}), 404
 
 
 @admin_bp.route('/translations', methods=['POST'])
@@ -1311,53 +1359,68 @@ def get_translation(translation_id):
 @manager_or_higher_required
 @validate_json()
 def create_translation():
-    """Create a new translation"""
+    """Create a new translation (static or entity)"""
     try:
         data = request.get_json()
         
-        # Validate required fields
-        required_fields = ['entity_type', 'entity_id', 'field_name', 'language', 'content']
-        for field in required_fields:
-            if field not in data:
-                return jsonify({'error': f'Missing required field: {field}'}), 400
+        # Determine if it's an entity translation or static translation
+        if all(field in data for field in ['entity_type', 'entity_id', 'field_name']):
+            # Entity translation
+            entity_type = data['entity_type']
+            entity_id = data['entity_id']
+            field_name = data['field_name']
+            language = data['language']
+            content = data['content']
+            
+            # Use unified Translation model
+            success = Translation.set_entity_translation(
+                entity_type=entity_type,
+                entity_id=entity_id,
+                field_name=field_name,
+                language=language,
+                value=content,
+                user_id=get_jwt_identity()
+            )
+            
+            if success:
+                db.session.commit()
+                return jsonify({
+                    'success': True,
+                    'message': 'Entity translation created successfully'
+                }), 201
+            else:
+                return jsonify({'error': 'Failed to create entity translation'}), 500
         
-        # Check if translation already exists
-        existing = TranslatableContent.query.filter_by(
-            entity_type=data['entity_type'],
-            entity_id=data['entity_id'],
-            field_name=data['field_name'],
-            language=data['language']
-        ).first()
+        elif all(field in data for field in ['key', 'language', 'value']):
+            # Static translation
+            existing = Translation.query.filter_by(
+                key=data['key'],
+                language=data['language']
+            ).first()
+            
+            if existing:
+                return jsonify({'error': 'Translation already exists'}), 400
+            
+            translation = Translation(
+                key=data['key'],
+                language=data['language'],
+                value=data['value'],
+                category=data.get('category', 'general'),
+                description=data.get('description'),
+                is_active=True,
+                created_by=get_jwt_identity(),
+                updated_by=get_jwt_identity()
+            )
+            
+            db.session.add(translation)
+        else:
+            return jsonify({'error': 'Invalid translation data format'}), 400
         
-        if existing:
-            return jsonify({'error': 'Translation already exists for this entity/field/language combination'}), 409
-        
-        # Create new translation
-        translation = TranslatableContent(
-            entity_type=data['entity_type'],
-            entity_id=data['entity_id'],
-            field_name=data['field_name'],
-            language=data['language'],
-            content=data['content'],
-            is_active=data.get('is_active', True)
-        )
-        
-        db.session.add(translation)
         db.session.commit()
         
         return jsonify({
             'success': True,
-            'message': 'Translation created successfully',
-            'translation': {
-                'id': translation.id,
-                'entity_type': translation.entity_type,
-                'entity_id': translation.entity_id,
-                'field_name': translation.field_name,
-                'language': translation.language,
-                'content': translation.content,
-                'is_active': translation.is_active,
-                'version': translation.version
-            }
+            'message': 'Translation created successfully'
         }), 201
         
     except Exception as e:
@@ -1373,33 +1436,29 @@ def create_translation():
 def update_translation(translation_id):
     """Update an existing translation"""
     try:
-        translation = TranslatableContent.query.get_or_404(translation_id)
+        translation = Translation.query.get_or_404(translation_id)
         data = request.get_json()
         
         # Update fields
         if 'content' in data:
-            translation.content = data['content']
-            translation.version += 1  # Increment version for content changes
-        
+            translation.value = data['content']
+        if 'value' in data:
+            translation.value = data['value']
+        if 'category' in data:
+            translation.category = data['category']
+        if 'description' in data:
+            translation.description = data['description']
         if 'is_active' in data:
             translation.is_active = data['is_active']
         
+        translation.updated_by = get_jwt_identity()
         translation.updated_at = datetime.now(UTC)
+        
         db.session.commit()
         
         return jsonify({
             'success': True,
-            'message': 'Translation updated successfully',
-            'translation': {
-                'id': translation.id,
-                'entity_type': translation.entity_type,
-                'entity_id': translation.entity_id,
-                'field_name': translation.field_name,
-                'language': translation.language,
-                'content': translation.content,
-                'is_active': translation.is_active,
-                'version': translation.version
-            }
+            'message': 'Translation updated successfully'
         })
         
     except Exception as e:
@@ -1414,7 +1473,7 @@ def update_translation(translation_id):
 def delete_translation(translation_id):
     """Delete a translation"""
     try:
-        translation = TranslatableContent.query.get_or_404(translation_id)
+        translation = Translation.query.get_or_404(translation_id)
         
         db.session.delete(translation)
         db.session.commit()
@@ -1436,25 +1495,37 @@ def delete_translation(translation_id):
 def get_translatable_entities():
     """Get all translatable entities with their available fields"""
     try:
-        # Get distinct entity types
-        entity_types = db.session.query(TranslatableContent.entity_type).distinct().all()
+        # Get distinct entity categories (like entity_product, entity_subscription)
+        entity_categories = db.session.query(Translation.category).filter(
+            Translation.category.like('entity_%')
+        ).distinct().all()
         
         entities = []
-        for (entity_type,) in entity_types:
-            # Get sample entity to find available fields
-            fields = db.session.query(TranslatableContent.field_name).filter_by(
-                entity_type=entity_type
-            ).distinct().all()
+        for (category,) in entity_categories:
+            # Extract entity type from category (entity_product -> Product)
+            entity_type = category.replace('entity_', '').title()
             
-            # Get count of entities of this type
-            entity_count = db.session.query(TranslatableContent.entity_id).filter_by(
-                entity_type=entity_type
-            ).distinct().count()
+            # Get translations for this entity category to parse fields and count entities
+            translations = db.session.query(Translation.key).filter_by(category=category).distinct().all()
+            
+            available_fields = set()
+            entity_ids = set()
+            
+            for (key,) in translations:
+                # Parse key format: EntityType.field.ID (e.g., Product.name.123)
+                key_parts = key.split('.')
+                if len(key_parts) == 3:
+                    parsed_entity_type, field_name, entity_id = key_parts
+                    available_fields.add(field_name)
+                    try:
+                        entity_ids.add(int(entity_id))
+                    except ValueError:
+                        continue
             
             entities.append({
                 'entity_type': entity_type,
-                'available_fields': [field[0] for field in fields],
-                'entity_count': entity_count
+                'available_fields': list(available_fields),
+                'entity_count': len(entity_ids)
             })
         
         return jsonify({
@@ -1540,11 +1611,11 @@ def export_translations():
         entity_type = request.args.get('entity_type')
         language = request.args.get('language')
         
-        query = TranslatableContent.query
+        query = Translation.query.filter(Translation.key.like("%.%.%"))
         if entity_type:
-            query = query.filter(TranslatableContent.entity_type == entity_type)
+            query = query.filter(Translation.category == entity_type)
         if language:
-            query = query.filter(TranslatableContent.language == language)
+            query = query.filter(Translation.language == language)
         
         translations = query.all()
         
@@ -1618,7 +1689,7 @@ def import_translations():
                     continue
                 
                 # Check if exists
-                existing = TranslatableContent.query.filter_by(
+                existing = Translation.query.filter(Translation.key.like("%.%.%")).filter_by(
                     entity_type=item['entity_type'],
                     entity_id=item['entity_id'],
                     field_name=item['field_name'],
@@ -1635,16 +1706,17 @@ def import_translations():
                     else:
                         skipped_count += 1
                 else:
-                    translation = TranslatableContent(
+                    # Use unified Translation model with entity key format
+                    success = Translation.set_entity_translation(
                         entity_type=item['entity_type'],
                         entity_id=item['entity_id'],
                         field_name=item['field_name'],
                         language=item['language'],
-                        content=item['content'],
-                        is_active=item.get('is_active', True)
+                        value=item['content'],
+                        user_id=get_jwt_identity()
                     )
-                    db.session.add(translation)
-                    created_count += 1
+                    if success:
+                        created_count += 1
                     
             except Exception as e:
                 errors.append(f"Error processing item {item}: {e}")
@@ -1679,18 +1751,25 @@ def get_translation_completion():
         languages = ['en', 'uz', 'ru']  # From config
         entity_type = request.args.get('entity_type')
         
-        # Build base query
-        query = db.session.query(
-            TranslatableContent.entity_type,
-            TranslatableContent.entity_id,
-            TranslatableContent.field_name
-        ).distinct()
+        # Get all entity translations (keys with EntityType.field.ID format)
+        entity_translations_query = Translation.query.filter(Translation.key.like('%.%.%'))
         
         if entity_type:
-            query = query.filter(TranslatableContent.entity_type == entity_type)
+            entity_translations_query = entity_translations_query.filter(
+                Translation.category == f'entity_{entity_type.lower()}'
+            )
         
-        # Get all unique entity/field combinations
-        unique_fields = query.all()
+        all_entity_translations = entity_translations_query.all()
+        
+        # Parse unique entity/field combinations from keys
+        unique_combinations = set()
+        for trans in all_entity_translations:
+            key_parts = trans.key.split('.')
+            if len(key_parts) == 3:
+                entity_type_name, field_name, entity_id = key_parts
+                unique_combinations.add((trans.category, entity_id, field_name))
+        
+        unique_fields = list(unique_combinations)
         
         completion_stats = []
         overall_stats = {
@@ -1709,7 +1788,7 @@ def get_translation_completion():
             }
         
         # Calculate completion for each entity type
-        entity_types = db.session.query(TranslatableContent.entity_type).distinct().all()
+        entity_types = db.session.query(Translation.category).distinct().all()
         
         for (entity_type_name,) in entity_types:
             if entity_type and entity_type != entity_type_name:
@@ -1721,10 +1800,10 @@ def get_translation_completion():
             # Count translations per language
             lang_stats = {}
             for lang in languages:
-                translated_count = TranslatableContent.query.filter(
-                    TranslatableContent.entity_type == entity_type_name,
-                    TranslatableContent.language == lang,
-                    TranslatableContent.is_active == True
+                translated_count = Translation.query.filter(Translation.key.like("%.%.%")).filter(
+                    Translation.category == entity_type_name,
+                    Translation.language == lang,
+                    Translation.is_active == True
                 ).count()
                 
                 lang_stats[lang] = {
@@ -1788,17 +1867,25 @@ def get_missing_translations():
         page = request.args.get('page', 1, type=int)
         per_page = min(request.args.get('per_page', 50, type=int), 100)
         
-        # Get all unique entity/field combinations
-        base_query = db.session.query(
-            TranslatableContent.entity_type,
-            TranslatableContent.entity_id,
-            TranslatableContent.field_name
-        ).distinct()
+        # Get all entity translations to parse unique combinations
+        entity_translations_query = Translation.query.filter(Translation.key.like('%.%.%'))
         
         if entity_type:
-            base_query = base_query.filter(TranslatableContent.entity_type == entity_type)
+            entity_translations_query = entity_translations_query.filter(
+                Translation.category == f'entity_{entity_type.lower()}'
+            )
         
-        unique_combinations = base_query.all()
+        all_entity_translations = entity_translations_query.all()
+        
+        # Parse unique entity/field combinations from keys
+        unique_combinations = set()
+        for trans in all_entity_translations:
+            key_parts = trans.key.split('.')
+            if len(key_parts) == 3:
+                entity_type_name, field_name, entity_id = key_parts
+                unique_combinations.add((trans.category, entity_id, field_name))
+        
+        unique_combinations = list(unique_combinations)
         
         missing_translations = []
         
@@ -1806,13 +1893,21 @@ def get_missing_translations():
             check_languages = [language] if language else languages
             
             for lang in check_languages:
-                # Check if translation exists
-                existing = TranslatableContent.query.filter_by(
-                    entity_type=entity_type_val,
-                    entity_id=entity_id,
-                    field_name=field_name,
-                    language=lang
-                ).first()
+                # Construct the expected key format: EntityType.field.ID
+                # Extract entity type name from category (entity_product -> Product)
+                category = entity_type_val
+                if category.startswith('entity_'):
+                    entity_type_name = category.replace('entity_', '').title()
+                    expected_key = f"{entity_type_name}.{field_name}.{entity_id}"
+                    
+                    # Check if translation exists
+                    existing = Translation.query.filter_by(
+                        key=expected_key,
+                        language=lang,
+                        is_active=True
+                    ).first()
+                else:
+                    existing = None
                 
                 if not existing:
                     missing_translations.append({

@@ -13,140 +13,22 @@ from business_app.utils.helpers import get_current_language
 import json
 
 
-class TranslatableContent(db.Model, TimestampMixin):
-    """
-    Generic translatable content table
-    Stores translations for any model field in any language
-    """
-    __tablename__ = 'translatable_content'
-    
-    id = Column(Integer, primary_key=True)
-    
-    # Reference to the original entity
-    entity_type = Column(String(50), nullable=False, index=True)  # e.g., 'Product', 'Category'
-    entity_id = Column(Integer, nullable=False, index=True)       # ID of the entity
-    field_name = Column(String(50), nullable=False, index=True)   # e.g., 'name', 'description'
-    
-    # Translation details
-    language = Column(String(5), nullable=False, index=True)      # e.g., 'en', 'uz', 'ru'
-    content = Column(Text, nullable=False)                        # The translated content
-    
-    # Metadata
-    is_active = Column(Boolean, default=True, nullable=False)
-    version = Column(Integer, default=1)                          # Version for content history
-    
-    # Unique constraint: one translation per entity+field+language
-    __table_args__ = (
-        UniqueConstraint('entity_type', 'entity_id', 'field_name', 'language', 
-                        name='uq_translatable_content'),
-        Index('idx_entity_lookup', 'entity_type', 'entity_id'),
-        Index('idx_content_search', 'entity_type', 'field_name', 'language'),
-    )
-    
-    def __repr__(self):
-        return f'<TranslatableContent {self.entity_type}:{self.entity_id}.{self.field_name}[{self.language}]>'
-    
-    @classmethod
-    def get_content(cls, entity_type, entity_id, field_name, language=None):
-        """Get translated content for a specific entity field"""
-        if language is None:
-            language = get_current_language()
-        
-        content = cls.query.filter_by(
-            entity_type=entity_type,
-            entity_id=entity_id,
-            field_name=field_name,
-            language=language,
-            is_active=True
-        ).first()
-        
-        if content:
-            return content.content
-        
-        # Fallback to English if not found
-        if language != 'en':
-            content = cls.query.filter_by(
-                entity_type=entity_type,
-                entity_id=entity_id,
-                field_name=field_name,
-                language='en',
-                is_active=True
-            ).first()
-            if content:
-                return content.content
-        
-        return None
-    
-    @classmethod
-    def set_content(cls, entity_type, entity_id, field_name, language, content):
-        """Set translated content for a specific entity field"""
-        existing = cls.query.filter_by(
-            entity_type=entity_type,
-            entity_id=entity_id,
-            field_name=field_name,
-            language=language
-        ).first()
-        
-        if existing:
-            existing.content = content
-            existing.is_active = True
-            existing.version += 1
-        else:
-            new_content = cls(
-                entity_type=entity_type,
-                entity_id=entity_id,
-                field_name=field_name,
-                language=language,
-                content=content,
-                is_active=True
-            )
-            db.session.add(new_content)
-        
-        return True
-    
-    @classmethod
-    def get_all_translations(cls, entity_type, entity_id, field_name):
-        """Get all translations for a specific entity field"""
-        translations = cls.query.filter_by(
-            entity_type=entity_type,
-            entity_id=entity_id,
-            field_name=field_name,
-            is_active=True
-        ).all()
-        
-        return {t.language: t.content for t in translations}
-    
-    @classmethod
-    def bulk_set_content(cls, entity_type, entity_id, translations_dict):
-        """
-        Bulk set translations for an entity
-        translations_dict: {field_name: {language: content}}
-        """
-        for field_name, translations in translations_dict.items():
-            for language, content in translations.items():
-                if content:  # Only set non-empty content
-                    cls.set_content(entity_type, entity_id, field_name, language, content)
-    
-    def to_dict(self):
-        """Convert to dictionary"""
-        return {
-            'id': self.id,
-            'entity_type': self.entity_type,
-            'entity_id': self.entity_id,
-            'field_name': self.field_name,
-            'language': self.language,
-            'content': self.content,
-            'is_active': self.is_active,
-            'version': self.version,
-            'created_at': self.created_at.isoformat() if self.created_at else None,
-            'updated_at': self.updated_at.isoformat() if self.updated_at else None
-        }
+# DEPRECATED: TranslatableContent class - replaced by unified Translation system
+# This class is no longer used. All functionality has been migrated to the Translation model.
+# The unified Translation system uses key format: EntityType.field.ID (e.g., Product.name.123)
+
+# class TranslatableContent(db.Model, TimestampMixin):
+#     """
+#     DEPRECATED: Generic translatable content table - REPLACED BY UNIFIED TRANSLATION SYSTEM
+#     All functionality moved to Translation model with unified key format
+#     """
+#     pass
 
 
 class TranslatableMixin:
     """
     Mixin for models that need translatable content
-    Provides helper methods for getting/setting translations
+    Now uses the unified Translation model instead of TranslatableContent
     """
     
     @declared_attr
@@ -160,18 +42,36 @@ class TranslatableMixin:
             # If not translatable, return the original field value
             return getattr(self, field_name, None)
         
-        # Get from translatable content
-        translated = TranslatableContent.get_content(
+        # Import here to avoid circular imports
+        from business_app.models.translation import Translation
+        from business_app.utils.helpers import get_current_language
+        
+        if language is None:
+            language = get_current_language()
+        
+        # Get from unified Translation model
+        translation_obj = Translation.get_entity_translation(
             entity_type=self.__class__.__name__,
             entity_id=self.id,
             field_name=field_name,
             language=language
         )
         
-        if translated is not None:
-            return translated
+        if translation_obj and translation_obj.value:
+            return translation_obj.value
         
-        # Fallback to original field value if exists
+        # Fallback to English if not found and current language isn't English
+        if language != 'en':
+            translation_obj = Translation.get_entity_translation(
+                entity_type=self.__class__.__name__,
+                entity_id=self.id,
+                field_name=field_name,
+                language='en'
+            )
+            if translation_obj and translation_obj.value:
+                return translation_obj.value
+        
+        # Final fallback to original field value if exists
         return getattr(self, field_name, None)
     
     def set_translated(self, field_name, content, language):
@@ -179,12 +79,15 @@ class TranslatableMixin:
         if field_name not in self._translatable_fields:
             raise ValueError(f"Field '{field_name}' is not translatable in {self.__class__.__name__}")
         
-        return TranslatableContent.set_content(
+        # Import here to avoid circular imports
+        from business_app.models.translation import Translation
+        
+        return Translation.set_entity_translation(
             entity_type=self.__class__.__name__,
             entity_id=self.id,
             field_name=field_name,
             language=language,
-            content=content
+            value=content
         )
     
     def get_all_translations(self, field_name):
@@ -192,7 +95,10 @@ class TranslatableMixin:
         if field_name not in self._translatable_fields:
             raise ValueError(f"Field '{field_name}' is not translatable in {self.__class__.__name__}")
         
-        return TranslatableContent.get_all_translations(
+        # Import here to avoid circular imports
+        from business_app.models.translation import Translation
+        
+        return Translation.get_all_entity_translations(
             entity_type=self.__class__.__name__,
             entity_id=self.id,
             field_name=field_name
@@ -200,7 +106,10 @@ class TranslatableMixin:
     
     def set_translations(self, translations_dict):
         """Set multiple translations at once"""
-        TranslatableContent.bulk_set_content(
+        # Import here to avoid circular imports
+        from business_app.models.translation import Translation
+        
+        Translation.bulk_set_entity_translations(
             entity_type=self.__class__.__name__,
             entity_id=self.id,
             translations_dict=translations_dict

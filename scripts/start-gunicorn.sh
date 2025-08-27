@@ -48,7 +48,6 @@ exec gunicorn \
   --keep-alive=$keepalive \
   --preload \
   --log-level=info \
-  --access-logfile=- \
   --error-logfile=- \
   --capture-output \
   --enable-stdio-inheritance \

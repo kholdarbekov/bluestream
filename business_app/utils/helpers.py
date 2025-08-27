@@ -12,7 +12,9 @@ from geopy.distance import geodesic
 import phonenumbers
 from phonenumbers import NumberParseException
 from transliterate import translit
+import logging
 
+logger = logging.getLogger(__name__)
 
 def generate_random_string(length: int = 32) -> str:
     """Generate a random string of specified length"""
@@ -201,12 +203,39 @@ def paginate_query(query, page: int = 1, per_page: int = 20, max_per_page: int =
 
 def get_current_language() -> str:
     """Get current language from request context"""
-    return getattr(g, 'language', current_app.config['DEFAULT_LANGUAGE'])
+    # COMPREHENSIVE LOGGING - Step 1: Function Call
+    logger.info(f"🌐 GET_CURRENT_LANGUAGE CALLED")
+    
+    # COMPREHENSIVE LOGGING - Step 2: Check g object
+    g_language = getattr(g, 'language', 'NOT_SET')
+    default_language = current_app.config.get('DEFAULT_LANGUAGE', 'en')
+    logger.info(f"🌐 g.language='{g_language}', default='{default_language}'")
+    
+    # COMPREHENSIVE LOGGING - Step 3: Return decision
+    if g_language != 'NOT_SET':
+        logger.info(f"🌐 RETURNING g.language: '{g_language}'")
+        return g_language
+    else:
+        logger.info(f"🌐 RETURNING DEFAULT: '{default_language}'")
+        return default_language
 
 
 def set_language(language: str):
     """Set language in request context"""
+    # COMPREHENSIVE LOGGING - Step 1: Function Call
+    logger.info(f"🌐 SET_LANGUAGE CALLED with language='{language}'")
+    
+    # COMPREHENSIVE LOGGING - Step 2: Before setting
+    old_language = getattr(g, 'language', 'NOT_SET')
+    logger.info(f"🌐 BEFORE: g.language was '{old_language}'")
+    
+    # Set the language
     g.language = language
+    
+    # COMPREHENSIVE LOGGING - Step 3: After setting
+    new_language = getattr(g, 'language', 'NOT_SET')
+    logger.info(f"🌐 AFTER: g.language is now '{new_language}'")
+    logger.info(f"🌐 SET_LANGUAGE COMPLETED successfully")
 
 
 def translate_text(key: str, language: str = None, **kwargs) -> str:

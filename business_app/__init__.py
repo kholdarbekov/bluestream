@@ -124,16 +124,18 @@ def setup_request_handlers(app):
     
     @app.before_request
     def before_request():
-        """Execute before each request"""
+        """Execute before each request - NO SESSION, USE URL PARAMS"""
         # Set request start time for performance monitoring
         g.start_time = datetime.now(UTC)
         
-        # Set language - prioritize session, then user preference, then browser, then default
-        lang = None
+        # Get language from URL parameter - NO SESSION STORAGE
+        lang = request.args.get('lang', None)
         
-        # 1. Check session language (set by language switcher)
-        if 'language' in session:
-            lang = session['language']
+        print(f"🔥 BEFORE_REQUEST: {request.method} {request.path}, URL lang='{lang}'", flush=True)
+        
+        # 1. Check URL parameter first
+        if lang and lang in app.config['LANGUAGES']:
+            print(f"🔥 STEP1: Using URL lang '{lang}'", flush=True)
         else:
             # 2. Check if user is logged in and has a preferred language
             try:
@@ -144,23 +146,38 @@ def setup_request_handlers(app):
                     user = User.query.get(current_user_id)
                     if user and user.preferred_language:
                         lang = user.preferred_language
-                        # Store in session for future requests
-                        session['language'] = lang
-            except:
-                pass
+                        print(f"🔥 STEP2: Using user lang '{lang}'", flush=True)
+                    else:
+                        print(f"🔥 STEP2: User has no preferred language", flush=True)
+                else:
+                    print(f"🔥 STEP2: No authenticated user", flush=True)
+            except Exception as e:
+                print(f"🔥 STEP2: Exception: {e}", flush=True)
             
             # 3. Fall back to browser Accept-Language header
             if not lang:
                 browser_lang = request.headers.get('Accept-Language', '')
                 if browser_lang and browser_lang[:2] in app.config['LANGUAGES']:
                     lang = browser_lang[:2]
+                    print(f"🔥 STEP3: Using browser lang '{lang}'", flush=True)
+                else:
+                    print(f"🔥 STEP3: Browser lang not usable", flush=True)
         
         # 4. Use default language if nothing else worked
         if not lang or lang not in app.config['LANGUAGES']:
+            old_lang = lang
             lang = app.config['DEFAULT_LANGUAGE']
+            print(f"🔥 STEP4: Using default lang '{old_lang}' -> '{lang}'", flush=True)
+        else:
+            print(f"🔥 STEP4: Valid lang '{lang}'", flush=True)
         
         # Set the language in request context
+        print(f"🔥 SETTING: g.language = '{lang}'", flush=True)
         set_language(lang)
+        
+        # Verify
+        final_g_language = getattr(g, 'language', 'NOT_SET')
+        print(f"🔥 FINAL: g.language = '{final_g_language}'", flush=True)
     
     @app.after_request
     def after_request(response):
@@ -278,6 +295,15 @@ def create_app(config_class=None):
         # In production, fail hard if validation doesn't pass
         if not validation_passed and os.environ.get('FLASK_ENV') == 'production':
             raise RuntimeError("Environment validation failed in production")
+    
+    # Disable Jinja2 template caching completely for development
+    if app.debug:
+        app.jinja_env.cache = {}
+        app.jinja_env.auto_reload = True
+        app.jinja_env.cache_size = 0
+        # Force template recompilation by modifying loader
+        if hasattr(app.jinja_loader, '_mapping'):
+            app.jinja_loader._mapping = {}
     
     # Initialize extensions with app
     db.init_app(app)

@@ -286,6 +286,7 @@ CREATE TABLE products (
     requires_prescription BOOLEAN DEFAULT FALSE,
     
     -- Inventory
+    track_inventory BOOLEAN DEFAULT TRUE,
     stock_quantity INTEGER DEFAULT 0,
     min_stock_level INTEGER DEFAULT 0,
     max_stock_level INTEGER DEFAULT 1000,
@@ -1440,7 +1441,7 @@ CREATE TABLE translation_categories (
 -- Translations table (matches Translation model)
 CREATE TABLE translations (
     id SERIAL PRIMARY KEY,
-    key VARCHAR(255) NOT NULL,
+    key TEXT NOT NULL,
     language VARCHAR(5) NOT NULL,
     value TEXT NOT NULL,
     category VARCHAR(50) DEFAULT 'general',

@@ -74,7 +74,9 @@
                             <div class="collapse navbar-collapse show clearfix" id="navbarSupportedContent">
                                 <ul class="navigation clearfix">
                                     <li class="{% if request.endpoint == 'frontend.index' %}current{% endif %}">
-                                        <a href="{{ url_for('frontend.index') }}">{{ 'Home'|translate }}</a>
+                                        <!-- DEBUG: Home translation - current_lang={{ get_current_lang() }}, g_lang={{ g.get('language', 'NOT_SET') }}, URL_lang={{ request.args.get('lang', 'NOT_SET') }} -->
+                                        <a href="{{ url_for('frontend.index') }}" data-debug="home-link" data-lang="{{ get_current_lang() }}">{{ 'Home'|translate }}</a>
+                                        <!-- DEBUG: Home translation result: {{ 'Home'|translate }} -->
                                     </li>
                                     <li class="dropdown {% if request.endpoint in ['frontend.shop', 'frontend.product_detail'] %}current{% endif %}">
                                         <a href="{{ url_for('frontend.shop') }}">{{ 'Shop'|translate }}</a>
@@ -130,9 +132,9 @@
                                     {% if current_language == 'uz' %}UZ{% elif current_language == 'ru' %}RU{% else %}EN{% endif %}
                                 </button>
                                 <div class="dropdown-menu">
-                                    <a class="dropdown-item" href="{{ url_for('frontend.set_language', language='en') }}">English</a>
-                                    <a class="dropdown-item" href="{{ url_for('frontend.set_language', language='uz') }}">O'zbek</a>
-                                    <a class="dropdown-item" href="{{ url_for('frontend.set_language', language='ru') }}">Русский</a>
+                                    <a class="dropdown-item" href="{{ url_for('frontend.set_language_route', language='en') }}">English</a>
+                                    <a class="dropdown-item" href="{{ url_for('frontend.set_language_route', language='uz') }}">O'zbek</a>
+                                    <a class="dropdown-item" href="{{ url_for('frontend.set_language_route', language='ru') }}">Русский</a>
                                 </div>
                             </div>
                         </li>
@@ -217,9 +219,9 @@
                                     {% if current_language == 'uz' %}UZ{% elif current_language == 'ru' %}RU{% else %}EN{% endif %}
                                 </button>
                                 <div class="dropdown-menu">
-                                    <a class="dropdown-item" href="{{ url_for('frontend.set_language', language='en') }}">English</a>
-                                    <a class="dropdown-item" href="{{ url_for('frontend.set_language', language='uz') }}">O'zbek</a>
-                                    <a class="dropdown-item" href="{{ url_for('frontend.set_language', language='ru') }}">Русский</a>
+                                    <a class="dropdown-item" href="{{ url_for('frontend.set_language_route', language='en') }}">English</a>
+                                    <a class="dropdown-item" href="{{ url_for('frontend.set_language_route', language='uz') }}">O'zbek</a>
+                                    <a class="dropdown-item" href="{{ url_for('frontend.set_language_route', language='ru') }}">Русский</a>
                                 </div>
                             </div>
                         </li>

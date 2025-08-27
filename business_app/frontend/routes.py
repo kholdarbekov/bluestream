@@ -1,7 +1,7 @@
 """
 Frontend Routes for Blue Stream Water Business Platform
 """
-from flask import render_template, request, session, jsonify, redirect, url_for, flash
+from flask import render_template, request, session, current_app, jsonify, redirect, url_for, flash
 from flask_jwt_extended import jwt_required, get_jwt_identity, verify_jwt_in_request
 from sqlalchemy import desc
 
@@ -417,9 +417,16 @@ def addresses():
 
 # Language switching
 @frontend_bp.route('/set-language/<language>')
-def set_language(language):
-    """Set user language preference"""
+def set_language_route(language):
+    """Set user language preference via URL redirect"""
+    print(f"🌟 SET_LANG: Switching to '{language}'", flush=True)
+    
+    # Validate language
+    if language not in current_app.config['LANGUAGES']:
+        language = current_app.config['DEFAULT_LANGUAGE']
+    
     session['language'] = language
+
     # Store in user profile if logged in
     try:
         verify_jwt_in_request(optional=True)
@@ -429,7 +436,7 @@ def set_language(language):
             if user:
                 user.preferred_language = language
                 db.session.commit()
-    except:
+    except Exception as exc:
         pass
     
     return redirect(request.referrer or url_for('frontend.index'))
@@ -452,7 +459,6 @@ def inject_global_vars():
     language = get_current_language()
     
     # Debug logging
-    from flask import current_app
     if current_app.debug:
         current_app.logger.debug(f"Context processor - current language: {language}")
     
@@ -490,13 +496,6 @@ def inject_global_vars():
 
 
 # Custom template filters
-@frontend_bp.app_template_filter('translate')
-def translate_filter(key, language=None):
-    """Template filter for translations"""
-    if language is None:
-        from business_app.utils.helpers import get_current_language
-        language = get_current_language()
-    return get_translation(key, language)
 
 
 @frontend_bp.app_template_filter('format_price')

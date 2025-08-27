@@ -444,8 +444,8 @@ def setup_enhanced_logging(app):
         'database': ['database', 'error'],
         'flask.app': ['main', 'error'],
         'werkzeug': ['main'],
-        'sqlalchemy.engine': ['database'],
-        'sqlalchemy.dialects': ['database'],
+        # 'sqlalchemy.engine': ['database'],  # DISABLED - SQL logging turned off for debugging
+        # 'sqlalchemy.dialects': ['database'],  # DISABLED - SQL logging turned off for debugging
         'celery': ['main', 'error'],
         'gunicorn': ['main', 'error'],
     }
@@ -482,6 +482,12 @@ def setup_enhanced_logging(app):
     if app.debug:
         app.logger.addHandler(console_handler)
     app.logger.setLevel(logging.DEBUG if app.debug else getattr(logging, app.config['LOG_LEVEL']))
+    
+    # EXPLICITLY DISABLE SQLAlchemy logging for debugging
+    logging.getLogger('sqlalchemy.engine').setLevel(logging.CRITICAL)
+    logging.getLogger('sqlalchemy.dialects').setLevel(logging.CRITICAL)
+    logging.getLogger('sqlalchemy.pool').setLevel(logging.CRITICAL)
+    logging.getLogger('sqlalchemy.orm').setLevel(logging.CRITICAL)
     
     app.logger.info('Enhanced logging system initialized')
 

@@ -13,7 +13,7 @@ class Translation(db.Model):
     __tablename__ = 'translations'
     
     id = db.Column(db.Integer, primary_key=True)
-    key = db.Column(db.String(255), nullable=False, index=True)
+    key = db.Column(db.Text, nullable=False, index=True)
     language = db.Column(db.String(5), nullable=False, index=True)
     value = db.Column(db.Text, nullable=False)
     category = db.Column(db.String(50), default='general', index=True)

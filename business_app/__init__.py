@@ -124,11 +124,11 @@ def setup_request_handlers(app):
     
     @app.before_request
     def before_request():
-        """Execute before each request - NO SESSION, USE URL PARAMS"""
+        """Execute before each request - Check URL params, session, and user preferences"""
         # Set request start time for performance monitoring
         g.start_time = datetime.now(UTC)
         
-        # Get language from URL parameter - NO SESSION STORAGE
+        # Get language from URL parameter first
         lang = request.args.get('lang', None)
         
         print(f"🔥 BEFORE_REQUEST: {request.method} {request.path}, URL lang='{lang}'", flush=True)
@@ -154,26 +154,35 @@ def setup_request_handlers(app):
             except Exception as e:
                 print(f"🔥 STEP2: Exception: {e}", flush=True)
             
-            # 3. Fall back to browser Accept-Language header
+            # 3. Check session language (from set-language endpoint)
+            if not lang:
+                session_lang = session.get('language')
+                if session_lang and session_lang in app.config['LANGUAGES']:
+                    lang = session_lang
+                    print(f"🔥 STEP3: Using session lang '{lang}'", flush=True)
+                else:
+                    print(f"🔥 STEP3: Session lang not usable: '{session_lang}'", flush=True)
+            
+            # 4. Fall back to browser Accept-Language header
             if not lang:
                 browser_lang = request.headers.get('Accept-Language', '')
                 if browser_lang and browser_lang[:2] in app.config['LANGUAGES']:
                     lang = browser_lang[:2]
-                    print(f"🔥 STEP3: Using browser lang '{lang}'", flush=True)
+                    print(f"🔥 STEP4: Using browser lang '{lang}'", flush=True)
                 else:
-                    print(f"🔥 STEP3: Browser lang not usable", flush=True)
+                    print(f"🔥 STEP4: Browser lang not usable", flush=True)
         
-        # 4. Use default language if nothing else worked
+        # 5. Use default language if nothing else worked
         if not lang or lang not in app.config['LANGUAGES']:
             old_lang = lang
             lang = app.config['DEFAULT_LANGUAGE']
-            print(f"🔥 STEP4: Using default lang '{old_lang}' -> '{lang}'", flush=True)
+            print(f"🔥 STEP5: Using default lang '{old_lang}' -> '{lang}'", flush=True)
         else:
-            print(f"🔥 STEP4: Valid lang '{lang}'", flush=True)
+            print(f"🔥 STEP5: Valid lang '{lang}'", flush=True)
         
         # Set the language in request context
         print(f"🔥 SETTING: g.language = '{lang}'", flush=True)
-        set_language(lang)
+        g.language = lang
         
         # Verify
         final_g_language = getattr(g, 'language', 'NOT_SET')

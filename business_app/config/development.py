@@ -25,7 +25,7 @@ class DevelopmentConfig(BaseConfig):
             uri = f'postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}'
         return uri
     
-    SQLALCHEMY_ECHO = True  # Log all SQL statements
+    SQLALCHEMY_ECHO = False  # Log all SQL statements
     
     # Redis Configuration
     REDIS_URL = os.environ.get('REDIS_URL', 'redis://redis:6379/0')

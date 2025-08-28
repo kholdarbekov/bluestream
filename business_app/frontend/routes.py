@@ -1,7 +1,7 @@
 """
 Frontend Routes for Blue Stream Water Business Platform
 """
-from flask import render_template, request, session, current_app, jsonify, redirect, url_for, flash
+from flask import render_template, request, session, current_app, jsonify, redirect, url_for, flash, g
 from flask_jwt_extended import jwt_required, get_jwt_identity, verify_jwt_in_request
 from sqlalchemy import desc
 
@@ -454,9 +454,12 @@ def inject_global_vars():
                 return datetime.now().year
             return datetime.now().strftime(fmt)
     
-    # Get current language
+    # Get current language and set in g object for template filters
     from business_app.utils.helpers import get_current_language
     language = get_current_language()
+    
+    # Set language in g object so template filters can use it
+    g.language = language
     
     # Debug logging
     if current_app.debug:

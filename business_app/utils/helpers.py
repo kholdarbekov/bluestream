@@ -202,22 +202,43 @@ def paginate_query(query, page: int = 1, per_page: int = 20, max_per_page: int =
 
 
 def get_current_language() -> str:
-    """Get current language from request context"""
+    """Get current language from request context, checking user preferences, session, and g object"""
+    from flask import session
+    from flask_jwt_extended import get_jwt_identity, verify_jwt_in_request
+    
     # COMPREHENSIVE LOGGING - Step 1: Function Call
     logger.info(f"🌐 GET_CURRENT_LANGUAGE CALLED")
     
-    # COMPREHENSIVE LOGGING - Step 2: Check g object
-    g_language = getattr(g, 'language', 'NOT_SET')
     default_language = current_app.config.get('DEFAULT_LANGUAGE', 'en')
-    logger.info(f"🌐 g.language='{g_language}', default='{default_language}'")
     
-    # COMPREHENSIVE LOGGING - Step 3: Return decision
-    if g_language != 'NOT_SET':
+    # COMPREHENSIVE LOGGING - Step 2: Check user preferences if logged in
+    try:
+        verify_jwt_in_request(optional=True)
+        current_user_id = get_jwt_identity()
+        if current_user_id:
+            from business_app.models import User
+            user = User.query.get(current_user_id)
+            if user and user.preferred_language:
+                logger.info(f"🌐 RETURNING user.preferred_language: '{user.preferred_language}'")
+                return user.preferred_language
+    except Exception as e:
+        logger.debug(f"🌐 No JWT user context: {e}")
+    
+    # COMPREHENSIVE LOGGING - Step 3: Check session
+    session_language = session.get('language')
+    if session_language:
+        logger.info(f"🌐 RETURNING session['language']: '{session_language}'")
+        return session_language
+    
+    # COMPREHENSIVE LOGGING - Step 4: Check g object (fallback)
+    g_language = getattr(g, 'language', None)
+    if g_language:
         logger.info(f"🌐 RETURNING g.language: '{g_language}'")
         return g_language
-    else:
-        logger.info(f"🌐 RETURNING DEFAULT: '{default_language}'")
-        return default_language
+    
+    # COMPREHENSIVE LOGGING - Step 5: Return default
+    logger.info(f"🌐 RETURNING DEFAULT: '{default_language}'")
+    return default_language
 
 
 def set_language(language: str):

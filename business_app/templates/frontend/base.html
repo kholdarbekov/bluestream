@@ -36,7 +36,7 @@
         <!-- preloader -->
         <div class="loader-wrap">
             <div class="preloader">
-                <div class="preloader-close">{{ 'Preloader Close'|translate }}</div>
+                <div class="preloader-close">{{ 'Preloader Close'|translate(current_language) }}</div>
                 <div id="handle-preloader" class="handle-preloader">
                     <div class="animation-preloader">
                         <div class="spinner"></div>
@@ -75,11 +75,11 @@
                                 <ul class="navigation clearfix">
                                     <li class="{% if request.endpoint == 'frontend.index' %}current{% endif %}">
                                         <!-- DEBUG: Home translation - current_lang={{ get_current_lang() }}, g_lang={{ g.get('language', 'NOT_SET') }}, URL_lang={{ request.args.get('lang', 'NOT_SET') }} -->
-                                        <a href="{{ url_for('frontend.index') }}" data-debug="home-link" data-lang="{{ get_current_lang() }}">{{ 'Home'|translate }}</a>
-                                        <!-- DEBUG: Home translation result: {{ 'Home'|translate }} -->
+                                        <a href="{{ url_for('frontend.index') }}" data-debug="home-link" data-lang="{{ get_current_lang() }}">{{ 'Home'|translate(current_language) }}</a>
+                                        <!-- DEBUG: Home translation result: {{ 'Home'|translate(current_language) }} -->
                                     </li>
                                     <li class="dropdown {% if request.endpoint in ['frontend.shop', 'frontend.product_detail'] %}current{% endif %}">
-                                        <a href="{{ url_for('frontend.shop') }}">{{ 'Shop'|translate }}</a>
+                                        <a href="{{ url_for('frontend.shop') }}">{{ 'Shop'|translate(current_language) }}</a>
                                         {% if nav_categories %}
                                         <ul>
                                             {% for category in nav_categories[:6] %}
@@ -89,17 +89,17 @@
                                         {% endif %}
                                     </li>
                                     <li class="{% if request.endpoint == 'frontend.subscriptions' %}current{% endif %}">
-                                        <a href="{{ url_for('frontend.subscriptions') }}">{{ 'Subscriptions'|translate }}</a>
+                                        <a href="{{ url_for('frontend.subscriptions') }}">{{ 'Subscriptions'|translate(current_language) }}</a>
                                     </li>
                                     <li class="{% if request.endpoint == 'frontend.services' %}current{% endif %}">
-                                        <a href="{{ url_for('frontend.services') }}">{{ 'Services'|translate }}</a>
+                                        <a href="{{ url_for('frontend.services') }}">{{ 'Services'|translate(current_language) }}</a>
                                     </li>
                                     <li class="dropdown">
-                                        <a href="#">{{ 'Pages'|translate }}</a>
+                                        <a href="#">{{ 'Pages'|translate(current_language) }}</a>
                                         <ul>
-                                            <li><a href="{{ url_for('frontend.about') }}">{{ 'About Us'|translate }}</a></li>
-                                            <li><a href="{{ url_for('frontend.gallery') }}">{{ 'Gallery'|translate }}</a></li>
-                                            <li><a href="{{ url_for('frontend.contact') }}">{{ 'Contact'|translate }}</a></li>
+                                            <li><a href="{{ url_for('frontend.about') }}">{{ 'About Us'|translate(current_language) }}</a></li>
+                                            <li><a href="{{ url_for('frontend.gallery') }}">{{ 'Gallery'|translate(current_language) }}</a></li>
+                                            <li><a href="{{ url_for('frontend.contact') }}">{{ 'Contact'|translate(current_language) }}</a></li>
                                         </ul>
                                     </li>
                                 </ul>
@@ -116,7 +116,7 @@
                                     <div class="form-container">
                                         <form method="get" action="{{ url_for('frontend.shop') }}">
                                             <div class="form-group">
-                                                <input type="search" name="search" placeholder="{{ 'Search products...'|translate }}" required>
+                                                <input type="search" name="search" placeholder="{{ 'Search products...'|translate(current_language) }}" required>
                                                 <button type="submit" class="search-btn"><span class="fas fa-search"></span></button>
                                             </div>
                                         </form>
@@ -156,17 +156,17 @@
                                 </button>
                                 <div class="dropdown-menu">
                                     <a class="dropdown-item" href="{{ url_for('frontend.my_account') }}">
-                                        <i class="far fa-user-circle"></i> {{ 'My Account'|translate }}
+                                        <i class="far fa-user-circle"></i> {{ 'My Account'|translate(current_language) }}
                                     </a>
                                     <a class="dropdown-item" href="{{ url_for('frontend.my_orders') }}">
-                                        <i class="far fa-list"></i> {{ 'My Orders'|translate }}
+                                        <i class="far fa-list"></i> {{ 'My Orders'|translate(current_language) }}
                                     </a>
                                     <a class="dropdown-item" href="{{ url_for('frontend.my_loyalty') }}">
-                                        <i class="far fa-star"></i> {{ 'Loyalty Program'|translate }}
+                                        <i class="far fa-star"></i> {{ 'Loyalty Program'|translate(current_language) }}
                                     </a>
                                     <div class="dropdown-divider"></div>
                                     <a class="dropdown-item" href="#" onclick="logout()">
-                                        <i class="far fa-sign-out"></i> {{ 'Logout'|translate }}
+                                        <i class="far fa-sign-out"></i> {{ 'Logout'|translate(current_language) }}
                                     </a>
                                 </div>
                             </div>
@@ -174,7 +174,7 @@
                         {% else %}
                         <li class="account-info">
                             <a href="{{ url_for('frontend.login') }}" class="theme-btn btn-one btn-sm">
-                                <i class="far fa-user"></i> {{ 'Login'|translate }}
+                                <i class="far fa-user"></i> {{ 'Login'|translate(current_language) }}
                             </a>
                         </li>
                         {% endif %}
@@ -203,7 +203,7 @@
                                     <div class="form-container">
                                         <form method="get" action="{{ url_for('frontend.shop') }}">
                                             <div class="form-group">
-                                                <input type="search" name="search" placeholder="{{ 'Search products...'|translate }}" required>
+                                                <input type="search" name="search" placeholder="{{ 'Search products...'|translate(current_language) }}" required>
                                                 <button type="submit" class="search-btn"><span class="fas fa-search"></span></button>
                                             </div>
                                         </form>
@@ -243,17 +243,17 @@
                                 </button>
                                 <div class="dropdown-menu">
                                     <a class="dropdown-item" href="{{ url_for('frontend.my_account') }}">
-                                        <i class="far fa-user-circle"></i> {{ 'My Account'|translate }}
+                                        <i class="far fa-user-circle"></i> {{ 'My Account'|translate(current_language) }}
                                     </a>
                                     <a class="dropdown-item" href="{{ url_for('frontend.my_orders') }}">
-                                        <i class="far fa-list"></i> {{ 'My Orders'|translate }}
+                                        <i class="far fa-list"></i> {{ 'My Orders'|translate(current_language) }}
                                     </a>
                                     <a class="dropdown-item" href="{{ url_for('frontend.my_loyalty') }}">
-                                        <i class="far fa-star"></i> {{ 'Loyalty Program'|translate }}
+                                        <i class="far fa-star"></i> {{ 'Loyalty Program'|translate(current_language) }}
                                     </a>
                                     <div class="dropdown-divider"></div>
                                     <a class="dropdown-item" href="#" onclick="logout()">
-                                        <i class="far fa-sign-out"></i> {{ 'Logout'|translate }}
+                                        <i class="far fa-sign-out"></i> {{ 'Logout'|translate(current_language) }}
                                     </a>
                                 </div>
                             </div>
@@ -261,7 +261,7 @@
                         {% else %}
                         <li class="account-info">
                             <a href="{{ url_for('frontend.login') }}" class="theme-btn btn-one btn-sm">
-                                <i class="far fa-user"></i> {{ 'Login'|translate }}
+                                <i class="far fa-user"></i> {{ 'Login'|translate(current_language) }}
                             </a>
                         </li>
                         {% endif %}
@@ -280,7 +280,7 @@
                 <div class="nav-logo"><a href="{{ url_for('frontend.index') }}"><img src="{{ url_for('static', filename='images/logo.png') }}" alt="{{ company_name }}" title="{{ company_name }}"></a></div>
                 <div class="menu-outer"><!--Here Menu Will Come Automatically Via Javascript / Same Menu as in Header--></div>
                 <div class="contact-info">
-                    <h4>{{ 'Contact Info'|translate }}</h4>
+                    <h4>{{ 'Contact Info'|translate(current_language) }}</h4>
                     <ul>
                         <li>{{ company_phone }}</li>
                         <li>{{ company_email }}</li>
@@ -312,7 +312,7 @@
                 <div class="footer-top clearfix">
                     <div class="line-shape" style="background-image: url({{ url_for('static', filename='images/shape/shape-11.png') }});"></div>
                     <div class="text pull-left">
-                        <h2>{{ 'Please'|translate }} <span>{{ 'Call Us'|translate }}</span> {{ 'to Take an Extraordinary Service'|translate }}</h2>
+                        <h2>{{ 'Please'|translate(current_language) }} <span>{{ 'Call Us'|translate(current_language) }}</span> {{ 'to Take an Extraordinary Service'|translate(current_language) }}</h2>
                     </div>
                     <div class="support-box pull-right">
                         <a href="tel:{{ company_phone }}"><i class="fas fa-phone"></i>{{ company_phone }}</a>
@@ -324,13 +324,13 @@
                             <div class="footer-widget logo-widget">
                                 <figure class="footer-logo"><a href="{{ url_for('frontend.index') }}"><img src="{{ url_for('static', filename='images/footer-logo.png') }}" alt="{{ company_name }}"></a></figure>
                                 <div class="text">
-                                    <p>{{ 'Premium water delivery services with a commitment to quality and customer satisfaction.'|translate }}</p>
+                                    <p>{{ 'Premium water delivery services with a commitment to quality and customer satisfaction.'|translate(current_language) }}</p>
                                 </div>
                                 <div class="schedule-box">
-                                    <h6>{{ 'Open Hours:'|translate }}</h6>
+                                    <h6>{{ 'Open Hours:'|translate(current_language) }}</h6>
                                     <ul class="list clearfix">
-                                        <li>{{ 'Mon - Sat: 9AM - 6PM.'|translate }}</li>
-                                        <li>{{ 'Delivery: 24/7'|translate }}</li>
+                                        <li>{{ 'Mon - Sat: 9AM - 6PM.'|translate(current_language) }}</li>
+                                        <li>{{ 'Delivery: 24/7'|translate(current_language) }}</li>
                                     </ul>
                                 </div>
                             </div>
@@ -338,12 +338,12 @@
                         <div class="col-lg-3 col-md-6 col-sm-12 footer-column">
                             <div class="footer-widget contact-widget ml-70">
                                 <div class="widget-title">
-                                    <h4>{{ 'Address'|translate }}</h4>
+                                    <h4>{{ 'Address'|translate(current_language) }}</h4>
                                 </div>
                                 <div class="widget-content">
                                     <ul class="info-list clearfix">
-                                        <li><i class="fal fa-map-marker-alt"></i>{{ 'Tashkent, Uzbekistan'|translate }}</li>
-                                        <li><i class="fal fa-phone"></i>{{ 'Call Us:'|translate }} <a href="tel:{{ company_phone }}">{{ company_phone }}</a></li>
+                                        <li><i class="fal fa-map-marker-alt"></i>{{ 'Tashkent, Uzbekistan'|translate(current_language) }}</li>
+                                        <li><i class="fal fa-phone"></i>{{ 'Call Us:'|translate(current_language) }} <a href="tel:{{ company_phone }}">{{ company_phone }}</a></li>
                                         <li><i class="fal fa-envelope-open-text"></i><a href="mailto:{{ company_email }}">{{ company_email }}</a></li>
                                     </ul>
                                 </div>
@@ -352,15 +352,15 @@
                         <div class="col-lg-3 col-md-6 col-sm-12 footer-column">
                             <div class="footer-widget links-widget ml-70">
                                 <div class="widget-title">
-                                    <h4>{{ 'Useful Links'|translate }}</h4>
+                                    <h4>{{ 'Useful Links'|translate(current_language) }}</h4>
                                 </div>
                                 <div class="widget-content">
                                     <ul class="links-list clearfix">
-                                        <li><a href="{{ url_for('frontend.about') }}">{{ 'About Company'|translate }}</a></li>
-                                        <li><a href="{{ url_for('frontend.services') }}">{{ 'Services'|translate }}</a></li>
-                                        <li><a href="{{ url_for('frontend.shop') }}">{{ 'Our Products'|translate }}</a></li>
-                                        <li><a href="#">{{ 'Our Blog'|translate }}</a></li>
-                                        <li><a href="{{ url_for('frontend.contact') }}">{{ 'Contact Us'|translate }}</a></li>
+                                        <li><a href="{{ url_for('frontend.about') }}">{{ 'About Company'|translate(current_language) }}</a></li>
+                                        <li><a href="{{ url_for('frontend.services') }}">{{ 'Services'|translate(current_language) }}</a></li>
+                                        <li><a href="{{ url_for('frontend.shop') }}">{{ 'Our Products'|translate(current_language) }}</a></li>
+                                        <li><a href="#">{{ 'Our Blog'|translate(current_language) }}</a></li>
+                                        <li><a href="{{ url_for('frontend.contact') }}">{{ 'Contact Us'|translate(current_language) }}</a></li>
                                     </ul>
                                 </div>
                             </div>
@@ -368,14 +368,14 @@
                         <div class="col-lg-3 col-md-6 col-sm-12 footer-column">
                             <div class="footer-widget subscribe-widget">
                                 <div class="widget-title">
-                                    <h4>{{ 'Subscribe'|translate }}</h4>
+                                    <h4>{{ 'Subscribe'|translate(current_language) }}</h4>
                                 </div>
                                 <div class="widget-content">
-                                    <p>{{ 'Stay updated with our latest news, offers, and water delivery tips.'|translate }}</p>
+                                    <p>{{ 'Stay updated with our latest news, offers, and water delivery tips.'|translate(current_language) }}</p>
                                     <div class="form-inner">
                                         <form action="{{ url_for('frontend.contact') }}" method="post">
                                             <div class="form-group">
-                                                <input type="email" name="email" placeholder="{{ 'Your Email'|translate }}" required="">
+                                                <input type="email" name="email" placeholder="{{ 'Your Email'|translate(current_language) }}" required="">
                                                 <button type="submit"><i class="far fa-long-arrow-alt-right"></i></button>
                                             </div>
                                         </form>
@@ -390,7 +390,7 @@
                 <div class="auto-container">
                     <div class="bottom-inner">
                         <div class="copyright">
-                            <p><a href="/">Blue Stream Group</a> &copy; 2025 {{ 'All Rights Reserved'|translate }}</p>
+                            <p><a href="/">Blue Stream Group</a> &copy; 2025 {{ 'All Rights Reserved'|translate(current_language) }}</p>
                         </div>
                         <ul class="social-links clearfix">
                             <li><a href="#"><i class="fab fa-facebook-f"></i></a></li>
@@ -399,8 +399,8 @@
                             <li><a href="#"><i class="fab fa-instagram"></i></a></li>
                         </ul>
                         <ul class="footer-nav clearfix">
-                            <li><a href="#">{{ 'Terms of Service'|translate }}</a></li>
-                            <li><a href="#">{{ 'Privacy Policy'|translate }}</a></li>
+                            <li><a href="#">{{ 'Terms of Service'|translate(current_language) }}</a></li>
+                            <li><a href="#">{{ 'Privacy Policy'|translate(current_language) }}</a></li>
                         </ul>
                     </div>
                 </div>
@@ -478,7 +478,7 @@
             localStorage.removeItem('cart');
             
             // Show logout message
-            showNotification('{{ "Logged out successfully"|translate }}', 'success');
+            showNotification('{{ "Logged out successfully"|translate(current_language) }}', 'success');
             
             // Redirect to login
             setTimeout(() => {
@@ -505,7 +505,7 @@
             cart = [];
             localStorage.removeItem('cart');
             
-            showNotification('{{ "Logged out from all sessions"|translate }}', 'success');
+            showNotification('{{ "Logged out from all sessions"|translate(current_language) }}', 'success');
             
             setTimeout(() => {
                 window.location.href = '{{ url_for("frontend.login") }}';
@@ -571,7 +571,7 @@
             }
             localStorage.setItem('cart', JSON.stringify(cart));
             updateCartCount();
-            showNotification('{{ "Product added to cart"|translate }}', 'success');
+            showNotification('{{ "Product added to cart"|translate(current_language) }}', 'success');
         }
         
         function removeFromCart(productId) {
@@ -658,7 +658,7 @@
             setInterval(async () => {
                 const isValid = await validateSession();
                 if (!isValid) {
-                    showNotification('{{ "Your session has expired. Please login again."|translate }}', 'warning');
+                    showNotification('{{ "Your session has expired. Please login again."|translate(current_language) }}', 'warning');
                     setTimeout(logout, 3000);
                 }
             }, 15 * 60 * 1000);

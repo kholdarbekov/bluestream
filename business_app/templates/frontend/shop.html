@@ -1,6 +1,6 @@
 {% extends "frontend/base.html" %}
 
-{% block title %}{{ 'Shop'|translate }} - {{ company_name }}{% endblock %}
+{% block title %}{{ 'Shop'|translate(current_language) }} - {{ company_name }}{% endblock %}
 
 {% block content %}
         <!-- page-title -->
@@ -8,10 +8,10 @@
             <div class="bg-layer" style="background-image: url({{ url_for('static', filename='images/background/page-title.jpg') }});"></div>
             <div class="auto-container">
                 <div class="content-box">
-                    <h1>{{ 'Our Products'|translate }}</h1>
+                    <h1>{{ 'Our Products'|translate(current_language) }}</h1>
                     <ul class="bread-crumb clearfix">
-                        <li><a href="{{ url_for('frontend.index') }}">{{ 'Home'|translate }}</a></li>
-                        <li>{{ 'Shop'|translate }}</li>
+                        <li><a href="{{ url_for('frontend.index') }}">{{ 'Home'|translate(current_language) }}</a></li>
+                        <li>{{ 'Shop'|translate(current_language) }}</li>
                     </ul>
                 </div>
             </div>
@@ -27,12 +27,12 @@
                             <!-- Search Widget -->
                             <div class="sidebar-widget search-widget">
                                 <div class="widget-title">
-                                    <h4>{{ 'Search Products'|translate }}</h4>
+                                    <h4>{{ 'Search Products'|translate(current_language) }}</h4>
                                 </div>
                                 <div class="search-form">
                                     <form method="get" action="{{ url_for('frontend.shop') }}">
                                         <div class="form-group">
-                                            <input type="search" name="search" placeholder="{{ 'Search...'|translate }}" value="{{ search_query or '' }}">
+                                            <input type="search" name="search" placeholder="{{ 'Search...'|translate(current_language) }}" value="{{ search_query or '' }}">
                                             <button type="submit"><i class="far fa-search"></i></button>
                                         </div>
                                     </form>
@@ -42,12 +42,12 @@
                             <!-- Category Widget -->
                             <div class="sidebar-widget category-widget">
                                 <div class="widget-title">
-                                    <h4>{{ 'Categories'|translate }}</h4>
+                                    <h4>{{ 'Categories'|translate(current_language) }}</h4>
                                 </div>
                                 <div class="widget-content">
                                     <ul class="category-list clearfix">
                                         <li class="{% if not current_category %}active{% endif %}">
-                                            <a href="{{ url_for('frontend.shop') }}">{{ 'All Products'|translate }}</a>
+                                            <a href="{{ url_for('frontend.shop') }}">{{ 'All Products'|translate(current_language) }}</a>
                                         </li>
                                         {% for category in categories %}
                                         <li class="{% if current_category == category.id %}active{% endif %}">
@@ -61,7 +61,7 @@
                             <!-- Price Range Widget -->
                             <div class="sidebar-widget price-widget">
                                 <div class="widget-title">
-                                    <h4>{{ 'Price Range'|translate }}</h4>
+                                    <h4>{{ 'Price Range'|translate(current_language) }}</h4>
                                 </div>
                                 <div class="price-range-slider">
                                     <div id="slider-range"></div>
@@ -83,15 +83,15 @@
                                         (products.page - 1) * products.per_page + 1 if products.items else 0,
                                         min(products.page * products.per_page, products.total),
                                         products.total
-                                    )|translate }}</p>
+                                    )|translate(current_language) }}</p>
                                 </div>
                                 <div class="right-column">
                                     <div class="short-box">
                                         <select class="selectmenu" onchange="sortProducts(this.value)">
-                                            <option value="newest">{{ 'Sort by Latest'|translate }}</option>
-                                            <option value="price_low">{{ 'Price: Low to High'|translate }}</option>
-                                            <option value="price_high">{{ 'Price: High to Low'|translate }}</option>
-                                            <option value="name">{{ 'Name: A to Z'|translate }}</option>
+                                            <option value="newest">{{ 'Sort by Latest'|translate(current_language) }}</option>
+                                            <option value="price_low">{{ 'Price: Low to High'|translate(current_language) }}</option>
+                                            <option value="price_high">{{ 'Price: High to Low'|translate(current_language) }}</option>
+                                            <option value="name">{{ 'Name: A to Z'|translate(current_language) }}</option>
                                         </select>
                                     </div>
                                 </div>
@@ -126,7 +126,7 @@
                                                 </div>
                                                 <p>{{ product.description[:60] }}{% if product.description|length > 60 %}...{% endif %}</p>
                                                 <div class="btn-box">
-                                                    <button onclick="addToCart({{ product.id }})" class="theme-btn btn-two">{{ 'Add to Cart'|translate }}</button>
+                                                    <button onclick="addToCart({{ product.id }})" class="theme-btn btn-two">{{ 'Add to Cart'|translate(current_language) }}</button>
                                                 </div>
                                             </div>
                                         </div>

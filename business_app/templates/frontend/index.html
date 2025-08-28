@@ -1,6 +1,6 @@
 {% extends "frontend/base.html" %}
 
-{% block title %}{{ 'Home'|translate }} - {{ company_name }}{% endblock %}
+{% block title %}{{ 'Home'|translate(current_language) }} - {{ company_name }}{% endblock %}
 
 {% block content %}
         <!-- banner-section -->
@@ -11,14 +11,14 @@
                     <div class="auto-container">
                         <div class="inner-box">
                             <div class="image-box">
-                                <figure class="image"><img src="{{ url_for('static', filename='images/banner/vector-5.png') }}" alt="{{ 'Water Delivery'|translate }}"></figure>
+                                <figure class="image"><img src="{{ url_for('static', filename='images/banner/vector-5.png') }}" alt="{{ 'Water Delivery'|translate(current_language) }}"></figure>
                             </div>
                             <div class="content-box">
-                                <h2>{{ 'Always Want Safe and Good Water for Healthy Life'|translate }}</h2>
-                                <p>{{ 'Experience the convenience of premium water delivery service with our reliable, eco-friendly solutions for your home and office.'|translate }}</p>
+                                <h2>{{ 'Always Want Safe and Good Water for Healthy Life'|translate(current_language) }}</h2>
+                                <p>{{ 'Experience the convenience of premium water delivery service with our reliable, eco-friendly solutions for your home and office.'|translate(current_language) }}</p>
                                 <div class="btn-box clearfix">
-                                    <a href="{{ url_for('frontend.services') }}" class="theme-btn btn-one">{{ 'Our Services'|translate }}</a>
-                                    <a href="{{ url_for('frontend.shop') }}" class="theme-btn banner-btn">{{ 'Discover'|translate }}</a>
+                                    <a href="{{ url_for('frontend.services') }}" class="theme-btn btn-one">{{ 'Our Services'|translate(current_language) }}</a>
+                                    <a href="{{ url_for('frontend.shop') }}" class="theme-btn banner-btn">{{ 'Discover'|translate(current_language) }}</a>
                                 </div>
                             </div>
                         </div> 
@@ -28,14 +28,14 @@
                     <div class="auto-container">
                         <div class="inner-box">
                             <div class="image-box">
-                                <figure class="image"><img src="{{ url_for('static', filename='images/banner/vector-4.png') }}" alt="{{ 'Premium Water'|translate }}"></figure>
+                                <figure class="image"><img src="{{ url_for('static', filename='images/banner/vector-4.png') }}" alt="{{ 'Premium Water'|translate(current_language) }}"></figure>
                             </div>
                             <div class="content-box">
-                                <h2>{{ 'Pure Water Delivery To Your Doorstep'|translate }}</h2>
-                                <p>{{ 'We provide our services across Uzbekistan with a network of professional delivery partners ensuring the highest quality standards.'|translate }}</p>
+                                <h2>{{ 'Pure Water Delivery To Your Doorstep'|translate(current_language) }}</h2>
+                                <p>{{ 'We provide our services across Uzbekistan with a network of professional delivery partners ensuring the highest quality standards.'|translate(current_language) }}</p>
                                 <div class="btn-box clearfix">
-                                    <a href="{{ url_for('frontend.services') }}" class="theme-btn btn-one">{{ 'Our Services'|translate }}</a>
-                                    <a href="{{ url_for('frontend.shop') }}" class="theme-btn banner-btn">{{ 'Shop Now'|translate }}</a>
+                                    <a href="{{ url_for('frontend.services') }}" class="theme-btn btn-one">{{ 'Our Services'|translate(current_language) }}</a>
+                                    <a href="{{ url_for('frontend.shop') }}" class="theme-btn banner-btn">{{ 'Shop Now'|translate(current_language) }}</a>
                                 </div>
                             </div>
                         </div> 
@@ -45,14 +45,14 @@
                     <div class="auto-container">
                         <div class="inner-box">
                             <div class="image-box">
-                                <figure class="image"><img src="{{ url_for('static', filename='images/banner/vector-3.png') }}" alt="{{ 'Home Delivery'|translate }}"></figure>
+                                <figure class="image"><img src="{{ url_for('static', filename='images/banner/vector-3.png') }}" alt="{{ 'Home Delivery'|translate(current_language) }}"></figure>
                             </div>
                             <div class="content-box">
-                                <h2>{{ 'Trusted Name In Bottled Water Industry'|translate }}</h2>
-                                <p>{{ 'Blue Stream Group has been serving communities across Uzbekistan with premium water delivery services for over a decade.'|translate }}</p>
+                                <h2>{{ 'Trusted Name In Bottled Water Industry'|translate(current_language) }}</h2>
+                                <p>{{ 'Blue Stream Group has been serving communities across Uzbekistan with premium water delivery services for over a decade.'|translate(current_language) }}</p>
                                 <div class="btn-box clearfix">
-                                    <a href="{{ url_for('frontend.about') }}" class="theme-btn btn-one">{{ 'About Us'|translate }}</a>
-                                    <a href="{{ url_for('frontend.subscriptions') }}" class="theme-btn banner-btn">{{ 'View Plans'|translate }}</a>
+                                    <a href="{{ url_for('frontend.about') }}" class="theme-btn btn-one">{{ 'About Us'|translate(current_language) }}</a>
+                                    <a href="{{ url_for('frontend.subscriptions') }}" class="theme-btn banner-btn">{{ 'View Plans'|translate(current_language) }}</a>
                                 </div>
                             </div>
                         </div> 
@@ -71,7 +71,7 @@
             <div class="auto-container">
                 <div class="inner-container wow fadeInLeft animated" data-wow-delay="00ms" data-wow-duration="1500ms">
                     <div class="title-text">
-                        <h2>{{ 'A Trusted Name In'|translate }} <br />{{ 'Bottled Water Industry'|translate }}</h2>
+                        <h2>{{ 'A Trusted Name In'|translate(current_language) }} <br />{{ 'Bottled Water Industry'|translate(current_language) }}</h2>
                     </div>
                     <div class="row clearfix">
                         <div class="col-lg-3 col-md-6 col-sm-12 feature-block">
@@ -79,8 +79,8 @@
                                 <div class="inner-box">
                                     <div class="shape" style="background-image: url({{ url_for('static', filename='images/shape/shape-27.png') }});"></div>
                                     <div class="icon-box"><i class="flaticon-water-drop"></i></div>
-                                    <h4>{{ 'Maximum Purity'|translate }}</h4>
-                                    <p>{{ 'Our water goes through rigorous filtration processes ensuring the highest quality.'|translate }}</p>
+                                    <h4>{{ 'Maximum Purity'|translate(current_language) }}</h4>
+                                    <p>{{ 'Our water goes through rigorous filtration processes ensuring the highest quality.'|translate(current_language) }}</p>
                                 </div>
                             </div>
                         </div>
@@ -89,8 +89,8 @@
                                 <div class="inner-box">
                                     <div class="shape" style="background-image: url({{ url_for('static', filename='images/shape/shape-27.png') }});"></div>
                                     <div class="icon-box"><i class="flaticon-water-drop-1"></i></div>
-                                    <h4>{{ 'Chlorine Free'|translate }}</h4>
-                                    <p>{{ 'Pure and clean water without harmful chemicals and additives.'|translate }}</p>
+                                    <h4>{{ 'Chlorine Free'|translate(current_language) }}</h4>
+                                    <p>{{ 'Pure and clean water without harmful chemicals and additives.'|translate(current_language) }}</p>
                                 </div>
                             </div>
                         </div>
@@ -99,8 +99,8 @@
                                 <div class="inner-box">
                                     <div class="shape" style="background-image: url({{ url_for('static', filename='images/shape/shape-27.png') }});"></div>
                                     <div class="icon-box"><i class="flaticon-recycle"></i></div>
-                                    <h4>{{ '8 Steps Filtration'|translate }}</h4>
-                                    <p>{{ 'Advanced multi-stage filtration system for optimal water quality.'|translate }}</p>
+                                    <h4>{{ '8 Steps Filtration'|translate(current_language) }}</h4>
+                                    <p>{{ 'Advanced multi-stage filtration system for optimal water quality.'|translate(current_language) }}</p>
                                 </div>
                             </div>
                         </div>
@@ -108,8 +108,8 @@
                             <div class="feature-block-one">
                                 <div class="inner-box">
                                     <div class="icon-box"><i class="flaticon-glass"></i></div>
-                                    <h4>{{ 'Healthy Water'|translate }}</h4>
-                                    <p>{{ 'Essential minerals preserved for your health and well-being.'|translate }}</p>
+                                    <h4>{{ 'Healthy Water'|translate(current_language) }}</h4>
+                                    <p>{{ 'Essential minerals preserved for your health and well-being.'|translate(current_language) }}</p>
                                 </div>
                             </div>
                         </div>
@@ -126,11 +126,11 @@
                     <div class="col-lg-6 col-md-12 col-sm-12 image-column">
                         <div class="image_block_2">
                             <div class="image-box">
-                                <figure class="image image-1 clearfix"><img src="{{ url_for('static', filename='images/resource/about-2.png') }}" alt="{{ 'About Us'|translate }}"></figure>
-                                <figure class="image image-2"><img src="{{ url_for('static', filename='images/resource/about-3.png') }}" alt="{{ 'Quality Water'|translate }}"></figure>
+                                <figure class="image image-1 clearfix"><img src="{{ url_for('static', filename='images/resource/about-2.png') }}" alt="{{ 'About Us'|translate(current_language) }}"></figure>
+                                <figure class="image image-2"><img src="{{ url_for('static', filename='images/resource/about-3.png') }}" alt="{{ 'Quality Water'|translate(current_language) }}"></figure>
                                 <div class="text">
                                     <h2>100+</h2>
-                                    <h6>{{ 'Meters deep'|translate }}</h6>
+                                    <h6>{{ 'Meters deep'|translate(current_language) }}</h6>
                                 </div>
                             </div>
                         </div>
@@ -139,14 +139,14 @@
                         <div class="content_block_1">
                             <div class="content-box wow fadeInRight animated" data-wow-delay="00ms" data-wow-duration="1500ms">
                                 <div class="sec-title">
-                                    <h2>{{ 'We Always Want Safe and Healthy Water for Healthy Life'|translate }}</h2>
+                                    <h2>{{ 'We Always Want Safe and Healthy Water for Healthy Life'|translate(current_language) }}</h2>
                                 </div>
                                 <div class="text">
-                                    <p>{{ 'Blue Stream Group is dedicated to providing the highest quality water delivery services to homes and businesses across Uzbekistan. Our commitment to excellence ensures that every drop meets the strictest safety and purity standards.'|translate }}</p>
-                                    <p>{{ 'With state-of-the-art filtration technology and a customer-first approach, we have become the trusted choice for thousands of families and businesses seeking reliable water solutions.'|translate }}</p>
+                                    <p>{{ 'Blue Stream Group is dedicated to providing the highest quality water delivery services to homes and businesses across Uzbekistan. Our commitment to excellence ensures that every drop meets the strictest safety and purity standards.'|translate(current_language) }}</p>
+                                    <p>{{ 'With state-of-the-art filtration technology and a customer-first approach, we have become the trusted choice for thousands of families and businesses seeking reliable water solutions.'|translate(current_language) }}</p>
                                 </div>
                                 <div class="btn-box">
-                                    <a href="{{ url_for('frontend.about') }}" class="theme-btn btn-one">{{ 'Read More'|translate }}</a>
+                                    <a href="{{ url_for('frontend.about') }}" class="theme-btn btn-one">{{ 'Read More'|translate(current_language) }}</a>
                                 </div>
                             </div>
                         </div>
@@ -161,7 +161,7 @@
             <div class="pattern-layer" style="background-image: url({{ url_for('static', filename='images/shape/shape-18.png') }});"></div>
             <div class="auto-container">
                 <div class="sec-title">
-                    <h2>{{ 'We Deliver Best Quality'|translate }} <br />{{ 'Water Products'|translate }}</h2>
+                    <h2>{{ 'We Deliver Best Quality'|translate(current_language) }} <br />{{ 'Water Products'|translate(current_language) }}</h2>
                 </div>
                 <div class="row clearfix">
                     {% for product in featured_products[:3] %}
@@ -182,7 +182,7 @@
                                     <h6>{{ product.current_price|format_price }}</h6>
                                     <p>{{ product.short_description[:60] if product.short_description }}{% if product.short_description and product.short_description|length > 60 %}...{% endif %}</p>
                                     <div class="btn-box">
-                                        <button onclick="addToCart({{ product.id }})" class="theme-btn btn-two">{{ 'Add to Cart'|translate }}</button>
+                                        <button onclick="addToCart({{ product.id }})" class="theme-btn btn-two">{{ 'Add to Cart'|translate(current_language) }}</button>
                                     </div>
                                 </div>
                             </div>
@@ -191,7 +191,7 @@
                     {% endfor %}
                 </div>
                 <div class="more-btn">
-                    <a href="{{ url_for('frontend.shop') }}" class="theme-btn btn-one">{{ 'View All Products'|translate }}</a>
+                    <a href="{{ url_for('frontend.shop') }}" class="theme-btn btn-one">{{ 'View All Products'|translate(current_language) }}</a>
                 </div>
             </div>
         </section>
@@ -202,8 +202,8 @@
         <section class="pricing-section">
             <div class="auto-container">
                 <div class="sec-title centred">
-                    <h2>{{ 'Choose Your Perfect'|translate }} <br />{{ 'Subscription Plan'|translate }}</h2>
-                    <p>{{ 'Save money and never run out of water with our flexible subscription plans.'|translate }}</p>
+                    <h2>{{ 'Choose Your Perfect'|translate(current_language) }} <br />{{ 'Subscription Plan'|translate(current_language) }}</h2>
+                    <p>{{ 'Save money and never run out of water with our flexible subscription plans.'|translate(current_language) }}</p>
                 </div>
                 <div class="row clearfix">
                     {% for plan in subscription_plans %}
@@ -211,27 +211,27 @@
                         <div class="pricing-block-one wow fadeInUp animated" data-wow-delay="{{ loop.index0 * 200 }}ms" data-wow-duration="1500ms">
                             <div class="pricing-table {% if plan.is_popular %}popular{% endif %}">
                                 {% if plan.is_popular %}
-                                <div class="popular-tag">{{ 'Most Popular'|translate }}</div>
+                                <div class="popular-tag">{{ 'Most Popular'|translate(current_language) }}</div>
                                 {% endif %}
                                 <div class="table-header">
                                     <h4>{{ plan.name }}</h4>
-                                    <div class="price">{{ plan.price|format_price }}<span>/{{ plan.billing_cycle|translate }}</span></div>
+                                    <div class="price">{{ plan.price|format_price }}<span>/{{ plan.billing_cycle|translate(current_language) }}</span></div>
                                 </div>
                                 <div class="table-content">
                                     <ul class="feature-list">
                                         {% for feature in plan.features %}
-                                        <li>{{ feature|translate }}</li>
+                                        <li>{{ feature|translate(current_language) }}</li>
                                         {% endfor %}
                                         {% if plan.free_delivery %}
-                                        <li>{{ 'Free Delivery'|translate }}</li>
+                                        <li>{{ 'Free Delivery'|translate(current_language) }}</li>
                                         {% endif %}
                                         {% if plan.discount_percentage > 0 %}
-                                        <li>{{ plan.discount_percentage }}% {{ 'Discount'|translate }}</li>
+                                        <li>{{ plan.discount_percentage }}% {{ 'Discount'|translate(current_language) }}</li>
                                         {% endif %}
                                     </ul>
                                 </div>
                                 <div class="table-footer">
-                                    <a href="{{ url_for('frontend.subscriptions') }}" class="theme-btn btn-one">{{ 'Choose Plan'|translate }}</a>
+                                    <a href="{{ url_for('frontend.subscriptions') }}" class="theme-btn btn-one">{{ 'Choose Plan'|translate(current_language) }}</a>
                                 </div>
                             </div>
                         </div>
@@ -252,20 +252,20 @@
             </div>
             <div class="auto-container">
                 <div class="sec-title light centred">
-                    <h2>{{ 'Loyalty Rewards Program'|translate }}</h2>
-                    <p>{{ 'Earn points with every purchase and redeem them for amazing rewards!'|translate }}</p>
+                    <h2>{{ 'Loyalty Rewards Program'|translate(current_language) }}</h2>
+                    <p>{{ 'Earn points with every purchase and redeem them for amazing rewards!'|translate(current_language) }}</p>
                 </div>
                 {% if current_user and loyalty_data %}
                 <div class="loyalty-status text-center mb-5">
                     <div class="loyalty-card">
-                        <h4>{{ 'Your Loyalty Status'|translate }}</h4>
+                        <h4>{{ 'Your Loyalty Status'|translate(current_language) }}</h4>
                         <div class="loyalty-info">
                             <span class="loyalty-badge">{{ loyalty_data.current_tier }}</span>
                             <div class="points-info">
-                                <strong class="points-balance">{{ loyalty_data.points_balance }} {{ 'Points'|translate }}</strong>
+                                <strong class="points-balance">{{ loyalty_data.points_balance }} {{ 'Points'|translate(current_language) }}</strong>
                             </div>
                         </div>
-                        <a href="{{ url_for('frontend.my_loyalty') }}" class="theme-btn btn-one btn-sm">{{ 'View Rewards'|translate }}</a>
+                        <a href="{{ url_for('frontend.my_loyalty') }}" class="theme-btn btn-one btn-sm">{{ 'View Rewards'|translate(current_language) }}</a>
                     </div>
                 </div>
                 {% endif %}
@@ -280,7 +280,7 @@
                                 <h4><a href="{{ url_for('frontend.my_loyalty') }}">{{ reward.name }}</a></h4>
                                 <p>{{ reward.description[:50] }}{% if reward.description|length > 50 %}...{% endif %}</p>
                                 <div class="points-required">
-                                    <strong>{{ reward.points_cost }} {{ 'Points'|translate }}</strong>
+                                    <strong>{{ reward.points_cost }} {{ 'Points'|translate(current_language) }}</strong>
                                 </div>
                             </div>
                         </div>
@@ -288,7 +288,7 @@
                     {% endfor %}
                 </div>
                 <div class="more-btn text-center">
-                    <a href="{{ url_for('frontend.my_loyalty') }}" class="theme-btn btn-one">{{ 'Join Loyalty Program'|translate }}</a>
+                    <a href="{{ url_for('frontend.my_loyalty') }}" class="theme-btn btn-one">{{ 'Join Loyalty Program'|translate(current_language) }}</a>
                 </div>
             </div>
         </section>
@@ -307,25 +307,25 @@
                 <div class="row align-items-center clearfix">
                     <div class="col-lg-6 col-md-12 col-sm-12 image-column">
                         <figure class="image-box wow slideInLeft animated" data-wow-delay="00ms" data-wow-duration="1500ms clearfix">
-                            <img src="{{ url_for('static', filename='images/resource/cta-1.png') }}" alt="{{ 'Premium Service'|translate }}">
+                            <img src="{{ url_for('static', filename='images/resource/cta-1.png') }}" alt="{{ 'Premium Service'|translate(current_language) }}">
                         </figure>
                     </div>
                     <div class="col-lg-6 col-md-12 col-sm-12 content-column">
                         <div class="content_block_3">
                             <div class="content-box">
                                 <div class="sec-title light">
-                                    <h2>{{ 'Ready To Get Our Premium Water Delivery Service'|translate }}</h2>
+                                    <h2>{{ 'Ready To Get Our Premium Water Delivery Service'|translate(current_language) }}</h2>
                                 </div>
                                 <div class="text">
-                                    <p>{{ 'We provide our services across Uzbekistan with a network of professional delivery partners. Experience fast, reliable delivery within 2 hours anywhere in the city.'|translate }}</p>
+                                    <p>{{ 'We provide our services across Uzbekistan with a network of professional delivery partners. Experience fast, reliable delivery within 2 hours anywhere in the city.'|translate(current_language) }}</p>
                                 </div>
                                 <ul class="list clearfix">
-                                    <li>{{ 'Free Delivery'|translate }}</li>
-                                    <li>{{ '7 Days A Week Service'|translate }}</li>
-                                    <li>{{ 'Premium Quality Guarantee'|translate }}</li>
+                                    <li>{{ 'Free Delivery'|translate(current_language) }}</li>
+                                    <li>{{ '7 Days A Week Service'|translate(current_language) }}</li>
+                                    <li>{{ 'Premium Quality Guarantee'|translate(current_language) }}</li>
                                 </ul>
                                 <div class="btn-box">
-                                    <a href="{{ url_for('frontend.services') }}" class="theme-btn btn-one">{{ 'Our Services'|translate }}</a>
+                                    <a href="{{ url_for('frontend.services') }}" class="theme-btn btn-one">{{ 'Our Services'|translate(current_language) }}</a>
                                 </div>
                             </div>
                         </div>
@@ -339,20 +339,20 @@
         <section class="team-section">
             <div class="auto-container">
                 <div class="sec-title centred">
-                    <h2>{{ 'Water Benefits & Health Tips'|translate }}</h2>
-                    <p>{{ 'Discover the importance of proper hydration and learn about the health benefits of quality water.'|translate }}</p>
+                    <h2>{{ 'Water Benefits & Health Tips'|translate(current_language) }}</h2>
+                    <p>{{ 'Discover the importance of proper hydration and learn about the health benefits of quality water.'|translate(current_language) }}</p>
                 </div>
                 <div class="row clearfix">
                     <div class="col-lg-4 col-md-6 col-sm-12 team-block">
                         <div class="team-block-one wow fadeInUp animated" data-wow-delay="00ms" data-wow-duration="1500ms">
                             <div class="inner-box">
                                 <div class="image-box">
-                                    <figure class="image"><img src="{{ url_for('static', filename='images/news/news-4.jpg') }}" alt="{{ 'Water Benefits'|translate }}"></figure>
+                                    <figure class="image"><img src="{{ url_for('static', filename='images/news/news-4.jpg') }}" alt="{{ 'Water Benefits'|translate(current_language) }}"></figure>
                                 </div>
                                 <div class="lower-content">
-                                    <h4><a href="#">{{ 'Daily Water Intake Guide'|translate }}</a></h4>
-                                    <span class="designation">{{ 'Health Tips'|translate }}</span>
-                                    <p>{{ 'Learn how much water you should drink daily and the optimal timing for maximum health benefits.'|translate }}</p>
+                                    <h4><a href="#">{{ 'Daily Water Intake Guide'|translate(current_language) }}</a></h4>
+                                    <span class="designation">{{ 'Health Tips'|translate(current_language) }}</span>
+                                    <p>{{ 'Learn how much water you should drink daily and the optimal timing for maximum health benefits.'|translate(current_language) }}</p>
                                 </div>
                             </div>
                         </div>
@@ -361,12 +361,12 @@
                         <div class="team-block-one wow fadeInUp animated" data-wow-delay="300ms" data-wow-duration="1500ms">
                             <div class="inner-box">
                                 <div class="image-box">
-                                    <figure class="image"><img src="{{ url_for('static', filename='images/news/news-5.jpg') }}" alt="{{ 'Water Quality'|translate }}"></figure>
+                                    <figure class="image"><img src="{{ url_for('static', filename='images/news/news-5.jpg') }}" alt="{{ 'Water Quality'|translate(current_language) }}"></figure>
                                 </div>
                                 <div class="lower-content">
-                                    <h4><a href="#">{{ 'Water Quality Standards'|translate }}</a></h4>
-                                    <span class="designation">{{ 'Quality Assurance'|translate }}</span>
-                                    <p>{{ 'Understanding water purity standards and what makes Blue Stream water exceptional for your health.'|translate }}</p>
+                                    <h4><a href="#">{{ 'Water Quality Standards'|translate(current_language) }}</a></h4>
+                                    <span class="designation">{{ 'Quality Assurance'|translate(current_language) }}</span>
+                                    <p>{{ 'Understanding water purity standards and what makes Blue Stream water exceptional for your health.'|translate(current_language) }}</p>
                                 </div>
                             </div>
                         </div>
@@ -375,12 +375,12 @@
                         <div class="team-block-one wow fadeInUp animated" data-wow-delay="600ms" data-wow-duration="1500ms">
                             <div class="inner-box">
                                 <div class="image-box">
-                                    <figure class="image"><img src="{{ url_for('static', filename='images/news/news-6.jpg') }}" alt="{{ 'Hydration Benefits'|translate }}"></figure>
+                                    <figure class="image"><img src="{{ url_for('static', filename='images/news/news-6.jpg') }}" alt="{{ 'Hydration Benefits'|translate(current_language) }}"></figure>
                                 </div>
                                 <div class="lower-content">
-                                    <h4><a href="#">{{ 'Hydration & Wellness'|translate }}</a></h4>
-                                    <span class="designation">{{ 'Wellness Guide'|translate }}</span>
-                                    <p>{{ 'Discover how proper hydration supports your immune system, skin health, and overall well-being.'|translate }}</p>
+                                    <h4><a href="#">{{ 'Hydration & Wellness'|translate(current_language) }}</a></h4>
+                                    <span class="designation">{{ 'Wellness Guide'|translate(current_language) }}</span>
+                                    <p>{{ 'Discover how proper hydration supports your immune system, skin health, and overall well-being.'|translate(current_language) }}</p>
                                 </div>
                             </div>
                         </div>
@@ -398,15 +398,15 @@
                         <div class="col-lg-6 col-md-12 col-sm-12 content-column">
                             <div class="content-box">
                                 <div class="sec-title">
-                                    <h2>{{ 'Choose Your Best Pricing Plan'|translate }}</h2>
+                                    <h2>{{ 'Choose Your Best Pricing Plan'|translate(current_language) }}</h2>
                                 </div>
                                 <div class="text">
-                                    <p>{{ 'Save money and enjoy convenient water delivery with our flexible subscription plans. Choose between monthly and yearly billing cycles to fit your needs.'|translate }}</p>
+                                    <p>{{ 'Save money and enjoy convenient water delivery with our flexible subscription plans. Choose between monthly and yearly billing cycles to fit your needs.'|translate(current_language) }}</p>
                                 </div>
                                 <div class="tab-btn-box">
                                     <ul class="tab-btns tab-buttons clearfix">
-                                        <li class="tab-btn active-btn" data-tab="#tab-1">{{ 'Monthly'|translate }}</li>
-                                        <li class="tab-btn" data-tab="#tab-2">{{ 'Yearly'|translate }}</li>
+                                        <li class="tab-btn active-btn" data-tab="#tab-1">{{ 'Monthly'|translate(current_language) }}</li>
+                                        <li class="tab-btn" data-tab="#tab-2">{{ 'Yearly'|translate(current_language) }}</li>
                                     </ul>
                                 </div>
                             </div>
@@ -426,23 +426,23 @@
                                                             <div class="shape-2" style="background-image: url({{ url_for('static', filename='images/shape/shape-30.png') }});"></div>
                                                         </div>
                                                         <h3>$29</h3>
-                                                        <span>{{ 'Monthly'|translate }}</span>
+                                                        <span>{{ 'Monthly'|translate(current_language) }}</span>
                                                     </div>
                                                     <div class="title">
-                                                        <h3>{{ 'Standard Plan'|translate }}</h3>
+                                                        <h3>{{ 'Standard Plan'|translate(current_language) }}</h3>
                                                     </div>
                                                 </div>
                                                 <div class="table-content">
                                                     <ul class="feature-list clearfix">
-                                                        <li>{{ '4 Bottles Per Month'|translate }}</li>
-                                                        <li>{{ 'Free Delivery'|translate }}</li>
-                                                        <li>{{ 'Flexible Scheduling'|translate }}</li>
-                                                        <li>{{ '24/7 Customer Support'|translate }}</li>
-                                                        <li>{{ 'Premium Water Quality'|translate }}</li>
+                                                        <li>{{ '4 Bottles Per Month'|translate(current_language) }}</li>
+                                                        <li>{{ 'Free Delivery'|translate(current_language) }}</li>
+                                                        <li>{{ 'Flexible Scheduling'|translate(current_language) }}</li>
+                                                        <li>{{ '24/7 Customer Support'|translate(current_language) }}</li>
+                                                        <li>{{ 'Premium Water Quality'|translate(current_language) }}</li>
                                                     </ul>
                                                 </div>
                                                 <div class="table-footer">
-                                                    <a href="{{ url_for('frontend.subscriptions') }}" class="theme-btn btn-one">{{ 'Choose Plan'|translate }}</a>
+                                                    <a href="{{ url_for('frontend.subscriptions') }}" class="theme-btn btn-one">{{ 'Choose Plan'|translate(current_language) }}</a>
                                                 </div>
                                             </div>
                                         </div>
@@ -458,23 +458,23 @@
                                                             <div class="shape-2" style="background-image: url({{ url_for('static', filename='images/shape/shape-30.png') }});"></div>
                                                         </div>
                                                         <h3>$299</h3>
-                                                        <span>{{ 'Yearly'|translate }}</span>
+                                                        <span>{{ 'Yearly'|translate(current_language) }}</span>
                                                     </div>
                                                     <div class="title">
-                                                        <h3>{{ 'Premium Plan'|translate }}</h3>
+                                                        <h3>{{ 'Premium Plan'|translate(current_language) }}</h3>
                                                     </div>
                                                 </div>
                                                 <div class="table-content">
                                                     <ul class="feature-list clearfix">
-                                                        <li>{{ '48 Bottles Per Year'|translate }}</li>
-                                                        <li>{{ 'Free Delivery'|translate }}</li>
-                                                        <li>{{ 'Priority Support'|translate }}</li>
-                                                        <li>{{ '15% Annual Discount'|translate }}</li>
-                                                        <li>{{ 'Loyalty Rewards'|translate }}</li>
+                                                        <li>{{ '48 Bottles Per Year'|translate(current_language) }}</li>
+                                                        <li>{{ 'Free Delivery'|translate(current_language) }}</li>
+                                                        <li>{{ 'Priority Support'|translate(current_language) }}</li>
+                                                        <li>{{ '15% Annual Discount'|translate(current_language) }}</li>
+                                                        <li>{{ 'Loyalty Rewards'|translate(current_language) }}</li>
                                                     </ul>
                                                 </div>
                                                 <div class="table-footer">
-                                                    <a href="{{ url_for('frontend.subscriptions') }}" class="theme-btn btn-one">{{ 'Choose Plan'|translate }}</a>
+                                                    <a href="{{ url_for('frontend.subscriptions') }}" class="theme-btn btn-one">{{ 'Choose Plan'|translate(current_language) }}</a>
                                                 </div>
                                             </div>
                                         </div>
@@ -505,7 +505,7 @@
             <div class="map-layer" style="background-image: url({{ url_for('static', filename='images/icons/map-1.png') }});"></div>
             <div class="auto-container">
                 <div class="sec-title">
-                    <h2>{{ 'What Our Customers are Saying'|translate }} <br />{{ 'About Blue Stream'|translate }}</h2>
+                    <h2>{{ 'What Our Customers are Saying'|translate(current_language) }} <br />{{ 'About Blue Stream'|translate(current_language) }}</h2>
                 </div>
                 <div class="row clearfix">
                     <div class="col-xl-8 col-lg-12 col-md-12 offset-xl-2">
@@ -521,9 +521,9 @@
                                             <li><i class="fas fa-star"></i></li>
                                             <li><i class="fas fa-star"></i></li>
                                         </ul>
-                                        <p>{{ 'Excellent service! The water quality is outstanding and delivery is always on time. Blue Stream has become an essential part of our daily routine for healthy living.'|translate }}</p>
+                                        <p>{{ 'Excellent service! The water quality is outstanding and delivery is always on time. Blue Stream has become an essential part of our daily routine for healthy living.'|translate(current_language) }}</p>
                                         <h5>Aziza Karimova</h5>
-                                        <span class="designation">{{ 'Satisfied Customer'|translate }}</span>
+                                        <span class="designation">{{ 'Satisfied Customer'|translate(current_language) }}</span>
                                     </div>
                                 </div>
                             </div>
@@ -538,9 +538,9 @@
                                             <li><i class="fas fa-star"></i></li>
                                             <li><i class="fas fa-star"></i></li>
                                         </ul>
-                                        <p>{{ 'Professional service and great value for money. The subscription plan saves us time and money. Highly recommended for businesses and families.'|translate }}</p>
+                                        <p>{{ 'Professional service and great value for money. The subscription plan saves us time and money. Highly recommended for businesses and families.'|translate(current_language) }}</p>
                                         <h5>Rustam Abdullaev</h5>
-                                        <span class="designation">{{ 'Business Owner'|translate }}</span>
+                                        <span class="designation">{{ 'Business Owner'|translate(current_language) }}</span>
                                     </div>
                                 </div>
                             </div>
@@ -555,9 +555,9 @@
                                             <li><i class="fas fa-star"></i></li>
                                             <li><i class="fas fa-star"></i></li>
                                         </ul>
-                                        <p>{{ 'Clean, pure water delivered right to our office. The team is professional and the quality is consistent. Very happy with their reliable service.'|translate }}</p>
+                                        <p>{{ 'Clean, pure water delivered right to our office. The team is professional and the quality is consistent. Very happy with their reliable service.'|translate(current_language) }}</p>
                                         <h5>Malika Tasheva</h5>
-                                        <span class="designation">{{ 'Office Manager'|translate }}</span>
+                                        <span class="designation">{{ 'Office Manager'|translate(current_language) }}</span>
                                     </div>
                                 </div>
                             </div>
@@ -588,25 +588,25 @@
         <section class="news-section">
             <div class="auto-container">
                 <div class="sec-title centred">
-                    <h2>{{ 'Stay Updated with'|translate }} <br />{{ 'Blue Stream'|translate }}</h2>
+                    <h2>{{ 'Stay Updated with'|translate(current_language) }} <br />{{ 'Blue Stream'|translate(current_language) }}</h2>
                 </div>
                 <div class="row clearfix">
                     <div class="col-lg-4 col-md-6 col-sm-12 news-block">
                         <div class="news-block-one wow fadeInUp animated" data-wow-delay="00ms" data-wow-duration="1500ms">
                             <div class="inner-box">
-                                <figure class="image-box"><a href="#"><img src="{{ url_for('static', filename='images/news/news-1.jpg') }}" alt="{{ 'Water Delivery News'|translate }}"></a></figure>
+                                <figure class="image-box"><a href="#"><img src="{{ url_for('static', filename='images/news/news-1.jpg') }}" alt="{{ 'Water Delivery News'|translate(current_language) }}"></a></figure>
                                 <div class="lower-content">
-                                    <div class="category"><a href="#">{{ 'Company News'|translate }}</a></div>
-                                    <h4><a href="#">{{ 'Blue Stream Expands Delivery Network Across Uzbekistan'|translate }}</a></h4>
+                                    <div class="category"><a href="#">{{ 'Company News'|translate(current_language) }}</a></div>
+                                    <h4><a href="#">{{ 'Blue Stream Expands Delivery Network Across Uzbekistan'|translate(current_language) }}</a></h4>
                                     <ul class="post-info clearfix">
-                                        <li><a href="#">{{ 'Admin'|translate }}</a></li>
-                                        <li>{{ 'Jan 15, 2024'|translate }}</li>
+                                        <li><a href="#">{{ 'Admin'|translate(current_language) }}</a></li>
+                                        <li>{{ 'Jan 15, 2024'|translate(current_language) }}</li>
                                     </ul>
                                     <div class="text">
-                                        <p>{{ 'We are excited to announce the expansion of our delivery network to serve more communities across Uzbekistan with premium quality water.'|translate }}</p>
+                                        <p>{{ 'We are excited to announce the expansion of our delivery network to serve more communities across Uzbekistan with premium quality water.'|translate(current_language) }}</p>
                                     </div>
                                     <div class="btn-box">
-                                        <a href="#" class="theme-btn btn-two">{{ 'Learn More'|translate }}</a>
+                                        <a href="#" class="theme-btn btn-two">{{ 'Learn More'|translate(current_language) }}</a>
                                     </div>
                                 </div>
                             </div>
@@ -615,19 +615,19 @@
                     <div class="col-lg-4 col-md-6 col-sm-12 news-block">
                         <div class="news-block-one wow fadeInUp animated" data-wow-delay="300ms" data-wow-duration="1500ms">
                             <div class="inner-box">
-                                <figure class="image-box"><a href="#"><img src="{{ url_for('static', filename='images/news/news-2.jpg') }}" alt="{{ 'Health Tips'|translate }}"></a></figure>
+                                <figure class="image-box"><a href="#"><img src="{{ url_for('static', filename='images/news/news-2.jpg') }}" alt="{{ 'Health Tips'|translate(current_language) }}"></a></figure>
                                 <div class="lower-content">
-                                    <div class="category"><a href="#">{{ 'Health Tips'|translate }}</a></div>
-                                    <h4><a href="#">{{ 'The Importance of Staying Hydrated During Winter'|translate }}</a></h4>
+                                    <div class="category"><a href="#">{{ 'Health Tips'|translate(current_language) }}</a></div>
+                                    <h4><a href="#">{{ 'The Importance of Staying Hydrated During Winter'|translate(current_language) }}</a></h4>
                                     <ul class="post-info clearfix">
-                                        <li><a href="#">{{ 'Health Team'|translate }}</a></li>
-                                        <li>{{ 'Dec 20, 2023'|translate }}</li>
+                                        <li><a href="#">{{ 'Health Team'|translate(current_language) }}</a></li>
+                                        <li>{{ 'Dec 20, 2023'|translate(current_language) }}</li>
                                     </ul>
                                     <div class="text">
-                                        <p>{{ 'Winter weather can lead to dehydration. Learn why maintaining proper hydration is crucial during colder months for optimal health.'|translate }}</p>
+                                        <p>{{ 'Winter weather can lead to dehydration. Learn why maintaining proper hydration is crucial during colder months for optimal health.'|translate(current_language) }}</p>
                                     </div>
                                     <div class="btn-box">
-                                        <a href="#" class="theme-btn btn-two">{{ 'Learn More'|translate }}</a>
+                                        <a href="#" class="theme-btn btn-two">{{ 'Learn More'|translate(current_language) }}</a>
                                     </div>
                                 </div>
                             </div>
@@ -636,19 +636,19 @@
                     <div class="col-lg-4 col-md-6 col-sm-12 news-block">
                         <div class="news-block-one wow fadeInUp animated" data-wow-delay="600ms" data-wow-duration="1500ms">
                             <div class="inner-box">
-                                <figure class="image-box"><a href="#"><img src="{{ url_for('static', filename='images/news/news-3.jpg') }}" alt="{{ 'Quality Standards'|translate }}"></a></figure>
+                                <figure class="image-box"><a href="#"><img src="{{ url_for('static', filename='images/news/news-3.jpg') }}" alt="{{ 'Quality Standards'|translate(current_language) }}"></a></figure>
                                 <div class="lower-content">
-                                    <div class="category"><a href="#">{{ 'Quality Assurance'|translate }}</a></div>
-                                    <h4><a href="#">{{ 'New Quality Standards and Certification Achieved'|translate }}</a></h4>
+                                    <div class="category"><a href="#">{{ 'Quality Assurance'|translate(current_language) }}</a></div>
+                                    <h4><a href="#">{{ 'New Quality Standards and Certification Achieved'|translate(current_language) }}</a></h4>
                                     <ul class="post-info clearfix">
-                                        <li><a href="#">{{ 'Quality Team'|translate }}</a></li>
-                                        <li>{{ 'Nov 10, 2023'|translate }}</li>
+                                        <li><a href="#">{{ 'Quality Team'|translate(current_language) }}</a></li>
+                                        <li>{{ 'Nov 10, 2023'|translate(current_language) }}</li>
                                     </ul>
                                     <div class="text">
-                                        <p>{{ 'Blue Stream has achieved new international quality certifications, ensuring the highest standards in water purification and delivery.'|translate }}</p>
+                                        <p>{{ 'Blue Stream has achieved new international quality certifications, ensuring the highest standards in water purification and delivery.'|translate(current_language) }}</p>
                                     </div>
                                     <div class="btn-box">
-                                        <a href="#" class="theme-btn btn-two">{{ 'Learn More'|translate }}</a>
+                                        <a href="#" class="theme-btn btn-two">{{ 'Learn More'|translate(current_language) }}</a>
                                     </div>
                                 </div>
                             </div>

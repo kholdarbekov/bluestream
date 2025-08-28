@@ -1,6 +1,6 @@
 {% extends "frontend/base.html" %}
 
-{% block title %}{{ 'Loyalty Program'|translate }} - {{ company_name }}{% endblock %}
+{% block title %}{{ 'Loyalty Program'|translate(current_language) }} - {{ company_name }}{% endblock %}
 
 {% block content %}
 <!-- page-title -->
@@ -8,11 +8,11 @@
     <div class="bg-layer" style="background-image: url({{ url_for('static', filename='images/background/page-title.jpg') }});"></div>
     <div class="auto-container">
         <div class="content-box">
-            <h1>{{ 'Loyalty Program'|translate }}</h1>
+            <h1>{{ 'Loyalty Program'|translate(current_language) }}</h1>
             <ul class="bread-crumb clearfix">
-                <li><a href="{{ url_for('frontend.index') }}">{{ 'Home'|translate }}</a></li>
-                <li><a href="{{ url_for('frontend.my_account') }}">{{ 'My Account'|translate }}</a></li>
-                <li>{{ 'Loyalty Program'|translate }}</li>
+                <li><a href="{{ url_for('frontend.index') }}">{{ 'Home'|translate(current_language) }}</a></li>
+                <li><a href="{{ url_for('frontend.my_account') }}">{{ 'My Account'|translate(current_language) }}</a></li>
+                <li>{{ 'Loyalty Program'|translate(current_language) }}</li>
             </ul>
         </div>
     </div>
@@ -40,42 +40,42 @@
                         <ul class="list-unstyled">
                             <li>
                                 <a href="{{ url_for('frontend.my_account') }}">
-                                    <i class="far fa-tachometer-alt"></i> {{ 'Dashboard'|translate }}
+                                    <i class="far fa-tachometer-alt"></i> {{ 'Dashboard'|translate(current_language) }}
                                 </a>
                             </li>
                             <li>
                                 <a href="{{ url_for('frontend.profile_settings') }}">
-                                    <i class="far fa-user-edit"></i> {{ 'Profile Settings'|translate }}
+                                    <i class="far fa-user-edit"></i> {{ 'Profile Settings'|translate(current_language) }}
                                 </a>
                             </li>
                             <li>
                                 <a href="{{ url_for('frontend.my_orders') }}">
-                                    <i class="far fa-shopping-bag"></i> {{ 'My Orders'|translate }}
+                                    <i class="far fa-shopping-bag"></i> {{ 'My Orders'|translate(current_language) }}
                                 </a>
                             </li>
                             <li>
                                 <a href="{{ url_for('frontend.addresses') }}">
-                                    <i class="far fa-map-marker-alt"></i> {{ 'Addresses'|translate }}
+                                    <i class="far fa-map-marker-alt"></i> {{ 'Addresses'|translate(current_language) }}
                                 </a>
                             </li>
                             <li>
                                 <a href="{{ url_for('frontend.my_subscriptions') }}">
-                                    <i class="far fa-sync-alt"></i> {{ 'Subscriptions'|translate }}
+                                    <i class="far fa-sync-alt"></i> {{ 'Subscriptions'|translate(current_language) }}
                                 </a>
                             </li>
                             <li class="active">
                                 <a href="{{ url_for('frontend.my_loyalty') }}">
-                                    <i class="far fa-star"></i> {{ 'Loyalty Program'|translate }}
+                                    <i class="far fa-star"></i> {{ 'Loyalty Program'|translate(current_language) }}
                                 </a>
                             </li>
                             <li>
                                 <a href="{{ url_for('frontend.account_security') }}">
-                                    <i class="far fa-shield-alt"></i> {{ 'Security'|translate }}
+                                    <i class="far fa-shield-alt"></i> {{ 'Security'|translate(current_language) }}
                                 </a>
                             </li>
                             <li>
                                 <a href="#" onclick="logout()">
-                                    <i class="far fa-sign-out-alt"></i> {{ 'Logout'|translate }}
+                                    <i class="far fa-sign-out-alt"></i> {{ 'Logout'|translate(current_language) }}
                                 </a>
                             </li>
                         </ul>
@@ -88,8 +88,8 @@
                 <div class="account-content">
                     <!-- Loyalty Header -->
                     <div class="content-header mb-4">
-                        <h2><i class="far fa-star"></i> {{ 'Blue Stream Loyalty Program'|translate }}</h2>
-                        <p class="text-muted">{{ 'Earn points with every purchase and unlock exclusive rewards'|translate }}</p>
+                        <h2><i class="far fa-star"></i> {{ 'Blue Stream Loyalty Program'|translate(current_language) }}</h2>
+                        <p class="text-muted">{{ 'Earn points with every purchase and unlock exclusive rewards'|translate(current_language) }}</p>
                     </div>
 
                     <!-- Loyalty Overview -->
@@ -102,8 +102,8 @@
                                             <i class="far fa-star fa-3x text-warning"></i>
                                         </div>
                                         <h3 class="text-primary" id="currentPoints">0</h3>
-                                        <p class="text-muted">{{ 'Current Points'|translate }}</p>
-                                        <small class="text-success" id="pointsThisMonth">+0 {{ 'this month'|translate }}</small>
+                                        <p class="text-muted">{{ 'Current Points'|translate(current_language) }}</p>
+                                        <small class="text-success" id="pointsThisMonth">+0 {{ 'this month'|translate(current_language) }}</small>
                                     </div>
                                 </div>
                             </div>
@@ -114,12 +114,12 @@
                                             <i class="far fa-trophy fa-3x text-success"></i>
                                         </div>
                                         <h3 class="text-primary" id="currentTier">Bronze</h3>
-                                        <p class="text-muted">{{ 'Current Tier'|translate }}</p>
+                                        <p class="text-muted">{{ 'Current Tier'|translate(current_language) }}</p>
                                         <div class="tier-progress">
                                             <div class="progress" style="height: 8px;">
                                                 <div class="progress-bar" role="progressbar" style="width: 0%" id="tierProgress"></div>
                                             </div>
-                                            <small class="text-muted" id="tierProgressText">0 {{ 'points to next tier'|translate }}</small>
+                                            <small class="text-muted" id="tierProgressText">0 {{ 'points to next tier'|translate(current_language) }}</small>
                                         </div>
                                     </div>
                                 </div>
@@ -131,9 +131,9 @@
                                             <i class="far fa-gift fa-3x text-info"></i>
                                         </div>
                                         <h3 class="text-primary" id="availableRewards">0</h3>
-                                        <p class="text-muted">{{ 'Available Rewards'|translate }}</p>
+                                        <p class="text-muted">{{ 'Available Rewards'|translate(current_language) }}</p>
                                         <button class="btn btn-sm btn-primary" onclick="showRewards()">
-                                            {{ 'View Rewards'|translate }}
+                                            {{ 'View Rewards'|translate(current_language) }}
                                         </button>
                                     </div>
                                 </div>
@@ -145,7 +145,7 @@
                     <div class="membership-tiers mb-4">
                         <div class="card">
                             <div class="card-header">
-                                <h5><i class="far fa-crown"></i> {{ 'Membership Tiers'|translate }}</h5>
+                                <h5><i class="far fa-crown"></i> {{ 'Membership Tiers'|translate(current_language) }}</h5>
                             </div>
                             <div class="card-body">
                                 <div class="row">
@@ -153,14 +153,14 @@
                                         <div class="tier-card bronze">
                                             <div class="tier-header">
                                                 <i class="far fa-medal"></i>
-                                                <h6>{{ 'Bronze'|translate }}</h6>
-                                                <p>0 - 999 {{ 'points'|translate }}</p>
+                                                <h6>{{ 'Bronze'|translate(current_language) }}</h6>
+                                                <p>0 - 999 {{ 'points'|translate(current_language) }}</p>
                                             </div>
                                             <div class="tier-benefits">
                                                 <ul>
-                                                    <li>{{ '1 point per $1 spent'|translate }}</li>
-                                                    <li>{{ 'Standard shipping'|translate }}</li>
-                                                    <li>{{ 'Basic customer support'|translate }}</li>
+                                                    <li>{{ '1 point per $1 spent'|translate(current_language) }}</li>
+                                                    <li>{{ 'Standard shipping'|translate(current_language) }}</li>
+                                                    <li>{{ 'Basic customer support'|translate(current_language) }}</li>
                                                 </ul>
                                             </div>
                                         </div>
@@ -169,15 +169,15 @@
                                         <div class="tier-card silver">
                                             <div class="tier-header">
                                                 <i class="far fa-medal"></i>
-                                                <h6>{{ 'Silver'|translate }}</h6>
-                                                <p>1,000 - 2,499 {{ 'points'|translate }}</p>
+                                                <h6>{{ 'Silver'|translate(current_language) }}</h6>
+                                                <p>1,000 - 2,499 {{ 'points'|translate(current_language) }}</p>
                                             </div>
                                             <div class="tier-benefits">
                                                 <ul>
-                                                    <li>{{ '1.25 points per $1 spent'|translate }}</li>
-                                                    <li>{{ 'Free standard shipping'|translate }}</li>
-                                                    <li>{{ 'Priority customer support'|translate }}</li>
-                                                    <li>{{ 'Exclusive monthly offers'|translate }}</li>
+                                                    <li>{{ '1.25 points per $1 spent'|translate(current_language) }}</li>
+                                                    <li>{{ 'Free standard shipping'|translate(current_language) }}</li>
+                                                    <li>{{ 'Priority customer support'|translate(current_language) }}</li>
+                                                    <li>{{ 'Exclusive monthly offers'|translate(current_language) }}</li>
                                                 </ul>
                                             </div>
                                         </div>
@@ -186,16 +186,16 @@
                                         <div class="tier-card gold">
                                             <div class="tier-header">
                                                 <i class="far fa-medal"></i>
-                                                <h6>{{ 'Gold'|translate }}</h6>
-                                                <p>2,500 - 4,999 {{ 'points'|translate }}</p>
+                                                <h6>{{ 'Gold'|translate(current_language) }}</h6>
+                                                <p>2,500 - 4,999 {{ 'points'|translate(current_language) }}</p>
                                             </div>
                                             <div class="tier-benefits">
                                                 <ul>
-                                                    <li>{{ '1.5 points per $1 spent'|translate }}</li>
-                                                    <li>{{ 'Free expedited shipping'|translate }}</li>
-                                                    <li>{{ 'VIP customer support'|translate }}</li>
-                                                    <li>{{ 'Early access to new products'|translate }}</li>
-                                                    <li>{{ '10% birthday discount'|translate }}</li>
+                                                    <li>{{ '1.5 points per $1 spent'|translate(current_language) }}</li>
+                                                    <li>{{ 'Free expedited shipping'|translate(current_language) }}</li>
+                                                    <li>{{ 'VIP customer support'|translate(current_language) }}</li>
+                                                    <li>{{ 'Early access to new products'|translate(current_language) }}</li>
+                                                    <li>{{ '10% birthday discount'|translate(current_language) }}</li>
                                                 </ul>
                                             </div>
                                         </div>
@@ -204,17 +204,17 @@
                                         <div class="tier-card platinum">
                                             <div class="tier-header">
                                                 <i class="far fa-crown"></i>
-                                                <h6>{{ 'Platinum'|translate }}</h6>
-                                                <p>5,000+ {{ 'points'|translate }}</p>
+                                                <h6>{{ 'Platinum'|translate(current_language) }}</h6>
+                                                <p>5,000+ {{ 'points'|translate(current_language) }}</p>
                                             </div>
                                             <div class="tier-benefits">
                                                 <ul>
-                                                    <li>{{ '2 points per $1 spent'|translate }}</li>
-                                                    <li>{{ 'Free same-day delivery'|translate }}</li>
-                                                    <li>{{ 'Dedicated account manager'|translate }}</li>
-                                                    <li>{{ 'Exclusive platinum rewards'|translate }}</li>
-                                                    <li>{{ '15% birthday discount'|translate }}</li>
-                                                    <li>{{ 'VIP events access'|translate }}</li>
+                                                    <li>{{ '2 points per $1 spent'|translate(current_language) }}</li>
+                                                    <li>{{ 'Free same-day delivery'|translate(current_language) }}</li>
+                                                    <li>{{ 'Dedicated account manager'|translate(current_language) }}</li>
+                                                    <li>{{ 'Exclusive platinum rewards'|translate(current_language) }}</li>
+                                                    <li>{{ '15% birthday discount'|translate(current_language) }}</li>
+                                                    <li>{{ 'VIP events access'|translate(current_language) }}</li>
                                                 </ul>
                                             </div>
                                         </div>
@@ -228,13 +228,13 @@
                     <div class="points-history mb-4">
                         <div class="card">
                             <div class="card-header d-flex justify-content-between align-items-center">
-                                <h5><i class="far fa-history"></i> {{ 'Points History'|translate }}</h5>
+                                <h5><i class="far fa-history"></i> {{ 'Points History'|translate(current_language) }}</h5>
                                 <div class="filter-options">
                                     <select class="form-control form-control-sm" id="historyFilter" onchange="loadPointsHistory()">
-                                        <option value="">{{ 'All Activity'|translate }}</option>
-                                        <option value="earned">{{ 'Points Earned'|translate }}</option>
-                                        <option value="redeemed">{{ 'Points Redeemed'|translate }}</option>
-                                        <option value="expired">{{ 'Points Expired'|translate }}</option>
+                                        <option value="">{{ 'All Activity'|translate(current_language) }}</option>
+                                        <option value="earned">{{ 'Points Earned'|translate(current_language) }}</option>
+                                        <option value="redeemed">{{ 'Points Redeemed'|translate(current_language) }}</option>
+                                        <option value="expired">{{ 'Points Expired'|translate(current_language) }}</option>
                                     </select>
                                 </div>
                             </div>
@@ -242,7 +242,7 @@
                                 <div class="points-history-list" id="pointsHistoryList">
                                     <div class="text-center py-4">
                                         <i class="far fa-spinner fa-spin fa-2x"></i>
-                                        <p class="mt-2">{{ 'Loading points history...'|translate }}</p>
+                                        <p class="mt-2">{{ 'Loading points history...'|translate(current_language) }}</p>
                                     </div>
                                 </div>
                             </div>
@@ -253,13 +253,13 @@
                     <div class="available-rewards mb-4">
                         <div class="card">
                             <div class="card-header">
-                                <h5><i class="far fa-gift"></i> {{ 'Available Rewards'|translate }}</h5>
+                                <h5><i class="far fa-gift"></i> {{ 'Available Rewards'|translate(current_language) }}</h5>
                             </div>
                             <div class="card-body">
                                 <div class="rewards-grid" id="rewardsGrid">
                                     <div class="text-center py-4">
                                         <i class="far fa-spinner fa-spin fa-2x"></i>
-                                        <p class="mt-2">{{ 'Loading rewards...'|translate }}</p>
+                                        <p class="mt-2">{{ 'Loading rewards...'|translate(current_language) }}</p>
                                     </div>
                                 </div>
                             </div>
@@ -270,7 +270,7 @@
                     <div class="earn-points-section">
                         <div class="card">
                             <div class="card-header">
-                                <h5><i class="far fa-lightbulb"></i> {{ 'Ways to Earn Points'|translate }}</h5>
+                                <h5><i class="far fa-lightbulb"></i> {{ 'Ways to Earn Points'|translate(current_language) }}</h5>
                             </div>
                             <div class="card-body">
                                 <div class="row">
@@ -280,8 +280,8 @@
                                                 <i class="far fa-shopping-cart text-primary"></i>
                                             </div>
                                             <div class="earn-details">
-                                                <h6>{{ 'Make Purchases'|translate }}</h6>
-                                                <p>{{ 'Earn 1-2 points for every dollar spent (based on your tier)'|translate }}</p>
+                                                <h6>{{ 'Make Purchases'|translate(current_language) }}</h6>
+                                                <p>{{ 'Earn 1-2 points for every dollar spent (based on your tier)'|translate(current_language) }}</p>
                                             </div>
                                         </div>
                                     </div>
@@ -291,8 +291,8 @@
                                                 <i class="far fa-user-plus text-success"></i>
                                             </div>
                                             <div class="earn-details">
-                                                <h6>{{ 'Refer Friends'|translate }}</h6>
-                                                <p>{{ 'Get 500 points for each friend who makes their first order'|translate }}</p>
+                                                <h6>{{ 'Refer Friends'|translate(current_language) }}</h6>
+                                                <p>{{ 'Get 500 points for each friend who makes their first order'|translate(current_language) }}</p>
                                             </div>
                                         </div>
                                     </div>
@@ -302,8 +302,8 @@
                                                 <i class="far fa-star text-warning"></i>
                                             </div>
                                             <div class="earn-details">
-                                                <h6>{{ 'Write Reviews'|translate }}</h6>
-                                                <p>{{ 'Earn 50 points for each product review you write'|translate }}</p>
+                                                <h6>{{ 'Write Reviews'|translate(current_language) }}</h6>
+                                                <p>{{ 'Earn 50 points for each product review you write'|translate(current_language) }}</p>
                                             </div>
                                         </div>
                                     </div>
@@ -313,15 +313,15 @@
                                                 <i class="far fa-birthday-cake text-info"></i>
                                             </div>
                                             <div class="earn-details">
-                                                <h6>{{ 'Birthday Bonus'|translate }}</h6>
-                                                <p>{{ 'Get 200 bonus points on your birthday every year'|translate }}</p>
+                                                <h6>{{ 'Birthday Bonus'|translate(current_language) }}</h6>
+                                                <p>{{ 'Get 200 bonus points on your birthday every year'|translate(current_language) }}</p>
                                             </div>
                                         </div>
                                     </div>
                                 </div>
                                 <div class="text-center mt-4">
                                     <button class="btn btn-primary" onclick="generateReferralCode()">
-                                        <i class="far fa-share"></i> {{ 'Get My Referral Code'|translate }}
+                                        <i class="far fa-share"></i> {{ 'Get My Referral Code'|translate(current_language) }}
                                     </button>
                                 </div>
                             </div>
@@ -338,7 +338,7 @@
     <div class="modal-dialog modal-lg" role="document">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title" id="rewardModalLabel">{{ 'Redeem Reward'|translate }}</h5>
+                <h5 class="modal-title" id="rewardModalLabel">{{ 'Redeem Reward'|translate(current_language) }}</h5>
                 <button type="button" class="close" data-dismiss="modal" aria-label="Close">
                     <span aria-hidden="true">&times;</span>
                 </button>
@@ -347,8 +347,8 @@
                 <!-- Reward details will be loaded here -->
             </div>
             <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-dismiss="modal">{{ 'Cancel'|translate }}</button>
-                <button type="button" class="btn btn-primary" id="redeemRewardBtn">{{ 'Redeem Reward'|translate }}</button>
+                <button type="button" class="btn btn-secondary" data-dismiss="modal">{{ 'Cancel'|translate(current_language) }}</button>
+                <button type="button" class="btn btn-primary" id="redeemRewardBtn">{{ 'Redeem Reward'|translate(current_language) }}</button>
             </div>
         </div>
     </div>
@@ -359,7 +359,7 @@
     <div class="modal-dialog" role="document">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title" id="referralModalLabel">{{ 'Your Referral Code'|translate }}</h5>
+                <h5 class="modal-title" id="referralModalLabel">{{ 'Your Referral Code'|translate(current_language) }}</h5>
                 <button type="button" class="close" data-dismiss="modal" aria-label="Close">
                     <span aria-hidden="true">&times;</span>
                 </button>
@@ -367,14 +367,14 @@
             <div class="modal-body text-center">
                 <div class="referral-code-display">
                     <h3 class="text-primary" id="referralCodeText">LOADING...</h3>
-                    <p class="text-muted">{{ 'Share this code with friends'|translate }}</p>
+                    <p class="text-muted">{{ 'Share this code with friends'|translate(current_language) }}</p>
                 </div>
                 <div class="referral-actions mt-4">
                     <button class="btn btn-outline-primary" onclick="copyReferralCode()">
-                        <i class="far fa-copy"></i> {{ 'Copy Code'|translate }}
+                        <i class="far fa-copy"></i> {{ 'Copy Code'|translate(current_language) }}
                     </button>
                     <button class="btn btn-outline-success ml-2" onclick="shareReferralCode()">
-                        <i class="far fa-share"></i> {{ 'Share'|translate }}
+                        <i class="far fa-share"></i> {{ 'Share'|translate(current_language) }}
                     </button>
                 </div>
                 <div class="referral-stats mt-4">
@@ -382,20 +382,20 @@
                         <div class="col-6">
                             <div class="stat-item">
                                 <h5 id="referralCount">0</h5>
-                                <p class="text-muted">{{ 'Friends Referred'|translate }}</p>
+                                <p class="text-muted">{{ 'Friends Referred'|translate(current_language) }}</p>
                             </div>
                         </div>
                         <div class="col-6">
                             <div class="stat-item">
                                 <h5 id="referralPoints">0</h5>
-                                <p class="text-muted">{{ 'Points Earned'|translate }}</p>
+                                <p class="text-muted">{{ 'Points Earned'|translate(current_language) }}</p>
                             </div>
                         </div>
                     </div>
                 </div>
             </div>
             <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-dismiss="modal">{{ 'Close'|translate }}</button>
+                <button type="button" class="btn btn-secondary" data-dismiss="modal">{{ 'Close'|translate(current_language) }}</button>
             </div>
         </div>
     </div>
@@ -683,7 +683,7 @@ async function loadLoyaltyData() {
 
 function updateLoyaltyOverview(loyalty) {
     document.getElementById('currentPoints').textContent = loyalty.current_balance || 0;
-    document.getElementById('pointsThisMonth').textContent = `+${loyalty.points_this_month || 0} {{ 'this month'|translate }}`;
+    document.getElementById('pointsThisMonth').textContent = `+${loyalty.points_this_month || 0} {{ 'this month'|translate(current_language) }}`;
     document.getElementById('currentTier').textContent = loyalty.current_tier || 'Bronze';
     document.getElementById('availableRewards').textContent = loyalty.available_rewards_count || 0;
     
@@ -691,7 +691,7 @@ function updateLoyaltyOverview(loyalty) {
     if (loyalty.tier_progress) {
         const progressPercent = (loyalty.tier_progress.current / loyalty.tier_progress.next_tier_points) * 100;
         document.getElementById('tierProgress').style.width = `${Math.min(progressPercent, 100)}%`;
-        document.getElementById('tierProgressText').textContent = `${loyalty.tier_progress.points_needed || loyalty.tier_progress.next_tier_points} {{ 'points to next tier'|translate }}`;
+        document.getElementById('tierProgressText').textContent = `${loyalty.tier_progress.points_needed || loyalty.tier_progress.next_tier_points} {{ 'points to next tier'|translate(current_language) }}`;
     }
 }
 
@@ -706,11 +706,11 @@ async function loadPointsHistory() {
         if (response.ok && result.success) {
             displayPointsHistory(result.data.transactions);
         } else {
-            historyList.innerHTML = '<div class="text-center py-4"><p class="text-muted">{{ "No points history found"|translate }}</p></div>';
+            historyList.innerHTML = '<div class="text-center py-4"><p class="text-muted">{{ "No points history found"|translate(current_language) }}</p></div>';
         }
     } catch (error) {
         console.error('Failed to load points history:', error);
-        historyList.innerHTML = '<div class="text-center py-4"><p class="text-muted">{{ "Failed to load points history"|translate }}</p></div>';
+        historyList.innerHTML = '<div class="text-center py-4"><p class="text-muted">{{ "Failed to load points history"|translate(current_language) }}</p></div>';
     }
 }
 
@@ -718,7 +718,7 @@ function displayPointsHistory(transactions) {
     const historyList = document.getElementById('pointsHistoryList');
     
     if (!transactions || transactions.length === 0) {
-        historyList.innerHTML = '<div class="text-center py-4"><p class="text-muted">{{ "No points history found"|translate }}</p></div>';
+        historyList.innerHTML = '<div class="text-center py-4"><p class="text-muted">{{ "No points history found"|translate(current_language) }}</p></div>';
         return;
     }
     
@@ -730,10 +730,10 @@ function displayPointsHistory(transactions) {
             <div class="points-details">
                 <h6>${transaction.description}</h6>
                 <small class="text-muted">${formatDate(transaction.created_at)}</small>
-                ${transaction.order_number ? `<br><small class="text-primary">{{ 'Order'|translate }} #${transaction.order_number}</small>` : ''}
+                ${transaction.order_number ? `<br><small class="text-primary">{{ 'Order'|translate(current_language) }} #${transaction.order_number}</small>` : ''}
             </div>
             <div class="points-amount ${transaction.points > 0 ? 'positive' : 'negative'}">
-                ${transaction.points > 0 ? '+' : ''}${transaction.points} {{ 'pts'|translate }}
+                ${transaction.points > 0 ? '+' : ''}${transaction.points} {{ 'pts'|translate(current_language) }}
             </div>
         </div>
     `).join('');
@@ -760,11 +760,11 @@ async function loadAvailableRewards() {
         if (response.ok && result.success) {
             displayRewards(result.data.rewards);
         } else {
-            rewardsGrid.innerHTML = '<div class="text-center py-4"><p class="text-muted">{{ "No rewards available"|translate }}</p></div>';
+            rewardsGrid.innerHTML = '<div class="text-center py-4"><p class="text-muted">{{ "No rewards available"|translate(current_language) }}</p></div>';
         }
     } catch (error) {
         console.error('Failed to load rewards:', error);
-        rewardsGrid.innerHTML = '<div class="text-center py-4"><p class="text-muted">{{ "Failed to load rewards"|translate }}</p></div>';
+        rewardsGrid.innerHTML = '<div class="text-center py-4"><p class="text-muted">{{ "Failed to load rewards"|translate(current_language) }}</p></div>';
     }
 }
 
@@ -772,7 +772,7 @@ function displayRewards(rewards) {
     const rewardsGrid = document.getElementById('rewardsGrid');
     
     if (!rewards || rewards.length === 0) {
-        rewardsGrid.innerHTML = '<div class="text-center py-4"><p class="text-muted">{{ "No rewards available"|translate }}</p></div>';
+        rewardsGrid.innerHTML = '<div class="text-center py-4"><p class="text-muted">{{ "No rewards available"|translate(current_language) }}</p></div>';
         return;
     }
     
@@ -785,9 +785,9 @@ function displayRewards(rewards) {
                         <h6>${reward.name}</h6>
                         <p class="text-muted">${reward.description}</p>
                         <div class="d-flex justify-content-between align-items-center">
-                            <span class="reward-points">${reward.points_required} {{ 'pts'|translate }}</span>
+                            <span class="reward-points">${reward.points_required} {{ 'pts'|translate(current_language) }}</span>
                             <button class="btn btn-sm btn-primary" onclick="redeemReward(${reward.id})" ${reward.points_required > parseInt(document.getElementById('currentPoints').textContent) ? 'disabled' : ''}>
-                                {{ 'Redeem'|translate }}
+                                {{ 'Redeem'|translate(current_language) }}
                             </button>
                         </div>
                     </div>
@@ -808,11 +808,11 @@ async function redeemReward(rewardId) {
             const reward = result.data;
             showRewardModal(reward);
         } else {
-            showNotification(result.message || '{{ "Failed to load reward details"|translate }}', 'error');
+            showNotification(result.message || '{{ "Failed to load reward details"|translate(current_language) }}', 'error');
         }
     } catch (error) {
         console.error('Failed to load reward details:', error);
-        showNotification('{{ "Failed to load reward details"|translate }}', 'error');
+        showNotification('{{ "Failed to load reward details"|translate(current_language) }}', 'error');
     }
 }
 
@@ -831,12 +831,12 @@ function showRewardModal(reward) {
                     <p class="text-muted">${reward.description}</p>
                     <div class="reward-info">
                         <div class="info-item">
-                            <strong>{{ 'Points Required'|translate }}:</strong> ${reward.points_required} {{ 'pts'|translate }}
+                            <strong>{{ 'Points Required'|translate(current_language) }}:</strong> ${reward.points_required} {{ 'pts'|translate(current_language) }}
                         </div>
                         <div class="info-item">
-                            <strong>{{ 'Your Points'|translate }}:</strong> ${document.getElementById('currentPoints').textContent} {{ 'pts'|translate }}
+                            <strong>{{ 'Your Points'|translate(current_language) }}:</strong> ${document.getElementById('currentPoints').textContent} {{ 'pts'|translate(current_language) }}
                         </div>
-                        ${reward.expiry_date ? `<div class="info-item"><strong>{{ 'Expires'|translate }}:</strong> ${formatDate(reward.expiry_date)}</div>` : ''}
+                        ${reward.expiry_date ? `<div class="info-item"><strong>{{ 'Expires'|translate(current_language) }}:</strong> ${formatDate(reward.expiry_date)}</div>` : ''}
                         ${reward.terms_conditions ? `<div class="info-item mt-3"><small class="text-muted">${reward.terms_conditions}</small></div>` : ''}
                     </div>
                 </div>
@@ -857,17 +857,17 @@ async function confirmRedeemReward(rewardId) {
         const result = await response.json();
         
         if (response.ok && result.success) {
-            showNotification('{{ "Reward redeemed successfully!"|translate }}', 'success');
+            showNotification('{{ "Reward redeemed successfully!"|translate(current_language) }}', 'success');
             $('#rewardModal').modal('hide');
             loadLoyaltyData(); // Refresh loyalty data
             loadPointsHistory(); // Refresh history
             loadAvailableRewards(); // Refresh rewards
         } else {
-            showNotification(result.message || '{{ "Failed to redeem reward"|translate }}', 'error');
+            showNotification(result.message || '{{ "Failed to redeem reward"|translate(current_language) }}', 'error');
         }
     } catch (error) {
         console.error('Failed to redeem reward:', error);
-        showNotification('{{ "Failed to redeem reward"|translate }}', 'error');
+        showNotification('{{ "Failed to redeem reward"|translate(current_language) }}', 'error');
     }
 }
 
@@ -883,27 +883,27 @@ async function generateReferralCode() {
             document.getElementById('referralPoints').textContent = result.data.referral_points || 0;
             $('#referralModal').modal('show');
         } else {
-            showNotification(result.message || '{{ "Failed to generate referral code"|translate }}', 'error');
+            showNotification(result.message || '{{ "Failed to generate referral code"|translate(current_language) }}', 'error');
         }
     } catch (error) {
         console.error('Failed to generate referral code:', error);
-        showNotification('{{ "Failed to generate referral code"|translate }}', 'error');
+        showNotification('{{ "Failed to generate referral code"|translate(current_language) }}', 'error');
     }
 }
 
 function copyReferralCode() {
     navigator.clipboard.writeText(currentUserReferralCode).then(() => {
-        showNotification('{{ "Referral code copied to clipboard!"|translate }}', 'success');
+        showNotification('{{ "Referral code copied to clipboard!"|translate(current_language) }}', 'success');
     }).catch(() => {
-        showNotification('{{ "Failed to copy referral code"|translate }}', 'error');
+        showNotification('{{ "Failed to copy referral code"|translate(current_language) }}', 'error');
     });
 }
 
 function shareReferralCode() {
     if (navigator.share) {
         navigator.share({
-            title: '{{ "Join Blue Stream Water Delivery"|translate }}',
-            text: `{{ "Use my referral code"|translate }}: ${currentUserReferralCode}`,
+            title: '{{ "Join Blue Stream Water Delivery"|translate(current_language) }}',
+            text: `{{ "Use my referral code"|translate(current_language) }}: ${currentUserReferralCode}`,
             url: `${window.location.origin}?ref=${currentUserReferralCode}`
         });
     } else {

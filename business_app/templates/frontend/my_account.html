@@ -1,6 +1,6 @@
 {% extends "frontend/base.html" %}
 
-{% block title %}{{ 'My Account'|translate }} - {{ company_name }}{% endblock %}
+{% block title %}{{ 'My Account'|translate(current_language) }} - {{ company_name }}{% endblock %}
 
 {% block content %}
         <!-- page-title -->
@@ -8,10 +8,10 @@
             <div class="bg-layer" style="background-image: url({{ url_for('static', filename='images/background/page-title.jpg') }});"></div>
             <div class="auto-container">
                 <div class="content-box">
-                    <h1>{{ 'My Account'|translate }}</h1>
+                    <h1>{{ 'My Account'|translate(current_language) }}</h1>
                     <ul class="bread-crumb clearfix">
-                        <li><a href="{{ url_for('frontend.index') }}">{{ 'Home'|translate }}</a></li>
-                        <li>{{ 'My Account'|translate }}</li>
+                        <li><a href="{{ url_for('frontend.index') }}">{{ 'Home'|translate(current_language) }}</a></li>
+                        <li>{{ 'My Account'|translate(current_language) }}</li>
                     </ul>
                 </div>
             </div>
@@ -34,15 +34,15 @@
                                     <p class="text-muted">{{ user.email }}</p>
                                     <div class="verification-badges">
                                         {% if user.email_verified_at %}
-                                        <span class="badge badge-success"><i class="far fa-check-circle"></i> {{ 'Email Verified'|translate }}</span>
+                                        <span class="badge badge-success"><i class="far fa-check-circle"></i> {{ 'Email Verified'|translate(current_language) }}</span>
                                         {% else %}
-                                        <span class="badge badge-warning"><i class="far fa-exclamation-circle"></i> {{ 'Email Pending'|translate }}</span>
+                                        <span class="badge badge-warning"><i class="far fa-exclamation-circle"></i> {{ 'Email Pending'|translate(current_language) }}</span>
                                         {% endif %}
                                         
                                         {% if user.phone_verified_at %}
-                                        <span class="badge badge-success"><i class="far fa-check-circle"></i> {{ 'Phone Verified'|translate }}</span>
+                                        <span class="badge badge-success"><i class="far fa-check-circle"></i> {{ 'Phone Verified'|translate(current_language) }}</span>
                                         {% else %}
-                                        <span class="badge badge-warning"><i class="far fa-exclamation-circle"></i> {{ 'Phone Pending'|translate }}</span>
+                                        <span class="badge badge-warning"><i class="far fa-exclamation-circle"></i> {{ 'Phone Pending'|translate(current_language) }}</span>
                                         {% endif %}
                                     </div>
                                 </div>
@@ -52,42 +52,42 @@
                                 <ul class="list-unstyled">
                                     <li class="active">
                                         <a href="{{ url_for('frontend.my_account') }}">
-                                            <i class="far fa-tachometer-alt"></i> {{ 'Dashboard'|translate }}
+                                            <i class="far fa-tachometer-alt"></i> {{ 'Dashboard'|translate(current_language) }}
                                         </a>
                                     </li>
                                     <li>
                                         <a href="{{ url_for('frontend.profile_settings') }}">
-                                            <i class="far fa-user-edit"></i> {{ 'Profile Settings'|translate }}
+                                            <i class="far fa-user-edit"></i> {{ 'Profile Settings'|translate(current_language) }}
                                         </a>
                                     </li>
                                     <li>
                                         <a href="{{ url_for('frontend.my_orders') }}">
-                                            <i class="far fa-shopping-bag"></i> {{ 'My Orders'|translate }}
+                                            <i class="far fa-shopping-bag"></i> {{ 'My Orders'|translate(current_language) }}
                                         </a>
                                     </li>
                                     <li>
                                         <a href="{{ url_for('frontend.addresses') }}">
-                                            <i class="far fa-map-marker-alt"></i> {{ 'Addresses'|translate }}
+                                            <i class="far fa-map-marker-alt"></i> {{ 'Addresses'|translate(current_language) }}
                                         </a>
                                     </li>
                                     <li>
                                         <a href="{{ url_for('frontend.my_subscriptions') }}">
-                                            <i class="far fa-sync-alt"></i> {{ 'Subscriptions'|translate }}
+                                            <i class="far fa-sync-alt"></i> {{ 'Subscriptions'|translate(current_language) }}
                                         </a>
                                     </li>
                                     <li>
                                         <a href="{{ url_for('frontend.my_loyalty') }}">
-                                            <i class="far fa-star"></i> {{ 'Loyalty Program'|translate }}
+                                            <i class="far fa-star"></i> {{ 'Loyalty Program'|translate(current_language) }}
                                         </a>
                                     </li>
                                     <li>
                                         <a href="{{ url_for('frontend.account_security') }}">
-                                            <i class="far fa-shield-alt"></i> {{ 'Security'|translate }}
+                                            <i class="far fa-shield-alt"></i> {{ 'Security'|translate(current_language) }}
                                         </a>
                                     </li>
                                     <li>
                                         <a href="#" onclick="logout()">
-                                            <i class="far fa-sign-out-alt"></i> {{ 'Logout'|translate }}
+                                            <i class="far fa-sign-out-alt"></i> {{ 'Logout'|translate(current_language) }}
                                         </a>
                                     </li>
                                 </ul>
@@ -104,15 +104,15 @@
                                     <div class="card-body">
                                         <div class="row align-items-center">
                                             <div class="col-md-8">
-                                                <h3>{{ 'Welcome back'|translate }}, {{ user.first_name }}!</h3>
-                                                <p class="mb-0">{{ 'Manage your account, orders, and preferences from your unified dashboard.'|translate }}</p>
-                                                <small>{{ 'Connected platforms'|translate }}: {{ 'Web App'|translate }}{% if user.telegram_id %}, {{ 'Telegram Bot'|translate }}{% endif %}</small>
+                                                <h3>{{ 'Welcome back'|translate(current_language) }}, {{ user.first_name }}!</h3>
+                                                <p class="mb-0">{{ 'Manage your account, orders, and preferences from your unified dashboard.'|translate(current_language) }}</p>
+                                                <small>{{ 'Connected platforms'|translate(current_language) }}: {{ 'Web App'|translate(current_language) }}{% if user.telegram_id %}, {{ 'Telegram Bot'|translate(current_language) }}{% endif %}</small>
                                             </div>
                                             <div class="col-md-4 text-center">
                                                 <div class="sync-status">
                                                     <i class="far fa-sync-alt" style="font-size: 2rem;"></i>
                                                     <div class="mt-2">
-                                                        <small id="syncStatus">{{ 'Synchronized'|translate }}</small>
+                                                        <small id="syncStatus">{{ 'Synchronized'|translate(current_language) }}</small>
                                                     </div>
                                                 </div>
                                             </div>
@@ -130,8 +130,8 @@
                                                 <div class="card-body">
                                                     <i class="far fa-shopping-bag text-primary" style="font-size: 2rem;"></i>
                                                     <h4 class="mt-2" id="totalOrdersCount">{{ recent_orders|length }}</h4>
-                                                    <p class="text-muted">{{ 'Total Orders'|translate }}</p>
-                                                    <small class="text-primary">{{ 'View All'|translate }}</small>
+                                                    <p class="text-muted">{{ 'Total Orders'|translate(current_language) }}</p>
+                                                    <small class="text-primary">{{ 'View All'|translate(current_language) }}</small>
                                                 </div>
                                             </div>
                                         </div>
@@ -142,8 +142,8 @@
                                                 <div class="card-body">
                                                     <i class="far fa-sync-alt text-success" style="font-size: 2rem;"></i>
                                                     <h4 class="mt-2">{{ active_subscriptions|length }}</h4>
-                                                    <p class="text-muted">{{ 'Active Subscriptions'|translate }}</p>
-                                                    <small class="text-success">{{ 'Manage'|translate }}</small>
+                                                    <p class="text-muted">{{ 'Active Subscriptions'|translate(current_language) }}</p>
+                                                    <small class="text-success">{{ 'Manage'|translate(current_language) }}</small>
                                                 </div>
                                             </div>
                                         </div>
@@ -154,8 +154,8 @@
                                                 <div class="card-body">
                                                     <i class="far fa-star text-warning" style="font-size: 2rem;"></i>
                                                     <h4 class="mt-2">{{ loyalty_account.current_balance if loyalty_account else 0 }}</h4>
-                                                    <p class="text-muted">{{ 'Loyalty Points'|translate }}</p>
-                                                    <small class="text-warning">{{ 'Tier'|translate }}: {{ loyalty_account.current_tier if loyalty_account else 'Bronze' }}</small>
+                                                    <p class="text-muted">{{ 'Loyalty Points'|translate(current_language) }}</p>
+                                                    <small class="text-warning">{{ 'Tier'|translate(current_language) }}: {{ loyalty_account.current_tier if loyalty_account else 'Bronze' }}</small>
                                                 </div>
                                             </div>
                                         </div>
@@ -166,8 +166,8 @@
                                                 <div class="card-body">
                                                     <i class="far fa-map-marker-alt text-info" style="font-size: 2rem;"></i>
                                                     <h4 class="mt-2" id="addressesCount">0</h4>
-                                                    <p class="text-muted">{{ 'Saved Addresses'|translate }}</p>
-                                                    <small class="text-info">{{ 'Manage'|translate }}</small>
+                                                    <p class="text-muted">{{ 'Saved Addresses'|translate(current_language) }}</p>
+                                                    <small class="text-info">{{ 'Manage'|translate(current_language) }}</small>
                                                 </div>
                                             </div>
                                         </div>
@@ -179,8 +179,8 @@
                             <div class="recent-orders-section mb-4">
                                 <div class="card">
                                     <div class="card-header d-flex justify-content-between align-items-center">
-                                        <h5>{{ 'Recent Orders'|translate }}</h5>
-                                        <a href="{{ url_for('frontend.my_orders') }}" class="btn btn-outline-primary btn-sm">{{ 'View All'|translate }}</a>
+                                        <h5>{{ 'Recent Orders'|translate(current_language) }}</h5>
+                                        <a href="{{ url_for('frontend.my_orders') }}" class="btn btn-outline-primary btn-sm">{{ 'View All'|translate(current_language) }}</a>
                                     </div>
                                     <div class="card-body">
                                         {% if recent_orders %}
@@ -188,11 +188,11 @@
                                             <table class="table table-hover">
                                                 <thead>
                                                     <tr>
-                                                        <th>{{ 'Order #'|translate }}</th>
-                                                        <th>{{ 'Date'|translate }}</th>
-                                                        <th>{{ 'Status'|translate }}</th>
-                                                        <th>{{ 'Total'|translate }}</th>
-                                                        <th>{{ 'Actions'|translate }}</th>
+                                                        <th>{{ 'Order #'|translate(current_language) }}</th>
+                                                        <th>{{ 'Date'|translate(current_language) }}</th>
+                                                        <th>{{ 'Status'|translate(current_language) }}</th>
+                                                        <th>{{ 'Total'|translate(current_language) }}</th>
+                                                        <th>{{ 'Actions'|translate(current_language) }}</th>
                                                     </tr>
                                                 </thead>
                                                 <tbody>
@@ -207,7 +207,7 @@
                                                         </td>
                                                         <td>${{ "%.2f"|format(order.total_amount) }}</td>
                                                         <td>
-                                                            <a href="{{ url_for('frontend.order_detail', order_id=order.id) }}" class="btn btn-sm btn-outline-primary">{{ 'View'|translate }}</a>
+                                                            <a href="{{ url_for('frontend.order_detail', order_id=order.id) }}" class="btn btn-sm btn-outline-primary">{{ 'View'|translate(current_language) }}</a>
                                                         </td>
                                                     </tr>
                                                     {% endfor %}
@@ -217,9 +217,9 @@
                                         {% else %}
                                         <div class="text-center py-4">
                                             <i class="far fa-shopping-bag" style="font-size: 3rem; color: #ccc;"></i>
-                                            <h5 class="mt-3">{{ 'No orders yet'|translate }}</h5>
-                                            <p class="text-muted">{{ 'Start shopping to see your orders here'|translate }}</p>
-                                            <a href="{{ url_for('frontend.shop') }}" class="btn btn-primary">{{ 'Start Shopping'|translate }}</a>
+                                            <h5 class="mt-3">{{ 'No orders yet'|translate(current_language) }}</h5>
+                                            <p class="text-muted">{{ 'Start shopping to see your orders here'|translate(current_language) }}</p>
+                                            <a href="{{ url_for('frontend.shop') }}" class="btn btn-primary">{{ 'Start Shopping'|translate(current_language) }}</a>
                                         </div>
                                         {% endif %}
                                     </div>
@@ -231,8 +231,8 @@
                             <div class="subscriptions-section mb-4">
                                 <div class="card">
                                     <div class="card-header d-flex justify-content-between align-items-center">
-                                        <h5>{{ 'Active Subscriptions'|translate }}</h5>
-                                        <a href="{{ url_for('frontend.my_subscriptions') }}" class="btn btn-outline-primary btn-sm">{{ 'Manage All'|translate }}</a>
+                                        <h5>{{ 'Active Subscriptions'|translate(current_language) }}</h5>
+                                        <a href="{{ url_for('frontend.my_subscriptions') }}" class="btn btn-outline-primary btn-sm">{{ 'Manage All'|translate(current_language) }}</a>
                                     </div>
                                     <div class="card-body">
                                         <div class="row">
@@ -245,7 +245,7 @@
                                                             <p class="text-muted">{{ subscription.plan.description }}</p>
                                                             <div class="d-flex justify-content-between align-items-center">
                                                                 <span class="text-primary">${{ "%.2f"|format(subscription.plan.price) }}/{{ subscription.plan.frequency }}</span>
-                                                                <span class="badge badge-success">{{ 'Active'|translate }}</span>
+                                                                <span class="badge badge-success">{{ 'Active'|translate(current_language) }}</span>
                                                             </div>
                                                         </div>
                                                     </div>
@@ -262,27 +262,27 @@
                             <div class="activity-summary-section mb-4">
                                 <div class="card">
                                     <div class="card-header">
-                                        <h5><i class="far fa-chart-line"></i> {{ 'Account Activity'|translate }}</h5>
+                                        <h5><i class="far fa-chart-line"></i> {{ 'Account Activity'|translate(current_language) }}</h5>
                                     </div>
                                     <div class="card-body">
                                         <div class="row">
                                             <div class="col-md-6">
                                                 <div class="activity-item">
-                                                    <h6>{{ 'Platform Usage'|translate }}</h6>
+                                                    <h6>{{ 'Platform Usage'|translate(current_language) }}</h6>
                                                     <div class="platform-usage">
                                                         <div class="platform-item">
-                                                            <span class="platform-name">{{ 'Web App'|translate }}</span>
-                                                            <span class="badge badge-success">{{ 'Active'|translate }}</span>
+                                                            <span class="platform-name">{{ 'Web App'|translate(current_language) }}</span>
+                                                            <span class="badge badge-success">{{ 'Active'|translate(current_language) }}</span>
                                                         </div>
                                                         {% if user.telegram_id %}
                                                         <div class="platform-item">
-                                                            <span class="platform-name">{{ 'Telegram Bot'|translate }}</span>
-                                                            <span class="badge badge-success">{{ 'Connected'|translate }}</span>
+                                                            <span class="platform-name">{{ 'Telegram Bot'|translate(current_language) }}</span>
+                                                            <span class="badge badge-success">{{ 'Connected'|translate(current_language) }}</span>
                                                         </div>
                                                         {% else %}
                                                         <div class="platform-item">
-                                                            <span class="platform-name">{{ 'Telegram Bot'|translate }}</span>
-                                                            <button class="btn btn-sm btn-outline-primary" onclick="connectTelegram()">{{ 'Connect'|translate }}</button>
+                                                            <span class="platform-name">{{ 'Telegram Bot'|translate(current_language) }}</span>
+                                                            <button class="btn btn-sm btn-outline-primary" onclick="connectTelegram()">{{ 'Connect'|translate(current_language) }}</button>
                                                         </div>
                                                         {% endif %}
                                                     </div>
@@ -290,11 +290,11 @@
                                             </div>
                                             <div class="col-md-6">
                                                 <div class="activity-item">
-                                                    <h6>{{ 'Recent Activity'|translate }}</h6>
+                                                    <h6>{{ 'Recent Activity'|translate(current_language) }}</h6>
                                                     <ul class="recent-activity-list">
-                                                        <li><i class="far fa-sign-in-alt text-success"></i> {{ 'Last login'|translate }}: {{ user.last_login.strftime('%Y-%m-%d %H:%M') if user.last_login else 'Today' }}</li>
-                                                        <li><i class="far fa-user-edit text-info"></i> {{ 'Profile updated'|translate }}: {{ user.updated_at.strftime('%Y-%m-%d') if user.updated_at else 'Never' }}</li>
-                                                        <li><i class="far fa-shopping-bag text-primary"></i> {{ 'Last order'|translate }}: {{ recent_orders[0].created_at.strftime('%Y-%m-%d') if recent_orders else 'No orders yet' }}</li>
+                                                        <li><i class="far fa-sign-in-alt text-success"></i> {{ 'Last login'|translate(current_language) }}: {{ user.last_login.strftime('%Y-%m-%d %H:%M') if user.last_login else 'Today' }}</li>
+                                                        <li><i class="far fa-user-edit text-info"></i> {{ 'Profile updated'|translate(current_language) }}: {{ user.updated_at.strftime('%Y-%m-%d') if user.updated_at else 'Never' }}</li>
+                                                        <li><i class="far fa-shopping-bag text-primary"></i> {{ 'Last order'|translate(current_language) }}: {{ recent_orders[0].created_at.strftime('%Y-%m-%d') if recent_orders else 'No orders yet' }}</li>
                                                     </ul>
                                                 </div>
                                             </div>
@@ -307,32 +307,32 @@
                             <div class="quick-actions-section">
                                 <div class="card">
                                     <div class="card-header">
-                                        <h5><i class="far fa-bolt"></i> {{ 'Quick Actions'|translate }}</h5>
+                                        <h5><i class="far fa-bolt"></i> {{ 'Quick Actions'|translate(current_language) }}</h5>
                                     </div>
                                     <div class="card-body">
                                         <div class="row">
                                             <div class="col-md-3">
                                                 <a href="{{ url_for('frontend.shop') }}" class="btn btn-outline-primary btn-block action-btn">
                                                     <i class="far fa-shopping-cart"></i>
-                                                    {{ 'Shop Products'|translate }}
+                                                    {{ 'Shop Products'|translate(current_language) }}
                                                 </a>
                                             </div>
                                             <div class="col-md-3">
                                                 <a href="{{ url_for('frontend.profile_settings') }}" class="btn btn-outline-secondary btn-block action-btn">
                                                     <i class="far fa-user-edit"></i>
-                                                    {{ 'Edit Profile'|translate }}
+                                                    {{ 'Edit Profile'|translate(current_language) }}
                                                 </a>
                                             </div>
                                             <div class="col-md-3">
                                                 <a href="{{ url_for('frontend.addresses') }}" class="btn btn-outline-info btn-block action-btn">
                                                     <i class="far fa-map-marker-alt"></i>
-                                                    {{ 'Manage Addresses'|translate }}
+                                                    {{ 'Manage Addresses'|translate(current_language) }}
                                                 </a>
                                             </div>
                                             <div class="col-md-3">
                                                 <button class="btn btn-outline-warning btn-block action-btn" onclick="downloadAccountData()">
                                                     <i class="far fa-download"></i>
-                                                    {{ 'Export Data'|translate }}
+                                                    {{ 'Export Data'|translate(current_language) }}
                                                 </button>
                                             </div>
                                         </div>
@@ -516,11 +516,11 @@ document.addEventListener('DOMContentLoaded', function() {
 
 function checkVerificationStatus() {
     {% if not user.email_verified_at %}
-    showNotification('{{ "Please verify your email address to access all features"|translate }}', 'warning');
+    showNotification('{{ "Please verify your email address to access all features"|translate(current_language) }}', 'warning');
     {% endif %}
     
     {% if not user.phone_verified_at %}
-    showNotification('{{ "Please verify your phone number for enhanced security"|translate }}', 'info');
+    showNotification('{{ "Please verify your phone number for enhanced security"|translate(current_language) }}', 'info');
     {% endif %}
 }
 
@@ -579,15 +579,15 @@ function updateSyncStatus(status) {
     if (syncElement) {
         switch (status) {
             case 'synchronized':
-                syncElement.textContent = '{{ "Synchronized"|translate }}';
+                syncElement.textContent = '{{ "Synchronized"|translate(current_language) }}';
                 syncElement.className = 'text-success';
                 break;
             case 'syncing':
-                syncElement.textContent = '{{ "Syncing..."|translate }}';
+                syncElement.textContent = '{{ "Syncing..."|translate(current_language) }}';
                 syncElement.className = 'text-warning';
                 break;
             case 'error':
-                syncElement.textContent = '{{ "Sync Error"|translate }}';
+                syncElement.textContent = '{{ "Sync Error"|translate(current_language) }}';
                 syncElement.className = 'text-danger';
                 break;
         }
@@ -595,13 +595,13 @@ function updateSyncStatus(status) {
 }
 
 function connectTelegram() {
-    showNotification('{{ "Telegram connection feature coming soon!"|translate }}', 'info');
+    showNotification('{{ "Telegram connection feature coming soon!"|translate(current_language) }}', 'info');
     // In future implementation, this would generate a connection link/QR code
 }
 
 async function downloadAccountData() {
     try {
-        showNotification('{{ "Preparing your account data for download..."|translate }}', 'info');
+        showNotification('{{ "Preparing your account data for download..."|translate(current_language) }}', 'info');
         
         const response = await apiRequest('/auth/export-data', {
             method: 'POST'
@@ -617,13 +617,13 @@ async function downloadAccountData() {
             document.body.appendChild(a);
             a.click();
             window.URL.revokeObjectURL(url);
-            showNotification('{{ "Account data downloaded successfully!"|translate }}', 'success');
+            showNotification('{{ "Account data downloaded successfully!"|translate(current_language) }}', 'success');
         } else {
             throw new Error('Failed to download data');
         }
     } catch (error) {
         console.error('Failed to download account data:', error);
-        showNotification('{{ "Failed to download account data. Please try again."|translate }}', 'error');
+        showNotification('{{ "Failed to download account data. Please try again."|translate(current_language) }}', 'error');
     }
 }
 </script>

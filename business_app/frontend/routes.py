@@ -490,7 +490,7 @@ def inject_global_vars():
         'nav_categories': categories,
         'current_user': user_info,
         'company_name': 'Blue Stream Group',
-        'company_phone': '+998 71 234 56 78',
+        'company_phone': '+998 90 915 0172',
         'company_email': 'info@bluestream.uz',
         'moment': lambda: MomentJS(),
         'min': min,

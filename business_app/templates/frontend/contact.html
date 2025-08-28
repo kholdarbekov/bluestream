@@ -1,6 +1,6 @@
 {% extends "frontend/base.html" %}
 
-{% block title %}{{ 'Contact Us'|translate }} - {{ company_name }}{% endblock %}
+{% block title %}{{ 'Contact Us'|translate(current_language) }} - {{ company_name }}{% endblock %}
 
 {% block content %}
         <!-- page-title -->
@@ -8,10 +8,10 @@
             <div class="bg-layer" style="background-image: url({{ url_for('static', filename='images/background/page-title.jpg') }});"></div>
             <div class="auto-container">
                 <div class="content-box">
-                    <h1>{{ 'Contact Us'|translate }}</h1>
+                    <h1>{{ 'Contact Us'|translate(current_language) }}</h1>
                     <ul class="bread-crumb clearfix">
-                        <li><a href="{{ url_for('frontend.index') }}">{{ 'Home'|translate }}</a></li>
-                        <li>{{ 'Contact'|translate }}</li>
+                        <li><a href="{{ url_for('frontend.index') }}">{{ 'Home'|translate(current_language) }}</a></li>
+                        <li>{{ 'Contact'|translate(current_language) }}</li>
                     </ul>
                 </div>
             </div>
@@ -25,28 +25,28 @@
                     <div class="col-lg-8 col-md-12 col-sm-12 form-column">
                         <div class="form-inner">
                             <div class="sec-title">
-                                <h2>{{ 'Get In Touch'|translate }}</h2>
-                                <p>{{ 'Send us a message and we will get back to you as soon as possible'|translate }}</p>
+                                <h2>{{ 'Get In Touch'|translate(current_language) }}</h2>
+                                <p>{{ 'Send us a message and we will get back to you as soon as possible'|translate(current_language) }}</p>
                             </div>
                             <form id="contactForm" class="default-form">
                                 <div class="row clearfix">
                                     <div class="col-lg-6 col-md-6 col-sm-12 form-group">
-                                        <input type="text" name="name" placeholder="{{ 'Your Name'|translate }}" required>
+                                        <input type="text" name="name" placeholder="{{ 'Your Name'|translate(current_language) }}" required>
                                     </div>
                                     <div class="col-lg-6 col-md-6 col-sm-12 form-group">
-                                        <input type="email" name="email" placeholder="{{ 'Email Address'|translate }}" required>
+                                        <input type="email" name="email" placeholder="{{ 'Email Address'|translate(current_language) }}" required>
                                     </div>
                                     <div class="col-lg-6 col-md-6 col-sm-12 form-group">
-                                        <input type="tel" name="phone" placeholder="{{ 'Phone Number'|translate }}">
+                                        <input type="tel" name="phone" placeholder="{{ 'Phone Number'|translate(current_language) }}">
                                     </div>
                                     <div class="col-lg-6 col-md-6 col-sm-12 form-group">
-                                        <input type="text" name="subject" placeholder="{{ 'Subject'|translate }}" required>
+                                        <input type="text" name="subject" placeholder="{{ 'Subject'|translate(current_language) }}" required>
                                     </div>
                                     <div class="col-lg-12 col-md-12 col-sm-12 form-group">
-                                        <textarea name="message" placeholder="{{ 'Your Message'|translate }}" required></textarea>
+                                        <textarea name="message" placeholder="{{ 'Your Message'|translate(current_language) }}" required></textarea>
                                     </div>
                                     <div class="col-lg-12 col-md-12 col-sm-12 form-group message-btn">
-                                        <button type="submit" class="theme-btn btn-one">{{ 'Send Message'|translate }}</button>
+                                        <button type="submit" class="theme-btn btn-one">{{ 'Send Message'|translate(current_language) }}</button>
                                     </div>
                                 </div>
                             </form>
@@ -55,22 +55,22 @@
                     <div class="col-lg-4 col-md-12 col-sm-12 info-column">
                         <div class="contact-info">
                             <div class="sec-title">
-                                <h3>{{ 'Contact Information'|translate }}</h3>
+                                <h3>{{ 'Contact Information'|translate(current_language) }}</h3>
                             </div>
                             <ul class="info-list">
                                 <li>
                                     <i class="flaticon-place"></i>
-                                    <h5>{{ 'Address'|translate }}</h5>
-                                    <p>{{ 'Tashkent, Uzbekistan'|translate }}</p>
+                                    <h5>{{ 'Address'|translate(current_language) }}</h5>
+                                    <p>{{ 'Tashkent, Uzbekistan'|translate(current_language) }}</p>
                                 </li>
                                 <li>
                                     <i class="flaticon-phone-call"></i>
-                                    <h5>{{ 'Phone'|translate }}</h5>
+                                    <h5>{{ 'Phone'|translate(current_language) }}</h5>
                                     <p><a href="tel:{{ company_phone }}">{{ company_phone }}</a></p>
                                 </li>
                                 <li>
                                     <i class="flaticon-email"></i>
-                                    <h5>{{ 'Email'|translate }}</h5>
+                                    <h5>{{ 'Email'|translate(current_language) }}</h5>
                                     <p><a href="mailto:{{ company_email }}">{{ company_email }}</a></p>
                                 </li>
                             </ul>
@@ -103,13 +103,13 @@ document.getElementById('contactForm').addEventListener('submit', async function
         });
         
         if (response.ok) {
-            showNotification('{{ "Message sent successfully!"|translate }}', 'success');
+            showNotification('{{ "Message sent successfully!"|translate(current_language) }}', 'success');
             this.reset();
         } else {
-            showNotification('{{ "Failed to send message"|translate }}', 'error');
+            showNotification('{{ "Failed to send message"|translate(current_language) }}', 'error');
         }
     } catch (error) {
-        showNotification('{{ "Network error. Please try again."|translate }}', 'error');
+        showNotification('{{ "Network error. Please try again."|translate(current_language) }}', 'error');
     }
 });
 </script>

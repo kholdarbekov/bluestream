@@ -1,6 +1,6 @@
 {% extends "frontend/base.html" %}
 
-{% block title %}{{ 'Profile Settings'|translate }} - {{ company_name }}{% endblock %}
+{% block title %}{{ 'Profile Settings'|translate(current_language) }} - {{ company_name }}{% endblock %}
 
 {% block content %}
         <!-- page-title -->
@@ -8,11 +8,11 @@
             <div class="bg-layer" style="background-image: url({{ url_for('static', filename='images/background/page-title.jpg') }});"></div>
             <div class="auto-container">
                 <div class="content-box">
-                    <h1>{{ 'Profile Settings'|translate }}</h1>
+                    <h1>{{ 'Profile Settings'|translate(current_language) }}</h1>
                     <ul class="bread-crumb clearfix">
-                        <li><a href="{{ url_for('frontend.index') }}">{{ 'Home'|translate }}</a></li>
-                        <li><a href="{{ url_for('frontend.my_account') }}">{{ 'My Account'|translate }}</a></li>
-                        <li>{{ 'Profile Settings'|translate }}</li>
+                        <li><a href="{{ url_for('frontend.index') }}">{{ 'Home'|translate(current_language) }}</a></li>
+                        <li><a href="{{ url_for('frontend.my_account') }}">{{ 'My Account'|translate(current_language) }}</a></li>
+                        <li>{{ 'Profile Settings'|translate(current_language) }}</li>
                     </ul>
                 </div>
             </div>
@@ -40,32 +40,32 @@
                                 <ul class="list-unstyled">
                                     <li>
                                         <a href="{{ url_for('frontend.my_account') }}">
-                                            <i class="far fa-tachometer-alt"></i> {{ 'Dashboard'|translate }}
+                                            <i class="far fa-tachometer-alt"></i> {{ 'Dashboard'|translate(current_language) }}
                                         </a>
                                     </li>
                                     <li class="active">
                                         <a href="{{ url_for('frontend.profile_settings') }}">
-                                            <i class="far fa-user-edit"></i> {{ 'Profile Settings'|translate }}
+                                            <i class="far fa-user-edit"></i> {{ 'Profile Settings'|translate(current_language) }}
                                         </a>
                                     </li>
                                     <li>
                                         <a href="{{ url_for('frontend.my_orders') }}">
-                                            <i class="far fa-shopping-bag"></i> {{ 'My Orders'|translate }}
+                                            <i class="far fa-shopping-bag"></i> {{ 'My Orders'|translate(current_language) }}
                                         </a>
                                     </li>
                                     <li>
                                         <a href="{{ url_for('frontend.addresses') }}">
-                                            <i class="far fa-map-marker-alt"></i> {{ 'Addresses'|translate }}
+                                            <i class="far fa-map-marker-alt"></i> {{ 'Addresses'|translate(current_language) }}
                                         </a>
                                     </li>
                                     <li>
                                         <a href="{{ url_for('frontend.account_security') }}">
-                                            <i class="far fa-shield-alt"></i> {{ 'Security'|translate }}
+                                            <i class="far fa-shield-alt"></i> {{ 'Security'|translate(current_language) }}
                                         </a>
                                     </li>
                                     <li>
                                         <a href="#" onclick="logout()">
-                                            <i class="far fa-sign-out-alt"></i> {{ 'Logout'|translate }}
+                                            <i class="far fa-sign-out-alt"></i> {{ 'Logout'|translate(current_language) }}
                                         </a>
                                     </li>
                                 </ul>
@@ -80,33 +80,33 @@
                             <div class="settings-section mb-4">
                                 <div class="card">
                                     <div class="card-header">
-                                        <h5><i class="far fa-user"></i> {{ 'Personal Information'|translate }}</h5>
+                                        <h5><i class="far fa-user"></i> {{ 'Personal Information'|translate(current_language) }}</h5>
                                     </div>
                                     <div class="card-body">
                                         <form id="personalInfoForm" class="default-form">
                                             <div class="row clearfix">
                                                 <div class="col-lg-6 col-md-6 col-sm-12 form-group">
-                                                    <label>{{ 'First Name'|translate }}</label>
-                                                    <input type="text" name="first_name" value="{{ user.first_name or '' }}" placeholder="{{ 'Enter first name'|translate }}" required>
+                                                    <label>{{ 'First Name'|translate(current_language) }}</label>
+                                                    <input type="text" name="first_name" value="{{ user.first_name or '' }}" placeholder="{{ 'Enter first name'|translate(current_language) }}" required>
                                                 </div>
                                                 <div class="col-lg-6 col-md-6 col-sm-12 form-group">
-                                                    <label>{{ 'Last Name'|translate }}</label>
-                                                    <input type="text" name="last_name" value="{{ user.last_name or '' }}" placeholder="{{ 'Enter last name'|translate }}" required>
+                                                    <label>{{ 'Last Name'|translate(current_language) }}</label>
+                                                    <input type="text" name="last_name" value="{{ user.last_name or '' }}" placeholder="{{ 'Enter last name'|translate(current_language) }}" required>
                                                 </div>
                                                 <div class="col-lg-6 col-md-6 col-sm-12 form-group">
-                                                    <label>{{ 'Date of Birth'|translate }}</label>
+                                                    <label>{{ 'Date of Birth'|translate(current_language) }}</label>
                                                     <input type="date" name="date_of_birth" value="{{ user.date_of_birth.strftime('%Y-%m-%d') if user.date_of_birth else '' }}">
                                                 </div>
                                                 <div class="col-lg-6 col-md-6 col-sm-12 form-group">
-                                                    <label>{{ 'Gender'|translate }}</label>
+                                                    <label>{{ 'Gender'|translate(current_language) }}</label>
                                                     <select name="gender">
-                                                        <option value="">{{ 'Select Gender'|translate }}</option>
-                                                        <option value="male" {{ 'selected' if user.gender == 'male' else '' }}>{{ 'Male'|translate }}</option>
-                                                        <option value="female" {{ 'selected' if user.gender == 'female' else '' }}>{{ 'Female'|translate }}</option>
+                                                        <option value="">{{ 'Select Gender'|translate(current_language) }}</option>
+                                                        <option value="male" {{ 'selected' if user.gender == 'male' else '' }}>{{ 'Male'|translate(current_language) }}</option>
+                                                        <option value="female" {{ 'selected' if user.gender == 'female' else '' }}>{{ 'Female'|translate(current_language) }}</option>
                                                     </select>
                                                 </div>
                                                 <div class="col-lg-12 col-md-12 col-sm-12 form-group">
-                                                    <label>{{ 'Preferred Language'|translate }}</label>
+                                                    <label>{{ 'Preferred Language'|translate(current_language) }}</label>
                                                     <select name="preferred_language">
                                                         <option value="en" {{ 'selected' if user.preferred_language == 'en' else '' }}>English</option>
                                                         <option value="uz" {{ 'selected' if user.preferred_language == 'uz' else '' }}>O'zbek</option>
@@ -115,7 +115,7 @@
                                                 </div>
                                                 <div class="col-lg-12 col-md-12 col-sm-12 form-group">
                                                     <button type="submit" class="theme-btn btn-one">
-                                                        <i class="far fa-save"></i> {{ 'Save Changes'|translate }}
+                                                        <i class="far fa-save"></i> {{ 'Save Changes'|translate(current_language) }}
                                                     </button>
                                                 </div>
                                             </div>
@@ -128,41 +128,41 @@
                             <div class="settings-section mb-4">
                                 <div class="card">
                                     <div class="card-header">
-                                        <h5><i class="far fa-envelope"></i> {{ 'Contact Information'|translate }}</h5>
+                                        <h5><i class="far fa-envelope"></i> {{ 'Contact Information'|translate(current_language) }}</h5>
                                     </div>
                                     <div class="card-body">
                                         <form id="contactInfoForm" class="default-form">
                                             <div class="row clearfix">
                                                 <div class="col-lg-6 col-md-6 col-sm-12 form-group">
-                                                    <label>{{ 'Email Address'|translate }}</label>
+                                                    <label>{{ 'Email Address'|translate(current_language) }}</label>
                                                     <div class="input-group">
                                                         <input type="email" name="email" value="{{ user.email }}" readonly>
                                                         <div class="input-group-append">
                                                             {% if user.email_verified_at %}
                                                             <span class="input-group-text text-success">
-                                                                <i class="far fa-check-circle"></i> {{ 'Verified'|translate }}
+                                                                <i class="far fa-check-circle"></i> {{ 'Verified'|translate(current_language) }}
                                                             </span>
                                                             {% else %}
                                                             <button type="button" class="btn btn-outline-warning btn-sm" onclick="resendEmailVerification()">
-                                                                <i class="far fa-envelope"></i> {{ 'Verify'|translate }}
+                                                                <i class="far fa-envelope"></i> {{ 'Verify'|translate(current_language) }}
                                                             </button>
                                                             {% endif %}
                                                         </div>
                                                     </div>
-                                                    <small class="text-muted">{{ 'Email address cannot be changed. Contact support if needed.'|translate }}</small>
+                                                    <small class="text-muted">{{ 'Email address cannot be changed. Contact support if needed.'|translate(current_language) }}</small>
                                                 </div>
                                                 <div class="col-lg-6 col-md-6 col-sm-12 form-group">
-                                                    <label>{{ 'Phone Number'|translate }}</label>
+                                                    <label>{{ 'Phone Number'|translate(current_language) }}</label>
                                                     <div class="input-group">
-                                                        <input type="tel" name="phone" value="{{ user.phone or '' }}" placeholder="{{ '+998901234567'|translate }}">
+                                                        <input type="tel" name="phone" value="{{ user.phone or '' }}" placeholder="{{ '+998901234567'|translate(current_language) }}">
                                                         <div class="input-group-append">
                                                             {% if user.phone_verified_at %}
                                                             <span class="input-group-text text-success">
-                                                                <i class="far fa-check-circle"></i> {{ 'Verified'|translate }}
+                                                                <i class="far fa-check-circle"></i> {{ 'Verified'|translate(current_language) }}
                                                             </span>
                                                             {% else %}
                                                             <button type="button" class="btn btn-outline-warning btn-sm" onclick="verifyPhone()">
-                                                                <i class="far fa-mobile"></i> {{ 'Verify'|translate }}
+                                                                <i class="far fa-mobile"></i> {{ 'Verify'|translate(current_language) }}
                                                             </button>
                                                             {% endif %}
                                                         </div>
@@ -170,7 +170,7 @@
                                                 </div>
                                                 <div class="col-lg-12 col-md-12 col-sm-12 form-group">
                                                     <button type="submit" class="theme-btn btn-one">
-                                                        <i class="far fa-save"></i> {{ 'Update Contact Info'|translate }}
+                                                        <i class="far fa-save"></i> {{ 'Update Contact Info'|translate(current_language) }}
                                                     </button>
                                                 </div>
                                             </div>
@@ -183,13 +183,13 @@
                             <div class="settings-section mb-4">
                                 <div class="card">
                                     <div class="card-header">
-                                        <h5><i class="far fa-info-circle"></i> {{ 'Account Status'|translate }}</h5>
+                                        <h5><i class="far fa-info-circle"></i> {{ 'Account Status'|translate(current_language) }}</h5>
                                     </div>
                                     <div class="card-body">
                                         <div class="row">
                                             <div class="col-md-6">
                                                 <div class="status-item">
-                                                    <h6>{{ 'Account Status'|translate }}</h6>
+                                                    <h6>{{ 'Account Status'|translate(current_language) }}</h6>
                                                     <span class="badge badge-{{ 'success' if user.status == 'active' else 'warning' }}">
                                                         {{ user.status|title }}
                                                     </span>
@@ -197,19 +197,19 @@
                                             </div>
                                             <div class="col-md-6">
                                                 <div class="status-item">
-                                                    <h6>{{ 'Member Since'|translate }}</h6>
+                                                    <h6>{{ 'Member Since'|translate(current_language) }}</h6>
                                                     <p class="text-muted">{{ user.created_at.strftime('%B %Y') if user.created_at else 'Unknown' }}</p>
                                                 </div>
                                             </div>
                                             <div class="col-md-6">
                                                 <div class="status-item">
-                                                    <h6>{{ 'Last Login'|translate }}</h6>
+                                                    <h6>{{ 'Last Login'|translate(current_language) }}</h6>
                                                     <p class="text-muted">{{ user.last_login.strftime('%Y-%m-%d %H:%M') if user.last_login else 'Never' }}</p>
                                                 </div>
                                             </div>
                                             <div class="col-md-6">
                                                 <div class="status-item">
-                                                    <h6>{{ 'Registration Source'|translate }}</h6>
+                                                    <h6>{{ 'Registration Source'|translate(current_language) }}</h6>
                                                     <span class="badge badge-info">
                                                         {{ user.registration_source|title if user.registration_source else 'Web' }}
                                                     </span>
@@ -224,7 +224,7 @@
                             <div class="settings-section mb-4">
                                 <div class="card">
                                     <div class="card-header">
-                                        <h5><i class="far fa-cog"></i> {{ 'Preferences'|translate }}</h5>
+                                        <h5><i class="far fa-cog"></i> {{ 'Preferences'|translate(current_language) }}</h5>
                                     </div>
                                     <div class="card-body">
                                         <form id="preferencesForm" class="default-form">
@@ -232,24 +232,24 @@
                                                 <div class="col-lg-12 col-md-12 col-sm-12 form-group">
                                                     <div class="check-box">
                                                         <input class="check" type="checkbox" id="email_notifications" name="email_notifications" checked>
-                                                        <label for="email_notifications">{{ 'Receive email notifications about orders'|translate }}</label>
+                                                        <label for="email_notifications">{{ 'Receive email notifications about orders'|translate(current_language) }}</label>
                                                     </div>
                                                 </div>
                                                 <div class="col-lg-12 col-md-12 col-sm-12 form-group">
                                                     <div class="check-box">
                                                         <input class="check" type="checkbox" id="sms_notifications" name="sms_notifications" checked>
-                                                        <label for="sms_notifications">{{ 'Receive SMS notifications about deliveries'|translate }}</label>
+                                                        <label for="sms_notifications">{{ 'Receive SMS notifications about deliveries'|translate(current_language) }}</label>
                                                     </div>
                                                 </div>
                                                 <div class="col-lg-12 col-md-12 col-sm-12 form-group">
                                                     <div class="check-box">
                                                         <input class="check" type="checkbox" id="marketing_emails" name="marketing_emails">
-                                                        <label for="marketing_emails">{{ 'Receive promotional emails and offers'|translate }}</label>
+                                                        <label for="marketing_emails">{{ 'Receive promotional emails and offers'|translate(current_language) }}</label>
                                                     </div>
                                                 </div>
                                                 <div class="col-lg-12 col-md-12 col-sm-12 form-group">
                                                     <button type="submit" class="theme-btn btn-one">
-                                                        <i class="far fa-save"></i> {{ 'Save Preferences'|translate }}
+                                                        <i class="far fa-save"></i> {{ 'Save Preferences'|translate(current_language) }}
                                                     </button>
                                                 </div>
                                             </div>
@@ -384,12 +384,12 @@ document.getElementById('personalInfoForm').addEventListener('submit', async fun
         const result = await response.json();
         
         if (response.ok) {
-            showNotification('{{ "Personal information updated successfully!"|translate }}', 'success');
+            showNotification('{{ "Personal information updated successfully!"|translate(current_language) }}', 'success');
         } else {
-            showNotification(result.message || '{{ "Failed to update personal information"|translate }}', 'error');
+            showNotification(result.message || '{{ "Failed to update personal information"|translate(current_language) }}', 'error');
         }
     } catch (error) {
-        showNotification('{{ "Network error. Please try again."|translate }}', 'error');
+        showNotification('{{ "Network error. Please try again."|translate(current_language) }}', 'error');
     }
 });
 
@@ -411,21 +411,21 @@ document.getElementById('contactInfoForm').addEventListener('submit', async func
         const result = await response.json();
         
         if (response.ok) {
-            showNotification('{{ "Contact information updated successfully!"|translate }}', 'success');
+            showNotification('{{ "Contact information updated successfully!"|translate(current_language) }}', 'success');
             
             // If phone number was changed, prompt for verification
             if (data.phone && data.phone !== '{{ user.phone or "" }}') {
                 setTimeout(() => {
-                    if (confirm('{{ "Would you like to verify your new phone number now?"|translate }}')) {
+                    if (confirm('{{ "Would you like to verify your new phone number now?"|translate(current_language) }}')) {
                         verifyPhone();
                     }
                 }, 2000);
             }
         } else {
-            showNotification(result.message || '{{ "Failed to update contact information"|translate }}', 'error');
+            showNotification(result.message || '{{ "Failed to update contact information"|translate(current_language) }}', 'error');
         }
     } catch (error) {
-        showNotification('{{ "Network error. Please try again."|translate }}', 'error');
+        showNotification('{{ "Network error. Please try again."|translate(current_language) }}', 'error');
     }
 });
 
@@ -433,7 +433,7 @@ document.getElementById('contactInfoForm').addEventListener('submit', async func
 document.getElementById('preferencesForm').addEventListener('submit', async function(e) {
     e.preventDefault();
     
-    showNotification('{{ "Preferences saved successfully!"|translate }}', 'success');
+    showNotification('{{ "Preferences saved successfully!"|translate(current_language) }}', 'success');
 });
 
 // Resend Email Verification
@@ -446,12 +446,12 @@ async function resendEmailVerification() {
         const result = await response.json();
         
         if (response.ok) {
-            showNotification('{{ "Verification email sent! Please check your inbox."|translate }}', 'success');
+            showNotification('{{ "Verification email sent! Please check your inbox."|translate(current_language) }}', 'success');
         } else {
-            showNotification(result.message || '{{ "Failed to send verification email"|translate }}', 'error');
+            showNotification(result.message || '{{ "Failed to send verification email"|translate(current_language) }}', 'error');
         }
     } catch (error) {
-        showNotification('{{ "Network error. Please try again."|translate }}', 'error');
+        showNotification('{{ "Network error. Please try again."|translate(current_language) }}', 'error');
     }
 }
 

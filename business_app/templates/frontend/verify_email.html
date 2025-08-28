@@ -1,6 +1,6 @@
 {% extends "frontend/base.html" %}
 
-{% block title %}{{ 'Verify Email Address'|translate }} - {{ company_name }}{% endblock %}
+{% block title %}{{ 'Verify Email Address'|translate(current_language) }} - {{ company_name }}{% endblock %}
 
 {% block content %}
         <!-- page-title -->
@@ -8,10 +8,10 @@
             <div class="bg-layer" style="background-image: url({{ url_for('static', filename='images/background/page-title.jpg') }});"></div>
             <div class="auto-container">
                 <div class="content-box">
-                    <h1>{{ 'Verify Email Address'|translate }}</h1>
+                    <h1>{{ 'Verify Email Address'|translate(current_language) }}</h1>
                     <ul class="bread-crumb clearfix">
-                        <li><a href="{{ url_for('frontend.index') }}">{{ 'Home'|translate }}</a></li>
-                        <li>{{ 'Verify Email'|translate }}</li>
+                        <li><a href="{{ url_for('frontend.index') }}">{{ 'Home'|translate(current_language) }}</a></li>
+                        <li>{{ 'Verify Email'|translate(current_language) }}</li>
                     </ul>
                 </div>
             </div>
@@ -25,8 +25,8 @@
                     <div class="col-lg-8 col-md-12 col-sm-12 offset-lg-2">
                         <div class="form-inner">
                             <div class="sec-title centred">
-                                <h2>{{ 'Verify Your Email Address'|translate }}</h2>
-                                <p>{{ 'Please check your email and enter the verification code'|translate }}</p>
+                                <h2>{{ 'Verify Your Email Address'|translate(current_language) }}</h2>
+                                <p>{{ 'Please check your email and enter the verification code'|translate(current_language) }}</p>
                             </div>
                             
                             <!-- Manual Token Entry Form -->
@@ -35,20 +35,20 @@
                                     <div class="col-lg-12 col-md-12 col-sm-12 form-group">
                                         <div class="alert alert-info">
                                             <i class="far fa-info-circle"></i>
-                                            {{ 'We sent a verification link to your email address. You can either click the link in your email or enter the verification code below.'|translate }}
+                                            {{ 'We sent a verification link to your email address. You can either click the link in your email or enter the verification code below.'|translate(current_language) }}
                                         </div>
                                     </div>
                                     <div class="col-lg-12 col-md-12 col-sm-12 form-group">
-                                        <input type="text" name="token" placeholder="{{ 'Enter verification code from email'|translate }}" required>
-                                        <small class="text-muted">{{ 'The verification code is in your email'|translate }}</small>
+                                        <input type="text" name="token" placeholder="{{ 'Enter verification code from email'|translate(current_language) }}" required>
+                                        <small class="text-muted">{{ 'The verification code is in your email'|translate(current_language) }}</small>
                                     </div>
                                     <div class="col-lg-12 col-md-12 col-sm-12 form-group message-btn">
-                                        <button type="submit" class="theme-btn btn-one">{{ 'Verify Email'|translate }}</button>
+                                        <button type="submit" class="theme-btn btn-one">{{ 'Verify Email'|translate(current_language) }}</button>
                                     </div>
                                     <div class="col-lg-12 col-md-12 col-sm-12 form-group">
                                         <div class="other-option centred">
-                                            <p>{{ "Didn't receive the email?"|translate }} <a href="#" id="resendEmail">{{ 'Resend Verification Email'|translate }}</a></p>
-                                            <p><a href="{{ url_for('frontend.my_account') }}">{{ 'Back to My Account'|translate }}</a></p>
+                                            <p>{{ "Didn't receive the email?"|translate(current_language) }} <a href="#" id="resendEmail">{{ 'Resend Verification Email'|translate(current_language) }}</a></p>
+                                            <p><a href="{{ url_for('frontend.my_account') }}">{{ 'Back to My Account'|translate(current_language) }}</a></p>
                                         </div>
                                     </div>
                                 </div>
@@ -57,9 +57,9 @@
                             <!-- Success Message -->
                             <div id="successMessage" class="alert alert-success" style="display: none;">
                                 <i class="far fa-check-circle"></i>
-                                {{ 'Email address verified successfully! Your account is now fully activated.'|translate }}
+                                {{ 'Email address verified successfully! Your account is now fully activated.'|translate(current_language) }}
                                 <div class="mt-3">
-                                    <a href="{{ url_for('frontend.my_account') }}" class="theme-btn btn-one btn-sm">{{ 'Go to My Account'|translate }}</a>
+                                    <a href="{{ url_for('frontend.my_account') }}" class="theme-btn btn-one btn-sm">{{ 'Go to My Account'|translate(current_language) }}</a>
                                 </div>
                             </div>
                             
@@ -97,7 +97,7 @@ document.getElementById('emailVerificationForm').addEventListener('submit', asyn
     const token = formData.get('token');
     
     if (!token) {
-        showError('{{ "Please enter the verification code"|translate }}');
+        showError('{{ "Please enter the verification code"|translate(current_language) }}');
         return;
     }
     
@@ -120,17 +120,17 @@ async function verifyEmailToken(token) {
             document.getElementById('errorMessage').style.display = 'none';
             document.getElementById('successMessage').style.display = 'block';
             
-            showNotification('{{ "Email verified successfully!"|translate }}', 'success');
+            showNotification('{{ "Email verified successfully!"|translate(current_language) }}', 'success');
             
             // Redirect after 3 seconds
             setTimeout(() => {
                 window.location.href = '{{ url_for("frontend.my_account") }}';
             }, 3000);
         } else {
-            showError(result.message || '{{ "Invalid or expired verification code"|translate }}');
+            showError(result.message || '{{ "Invalid or expired verification code"|translate(current_language) }}');
         }
     } catch (error) {
-        showError('{{ "Network error. Please try again."|translate }}');
+        showError('{{ "Network error. Please try again."|translate(current_language) }}');
     }
 }
 
@@ -140,7 +140,7 @@ document.getElementById('resendEmail').addEventListener('click', async function(
     
     const token = getAuthToken();
     if (!token) {
-        showError('{{ "Please log in first"|translate }}');
+        showError('{{ "Please log in first"|translate(current_language) }}');
         window.location.href = '{{ url_for("frontend.login") }}';
         return;
     }
@@ -153,24 +153,24 @@ document.getElementById('resendEmail').addEventListener('click', async function(
         const result = await response.json();
         
         if (response.ok) {
-            showNotification('{{ "Verification email sent successfully! Please check your inbox."|translate }}', 'success');
+            showNotification('{{ "Verification email sent successfully! Please check your inbox."|translate(current_language) }}', 'success');
             
             // Disable resend button temporarily
             const button = e.target;
             button.style.pointerEvents = 'none';
             button.style.opacity = '0.6';
-            button.textContent = '{{ "Email sent"|translate }}';
+            button.textContent = '{{ "Email sent"|translate(current_language) }}';
             
             setTimeout(() => {
                 button.style.pointerEvents = '';
                 button.style.opacity = '';
-                button.textContent = '{{ "Resend Verification Email"|translate }}';
+                button.textContent = '{{ "Resend Verification Email"|translate(current_language) }}';
             }, 60000); // Re-enable after 1 minute
         } else {
-            showError(result.message || '{{ "Failed to send verification email"|translate }}');
+            showError(result.message || '{{ "Failed to send verification email"|translate(current_language) }}');
         }
     } catch (error) {
-        showError('{{ "Network error. Please try again."|translate }}');
+        showError('{{ "Network error. Please try again."|translate(current_language) }}');
     }
 });
 

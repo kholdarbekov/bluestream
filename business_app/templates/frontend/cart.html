@@ -1,6 +1,6 @@
 {% extends "frontend/base.html" %}
 
-{% block title %}{{ 'Shopping Cart'|translate }} - {{ company_name }}{% endblock %}
+{% block title %}{{ 'Shopping Cart'|translate(current_language) }} - {{ company_name }}{% endblock %}
 
 {% block content %}
         <!-- page-title -->
@@ -8,10 +8,10 @@
             <div class="bg-layer" style="background-image: url({{ url_for('static', filename='images/background/page-title.jpg') }});"></div>
             <div class="auto-container">
                 <div class="content-box">
-                    <h1>{{ 'Shopping Cart'|translate }}</h1>
+                    <h1>{{ 'Shopping Cart'|translate(current_language) }}</h1>
                     <ul class="bread-crumb clearfix">
-                        <li><a href="{{ url_for('frontend.index') }}">{{ 'Home'|translate }}</a></li>
-                        <li>{{ 'Cart'|translate }}</li>
+                        <li><a href="{{ url_for('frontend.index') }}">{{ 'Home'|translate(current_language) }}</a></li>
+                        <li>{{ 'Cart'|translate(current_language) }}</li>
                     </ul>
                 </div>
             </div>
@@ -28,26 +28,26 @@
                         <div class="row clearfix">
                             <div class="col-lg-6 col-md-12 col-sm-12">
                                 <div class="coupon-box">
-                                    <h4>{{ 'Have a Coupon?'|translate }}</h4>
+                                    <h4>{{ 'Have a Coupon?'|translate(current_language) }}</h4>
                                     <form class="coupon-form">
                                         <div class="form-group">
-                                            <input type="text" name="coupon_code" placeholder="{{ 'Enter coupon code'|translate }}">
-                                            <button type="submit" class="theme-btn btn-two">{{ 'Apply Coupon'|translate }}</button>
+                                            <input type="text" name="coupon_code" placeholder="{{ 'Enter coupon code'|translate(current_language) }}">
+                                            <button type="submit" class="theme-btn btn-two">{{ 'Apply Coupon'|translate(current_language) }}</button>
                                         </div>
                                     </form>
                                 </div>
                             </div>
                             <div class="col-lg-6 col-md-12 col-sm-12">
                                 <div class="total-box">
-                                    <h4>{{ 'Cart Total'|translate }}</h4>
+                                    <h4>{{ 'Cart Total'|translate(current_language) }}</h4>
                                     <ul class="list clearfix">
-                                        <li>{{ 'Subtotal'|translate }}: <span id="subtotal">0 UZS</span></li>
-                                        <li>{{ 'Delivery'|translate }}: <span id="delivery-fee">{{ 'Free'|translate }}</span></li>
-                                        <li>{{ 'Discount'|translate }}: <span id="discount">0 UZS</span></li>
-                                        <li class="total">{{ 'Total'|translate }}: <span id="total">0 UZS</span></li>
+                                        <li>{{ 'Subtotal'|translate(current_language) }}: <span id="subtotal">0 UZS</span></li>
+                                        <li>{{ 'Delivery'|translate(current_language) }}: <span id="delivery-fee">{{ 'Free'|translate(current_language) }}</span></li>
+                                        <li>{{ 'Discount'|translate(current_language) }}: <span id="discount">0 UZS</span></li>
+                                        <li class="total">{{ 'Total'|translate(current_language) }}: <span id="total">0 UZS</span></li>
                                     </ul>
                                     <div class="btn-box">
-                                        <a href="{{ url_for('frontend.checkout') }}" class="theme-btn btn-one" id="checkout-btn">{{ 'Proceed to Checkout'|translate }}</a>
+                                        <a href="{{ url_for('frontend.checkout') }}" class="theme-btn btn-one" id="checkout-btn">{{ 'Proceed to Checkout'|translate(current_language) }}</a>
                                     </div>
                                 </div>
                             </div>
@@ -60,9 +60,9 @@
                     <div class="icon-box">
                         <i class="flaticon-shopping-cart" style="font-size: 80px; color: #ccc;"></i>
                     </div>
-                    <h3>{{ 'Your cart is empty'|translate }}</h3>
-                    <p>{{ 'Add some products to your cart to see them here'|translate }}</p>
-                    <a href="{{ url_for('frontend.shop') }}" class="theme-btn btn-one">{{ 'Continue Shopping'|translate }}</a>
+                    <h3>{{ 'Your cart is empty'|translate(current_language) }}</h3>
+                    <p>{{ 'Add some products to your cart to see them here'|translate(current_language) }}</p>
+                    <a href="{{ url_for('frontend.shop') }}" class="theme-btn btn-one">{{ 'Continue Shopping'|translate(current_language) }}</a>
                 </div>
             </div>
         </section>
@@ -113,10 +113,10 @@ function renderCart(products) {
             <table class="cart-table">
                 <thead class="cart-header">
                     <tr>
-                        <th>{{ 'Product'|translate }}</th>
-                        <th>{{ 'Price'|translate }}</th>
-                        <th>{{ 'Quantity'|translate }}</th>
-                        <th>{{ 'Total'|translate }}</th>
+                        <th>{{ 'Product'|translate(current_language) }}</th>
+                        <th>{{ 'Price'|translate(current_language) }}</th>
+                        <th>{{ 'Quantity'|translate(current_language) }}</th>
+                        <th>{{ 'Total'|translate(current_language) }}</th>
                         <th></th>
                     </tr>
                 </thead>
@@ -166,11 +166,11 @@ function renderCart(products) {
         </div>
         <div class="cart-options">
             <div class="left-column">
-                <a href="{{ url_for('frontend.shop') }}" class="theme-btn btn-two">{{ 'Continue Shopping'|translate }}</a>
+                <a href="{{ url_for('frontend.shop') }}" class="theme-btn btn-two">{{ 'Continue Shopping'|translate(current_language) }}</a>
             </div>
             <div class="right-column">
-                <button onclick="clearCart()" class="theme-btn btn-three">{{ 'Clear Cart'|translate }}</button>
-                <button onclick="updateCart()" class="theme-btn btn-two">{{ 'Update Cart'|translate }}</button>
+                <button onclick="clearCart()" class="theme-btn btn-three">{{ 'Clear Cart'|translate(current_language) }}</button>
+                <button onclick="updateCart()" class="theme-btn btn-two">{{ 'Update Cart'|translate(current_language) }}</button>
             </div>
         </div>
     `;
@@ -206,22 +206,22 @@ function removeFromCart(productId) {
     localStorage.setItem('cart', JSON.stringify(cartItems));
     updateCartCount();
     loadCart();
-    showNotification('{{ "Product removed from cart"|translate }}', 'info');
+    showNotification('{{ "Product removed from cart"|translate(current_language) }}', 'info');
 }
 
 function clearCart() {
-    if (confirm('{{ "Are you sure you want to clear your cart?"|translate }}')) {
+    if (confirm('{{ "Are you sure you want to clear your cart?"|translate(current_language) }}')) {
         cartItems = [];
         localStorage.setItem('cart', JSON.stringify(cartItems));
         updateCartCount();
         showEmptyCart();
-        showNotification('{{ "Cart cleared"|translate }}', 'info');
+        showNotification('{{ "Cart cleared"|translate(current_language) }}', 'info');
     }
 }
 
 function updateCart() {
     loadCart();
-    showNotification('{{ "Cart updated"|translate }}', 'success');
+    showNotification('{{ "Cart updated"|translate(current_language) }}', 'success');
 }
 
 function updateCartTotals(subtotal) {
@@ -230,7 +230,7 @@ function updateCartTotals(subtotal) {
     const total = subtotal + deliveryFee - discount;
     
     document.getElementById('subtotal').textContent = formatPrice(subtotal);
-    document.getElementById('delivery-fee').textContent = deliveryFee === 0 ? '{{ "Free"|translate }}' : formatPrice(deliveryFee);
+    document.getElementById('delivery-fee').textContent = deliveryFee === 0 ? '{{ "Free"|translate(current_language) }}' : formatPrice(deliveryFee);
     document.getElementById('discount').textContent = formatPrice(discount);
     document.getElementById('total').textContent = formatPrice(total);
     
@@ -256,7 +256,7 @@ document.querySelector('.coupon-form').addEventListener('submit', async function
     const couponCode = this.querySelector('input[name="coupon_code"]').value;
     
     if (!couponCode) {
-        showNotification('{{ "Please enter a coupon code"|translate }}', 'warning');
+        showNotification('{{ "Please enter a coupon code"|translate(current_language) }}', 'warning');
         return;
     }
     
@@ -271,15 +271,15 @@ document.querySelector('.coupon-form').addEventListener('submit', async function
         
         if (response.ok) {
             const result = await response.json();
-            showNotification('{{ "Coupon applied successfully!"|translate }}', 'success');
+            showNotification('{{ "Coupon applied successfully!"|translate(current_language) }}', 'success');
             // Update discount display
             // This would need to be implemented in the backend
         } else {
             const error = await response.json();
-            showNotification(error.message || '{{ "Invalid coupon code"|translate }}', 'error');
+            showNotification(error.message || '{{ "Invalid coupon code"|translate(current_language) }}', 'error');
         }
     } catch (error) {
-        showNotification('{{ "Error applying coupon"|translate }}', 'error');
+        showNotification('{{ "Error applying coupon"|translate(current_language) }}', 'error');
     }
 });
 </script>

@@ -1,6 +1,6 @@
 {% extends "frontend/base.html" %}
 
-{% block title %}{{ 'Subscription Plans - '|translate }}{{ super() }}{% endblock %}
+{% block title %}{{ 'Subscription Plans - '|translate(current_language) }}{{ super() }}{% endblock %}
 
 {% block content %}
 <!-- Page Title -->
@@ -8,10 +8,10 @@
     <div class="shape" style="background-image: url({{ url_for('static', filename='images/shape/banner-shap.png') }});"></div>
     <div class="auto-container">
         <div class="content-box">
-            <h1>{{ 'Subscription Plans'|translate }}</h1>
+            <h1>{{ 'Subscription Plans'|translate(current_language) }}</h1>
             <ul class="bread-crumb clearfix">
-                <li><a href="{{ url_for('frontend.index') }}">{{ 'Home'|translate }}</a></li>
-                <li>{{ 'Subscriptions'|translate }}</li>
+                <li><a href="{{ url_for('frontend.index') }}">{{ 'Home'|translate(current_language) }}</a></li>
+                <li>{{ 'Subscriptions'|translate(current_language) }}</li>
             </ul>
         </div>
     </div>
@@ -22,9 +22,9 @@
 <section class="pricing-section subscription-section">
     <div class="auto-container">
         <div class="sec-title centred">
-            <p>{{ 'Choose Your Plan'|translate }}</p>
-            <h2>{{ 'Water Delivery Subscription Plans'|translate }}</h2>
-            <div class="title-text">{{ 'Select the perfect plan for your water needs. All plans include free delivery, quality guarantee, and flexible scheduling.'|translate }}</div>
+            <p>{{ 'Choose Your Plan'|translate(current_language) }}</p>
+            <h2>{{ 'Water Delivery Subscription Plans'|translate(current_language) }}</h2>
+            <div class="title-text">{{ 'Select the perfect plan for your water needs. All plans include free delivery, quality guarantee, and flexible scheduling.'|translate(current_language) }}</div>
         </div>
         
         <div class="row clearfix">
@@ -35,24 +35,24 @@
                     <div class="pricing-table">
                         <div class="table-header">
                             <div class="plan-title">
-                                <h3>{{ 'Basic Plan'|translate }}</h3>
-                                <p>{{ 'Perfect for small families'|translate }}</p>
+                                <h3>{{ 'Basic Plan'|translate(current_language) }}</h3>
+                                <p>{{ 'Perfect for small families'|translate(current_language) }}</p>
                             </div>
                             <div class="price-box">
-                                <h2>$29<span>/{{ 'month'|translate }}</span></h2>
+                                <h2>$29<span>/{{ 'month'|translate(current_language) }}</span></h2>
                             </div>
                         </div>
                         <div class="table-content">
                             <ul class="feature-list clearfix">
-                                <li>{{ '4 bottles of 19L water per month'|translate }}</li>
-                                <li>{{ 'Free water cooler rental'|translate }}</li>
-                                <li>{{ 'Weekly delivery schedule'|translate }}</li>
-                                <li>{{ 'Basic water quality testing'|translate }}</li>
-                                <li>{{ 'Email customer support'|translate }}</li>
-                                <li>{{ 'Flexible pause/resume options'|translate }}</li>
+                                <li>{{ '4 bottles of 19L water per month'|translate(current_language) }}</li>
+                                <li>{{ 'Free water cooler rental'|translate(current_language) }}</li>
+                                <li>{{ 'Weekly delivery schedule'|translate(current_language) }}</li>
+                                <li>{{ 'Basic water quality testing'|translate(current_language) }}</li>
+                                <li>{{ 'Email customer support'|translate(current_language) }}</li>
+                                <li>{{ 'Flexible pause/resume options'|translate(current_language) }}</li>
                             </ul>
                             <div class="btn-box">
-                                <a href="#" class="theme-btn btn-one subscription-btn" data-plan="basic">{{ 'Choose Basic Plan'|translate }}</a>
+                                <a href="#" class="theme-btn btn-one subscription-btn" data-plan="basic">{{ 'Choose Basic Plan'|translate(current_language) }}</a>
                             </div>
                         </div>
                     </div>
@@ -65,27 +65,27 @@
                     <div class="pricing-table">
                         <div class="table-header">
                             <div class="plan-title">
-                                <h3>{{ 'Premium Plan'|translate }}</h3>
-                                <p>{{ 'Most popular for families'|translate }}</p>
-                                <div class="popular-tag">{{ 'Most Popular'|translate }}</div>
+                                <h3>{{ 'Premium Plan'|translate(current_language) }}</h3>
+                                <p>{{ 'Most popular for families'|translate(current_language) }}</p>
+                                <div class="popular-tag">{{ 'Most Popular'|translate(current_language) }}</div>
                             </div>
                             <div class="price-box">
-                                <h2>$49<span>/{{ 'month'|translate }}</span></h2>
+                                <h2>$49<span>/{{ 'month'|translate(current_language) }}</span></h2>
                             </div>
                         </div>
                         <div class="table-content">
                             <ul class="feature-list clearfix">
-                                <li>{{ '8 bottles of 19L water per month'|translate }}</li>
-                                <li>{{ 'Free premium water cooler'|translate }}</li>
-                                <li>{{ 'Bi-weekly delivery schedule'|translate }}</li>
-                                <li>{{ 'Advanced water quality testing'|translate }}</li>
-                                <li>{{ '24/7 phone & chat support'|translate }}</li>
-                                <li>{{ 'Priority delivery scheduling'|translate }}</li>
-                                <li>{{ 'Free maintenance service'|translate }}</li>
-                                <li>{{ 'Emergency water supply'|translate }}</li>
+                                <li>{{ '8 bottles of 19L water per month'|translate(current_language) }}</li>
+                                <li>{{ 'Free premium water cooler'|translate(current_language) }}</li>
+                                <li>{{ 'Bi-weekly delivery schedule'|translate(current_language) }}</li>
+                                <li>{{ 'Advanced water quality testing'|translate(current_language) }}</li>
+                                <li>{{ '24/7 phone & chat support'|translate(current_language) }}</li>
+                                <li>{{ 'Priority delivery scheduling'|translate(current_language) }}</li>
+                                <li>{{ 'Free maintenance service'|translate(current_language) }}</li>
+                                <li>{{ 'Emergency water supply'|translate(current_language) }}</li>
                             </ul>
                             <div class="btn-box">
-                                <a href="#" class="theme-btn btn-one subscription-btn" data-plan="premium">{{ 'Choose Premium Plan'|translate }}</a>
+                                <a href="#" class="theme-btn btn-one subscription-btn" data-plan="premium">{{ 'Choose Premium Plan'|translate(current_language) }}</a>
                             </div>
                         </div>
                     </div>
@@ -98,27 +98,27 @@
                     <div class="pricing-table">
                         <div class="table-header">
                             <div class="plan-title">
-                                <h3>{{ 'Business Plan'|translate }}</h3>
-                                <p>{{ 'Ideal for offices & businesses'|translate }}</p>
+                                <h3>{{ 'Business Plan'|translate(current_language) }}</h3>
+                                <p>{{ 'Ideal for offices & businesses'|translate(current_language) }}</p>
                             </div>
                             <div class="price-box">
-                                <h2>$99<span>/{{ 'month'|translate }}</span></h2>
+                                <h2>$99<span>/{{ 'month'|translate(current_language) }}</span></h2>
                             </div>
                         </div>
                         <div class="table-content">
                             <ul class="feature-list clearfix">
-                                <li>{{ '20 bottles of 19L water per month'|translate }}</li>
-                                <li>{{ 'Multiple premium coolers'|translate }}</li>
-                                <li>{{ 'Custom delivery schedule'|translate }}</li>
-                                <li>{{ 'Comprehensive water analysis'|translate }}</li>
-                                <li>{{ 'Dedicated account manager'|translate }}</li>
-                                <li>{{ 'Same-day emergency delivery'|translate }}</li>
-                                <li>{{ 'Free installation & maintenance'|translate }}</li>
-                                <li>{{ 'Volume discounts available'|translate }}</li>
-                                <li>{{ 'Invoice billing options'|translate }}</li>
+                                <li>{{ '20 bottles of 19L water per month'|translate(current_language) }}</li>
+                                <li>{{ 'Multiple premium coolers'|translate(current_language) }}</li>
+                                <li>{{ 'Custom delivery schedule'|translate(current_language) }}</li>
+                                <li>{{ 'Comprehensive water analysis'|translate(current_language) }}</li>
+                                <li>{{ 'Dedicated account manager'|translate(current_language) }}</li>
+                                <li>{{ 'Same-day emergency delivery'|translate(current_language) }}</li>
+                                <li>{{ 'Free installation & maintenance'|translate(current_language) }}</li>
+                                <li>{{ 'Volume discounts available'|translate(current_language) }}</li>
+                                <li>{{ 'Invoice billing options'|translate(current_language) }}</li>
                             </ul>
                             <div class="btn-box">
-                                <a href="#" class="theme-btn btn-one subscription-btn" data-plan="business">{{ 'Choose Business Plan'|translate }}</a>
+                                <a href="#" class="theme-btn btn-one subscription-btn" data-plan="business">{{ 'Choose Business Plan'|translate(current_language) }}</a>
                             </div>
                         </div>
                     </div>
@@ -132,27 +132,27 @@
             <div class="row clearfix">
                 <div class="col-lg-6 col-md-12 col-sm-12 info-column">
                     <div class="info-block">
-                        <h3>{{ 'Why Choose Our Subscription Service?'|translate }}</h3>
+                        <h3>{{ 'Why Choose Our Subscription Service?'|translate(current_language) }}</h3>
                         <ul class="list-style-one clearfix">
-                            <li>{{ 'Never run out of pure, clean water'|translate }}</li>
-                            <li>{{ 'Convenient regular deliveries to your door'|translate }}</li>
-                            <li>{{ 'Cost-effective compared to one-time purchases'|translate }}</li>
-                            <li>{{ 'Flexible scheduling and easy management'|translate }}</li>
-                            <li>{{ 'Quality guarantee on every bottle'|translate }}</li>
-                            <li>{{ 'No contracts - cancel or modify anytime'|translate }}</li>
+                            <li>{{ 'Never run out of pure, clean water'|translate(current_language) }}</li>
+                            <li>{{ 'Convenient regular deliveries to your door'|translate(current_language) }}</li>
+                            <li>{{ 'Cost-effective compared to one-time purchases'|translate(current_language) }}</li>
+                            <li>{{ 'Flexible scheduling and easy management'|translate(current_language) }}</li>
+                            <li>{{ 'Quality guarantee on every bottle'|translate(current_language) }}</li>
+                            <li>{{ 'No contracts - cancel or modify anytime'|translate(current_language) }}</li>
                         </ul>
                     </div>
                 </div>
                 <div class="col-lg-6 col-md-12 col-sm-12 info-column">
                     <div class="info-block">
-                        <h3>{{ 'Subscription Management'|translate }}</h3>
+                        <h3>{{ 'Subscription Management'|translate(current_language) }}</h3>
                         <ul class="list-style-one clearfix">
-                            <li>{{ 'Easy online account management'|translate }}</li>
-                            <li>{{ 'Mobile app for schedule changes'|translate }}</li>
-                            <li>{{ 'Automatic billing and payment'|translate }}</li>
-                            <li>{{ 'Delivery tracking and notifications'|translate }}</li>
-                            <li>{{ 'Pause subscriptions for vacations'|translate }}</li>
-                            <li>{{ 'Upgrade or downgrade plans anytime'|translate }}</li>
+                            <li>{{ 'Easy online account management'|translate(current_language) }}</li>
+                            <li>{{ 'Mobile app for schedule changes'|translate(current_language) }}</li>
+                            <li>{{ 'Automatic billing and payment'|translate(current_language) }}</li>
+                            <li>{{ 'Delivery tracking and notifications'|translate(current_language) }}</li>
+                            <li>{{ 'Pause subscriptions for vacations'|translate(current_language) }}</li>
+                            <li>{{ 'Upgrade or downgrade plans anytime'|translate(current_language) }}</li>
                         </ul>
                     </div>
                 </div>
@@ -167,8 +167,8 @@
 <section class="faq-section">
     <div class="auto-container">
         <div class="sec-title centred">
-            <p>{{ 'Got Questions?'|translate }}</p>
-            <h2>{{ 'Subscription FAQ'|translate }}</h2>
+            <p>{{ 'Got Questions?'|translate(current_language) }}</p>
+            <h2>{{ 'Subscription FAQ'|translate(current_language) }}</h2>
         </div>
         
         <div class="row clearfix">
@@ -179,55 +179,55 @@
                             <li class="accordion block active-block">
                                 <div class="acc-btn active">
                                     <div class="icon-outer"><i class="fal fa-plus"></i></div>
-                                    <h4>{{ 'Can I change my subscription plan?'|translate }}</h4>
+                                    <h4>{{ 'Can I change my subscription plan?'|translate(current_language) }}</h4>
                                 </div>
                                 <div class="acc-content current">
                                     <div class="text">
-                                        <p>{{ 'Yes, you can upgrade or downgrade your subscription plan at any time. Changes will take effect with your next billing cycle. Contact our customer service team or manage your subscription through your online account.'|translate }}</p>
+                                        <p>{{ 'Yes, you can upgrade or downgrade your subscription plan at any time. Changes will take effect with your next billing cycle. Contact our customer service team or manage your subscription through your online account.'|translate(current_language) }}</p>
                                     </div>
                                 </div>
                             </li>
                             <li class="accordion block">
                                 <div class="acc-btn">
                                     <div class="icon-outer"><i class="fal fa-plus"></i></div>
-                                    <h4>{{ 'What if I need to pause my subscription?'|translate }}</h4>
+                                    <h4>{{ 'What if I need to pause my subscription?'|translate(current_language) }}</h4>
                                 </div>
                                 <div class="acc-content">
                                     <div class="text">
-                                        <p>{{ 'You can pause your subscription for up to 3 months for vacations or other reasons. Simply log into your account or call our customer service team at least 48 hours before your next scheduled delivery.'|translate }}</p>
+                                        <p>{{ 'You can pause your subscription for up to 3 months for vacations or other reasons. Simply log into your account or call our customer service team at least 48 hours before your next scheduled delivery.'|translate(current_language) }}</p>
                                     </div>
                                 </div>
                             </li>
                             <li class="accordion block">
                                 <div class="acc-btn">
                                     <div class="icon-outer"><i class="fal fa-plus"></i></div>
-                                    <h4>{{ 'Are there any setup fees or contracts?'|translate }}</h4>
+                                    <h4>{{ 'Are there any setup fees or contracts?'|translate(current_language) }}</h4>
                                 </div>
                                 <div class="acc-content">
                                     <div class="text">
-                                        <p>{{ 'No setup fees and no long-term contracts required. You can cancel your subscription at any time with 30 days notice. Water cooler rental is included in all plans at no extra cost.'|translate }}</p>
+                                        <p>{{ 'No setup fees and no long-term contracts required. You can cancel your subscription at any time with 30 days notice. Water cooler rental is included in all plans at no extra cost.'|translate(current_language) }}</p>
                                     </div>
                                 </div>
                             </li>
                             <li class="accordion block">
                                 <div class="acc-btn">
                                     <div class="icon-outer"><i class="fal fa-plus"></i></div>
-                                    <h4>{{ 'What payment methods do you accept?'|translate }}</h4>
+                                    <h4>{{ 'What payment methods do you accept?'|translate(current_language) }}</h4>
                                 </div>
                                 <div class="acc-content">
                                     <div class="text">
-                                        <p>{{ 'We accept all major credit cards, bank transfers, and automatic monthly billing. Business accounts can also use invoice billing with net 30 terms after credit approval.'|translate }}</p>
+                                        <p>{{ 'We accept all major credit cards, bank transfers, and automatic monthly billing. Business accounts can also use invoice billing with net 30 terms after credit approval.'|translate(current_language) }}</p>
                                     </div>
                                 </div>
                             </li>
                             <li class="accordion block">
                                 <div class="acc-btn">
                                     <div class="icon-outer"><i class="fal fa-plus"></i></div>
-                                    <h4>{{ 'What happens if I miss a delivery?'|translate }}</h4>
+                                    <h4>{{ 'What happens if I miss a delivery?'|translate(current_language) }}</h4>
                                 </div>
                                 <div class="acc-content">
                                     <div class="text">
-                                        <p>{{ 'We will attempt to reschedule your delivery within 24-48 hours at no extra charge. Our drivers will leave a note if you are not available. You can also reschedule deliveries through your online account.'|translate }}</p>
+                                        <p>{{ 'We will attempt to reschedule your delivery within 24-48 hours at no extra charge. Our drivers will leave a note if you are not available. You can also reschedule deliveries through your online account.'|translate(current_language) }}</p>
                                     </div>
                                 </div>
                             </li>
@@ -245,7 +245,7 @@
     <div class="modal-dialog modal-lg" role="document">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title" id="subscriptionModalLabel">{{ 'Subscribe to Plan'|translate }}</h5>
+                <h5 class="modal-title" id="subscriptionModalLabel">{{ 'Subscribe to Plan'|translate(current_language) }}</h5>
                 <button type="button" class="close" data-dismiss="modal" aria-label="Close">
                     <span aria-hidden="true">&times;</span>
                 </button>
@@ -255,13 +255,13 @@
                     <div class="row">
                         <div class="col-md-6">
                             <div class="form-group">
-                                <label for="firstName">{{ 'First Name'|translate }}</label>
+                                <label for="firstName">{{ 'First Name'|translate(current_language) }}</label>
                                 <input type="text" class="form-control" id="firstName" required>
                             </div>
                         </div>
                         <div class="col-md-6">
                             <div class="form-group">
-                                <label for="lastName">{{ 'Last Name'|translate }}</label>
+                                <label for="lastName">{{ 'Last Name'|translate(current_language) }}</label>
                                 <input type="text" class="form-control" id="lastName" required>
                             </div>
                         </div>
@@ -269,44 +269,44 @@
                     <div class="row">
                         <div class="col-md-6">
                             <div class="form-group">
-                                <label for="email">{{ 'Email Address'|translate }}</label>
+                                <label for="email">{{ 'Email Address'|translate(current_language) }}</label>
                                 <input type="email" class="form-control" id="email" required>
                             </div>
                         </div>
                         <div class="col-md-6">
                             <div class="form-group">
-                                <label for="phone">{{ 'Phone Number'|translate }}</label>
+                                <label for="phone">{{ 'Phone Number'|translate(current_language) }}</label>
                                 <input type="tel" class="form-control" id="phone" required>
                             </div>
                         </div>
                     </div>
                     <div class="form-group">
-                        <label for="address">{{ 'Delivery Address'|translate }}</label>
+                        <label for="address">{{ 'Delivery Address'|translate(current_language) }}</label>
                         <textarea class="form-control" id="address" rows="3" required></textarea>
                     </div>
                     <div class="row">
                         <div class="col-md-6">
                             <div class="form-group">
-                                <label for="deliveryDay">{{ 'Preferred Delivery Day'|translate }}</label>
+                                <label for="deliveryDay">{{ 'Preferred Delivery Day'|translate(current_language) }}</label>
                                 <select class="form-control" id="deliveryDay" required>
-                                    <option value="">{{ 'Select Day'|translate }}</option>
-                                    <option value="monday">{{ 'Monday'|translate }}</option>
-                                    <option value="tuesday">{{ 'Tuesday'|translate }}</option>
-                                    <option value="wednesday">{{ 'Wednesday'|translate }}</option>
-                                    <option value="thursday">{{ 'Thursday'|translate }}</option>
-                                    <option value="friday">{{ 'Friday'|translate }}</option>
-                                    <option value="saturday">{{ 'Saturday'|translate }}</option>
+                                    <option value="">{{ 'Select Day'|translate(current_language) }}</option>
+                                    <option value="monday">{{ 'Monday'|translate(current_language) }}</option>
+                                    <option value="tuesday">{{ 'Tuesday'|translate(current_language) }}</option>
+                                    <option value="wednesday">{{ 'Wednesday'|translate(current_language) }}</option>
+                                    <option value="thursday">{{ 'Thursday'|translate(current_language) }}</option>
+                                    <option value="friday">{{ 'Friday'|translate(current_language) }}</option>
+                                    <option value="saturday">{{ 'Saturday'|translate(current_language) }}</option>
                                 </select>
                             </div>
                         </div>
                         <div class="col-md-6">
                             <div class="form-group">
-                                <label for="deliveryTime">{{ 'Preferred Time'|translate }}</label>
+                                <label for="deliveryTime">{{ 'Preferred Time'|translate(current_language) }}</label>
                                 <select class="form-control" id="deliveryTime" required>
-                                    <option value="">{{ 'Select Time'|translate }}</option>
-                                    <option value="morning">{{ '9:00 AM - 12:00 PM'|translate }}</option>
-                                    <option value="afternoon">{{ '12:00 PM - 3:00 PM'|translate }}</option>
-                                    <option value="evening">{{ '3:00 PM - 6:00 PM'|translate }}</option>
+                                    <option value="">{{ 'Select Time'|translate(current_language) }}</option>
+                                    <option value="morning">{{ '9:00 AM - 12:00 PM'|translate(current_language) }}</option>
+                                    <option value="afternoon">{{ '12:00 PM - 3:00 PM'|translate(current_language) }}</option>
+                                    <option value="evening">{{ '3:00 PM - 6:00 PM'|translate(current_language) }}</option>
                                 </select>
                             </div>
                         </div>
@@ -315,8 +315,8 @@
                 </form>
             </div>
             <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-dismiss="modal">{{ 'Cancel'|translate }}</button>
-                <button type="button" class="btn theme-btn btn-one" id="confirmSubscription">{{ 'Subscribe Now'|translate }}</button>
+                <button type="button" class="btn btn-secondary" data-dismiss="modal">{{ 'Cancel'|translate(current_language) }}</button>
+                <button type="button" class="btn theme-btn btn-one" id="confirmSubscription">{{ 'Subscribe Now'|translate(current_language) }}</button>
             </div>
         </div>
     </div>
@@ -342,7 +342,7 @@ document.addEventListener('DOMContentLoaded', function() {
             
             // Update modal title
             const modalTitle = document.getElementById('subscriptionModalLabel');
-            modalTitle.textContent = `{{ 'Subscribe to '|translate }}${selectedPlan.charAt(0).toUpperCase() + selectedPlan.slice(1)} {{ 'Plan'|translate }}`;
+            modalTitle.textContent = `{{ 'Subscribe to '|translate(current_language) }}${selectedPlan.charAt(0).toUpperCase() + selectedPlan.slice(1)} {{ 'Plan'|translate(current_language) }}`;
             
             // Show modal
             $('#subscriptionModal').modal('show');
@@ -373,15 +373,15 @@ document.addEventListener('DOMContentLoaded', function() {
                 const result = await response.json();
                 
                 if (response.ok && result.success) {
-                    showNotification('{{ "Subscription created successfully! We will contact you to confirm delivery details."|translate }}', 'success');
+                    showNotification('{{ "Subscription created successfully! We will contact you to confirm delivery details."|translate(current_language) }}', 'success');
                     $('#subscriptionModal').modal('hide');
                     form.reset();
                 } else {
-                    showNotification(result.message || '{{ "Failed to create subscription. Please try again."|translate }}', 'error');
+                    showNotification(result.message || '{{ "Failed to create subscription. Please try again."|translate(current_language) }}', 'error');
                 }
             } catch (error) {
                 console.error('Subscription error:', error);
-                showNotification('{{ "An error occurred. Please try again later."|translate }}', 'error');
+                showNotification('{{ "An error occurred. Please try again later."|translate(current_language) }}', 'error');
             }
         } else {
             form.reportValidity();

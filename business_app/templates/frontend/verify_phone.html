@@ -1,6 +1,6 @@
 {% extends "frontend/base.html" %}
 
-{% block title %}{{ 'Verify Phone Number'|translate }} - {{ company_name }}{% endblock %}
+{% block title %}{{ 'Verify Phone Number'|translate(current_language) }} - {{ company_name }}{% endblock %}
 
 {% block content %}
         <!-- page-title -->
@@ -8,10 +8,10 @@
             <div class="bg-layer" style="background-image: url({{ url_for('static', filename='images/background/page-title.jpg') }});"></div>
             <div class="auto-container">
                 <div class="content-box">
-                    <h1>{{ 'Verify Phone Number'|translate }}</h1>
+                    <h1>{{ 'Verify Phone Number'|translate(current_language) }}</h1>
                     <ul class="bread-crumb clearfix">
-                        <li><a href="{{ url_for('frontend.index') }}">{{ 'Home'|translate }}</a></li>
-                        <li>{{ 'Verify Phone'|translate }}</li>
+                        <li><a href="{{ url_for('frontend.index') }}">{{ 'Home'|translate(current_language) }}</a></li>
+                        <li>{{ 'Verify Phone'|translate(current_language) }}</li>
                     </ul>
                 </div>
             </div>
@@ -25,19 +25,19 @@
                     <div class="col-lg-8 col-md-12 col-sm-12 offset-lg-2">
                         <div class="form-inner">
                             <div class="sec-title centred">
-                                <h2>{{ 'Verify Your Phone Number'|translate }}</h2>
-                                <p>{{ 'Please enter your phone number to receive a verification code'|translate }}</p>
+                                <h2>{{ 'Verify Your Phone Number'|translate(current_language) }}</h2>
+                                <p>{{ 'Please enter your phone number to receive a verification code'|translate(current_language) }}</p>
                             </div>
                             
                             <!-- Phone Number Form -->
                             <form id="phoneForm" class="default-form" style="display: block;">
                                 <div class="row clearfix">
                                     <div class="col-lg-12 col-md-12 col-sm-12 form-group">
-                                        <input type="tel" name="phone" placeholder="{{ 'Phone Number (+998XXXXXXXXX)'|translate }}" required>
-                                        <small class="text-muted">{{ 'Enter your phone number with country code'|translate }}</small>
+                                        <input type="tel" name="phone" placeholder="{{ 'Phone Number (+998XXXXXXXXX)'|translate(current_language) }}" required>
+                                        <small class="text-muted">{{ 'Enter your phone number with country code'|translate(current_language) }}</small>
                                     </div>
                                     <div class="col-lg-12 col-md-12 col-sm-12 form-group message-btn">
-                                        <button type="submit" class="theme-btn btn-one">{{ 'Send Verification Code'|translate }}</button>
+                                        <button type="submit" class="theme-btn btn-one">{{ 'Send Verification Code'|translate(current_language) }}</button>
                                     </div>
                                 </div>
                             </form>
@@ -48,24 +48,24 @@
                                     <div class="col-lg-12 col-md-12 col-sm-12 form-group">
                                         <div class="alert alert-info">
                                             <i class="far fa-info-circle"></i>
-                                            {{ 'We sent a verification code to'|translate }} <strong id="sentToPhone"></strong>
+                                            {{ 'We sent a verification code to'|translate(current_language) }} <strong id="sentToPhone"></strong>
                                         </div>
                                     </div>
                                     <div class="col-lg-12 col-md-12 col-sm-12 form-group">
-                                        <input type="text" name="otp" placeholder="{{ 'Enter 6-digit verification code'|translate }}" maxlength="6" required>
+                                        <input type="text" name="otp" placeholder="{{ 'Enter 6-digit verification code'|translate(current_language) }}" maxlength="6" required>
                                     </div>
                                     <div class="col-lg-12 col-md-12 col-sm-12 form-group">
                                         <div class="timer-display">
-                                            <small class="text-muted">{{ 'Code expires in'|translate }}: <span id="timer">05:00</span></small>
+                                            <small class="text-muted">{{ 'Code expires in'|translate(current_language) }}: <span id="timer">05:00</span></small>
                                         </div>
                                     </div>
                                     <div class="col-lg-12 col-md-12 col-sm-12 form-group message-btn">
-                                        <button type="submit" class="theme-btn btn-one">{{ 'Verify Code'|translate }}</button>
+                                        <button type="submit" class="theme-btn btn-one">{{ 'Verify Code'|translate(current_language) }}</button>
                                     </div>
                                     <div class="col-lg-12 col-md-12 col-sm-12 form-group">
                                         <div class="other-option centred">
-                                            <p><a href="#" id="resendCode">{{ 'Resend Code'|translate }}</a></p>
-                                            <p><a href="#" id="changePhone">{{ 'Change Phone Number'|translate }}</a></p>
+                                            <p><a href="#" id="resendCode">{{ 'Resend Code'|translate(current_language) }}</a></p>
+                                            <p><a href="#" id="changePhone">{{ 'Change Phone Number'|translate(current_language) }}</a></p>
                                         </div>
                                     </div>
                                 </div>
@@ -74,9 +74,9 @@
                             <!-- Success Message -->
                             <div id="successMessage" class="alert alert-success" style="display: none;">
                                 <i class="far fa-check-circle"></i>
-                                {{ 'Phone number verified successfully! You can now use all features.'|translate }}
+                                {{ 'Phone number verified successfully! You can now use all features.'|translate(current_language) }}
                                 <div class="mt-3">
-                                    <a href="{{ url_for('frontend.my_account') }}" class="theme-btn btn-one btn-sm">{{ 'Go to My Account'|translate }}</a>
+                                    <a href="{{ url_for('frontend.my_account') }}" class="theme-btn btn-one btn-sm">{{ 'Go to My Account'|translate(current_language) }}</a>
                                 </div>
                             </div>
                         </div>
@@ -101,7 +101,7 @@ document.getElementById('phoneForm').addEventListener('submit', async function(e
     const phone = formData.get('phone');
     
     if (!phone) {
-        showNotification('{{ "Please enter a valid phone number"|translate }}', 'error');
+        showNotification('{{ "Please enter a valid phone number"|translate(current_language) }}', 'error');
         return;
     }
     
@@ -109,7 +109,7 @@ document.getElementById('phoneForm').addEventListener('submit', async function(e
         // Get current user ID (you'll need to get this from your auth system)
         const token = getAuthToken();
         if (!token) {
-            showNotification('{{ "Please log in first"|translate }}', 'error');
+            showNotification('{{ "Please log in first"|translate(current_language) }}', 'error');
             window.location.href = '{{ url_for("frontend.login") }}';
             return;
         }
@@ -136,12 +136,12 @@ document.getElementById('phoneForm').addEventListener('submit', async function(e
             // Start countdown timer
             startTimer(300); // 5 minutes
             
-            showNotification('{{ "Verification code sent successfully!"|translate }}', 'success');
+            showNotification('{{ "Verification code sent successfully!"|translate(current_language) }}', 'success');
         } else {
-            showNotification(result.message || '{{ "Failed to send verification code"|translate }}', 'error');
+            showNotification(result.message || '{{ "Failed to send verification code"|translate(current_language) }}', 'error');
         }
     } catch (error) {
-        showNotification('{{ "Network error. Please try again."|translate }}', 'error');
+        showNotification('{{ "Network error. Please try again."|translate(current_language) }}', 'error');
     }
 });
 
@@ -153,7 +153,7 @@ document.getElementById('otpForm').addEventListener('submit', async function(e) 
     const otp = formData.get('otp');
     
     if (!otp || otp.length !== 6) {
-        showNotification('{{ "Please enter a valid 6-digit code"|translate }}', 'error');
+        showNotification('{{ "Please enter a valid 6-digit code"|translate(current_language) }}', 'error');
         return;
     }
     
@@ -176,12 +176,12 @@ document.getElementById('otpForm').addEventListener('submit', async function(e) 
             // Clear timer
             clearInterval(timerInterval);
             
-            showNotification('{{ "Phone number verified successfully!"|translate }}', 'success');
+            showNotification('{{ "Phone number verified successfully!"|translate(current_language) }}', 'success');
         } else {
-            showNotification(result.message || '{{ "Invalid verification code"|translate }}', 'error');
+            showNotification(result.message || '{{ "Invalid verification code"|translate(current_language) }}', 'error');
         }
     } catch (error) {
-        showNotification('{{ "Network error. Please try again."|translate }}', 'error');
+        showNotification('{{ "Network error. Please try again."|translate(current_language) }}', 'error');
     }
 });
 
@@ -190,7 +190,7 @@ document.getElementById('resendCode').addEventListener('click', async function(e
     e.preventDefault();
     
     if (!currentPhone) {
-        showNotification('{{ "No phone number available"|translate }}', 'error');
+        showNotification('{{ "No phone number available"|translate(current_language) }}', 'error');
         return;
     }
     
@@ -207,12 +207,12 @@ document.getElementById('resendCode').addEventListener('click', async function(e
         
         if (response.ok) {
             startTimer(300);
-            showNotification('{{ "Verification code resent successfully!"|translate }}', 'success');
+            showNotification('{{ "Verification code resent successfully!"|translate(current_language) }}', 'success');
         } else {
-            showNotification(result.message || '{{ "Failed to resend code"|translate }}', 'error');
+            showNotification(result.message || '{{ "Failed to resend code"|translate(current_language) }}', 'error');
         }
     } catch (error) {
-        showNotification('{{ "Network error. Please try again."|translate }}', 'error');
+        showNotification('{{ "Network error. Please try again."|translate(current_language) }}', 'error');
     }
 });
 
@@ -247,7 +247,7 @@ function startTimer(seconds) {
         if (timeLeft <= 0) {
             clearInterval(timerInterval);
             timerElement.textContent = '00:00';
-            showNotification('{{ "Verification code expired. Please request a new one."|translate }}', 'warning');
+            showNotification('{{ "Verification code expired. Please request a new one."|translate(current_language) }}', 'warning');
         }
         
         timeLeft--;

@@ -114,49 +114,60 @@ class AuthService:
     def login_user(self, identifier: str, password: str) -> Tuple[User, Dict[str, str]]:
         """
         Login user with email/phone and password
-        
+
         Args:
             identifier: Email or phone number
             password: User password
-        
+
         Returns:
             Tuple of (User object, tokens dict)
-        
+
         Raises:
             UnauthorizedError: If credentials are invalid
             ValidationError: If account is locked
         """
         # Check for account lockout
         self._check_account_lockout(identifier)
-        
+
         # Find user by email or phone
         user = User.query.filter(
             (User.email == identifier.lower()) |
             (User.phone == identifier)
         ).first()
-        
-        if not user or not self._verify_password(password, user.password_hash):
+
+        if not user:
+            self._increment_failed_attempts(identifier)
+            raise UnauthorizedError("Invalid credentials")
+
+        # Check if this is a telegram-only user trying to login with placeholder email
+        if self._is_telegram_only_user(user) and identifier.lower() == user.email:
+            raise UnauthorizedError(
+                "This account was created via Telegram. Please set a password first "
+                "or use the Telegram bot to access your account."
+            )
+
+        if not self._verify_password(password, user.password_hash):
             # Increment failed login attempts
             self._increment_failed_attempts(identifier)
             raise UnauthorizedError("Invalid credentials")
-        
+
         # Check if user is active
         if user.status in [UserStatus.BANNED.value, UserStatus.INACTIVE.value]:
             raise UnauthorizedError("Account is disabled")
-        
+
         # Reset failed login attempts
         self._reset_failed_attempts(identifier)
-        
+
         # Update last login
         user.last_login = datetime.now(timezone.utc)
         db.session.commit()
-        
+
         # Generate tokens
         tokens = self._generate_tokens(user)
-        
+
         # Log user session
         self._create_user_session(user.id, tokens['access_token'])
-        
+
         return user, tokens
     
     def refresh_token(self, refresh_token: str) -> Dict[str, str]:
@@ -318,25 +329,25 @@ class AuthService:
         """Verify phone with OTP"""
         key = f"sms_verification:{user_id}"
         stored_otp = self.redis_client.get(key)
-        
+
         if not stored_otp or stored_otp.decode() != otp:
             return False
-        
+
         # Remove OTP from Redis
         self.redis_client.delete(key)
-        
+
         user = User.query.get(user_id)
         if user:
-            user.phone_verified = True
             user.phone_verified_at = datetime.now(timezone.utc)
-            
+
             # If this was the only pending verification, activate account
-            if user.status == UserStatus.PENDING_VERIFICATION and user.email_verified:
-                user.status = UserStatus.ACTIVE
-            
+            if user.status == UserStatus.PENDING_VERIFICATION.value and user.email_verified:
+                user.status = UserStatus.ACTIVE.value
+                user.is_verified = True
+
             db.session.commit()
             return True
-        
+
         return False
     
     def request_password_reset(self, identifier: str) -> bool:
@@ -664,8 +675,25 @@ class AuthService:
         """Reset failed login attempts"""
         key = f"login_attempts:{identifier}"
         lockout_key = f"account_lockout:{identifier}"
-        
+
         self.redis_client.delete(key, lockout_key)
+
+    def _is_telegram_only_user(self, user: User) -> bool:
+        """
+        Check if user is telegram-only (hasn't set web password yet)
+
+        Args:
+            user: User object
+
+        Returns:
+            True if user is telegram-only, False otherwise
+        """
+        return (
+            user.registration_source == 'telegram' and
+            user.email and
+            user.email.startswith('telegram_') and
+            user.email.endswith('@bot.internal')
+        )
     
     def cleanup_user_sessions(self, user_id: int = None, 
                              exclude_current: bool = True) -> Dict[str, int]:
@@ -748,16 +776,22 @@ class AuthService:
                 if not full_name:
                     full_name = f"User {telegram_id}"
                     
+                # Generate a secure random password that the user will never use
+                # Telegram users will set their own password if they want web access
+                import secrets
+                random_password = secrets.token_urlsafe(32)
+                secure_password_hash = self._hash_password(random_password)
+
                 user = User(
                     telegram_id=str(telegram_id),
                     first_name=first_name or "Telegram User",
                     last_name=last_name or "",
                     full_name=full_name,
-                    email=f"telegram_{telegram_id}@bluestream.local",  # Placeholder email
+                    email=f"telegram_{telegram_id}@bot.internal",  # Placeholder email with proper domain
                     phone=None,  # No phone initially
-                    password_hash="telegram_user",  # Placeholder password hash
-                    role='customer',  # Direct string value
-                    status='active',
+                    password_hash=secure_password_hash,  # Secure random password hash
+                    role=UserRole.CUSTOMER.value,  # Use enum
+                    status=UserStatus.ACTIVE.value,  # Use enum
                     is_verified=False,
                     registration_source='telegram',
                     # Bot-specific fields in unified table
@@ -829,7 +863,7 @@ class AuthService:
         
         # Check if user account is active
         logger.info(f"Checking user status: {user.status}")
-        if user.status != 'active':
+        if user.status != UserStatus.ACTIVE.value:
             logger.error(f"User account not active: {user.status}")
             raise UnauthorizedError("User account is not active")
         

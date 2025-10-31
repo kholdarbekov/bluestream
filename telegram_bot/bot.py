@@ -27,7 +27,7 @@ setup_logging(log_level=log_level, log_to_file=False)
 
 # Bot modules
 from config import config
-from database import db_manager, create_bot_tables, BotUserRepository
+from database import db_manager, BotUserRepository
 from i18n import i18n
 from api_client import api_client
 from handlers import (
@@ -61,7 +61,6 @@ class WaterBusinessBot:
             
             # Initialize database connection
             await db_manager.connect()
-            await create_bot_tables(db_manager)
             
             # Load translations
             await i18n.load_translations()

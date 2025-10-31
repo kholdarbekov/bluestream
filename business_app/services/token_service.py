@@ -26,7 +26,7 @@ class TokenService:
         # Initialize Redis connection for token blacklist and session management
         self.redis_client = None
         self.redis_available = False
-        self._in_memory_blacklist = set()
+        self._in_memory_blacklist = {}  # Changed to dict to store expiry times
         self._initialize_redis()
     
     def _initialize_redis(self):
@@ -161,7 +161,7 @@ class TokenService:
             
             # Get user
             user = User.query.get(user_id)
-            if not user or not user.is_active:
+            if not user or user.status != UserStatus.ACTIVE.value:
                 raise ValueError("User not found or inactive")
             
             # Validate session
@@ -257,8 +257,9 @@ class TokenService:
                     datetime.now(timezone.utc).isoformat()
                 )
             else:
-                # Store in memory (not persistent across restarts)
-                self._in_memory_blacklist.add(token_jti)
+                # Store in memory with expiry time (not persistent across restarts)
+                expiry_time = datetime.now(timezone.utc) + timedelta(seconds=expiry_seconds)
+                self._in_memory_blacklist[token_jti] = expiry_time
                 return True
                 
         except Exception as e:
@@ -280,7 +281,16 @@ class TokenService:
             if self.redis_available:
                 return self.redis_client.exists(f"blacklist:{token_jti}")
             else:
-                return token_jti in self._in_memory_blacklist
+                # Check in-memory blacklist with expiry
+                if token_jti in self._in_memory_blacklist:
+                    expiry_time = self._in_memory_blacklist[token_jti]
+                    if datetime.now(timezone.utc) < expiry_time:
+                        return True
+                    else:
+                        # Token has expired, remove it from blacklist
+                        del self._in_memory_blacklist[token_jti]
+                        return False
+                return False
                 
         except Exception as e:
             logger.error(f"Failed to check blacklist for token {token_jti}: {e}")
@@ -380,7 +390,7 @@ class TokenService:
                     'error_code': 'USER_NOT_FOUND'
                 }
             
-            if not user.is_active or user.status != UserStatus.ACTIVE.value:
+            if user.status != UserStatus.ACTIVE.value:
                 return {
                     'valid': False,
                     'reason': 'User account is not active',
@@ -462,8 +472,19 @@ class TokenService:
         cleaned_count = 0
         
         try:
+            # Clean up expired in-memory blacklist entries
             if not self.redis_available:
-                return 0
+                now = datetime.now(timezone.utc)
+                expired_tokens = [
+                    token_jti for token_jti, expiry_time in self._in_memory_blacklist.items()
+                    if now >= expiry_time
+                ]
+                for token_jti in expired_tokens:
+                    del self._in_memory_blacklist[token_jti]
+                    cleaned_count += 1
+                
+                logger.info(f"Cleaned up {cleaned_count} expired in-memory blacklist entries")
+                return cleaned_count
             
             # Clean up expired blacklist entries (Redis handles this automatically with TTL)
             # Clean up expired sessions

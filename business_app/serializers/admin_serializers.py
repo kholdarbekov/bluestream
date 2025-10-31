@@ -557,7 +557,7 @@ def serialize_user_admin(user, include_statistics: bool = False) -> Dict[str, An
             'role': user.role if user.role else 'customer',
             'status': user.status if user.status else 'active',
             'email_verified': user.email_verified_at is not None,
-            'phone_verified': False,
+            'phone_verified': user.phone_verified_at is not None,
             'created_at': user.created_at.isoformat() if user.created_at else None,
             'last_login': user.last_login.isoformat() if user.last_login else None,
             'last_activity_at': getattr(user, 'last_activity_at', None),

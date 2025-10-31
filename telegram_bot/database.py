@@ -3,7 +3,7 @@ Database connection and operations for Telegram Bot
 """
 import asyncpg
 import logging
-from typing import Optional, Dict, Any, List, Union
+from typing import Optional, Dict, Any, List
 from contextlib import asynccontextmanager
 import json
 from datetime import datetime, timezone
@@ -99,49 +99,6 @@ class BotUserRepository:
         """
         row = await self.db.fetchone(query, str(telegram_id))
         return dict(row) if row else None
-    
-    async def create_bot_user(self, telegram_id: int, username: str = None, 
-                             first_name: str = None, last_name: str = None,
-                             language_code: str = 'en') -> Dict[str, Any]:
-        """Create new bot user in unified users table"""
-        async with self.db.get_connection() as conn:
-            # Create user in unified users table with telegram fields
-            user_query = """
-            INSERT INTO users (
-                email, phone, password_hash, first_name, last_name, full_name, 
-                preferred_language, role, status, telegram_id, registration_source,
-                telegram_username, telegram_first_name, telegram_last_name,
-                telegram_language_code, is_bot_active, bot_state, last_bot_interaction
-            )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
-            RETURNING *
-            """
-            
-            full_name = f"{first_name or ''} {last_name or ''}".strip() or f"User {telegram_id}"
-            
-            user_row = await conn.fetchrow(
-                user_query,
-                f"telegram_{telegram_id}@bot.local",  # Temporary email
-                None,  # No phone initially
-                "telegram_user",  # Placeholder password hash
-                first_name,
-                last_name,
-                full_name,
-                language_code,
-                'customer',
-                'active',
-                str(telegram_id),
-                'telegram',
-                username,
-                first_name,
-                last_name,
-                language_code,
-                True,
-                json.dumps({}),  # Empty state
-                datetime.now(timezone.utc)
-            )
-            
-            return dict(user_row) if user_row else None
     
     async def update_user_state(self, telegram_id: int, state: Dict[str, Any]):
         """Update user's bot state"""
@@ -242,71 +199,6 @@ class BotSessionRepository:
         """Clean up expired sessions"""
         query = "DELETE FROM bot_sessions WHERE expires_at < CURRENT_TIMESTAMP"
         await self.db.execute(query)
-
-
-# Create database tables for bot-specific data
-async def create_bot_tables(db: DatabaseManager):
-    """Create bot-specific database tables"""
-    bot_users_table = """
-    CREATE TABLE IF NOT EXISTS bot_users (
-        id SERIAL PRIMARY KEY,
-        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-        telegram_id BIGINT UNIQUE NOT NULL,
-        username VARCHAR(255),
-        first_name VARCHAR(255),
-        last_name VARCHAR(255),
-        language_code VARCHAR(10) DEFAULT 'en',
-        is_bot_active BOOLEAN DEFAULT TRUE,
-        bot_state JSONB DEFAULT '{}',
-        last_interaction TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-    );
-    """
-    
-    bot_sessions_table = """
-    CREATE TABLE IF NOT EXISTS bot_sessions (
-        session_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        telegram_id BIGINT NOT NULL,
-        session_data JSONB DEFAULT '{}',
-        expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-    );
-    """
-    
-    bot_analytics_table = """
-    CREATE TABLE IF NOT EXISTS bot_analytics (
-        id SERIAL PRIMARY KEY,
-        telegram_id BIGINT,
-        command VARCHAR(100),
-        action VARCHAR(100),
-        data JSONB DEFAULT '{}',
-        success BOOLEAN DEFAULT TRUE,
-        error_message TEXT,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-    );
-    """
-    
-    # Create indexes
-    indexes = [
-        "CREATE INDEX IF NOT EXISTS idx_bot_users_telegram_id ON bot_users(telegram_id);",
-        "CREATE INDEX IF NOT EXISTS idx_bot_users_user_id ON bot_users(user_id);",
-        "CREATE INDEX IF NOT EXISTS idx_bot_sessions_telegram_id ON bot_sessions(telegram_id);",
-        "CREATE INDEX IF NOT EXISTS idx_bot_sessions_expires_at ON bot_sessions(expires_at);",
-        "CREATE INDEX IF NOT EXISTS idx_bot_analytics_telegram_id ON bot_analytics(telegram_id);",
-        "CREATE INDEX IF NOT EXISTS idx_bot_analytics_created_at ON bot_analytics(created_at);",
-    ]
-    
-    async with db.get_connection() as conn:
-        await conn.execute(bot_users_table)
-        await conn.execute(bot_sessions_table)
-        await conn.execute(bot_analytics_table)
-        
-        for index in indexes:
-            await conn.execute(index)
-    
-    logger.info("Bot database tables created/verified")
 
 
 # Global database manager instance

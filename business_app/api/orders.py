@@ -23,7 +23,7 @@ from business_app.serializers.order_serializers import (
     OrderSchema, OrderItemSchema, CreateOrderRequest, UpdateOrderRequest,
     OrderFeedbackRequest, CartEstimateRequest, DeliverySlotSchema
 )
-from business_app.utils.decorators import validate_json, validate_order_input, validate_query_params, rate_limit
+from business_app.utils.decorators import validate_json, validate_order_input, validate_query_params, rate_limit, require_verification
 from business_app.utils.constants import OrderStatus, PaymentMethod, DeliveryStatus, UserRole
 from business_app.utils.validation_helpers import (
     validate_list_request_params, FilterValidator, PaginationHelper,
@@ -417,6 +417,7 @@ def submit_order_feedback(order_id):
 
 @orders_bp.route('/', methods=['POST'])
 @jwt_required()
+@require_verification('phone')
 @validate_order_input('create_order')
 def create_order():
     """Create a new order"""

@@ -166,10 +166,14 @@ def revoke_session(session_id):
         auth_service = AuthService()
         auth_service._end_user_session(user_id, f"temp_token_with_jti_{session.session_token}")
         
-        # Blacklist the token if possible
+        # Blacklist the token if possible with proper expiry
         from business_app.services.token_service import TokenService
+        from datetime import timedelta
+        from flask import current_app
         token_service = TokenService()
-        token_service.blacklist_token(session.session_token)
+        # Default to access token expiry for session tokens
+        default_expires = current_app.config.get('JWT_ACCESS_TOKEN_EXPIRES', timedelta(hours=1))
+        token_service.blacklist_token(session.session_token, expires_delta=default_expires)
         
         logger.info(f"Session {session_id} revoked for user {user_id}")
         return jsonify({'message': 'Session revoked successfully'}), 200

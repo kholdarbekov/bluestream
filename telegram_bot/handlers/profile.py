@@ -116,30 +116,67 @@ class ProfileHandlers:
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
             contact = update.message.contact
-            
+
             if contact.user_id != user_id:
                 await update.message.reply_text(
                     "❌ Please share your own contact information.",
                     reply_markup=ReplyKeyboardRemove()
                 )
                 return PHONE
-            
+
             phone = normalize_phone_number(contact.phone_number)
-            
-            # Store phone number
+
+            # Store phone number and trigger SMS verification
             await self.user_repo.set_user_phone(user_id, phone)
-            
+
             await update.message.reply_text(
                 i18n.get('phone_shared', language),
                 reply_markup=ReplyKeyboardRemove()
             )
-            
+
+            # Trigger SMS OTP verification via API
+            try:
+                async with api_client as client:
+                    user_token = await authenticate_telegram_user(update, client)
+                    if user_token:
+                        # Send verification SMS
+                        response = await client.send_phone_verification(user_token, phone)
+                        if response.success:
+                            verification_msg = (
+                                "📱 **Phone Verification**\n\n"
+                                f"An SMS with a verification code has been sent to {phone}.\n\n"
+                                "Please enter the 6-digit code to verify your phone number:"
+                            )
+                            await update.message.reply_text(
+                                verification_msg,
+                                parse_mode='Markdown'
+                            )
+
+                            # Store phone in context for OTP verification
+                            context.user_data['pending_phone_verification'] = phone
+                            context.user_data['awaiting_otp'] = True
+
+                            logger.info(f"SMS verification sent to {phone} for user {user_id}")
+                            return NAME  # Reuse NAME state for OTP input
+                        else:
+                            logger.warning(f"Failed to send SMS verification: {response.error}")
+                            await update.message.reply_text(
+                                "⚠️ Could not send verification SMS. Your phone has been saved, "
+                                "but you'll need to verify it later from your profile."
+                            )
+            except Exception as sms_error:
+                logger.error(f"Error sending verification SMS: {sms_error}")
+                await update.message.reply_text(
+                    "⚠️ Could not send verification SMS. Your phone has been saved, "
+                    "but you'll need to verify it later from your profile."
+                )
+
             # Ask for name
             name_text = i18n.get('enter_name', language)
             await update.message.reply_text(name_text)
-            
+
             return NAME
-            
+
         except Exception as e:
             logger.error(f"Error handling phone: {e}")
             return ConversationHandler.END
@@ -150,41 +187,128 @@ class ProfileHandlers:
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
             phone_text = update.message.text.strip()
-            
+
             if not await validate_phone_number(phone_text):
                 await update.message.reply_text(
                     "❌ Invalid phone number format. Please enter a valid Uzbekistan phone number."
                 )
                 return PHONE
-            
+
             phone = normalize_phone_number(phone_text)
-            
+
             # Store phone number
             await self.user_repo.set_user_phone(user_id, phone)
-            
+
             await update.message.reply_text(i18n.get('phone_shared', language))
-            
+
+            # Trigger SMS OTP verification via API
+            try:
+                async with api_client as client:
+                    user_token = await authenticate_telegram_user(update, client)
+                    if user_token:
+                        # Send verification SMS
+                        response = await client.send_phone_verification(user_token, phone)
+                        if response.success:
+                            verification_msg = (
+                                "📱 **Phone Verification**\n\n"
+                                f"An SMS with a verification code has been sent to {phone}.\n\n"
+                                "Please enter the 6-digit code to verify your phone number:"
+                            )
+                            await update.message.reply_text(
+                                verification_msg,
+                                parse_mode='Markdown'
+                            )
+
+                            # Store phone in context for OTP verification
+                            context.user_data['pending_phone_verification'] = phone
+                            context.user_data['awaiting_otp'] = True
+
+                            logger.info(f"SMS verification sent to {phone} for user {user_id}")
+                            return NAME  # Reuse NAME state for OTP input
+                        else:
+                            logger.warning(f"Failed to send SMS verification: {response.error}")
+                            await update.message.reply_text(
+                                "⚠️ Could not send verification SMS. Your phone has been saved, "
+                                "but you'll need to verify it later from your profile."
+                            )
+            except Exception as sms_error:
+                logger.error(f"Error sending verification SMS: {sms_error}")
+                await update.message.reply_text(
+                    "⚠️ Could not send verification SMS. Your phone has been saved, "
+                    "but you'll need to verify it later from your profile."
+                )
+
             # Ask for name
             name_text = i18n.get('enter_name', language)
             await update.message.reply_text(name_text)
-            
+
             return NAME
-            
+
         except Exception as e:
             logger.error(f"Error handling phone text: {e}")
             return ConversationHandler.END
     
     async def name_received(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle name input"""
+        """Handle name input or OTP verification"""
         try:
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
-            name = update.message.text.strip()
-            
+            text = update.message.text.strip()
+
+            # Check if we're waiting for OTP verification
+            if context.user_data.get('awaiting_otp'):
+                # Validate OTP format (6 digits)
+                if not text.isdigit() or len(text) != 6:
+                    await update.message.reply_text(
+                        "❌ Invalid code format. Please enter the 6-digit verification code:"
+                    )
+                    return NAME
+
+                # Verify OTP via API
+                try:
+                    async with api_client as client:
+                        user_token = await authenticate_telegram_user(update, client)
+                        if user_token:
+                            response = await client.verify_phone_otp(user_token, text)
+                            if response.success:
+                                await update.message.reply_text(
+                                    "✅ **Phone verified successfully!**\n\n"
+                                    "Your phone number has been verified. "
+                                    "You can now place orders.",
+                                    parse_mode='Markdown'
+                                )
+
+                                # Clear OTP flags
+                                context.user_data.pop('awaiting_otp', None)
+                                context.user_data.pop('pending_phone_verification', None)
+
+                                logger.info(f"Phone verification successful for user {user_id}")
+
+                                # Now ask for name
+                                name_text = i18n.get('enter_name', language)
+                                await update.message.reply_text(name_text)
+
+                                return NAME
+                            else:
+                                await update.message.reply_text(
+                                    f"❌ Verification failed: {response.error}\n\n"
+                                    "Please enter the correct code or /cancel to skip:"
+                                )
+                                return NAME
+                except Exception as verify_error:
+                    logger.error(f"Error verifying OTP: {verify_error}")
+                    await update.message.reply_text(
+                        "❌ Verification failed. Please try again or /cancel to skip."
+                    )
+                    return NAME
+
+            # Handle name input
+            name = text
+
             if len(name) < 2:
                 await update.message.reply_text("❌ Name is too short. Please enter your full name.")
                 return NAME
-            
+
             # Update user profile
             async with api_client as client:
                 user_token = await authenticate_telegram_user(update, client)
@@ -195,20 +319,20 @@ class ProfileHandlers:
                         'last_name': ' '.join(name.split()[1:]) if len(name.split()) > 1 else ''
                     }
                     await client.update_user_profile(user_token, profile_data)
-            
+
             # Registration complete
             complete_text = i18n.get('registration_complete', language)
             keyboard = MenuKeyboards.main_menu(language)
-            
+
             await update.message.reply_text(
                 text=complete_text,
                 reply_markup=keyboard
             )
-            
+
             logger.info(f"Registration completed for user {user_id}")
-            
+
             return ConversationHandler.END
-            
+
         except Exception as e:
             logger.error(f"Error handling name: {e}")
             return ConversationHandler.END

@@ -90,6 +90,7 @@ class UserStatus(Enum):
     INACTIVE = 'inactive'
     BANNED = 'banned'
     PENDING_VERIFICATION = 'pending_verification'
+    MERGED = 'merged'  # Account merged into another account
 
 
 class NotificationType(Enum):

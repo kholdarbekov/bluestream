@@ -65,7 +65,7 @@ CREATE TYPE user_role AS ENUM (
 );
 
 CREATE TYPE user_status AS ENUM (
-    'active', 'inactive', 'banned', 'pending_verification'
+    'active', 'inactive', 'banned', 'pending_verification', 'merged'
 );
 
 -- Notification related enums
@@ -171,6 +171,7 @@ CREATE TABLE users (
     password_reset_expires TIMESTAMP WITH TIME ZONE,
     email_verification_token VARCHAR(255),
     email_verified_at TIMESTAMP WITH TIME ZONE,
+    phone_verified_at TIMESTAMP WITH TIME ZONE,
     
     -- Telegram/Bot integration fields
     telegram_id VARCHAR(50) UNIQUE,
@@ -179,7 +180,7 @@ CREATE TABLE users (
     telegram_last_name VARCHAR(255),
     telegram_language_code VARCHAR(10),
     is_bot_active BOOLEAN DEFAULT FALSE,
-    bot_state TEXT, -- JSON string for bot conversation state
+    bot_state JSONB DEFAULT '{}', -- Bot conversation state
     last_bot_interaction TIMESTAMP WITH TIME ZONE,
     
     -- Registration source tracking
@@ -1486,6 +1487,7 @@ CREATE INDEX idx_users_telegram_id ON users(telegram_id);
 CREATE INDEX idx_users_role ON users(role);
 CREATE INDEX idx_users_status ON users(status);
 CREATE INDEX idx_users_is_verified ON users(is_verified);
+CREATE INDEX idx_users_phone_verified_at ON users(phone_verified_at) WHERE phone_verified_at IS NOT NULL;
 CREATE INDEX idx_users_registration_source ON users(registration_source);
 CREATE INDEX idx_users_is_bot_active ON users(is_bot_active);
 
@@ -1640,6 +1642,47 @@ INSERT INTO translation_categories (name, description) VALUES
 ('admin', 'Admin interface text'),
 ('telegram', 'Telegram bot messages'),
 ('validation', 'Validation messages');
+
+-- =========================================================================
+-- TELEGRAM BOT SPECIFIC TABLES
+-- =========================================================================
+
+-- Bot sessions table for temporary bot conversation sessions
+CREATE TABLE bot_sessions (
+    session_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    telegram_id BIGINT NOT NULL,
+    session_data JSONB DEFAULT '{}',
+    expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Bot analytics table for tracking bot usage and errors
+CREATE TABLE bot_analytics (
+    id SERIAL PRIMARY KEY,
+    telegram_id BIGINT,
+    command VARCHAR(100),
+    action VARCHAR(100),
+    data JSONB DEFAULT '{}',
+    success BOOLEAN DEFAULT TRUE,
+    error_message TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Indexes for bot tables
+CREATE INDEX idx_bot_sessions_telegram_id ON bot_sessions(telegram_id);
+CREATE INDEX idx_bot_sessions_expires_at ON bot_sessions(expires_at);
+CREATE INDEX idx_bot_analytics_telegram_id ON bot_analytics(telegram_id);
+CREATE INDEX idx_bot_analytics_created_at ON bot_analytics(created_at);
+CREATE INDEX idx_bot_analytics_command ON bot_analytics(command);
+
+-- Comments
+COMMENT ON TABLE bot_sessions IS 'Temporary session data for telegram bot conversations';
+COMMENT ON TABLE bot_analytics IS 'Analytics and error tracking for telegram bot operations';
+
+-- =========================================================================
+-- DEFAULT DATA INSERTS
+-- =========================================================================
 
 -- Insert default product categories
 INSERT INTO product_categories (name, name_en, name_ru, description, is_active, sort_order) VALUES

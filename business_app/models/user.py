@@ -40,6 +40,7 @@ class User(db.Model, TimestampMixin):
     password_reset_expires = Column(DateTime, nullable=True)
     email_verification_token = Column(String(255), nullable=True)
     email_verified_at = Column(DateTime, nullable=True)
+    phone_verified_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     telegram_id = Column(String(50), unique=True, nullable=True, index=True)
@@ -148,30 +149,45 @@ class User(db.Model, TimestampMixin):
         
         return sanitized if sanitized else None
     
+    @property
+    def email_verified(self) -> bool:
+        """Check if email is verified"""
+        return self.email_verified_at is not None
+
+    @property
+    def phone_verified(self) -> bool:
+        """Check if phone is verified"""
+        return self.phone_verified_at is not None
+
+    @property
+    def is_admin(self) -> bool:
+        """Check if user has admin role"""
+        return self.role == 'admin'
+
     def validate_user_data(self):
         """Validate all user data before saving"""
         errors = []
-        
+
         # Validate email
         is_valid, message = self.validate_email(self.email)
         if not is_valid:
             errors.append(f"Email: {message}")
-        
+
         # Validate phone if provided
         is_valid, message = self.validate_phone(self.phone)
         if not is_valid:
             errors.append(f"Phone: {message}")
-        
+
         # Validate role
         valid_roles = ['customer', 'admin', 'manager', 'delivery_driver', 'operator']
         if self.role not in valid_roles:
             errors.append(f"Role must be one of: {', '.join(valid_roles)}")
-        
+
         # Validate status
-        valid_statuses = ['active', 'inactive', 'banned', 'pending_verification']
+        valid_statuses = ['active', 'inactive', 'banned', 'pending_verification', 'merged']
         if self.status not in valid_statuses:
             errors.append(f"Status must be one of: {', '.join(valid_statuses)}")
-        
+
         # Validate names if provided
         if self.first_name:
             sanitized = self.sanitize_user_input(self.first_name)
@@ -179,19 +195,19 @@ class User(db.Model, TimestampMixin):
                 errors.append("First name contains invalid characters or is too long")
             else:
                 self.first_name = sanitized
-        
+
         if self.last_name:
             sanitized = self.sanitize_user_input(self.last_name)
             if not sanitized or len(sanitized) > 100:
                 errors.append("Last name contains invalid characters or is too long")
             else:
                 self.last_name = sanitized
-        
+
         # Validate telegram_id if provided
         if self.telegram_id:
             if not self.telegram_id.isdigit() or len(self.telegram_id) < 5 or len(self.telegram_id) > 15:
                 errors.append("Telegram ID must be a numeric string between 5-15 characters")
-        
+
         # Validate business fields if provided
         if self.company_name:
             sanitized = self.sanitize_user_input(self.company_name)
@@ -199,12 +215,12 @@ class User(db.Model, TimestampMixin):
                 errors.append("Company name contains invalid characters or is too long")
             else:
                 self.company_name = sanitized
-        
+
         if self.tax_id:
             import re
             if not re.match(r'^[A-Z0-9-]+$', self.tax_id) or len(self.tax_id) < 5 or len(self.tax_id) > 20:
                 errors.append("Tax ID must contain only alphanumeric characters and dashes, 5-20 characters long")
-        
+
         return errors
     
     def to_dict(self):

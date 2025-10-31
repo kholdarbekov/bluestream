@@ -72,7 +72,7 @@ def require_role(required_roles):
                     }), 404
                 
                 # Check if user is active
-                if not user.is_active or user.status != UserStatus.ACTIVE.value:
+                if user.status != UserStatus.ACTIVE.value:
                     return jsonify({
                         'success': False,
                         'message': 'Account is not active',

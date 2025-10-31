@@ -69,7 +69,7 @@ def super_admin_required(f):
         # Additional validation for super admin operations
         from business_app.models.user import User
         user = User.query.get(user_id)
-        if not user or not user.is_admin or user.status != 'active':
+        if not user or not user.is_admin or user.status != UserStatus.ACTIVE.value:
             raise ForbiddenError("Active admin account required")
         
         g.current_user_id = user_id
@@ -99,7 +99,7 @@ def manager_or_higher_required(f):
         # Additional validation
         from business_app.models.user import User
         user = User.query.get(user_id)
-        if not user or user.status != 'active':
+        if not user or user.status != UserStatus.ACTIVE.value:
             raise ForbiddenError("Active account required")
         
         # Check if user still has the claimed role
@@ -134,7 +134,7 @@ def staff_or_higher_required(f):
         # Additional validation
         from business_app.models.user import User
         user = User.query.get(user_id)
-        if not user or user.status != 'active':
+        if not user or user.status != UserStatus.ACTIVE.value:
             raise ForbiddenError("Active account required")
         
         # Check if user still has the claimed role

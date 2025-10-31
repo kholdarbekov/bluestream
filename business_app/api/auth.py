@@ -13,6 +13,7 @@ from business_app.utils.decorators import (
     require_auth, validate_json, handle_exceptions, 
     rate_limit, log_request
 )
+from business_app.middleware import jwt_required_with_refresh
 from business_app.utils.validators import phone_validator, email_validator
 from business_app.utils.exceptions import ValidationError, UnauthorizedError, ConflictError
 from business_app.utils.helpers import get_current_language
@@ -132,7 +133,7 @@ def register():
                     'last_name': user.last_name,
                     'status': user.status,
                     'email_verified': user.email_verified_at is not None,
-                    'phone_verified': False
+                    'phone_verified': user.phone_verified_at is not None
                 },
                 'tokens': tokens
             }
@@ -225,7 +226,7 @@ def login():
                     'role': user.role,
                     'status': user.status,
                     'email_verified': user.email_verified_at is not None,
-                    'phone_verified': False,
+                    'phone_verified': user.phone_verified_at is not None,
                     'last_login': user.last_login.isoformat() if user.last_login else None
                 },
                 'tokens': tokens,
@@ -879,7 +880,7 @@ def get_profile():
             'role': user.role,
             'status': user.status,
             'email_verified': user.email_verified_at is not None,
-            'phone_verified': False,  # No phone verification field in current model
+            'phone_verified': user.phone_verified_at is not None,
             'created_at': user.created_at.isoformat(),
             'last_login': user.last_login.isoformat() if user.last_login else None,
             'preferred_language': getattr(user, 'preferred_language', 'en'),
@@ -1795,14 +1796,59 @@ def telegram_register():
             token_service = TokenService()
             tokens = token_service.generate_tokens(existing_user)
             
+            # Check for cross-platform linking opportunities
+            from business_app.services.cross_platform_sync_service import cross_platform_sync_service
+            sync_suggestions = cross_platform_sync_service.suggest_account_linking(existing_user)
+            platform_status = cross_platform_sync_service.get_user_platform_status(existing_user)
+            
             return jsonify({
                 'success': True,
                 'message': get_translation('user_already_registered'),
                 'data': {
                     'user': existing_user.to_dict(),
-                    'tokens': tokens
+                    'tokens': tokens,
+                    'platform_status': platform_status,
+                    'linking_suggestions': sync_suggestions
                 }
             })
+        
+        # Check for potential account matches before creating new user
+        from business_app.services.cross_platform_sync_service import cross_platform_sync_service
+        
+        # Look for existing accounts with matching phone (if provided)
+        potential_matches = []
+        if data.get('phone'):
+            potential_matches = cross_platform_sync_service.find_potential_matches(
+                phone=data['phone']
+            )
+        
+        # If matches found, suggest linking instead of creating new account
+        if potential_matches:
+            logger.info(f"Found {len(potential_matches)} potential account matches for telegram registration")
+            return jsonify({
+                'success': False,
+                'message': get_translation('account_already_exists_suggest_linking'),
+                'error_code': 'ACCOUNT_MATCH_FOUND',
+                'data': {
+                    'potential_matches': [
+                        {
+                            'user_id': match.id,
+                            'email': match.email,
+                            'name': match.full_name or f"{match.first_name} {match.last_name}".strip(),
+                            'registration_source': match.registration_source,
+                            'has_telegram': bool(match.telegram_id)
+                        }
+                        for match in potential_matches[:3]  # Limit to 3 suggestions
+                    ],
+                    'linking_options': [
+                        {
+                            'action': 'link_with_existing',
+                            'description': 'Link Telegram with existing account',
+                            'endpoint': '/api/v1/auth/link-web-account'
+                        }
+                    ]
+                }
+            }), 409
         
         # Create new telegram user in unified table
         logger.info("Creating new telegram user in unified table...")
@@ -2718,11 +2764,13 @@ def revoke_session(session_id):
                 'message': 'Session not found'
             }), 404
         
-        # Blacklist tokens for this session
+        # Blacklist tokens for this session with proper expiry
         if 'access_token_jti' in target_session:
-            token_service.blacklist_token(target_session['access_token_jti'])
+            access_expires = current_app.config.get('JWT_ACCESS_TOKEN_EXPIRES', timedelta(hours=1))
+            token_service.blacklist_token(target_session['access_token_jti'], expires_delta=access_expires)
         if 'refresh_token_jti' in target_session:
-            token_service.blacklist_token(target_session['refresh_token_jti'])
+            refresh_expires = current_app.config.get('JWT_REFRESH_TOKEN_EXPIRES', timedelta(days=30))
+            token_service.blacklist_token(target_session['refresh_token_jti'], expires_delta=refresh_expires)
         
         # Remove session info
         token_service._remove_session_info(user_id, session_id)
@@ -2836,4 +2884,583 @@ def logout_all():
             'success': False,
             'message': 'Operation failed'
         }), 500
+
+
+@auth_bp.route('/platform-status', methods=['GET'])
+@jwt_required_with_refresh()
+def get_platform_status():
+    """
+    Get Cross-Platform Account Status
+    ---
+    tags:
+      - Authentication
+    security:
+      - bearerAuth: []
+    responses:
+      200:
+        description: Platform status retrieved successfully
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+            data:
+              type: object
+              properties:
+                platform_status:
+                  type: object
+                linking_suggestions:
+                  type: object
+    """
+    user_id = get_jwt_identity()
+    user = User.query.get(user_id)
+    
+    if not user:
+        return jsonify({
+            'success': False,
+            'message': 'User not found'
+        }), 404
+    
+    from business_app.services.cross_platform_sync_service import cross_platform_sync_service
+    
+    platform_status = cross_platform_sync_service.get_user_platform_status(user)
+    linking_suggestions = cross_platform_sync_service.suggest_account_linking(user)
+    
+    return jsonify({
+        'success': True,
+        'data': {
+            'platform_status': platform_status,
+            'linking_suggestions': linking_suggestions
+        }
+    })
+
+
+@auth_bp.route('/suggest-auto-link', methods=['POST'])
+@jwt_required_with_refresh()
+@validate_json(['target_user_id'])
+def suggest_auto_link():
+    """
+    Suggest Automatic Account Linking
+    ---
+    tags:
+      - Authentication
+    security:
+      - bearerAuth: []
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - target_user_id
+          properties:
+            target_user_id:
+              type: integer
+              example: 123
+            confirm:
+              type: boolean
+              example: false
+    responses:
+      200:
+        description: Link suggestion or completion
+      400:
+        description: Invalid request
+      409:
+        description: Cannot link accounts
+    """
+    data = request.get_json()
+    current_user_id = get_jwt_identity()
+    target_user_id = data['target_user_id']
+    confirm = data.get('confirm', False)
+    
+    current_user = User.query.get(current_user_id)
+    target_user = User.query.get(target_user_id)
+    
+    if not current_user or not target_user:
+        return jsonify({
+            'success': False,
+            'message': 'One or both users not found'
+        }), 404
+    
+    from business_app.services.cross_platform_sync_service import cross_platform_sync_service
+    
+    if not confirm:
+        # Just analyze and return suggestion
+        if current_user.registration_source == target_user.registration_source:
+            return jsonify({
+                'success': False,
+                'message': 'Cannot link accounts from the same platform',
+                'error_code': 'SAME_PLATFORM_ACCOUNTS'
+            }), 409
+        
+        return jsonify({
+            'success': True,
+            'message': 'Accounts can be linked',
+            'data': {
+                'link_preview': {
+                    'primary_account': {
+                        'id': current_user.id,
+                        'email': current_user.email,
+                        'platform': current_user.registration_source,
+                        'name': current_user.full_name
+                    },
+                    'secondary_account': {
+                        'id': target_user.id,
+                        'email': target_user.email,
+                        'platform': target_user.registration_source,
+                        'name': target_user.full_name
+                    },
+                    'benefits': [
+                        'Unified account across all platforms',
+                        'Single login for web and Telegram',
+                        'Synchronized preferences and data'
+                    ]
+                }
+            }
+        })
+    
+    # Perform the linking
+    result = cross_platform_sync_service.auto_link_accounts(
+        primary_user=current_user,
+        secondary_user=target_user,
+        link_type='merge'
+    )
+    
+    if result['success']:
+        # Generate new tokens for the linked account
+        from business_app.services.token_service import TokenService
+        token_service = TokenService()
+        tokens = token_service.generate_tokens(current_user)
+        
+        return jsonify({
+            'success': True,
+            'message': result['message'],
+            'data': {
+                'user': current_user.to_dict(),
+                'tokens': tokens,
+                'link_result': result
+            }
+        })
+    else:
+        return jsonify({
+            'success': False,
+            'message': result.get('error', 'Failed to link accounts'),
+            'error_code': 'LINKING_FAILED'
+        }), 400
+
+
+@auth_bp.route('/generate-telegram-auth', methods=['POST'])
+@jwt_required()
+@handle_exceptions
+def generate_telegram_auth():
+    """
+    Generate Telegram Authentication Link/Code for Web User
+    ---
+    tags:
+      - Authentication
+    security:
+      - bearerAuth: []
+    responses:
+      200:
+        description: Telegram auth code generated successfully
+      400:
+        description: User already has Telegram access
+      404:
+        description: User not found
+    """
+    user_id = get_jwt_identity()
+    user = User.query.get(user_id)
+    
+    if not user:
+        return jsonify({
+            'success': False,
+            'message': 'User not found'
+        }), 404
+    
+    # Check if user already has Telegram access
+    if user.telegram_id:
+        return jsonify({
+            'success': False,
+            'message': 'User already has Telegram access',
+            'error_code': 'TELEGRAM_ALREADY_LINKED'
+        }), 400
+    
+    # Generate a secure auth code for Telegram bot linking
+    import secrets
+    import string
+    from datetime import timedelta
+    
+    auth_code = ''.join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(8))
+    
+    # Store the auth code with expiry (5 minutes)
+    from business_app.services.token_service import TokenService
+    token_service = TokenService()
+    
+    # Store auth code in Redis with user_id
+    auth_data = {
+        'user_id': user_id,
+        'email': user.email,
+        'created_at': datetime.now(timezone.utc).isoformat(),
+        'type': 'telegram_auth'
+    }
+    
+    try:
+        token_service._ensure_redis_connection()
+        if token_service.redis_available:
+            import json
+            token_service.redis_client.setex(
+                f"telegram_auth:{auth_code}",
+                300,  # 5 minutes expiry
+                json.dumps(auth_data)
+            )
+        else:
+            # Fallback to in-memory storage (not recommended for production)
+            if not hasattr(token_service, '_telegram_auth_codes'):
+                token_service._telegram_auth_codes = {}
+            token_service._telegram_auth_codes[auth_code] = {
+                **auth_data,
+                'expires_at': datetime.now(timezone.utc) + timedelta(minutes=5)
+            }
+    except Exception as e:
+        logger.error(f"Failed to store telegram auth code: {e}")
+        return jsonify({
+            'success': False,
+            'message': 'Failed to generate auth code'
+        }), 500
+    
+    # Create Telegram bot link
+    bot_username = current_app.config.get('TELEGRAM_BOT_USERNAME', 'bluewaterbot')
+    telegram_link = f"https://t.me/{bot_username}?start=auth_{auth_code}"
+    
+    return jsonify({
+        'success': True,
+        'message': 'Telegram authentication code generated',
+        'data': {
+            'auth_code': auth_code,
+            'telegram_link': telegram_link,
+            'expires_in': 300,  # 5 minutes
+            'instructions': [
+                f"Click the link to open Telegram: {telegram_link}",
+                f"Or manually open @{bot_username} and send: /start auth_{auth_code}",
+                "Your accounts will be automatically linked"
+            ]
+        }
+    })
+
+
+@auth_bp.route('/generate-web-auth', methods=['POST'])
+@rate_limit(5, 300)  # 5 attempts per 5 minutes
+@validate_json(['telegram_id'])
+@handle_exceptions
+def generate_web_auth():
+    """
+    Generate Web Authentication Token for Telegram User
+    ---
+    tags:
+      - Authentication
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - telegram_id
+          properties:
+            telegram_id:
+              type: string
+              example: "123456789"
+    responses:
+      200:
+        description: Web auth token generated successfully
+      404:
+        description: Telegram user not found
+      400:
+        description: User already has web access
+    """
+    data = request.get_json()
+    telegram_id = str(data['telegram_id'])
+    
+    # Find telegram user
+    user = User.query.filter_by(telegram_id=telegram_id).first()
+    if not user:
+        return jsonify({
+            'success': False,
+            'message': 'Telegram user not found'
+        }), 404
+    
+    # Check if user already has proper web access
+    if user.email and not user.email.startswith('telegram_') and user.password_hash != 'telegram_user':
+        return jsonify({
+            'success': False,
+            'message': 'User already has web access',
+            'error_code': 'WEB_ALREADY_LINKED'
+        }), 400
+    
+    # Generate secure temporary web auth token
+    from business_app.services.token_service import TokenService
+    token_service = TokenService()
+    
+    # Generate temporary access tokens for web login
+    temp_tokens = token_service.generate_tokens(user)
+    
+    # Create a secure one-time web auth link
+    import secrets
+    web_auth_token = secrets.token_urlsafe(32)
+    
+    # Store the web auth token
+    auth_data = {
+        'user_id': user.id,
+        'telegram_id': telegram_id,
+        'access_token': temp_tokens['access_token'],
+        'refresh_token': temp_tokens['refresh_token'],
+        'created_at': datetime.now(timezone.utc).isoformat(),
+        'type': 'web_auth'
+    }
+    
+    try:
+        token_service._ensure_redis_connection()
+        if token_service.redis_available:
+            import json
+            token_service.redis_client.setex(
+                f"web_auth:{web_auth_token}",
+                600,  # 10 minutes expiry
+                json.dumps(auth_data)
+            )
+        else:
+            # Fallback to in-memory storage
+            if not hasattr(token_service, '_web_auth_tokens'):
+                token_service._web_auth_tokens = {}
+            token_service._web_auth_tokens[web_auth_token] = {
+                **auth_data,
+                'expires_at': datetime.now(timezone.utc) + timedelta(minutes=10)
+            }
+    except Exception as e:
+        logger.error(f"Failed to store web auth token: {e}")
+        return jsonify({
+            'success': False,
+            'message': 'Failed to generate web auth token'
+        }), 500
+    
+    # Create web app authentication link
+    web_app_url = current_app.config.get('WEB_APP_URL', 'https://bluestream.uz')
+    web_auth_link = f"{web_app_url}/auth/telegram-login?token={web_auth_token}"
+    
+    return jsonify({
+        'success': True,
+        'message': 'Web authentication token generated',
+        'data': {
+            'auth_token': web_auth_token,
+            'web_auth_link': web_auth_link,
+            'expires_in': 600,  # 10 minutes
+            'instructions': [
+                f"Click this link to access the web app: {web_auth_link}",
+                "You'll be automatically logged in",
+                "Link expires in 10 minutes for security"
+            ]
+        }
+    })
+
+
+@auth_bp.route('/verify-telegram-auth/<auth_code>', methods=['POST'])
+@rate_limit(10, 300)  # 10 attempts per 5 minutes
+@handle_exceptions
+def verify_telegram_auth(auth_code):
+    """
+    Verify Telegram Authentication Code and Link Account
+    ---
+    tags:
+      - Authentication
+    parameters:
+      - in: path
+        name: auth_code
+        type: string
+        required: true
+        description: The authentication code from /generate-telegram-auth
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - telegram_id
+            - telegram_username
+          properties:
+            telegram_id:
+              type: string
+              example: "123456789"
+            telegram_username:
+              type: string
+              example: "username"
+            first_name:
+              type: string
+              example: "John"
+            last_name:
+              type: string
+              example: "Doe"
+    responses:
+      200:
+        description: Accounts linked successfully
+      400:
+        description: Invalid or expired auth code
+      409:
+        description: Telegram ID already linked
+    """
+    data = request.get_json()
+    
+    # Retrieve auth code data
+    from business_app.services.token_service import TokenService
+    token_service = TokenService()
+    
+    auth_data = None
+    try:
+        token_service._ensure_redis_connection()
+        if token_service.redis_available:
+            import json
+            auth_data_str = token_service.redis_client.get(f"telegram_auth:{auth_code}")
+            if auth_data_str:
+                auth_data = json.loads(auth_data_str)
+                # Delete the used code
+                token_service.redis_client.delete(f"telegram_auth:{auth_code}")
+        else:
+            # Check in-memory storage
+            if hasattr(token_service, '_telegram_auth_codes') and auth_code in token_service._telegram_auth_codes:
+                stored_data = token_service._telegram_auth_codes[auth_code]
+                if datetime.now(timezone.utc) < stored_data['expires_at']:
+                    auth_data = stored_data
+                # Delete used code
+                del token_service._telegram_auth_codes[auth_code]
+    except Exception as e:
+        logger.error(f"Failed to retrieve auth code: {e}")
+    
+    if not auth_data:
+        return jsonify({
+            'success': False,
+            'message': 'Invalid or expired authentication code'
+        }), 400
+    
+    # Get the web user
+    user = User.query.get(auth_data['user_id'])
+    if not user:
+        return jsonify({
+            'success': False,
+            'message': 'User not found'
+        }), 404
+    
+    telegram_id = str(data['telegram_id'])
+    
+    # Check if this telegram_id is already linked to another account
+    existing_telegram_user = User.query.filter_by(telegram_id=telegram_id).first()
+    if existing_telegram_user and existing_telegram_user.id != user.id:
+        return jsonify({
+            'success': False,
+            'message': 'Telegram account already linked to another user'
+        }), 409
+    
+    # Link the telegram account to web user
+    user.telegram_id = telegram_id
+    user.telegram_username = data.get('telegram_username')
+    user.telegram_first_name = data.get('first_name')
+    user.telegram_last_name = data.get('last_name')
+    user.is_bot_active = True
+    user.last_bot_interaction = datetime.now(timezone.utc)
+    
+    # Update name if web user has incomplete info
+    if data.get('first_name') and not user.first_name:
+        user.first_name = data['first_name']
+    if data.get('last_name') and not user.last_name:
+        user.last_name = data['last_name']
+        
+    # Update full name
+    if user.first_name or user.last_name:
+        user.full_name = f"{user.first_name or ''} {user.last_name or ''}".strip()
+    
+    db.session.commit()
+    
+    logger.info(f"Successfully linked Telegram account {telegram_id} to web user {user.id}")
+    
+    return jsonify({
+        'success': True,
+        'message': 'Telegram account linked successfully',
+        'data': {
+            'user': user.to_dict(),
+            'linked_platforms': ['web', 'telegram']
+        }
+    })
+
+
+@auth_bp.route('/verify-web-auth/<auth_token>', methods=['GET'])
+@rate_limit(10, 600)  # 10 attempts per 10 minutes
+@handle_exceptions
+def verify_web_auth(auth_token):
+    """
+    Verify Web Authentication Token and Return Login Tokens
+    ---
+    tags:
+      - Authentication
+    parameters:
+      - in: path
+        name: auth_token
+        type: string
+        required: true
+        description: The authentication token from /generate-web-auth
+    responses:
+      200:
+        description: Authentication successful, returns tokens
+      400:
+        description: Invalid or expired auth token
+    """
+    # Retrieve auth token data
+    from business_app.services.token_service import TokenService
+    token_service = TokenService()
+    
+    auth_data = None
+    try:
+        token_service._ensure_redis_connection()
+        if token_service.redis_available:
+            import json
+            auth_data_str = token_service.redis_client.get(f"web_auth:{auth_token}")
+            if auth_data_str:
+                auth_data = json.loads(auth_data_str)
+                # Delete the used token
+                token_service.redis_client.delete(f"web_auth:{auth_token}")
+        else:
+            # Check in-memory storage
+            if hasattr(token_service, '_web_auth_tokens') and auth_token in token_service._web_auth_tokens:
+                stored_data = token_service._web_auth_tokens[auth_token]
+                if datetime.now(timezone.utc) < stored_data['expires_at']:
+                    auth_data = stored_data
+                # Delete used token
+                del token_service._web_auth_tokens[auth_token]
+    except Exception as e:
+        logger.error(f"Failed to retrieve web auth token: {e}")
+    
+    if not auth_data:
+        return jsonify({
+            'success': False,
+            'message': 'Invalid or expired authentication token'
+        }), 400
+    
+    # Get the user
+    user = User.query.get(auth_data['user_id'])
+    if not user:
+        return jsonify({
+            'success': False,
+            'message': 'User not found'
+        }), 404
+    
+    # Return the authentication tokens
+    return jsonify({
+        'success': True,
+        'message': 'Web authentication successful',
+        'data': {
+            'user': user.to_dict(),
+            'tokens': {
+                'access_token': auth_data['access_token'],
+                'refresh_token': auth_data['refresh_token']
+            },
+            'linked_platforms': ['telegram', 'web'] if user.email and not user.email.startswith('telegram_') else ['telegram']
+        }
+    })
   

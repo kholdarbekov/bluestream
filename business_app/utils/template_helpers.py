@@ -237,7 +237,7 @@ def register_multilingual_filters(app):
     
     @app.template_filter('translate')
     def translate_filter(key, language=None, **kwargs):
-        """Translate static text: {{ 'Home'|translate }}"""
+        """Translate static text: {{ 'Home'|translate(current_language) }}"""
         from business_app.utils.translations import get_translation
         from flask import session, g, request
         import logging

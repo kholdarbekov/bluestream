@@ -12,7 +12,7 @@ from flask_jwt_extended import verify_jwt_in_request, get_jwt_identity, get_jwt
 from datetime import datetime, UTC
 
 from .exceptions import UnauthorizedError, ForbiddenError, RateLimitError
-from .constants import UserRole
+from .constants import UserRole, UserStatus
 
 
 class Permission(Enum):
@@ -239,7 +239,7 @@ class RBACValidator:
             return False
         
         # Check account status
-        if user.status != 'active':
+        if user.status != UserStatus.ACTIVE.value:
             return False
         
         # Check if account is locked

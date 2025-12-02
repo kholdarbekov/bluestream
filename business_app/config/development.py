@@ -18,9 +18,9 @@ class DevelopmentConfig(BaseConfig):
         if not uri:
             db_user = os.environ.get('DB_USER', 'postgres')
             db_password = os.environ.get('DB_PASSWORD', 'postgres')
-            db_host = os.environ.get('POSTGRES_HOST', 'localhost')
+            db_host = os.environ.get('DB_HOST', 'localhost')
             db_port = os.environ.get('DB_PORT', '5432')
-            db_name = os.environ.get('POSTGRES_DB', 'bluestream_dev')
+            db_name = os.environ.get('DB_NAME', 'bluestream_dev')
             
             uri = f'postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}'
         return uri

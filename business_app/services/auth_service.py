@@ -425,7 +425,7 @@ class AuthService:
         
         return True
     
-    def create_admin_user(self, email: str, password: str, first_name: str = "Admin", 
+    def create_admin_user(self, phone: str, email: str, password: str, first_name: str = "Admin", 
                          last_name: str = "User") -> User:
         """Create admin user"""
         # Check if admin already exists
@@ -434,6 +434,7 @@ class AuthService:
             raise ConflictError(get_translation('api.auth.admin_already_exists'))
         
         admin_user = User(
+            phone=format_phone_number(phone),
             email=email.lower().strip(),
             first_name=first_name,
             last_name=last_name,

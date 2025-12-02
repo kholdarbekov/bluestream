@@ -39,7 +39,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def create_admin_user(app: Flask, email: str, password: str, first_name: str, last_name: str):
+def create_admin_user(app: Flask, phone: str, email: str, password: str, first_name: str, last_name: str):
     """Create a new admin user"""
     
     with app.app_context():
@@ -47,6 +47,7 @@ def create_admin_user(app: Flask, email: str, password: str, first_name: str, la
             auth_service = AuthService()
             
             user = auth_service.create_admin_user(
+                phone=phone,
                 email=email,
                 password=password,
                 first_name=first_name,
@@ -231,6 +232,7 @@ def main():
     
     # Create admin command
     create_parser = subparsers.add_parser('create-admin', help='Create a new admin user')
+    create_parser.add_argument('--phone', required=True, help='Admin phone number')
     create_parser.add_argument('--email', required=True, help='Admin email address')
     create_parser.add_argument('--password', help='Admin password (will prompt if not provided)')
     create_parser.add_argument('--first-name', default='Admin', help='First name (default: Admin)')
@@ -279,7 +281,7 @@ def main():
                     print("❌ Passwords do not match")
                     return
             
-            create_admin_user(app, args.email, password, args.first_name, args.last_name)
+            create_admin_user(app, args.phone, args.email, password, args.first_name, args.last_name)
             
         elif args.command == 'list-users':
             list_users(app, args.role, args.status, args.limit)

@@ -166,6 +166,7 @@ class ProductionConfig(BaseConfig):
         'font-src': ["'self'", "https://fonts.gstatic.com"],
         'img-src': ["'self'", "data:", "https://bluestream.uz", "https:"],
         'connect-src': ["'self'", "https://api.bluestream.uz"],
+        'frame-src': ["'self'", "https://www.youtube.com", "https://www.youtube-nocookie.com"],  # Allow YouTube embeds
         'object-src': ["'none'"],
         'base-uri': ["'self'"],
         'form-action': ["'self'"],

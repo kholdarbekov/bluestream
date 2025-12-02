@@ -40,7 +40,7 @@ class ProductionConfig(BaseConfig):
         'connect_args': {
             'sslmode': 'prefer',  # Prefer SSL but allow fallback if not supported
             'connect_timeout': 10,
-            'application_name': 'bluestream_prod'
+            'application_name': os.environ.get('DB_NAME', 'bluestream_prod')
         }
     }
     

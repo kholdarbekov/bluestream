@@ -2256,6 +2256,7 @@ def admin_create_user():
             try:
                 if data['role'] == UserRole.ADMIN.value:
                     user = auth_service.create_admin_user(
+                        phone=data['phone'],
                         email=data['email'],
                         password=data['password'],
                         first_name=data['first_name'],

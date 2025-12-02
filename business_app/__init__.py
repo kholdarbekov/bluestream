@@ -110,10 +110,11 @@ def register_cli_commands(app):
         """Create admin user"""
         from business_app.services.auth_service import AuthService
         
+        phone = click.prompt('Admin phone')
         email = click.prompt('Admin email')
         password = click.prompt('Admin password', hide_input=True)
         
-        admin_user = AuthService.create_admin_user(email, password)
+        admin_user = AuthService.create_admin_user(phone, email, password)
         click.echo(f'Admin user created: {admin_user.email}')
     
     # Initialize configuration CLI commands

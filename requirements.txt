@@ -122,3 +122,6 @@ APScheduler==3.11.0
 debugpy
 eskiz_sms==0.2.4
 python-magic==0.4.27
+
+flask-talisman
+python-json-logger

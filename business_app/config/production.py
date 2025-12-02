@@ -283,11 +283,11 @@ class ProductionConfig(BaseConfig):
                 ],
                 environment=cls.SENTRY_ENVIRONMENT,
                 release=cls.SENTRY_RELEASE,
-                traces_sample_rate=0.01,  # Low sample rate in production
+                traces_sample_rate=0.01,
                 profiles_sample_rate=0.01,
                 debug=False,
                 attach_stacktrace=True,
-                send_default_pii=False  # Don't send PII to Sentry
+                send_default_pii=False
             )
         except ImportError:
             raise ImportError("Sentry SDK is required in production environment")

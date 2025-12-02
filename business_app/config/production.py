@@ -272,6 +272,8 @@ class ProductionConfig(BaseConfig):
             from sentry_sdk.integrations.sqlalchemy import SqlalchemyIntegration
             from sentry_sdk.integrations.redis import RedisIntegration
             from sentry_sdk.integrations.celery import CeleryIntegration
+
+            print(f"ProductionConfig class: SENTRY_DSN: {cls.SENTRY_DSN}")
             
             sentry_sdk.init(
                 dsn=cls.SENTRY_DSN,

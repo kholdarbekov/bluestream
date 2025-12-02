@@ -268,6 +268,8 @@ def create_app(config_class=None):
     
     # Initialize configuration with app-specific setup
     if hasattr(config_class, 'init_app'):
+        print(f"SENTRY_DSN: {config_class.SENTRY_DSN}")
+        app.logger.info(f"SENTRY_DSN: {config_class.SENTRY_DSN}")
         config_class.init_app(app)
     else:
         # Legacy validation for backward compatibility

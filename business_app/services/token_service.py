@@ -269,31 +269,37 @@ class TokenService:
     def is_token_blacklisted(self, token_jti: str) -> bool:
         """
         Check if token is blacklisted
-        
+
         Args:
             token_jti: JTI (JWT ID) of the token to check
-            
+
         Returns:
             True if token is blacklisted
         """
         try:
             self._ensure_redis_connection()
             if self.redis_available:
-                return self.redis_client.exists(f"blacklist:{token_jti}")
+                is_blacklisted = bool(self.redis_client.exists(f"blacklist:{token_jti}"))
+                if is_blacklisted:
+                    logger.debug(f"Token {token_jti} found in Redis blacklist")
+                return is_blacklisted
             else:
                 # Check in-memory blacklist with expiry
                 if token_jti in self._in_memory_blacklist:
                     expiry_time = self._in_memory_blacklist[token_jti]
                     if datetime.now(timezone.utc) < expiry_time:
+                        logger.debug(f"Token {token_jti} found in in-memory blacklist")
                         return True
                     else:
                         # Token has expired, remove it from blacklist
                         del self._in_memory_blacklist[token_jti]
                         return False
                 return False
-                
+
         except Exception as e:
-            logger.error(f"Failed to check blacklist for token {token_jti}: {e}")
+            logger.error(f"Failed to check blacklist for token {token_jti}: {e}", exc_info=True)
+            # Fail open: return False to avoid authentication disruption
+            # In stricter environments, you might want to fail closed (return True)
             return False
     
     def blacklist_token_by_string(self, token: str) -> bool:

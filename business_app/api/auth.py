@@ -2715,39 +2715,74 @@ def revoke_session(session_id):
 @jwt_required()
 @handle_exceptions
 def logout():
-    """Logout and blacklist current token"""
+    """
+    User Logout
+    ---
+    tags:
+      - Authentication
+    security:
+      - bearerAuth: []
+    responses:
+      200:
+        description: Logout successful
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+              example: true
+            message:
+              type: string
+              example: Logout successful
+      401:
+        description: Unauthorized
+    """
     user_id = get_jwt_identity()
     claims = get_jwt()
     jti = claims['jti']
     session_id = claims.get('session_id')
-    
+
     try:
         from business_app.services.token_service import TokenService
         token_service = TokenService()
-        
+
         # Blacklist the current token with proper expiry
         # Get the actual token from Authorization header to extract proper expiry
         auth_header = request.headers.get('Authorization', '')
         if auth_header.startswith('Bearer '):
             current_token = auth_header[7:]  # Remove "Bearer " prefix
-            token_service.blacklist_token_by_string(current_token)
+            blacklisted = token_service.blacklist_token_by_string(current_token)
+            logger.info(f"Token blacklisted for user {user_id}: {blacklisted}")
         else:
             # Fallback to JTI with default expiry
             access_expires = current_app.config.get('JWT_ACCESS_TOKEN_EXPIRES', timedelta(hours=1))
-            token_service.blacklist_token(jti, expires_delta=access_expires)
-        
+            blacklisted = token_service.blacklist_token(jti, expires_delta=access_expires)
+            logger.info(f"Token JTI blacklisted for user {user_id}: {blacklisted}")
+
         # Remove session info if session_id exists
         if session_id:
-            token_service._remove_session_info(user_id, session_id)
-        
+            session_removed = token_service._remove_session_info(user_id, session_id)
+            logger.info(f"Session removed for user {user_id}: {session_removed}")
+
         # Create response and clear JWT cookies
-        response_tuple = success_response(message=get_translation('api.auth.logout_successful'))
-        response = response_tuple[0]  # Extract the response object from tuple
+        # Handle both tuple and Response object returns from success_response
+        response_result = success_response(message=get_translation('api.auth.logout_successful'))
+
+        if isinstance(response_result, tuple):
+            response = response_result[0]  # Extract response object from tuple
+            status_code = response_result[1] if len(response_result) > 1 else 200
+        else:
+            response = response_result
+            status_code = 200
+
+        # Clear JWT cookies - this removes both access and refresh token cookies
         unset_jwt_cookies(response)
-        return response, 200
-        
+
+        logger.info(f"User {user_id} logged out successfully")
+        return response, status_code
+
     except Exception as e:
-        logger.error(f"Logout failed for user {user_id}: {e}")
+        logger.error(f"Logout failed for user {user_id}: {e}", exc_info=True)
         return internal_error_response(message=get_translation('error.server_error'))
 
 

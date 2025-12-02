@@ -228,6 +228,40 @@ def setup_jwt_handlers(app):
             'message': 'The token has been revoked.'
         }), 401
 
+    @jwt.token_in_blocklist_loader
+    def check_if_token_revoked(jwt_header, jwt_payload):
+        """
+        Callback to check if a JWT token has been blacklisted/revoked.
+        This is called on every request that requires JWT authentication.
+
+        Args:
+            jwt_header: The header of the JWT
+            jwt_payload: The payload/claims of the JWT
+
+        Returns:
+            True if token is blacklisted, False otherwise
+        """
+        jti = jwt_payload['jti']
+
+        try:
+            # Import TokenService to check blacklist
+            from business_app.services.token_service import TokenService
+            token_service = TokenService()
+
+            # Check if token is blacklisted
+            is_blacklisted = token_service.is_token_blacklisted(jti)
+
+            if is_blacklisted:
+                app.logger.info(f'Blocked blacklisted token with JTI: {jti}')
+
+            return is_blacklisted
+
+        except Exception as e:
+            app.logger.error(f'Error checking token blacklist for JTI {jti}: {e}')
+            # Fail open to prevent authentication disruption
+            # In production, you might want to fail closed (return True)
+            return False
+
 
 def create_app(config_class=None):
     """

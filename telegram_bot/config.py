@@ -141,22 +141,6 @@ class PaymentConfig:
 
 
 @dataclass
-class NotificationConfig:
-    """Notification services configuration"""
-    # SendGrid
-    sendgrid_api_key: Optional[str] = None
-    sendgrid_from_email: Optional[str] = None
-    
-    # Twilio
-    twilio_account_sid: Optional[str] = None
-    twilio_auth_token: Optional[str] = None
-    twilio_phone_number: Optional[str] = None
-    
-    # Push notifications
-    fcm_server_key: Optional[str] = None
-
-
-@dataclass
 class LocalizationConfig:
     """Multi-language configuration"""
     default_language: str = "en"
@@ -255,15 +239,6 @@ class BotConfig:
             click_secret_key=get_secret('click_secret_key', 'CLICK_SECRET_KEY', required=False),
             click_test_mode=os.getenv('CLICK_TEST_MODE', 'true').lower() == 'true',
             telegram_provider_token=os.getenv('TELEGRAM_PROVIDER_TOKEN'),
-        )
-        
-        self.notifications = NotificationConfig(
-            sendgrid_api_key=get_secret('sendgrid_api_key', 'SENDGRID_API_KEY', required=False),
-            sendgrid_from_email=os.getenv('SENDGRID_FROM_EMAIL'),
-            twilio_account_sid=os.getenv('TWILIO_ACCOUNT_SID'),
-            twilio_auth_token=get_secret('twilio_auth_token', 'TWILIO_AUTH_TOKEN', required=False),
-            twilio_phone_number=os.getenv('TWILIO_PHONE_NUMBER'),
-            fcm_server_key=os.getenv('FCM_SERVER_KEY'),
         )
         
         self.localization = LocalizationConfig(

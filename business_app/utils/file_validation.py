@@ -70,12 +70,13 @@ class FileValidator:
     }
     
     # Maximum file sizes by category (in bytes)
+    # Note: These are overridden by app.config['MAX_CONTENT_LENGTH'] if set
     MAX_FILE_SIZES = {
-        'images': 10 * 1024 * 1024,      # 10MB
+        'images': 50 * 1024 * 1024,      # 50MB
         'documents': 25 * 1024 * 1024,   # 25MB
         'archives': 50 * 1024 * 1024,    # 50MB
         'media': 100 * 1024 * 1024,      # 100MB
-        'default': 16 * 1024 * 1024      # 16MB
+        'default': 50 * 1024 * 1024      # 50MB
     }
     
     def __init__(self):
@@ -152,21 +153,21 @@ class FileValidator:
             FileValidationError: If file content is invalid
         """
         file.seek(0)
-        
+
         # Read file header for magic number detection
-        header = file.read(8192)  # Read first 8KB
+        header: bytes = file.read(8192)  # Read first 8KB
         file.seek(0)
-        
+
         if len(header) == 0:
             raise FileValidationError("File is empty")
-        
+
         # Detect MIME type using python-magic
         try:
             mime_type = magic.from_buffer(header, mime=True)
         except Exception as e:
             logger.warning(f"Magic number detection failed: {e}")
             mime_type = 'application/octet-stream'
-        
+
         # Get file extension
         file_ext = self._extract_extension(filename)
         
@@ -217,44 +218,45 @@ class FileValidator:
     def generate_safe_path(self, filename: str, folder: str, user_id: Optional[int] = None) -> str:
         """
         Generate a safe file path with proper directory structure
-        
+
         Args:
             filename: Sanitized filename
-            folder: Target folder
+            folder: Target folder (can contain slashes for subdirectories)
             user_id: User ID for organization
-        
+
         Returns:
             Safe file path
         """
-        # Sanitize folder name
-        safe_folder = self._sanitize_path_component(folder)
-        
+        # Split folder path and sanitize each component separately
+        folder_parts = folder.split('/')
+        safe_folder_parts = [self._sanitize_path_component(part) for part in folder_parts if part]
+
         # Generate unique filename to prevent conflicts
         name, ext = os.path.splitext(filename)
         import uuid
         unique_filename = f"{name}_{uuid.uuid4().hex[:8]}{ext}"
-        
-        # Build path components
-        path_components = [safe_folder]
-        
+
+        # Build path components starting with sanitized folder parts
+        path_components = safe_folder_parts
+
         if user_id:
             # Add user-specific subdirectory
             path_components.append(str(user_id))
-        
+
         # Add date-based subdirectory for organization
         from datetime import datetime
         date_folder = datetime.now().strftime('%Y/%m')
         path_components.extend(date_folder.split('/'))
-        
+
         path_components.append(unique_filename)
-        
+
         # Join with forward slashes (works on all platforms)
         safe_path = '/'.join(path_components)
-        
+
         # Validate final path doesn't escape intended directory
         if self._contains_path_traversal(safe_path):
             raise FileValidationError("Generated path contains invalid sequences")
-        
+
         return safe_path
     
     def _contains_path_traversal(self, path: str) -> bool:
@@ -342,31 +344,33 @@ class FileValidator:
         try:
             from PIL import Image
             file.seek(0)
-            
+
             with Image.open(file) as img:
                 # Check image dimensions
                 width, height = img.size
                 max_dimension = 5000  # 5000px max
-                
+
                 if width > max_dimension or height > max_dimension:
                     raise FileValidationError(f"Image dimensions too large. Max: {max_dimension}x{max_dimension}")
-                
+
                 # Check for EXIF data that could contain malicious content
                 if hasattr(img, '_getexif') and img._getexif():
                     results['warnings'].append('Image contains EXIF data')
-                
-                # Verify image is not corrupted
-                img.verify()
-                
+
+                # Store image info
                 results['image_info'] = {
                     'width': width,
                     'height': height,
                     'format': img.format,
                     'mode': img.mode
                 }
-            
+
+                # Load image data to verify it's valid (this will throw if corrupted)
+                # We don't need to store the data, just verify it can be loaded
+                img.load()
+
             file.seek(0)
-            
+
         except Exception as e:
             raise FileValidationError(f"Invalid or corrupted image: {e}")
     

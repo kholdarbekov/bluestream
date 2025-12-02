@@ -2,6 +2,7 @@
 Admin Serializers for the Water Business Platform using Pydantic v2
 This file contains Pydantic models for admin-related data serialization
 """
+import logging
 from datetime import datetime, date
 from typing import Dict, Any, Optional, List, Union
 from enum import Enum
@@ -9,6 +10,8 @@ from decimal import Decimal
 
 from pydantic import BaseModel, Field, field_validator, ConfigDict
 from pydantic.alias_generators import to_camel
+from business_app.models.product import Product
+from business_app.models.order import Order
 
 
 class UserRole(str, Enum):
@@ -175,7 +178,6 @@ class ProductAdminSchema(BaseModel):
     category_name: Optional[str] = None
     base_price: Decimal
     current_price: Decimal
-    cost_price: Optional[Decimal] = None
     stock_quantity: Optional[int] = None
     min_stock_level: Optional[int] = None
     is_active: bool = Field(default=True)
@@ -198,7 +200,7 @@ class ProductAdminSchema(BaseModel):
     updated_at: Optional[datetime] = None
     last_sold_at: Optional[datetime] = None
     
-    @field_validator('base_price', 'current_price', 'cost_price', 'total_revenue')
+    @field_validator('base_price', 'current_price', 'total_revenue')
     @classmethod
     def validate_amounts(cls, v):
         if v is not None:
@@ -554,8 +556,8 @@ def serialize_user_admin(user, include_statistics: bool = False) -> Dict[str, An
             'phone': user.phone,
             'first_name': user.first_name,
             'last_name': user.last_name,
-            'role': user.role if user.role else 'customer',
-            'status': user.status if user.status else 'active',
+            'role': user.role.value if hasattr(user.role, 'value') else (user.role if user.role else 'customer'),
+            'status': user.status.value if hasattr(user.status, 'value') else (user.status if user.status else 'active'),
             'email_verified': user.email_verified_at is not None,
             'phone_verified': user.phone_verified_at is not None,
             'created_at': user.created_at.isoformat() if user.created_at else None,
@@ -594,7 +596,7 @@ def serialize_user_admin(user, include_statistics: bool = False) -> Dict[str, An
         }
 
 
-def serialize_order_admin(order) -> Dict[str, Any]:
+def serialize_order_admin(order: Order) -> Dict[str, Any]:
     """
     Serialize order for admin view
     
@@ -617,7 +619,7 @@ def serialize_order_admin(order) -> Dict[str, Any]:
             'payment_method': getattr(order, 'payment_method', None),
             'payment_status': getattr(order, 'payment_status', None),
             'delivery_date': order.delivery_date.isoformat() if order.delivery_date else None,
-            'delivery_address': getattr(order, 'delivery_address', None),
+            'delivery_address': order.delivery_address.to_dict() if getattr(order, 'delivery_address', None) else None,
             'special_instructions': getattr(order, 'special_instructions', None),
             'created_at': order.created_at.isoformat() if order.created_at else None,
             'updated_at': order.updated_at.isoformat() if order.updated_at else None
@@ -658,7 +660,8 @@ def serialize_order_admin(order) -> Dict[str, Any]:
         
         return data
         
-    except Exception:
+    except Exception as e:
+        logging.error(f"Exception in serialize_order_admin: {e}")
         # Fallback to basic serialization
         return {
             'id': order.id,
@@ -670,7 +673,7 @@ def serialize_order_admin(order) -> Dict[str, Any]:
         }
 
 
-def serialize_product_admin(product) -> Dict[str, Any]:
+def serialize_product_admin(product: Product) -> Dict[str, Any]:
     """
     Serialize product for admin view
     
@@ -688,7 +691,6 @@ def serialize_product_admin(product) -> Dict[str, Any]:
             'barcode': product.barcode,
             'base_price': float(product.base_price),
             'current_price': float(getattr(product, 'current_price', product.base_price)),
-            'cost_price': float(product.cost_price) if product.cost_price else None,
             'stock_quantity': product.stock_quantity if product.track_inventory else None,
             'min_stock_level': product.min_stock_level,
             'is_active': product.is_active,

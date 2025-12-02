@@ -216,8 +216,8 @@ def get_current_language() -> str:
         verify_jwt_in_request(optional=True)
         current_user_id = get_jwt_identity()
         if current_user_id:
-            from business_app.models import User
-            user = User.query.get(current_user_id)
+            from business_app.models.user import User
+            user: User = User.query.get(current_user_id)
             if user and user.preferred_language:
                 logger.info(f"🌐 RETURNING user.preferred_language: '{user.preferred_language}'")
                 return user.preferred_language

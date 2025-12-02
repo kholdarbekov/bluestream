@@ -22,8 +22,8 @@ class Payment(db.Model, TimestampMixin):
     
     amount = Column(Numeric(precision=10, scale=2), nullable=False)
     currency = Column(String(3), default='UZS')
-    payment_method = Column(Enum(PaymentMethod), nullable=False)
-    status = Column(Enum(PaymentStatus), default=PaymentStatus.PENDING, index=True)
+    payment_method = Column(Enum(PaymentMethod, name='payment_method', values_callable=lambda x: [e.value for e in x]), nullable=False)
+    status = Column(Enum(PaymentStatus, name='payment_status', values_callable=lambda x: [e.value for e in x]), default=PaymentStatus.PENDING, index=True)
     
     # Payment provider specific data
     provider_transaction_id = Column(String(255), nullable=True, index=True)

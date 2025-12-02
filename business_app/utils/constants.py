@@ -74,6 +74,11 @@ class SubscriptionFrequency(Enum):
     BIWEEKLY = 'biweekly'
     MONTHLY = 'monthly'
 
+class UserGender(Enum):
+    """User gender enumeration"""
+    MALE = 'male'
+    FEMALE = 'female'
+    UNKNOWN = 'unknown'
 
 class UserRole(Enum):
     """User role enumeration"""
@@ -196,13 +201,34 @@ class NotificationStatus(Enum):
 
 class NotificationType(Enum):
     """Notification type enumeration"""
-    ORDER_UPDATE = 'order_update'
-    DELIVERY_REMINDER = 'delivery_reminder'
-    PAYMENT_CONFIRMATION = 'payment_confirmation'
-    PROMOTIONAL_OFFER = 'promotional_offer'
-    SYSTEM_ANNOUNCEMENT = 'system_announcement'
+    
+    # Loyalty notification types
     LOYALTY_REWARD = 'loyalty_reward'
+    
+    # Subscription notification types
+    SUBSCRIPTION_CREATED = 'subscription_created'
     SUBSCRIPTION_RENEWAL = 'subscription_renewal'
+    SUBSCRIPTION_CANCELLED = 'subscription_cancelled'
+    SUBSCRIPTION_CANCELLATION_SCHEDULED = 'subscription_cancellation_scheduled'
+    SUBSCRIPTION_REMINDER = 'subscription_reminder'
+
+    # Order notification types
+    ORDER_CONFIRMATION = 'order_confirmation'
+    ORDER_UPDATE = 'order_update'
+    ORDER_STATUS_UPDATE = 'order_status_update'
+
+    # Delivery notification types
+    DELIVERY_UPDATE = 'delivery_update'
+    DELIVERY_REMINDER = 'delivery_reminder'
+
+    # Payment notification types
+    PAYMENT_CONFIRMATION = 'payment_confirmation'
+
+    # Promotional notification types
+    PROMOTIONAL = 'promotional'
+
+    # System notification types
+    SYSTEM = 'system'
 
 
 class NotificationChannelType(Enum):

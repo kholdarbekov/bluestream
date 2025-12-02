@@ -1,0 +1,233 @@
+{% extends "frontend/base.html" %}
+
+{% block title %}{{ 'Payment Processing'|translate(current_language) }} - {{ company_name }}{% endblock %}
+
+{% block extra_head %}
+<style>
+.payment-pending-section {
+    padding: 100px 0;
+    min-height: 70vh;
+    display: flex;
+    align-items: center;
+}
+
+.pending-content {
+    max-width: 600px;
+    margin: 0 auto;
+    text-align: center;
+    background: #fff;
+    border-radius: 10px;
+    padding: 50px 30px;
+    box-shadow: 0 2px 20px rgba(0, 0, 0, 0.08);
+}
+
+.pending-icon {
+    width: 100px;
+    height: 100px;
+    background: linear-gradient(135deg, #ffd700 0%, #ff8c00 100%);
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 30px;
+    animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+    0%, 100% {
+        transform: scale(1);
+        opacity: 1;
+    }
+    50% {
+        transform: scale(1.05);
+        opacity: 0.8;
+    }
+}
+
+.pending-icon i {
+    font-size: 50px;
+    color: #fff;
+}
+
+.pending-content h2 {
+    font-size: 28px;
+    font-weight: 700;
+    margin-bottom: 15px;
+    color: #222;
+}
+
+.pending-content p {
+    font-size: 16px;
+    color: #666;
+    margin-bottom: 10px;
+    line-height: 1.6;
+}
+
+.order-info {
+    background: #f8f9fa;
+    border-radius: 8px;
+    padding: 20px;
+    margin: 30px 0;
+}
+
+.info-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 10px 0;
+    border-bottom: 1px solid #e5e5e5;
+}
+
+.info-row:last-child {
+    border-bottom: none;
+}
+
+.info-label {
+    font-weight: 600;
+    color: #666;
+}
+
+.info-value {
+    color: #222;
+}
+
+.action-buttons {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 15px;
+    margin-top: 30px;
+}
+
+.refresh-notice {
+    background: #e3f2fd;
+    border: 1px solid #90caf9;
+    border-radius: 5px;
+    padding: 15px;
+    margin-top: 20px;
+    font-size: 14px;
+    color: #1976d2;
+}
+
+@media (max-width: 767px) {
+    .pending-content {
+        padding: 40px 20px;
+    }
+
+    .pending-content h2 {
+        font-size: 24px;
+    }
+
+    .action-buttons {
+        grid-template-columns: 1fr;
+    }
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<section class="payment-pending-section">
+    <div class="auto-container">
+        <div class="pending-content">
+            <div class="pending-icon">
+                <i class="far fa-hourglass-half"></i>
+            </div>
+
+            <h2>{{ 'Payment Processing'|translate(current_language) }}</h2>
+            <p>{{ 'Your payment is being processed. This may take a few moments.'|translate(current_language) }}</p>
+
+            {% if order %}
+            <div class="order-info">
+                <div class="info-row">
+                    <span class="info-label">{{ 'Order Number'|translate(current_language) }}:</span>
+                    <span class="info-value">{{ order.order_number }}</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">{{ 'Total Amount'|translate(current_language) }}:</span>
+                    <span class="info-value">{{ "{:,.0f}".format(order.total_amount) }} UZS</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">{{ 'Payment Method'|translate(current_language) }}:</span>
+                    <span class="info-value">
+                        {% if order.payment_method == 'payme' %}
+                            Payme
+                        {% elif order.payment_method == 'click' %}
+                            Click
+                        {% else %}
+                            {{ order.payment_method|title }}
+                        {% endif %}
+                    </span>
+                </div>
+            </div>
+            {% endif %}
+
+            <div class="refresh-notice">
+                <i class="far fa-info-circle"></i>
+                {{ 'This page will automatically refresh to check your payment status. You will be redirected once the payment is confirmed.'|translate(current_language) }}
+            </div>
+
+            <div class="action-buttons">
+                <button onclick="checkPaymentStatus()" class="theme-btn btn-one">
+                    <i class="far fa-sync"></i> {{ 'Check Status'|translate(current_language) }}
+                </button>
+                <a href="{{ url_for('frontend.my_orders') }}" class="theme-btn btn-three">
+                    <i class="far fa-list"></i> {{ 'My Orders'|translate(current_language) }}
+                </a>
+            </div>
+        </div>
+    </div>
+</section>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let checkAttempts = 0;
+const maxAttempts = 20; // Check for 20 times (about 2 minutes with 6 second intervals)
+
+// Auto-refresh to check payment status
+function checkPaymentStatus() {
+    fetch('/api/v1/orders/{{ order.id }}', {
+        headers: {
+            'Authorization': 'Bearer ' + localStorage.getItem('access_token')
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success && data.data.order) {
+            const order = data.data.order;
+
+            // Check if payment is completed
+            if (order.payment_status === 'completed' || order.payment_status === 'paid') {
+                // Redirect to order confirmation
+                window.location.href = `/order-confirmation?order_id=${order.id}`;
+            } else if (order.payment_status === 'failed') {
+                // Payment failed
+                showNotification('{{ "Payment failed. Please try again."|translate(current_language) }}', 'error');
+                setTimeout(() => {
+                    window.location.href = `/payment/cancel?order_id=${order.id}`;
+                }, 2000);
+            } else {
+                // Still pending, continue checking
+                checkAttempts++;
+                if (checkAttempts < maxAttempts) {
+                    setTimeout(checkPaymentStatus, 6000); // Check again in 6 seconds
+                } else {
+                    // Max attempts reached
+                    showNotification('{{ "Payment verification is taking longer than expected. Please check your order status."|translate(current_language) }}', 'warning');
+                }
+            }
+        }
+    })
+    .catch(error => {
+        console.error('Error checking payment status:', error);
+        checkAttempts++;
+        if (checkAttempts < maxAttempts) {
+            setTimeout(checkPaymentStatus, 6000);
+        }
+    });
+}
+
+// Start checking payment status on page load
+document.addEventListener('DOMContentLoaded', function() {
+    setTimeout(checkPaymentStatus, 3000); // First check after 3 seconds
+});
+</script>
+{% endblock %}

@@ -7,7 +7,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from flask_sqlalchemy import SQLAlchemy
 import uuid
 from business_app import db
-from business_app.utils.constants import SubscriptionStatus, PaymentMethod
+from business_app.utils.constants import SubscriptionStatus, PaymentMethod, SubscriptionFrequency
 from business_app.models import TimestampMixin
 from business_app.models.translatable import TranslatableMixin, translatable
 
@@ -19,7 +19,7 @@ class Subscription(db.Model, TimestampMixin, TranslatableMixin):
     id = Column(Integer, primary_key=True)
     subscription_number = Column(String(50), unique=True, nullable=False, index=True)
     user_id = Column(Integer, ForeignKey('users.id'), nullable=False, index=True)
-    status = Column(Enum(SubscriptionStatus), default=SubscriptionStatus.ACTIVE.value, index=True)
+    status = Column(Enum(SubscriptionStatus, name='subscription_status', values_callable=lambda x: [e.value for e in x]), default='active', index=True)
     
     # Subscription details
     name = Column(String(200), nullable=False)        # Default/fallback name (Uzbek)
@@ -32,24 +32,30 @@ class Subscription(db.Model, TimestampMixin, TranslatableMixin):
     last_billing_date = Column(DateTime, nullable=True)
     
     # Delivery schedule
-    delivery_frequency = Column(String(20), nullable=False)  # daily, weekly, monthly
+    delivery_frequency = Column(Enum(SubscriptionFrequency, name='subscription_frequency', values_callable=lambda x: [e.value for e in x]), nullable=False)
     delivery_day_of_week = Column(Integer, nullable=True)  # 1=Monday, 7=Sunday
     delivery_day_of_month = Column(Integer, nullable=True)  # 1-31
     delivery_time_slot = Column(String(20), nullable=False)
     delivery_address_id = Column(Integer, ForeignKey('addresses.id'), nullable=False)
-    
+    next_delivery_date = Column(DateTime, nullable=True)
+    last_delivery_date = Column(DateTime, nullable=True)
+
     # Subscription period
     start_date = Column(DateTime, nullable=False)
     end_date = Column(DateTime, nullable=True)  # null for indefinite
     auto_renew = Column(Boolean, default=True)
-    
+
     # Payment settings
-    payment_method = Column(Enum(PaymentMethod), nullable=False)
+    payment_method = Column(Enum(PaymentMethod, name='payment_method', values_callable=lambda x: [e.value for e in x]), nullable=False)
     auto_payment = Column(Boolean, default=True)
-    
+    payment_token = Column(String(255), nullable=True)  # Stored payment token for auto-payment
+    failed_payment_count = Column(Integer, default=0)
+
     # Pause/Resume functionality
     paused_at = Column(DateTime, nullable=True)
     pause_reason = Column(String(255), nullable=True)
+    pause_start_date = Column(DateTime, nullable=True)
+    pause_end_date = Column(DateTime, nullable=True)
     resume_date = Column(DateTime, nullable=True)
     
     # Analytics
@@ -98,15 +104,15 @@ class Subscription(db.Model, TimestampMixin, TranslatableMixin):
     def calculate_next_delivery_date(self):
         """Calculate next delivery date based on delivery frequency"""
         today = datetime.now().date()
-        
-        if self.delivery_frequency == 'daily':
+
+        if self.delivery_frequency == SubscriptionFrequency.DAILY:
             return today + timedelta(days=1)
-        elif self.delivery_frequency == 'weekly':
+        elif self.delivery_frequency == SubscriptionFrequency.WEEKLY:
             days_ahead = self.delivery_day_of_week - today.weekday()
             if days_ahead <= 0:  # Target day already happened this week
                 days_ahead += 7
             return today + timedelta(days=days_ahead)
-        elif self.delivery_frequency == 'monthly':
+        elif self.delivery_frequency == SubscriptionFrequency.MONTHLY:
             # Next month, same day
             if today.month == 12:
                 next_month = today.replace(year=today.year + 1, month=1, day=self.delivery_day_of_month)
@@ -116,7 +122,7 @@ class Subscription(db.Model, TimestampMixin, TranslatableMixin):
                 except ValueError:  # Day doesn't exist in next month
                     next_month = today.replace(month=today.month + 1, day=28)
             return next_month
-        
+
         return today
     
     def pause(self, reason=None, resume_date=None):
@@ -125,7 +131,7 @@ class Subscription(db.Model, TimestampMixin, TranslatableMixin):
         self.paused_at = datetime.now(UTC)
         self.pause_reason = reason
         self.resume_date = resume_date
-        
+
         # Log the pause
         log = SubscriptionLog(
             subscription_id=self.id,
@@ -140,10 +146,10 @@ class Subscription(db.Model, TimestampMixin, TranslatableMixin):
         self.paused_at = None
         self.pause_reason = None
         self.resume_date = None
-        
+
         # Recalculate next billing date
         self.next_billing_date = self.calculate_next_billing_date()
-        
+
         # Log the resume
         log = SubscriptionLog(
             subscription_id=self.id,
@@ -155,7 +161,7 @@ class Subscription(db.Model, TimestampMixin, TranslatableMixin):
     def cancel(self, reason=None):
         """Cancel subscription"""
         self.status = SubscriptionStatus.CANCELLED
-        
+
         # Log the cancellation
         log = SubscriptionLog(
             subscription_id=self.id,
@@ -166,22 +172,22 @@ class Subscription(db.Model, TimestampMixin, TranslatableMixin):
     
     def get_total_value(self):
         """Calculate total subscription value per billing cycle"""
-        total = sum(item.total_price for item in self.subscription_items)
+        total = sum(float(item.total_price) for item in self.subscription_items)
         discount = total * (self.discount_percentage / 100)
         return total - discount
     
     def to_dict(self, language=None, include_all_translations=False):
         """Convert to dictionary with multilingual support"""
         result = self.to_dict_multilingual(language, include_all_translations)
-        
+
         # Add subscription-specific fields
         result.update({
             'subscription_number': self.subscription_number,
-            'status': self.status.value,
+            'status': self.status.value if hasattr(self.status, 'value') else self.status,
             'billing_cycle': self.billing_cycle,
             'billing_amount': float(self.billing_amount),
             'next_billing_date': self.next_billing_date.isoformat() if self.next_billing_date else None,
-            'delivery_frequency': self.delivery_frequency,
+            'delivery_frequency': self.delivery_frequency.value if hasattr(self.delivery_frequency, 'value') else self.delivery_frequency,
             'delivery_time_slot': self.delivery_time_slot,
             'start_date': self.start_date.isoformat() if self.start_date else None,
             'end_date': self.end_date.isoformat() if self.end_date else None,
@@ -193,42 +199,39 @@ class Subscription(db.Model, TimestampMixin, TranslatableMixin):
             'subscription_items': [item.to_dict(language) for item in self.subscription_items],
             'delivery_address': self.delivery_address.to_dict() if self.delivery_address else None
         })
-        
+
         return result
 
-class SubscriptionItem(db.Model):
+class SubscriptionItem(db.Model, TimestampMixin):
     __tablename__ = 'subscription_items'
-    
+
     id = Column(Integer, primary_key=True)
     subscription_id = Column(Integer, ForeignKey('subscriptions.id'), nullable=False, index=True)
     product_id = Column(Integer, ForeignKey('products.id'), nullable=False, index=True)
     quantity = Column(Integer, nullable=False)
     unit_price = Column(Numeric(precision=10, scale=2), nullable=False)
     total_price = Column(Numeric(precision=10, scale=2), nullable=False)
-    
-    # Product snapshot (in case product changes)
-    product_name = Column(String(200), nullable=False)
-    product_sku = Column(String(50), nullable=False)
-    
+    special_instructions = Column(Text, nullable=True)
+
     subscription = relationship('Subscription', back_populates='subscription_items')
-    # Removed back_populates since Product model doesn't have subscription_items relationship
-    # product = relationship('Product', back_populates='subscription_items')
+    product = relationship('Product')
     
     def calculate_total(self):
         """Calculate total price for this subscription item"""
-        self.total_price = self.unit_price * self.quantity
+        self.total_price = float(self.unit_price) * self.quantity
         return self.total_price
     
     def to_dict(self, language=None):
         return {
             'id': self.id,
             'product_id': self.product_id,
-            'product_name': self.product_name,
-            'product_sku': self.product_sku,
             'quantity': self.quantity,
             'unit_price': float(self.unit_price),
             'total_price': float(self.total_price),
-            'product': self.product.to_dict(language=language) if self.product else None
+            'special_instructions': self.special_instructions,
+            'product': self.product.to_dict(language=language) if self.product else None,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None
         }
 
 class SubscriptionLog(db.Model, TimestampMixin):

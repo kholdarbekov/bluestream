@@ -421,16 +421,16 @@ class BusinessAPIClient:
         return await self._make_request('POST', '/api/v1/auth/telegram-register', data=data)
     
     # Product methods
-    async def get_products(self, user_token: str, category: Optional[str] = None, 
+    async def get_products(self, user_token: str, category: Optional[str] = None,
                           search: Optional[str] = None, page: int = 1) -> APIResponse:
         """Get products list"""
         params = {'page': page}
         if category:
-            params['category'] = category
+            params['category_id'] = category
         if search:
             params['search'] = search
-            
-        return await self._make_request('GET', '/api/v1/products', 
+
+        return await self._make_request('GET', '/api/v1/products',
                                        user_token=user_token, params=params)
     
     async def get_product(self, user_token: str, product_id: int) -> APIResponse:
@@ -441,6 +441,38 @@ class BusinessAPIClient:
     async def get_product_categories(self, user_token: str) -> APIResponse:
         """Get product categories"""
         return await self._make_request('GET', '/api/v1/products/categories', 
+                                       user_token=user_token)
+    
+    # Cart methods
+    async def get_cart(self, user_token: str) -> APIResponse:
+        """Get user's cart"""
+        return await self._make_request('GET', '/api/v1/cart', 
+                                       user_token=user_token)
+    
+    async def add_to_cart(self, user_token: str, product_id: int, quantity: int) -> APIResponse:
+        """Add item to cart"""
+        data = {
+            'product_id': product_id,
+            'quantity': quantity
+        }
+        return await self._make_request('POST', '/api/v1/cart/items', 
+                                       user_token=user_token, data=data)
+    
+    async def update_cart_item(self, user_token: str, product_id: int, quantity: int) -> APIResponse:
+        """Update cart item quantity"""
+        data = {
+            'quantity': quantity
+        }
+        return await self._make_request('PUT', f'/api/v1/cart/items/{product_id}', 
+                                       user_token=user_token, data=data)
+    async def remove_cart_item(self, user_token: str, product_id: int) -> APIResponse:
+        """Remove item from cart"""
+        return await self._make_request('DELETE', f'/api/v1/cart/items/{product_id}', 
+                                       user_token=user_token)
+    
+    async def clear_cart(self, user_token: str) -> APIResponse:
+        """Clear user's cart"""
+        return await self._make_request('POST', '/api/v1/cart/clear', 
                                        user_token=user_token)
     
     # Order methods
@@ -503,9 +535,19 @@ class BusinessAPIClient:
     
     async def update_user_profile(self, user_token: str, profile_data: Dict) -> APIResponse:
         """Update user profile"""
-        return await self._make_request('PUT', '/api/v1/auth/profile', 
+        return await self._make_request('PUT', '/api/v1/auth/profile',
                                        user_token=user_token, data=profile_data)
-    
+
+    async def send_phone_verification(self, user_token: str, phone: str) -> APIResponse:
+        """Send phone verification SMS with OTP"""
+        return await self._make_request('POST', '/api/v1/auth/send-otp',
+                                       user_token=user_token, data={'phone': phone})
+
+    async def verify_phone_otp(self, user_token: str, otp: str) -> APIResponse:
+        """Verify phone number with OTP code"""
+        return await self._make_request('POST', '/api/v1/auth/verify-phone',
+                                       user_token=user_token, data={'otp': otp})
+
     async def get_user_addresses(self, user_token: str) -> APIResponse:
         """Get user addresses"""
         return await self._make_request('GET', '/api/v1/auth/addresses', 
@@ -555,9 +597,85 @@ class BusinessAPIClient:
     
     async def resume_subscription(self, user_token: str, subscription_id: int) -> APIResponse:
         """Resume subscription"""
-        return await self._make_request('POST', f'/api/v1/subscriptions/{subscription_id}/resume', 
+        return await self._make_request('POST', f'/api/v1/subscriptions/{subscription_id}/resume',
                                        user_token=user_token)
-    
+
+    async def get_subscription(self, user_token: str, subscription_id: int) -> APIResponse:
+        """Get specific subscription details"""
+        return await self._make_request('GET', f'/api/v1/subscriptions/{subscription_id}',
+                                       user_token=user_token)
+
+    async def cancel_subscription(self, user_token: str, subscription_id: int,
+                                 cancel_data: Dict = None) -> APIResponse:
+        """Cancel subscription"""
+        return await self._make_request('POST', f'/api/v1/subscriptions/{subscription_id}/cancel',
+                                       user_token=user_token, data=cancel_data or {})
+
+    async def get_subscription_items(self, user_token: str, subscription_id: int) -> APIResponse:
+        """Get subscription items"""
+        return await self._make_request('GET', f'/api/v1/subscriptions/{subscription_id}/items',
+                                       user_token=user_token)
+
+    async def add_subscription_item(self, user_token: str, subscription_id: int,
+                                   item_data: Dict) -> APIResponse:
+        """Add item to subscription"""
+        return await self._make_request('POST', f'/api/v1/subscriptions/{subscription_id}/items',
+                                       user_token=user_token, data=item_data)
+
+    async def update_subscription_item(self, user_token: str, subscription_id: int,
+                                      item_id: int, item_data: Dict) -> APIResponse:
+        """Update subscription item"""
+        return await self._make_request('PUT', f'/api/v1/subscriptions/{subscription_id}/items/{item_id}',
+                                       user_token=user_token, data=item_data)
+
+    async def remove_subscription_item(self, user_token: str, subscription_id: int,
+                                      item_id: int) -> APIResponse:
+        """Remove item from subscription"""
+        return await self._make_request('DELETE', f'/api/v1/subscriptions/{subscription_id}/items/{item_id}',
+                                       user_token=user_token)
+
+    async def get_billing_history(self, user_token: str, subscription_id: int) -> APIResponse:
+        """Get subscription billing history"""
+        return await self._make_request('GET', f'/api/v1/subscriptions/{subscription_id}/billing-history',
+                                       user_token=user_token)
+
+    async def get_subscription_logs(self, user_token: str, subscription_id: int) -> APIResponse:
+        """Get subscription activity logs"""
+        return await self._make_request('GET', f'/api/v1/subscriptions/{subscription_id}/logs',
+                                       user_token=user_token)
+
+    async def get_subscription_templates(self, user_token: str) -> APIResponse:
+        """Get predefined subscription templates"""
+        return await self._make_request('GET', '/api/v1/subscriptions/templates',
+                                       user_token=user_token)
+
+    async def preview_subscription(self, user_token: str, preview_data: Dict) -> APIResponse:
+        """Preview subscription cost before creating"""
+        return await self._make_request('POST', '/api/v1/subscriptions/preview',
+                                       user_token=user_token, data=preview_data)
+
+    async def get_subscription_statistics(self, user_token: str) -> APIResponse:
+        """Get user subscription statistics"""
+        return await self._make_request('GET', '/api/v1/subscriptions/statistics',
+                                       user_token=user_token)
+
+    async def skip_next_delivery(self, user_token: str, subscription_id: int,
+                                skip_data: Dict = None) -> APIResponse:
+        """Skip next delivery for subscription"""
+        return await self._make_request('POST', f'/api/v1/subscriptions/{subscription_id}/skip-next-delivery',
+                                       user_token=user_token, data=skip_data or {})
+
+    async def change_payment_method(self, user_token: str, subscription_id: int,
+                                   payment_data: Dict) -> APIResponse:
+        """Change subscription payment method"""
+        return await self._make_request('POST', f'/api/v1/subscriptions/{subscription_id}/change-payment-method',
+                                       user_token=user_token, data=payment_data)
+
+    async def retry_billing(self, user_token: str, subscription_id: int) -> APIResponse:
+        """Retry failed billing for subscription"""
+        return await self._make_request('POST', f'/api/v1/subscriptions/{subscription_id}/retry-billing',
+                                       user_token=user_token)
+
     # Loyalty methods
     async def get_loyalty_points(self, user_token: str) -> APIResponse:
         """Get user's loyalty points balance"""

@@ -11,12 +11,14 @@ from business_app.models.order import Order
 from business_app.models.subscription import Subscription, SubscriptionPlan
 from business_app.models.user import User
 from business_app.models.loyalty import LoyaltyPoints, LoyaltyReward
+from business_app.models.blog import BlogPost, BlogStatus, BlogCategory
 from business_app.services.loyalty_service import LoyaltyService
 from business_app.services.order_service import OrderService
 from business_app.services.subscription_service import SubscriptionService
 from business_app.utils.translations import get_translation
 from business_app.utils.helpers import get_current_language
 from business_app import db
+from datetime import datetime, UTC
 
 
 @frontend_bp.route('/')
@@ -55,7 +57,20 @@ def index():
     except Exception as e:
         print(f"Error getting loyalty rewards: {e}")
         featured_rewards = []
-    
+
+    # Get featured blog posts (defensive)
+    try:
+        featured_posts = BlogPost.query.filter(
+            BlogPost.status == BlogStatus.PUBLISHED.value,
+            BlogPost.is_featured == True,
+            BlogPost.published_at <= datetime.now(UTC)
+        ).order_by(desc(BlogPost.sort_order), desc(BlogPost.published_at)).limit(3).all()
+    except Exception as e:
+        current_app.logger.error(f"Error getting featured blog posts: {e}")
+        featured_posts = []
+
+    current_app.logger.info(f"featured_posts: {[post.to_dict() for post in featured_posts]}")
+
     # Get user info if logged in
     user_data = None
     loyalty_data = None
@@ -86,6 +101,7 @@ def index():
                          categories=categories,
                          subscription_plans=subscription_plans,
                          featured_rewards=featured_rewards,
+                         featured_posts=featured_posts,
                          user_data=user_data,
                          loyalty_data=loyalty_data)
 
@@ -154,15 +170,145 @@ def cart():
 @jwt_required()
 def checkout():
     """Checkout page"""
+    from datetime import datetime
+
     current_user_id = get_jwt_identity()
     user = User.query.get(current_user_id)
-    
+
     # Get user addresses
     addresses = user.addresses if user else []
-    
+
+    # Get today's date for date picker
+    today = datetime.now().strftime('%Y-%m-%d')
+
     return render_template('frontend/checkout.html',
                          user=user,
-                         addresses=addresses)
+                         addresses=addresses,
+                         today=today)
+
+
+@frontend_bp.route('/order-confirmation')
+@jwt_required()
+def order_confirmation():
+    """Order confirmation page"""
+    from business_app.models.order import Order
+    from business_app.models.delivery import Delivery
+
+    current_user_id = get_jwt_identity()
+    order_id = request.args.get('order_id', type=int)
+
+    if not order_id:
+        flash('Order not found', 'error')
+        return redirect(url_for('frontend.shop'))
+
+    # Get order with items
+    order = Order.query.filter_by(id=order_id, user_id=current_user_id).first()
+
+    if not order:
+        flash('Order not found', 'error')
+        return redirect(url_for('frontend.my_orders'))
+
+    # Get delivery information
+    delivery = Delivery.query.filter_by(order_id=order.id).first()
+
+    return render_template('frontend/order_confirmation.html',
+                         order=order,
+                         delivery=delivery)
+
+
+@frontend_bp.route('/payment/success')
+@jwt_required()
+def payment_success():
+    """Payment success callback page"""
+    from business_app.models.order import Order
+    from business_app.models.payment import Payment
+
+    current_user_id = get_jwt_identity()
+
+    # Get order reference from query params
+    order_id = request.args.get('order_id', type=int)
+
+    if order_id:
+        # Verify order belongs to user
+        order = Order.query.filter_by(id=order_id, user_id=current_user_id).first()
+
+        if order:
+            # Check if there's a pending payment for this order
+            payment = Payment.query.filter_by(order_id=order.id).order_by(
+                desc(Payment.created_at)
+            ).first()
+
+            # If payment is still pending, show a waiting page
+            # The webhook will update the payment status asynchronously
+            if payment and payment.status.value == 'pending':
+                return render_template('frontend/payment_pending.html',
+                                     order=order,
+                                     payment=payment)
+
+            # If payment completed, redirect to order confirmation
+            if payment and payment.status.value == 'completed':
+                flash('Payment successful! Your order has been confirmed.', 'success')
+                return redirect(url_for('frontend.order_confirmation', order_id=order.id))
+
+    flash('Payment information not found. Please check your order status.', 'warning')
+    return redirect(url_for('frontend.my_orders'))
+
+
+@frontend_bp.route('/payment/cancel')
+@jwt_required()
+def payment_cancel():
+    """Payment cancellation callback page"""
+    from business_app.models.order import Order
+
+    current_user_id = get_jwt_identity()
+    order_id = request.args.get('order_id', type=int)
+
+    if order_id:
+        order = Order.query.filter_by(id=order_id, user_id=current_user_id).first()
+
+        if order:
+            # Show payment cancelled message
+            flash('Payment was cancelled. You can try again or choose a different payment method.', 'warning')
+            return render_template('frontend/payment_cancelled.html',
+                                 order=order)
+
+    flash('Order not found', 'error')
+    return redirect(url_for('frontend.cart'))
+
+
+@frontend_bp.route('/order-tracking')
+@jwt_required()
+def order_tracking():
+    """Order tracking page with real-time status"""
+    from business_app.models.order import Order
+    from business_app.models.delivery import Delivery
+
+    current_user_id = get_jwt_identity()
+    order_id = request.args.get('order_id', type=int)
+
+    if not order_id:
+        flash('Order not found', 'error')
+        return redirect(url_for('frontend.my_orders'))
+
+    # Get order with items
+    order = Order.query.filter_by(id=order_id, user_id=current_user_id).first()
+
+    if not order:
+        flash('Order not found or access denied', 'error')
+        return redirect(url_for('frontend.my_orders'))
+
+    # Get delivery information
+    delivery = Delivery.query.filter_by(order_id=order.id).first()
+
+    # Get map provider from config
+    map_provider = current_app.config.get('MAPS_PROVIDER', 'google')
+    maps_api_key = current_app.config.get('GOOGLE_MAPS_API_KEY', '')
+
+    return render_template('frontend/order_tracking.html',
+                         order=order,
+                         delivery=delivery,
+                         map_provider=map_provider,
+                         maps_api_key=maps_api_key)
 
 
 @frontend_bp.route('/subscriptions')
@@ -419,12 +565,10 @@ def addresses():
 @frontend_bp.route('/set-language/<language>')
 def set_language_route(language):
     """Set user language preference via URL redirect"""
-    print(f"🌟 SET_LANG: Switching to '{language}'", flush=True)
-    
     # Validate language
     if language not in current_app.config['LANGUAGES']:
         language = current_app.config['DEFAULT_LANGUAGE']
-    
+
     session['language'] = language
 
     # Store in user profile if logged in
@@ -530,3 +674,80 @@ def api_documentation():
         return render_template('frontend/api_docs.html', content=html_content)
     else:
         return "API Documentation not found", 404
+
+
+# ============================================================================
+# BLOG ROUTES
+# ============================================================================
+
+@frontend_bp.route('/blog')
+def blog_list():
+    """Blog listing page with filtering"""
+    language = get_current_language()
+    page = request.args.get('page', 1, type=int)
+    category = request.args.get('category', None)
+    tag = request.args.get('tag', None)
+    per_page = 9
+
+    # Build query for published posts
+    query = BlogPost.query.filter(
+        BlogPost.status == BlogStatus.PUBLISHED,
+        BlogPost.published_at <= datetime.now(UTC)
+    )
+
+    # Apply filters
+    if category:
+        try:
+            from business_app.models.blog import BlogCategory
+            category_enum = BlogCategory(category)
+            query = query.filter(BlogPost.category == category_enum)
+        except ValueError:
+            pass  # Invalid category, ignore filter
+
+    if tag:
+        query = query.filter(BlogPost.tags.ilike(f'%{tag}%'))
+
+    # Order by published date
+    query = query.order_by(desc(BlogPost.published_at))
+
+    # Paginate
+    pagination = query.paginate(page=page, per_page=per_page, error_out=False)
+
+    return render_template('frontend/blog_list.html',
+                         posts=pagination.items,
+                         pagination=pagination,
+                         current_category=category,
+                         current_tag=tag)
+
+
+@frontend_bp.route('/blog/<slug>')
+def blog_detail(slug):
+    """Blog detail page"""
+    language = get_current_language()
+
+    # Find post by slug
+    post = BlogPost.query.filter(
+        BlogPost.slug == slug,
+        BlogPost.status == BlogStatus.PUBLISHED,
+        BlogPost.published_at <= datetime.now(UTC)
+    ).first_or_404()
+
+    # Increment view count
+    try:
+        post.increment_views()
+        db.session.commit()
+    except Exception as e:
+        current_app.logger.error(f"Error incrementing blog view count: {e}")
+        db.session.rollback()
+
+    # Get recent posts from same category
+    recent_posts = BlogPost.query.filter(
+        BlogPost.status == BlogStatus.PUBLISHED,
+        BlogPost.published_at <= datetime.now(UTC),
+        BlogPost.id != post.id,
+        BlogPost.category == post.category
+    ).order_by(desc(BlogPost.published_at)).limit(5).all()
+
+    return render_template('frontend/blog_detail.html',
+                         post=post,
+                         recent_posts=recent_posts)

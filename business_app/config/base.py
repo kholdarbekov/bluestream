@@ -123,6 +123,7 @@ class BaseConfig:
     YANDEX_MAPS_API_KEY = get_secret('yandex_maps_api_key', 'YANDEX_MAPS_API_KEY', required=False)
     
     # Email Configuration
+    SENDGRID_API_KEY = get_secret('sendgrid_api_key', 'SENDGRID_API_KEY', required=False)
     MAIL_SERVER = os.environ.get('MAIL_SERVER', 'smtp.sendgrid.net')
     MAIL_PORT = int(os.environ.get('MAIL_PORT', 587))
     MAIL_USE_TLS = os.environ.get('MAIL_USE_TLS', 'True').lower() == 'true'
@@ -131,10 +132,10 @@ class BaseConfig:
     MAIL_DEFAULT_SENDER = os.environ.get('MAIL_DEFAULT_SENDER', 'noreply@bluestream.uz')
     MAIL_SUPPORT_EMAIL = os.environ.get('MAIL_SUPPORT_EMAIL', 'support@bluestream.uz')
     
-    # SMS Configuration
-    TWILIO_ACCOUNT_SID = os.environ.get('TWILIO_ACCOUNT_SID')
-    TWILIO_AUTH_TOKEN = get_secret('twilio_auth_token', 'TWILIO_AUTH_TOKEN', required=False)
-    TWILIO_PHONE_NUMBER = os.environ.get('TWILIO_PHONE_NUMBER')
+    # SMS Configuration - Eskiz SMS (Uzbekistan)
+    ESKIZ_EMAIL = os.environ.get('ESKIZ_EMAIL')
+    ESKIZ_PASSWORD = os.environ.get('ESKIZ_PASSWORD')
+    ESKIZ_FROM = os.environ.get('ESKIZ_FROM', '4546')
     
     # Business Configuration
     COMPANY_NAME = os.environ.get('COMPANY_NAME', 'BlueStream Water Delivery')

@@ -350,7 +350,7 @@ def setup_csrf_protection(app: Flask):
     csrf_protection.init_app(app)
     
     # Add CSRF token endpoint
-    @app.route('/api/csrf-token', methods=['GET'])
+    @app.route('/api/v1/csrf-token', methods=['GET'])
     def get_csrf_token_endpoint():
         """Get CSRF token for client-side use"""
         try:

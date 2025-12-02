@@ -121,7 +121,7 @@ class ExportUtils {
       } else {
         // Fallback: fetch data and export locally
         const userData = await adminService.getUsers({ ...filters, per_page: 10000 });
-        const exportData = userData.users.map(user => ({
+        const exportData = (userData.data?.items || []).map(user => ({
           'ID': user.id,
           'Name': user.name,
           'Email': user.email,
@@ -147,7 +147,7 @@ class ExportUtils {
       const filename = `orders_export_${new Date().toISOString().split('T')[0]}`;
 
       const ordersData = await adminService.getOrders({ ...filters, per_page: 10000 });
-      const exportData = ordersData.orders.map(order => ({
+      const exportData = (ordersData.data?.items || []).map(order => ({
         'Order Number': order.order_number,
         'Customer': order.customer_name,
         'Email': order.customer_email,
@@ -178,7 +178,7 @@ class ExportUtils {
       const filename = `products_export_${new Date().toISOString().split('T')[0]}`;
 
       const productsData = await adminService.getProducts({ ...filters, per_page: 10000 });
-      const exportData = productsData.products.map(product => ({
+      const exportData = (productsData.data?.items || []).map(product => ({
         'SKU': product.sku,
         'Product Name': product.name,
         'Category': product.category,
@@ -209,7 +209,7 @@ class ExportUtils {
       const filename = `deliveries_export_${new Date().toISOString().split('T')[0]}`;
 
       const deliveriesData = await adminService.getDeliveries({ ...filters, per_page: 10000 });
-      const exportData = deliveriesData.deliveries.map(delivery => ({
+      const exportData = (deliveriesData.data?.items || []).map(delivery => ({
         'Delivery ID': delivery.delivery_id,
         'Order Number': delivery.order_number,
         'Customer': delivery.customer_name,
@@ -241,7 +241,7 @@ class ExportUtils {
       const filename = `loyalty_programs_export_${new Date().toISOString().split('T')[0]}`;
 
       const programsData = await adminService.getLoyaltyPrograms({ ...filters, per_page: 10000 });
-      const exportData = programsData.programs.map(program => ({
+      const exportData = (programsData.data?.items || []).map(program => ({
         'Program Name': program.name,
         'Type': program.type,
         'Points per Dollar': program.points_per_dollar,
@@ -265,7 +265,7 @@ class ExportUtils {
       const filename = `notification_campaigns_export_${new Date().toISOString().split('T')[0]}`;
 
       const campaignsData = await adminService.getNotificationCampaigns({ ...filters, per_page: 10000 });
-      const exportData = campaignsData.campaigns.map(campaign => ({
+      const exportData = (campaignsData.data?.items || []).map(campaign => ({
         'Campaign Name': campaign.name,
         'Channel': campaign.channel,
         'Subject': campaign.subject,

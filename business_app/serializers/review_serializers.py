@@ -5,6 +5,8 @@ This file contains serializers for review-related models
 from datetime import datetime
 from typing import Dict, Any, Optional, List
 
+from business_app.utils.constants import UserRole
+
 
 class ReviewSerializer:
     """Serializer for Review model"""
@@ -53,7 +55,7 @@ class ReviewSerializer:
             data['product'] = {
                 'id': self.review.product.id,
                 'name': self.review.product.name,
-                'image_url': self.review.product.main_image_url,
+                'image_url': self.review.product.images,
                 'sku': self.review.product.sku
             }
         
@@ -321,10 +323,10 @@ class ReviewResponseSerializer:
         """Get responder display name"""
         if not self.response.user:
             return "Admin"
-        
-        if self.response.responder_role == 'admin':
+
+        if self.response.responder_role == UserRole.ADMIN:
             return "Customer Service"
-        elif self.response.responder_role == 'vendor':
+        elif self.response.responder_role == UserRole.VENDOR:
             return "Vendor"
-        
+
         return f"{self.response.user.first_name} {self.response.user.last_name}"

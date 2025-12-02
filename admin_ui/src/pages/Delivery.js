@@ -285,8 +285,8 @@ const Delivery = () => {
   };
 
   // Calculate summary statistics
-  const deliveries = data?.deliveries || [];
-  const totalDeliveries = data?.pagination?.total || 0;
+  const deliveries = data?.data?.items || [];
+  const totalDeliveries = data?.meta?.total || 0;
   const pendingDeliveries = deliveries.filter(d => d.status === 'pending').length;
   const inTransitDeliveries = deliveries.filter(d => d.status === 'in_transit').length;
   const completedDeliveries = deliveries.filter(d => d.status === 'delivered').length;

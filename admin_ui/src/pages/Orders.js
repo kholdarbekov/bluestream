@@ -260,7 +260,7 @@ const Orders = () => {
   };
 
   // Calculate summary statistics
-  const orders = data?.orders || [];
+  const orders = data?.data?.items || [];
   const totalRevenue = orders.reduce((sum, order) => sum + (order.total_amount || 0), 0);
   const pendingOrders = orders.filter(order => order.status === 'pending').length;
   const completedOrders = orders.filter(order => order.status === 'delivered').length;
@@ -273,7 +273,7 @@ const Orders = () => {
           <Card>
             <Statistic
               title="Total Orders"
-              value={data?.pagination?.total || 0}
+              value={data?.meta?.total || 0}
               prefix={<ShoppingCartOutlined />}
             />
           </Card>
@@ -347,7 +347,7 @@ const Orders = () => {
           pagination={{
             current: pagination.page,
             pageSize: pagination.per_page,
-            total: data?.pagination?.total || 0,
+            total: data?.meta?.total || 0,
             showSizeChanger: true,
             showQuickJumper: true,
             showTotal: (total, range) =>

@@ -1,0 +1,610 @@
+{% extends "frontend/base.html" %}
+
+{% block title %}{{ 'Track Order'|translate(current_language) }} #{{ order.order_number }} - {{ company_name }}{% endblock %}
+
+{% block extra_head %}
+<style>
+.tracking-section {
+    padding: 100px 0;
+}
+
+.tracking-header {
+    background: linear-gradient(135deg, #00d1f9 0%, #002c8f 100%);
+    color: #fff;
+    padding: 30px;
+    border-radius: 10px 10px 0 0;
+    margin-bottom: 0;
+}
+
+.tracking-header h2 {
+    font-size: 24px;
+    margin-bottom: 10px;
+}
+
+.tracking-header .order-meta {
+    display: flex;
+    gap: 30px;
+    flex-wrap: wrap;
+    font-size: 14px;
+    opacity: 0.9;
+}
+
+.tracking-content {
+    background: #fff;
+    border-radius: 0 0 10px 10px;
+    box-shadow: 0 2px 20px rgba(0, 0, 0, 0.08);
+}
+
+.tracking-grid {
+    display: grid;
+    grid-template-columns: 1fr 400px;
+    gap: 30px;
+    padding: 30px;
+}
+
+.status-timeline {
+    position: relative;
+}
+
+.timeline-item {
+    position: relative;
+    padding-left: 50px;
+    padding-bottom: 30px;
+}
+
+.timeline-item:last-child {
+    padding-bottom: 0;
+}
+
+.timeline-item::before {
+    content: '';
+    position: absolute;
+    left: 15px;
+    top: 0;
+    bottom: -30px;
+    width: 2px;
+    background: #e5e5e5;
+}
+
+.timeline-item:last-child::before {
+    display: none;
+}
+
+.timeline-icon {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 35px;
+    height: 35px;
+    border-radius: 50%;
+    background: #f0f0f0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #999;
+    font-size: 16px;
+    z-index: 1;
+}
+
+.timeline-item.active .timeline-icon {
+    background: linear-gradient(135deg, #00d1f9 0%, #002c8f 100%);
+    color: #fff;
+    box-shadow: 0 0 0 4px rgba(0, 209, 249, 0.2);
+}
+
+.timeline-item.completed .timeline-icon {
+    background: #28a745;
+    color: #fff;
+}
+
+.timeline-title {
+    font-size: 16px;
+    font-weight: 700;
+    margin-bottom: 5px;
+    color: #222;
+}
+
+.timeline-time {
+    font-size: 13px;
+    color: #999;
+    margin-bottom: 5px;
+}
+
+.timeline-description {
+    font-size: 14px;
+    color: #666;
+}
+
+.sidebar-info {
+    background: #f8f9fa;
+    border-radius: 8px;
+    padding: 25px;
+}
+
+.info-section {
+    margin-bottom: 25px;
+}
+
+.info-section:last-child {
+    margin-bottom: 0;
+}
+
+.info-section h4 {
+    font-size: 16px;
+    font-weight: 700;
+    margin-bottom: 15px;
+    color: #222;
+    padding-bottom: 10px;
+    border-bottom: 2px solid #e5e5e5;
+}
+
+.info-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 10px 0;
+    font-size: 14px;
+}
+
+.info-label {
+    color: #666;
+    font-weight: 600;
+}
+
+.info-value {
+    color: #222;
+    text-align: right;
+}
+
+.status-badge {
+    display: inline-block;
+    padding: 6px 12px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.status-badge.pending {
+    background: #fff3cd;
+    color: #856404;
+}
+
+.status-badge.confirmed {
+    background: #d1ecf1;
+    color: #0c5460;
+}
+
+.status-badge.preparing {
+    background: #d4edda;
+    color: #155724;
+}
+
+.status-badge.out_for_delivery {
+    background: #cce5ff;
+    color: #004085;
+}
+
+.status-badge.delivered {
+    background: #d4edda;
+    color: #155724;
+}
+
+.status-badge.cancelled {
+    background: #f8d7da;
+    color: #721c24;
+}
+
+.map-container {
+    width: 100%;
+    height: 400px;
+    background: #f0f0f0;
+    border-radius: 8px;
+    margin-bottom: 30px;
+    position: relative;
+    overflow: hidden;
+}
+
+#tracking-map {
+    width: 100%;
+    height: 100%;
+}
+
+.map-placeholder {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: #999;
+    flex-direction: column;
+}
+
+.map-placeholder i {
+    font-size: 60px;
+    margin-bottom: 15px;
+}
+
+.order-items {
+    margin-top: 20px;
+}
+
+.order-item {
+    display: flex;
+    align-items: center;
+    padding: 12px 0;
+    border-bottom: 1px solid #e5e5e5;
+}
+
+.order-item:last-child {
+    border-bottom: none;
+}
+
+.item-image {
+    width: 50px;
+    height: 50px;
+    border-radius: 5px;
+    object-fit: cover;
+    margin-right: 12px;
+}
+
+.item-details {
+    flex: 1;
+}
+
+.item-name {
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 3px;
+}
+
+.item-qty {
+    font-size: 13px;
+    color: #666;
+}
+
+.item-price {
+    font-size: 14px;
+    font-weight: 600;
+    color: #00d1f9;
+}
+
+.action-buttons {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 15px;
+    margin-top: 20px;
+}
+
+.refresh-notice {
+    background: #e3f2fd;
+    border: 1px solid #90caf9;
+    border-radius: 5px;
+    padding: 12px;
+    margin-top: 20px;
+    font-size: 13px;
+    color: #1976d2;
+    text-align: center;
+}
+
+@media (max-width: 991px) {
+    .tracking-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .sidebar-info {
+        order: -1;
+    }
+}
+
+@media (max-width: 767px) {
+    .tracking-header .order-meta {
+        flex-direction: column;
+        gap: 10px;
+    }
+
+    .tracking-grid {
+        padding: 20px;
+    }
+
+    .action-buttons {
+        grid-template-columns: 1fr;
+    }
+}
+</style>
+
+{% if map_provider == 'google' and maps_api_key %}
+<script src="https://maps.googleapis.com/maps/api/js?key={{ maps_api_key }}"></script>
+{% endif %}
+{% endblock %}
+
+{% block content %}
+<section class="tracking-section">
+    <div class="auto-container">
+        <div class="tracking-content">
+            <div class="tracking-header">
+                <h2>
+                    <i class="far fa-map-marker-alt"></i>
+                    {{ 'Track Order'|translate(current_language) }} #{{ order.order_number }}
+                </h2>
+                <div class="order-meta">
+                    <span><i class="far fa-calendar"></i> {{ order.created_at.strftime('%B %d, %Y at %I:%M %p') }}</span>
+                    <span><i class="far fa-box"></i> {{ order.order_items|length }} {{ 'items'|translate(current_language) }}</span>
+                    <span><i class="far fa-money-bill"></i> {{ "{:,.0f}".format(order.total_amount) }} UZS</span>
+                </div>
+            </div>
+
+            <div class="tracking-grid">
+                <!-- Left: Timeline and Map -->
+                <div class="main-content">
+                    <!-- Map -->
+                    {% if delivery and delivery.delivery_latitude and delivery.delivery_longitude %}
+                    <div class="map-container">
+                        <div id="tracking-map"></div>
+                    </div>
+                    {% else %}
+                    <div class="map-container">
+                        <div class="map-placeholder">
+                            <i class="far fa-map"></i>
+                            <p>{{ 'Delivery location will be shown here'|translate(current_language) }}</p>
+                        </div>
+                    </div>
+                    {% endif %}
+
+                    <!-- Status Timeline -->
+                    <div class="status-timeline">
+                        <h3 style="margin-bottom: 30px; font-size: 20px; color: #222;">
+                            {{ 'Order Status'|translate(current_language) }}
+                        </h3>
+
+                        <!-- Pending -->
+                        <div class="timeline-item {% if order.status.value == 'pending' %}active{% elif order.status.value in ['confirmed', 'preparing', 'out_for_delivery', 'delivered'] %}completed{% endif %}">
+                            <div class="timeline-icon">
+                                <i class="far fa-clock"></i>
+                            </div>
+                            <div class="timeline-title">{{ 'Order Placed'|translate(current_language) }}</div>
+                            <div class="timeline-time">{{ order.created_at.strftime('%B %d, %Y at %I:%M %p') }}</div>
+                            <div class="timeline-description">{{ 'Your order has been received and is being processed'|translate(current_language) }}</div>
+                        </div>
+
+                        <!-- Confirmed -->
+                        <div class="timeline-item {% if order.status.value == 'confirmed' %}active{% elif order.status.value in ['preparing', 'out_for_delivery', 'delivered'] %}completed{% endif %}">
+                            <div class="timeline-icon">
+                                <i class="far fa-check-circle"></i>
+                            </div>
+                            <div class="timeline-title">{{ 'Order Confirmed'|translate(current_language) }}</div>
+                            {% if order.status.value in ['confirmed', 'preparing', 'out_for_delivery', 'delivered'] %}
+                            <div class="timeline-time">{{ order.updated_at.strftime('%B %d, %Y at %I:%M %p') }}</div>
+                            <div class="timeline-description">{{ 'Payment confirmed and order is being prepared'|translate(current_language) }}</div>
+                            {% else %}
+                            <div class="timeline-description">{{ 'Waiting for confirmation'|translate(current_language) }}</div>
+                            {% endif %}
+                        </div>
+
+                        <!-- Preparing -->
+                        <div class="timeline-item {% if order.status.value == 'preparing' %}active{% elif order.status.value in ['out_for_delivery', 'delivered'] %}completed{% endif %}">
+                            <div class="timeline-icon">
+                                <i class="far fa-box"></i>
+                            </div>
+                            <div class="timeline-title">{{ 'Order Preparing'|translate(current_language) }}</div>
+                            {% if order.status.value in ['preparing', 'out_for_delivery', 'delivered'] %}
+                            <div class="timeline-description">{{ 'Your order is being prepared for delivery'|translate(current_language) }}</div>
+                            {% else %}
+                            <div class="timeline-description">{{ 'Order will be prepared soon'|translate(current_language) }}</div>
+                            {% endif %}
+                        </div>
+
+                        <!-- Out for Delivery -->
+                        <div class="timeline-item {% if order.status.value == 'out_for_delivery' %}active{% elif order.status.value == 'delivered' %}completed{% endif %}">
+                            <div class="timeline-icon">
+                                <i class="far fa-truck"></i>
+                            </div>
+                            <div class="timeline-title">{{ 'Out for Delivery'|translate(current_language) }}</div>
+                            {% if delivery and delivery.status and delivery.status.value == 'in_transit' %}
+                            <div class="timeline-time">{{ delivery.updated_at.strftime('%B %d, %Y at %I:%M %p') }}</div>
+                            <div class="timeline-description">
+                                {{ 'Your order is on the way'|translate(current_language) }}
+                                {% if delivery.driver %}
+                                <br><strong>{{ 'Driver'|translate(current_language) }}:</strong> {{ delivery.driver.name }}
+                                {% if delivery.driver.phone %}<br><strong>{{ 'Phone'|translate(current_language) }}:</strong> {{ delivery.driver.phone }}{% endif %}
+                                {% endif %}
+                            </div>
+                            {% elif order.status.value == 'delivered' %}
+                            <div class="timeline-description">{{ 'Delivery completed'|translate(current_language) }}</div>
+                            {% else %}
+                            <div class="timeline-description">{{ 'Delivery will start soon'|translate(current_language) }}</div>
+                            {% endif %}
+                        </div>
+
+                        <!-- Delivered -->
+                        <div class="timeline-item {% if order.status.value == 'delivered' %}active completed{% endif %}">
+                            <div class="timeline-icon">
+                                <i class="far fa-check-double"></i>
+                            </div>
+                            <div class="timeline-title">{{ 'Delivered'|translate(current_language) }}</div>
+                            {% if order.status.value == 'delivered' %}
+                            {% if delivery and delivery.delivered_at %}
+                            <div class="timeline-time">{{ delivery.delivered_at.strftime('%B %d, %Y at %I:%M %p') }}</div>
+                            {% endif %}
+                            <div class="timeline-description">{{ 'Your order has been delivered successfully'|translate(current_language) }}</div>
+                            {% else %}
+                            <div class="timeline-description">{{ 'Estimated delivery'|translate(current_language) }}: {{ order.delivery_date.strftime('%B %d, %Y') if order.delivery_date else 'TBD' }}</div>
+                            {% endif %}
+                        </div>
+                    </div>
+
+                    {% if order.status.value in ['pending', 'confirmed', 'preparing', 'out_for_delivery'] %}
+                    <div class="refresh-notice">
+                        <i class="far fa-sync"></i>
+                        {{ 'This page automatically refreshes every 30 seconds to show the latest status'|translate(current_language) }}
+                    </div>
+                    {% endif %}
+                </div>
+
+                <!-- Right: Order Details Sidebar -->
+                <div class="sidebar-info">
+                    <!-- Order Summary -->
+                    <div class="info-section">
+                        <h4>{{ 'Order Summary'|translate(current_language) }}</h4>
+                        <div class="info-row">
+                            <span class="info-label">{{ 'Status'|translate(current_language) }}:</span>
+                            <span class="info-value">
+                                <span class="status-badge {{ order.status.value }}">{{ order.status.value|replace('_', ' ')|title }}</span>
+                            </span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label">{{ 'Payment'|translate(current_language) }}:</span>
+                            <span class="info-value">
+                                {% if order.payment_method == 'cash' %}
+                                    {{ 'Cash on Delivery'|translate(current_language) }}
+                                {% elif order.payment_method == 'payme' %}
+                                    Payme
+                                {% elif order.payment_method == 'click' %}
+                                    Click
+                                {% else %}
+                                    {{ order.payment_method|title }}
+                                {% endif %}
+                            </span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label">{{ 'Total'|translate(current_language) }}:</span>
+                            <span class="info-value" style="color: #00d1f9; font-weight: 700;">{{ "{:,.0f}".format(order.total_amount) }} UZS</span>
+                        </div>
+                    </div>
+
+                    <!-- Delivery Address -->
+                    {% if delivery %}
+                    <div class="info-section">
+                        <h4>{{ 'Delivery Address'|translate(current_language) }}</h4>
+                        <p style="color: #666; line-height: 1.6; font-size: 14px;">
+                            {% if delivery.recipient_name %}{{ delivery.recipient_name }}<br>{% endif %}
+                            {{ delivery.delivery_address_line1 }}<br>
+                            {% if delivery.delivery_address_line2 %}{{ delivery.delivery_address_line2 }}<br>{% endif %}
+                            {{ delivery.delivery_city }}{% if delivery.delivery_postal_code %}, {{ delivery.delivery_postal_code }}{% endif %}<br>
+                            {% if delivery.recipient_phone %}<strong>{{ 'Phone'|translate(current_language) }}:</strong> {{ delivery.recipient_phone }}{% endif %}
+                        </p>
+                    </div>
+                    {% endif %}
+
+                    <!-- Order Items -->
+                    <div class="info-section">
+                        <h4>{{ 'Order Items'|translate(current_language) }} ({{ order.order_items|length }})</h4>
+                        <div class="order-items">
+                            {% for item in order.order_items %}
+                            <div class="order-item">
+                                <img src="{{ item.product.image_url if item.product.image_url else url_for('static', filename='images/resource/shop/shop-1.jpg') }}"
+                                     alt="{{ item.product.name }}"
+                                     class="item-image">
+                                <div class="item-details">
+                                    <div class="item-name">{{ item.product.name }}</div>
+                                    <div class="item-qty">{{ 'Qty'|translate(current_language) }}: {{ item.quantity }}</div>
+                                </div>
+                                <div class="item-price">{{ "{:,.0f}".format(item.total_price) }} UZS</div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+
+                    <!-- Action Buttons -->
+                    <div class="action-buttons">
+                        {% if order.status.value in ['pending', 'confirmed'] and order.can_be_cancelled() %}
+                        <button onclick="cancelOrder()" class="theme-btn btn-three">
+                            <i class="far fa-times"></i> {{ 'Cancel Order'|translate(current_language) }}
+                        </button>
+                        {% endif %}
+                        <a href="{{ url_for('frontend.my_orders') }}" class="theme-btn btn-two">
+                            <i class="far fa-list"></i> {{ 'All Orders'|translate(current_language) }}
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// Initialize map if coordinates available
+{% if delivery and delivery.delivery_latitude and delivery.delivery_longitude and map_provider == 'google' and maps_api_key %}
+let map;
+let deliveryMarker;
+
+function initMap() {
+    const deliveryLocation = {
+        lat: {{ delivery.delivery_latitude }},
+        lng: {{ delivery.delivery_longitude }}
+    };
+
+    map = new google.maps.Map(document.getElementById('tracking-map'), {
+        zoom: 15,
+        center: deliveryLocation,
+        mapTypeControl: true,
+        streetViewControl: false,
+        fullscreenControl: true
+    });
+
+    deliveryMarker = new google.maps.Marker({
+        position: deliveryLocation,
+        map: map,
+        title: '{{ "Delivery Location"|translate(current_language) }}',
+        icon: {
+            url: 'https://maps.google.com/mapfiles/ms/icons/red-dot.png'
+        }
+    });
+
+    // Add info window
+    const infoWindow = new google.maps.InfoWindow({
+        content: `
+            <div style="padding: 10px;">
+                <h4 style="margin: 0 0 5px 0;">{{ "Delivery Location"|translate(current_language) }}</h4>
+                <p style="margin: 0; color: #666;">{{ delivery.delivery_address_line1 }}</p>
+            </div>
+        `
+    });
+
+    deliveryMarker.addListener('click', () => {
+        infoWindow.open(map, deliveryMarker);
+    });
+}
+
+document.addEventListener('DOMContentLoaded', initMap);
+{% endif %}
+
+// Auto-refresh page for active orders
+{% if order.status.value in ['pending', 'confirmed', 'preparing', 'out_for_delivery'] %}
+let refreshInterval = setInterval(function() {
+    location.reload();
+}, 30000); // Refresh every 30 seconds
+{% endif %}
+
+// Cancel order function
+function cancelOrder() {
+    if (!confirm('{{ "Are you sure you want to cancel this order?"|translate(current_language) }}')) {
+        return;
+    }
+
+    const reason = prompt('{{ "Please provide a reason for cancellation (optional)"|translate(current_language) }}');
+
+    fetch('/api/v1/orders/{{ order.id }}/cancel', {
+        method: 'POST',
+        headers: {
+            'Authorization': 'Bearer ' + localStorage.getItem('access_token'),
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ reason: reason || 'Customer request' })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showNotification('{{ "Order cancelled successfully"|translate(current_language) }}', 'success');
+            setTimeout(() => location.reload(), 1500);
+        } else {
+            showNotification(data.message || '{{ "Failed to cancel order"|translate(current_language) }}', 'error');
+        }
+    })
+    .catch(error => {
+        console.error('Error cancelling order:', error);
+        showNotification('{{ "An error occurred. Please try again."|translate(current_language) }}', 'error');
+    });
+}
+</script>
+{% endblock %}

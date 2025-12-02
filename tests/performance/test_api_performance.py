@@ -67,7 +67,6 @@ def performance_app():
                 volume=Decimal('19.00'),
                 volume_unit='L',
                 base_price=Decimal('15000.00'),
-                cost_price=Decimal('10000.00'),
                 stock_quantity=100,
                 is_active=True
             )
@@ -336,7 +335,6 @@ class TestDatabasePerformance:
                     volume=Decimal('10.00'),
                     volume_unit='L',
                     base_price=Decimal('12000.00'),
-                    cost_price=Decimal('8000.00'),
                     stock_quantity=50,
                     is_active=True
                 )

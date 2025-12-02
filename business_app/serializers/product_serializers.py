@@ -2,12 +2,16 @@
 Product Serializers for the Water Business Platform using Pydantic v2
 This file contains Pydantic models for product-related data serialization
 """
-from datetime import datetime
+import logging
+from datetime import datetime, timezone
 from typing import Dict, Any, Optional, List
 from decimal import Decimal
 
 from pydantic import BaseModel, Field, field_validator, ConfigDict
 from pydantic.alias_generators import to_camel
+from business_app.models.product import Product, ProductCategory
+
+logger = logging.getLogger(__name__)
 
 
 class ProductCategorySchema(BaseModel):
@@ -316,7 +320,7 @@ __all__ = [
 ]
 
 
-def serialize_product(product, language: str = 'uz', user=None, quantity: int = 1) -> Dict[str, Any]:
+def serialize_product(product: Product, language: str = 'uz', user=None, quantity: int = 1) -> Dict[str, Any]:
     """
     Serialize a product object to dictionary using Pydantic
     
@@ -353,10 +357,10 @@ def serialize_product(product, language: str = 'uz', user=None, quantity: int = 
                 'is_discounted': current_price < base_price
             },
             'media': {
-                'main_image': product.main_image_url,
-                'image_urls': product.image_urls or [],
-                'video_url': product.video_url,
-                'gallery_images': product.gallery_images or []
+                'images': product.images,
+                # 'image_urls': product.image_urls or [],
+                # 'video_url': product.video_url,
+                # 'gallery_images': product.gallery_images or []
             },
             'specifications': {
                 'volume': product.volume,
@@ -369,9 +373,9 @@ def serialize_product(product, language: str = 'uz', user=None, quantity: int = 
                     'height': getattr(product, 'height', None),
                     'unit': getattr(product, 'dimension_unit', None)
                 },
-                'material': product.material,
-                'color': product.color,
-                'brand': product.brand
+                # 'material': product.material,
+                # 'color': product.color,
+                # 'brand': product.brand
             },
             'inventory': {
                 'stock_quantity': product.stock_quantity if product.track_inventory else None,
@@ -379,11 +383,11 @@ def serialize_product(product, language: str = 'uz', user=None, quantity: int = 
                 'min_stock_level': product.min_stock_level,
                 'is_low_stock': is_product_low_stock(product),
                 'is_in_stock': is_product_in_stock(product),
-                'restock_date': product.restock_date.isoformat() if product.restock_date else None
+                # 'restock_date': product.restock_date.isoformat() if product.restock_date else None
             },
             'ratings': {
-                'average_rating': float(product.average_rating) if product.average_rating else 0.0,
-                'review_count': product.review_count or 0,
+                # 'average_rating': float(product.average_rating) if product.average_rating else 0.0,
+                # 'review_count': product.review_count or 0,
                 'rating_distribution': get_rating_distribution(product)
             },
             'flags': {
@@ -394,11 +398,11 @@ def serialize_product(product, language: str = 'uz', user=None, quantity: int = 
                 'is_organic': getattr(product, 'is_organic', False),
                 'is_premium': getattr(product, 'is_premium', False)
             },
-            'sales': {
-                'total_sold': product.total_sold or 0,
-                'view_count': product.view_count or 0,
-                'popularity_score': calculate_popularity_score(product)
-            },
+            # 'sales': {
+            #     # 'total_sold': product.total_sold or 0,
+            #     # 'view_count': product.view_count or 0,
+            #     # 'popularity_score': calculate_popularity_score(product)
+            # },
             'seo': {
                 'slug': getattr(product, 'slug', None),
                 'meta_title': get_localized_field(product, 'meta_title', language),
@@ -422,11 +426,12 @@ def serialize_product(product, language: str = 'uz', user=None, quantity: int = 
             }
         
         # Add applicable discounts
-        product_data['discounts'] = get_applicable_discounts(product, user, quantity)
+        # product_data['discounts'] = get_applicable_discounts(product, user, quantity)
         
         return product_data
         
-    except Exception:
+    except Exception as e:
+        logger.error(f"Error serializing product ID {product.id}: {e}")
         # Fallback to basic serialization if complex logic fails
         return {
             'id': product.id,
@@ -472,20 +477,24 @@ def serialize_product_category(category, language: str = 'uz') -> Dict[str, Any]
         'name': get_localized_field(category, 'name', language),
         'slug': getattr(category, 'slug', None),
         'icon_url': category.icon_url,
-        'parent_id': category.parent_id
+        'parent_id': getattr(category, 'parent_id', None)  # Categories don't have hierarchy yet
     }
 
 
 # Helper functions
 def get_localized_field(obj, field_name: str, language: str) -> Optional[str]:
     """Get localized field value"""
-    # Try to get localized version first
+    # Check if the object has TranslatableMixin's get_translated method
+    if hasattr(obj, 'get_translated'):
+        return obj.get_translated(field_name, language)
+
+    # Legacy: Try to get localized version from direct fields (name_ru, name_en, etc.)
     localized_field = f"{field_name}_{language}"
     if hasattr(obj, localized_field):
         localized_value = getattr(obj, localized_field)
         if localized_value:
             return localized_value
-    
+
     # Fall back to default field
     return getattr(obj, field_name, None)
 
@@ -544,7 +553,7 @@ def is_new_product(product) -> bool:
     if not product.created_at:
         return False
     
-    days_since_creation = (datetime.now() - product.created_at).days
+    days_since_creation = (datetime.now(timezone.utc) - product.created_at).days
     return days_since_creation <= 30
 
 

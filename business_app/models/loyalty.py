@@ -9,6 +9,7 @@ import uuid
 from business_app import db
 from business_app.models import TimestampMixin
 from business_app.models.translatable import TranslatableMixin, translatable
+from business_app.utils.constants import LoyaltyTransactionType
 
 
 class LoyaltyTransaction(db.Model, TimestampMixin):
@@ -17,7 +18,7 @@ class LoyaltyTransaction(db.Model, TimestampMixin):
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey('users.id'), nullable=False, index=True)
     points = Column(Integer, nullable=False)  # Can be negative for redemptions
-    transaction_type = Column(String(20), nullable=False)  # earned, redeemed, expired, bonus
+    transaction_type = Column(Enum(LoyaltyTransactionType, name='loyalty_transaction_type', values_callable=lambda x: [e.value for e in x]), nullable=False)
     description = Column(String(255), nullable=False)
     
     # Related entities
@@ -39,7 +40,7 @@ class LoyaltyTransaction(db.Model, TimestampMixin):
         return {
             'id': self.id,
             'points': self.points,
-            'transaction_type': self.transaction_type,
+            'transaction_type': self.transaction_type.value if hasattr(self.transaction_type, 'value') else self.transaction_type,
             'description': self.description,
             'expires_at': self.expires_at.isoformat() if self.expires_at else None,
             'is_expired': self.is_expired,

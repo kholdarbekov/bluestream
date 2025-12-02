@@ -8,6 +8,7 @@ import uuid
 from business_app import db
 from business_app.models import TimestampMixin
 from business_app.models.translatable import TranslatableMixin, translatable
+from business_app.utils.constants import NotificationType, NotificationChannel, NotificationStatus, Priority
 
 
 class Notification(db.Model, TimestampMixin):
@@ -15,8 +16,8 @@ class Notification(db.Model, TimestampMixin):
     
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey('users.id'), nullable=False, index=True)
-    notification_type = Column(String(50), nullable=False, index=True)  # order_update, delivery_reminder, etc.
-    channel = Column(String(20), nullable=False)  # sms, email, telegram, push
+    notification_type = Column(String(50), nullable=False, index=True)  # Note: schema uses VARCHAR, not the enum type
+    channel = Column(Enum(NotificationChannel, name='notification_channel', values_callable=lambda x: [e.value for e in x]), nullable=False)
     
     # Content
     title = Column(String(255), nullable=False)
@@ -25,7 +26,7 @@ class Notification(db.Model, TimestampMixin):
     # Delivery status
     is_sent = Column(Boolean, default=False, index=True)
     sent_at = Column(DateTime, nullable=True)
-    delivery_status = Column(String(20), default='pending')  # pending, sent, delivered, failed
+    delivery_status = Column(Enum(NotificationStatus, name='notification_status', values_callable=lambda x: [e.value for e in x]), default=NotificationStatus.PENDING)
     failure_reason = Column(String(255), nullable=True)
     
     # Recipient details
@@ -39,7 +40,7 @@ class Notification(db.Model, TimestampMixin):
     
     # Scheduling
     scheduled_for = Column(DateTime, nullable=True)
-    priority = Column(String(10), default='normal')  # low, normal, high, urgent
+    priority = Column(Enum(Priority, name='priority', values_callable=lambda x: [e.value for e in x]), default=Priority.NORMAL)
     
     # Additional data
     extra_data = Column(JSON, default={})
@@ -48,29 +49,29 @@ class Notification(db.Model, TimestampMixin):
     order = relationship('Order')
     delivery = relationship('Delivery')
     
-    def mark_as_sent(self, status='sent'):
+    def mark_as_sent(self, status=NotificationStatus.SENT):
         """Mark notification as sent"""
         self.is_sent = True
         self.sent_at = datetime.now(UTC)
         self.delivery_status = status
-    
+
     def mark_as_failed(self, reason):
         """Mark notification as failed"""
-        self.delivery_status = 'failed'
+        self.delivery_status = NotificationStatus.FAILED
         self.failure_reason = reason
     
     def to_dict(self):
         return {
             'id': self.id,
             'notification_type': self.notification_type,
-            'channel': self.channel,
+            'channel': self.channel.value if hasattr(self.channel, 'value') else self.channel,
             'title': self.title,
             'message': self.message,
             'is_sent': self.is_sent,
             'sent_at': self.sent_at.isoformat() if self.sent_at else None,
-            'delivery_status': self.delivery_status,
+            'delivery_status': self.delivery_status.value if hasattr(self.delivery_status, 'value') else self.delivery_status,
             'scheduled_for': self.scheduled_for.isoformat() if self.scheduled_for else None,
-            'priority': self.priority,
+            'priority': self.priority.value if hasattr(self.priority, 'value') else self.priority,
             'created_at': self.created_at.isoformat() if self.created_at else None
         }
 
@@ -83,7 +84,7 @@ class NotificationTemplate(db.Model, TimestampMixin, TranslatableMixin):
     id = Column(Integer, primary_key=True)
     name = Column(String(100), nullable=False)          # Default/fallback name (Uzbek)
     notification_type = Column(String(50), nullable=False)
-    channel = Column(String(20), nullable=False)        # email, sms, push, in_app
+    channel = Column(String(20), nullable=False)        # email, sms, push, in_app - Note: schema.sql uses VARCHAR, not enum for templates
     subject = Column(String(255), nullable=True)        # Default/fallback subject (Uzbek)
     content = Column(Text, nullable=False)              # Default/fallback content (Uzbek)
     is_active = Column(Boolean, default=True)
@@ -99,11 +100,11 @@ class NotificationTemplate(db.Model, TimestampMixin, TranslatableMixin):
 class NotificationPreference(db.Model, TimestampMixin):
     """User notification preferences"""
     __tablename__ = 'notification_preferences'
-    
+
     id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)
     notification_type = Column(String(50), nullable=False)
-    channel = Column(String(20), nullable=False)  # email, sms, push, telegram
+    channel = Column(Enum(NotificationChannel, name='notification_channel', values_callable=lambda x: [e.value for e in x]), nullable=False)
     is_enabled = Column(Boolean, default=True, nullable=False)
     
     def __repr__(self):
@@ -114,7 +115,7 @@ class NotificationPreference(db.Model, TimestampMixin):
             'id': self.id,
             'user_id': self.user_id,
             'notification_type': self.notification_type,
-            'channel': self.channel,
+            'channel': self.channel.value if hasattr(self.channel, 'value') else self.channel,
             'is_enabled': self.is_enabled,
             'created_at': self.created_at.isoformat() if self.created_at else None
         }

@@ -939,3 +939,311 @@ class AnalyticsService:
     def _generate_annual_report(self, start_date: datetime, end_date: datetime) -> Dict[str, Any]:
         """Generate annual business report"""
         return self._generate_monthly_report(start_date, end_date)
+
+    # Public methods for API endpoints
+    def get_rating_distribution(self, product_id: int) -> Dict[int, int]:
+        """Get rating distribution for a product (1-5 stars)"""
+        from business_app.models.review import Review
+
+        ratings = db.session.query(
+            Review.rating,
+            func.count(Review.id).label('count')
+        ).filter(
+            Review.product_id == product_id,
+            Review.is_approved == True
+        ).group_by(Review.rating).all()
+
+        # Initialize all ratings to 0
+        distribution = {1: 0, 2: 0, 3: 0, 4: 0, 5: 0}
+
+        for rating, count in ratings:
+            distribution[rating] = count
+
+        return distribution
+
+    def get_dashboard_metrics(self, start_date: datetime, end_date: datetime) -> Dict[str, Any]:
+        """Alias for get_dashboard_overview for backward compatibility"""
+        return self.get_dashboard_overview(start_date, end_date)
+
+    def get_revenue_analytics(self, start_date: datetime, end_date: datetime,
+                             granularity: str = 'daily') -> Dict[str, Any]:
+        """Get revenue analytics with specified granularity"""
+        revenue_metrics = self._get_revenue_metrics(start_date, end_date)
+
+        if granularity == 'daily':
+            trend_data = self._get_daily_sales_trend(start_date, end_date)
+        elif granularity == 'hourly':
+            trend_data = self._get_hourly_sales_distribution(start_date, end_date)
+        else:
+            trend_data = self._get_weekly_sales_distribution(start_date, end_date)
+
+        return {
+            **revenue_metrics,
+            'trend': trend_data,
+            'granularity': granularity
+        }
+
+    def get_total_revenue(self, start_date: datetime, end_date: datetime) -> float:
+        """Get total revenue for period"""
+        return self._calculate_revenue(start_date, end_date)
+
+    def get_product_analytics(self, start_date: datetime, end_date: datetime,
+                             limit: int = 20) -> List[Dict[str, Any]]:
+        """Get product performance analytics"""
+        products = self._get_product_performance(start_date, end_date)
+        return products[:limit]
+
+    def get_order_analytics(self, start_date: datetime, end_date: datetime) -> Dict[str, Any]:
+        """Get order analytics"""
+        return self._get_order_metrics(start_date, end_date)
+
+    def get_user_behavior_analytics(self, start_date: datetime, end_date: datetime) -> Dict[str, Any]:
+        """Get user behavior analytics"""
+        return self._get_customer_behavior_patterns(start_date, end_date)
+
+    def get_conversion_funnel(self, start_date: datetime, end_date: datetime) -> Dict[str, Any]:
+        """Get conversion funnel data"""
+        # Calculate funnel stages
+        total_visitors = db.session.query(func.count(func.distinct(UserBehavior.user_id))).filter(
+            UserBehavior.timestamp.between(start_date, end_date)
+        ).scalar() or 0
+
+        product_viewers = db.session.query(func.count(func.distinct(UserBehavior.user_id))).filter(
+            UserBehavior.timestamp.between(start_date, end_date),
+            UserBehavior.action == 'product_view'
+        ).scalar() or 0
+
+        cart_users = db.session.query(func.count(func.distinct(Order.user_id))).filter(
+            Order.created_at.between(start_date, end_date)
+        ).scalar() or 0
+
+        purchasers = db.session.query(func.count(func.distinct(Order.user_id))).filter(
+            Order.created_at.between(start_date, end_date),
+            Order.status == OrderStatus.DELIVERED
+        ).scalar() or 0
+
+        return {
+            'stages': {
+                'visitors': total_visitors,
+                'product_viewers': product_viewers,
+                'cart_users': cart_users,
+                'purchasers': purchasers
+            },
+            'conversion_rates': {
+                'visitor_to_viewer': round((product_viewers / total_visitors * 100) if total_visitors > 0 else 0, 2),
+                'viewer_to_cart': round((cart_users / product_viewers * 100) if product_viewers > 0 else 0, 2),
+                'cart_to_purchase': round((purchasers / cart_users * 100) if cart_users > 0 else 0, 2),
+                'overall': round((purchasers / total_visitors * 100) if total_visitors > 0 else 0, 2)
+            }
+        }
+
+    def get_cohort_analysis(self, cohort_type: str = 'monthly', periods: int = 6) -> Dict[str, Any]:
+        """Get cohort analysis data"""
+        # Simplified cohort analysis - group users by signup period
+        cohorts = []
+
+        for i in range(periods):
+            if cohort_type == 'monthly':
+                period_start = datetime.now(UTC) - timedelta(days=30 * (i + 1))
+                period_end = datetime.now(UTC) - timedelta(days=30 * i)
+            else:  # weekly
+                period_start = datetime.now(UTC) - timedelta(days=7 * (i + 1))
+                period_end = datetime.now(UTC) - timedelta(days=7 * i)
+
+            # Users who signed up in this period
+            cohort_users = User.query.filter(
+                User.created_at.between(period_start, period_end)
+            ).count()
+
+            # How many are still active
+            active_users = db.session.query(func.count(func.distinct(Order.user_id))).join(User).filter(
+                User.created_at.between(period_start, period_end),
+                Order.created_at >= period_end
+            ).scalar() or 0
+
+            retention_rate = (active_users / cohort_users * 100) if cohort_users > 0 else 0
+
+            cohorts.append({
+                'period_start': period_start.isoformat(),
+                'period_end': period_end.isoformat(),
+                'cohort_size': cohort_users,
+                'active_users': active_users,
+                'retention_rate': round(retention_rate, 2)
+            })
+
+        return {
+            'cohort_type': cohort_type,
+            'cohorts': cohorts
+        }
+
+    def get_segment_metrics(self, segment_id: int) -> Dict[str, Any]:
+        """Get metrics for a specific customer segment"""
+        # Placeholder - would need CustomerSegment model
+        return {
+            'segment_id': segment_id,
+            'total_customers': 0,
+            'total_revenue': 0,
+            'average_order_value': 0
+        }
+
+    def track_user_event(self, user_id: int, event_type: str, metadata: Dict[str, Any] = None) -> UserBehavior:
+        """Track user event (alias for track_user_behavior)"""
+        self.track_user_behavior(user_id, event_type, metadata)
+        return UserBehavior.query.filter_by(user_id=user_id).order_by(UserBehavior.timestamp.desc()).first()
+
+    def get_search_analytics(self, start_date: datetime, end_date: datetime,
+                            limit: int = 20) -> Dict[str, Any]:
+        """Get search analytics"""
+        # Top search terms
+        top_searches = db.session.query(
+            UserBehavior.metadata['search_term'].astext.label('search_term'),
+            func.count(UserBehavior.id).label('count')
+        ).filter(
+            UserBehavior.timestamp.between(start_date, end_date),
+            UserBehavior.action == 'search'
+        ).group_by(UserBehavior.metadata['search_term'].astext).order_by(
+            func.count(UserBehavior.id).desc()
+        ).limit(limit).all()
+
+        return {
+            'top_searches': [
+                {'term': term, 'count': count}
+                for term, count in top_searches
+            ],
+            'total_searches': sum(count for _, count in top_searches)
+        }
+
+    def get_geographic_analytics(self, start_date: datetime, end_date: datetime) -> List[Dict[str, Any]]:
+        """Get geographic analytics"""
+        return self._get_geographic_sales_distribution(start_date, end_date)
+
+    def get_active_users_count(self, start_date: datetime, end_date: datetime) -> int:
+        """Get count of active users in period"""
+        return db.session.query(func.count(func.distinct(Order.user_id))).filter(
+            Order.created_at.between(start_date, end_date)
+        ).scalar() or 0
+
+    def get_current_orders_count(self) -> int:
+        """Get count of current/active orders"""
+        return Order.query.filter(
+            Order.status.in_([OrderStatus.PENDING, OrderStatus.CONFIRMED, OrderStatus.PROCESSING])
+        ).count()
+
+    def get_revenue_today(self) -> float:
+        """Get revenue for today"""
+        today_start = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+        return self._calculate_revenue(today_start, datetime.now(UTC))
+
+    def get_current_conversion_rate(self) -> float:
+        """Get current conversion rate (last 24 hours)"""
+        one_day_ago = datetime.now(UTC) - timedelta(days=1)
+        now = datetime.now(UTC)
+
+        visitors = db.session.query(func.count(func.distinct(UserBehavior.user_id))).filter(
+            UserBehavior.timestamp.between(one_day_ago, now)
+        ).scalar() or 1
+
+        purchasers = db.session.query(func.count(func.distinct(Order.user_id))).filter(
+            Order.created_at.between(one_day_ago, now),
+            Order.status != OrderStatus.CANCELLED
+        ).scalar() or 0
+
+        return round((purchasers / visitors * 100), 2)
+
+    def get_top_products_today(self, limit: int = 5) -> List[Dict[str, Any]]:
+        """Get top products for today"""
+        today_start = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+        return self._get_product_performance(today_start, datetime.now(UTC))[:limit]
+
+    def get_recent_events(self, limit: int = 10) -> List[Dict[str, Any]]:
+        """Get recent user behavior events"""
+        events = UserBehavior.query.order_by(
+            UserBehavior.timestamp.desc()
+        ).limit(limit).all()
+
+        return [
+            {
+                'user_id': event.user_id,
+                'action': event.action,
+                'timestamp': event.timestamp.isoformat(),
+                'metadata': event.metadata
+            }
+            for event in events
+        ]
+
+    def track_search(self, search_term: str, result_count: int):
+        """Track search action"""
+        # Track as user behavior event
+        # Note: This requires user context which might not be available
+        # For now, we'll skip tracking if no user context
+        pass
+
+    def track_product_view(self, product_id: int, user_id: int = None):
+        """Track product view"""
+        if user_id:
+            self.track_user_behavior(
+                user_id=user_id,
+                action='product_view',
+                metadata={'product_id': product_id}
+            )
+
+    def track_order_feedback(self, order_id: int, rating: int, comment: str = None):
+        """Track order feedback"""
+        # Could expand to store in dedicated feedback table
+        pass
+
+    def track_review_created(self, review_id: int, product_id: int, user_id: int,
+                           rating: int, verified_purchase: bool):
+        """Track review creation"""
+        self.track_user_behavior(
+            user_id=user_id,
+            action='review_created',
+            metadata={
+                'review_id': review_id,
+                'product_id': product_id,
+                'rating': rating,
+                'verified_purchase': verified_purchase
+            }
+        )
+
+    # Helper methods for query consolidation
+    def _calculate_revenue(self, start_date: datetime, end_date: datetime) -> float:
+        """Calculate total revenue for period"""
+        return db.session.query(func.sum(Order.total_amount)).filter(
+            Order.created_at.between(start_date, end_date),
+            Order.status != OrderStatus.CANCELLED
+        ).scalar() or 0
+
+    def _count_orders(self, start_date: datetime, end_date: datetime,
+                     status: OrderStatus = None) -> int:
+        """Count orders for period"""
+        query = Order.query.filter(Order.created_at.between(start_date, end_date))
+        if status:
+            query = query.filter(Order.status == status)
+        return query.count()
+
+    def _build_delivery_performance_metrics(self, start_date: datetime, end_date: datetime) -> Dict[str, Any]:
+        """Get delivery performance metrics - placeholder for future implementation"""
+        return self._get_delivery_metrics(start_date, end_date)
+
+    def _get_route_efficiency_metrics(self, start_date: datetime, end_date: datetime) -> Dict[str, Any]:
+        """Get route efficiency metrics - placeholder"""
+        return {
+            'total_routes': 0,
+            'average_stops_per_route': 0,
+            'average_delivery_time': 0
+        }
+
+    def _get_driver_performance_metrics(self, start_date: datetime, end_date: datetime) -> Dict[str, Any]:
+        """Get driver performance metrics - placeholder"""
+        return {
+            'total_drivers': 0,
+            'average_deliveries_per_driver': 0,
+            'top_performers': []
+        }
+
+    def _get_delivery_geographic_patterns(self, start_date: datetime, end_date: datetime) -> Dict[str, Any]:
+        """Get delivery geographic patterns"""
+        return {
+            'by_city': self._get_geographic_sales_distribution(start_date, end_date)
+        }

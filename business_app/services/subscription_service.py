@@ -2,7 +2,7 @@
 Subscription service for the Water Business Platform
 Handles recurring water delivery subscriptions
 """
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta, time
 from typing import List, Dict, Any, Optional
 from flask import current_app
 from dateutil.relativedelta import relativedelta
@@ -11,7 +11,7 @@ from business_app.models.subscription import Subscription, SubscriptionPlan, Sub
 from business_app.models.user import User
 from business_app.models.product import Product
 from business_app.utils.exceptions import ValidationError, NotFoundError, ConflictError
-from business_app.utils.constants import SubscriptionStatus, SubscriptionFrequency
+from business_app.utils.constants import SubscriptionStatus, SubscriptionFrequency, PaymentMethod
 from business_app import db
 
 
@@ -23,97 +23,126 @@ class SubscriptionService:
         self.billing_day = current_app.config.get('SUBSCRIPTION_BILLING_DAY', 1)
         self.max_items = current_app.config.get('MAX_SUBSCRIPTION_ITEMS', 10)
     
-    def create_subscription(self, user_id: int, plan_id: int, 
-                          items: List[Dict[str, Any]], 
-                          delivery_address: Dict[str, Any],
-                          start_date: datetime = None,
-                          use_trial: bool = True) -> Subscription:
+    def create_subscription(self, subscription_data: Dict[str, Any], items: List[Dict[str, Any]]) -> Subscription:
         """
         Create a new subscription
-        
+
         Args:
-            user_id: User ID
-            plan_id: Subscription plan ID
-            items: List of subscription items
-            delivery_address: Delivery address
-            start_date: Subscription start date
-            use_trial: Whether to use trial period
-        
+            subscription_data: Dictionary containing subscription configuration
+            items: List of subscription items with product_id and quantity
+
         Returns:
             Created Subscription object
         """
+        user_id = subscription_data['user_id']
+
         # Validate user
         user = User.query.get(user_id)
         if not user:
             raise NotFoundError("User not found")
-        
-        # Validate plan
-        plan = SubscriptionPlan.query.get(plan_id)
-        if not plan or not plan.is_active:
-            raise NotFoundError("Subscription plan not found")
-        
-        # Check if user already has active subscription
+
+        # Check if user already has active subscription with same name
         existing_subscription = Subscription.query.filter_by(
             user_id=user_id,
+            name=subscription_data.get('name'),
             status=SubscriptionStatus.ACTIVE
         ).first()
-        
+
         if existing_subscription:
-            raise ConflictError("User already has an active subscription")
-        
+            raise ConflictError("User already has an active subscription with this name")
+
         # Validate items
+        if not items or len(items) == 0:
+            raise ValidationError("Subscription must have at least one item")
+
         self._validate_subscription_items(items)
-        
+
         # Calculate pricing
-        total_amount = self._calculate_subscription_total(items, plan)
-        
+        total_amount = self._calculate_items_total(items)
+
+        # Apply discount if provided
+        discount_percentage = subscription_data.get('discount_percentage', 0)
+        if discount_percentage > 0:
+            total_amount = total_amount * (1 - discount_percentage / 100)
+
         # Set start date
+        start_date = subscription_data.get('start_date')
         if start_date is None:
             start_date = datetime.now(timezone.utc)
-        
-        # Calculate next billing date
-        next_billing_date = self._calculate_next_billing_date(start_date, plan.frequency)
-        
+
+        # Calculate next billing date based on billing cycle
+        billing_cycle = subscription_data.get('billing_cycle', 'MONTHLY')
+        next_billing_date = self._calculate_next_billing_date(start_date, billing_cycle)
+
+        # Calculate next delivery date based on delivery frequency
+        delivery_frequency = subscription_data.get('delivery_frequency', 'WEEKLY')
+        next_delivery_date = self._calculate_next_delivery_date(
+            start_date,
+            delivery_frequency,
+            subscription_data.get('delivery_day_of_week'),
+            subscription_data.get('delivery_day_of_month')
+        )
+
         # Create subscription
         subscription = Subscription(
             user_id=user_id,
-            plan_id=plan_id,
-            status=SubscriptionStatus.TRIAL if use_trial else SubscriptionStatus.ACTIVE,
-            frequency=plan.frequency,
-            total_amount=total_amount,
-            delivery_address_street=delivery_address['street'],
-            delivery_address_city=delivery_address.get('city', 'Tashkent'),
-            delivery_address_latitude=delivery_address['latitude'],
-            delivery_address_longitude=delivery_address['longitude'],
-            delivery_instructions=delivery_address.get('instructions'),
-            preferred_delivery_time=delivery_address.get('preferred_time'),
+            name=subscription_data.get('name', 'Water Delivery Subscription'),
+            description=subscription_data.get('description', ''),
+            status=SubscriptionStatus.ACTIVE,
+            billing_cycle=billing_cycle,
+            delivery_frequency=delivery_frequency,
+            delivery_day_of_week=subscription_data.get('delivery_day_of_week'),
+            delivery_day_of_month=subscription_data.get('delivery_day_of_month'),
+            delivery_time_slot=subscription_data.get('delivery_time_slot'),
+            delivery_address_id=subscription_data.get('delivery_address_id'),
+            payment_method=subscription_data.get('payment_method', PaymentMethod.CASH),
+            auto_payment=subscription_data.get('auto_payment', False),
+            auto_renew=subscription_data.get('auto_renew', True),
+            discount_percentage=discount_percentage,
+            billing_amount=total_amount,
             start_date=start_date,
-            trial_end_date=start_date + timedelta(days=self.trial_days) if use_trial else None,
+            end_date=subscription_data.get('end_date'),
             next_billing_date=next_billing_date,
-            created_at=datetime.now(timezone.utc)
+            next_delivery_date=next_delivery_date,
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc)
         )
-        
+
         db.session.add(subscription)
         db.session.flush()  # Get subscription ID
-        
+
+        current_app.logger.info(f"Subscription object CREATED SUCCESSFULLY")
+
         # Add subscription items
         for item_data in items:
+            product: Product = Product.query.get(item_data['product_id'])
+            if not product:
+                raise NotFoundError(f"Product {item_data['product_id']} not found")
+
             subscription_item = SubscriptionItem(
                 subscription_id=subscription.id,
                 product_id=item_data['product_id'],
                 quantity=item_data['quantity'],
-                unit_price=item_data.get('unit_price', 0)
+                unit_price=product.base_price,
+                special_instructions=item_data.get('special_instructions')
             )
+            subscription_item.calculate_total()
             db.session.add(subscription_item)
-        
+            current_app.logger.info(f"SubscriptionItem object CREATED SUCCESSFULLY")
+
         db.session.commit()
-        
-        # Schedule first delivery
-        self._schedule_subscription_delivery(subscription.id)
-        
-        # Send confirmation
-        self._send_subscription_confirmation(subscription)
-        
+        current_app.logger.info(f"SubscriptionItem object CREATED SUCCESSFULLY with db commit")
+
+        # Schedule first delivery (async task)
+        try:
+            from business_app.tasks.subscription_tasks import create_subscription_delivery_task
+            create_subscription_delivery_task.delay(subscription.id)
+            current_app.logger.info(f"create_subscription SERVICE create_subscription_delivery_task task scheduled")
+        except Exception as e:
+            # Log error but don't fail subscription creation if Celery is unavailable
+            current_app.logger.error(f"Failed to schedule delivery task: {e}")
+            current_app.logger.warning(f"Subscription {subscription.id} created but delivery task not scheduled")
+
         return subscription
     
     def update_subscription(self, subscription_id: int, user_id: int = None,
@@ -171,8 +200,8 @@ class SubscriptionService:
         # Add new items
         total_amount = 0
         for item_data in items:
-            product = Product.query.get(item_data['product_id'])
-            unit_price = product.price if product else 0
+            product: Product = Product.query.get(item_data['product_id'])
+            unit_price = product.base_price if product else 0
             
             subscription_item = SubscriptionItem(
                 subscription_id=subscription_id,
@@ -468,9 +497,9 @@ class SubscriptionService:
         total = 0
         
         for item in items:
-            product = Product.query.get(item['product_id'])
+            product: Product = Product.query.get(item['product_id'])
             if product:
-                total += product.price * item['quantity']
+                total += product.base_price * item['quantity']
         
         # Apply plan discount
         if plan.discount_percentage > 0:
@@ -494,24 +523,94 @@ class SubscriptionService:
     
     def _schedule_subscription_delivery(self, subscription_id: int):
         """Schedule subscription delivery"""
-        from ..tasks.subscription_tasks import schedule_subscription_delivery_task
-        schedule_subscription_delivery_task.delay(subscription_id)
-    
+        try:
+            from ..tasks.subscription_tasks import schedule_subscription_delivery_task
+            schedule_subscription_delivery_task.delay(subscription_id)
+        except Exception as e:
+            current_app.logger.error(f"Failed to schedule subscription delivery: {e}")
+
     def _send_subscription_confirmation(self, subscription: Subscription):
         """Send subscription confirmation"""
-        from ..tasks.notification_tasks import send_subscription_confirmation_task
-        send_subscription_confirmation_task.delay(subscription.id)
-    
+        try:
+            from ..tasks.notification_tasks import send_subscription_confirmation_task
+            send_subscription_confirmation_task.delay(subscription.id)
+        except Exception as e:
+            current_app.logger.error(f"Failed to send subscription confirmation: {e}")
+
     def _send_subscription_notification(self, subscription: Subscription, event_type: str):
         """Send subscription notification"""
-        from ..tasks.notification_tasks import send_subscription_notification_task
-        send_subscription_notification_task.delay(subscription.id, event_type)
-    
+        try:
+            from ..tasks.notification_tasks import send_subscription_notification_task
+            send_subscription_notification_task.delay(subscription.id, event_type)
+        except Exception as e:
+            current_app.logger.error(f"Failed to send subscription notification: {e}")
+
     def _cancel_pending_deliveries(self, subscription_id: int):
         """Cancel pending deliveries for subscription"""
-        from ..tasks.subscription_tasks import cancel_subscription_deliveries_task
-        cancel_subscription_deliveries_task.delay(subscription_id)
-    
+        try:
+            from ..tasks.subscription_tasks import cancel_subscription_deliveries_task
+            cancel_subscription_deliveries_task.delay(subscription_id)
+        except Exception as e:
+            current_app.logger.error(f"Failed to cancel pending deliveries: {e}")
+
+    def _calculate_items_total(self, items: List[Dict[str, Any]]) -> float:
+        """Calculate total amount for subscription items"""
+        total = 0.0
+
+        for item in items:
+            product: Product = Product.query.get(item['product_id'])
+            if not product:
+                raise NotFoundError(f"Product {item['product_id']} not found")
+
+            total += float(product.base_price * item['quantity'])
+
+        return total
+
+    def _calculate_next_delivery_date(self, start_date: datetime, frequency: str,
+                                     day_of_week: Optional[int] = None,
+                                     day_of_month: Optional[int] = None) -> datetime:
+        """Calculate next delivery date based on frequency and preferences"""
+        if frequency == 'DAILY':
+            return start_date + timedelta(days=1)
+
+        elif frequency == 'WEEKLY':
+            # If day_of_week specified, find next occurrence of that day
+            if day_of_week is not None:
+                days_ahead = day_of_week - start_date.weekday()
+                if days_ahead <= 0:  # Target day already happened this week
+                    days_ahead += 7
+                return start_date + timedelta(days=days_ahead)
+            else:
+                return start_date + timedelta(weeks=1)
+
+        elif frequency == 'BIWEEKLY':
+            if day_of_week is not None:
+                days_ahead = day_of_week - start_date.weekday()
+                if days_ahead <= 0:
+                    days_ahead += 14
+                else:
+                    days_ahead += 7  # Skip to next occurrence after 2 weeks
+                return start_date + timedelta(days=days_ahead)
+            else:
+                return start_date + timedelta(weeks=2)
+
+        elif frequency == 'MONTHLY':
+            # If day_of_month specified, use that day
+            if day_of_month is not None:
+                next_month = start_date + relativedelta(months=1)
+                # Handle edge case where day doesn't exist in month (e.g., Feb 30)
+                try:
+                    return next_month.replace(day=day_of_month)
+                except ValueError:
+                    # Use last day of month if specified day doesn't exist
+                    return next_month + relativedelta(day=31)
+            else:
+                return start_date + relativedelta(months=1)
+
+        else:
+            # Default to weekly
+            return start_date + timedelta(weeks=1)
+
     def _process_auto_payment(self, payment, payment_token: str) -> bool:
         """Process automatic payment using stored payment method"""
         # This would integrate with actual payment gateway for auto-charging
@@ -533,6 +632,244 @@ class SubscriptionService:
         # Send payment failure notification
         self._send_subscription_notification(subscription, 'payment_failed')
     
+    def get_billing_info(self, subscription_id: int) -> Dict[str, Any]:
+        """
+        Get billing information for a subscription
+
+        Args:
+            subscription_id: Subscription ID
+
+        Returns:
+            Dictionary with billing information
+        """
+        subscription: Subscription = Subscription.query.get(subscription_id)
+        if not subscription:
+            raise NotFoundError("Subscription not found")
+
+        # Calculate next billing amount
+        next_billing_amount = subscription.billing_amount
+
+        # Get payment method
+        payment_method = subscription.payment_method.value or PaymentMethod.CASH
+
+        # Calculate days until next billing
+        days_until_billing = 0
+        if subscription.next_billing_date:
+            current_app.logger.info(f"get_billing_info: subscription.next_billing_date: {subscription.next_billing_date}, type: {type(subscription.next_billing_date)}, tzinfo: {subscription.next_billing_date.tzinfo}")
+            current_app.logger.info(f"get_billing_info: now: {datetime.combine(datetime.now(timezone.utc), time.min)}, type: {type(datetime.combine(datetime.now(timezone.utc), time.min))}, tzinfo: {type(datetime.combine(datetime.now(timezone.utc), time.min, tzinfo=timezone.utc)).tzinfo}")
+            days_until_billing = (subscription.next_billing_date - datetime.combine(datetime.now(timezone.utc), time.min, tzinfo=timezone.utc)).days
+
+        return {
+            'subscription_id': subscription_id,
+            'next_billing_date': subscription.next_billing_date,
+            'next_billing_amount': next_billing_amount,
+            'payment_method': payment_method.value if hasattr(payment_method, 'value') else payment_method,
+            'days_until_billing': max(0, days_until_billing),
+            # 'is_trial': subscription.status == SubscriptionStatus.TRIAL,
+            # 'trial_ends_at': subscription.trial_end_date if subscription.status == SubscriptionStatus.TRIAL else None
+        }
+
+    def calculate_subscription_preview(self, user_id: int, billing_cycle: str,
+                                       delivery_frequency: str, items: List[Dict[str, Any]],
+                                       discount_percentage: float = 0) -> Dict[str, Any]:
+        """
+        Calculate preview of subscription before creation
+
+        Args:
+            user_id: User ID
+            billing_cycle: Billing cycle (monthly, quarterly, annually)
+            delivery_frequency: Delivery frequency (daily, weekly, biweekly, monthly)
+            items: List of items with product_id and quantity
+            discount_percentage: Discount percentage to apply
+
+        Returns:
+            Preview information with pricing breakdown
+        """
+        # Validate user
+        user = User.query.get(user_id)
+        if not user:
+            raise NotFoundError("User not found")
+
+        # Validate items
+        self._validate_subscription_items(items)
+
+        # Calculate base amount
+        subtotal = 0
+        item_details = []
+
+        for item in items:
+            product = Product.query.get(item['product_id'])
+            if not product:
+                raise NotFoundError(f"Product {item['product_id']} not found")
+
+            quantity = item.get('quantity', 1)
+            item_total = product.base_price * quantity
+            subtotal += item_total
+
+            item_details.append({
+                'product_id': product.id,
+                'product_name': product.name,
+                'unit_price': float(product.base_price),
+                'quantity': quantity,
+                'item_total': float(item_total)
+            })
+
+        # Apply discount
+        discount_amount = (subtotal * discount_percentage / 100) if discount_percentage > 0 else 0
+        total_after_discount = subtotal - discount_amount
+
+        # Calculate delivery fee (if applicable)
+        delivery_fee = 0  # Can be calculated based on address/distance
+
+        # Calculate final total
+        total_amount = total_after_discount + delivery_fee
+
+        # Calculate frequency-based pricing
+        frequency_multiplier = {
+            'daily': 30,
+            'weekly': 4,
+            'biweekly': 2,
+            'monthly': 1
+        }.get(delivery_frequency, 1)
+
+        monthly_cost = total_amount * frequency_multiplier
+
+        return {
+            'items': item_details,
+            'subtotal': float(subtotal),
+            'discount_percentage': discount_percentage,
+            'discount_amount': float(discount_amount),
+            'delivery_fee': float(delivery_fee),
+            'total_amount': float(total_amount),
+            'billing_cycle': billing_cycle,
+            'delivery_frequency': delivery_frequency,
+            'estimated_monthly_cost': float(monthly_cost),
+            'estimated_annual_cost': float(monthly_cost * 12),
+            'trial_available': True,
+            'trial_days': self.trial_days
+        }
+
+    def calculate_subscription_statistics(self, user_id: int) -> Dict[str, Any]:
+        """
+        Calculate subscription statistics for a user
+
+        Args:
+            user_id: User ID
+
+        Returns:
+            Statistics dictionary
+        """
+        # Get all user subscriptions
+        subscriptions = Subscription.query.filter_by(user_id=user_id).all()
+
+        if not subscriptions:
+            return {
+                'total_subscriptions': 0,
+                'active_subscriptions': 0,
+                'total_spent': 0,
+                'total_deliveries': 0,
+                'average_order_value': 0,
+                'total_savings': 0,
+                'most_ordered_product': None
+            }
+
+        # Calculate statistics
+        total_spent = 0
+        total_deliveries = 0
+        active_count = 0
+        product_counts = {}
+
+        for subscription in subscriptions:
+            if subscription.status == SubscriptionStatus.ACTIVE:
+                active_count += 1
+
+            # Count deliveries (estimated from subscription duration and frequency)
+            if subscription.created_at and subscription.frequency:
+                days_active = (datetime.now(timezone.utc) - subscription.created_at).days
+                deliveries_per_week = {
+                    'daily': 7,
+                    'weekly': 1,
+                    'biweekly': 0.5,
+                    'monthly': 0.25
+                }.get(subscription.frequency.value if hasattr(subscription.frequency, 'value') else subscription.frequency, 1)
+
+                estimated_deliveries = int((days_active / 7) * deliveries_per_week)
+                total_deliveries += estimated_deliveries
+                total_spent += subscription.total_amount * estimated_deliveries
+
+            # Count products
+            for item in subscription.items:
+                product_name = item.product.name if item.product else 'Unknown'
+                product_counts[product_name] = product_counts.get(product_name, 0) + item.quantity
+
+        # Find most ordered product
+        most_ordered = max(product_counts.items(), key=lambda x: x[1])[0] if product_counts else None
+
+        # Calculate average order value
+        avg_order = total_spent / total_deliveries if total_deliveries > 0 else 0
+
+        # Calculate savings (example: 10% off regular pricing)
+        estimated_savings = total_spent * 0.1
+
+        return {
+            'total_subscriptions': len(subscriptions),
+            'active_subscriptions': active_count,
+            'total_spent': float(total_spent),
+            'total_deliveries': total_deliveries,
+            'average_order_value': float(avg_order),
+            'total_savings': float(estimated_savings),
+            'most_ordered_product': most_ordered
+        }
+
+    def skip_next_delivery(self, subscription_id: int, user_id: int = None,
+                           skip_reason: str = None) -> Subscription:
+        """
+        Skip the next delivery for a subscription
+
+        Args:
+            subscription_id: Subscription ID
+            user_id: Optional user ID for validation
+            skip_reason: Reason for skipping
+
+        Returns:
+            Updated Subscription object
+        """
+        subscription = Subscription.query.get(subscription_id)
+        if not subscription:
+            raise NotFoundError("Subscription not found")
+
+        # Validate ownership
+        if user_id and subscription.user_id != user_id:
+            raise ValidationError("Subscription does not belong to user")
+
+        # Can only skip active subscriptions
+        if subscription.status != SubscriptionStatus.ACTIVE:
+            raise ValidationError("Can only skip deliveries for active subscriptions")
+
+        # Calculate next delivery date after skip
+        if subscription.next_delivery_date:
+            frequency_days = {
+                'daily': 1,
+                'weekly': 7,
+                'biweekly': 14,
+                'monthly': 30
+            }.get(subscription.frequency.value if hasattr(subscription.frequency, 'value') else subscription.frequency, 7)
+
+            new_next_delivery = subscription.next_delivery_date + timedelta(days=frequency_days)
+            subscription.next_delivery_date = new_next_delivery
+
+        # Log the skip
+        if hasattr(subscription, 'add_log'):
+            subscription.add_log(
+                action='delivery_skipped',
+                description=f'Delivery skipped. Reason: {skip_reason or "User request"}',
+                user_id=user_id
+            )
+
+        db.session.commit()
+
+        return subscription
+
     def _get_frequency_breakdown(self, subscriptions: List[Subscription]) -> Dict[str, int]:
         """Get subscription frequency breakdown"""
         breakdown = {}

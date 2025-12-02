@@ -111,7 +111,7 @@ def log_service_call(operation_type: str = 'general',
                     'error_message': str(e)
                 }
                 
-                performance_logger.logger.error(f"Failed {operation_name}: {e}", 
+                performance_logger.logger.error(f"log_service_call Failed {operation_name}: {e}", 
                                               extra=error_data, exc_info=True)
                 
                 # Track error metrics
@@ -263,22 +263,24 @@ def log_security_event(event_type: str, severity: str = 'medium'):
     return decorator
 
 
-def log_database_query(operation_type: str = 'query'):
+def log_database_query(operation_type: str = 'query', query_type: str = None, entity_type: str = None):
     """
     Decorator to log database operations with performance tracking
-    
+
     Args:
         operation_type: Type of database operation (select, insert, update, delete)
+        query_type: Type of query (SELECT, INSERT, UPDATE, DELETE) - optional
+        entity_type: Type of entity being queried (product, order, etc) - optional
     """
     def decorator(func):
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
             start_time = time.time()
-            
+
             try:
                 result = func(*args, **kwargs)
                 duration = time.time() - start_time
-                
+
                 # Count results if possible
                 result_count = None
                 if hasattr(result, '__len__'):
@@ -288,7 +290,7 @@ def log_database_query(operation_type: str = 'query'):
                         pass
                 elif hasattr(result, 'rowcount'):
                     result_count = result.rowcount
-                
+
                 # Log the database operation
                 database_logger.log_query(
                     query=func.__name__,

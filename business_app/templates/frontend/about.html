@@ -2,10 +2,49 @@
 
 {% block title %}{{ 'About Us'|translate(current_language) }} - {{ company_name }}{% endblock %}
 
+{% block extra_head %}
+<style>
+/* Professional Page Title with Wavy Border */
+.page-title {
+    position: relative;
+    padding: 180px 0 120px 0 !important;
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+    overflow: hidden;
+}
+
+.page-title .shape {
+    position: absolute;
+    left: 0;
+    bottom: 0;
+    width: 100%;
+    height: 200px;
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+    z-index: 1;
+}
+
+.page-title .auto-container {
+    position: relative;
+    z-index: 2;
+}
+
+.page-title h1 {
+    font-size: 48px;
+    font-weight: 700;
+    color: #222;
+    margin-bottom: 15px;
+    text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.1);
+}
+</style>
+{% endblock %}
+
 {% block content %}
         <!-- page-title -->
-        <section class="page-title">
-            <div class="bg-layer" style="background-image: url({{ url_for('static', filename='images/background/page-title.jpg') }});"></div>
+        <section class="page-title centred" style="background-image: url({{ url_for('static', filename='images/background/page-title.jpg') }});">
+            <div class="shape" style="background-image: url({{ url_for('static', filename='images/shape/banner-shap.png') }});"></div>
             <div class="auto-container">
                 <div class="content-box">
                     <h1>{{ 'About Us'|translate(current_language) }}</h1>

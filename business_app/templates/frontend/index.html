@@ -11,7 +11,7 @@
                     <div class="auto-container">
                         <div class="inner-box">
                             <div class="image-box">
-                                <figure class="image"><img src="{{ url_for('static', filename='images/banner/vector-5.png') }}" alt="{{ 'Water Delivery'|translate(current_language) }}"></figure>
+                                <figure class="image"><img src="{{ url_for('static', filename='images/banner/vector-5-elon-musk.png') }}" alt="{{ 'Water Delivery'|translate(current_language) }}"></figure>
                             </div>
                             <div class="content-box">
                                 <h2>{{ 'Always Want Safe and Good Water for Healthy Life'|translate(current_language) }}</h2>
@@ -28,7 +28,7 @@
                     <div class="auto-container">
                         <div class="inner-box">
                             <div class="image-box">
-                                <figure class="image"><img src="{{ url_for('static', filename='images/banner/vector-4.png') }}" alt="{{ 'Premium Water'|translate(current_language) }}"></figure>
+                                <figure class="image"><img src="{{ url_for('static', filename='images/banner/vector-4-elon-musk.png') }}" alt="{{ 'Premium Water'|translate(current_language) }}"></figure>
                             </div>
                             <div class="content-box">
                                 <h2>{{ 'Pure Water Delivery To Your Doorstep'|translate(current_language) }}</h2>
@@ -178,7 +178,7 @@
                                 <div class="lower-content">
                                     <div class="shape" style="background-image: url({{ url_for('static', filename='images/shape/shape-7.png') }});"></div>
                                     <span>{{ product.volume if product.volume }}{{ product.volume_unit }} {{ product.category }}</span>
-                                    <h4><a href="/product/{{ product.id }}">{{ product.name }}</a></h4>
+                                    <h4><a href="{{ url_for('frontend.product_detail', product_id=product.id) }}">{{ product.name }}</a></h4>
                                     <h6>{{ product.current_price|format_price }}</h6>
                                     <p>{{ product.short_description[:60] if product.short_description }}{% if product.short_description and product.short_description|length > 60 %}...{% endif %}</p>
                                     <div class="btn-box">
@@ -342,50 +342,87 @@
                     <h2>{{ 'Water Benefits & Health Tips'|translate(current_language) }}</h2>
                     <p>{{ 'Discover the importance of proper hydration and learn about the health benefits of quality water.'|translate(current_language) }}</p>
                 </div>
-                <div class="row clearfix">
-                    <div class="col-lg-4 col-md-6 col-sm-12 team-block">
-                        <div class="team-block-one wow fadeInUp animated" data-wow-delay="00ms" data-wow-duration="1500ms">
-                            <div class="inner-box">
-                                <div class="image-box">
-                                    <figure class="image"><img src="{{ url_for('static', filename='images/news/news-4.jpg') }}" alt="{{ 'Water Benefits'|translate(current_language) }}"></figure>
-                                </div>
-                                <div class="lower-content">
-                                    <h4><a href="#">{{ 'Daily Water Intake Guide'|translate(current_language) }}</a></h4>
-                                    <span class="designation">{{ 'Health Tips'|translate(current_language) }}</span>
-                                    <p>{{ 'Learn how much water you should drink daily and the optimal timing for maximum health benefits.'|translate(current_language) }}</p>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="col-lg-4 col-md-6 col-sm-12 team-block">
-                        <div class="team-block-one wow fadeInUp animated" data-wow-delay="300ms" data-wow-duration="1500ms">
-                            <div class="inner-box">
-                                <div class="image-box">
-                                    <figure class="image"><img src="{{ url_for('static', filename='images/news/news-5.jpg') }}" alt="{{ 'Water Quality'|translate(current_language) }}"></figure>
-                                </div>
-                                <div class="lower-content">
-                                    <h4><a href="#">{{ 'Water Quality Standards'|translate(current_language) }}</a></h4>
-                                    <span class="designation">{{ 'Quality Assurance'|translate(current_language) }}</span>
-                                    <p>{{ 'Understanding water purity standards and what makes Blue Stream water exceptional for your health.'|translate(current_language) }}</p>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="col-lg-4 col-md-6 col-sm-12 team-block">
-                        <div class="team-block-one wow fadeInUp animated" data-wow-delay="600ms" data-wow-duration="1500ms">
-                            <div class="inner-box">
-                                <div class="image-box">
-                                    <figure class="image"><img src="{{ url_for('static', filename='images/news/news-6.jpg') }}" alt="{{ 'Hydration Benefits'|translate(current_language) }}"></figure>
-                                </div>
-                                <div class="lower-content">
-                                    <h4><a href="#">{{ 'Hydration & Wellness'|translate(current_language) }}</a></h4>
-                                    <span class="designation">{{ 'Wellness Guide'|translate(current_language) }}</span>
-                                    <p>{{ 'Discover how proper hydration supports your immune system, skin health, and overall well-being.'|translate(current_language) }}</p>
+                <div class="row clearfix blog-posts-equal-height">
+                    {% if featured_posts and featured_posts|length > 0 %}
+                        {% for post in featured_posts %}
+                        <div class="col-lg-4 col-md-6 col-sm-12 team-block">
+                            <div class="team-block-one wow fadeInUp animated" data-wow-delay="{{ loop.index0 * 300 }}ms" data-wow-duration="1500ms">
+                                <div class="inner-box">
+                                    <div class="image-box">
+                                        <figure class="image">
+                                            <a href="{{ url_for('frontend.blog_detail', slug=post.slug) }}">
+                                                {% if post.featured_image %}
+                                                    <img src="{{ post.featured_image }}" alt="{{ post.image_alt_text or post.get_translated('title', current_language) }}">
+                                                {% else %}
+                                                    <img src="{{ url_for('static', filename='images/news/news-' ~ (loop.index + 3) ~ '.jpg') }}" alt="{{ post.get_translated('title', current_language) }}">
+                                                {% endif %}
+                                            </a>
+                                        </figure>
+                                    </div>
+                                    <div class="lower-content">
+                                        <h4>
+                                            <a href="{{ url_for('frontend.blog_detail', slug=post.slug) }}">
+                                                {{ post.get_translated('title', current_language) }}
+                                            </a>
+                                        </h4>
+                                        <span class="designation">{{ post.get_category_display(current_language) }}</span>
+                                        <p>{{ (post.get_translated('excerpt', current_language)[:120] + '...') if post.get_translated('excerpt', current_language)|length > 120 else post.get_translated('excerpt', current_language) }}</p>
+                                    </div>
                                 </div>
                             </div>
                         </div>
-                    </div>
+                        {% endfor %}
+                    {% else %}
+                        <!-- Fallback to static content if no posts available -->
+                        <div class="col-lg-4 col-md-6 col-sm-12 team-block">
+                            <div class="team-block-one wow fadeInUp animated" data-wow-delay="00ms" data-wow-duration="1500ms">
+                                <div class="inner-box">
+                                    <div class="image-box">
+                                        <figure class="image"><img src="{{ url_for('static', filename='images/news/news-4.jpg') }}" alt="{{ 'Water Benefits'|translate(current_language) }}"></figure>
+                                    </div>
+                                    <div class="lower-content">
+                                        <h4><a href="#">{{ 'Daily Water Intake Guide'|translate(current_language) }}</a></h4>
+                                        <span class="designation">{{ 'Health Tips'|translate(current_language) }}</span>
+                                        <p>{{ 'Learn how much water you should drink daily and the optimal timing for maximum health benefits.'|translate(current_language) }}</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-lg-4 col-md-6 col-sm-12 team-block">
+                            <div class="team-block-one wow fadeInUp animated" data-wow-delay="300ms" data-wow-duration="1500ms">
+                                <div class="inner-box">
+                                    <div class="image-box">
+                                        <figure class="image"><img src="{{ url_for('static', filename='images/news/news-5.jpg') }}" alt="{{ 'Water Quality'|translate(current_language) }}"></figure>
+                                    </div>
+                                    <div class="lower-content">
+                                        <h4><a href="#">{{ 'Water Quality Standards'|translate(current_language) }}</a></h4>
+                                        <span class="designation">{{ 'Quality Assurance'|translate(current_language) }}</span>
+                                        <p>{{ 'Understanding water purity standards and what makes Blue Stream water exceptional for your health.'|translate(current_language) }}</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-lg-4 col-md-6 col-sm-12 team-block">
+                            <div class="team-block-one wow fadeInUp animated" data-wow-delay="600ms" data-wow-duration="1500ms">
+                                <div class="inner-box">
+                                    <div class="image-box">
+                                        <figure class="image"><img src="{{ url_for('static', filename='images/news/news-6.jpg') }}" alt="{{ 'Hydration Benefits'|translate(current_language) }}"></figure>
+                                    </div>
+                                    <div class="lower-content">
+                                        <h4><a href="#">{{ 'Hydration & Wellness'|translate(current_language) }}</a></h4>
+                                        <span class="designation">{{ 'Wellness Guide'|translate(current_language) }}</span>
+                                        <p>{{ 'Discover how proper hydration supports your immune system, skin health, and overall well-being.'|translate(current_language) }}</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    {% endif %}
                 </div>
+                {% if featured_posts and featured_posts|length > 0 %}
+                <div class="more-btn centred" style="margin-top: 40px;">
+                    <a href="{{ url_for('frontend.blog_list') }}" class="theme-btn btn-one">{{ 'View All Posts'|translate(current_language) }}</a>
+                </div>
+                {% endif %}
             </div>
         </section>
         <!-- blog-section end -->
@@ -575,7 +612,7 @@
                     <div class="video-inner">
                         <div class="inner-box" style="background-image: url({{ url_for('static', filename='images/background/video-1.jpg') }});">
                              <div class="video-btn">
-                                <a href="https://www.youtube.com/watch?v=nfP5N9Yc72A&t=28s" class="lightbox-image" data-caption=""><i class="fas fa-play"></i></a>
+                                <a href="https://www.youtube.com/watch?v=9iMGFqMmUFs" class="lightbox-image" data-caption=""><i class="fas fa-play"></i></a>
                             </div>
                         </div>
                     </div>
@@ -588,7 +625,8 @@
         <section class="news-section">
             <div class="auto-container">
                 <div class="sec-title centred">
-                    <h2>{{ 'Stay Updated with'|translate(current_language) }} <br />{{ 'Blue Stream'|translate(current_language) }}</h2>
+                    <h2>{{ 'Stay Updated with Blue Stream'|translate(current_language) }}</h2>
+                    <p>{{ 'Latest news, updates, and announcements from our company'|translate(current_language) }}</p>
                 </div>
                 <div class="row clearfix">
                     <div class="col-lg-4 col-md-6 col-sm-12 news-block">
@@ -617,14 +655,14 @@
                             <div class="inner-box">
                                 <figure class="image-box"><a href="#"><img src="{{ url_for('static', filename='images/news/news-2.jpg') }}" alt="{{ 'Health Tips'|translate(current_language) }}"></a></figure>
                                 <div class="lower-content">
-                                    <div class="category"><a href="#">{{ 'Health Tips'|translate(current_language) }}</a></div>
-                                    <h4><a href="#">{{ 'The Importance of Staying Hydrated During Winter'|translate(current_language) }}</a></h4>
+                                    <div class="category"><a href="#">{{ 'Updates'|translate(current_language) }}</a></div>
+                                    <h4><a href="#">{{ 'New Mobile App for Convenient Water Ordering'|translate(current_language) }}</a></h4>
                                     <ul class="post-info clearfix">
-                                        <li><a href="#">{{ 'Health Team'|translate(current_language) }}</a></li>
+                                        <li><a href="#">{{ 'Tech Team'|translate(current_language) }}</a></li>
                                         <li>{{ 'Dec 20, 2023'|translate(current_language) }}</li>
                                     </ul>
                                     <div class="text">
-                                        <p>{{ 'Winter weather can lead to dehydration. Learn why maintaining proper hydration is crucial during colder months for optimal health.'|translate(current_language) }}</p>
+                                        <p>{{ 'Download our new mobile app to order water, track deliveries, and manage your subscription all from your smartphone.'|translate(current_language) }}</p>
                                     </div>
                                     <div class="btn-box">
                                         <a href="#" class="theme-btn btn-two">{{ 'Learn More'|translate(current_language) }}</a>

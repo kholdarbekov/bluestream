@@ -151,7 +151,6 @@ def sample_product(db):
         volume=Decimal('19.00'),
         volume_unit='L',
         base_price=Decimal('15000.00'),
-        cost_price=Decimal('10000.00'),
         stock_quantity=100,
         min_stock_level=10,
         max_stock_level=500,

@@ -47,6 +47,7 @@ def register_blueprints(app: Flask):
     from business_app.api.auth import auth_bp
     from business_app.api.products import products_bp
     from business_app.api.orders import orders_bp
+    from business_app.api.carts import cart_bp
     from business_app.api.payments import payments_bp
     from business_app.api.delivery import delivery_bp
     from business_app.api.subscriptions import subscriptions_bp
@@ -61,6 +62,7 @@ def register_blueprints(app: Flask):
     app.register_blueprint(auth_bp, url_prefix=f'{api_prefix}/auth')
     app.register_blueprint(products_bp, url_prefix=f'{api_prefix}/products')
     app.register_blueprint(orders_bp, url_prefix=f'{api_prefix}/orders')
+    app.register_blueprint(cart_bp, url_prefix=f'{api_prefix}/cart')
     app.register_blueprint(payments_bp, url_prefix=f'{api_prefix}/payments')
     app.register_blueprint(delivery_bp, url_prefix=f'{api_prefix}/delivery')
     app.register_blueprint(subscriptions_bp, url_prefix=f'{api_prefix}/subscriptions')
@@ -127,15 +129,16 @@ def setup_request_handlers(app):
         """Execute before each request - Check URL params, session, and user preferences"""
         # Set request start time for performance monitoring
         g.start_time = datetime.now(UTC)
-        
+
+        # Skip logging for healthcheck endpoints
+        is_healthcheck = request.path in ['/health', '/healthz', '/api/health']
+
         # Get language from URL parameter first
         lang = request.args.get('lang', None)
-        
-        print(f"🔥 BEFORE_REQUEST: {request.method} {request.path}, URL lang='{lang}'", flush=True)
-        
+
         # 1. Check URL parameter first
         if lang and lang in app.config['LANGUAGES']:
-            print(f"🔥 STEP1: Using URL lang '{lang}'", flush=True)
+            pass  # Use URL language
         else:
             # 2. Check if user is logged in and has a preferred language
             try:
@@ -146,47 +149,27 @@ def setup_request_handlers(app):
                     user = User.query.get(current_user_id)
                     if user and user.preferred_language:
                         lang = user.preferred_language
-                        print(f"🔥 STEP2: Using user lang '{lang}'", flush=True)
-                    else:
-                        print(f"🔥 STEP2: User has no preferred language", flush=True)
-                else:
-                    print(f"🔥 STEP2: No authenticated user", flush=True)
-            except Exception as e:
-                print(f"🔥 STEP2: Exception: {e}", flush=True)
-            
+            except Exception:
+                pass  # Continue with other methods
+
             # 3. Check session language (from set-language endpoint)
             if not lang:
                 session_lang = session.get('language')
                 if session_lang and session_lang in app.config['LANGUAGES']:
                     lang = session_lang
-                    print(f"🔥 STEP3: Using session lang '{lang}'", flush=True)
-                else:
-                    print(f"🔥 STEP3: Session lang not usable: '{session_lang}'", flush=True)
-            
+
             # 4. Fall back to browser Accept-Language header
             if not lang:
                 browser_lang = request.headers.get('Accept-Language', '')
                 if browser_lang and browser_lang[:2] in app.config['LANGUAGES']:
                     lang = browser_lang[:2]
-                    print(f"🔥 STEP4: Using browser lang '{lang}'", flush=True)
-                else:
-                    print(f"🔥 STEP4: Browser lang not usable", flush=True)
-        
+
         # 5. Use default language if nothing else worked
         if not lang or lang not in app.config['LANGUAGES']:
-            old_lang = lang
             lang = app.config['DEFAULT_LANGUAGE']
-            print(f"🔥 STEP5: Using default lang '{old_lang}' -> '{lang}'", flush=True)
-        else:
-            print(f"🔥 STEP5: Valid lang '{lang}'", flush=True)
-        
+
         # Set the language in request context
-        print(f"🔥 SETTING: g.language = '{lang}'", flush=True)
         g.language = lang
-        
-        # Verify
-        final_g_language = getattr(g, 'language', 'NOT_SET')
-        print(f"🔥 FINAL: g.language = '{final_g_language}'", flush=True)
     
     @app.after_request
     def after_request(response):
@@ -388,17 +371,18 @@ def create_app(config_class=None):
     from business_app.utils.service_factory import init_service_factory
     init_service_factory(app)
     
-    # Register health check endpoint
+    # Register health check endpoint (exempt from rate limiting)
     @app.route('/health')
+    @limiter.exempt
     def health_check():
-        """Health check endpoint"""
+        """Health check endpoint - exempt from rate limiting for monitoring systems"""
         try:
             # Check database connection
             db.session.execute(text('SELECT 1'))
-            
+
             # Check Redis connection
             redis_client.ping()
-            
+
             return jsonify({
                 'status': 'healthy',
                 'timestamp': datetime.now(UTC).isoformat(),
@@ -415,7 +399,19 @@ def create_app(config_class=None):
                 'timestamp': datetime.now(UTC).isoformat(),
                 'error': str(e)
             }), 503
-    
+
+    # Serve uploaded files (high rate limit for images/static files)
+    @app.route('/uploads/<path:filename>')
+    @limiter.limit('5000/hour', key_func=lambda: request.remote_addr)
+    def uploaded_file(filename):
+        """Serve uploaded files from the uploads directory"""
+        from flask import send_from_directory
+        import os
+        # Use the same upload path as FileStorageService
+        upload_folder = app.config.get('UPLOAD_FOLDER', 'uploads/')
+        uploads_dir = os.path.join(app.root_path, upload_folder)
+        return send_from_directory(uploads_dir, filename)
+
     return app
 
 

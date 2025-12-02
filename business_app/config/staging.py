@@ -34,8 +34,9 @@ class StagingConfig(BaseConfig):
     REDIS_URL = os.environ.get('REDIS_URL') or 'redis://localhost:6379/1'
     
     # Rate Limiting Configuration
+    # Note: This is the FALLBACK limit for endpoints without specific rate limits
     RATELIMIT_STORAGE_URL = REDIS_URL
-    RATELIMIT_DEFAULT = os.environ.get('RATE_LIMIT_REQUESTS', '200/hour')
+    RATELIMIT_DEFAULT = os.environ.get('RATE_LIMIT_REQUESTS', '750/hour')  # Between dev and production
     RATELIMIT_ENABLED = True
     
     # Celery Configuration

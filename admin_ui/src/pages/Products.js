@@ -63,7 +63,7 @@ const Products = () => {
       page: pagination.page,
       per_page: pagination.per_page,
       search: searchText,
-      category: categoryFilter,
+      category_id: categoryFilter,
       status: statusFilter
     }),
     {
@@ -153,11 +153,11 @@ const Products = () => {
     },
     {
       title: 'Category',
-      dataIndex: 'category',
-      key: 'category',
+      dataIndex: 'category_id',
+      key: 'category_id',
       width: 120,
-      render: (category) => (
-        <Tag color="blue">{category}</Tag>
+      render: (category_id) => (
+        <Tag color="blue">{category_id}</Tag>
       )
     },
     {
@@ -167,7 +167,18 @@ const Products = () => {
       width: 100,
       render: (price) => (
         <span style={{ fontWeight: 'bold', color: '#52c41a' }}>
-          ${price?.toFixed(2)}
+          UZS{price?.toFixed(2)}
+        </span>
+      )
+    },
+    {
+      title: 'Volume',
+      dataIndex: 'volume',
+      key: 'volume',
+      width: 100,
+      render: (volume) => (
+        <span style={{ fontWeight: 'bold', color: '#52c41a' }}>
+          {volume}
         </span>
       )
     },
@@ -253,9 +264,10 @@ const Products = () => {
     editForm.setFieldsValue({
       name: product.name,
       description: product.description,
-      category: product.category,
+      category_id: product.category_id,
       price: product.price,
       stock_quantity: product.stock_quantity,
+      volume: product.volume,
       status: product.status,
       is_featured: product.is_featured
     });
@@ -309,10 +321,10 @@ const Products = () => {
   };
 
   // Calculate summary statistics
-  const products = data?.products || [];
-  const totalProducts = data?.pagination?.total || 0;
+  const products = data?.data?.items || [];
+  const totalProducts = data?.meta?.total || 0;
   const lowStockProducts = products.filter(product => product.stock_quantity <= 10).length;
-  const totalValue = products.reduce((sum, product) => sum + (product.price * product.stock_quantity), 0);
+  const totalValue = products.reduce((sum, product) => sum + (product.base_price * product.stock_quantity), 0);
 
   const uploadProps = {
     name: 'file',
@@ -358,7 +370,7 @@ const Products = () => {
               value={totalValue}
               precision={2}
               prefix={<DollarOutlined />}
-              suffix="USD"
+              suffix="UZS"
             />
           </Card>
         </Col>
@@ -380,10 +392,12 @@ const Products = () => {
               onChange={handleCategoryFilter}
               style={{ width: 150 }}
             >
-              <Option value="water_bottles">Water Bottles</Option>
-              <Option value="dispensers">Dispensers</Option>
-              <Option value="filters">Filters</Option>
-              <Option value="accessories">Accessories</Option>
+              <Option value="4">Drinking Water</Option>
+              <Option value="5">Sparkling Water</Option>
+              <Option value="6">Flavored Water</Option>
+              <Option value="7">Alkaline Water</Option>
+              <Option value="8">Distilled Water</Option>
+              <Option value="9">Spring Water</Option>
             </Select>
             <Select
               placeholder="Filter by status"
@@ -455,8 +469,9 @@ const Products = () => {
               <Col span={16}>
                 <h3>{selectedProduct.name}</h3>
                 <p><strong>SKU:</strong> {selectedProduct.sku}</p>
-                <p><strong>Category:</strong> {selectedProduct.category}</p>
-                <p><strong>Price:</strong> ${selectedProduct.price?.toFixed(2)}</p>
+                <p><strong>Category:</strong> {selectedProduct.category_id}</p>
+                <p><strong>Price:</strong> UZS{selectedProduct.price?.toFixed(2)}</p>
+                <p><strong>Volume:</strong> {selectedProduct.volume}</p>
                 <p><strong>Stock:</strong> {selectedProduct.stock_quantity} units</p>
                 <p><strong>Status:</strong>
                   <Tag color={productStatusColors[selectedProduct.status]} style={{ marginLeft: 8 }}>
@@ -513,26 +528,47 @@ const Products = () => {
             <Input placeholder="Enter product name" />
           </Form.Item>
 
-          <Form.Item
-            name="sku"
-            label="SKU"
-            rules={[{ required: true, message: 'Please enter SKU' }]}
-          >
-            <Input placeholder="Enter SKU" />
-          </Form.Item>
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item
+              name="sku"
+              label="SKU"
+              rules={[{ required: true, message: 'Please enter SKU' }]}
+            >
+              <Input placeholder="Enter SKU" />
+            </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item
+              name="volume"
+              label="Volume"
+              rules={[{ required: true, message: 'Please enter Volume' }]}
+            >
+              <InputNumber
+                  placeholder="Enter Volume"
+                  style={{ width: '100%' }}
+                  min={0}
+                  precision={1}
+                />
+            </Form.Item>
+            </Col>
+          </Row>
+          
 
           <Row gutter={16}>
             <Col span={12}>
               <Form.Item
-                name="category"
+                name="category_id"
                 label="Category"
                 rules={[{ required: true, message: 'Please select category' }]}
               >
                 <Select placeholder="Select category">
-                  <Option value="water_bottles">Water Bottles</Option>
-                  <Option value="dispensers">Dispensers</Option>
-                  <Option value="filters">Filters</Option>
-                  <Option value="accessories">Accessories</Option>
+                  <Option value="4">Drinking Water</Option>
+                  <Option value="5">Sparkling Water</Option>
+                  <Option value="6">Flavored Water</Option>
+                  <Option value="7">Alkaline Water</Option>
+                  <Option value="8">Distilled Water</Option>
+                  <Option value="9">Spring Water</Option>
                 </Select>
               </Form.Item>
             </Col>
@@ -561,7 +597,7 @@ const Products = () => {
               >
                 <InputNumber
                   placeholder="0.00"
-                  prefix="$"
+                  prefix="UZS"
                   style={{ width: '100%' }}
                   min={0}
                   precision={2}
@@ -655,15 +691,17 @@ const Products = () => {
           <Row gutter={16}>
             <Col span={12}>
               <Form.Item
-                name="category"
+                name="category_id"
                 label="Category"
                 rules={[{ required: true, message: 'Please select category' }]}
               >
                 <Select placeholder="Select category">
-                  <Option value="water_bottles">Water Bottles</Option>
-                  <Option value="dispensers">Dispensers</Option>
-                  <Option value="filters">Filters</Option>
-                  <Option value="accessories">Accessories</Option>
+                  <Option value="4">Drinking Water</Option>
+                  <Option value="5">Sparkling Water</Option>
+                  <Option value="6">Flavored Water</Option>
+                  <Option value="7">Alkaline Water</Option>
+                  <Option value="8">Distilled Water</Option>
+                  <Option value="9">Spring Water</Option>
                 </Select>
               </Form.Item>
             </Col>

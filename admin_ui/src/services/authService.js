@@ -1,4 +1,4 @@
-import api from './api';
+import api, { fetchCSRFToken } from './api';
 
 class AuthService {
   async login(credentials) {
@@ -29,6 +29,9 @@ class AuthService {
       // Note: Tokens are now stored in httpOnly cookies by the server
       localStorage.setItem('admin_user', JSON.stringify(user));
       localStorage.setItem('admin_permissions', JSON.stringify(permissions));
+
+      // Fetch CSRF token for subsequent requests
+      await fetchCSRFToken();
 
       return { user, tokens, permissions }; // Include tokens in return if needed
     } catch (error) {

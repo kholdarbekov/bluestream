@@ -244,19 +244,14 @@ def register_multilingual_filters(app):
         import sys
         import threading
         import time
-        
-        # ALWAYS PRINT - CRITICAL DEBUG  
-        request_url = request.url if request else 'NO_REQUEST'
-        print(f"🚨🚨🚨 TRANSLATE_FILTER_CALLED: '{key}' lang={language} URL={request_url}", flush=True)
-        
+
         # HYPER-COMPREHENSIVE LOGGING - Step 1: Filter Entry with Thread Info
         logger = logging.getLogger(__name__)
         thread_id = threading.current_thread().ident
         request_id = getattr(request, 'id', 'NO_REQUEST') if request else 'NO_REQUEST'
         timestamp = time.time()
-        
-        logger.info(f"🔤🧵 TRANSLATE FILTER START: key='{key}', thread={thread_id}, request_id={request_id}, timestamp={timestamp}")
-        print(f"🔤🧵 TRANSLATE FILTER: {key} -> language={language} [THREAD:{thread_id}]", flush=True)
+
+        # logger.debug(f"TRANSLATE FILTER START: key='{key}', thread={thread_id}, request_id={request_id}, timestamp={timestamp}")
         
         # HYPER-COMPREHENSIVE LOGGING - Step 2: Context Analysis with Request Info
         try:
@@ -264,20 +259,19 @@ def register_multilingual_filters(app):
             session_language = session.get('language', 'NOT_SET')
             request_path = request.path if request else 'NO_REQUEST'
             request_method = request.method if request else 'NO_REQUEST'
-            
-            logger.info(f"🔤🧵 CONTEXT [T:{thread_id}]: g.language='{g_language}', session.language='{session_language}', path='{request_path}', method='{request_method}'")
-            print(f"🔤🧵 CONTEXT: g.lang='{g_language}', session.lang='{session_language}', path='{request_path}'", flush=True)
-            
+
+            # logger.debug(f"CONTEXT [T:{thread_id}]: g.language='{g_language}', session.language='{session_language}', path='{request_path}', method='{request_method}'")
+
             # Check for cross-contamination
             if hasattr(g, '_translation_calls'):
                 g._translation_calls += 1
             else:
                 g._translation_calls = 1
-            
-            logger.info(f"🔤🧵 CALL COUNT in this request: {g._translation_calls}")
-            
+
+            # logger.debug(f"CALL COUNT in this request: {g._translation_calls}")
+
         except RuntimeError as e:
-            logger.error(f"🔤🧵 CONTEXT ERROR [T:{thread_id}]: {e}")
+            logger.error(f"CONTEXT ERROR [T:{thread_id}]: {e}")
             g_language = 'ERROR'
             session_language = 'ERROR'
         
@@ -287,43 +281,40 @@ def register_multilingual_filters(app):
             try:
                 from business_app.utils.helpers import get_current_language
                 resolved_language = get_current_language()
-                logger.info(f"🔤🧵 LANGUAGE RESOLVED [T:{thread_id}]: get_current_language() returned '{resolved_language}'")
-                print(f"🔤🧵 RESOLVED: get_current_language() = '{resolved_language}'", flush=True)
+                # logger.debug(f"LANGUAGE RESOLVED [T:{thread_id}]: get_current_language() returned '{resolved_language}'")
             except RuntimeError as e:
-                logger.error(f"🔤🧵 LANGUAGE RESOLUTION ERROR [T:{thread_id}]: {e}")
+                logger.error(f"LANGUAGE RESOLUTION ERROR [T:{thread_id}]: {e}")
                 # Fallback to g.language or default
                 resolved_language = getattr(g, 'language', None)
                 if not resolved_language:
                     from flask import current_app
                     resolved_language = current_app.config.get('DEFAULT_LANGUAGE', 'en')
-                logger.info(f"🔤🧵 FALLBACK LANGUAGE [T:{thread_id}]: '{resolved_language}'")
+                # logger.debug(f"FALLBACK LANGUAGE [T:{thread_id}]: '{resolved_language}'")
             language = resolved_language
         else:
-            logger.info(f"🔤🧵 LANGUAGE PROVIDED [T:{thread_id}]: using explicit language '{language}'")
+            # logger.debug(f"LANGUAGE PROVIDED [T:{thread_id}]: using explicit language '{language}'")
+            pass
         
         # HYPER-COMPREHENSIVE LOGGING - Step 4: Cache State Check
         try:
             from business_app.utils.translations import translation_service
             cache_key = f"translations:{language}:{key}"
             cached_value = translation_service._get_cached_translation(key, language)
-            logger.info(f"🔤🧵 CACHE STATE [T:{thread_id}]: key='{cache_key}', cached='{cached_value}'")
-            print(f"🔤🧵 CACHE: {cache_key} = {cached_value}", flush=True)
+            # logger.debug(f"CACHE STATE [T:{thread_id}]: key='{cache_key}', cached='{cached_value}'")
         except Exception as cache_e:
-            logger.error(f"🔤🧵 CACHE CHECK ERROR [T:{thread_id}]: {cache_e}")
-        
+            logger.error(f"CACHE CHECK ERROR [T:{thread_id}]: {cache_e}")
+
         # HYPER-COMPREHENSIVE LOGGING - Step 5: Translation Call
-        logger.info(f"🔤🧵 CALLING get_translation [T:{thread_id}]: key='{key}', language='{language}', kwargs={kwargs}")
-        print(f"🔤🧵 CALLING get_translation('{key}', '{language}') [T:{thread_id}]", flush=True)
-        
+        # logger.debug(f"CALLING get_translation [T:{thread_id}]: key='{key}', language='{language}', kwargs={kwargs}")
+
         result = get_translation(key, language, **kwargs)
-        
-        logger.info(f"🔤🧵 TRANSLATION RESULT [T:{thread_id}]: '{key}' [{language}] -> '{result}'")
-        print(f"🔤🧵 RESULT: '{key}' [{language}] -> '{result}' [T:{thread_id}]", flush=True)
-        
+
+        # logger.debug(f"TRANSLATION RESULT [T:{thread_id}]: '{key}' [{language}] -> '{result}'")
+
         # HYPER-COMPREHENSIVE LOGGING - Step 6: Final State
         final_timestamp = time.time()
         duration = final_timestamp - timestamp
-        logger.info(f"🔤🧵 TRANSLATE FILTER END [T:{thread_id}]: duration={duration:.4f}s, final_result='{result}'")
+        # logger.debug(f"TRANSLATE FILTER END [T:{thread_id}]: duration={duration:.4f}s, final_result='{result}'")
         
         return result
 

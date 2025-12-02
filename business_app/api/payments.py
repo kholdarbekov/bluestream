@@ -34,6 +34,11 @@ from business_app.utils.error_handlers import handle_api_exception, create_succe
 from business_app.utils.exceptions import ValidationError, NotFoundError
 from business_app.utils.csrf_protection import csrf_required
 from business_app.tasks.payment_tasks import process_payment_verification, handle_payment_webhook
+from business_app.utils.api_responses import (
+    success_response, error_response, paginated_response, created_response,
+    not_found_response, validation_error_response, forbidden_response,
+    conflict_response, internal_error_response
+)
 from business_app import db
 
 payments_bp = Blueprint('payments', __name__)
@@ -47,17 +52,17 @@ def get_payment_methods():
     """Get available payment methods"""
     try:
         current_user_id = get_jwt_identity()
-        
+
         user = User.query.get(current_user_id)
         if not user:
-            return jsonify({'error': 'User not found'}), 404
-        
+            return not_found_response(message='User not found')
+
         # Get user's saved payment methods
         saved_cards = CreditCard.query.filter_by(
-            user_id=current_user_id, 
+            user_id=current_user_id,
             is_active=True
         ).all()
-        
+
         # Available payment providers
         available_methods = [
             {
@@ -101,17 +106,17 @@ def get_payment_methods():
                 'supported_currencies': ['UZS']
             }
         ]
-        
-        return jsonify({
+
+        return success_response(data={
             'available_methods': available_methods,
             'saved_cards': [
                 serialize_credit_card(card) for card in saved_cards
             ]
         })
-        
+
     except Exception as e:
         current_app.logger.error(f"Get payment methods error: {e}")
-        return jsonify({'error': 'Failed to get payment methods'}), 500
+        return internal_error_response(message='Failed to get payment methods')
 
 
 @payments_bp.route('/create', methods=['POST'])
@@ -123,22 +128,22 @@ def create_payment():
     try:
         current_user_id = get_jwt_identity()
         data = request.get_json()
-        
+
         order_id = data.get('order_id')
         payment_method = data.get('payment_method')
-        
+
         # Validate order
         order = Order.query.filter_by(
-            id=order_id, 
+            id=order_id,
             user_id=current_user_id
         ).first()
-        
+
         if not order:
-            return jsonify({'error': 'Order not found'}), 404
-        
+            return not_found_response(message='Order not found')
+
         if order.is_paid:
-            return jsonify({'error': 'Order is already paid'}), 400
-        
+            return error_response(message='Order is already paid')
+
         # Create payment
         payment_data = {
             'order_id': order_id,
@@ -154,7 +159,7 @@ def create_payment():
                 'customer_phone': order.user.phone
             }
         }
-        
+
         # Use saved card if specified
         saved_card_id = data.get('saved_card_id')
         if saved_card_id:
@@ -165,32 +170,36 @@ def create_payment():
             ).first()
             if card:
                 payment_data['saved_card_id'] = saved_card_id
-        
+
         payment = get_payment_service().create_payment(payment_data)
-        
+
         # For cash payments, mark as pending
         if payment_method == 'cash':
             payment.status = PaymentStatus.PENDING
             db.session.commit()
-            
-            return jsonify({
-                'payment': serialize_payment(payment),
-                'message': 'Cash payment created. Pay on delivery.'
-            }), 201
-        
+
+            return created_response(
+                data={
+                    'payment': serialize_payment(payment),
+                    'message': 'Cash payment created. Pay on delivery.'
+                }
+            )
+
         # For card payments, get payment link
         payment_link = get_payment_service().get_payment_link(payment)
-        
-        return jsonify({
-            'payment': serialize_payment(payment),
-            'payment_link': payment_link
-        }), 201
-        
+
+        return created_response(
+            data={
+                'payment': serialize_payment(payment),
+                'payment_link': payment_link
+            }
+        )
+
     except ValueError as e:
-        return jsonify({'error': str(e)}), 400
+        return error_response(message=str(e))
     except Exception as e:
         current_app.logger.error(f"Create payment error: {e}")
-        return jsonify({'error': 'Failed to create payment'}), 500
+        return internal_error_response(message='Failed to create payment')
 
 
 @payments_bp.route('/subscription', methods=['POST'])
@@ -201,19 +210,19 @@ def create_subscription_payment():
     try:
         current_user_id = get_jwt_identity()
         data = request.get_json()
-        
+
         subscription_id = data.get('subscription_id')
         payment_method = data.get('payment_method')
-        
+
         # Validate subscription
         subscription = Subscription.query.filter_by(
             id=subscription_id,
             user_id=current_user_id
         ).first()
-        
+
         if not subscription:
-            return jsonify({'error': 'Subscription not found'}), 404
-        
+            return not_found_response(message='Subscription not found')
+
         # Create subscription payment
         payment_data = {
             'subscription_id': subscription_id,
@@ -230,20 +239,22 @@ def create_subscription_payment():
                 'billing_cycle': subscription.billing_cycle
             }
         }
-        
+
         payment = get_payment_service().create_payment(payment_data)
         payment_link = get_payment_service().get_payment_link(payment)
-        
-        return jsonify({
-            'payment': serialize_payment(payment),
-            'payment_link': payment_link
-        }), 201
-        
+
+        return created_response(
+            data={
+                'payment': serialize_payment(payment),
+                'payment_link': payment_link
+            }
+        )
+
     except ValueError as e:
-        return jsonify({'error': str(e)}), 400
+        return error_response(message=str(e))
     except Exception as e:
         current_app.logger.error(f"Create subscription payment error: {e}")
-        return jsonify({'error': 'Failed to create subscription payment'}), 500
+        return internal_error_response(message='Failed to create subscription payment')
 
 
 @payments_bp.route('/<int:payment_id>/status', methods=['GET'])
@@ -252,26 +263,24 @@ def get_payment_status(payment_id):
     """Get payment status"""
     try:
         current_user_id = get_jwt_identity()
-        
+
         payment = Payment.query.filter_by(
             id=payment_id,
             user_id=current_user_id
         ).first()
-        
+
         if not payment:
-            return jsonify({'error': 'Payment not found'}), 404
-        
+            return not_found_response(message='Payment not found')
+
         # Update payment status from provider if pending
         if payment.status == PaymentStatus.PENDING:
             get_payment_service().update_payment_status(payment)
-        
-        return jsonify({
-            'payment': serialize_payment(payment)
-        })
-        
+
+        return success_response(data={'payment': serialize_payment(payment)})
+
     except Exception as e:
         current_app.logger.error(f"Get payment status error: {e}")
-        return jsonify({'error': 'Failed to get payment status'}), 500
+        return internal_error_response(message='Failed to get payment status')
 
 
 @payments_bp.route('/', methods=['GET'])
@@ -288,44 +297,42 @@ def get_payments():
         allow_date_filter=True,
         allow_future_dates=True
     )
-    
+
     # Validate payment method filter separately
     payment_method_str = request.args.get('payment_method')
     payment_method = StatusValidator.validate_status_enum(
         payment_method_str, PaymentMethodType, 'payment_method'
     )
-    
+
     # Build query
     query = Payment.query.filter_by(user_id=params['user_id'])
-    
+
     # Apply filters using centralized filter builders
     query = FilterValidator.build_status_filter_query(
         query, Payment.status, params.get('status')
     )
-    
+
     query = FilterValidator.build_status_filter_query(
         query, Payment.payment_method, payment_method
     )
-    
+
     query = FilterValidator.build_date_filter_query(
         query, Payment.created_at, params.get('start_date'), params.get('end_date')
     )
-    
+
     # Order by creation date (newest first)
     query = query.order_by(Payment.created_at.desc())
-    
+
     # Paginate
     pagination = query.paginate(
         page=params['page'], per_page=params['per_page'], error_out=False
     )
-    
-    # Build standardized pagination response
-    response_data = PaginationHelper.build_pagination_response(
-        pagination.items, pagination, serialize_payment
-    )
-    
-    return create_success_response(
-        data={'payments': response_data['items'], 'pagination': response_data['pagination']},
+
+    return paginated_response(
+        items=[serialize_payment(payment) for payment in pagination.items],
+        page=params['page'],
+        per_page=params['per_page'],
+        total=pagination.total,
         message='Payments retrieved successfully'
     )
 
@@ -336,32 +343,34 @@ def cancel_payment(payment_id):
     """Cancel a pending payment"""
     try:
         current_user_id = get_jwt_identity()
-        
+
         payment = Payment.query.filter_by(
             id=payment_id,
             user_id=current_user_id
         ).first()
-        
+
         if not payment:
-            return jsonify({'error': 'Payment not found'}), 404
-        
+            return not_found_response(message='Payment not found')
+
         if payment.status != PaymentStatus.PENDING:
-            return jsonify({'error': 'Only pending payments can be cancelled'}), 400
-        
+            return error_response(message='Only pending payments can be cancelled')
+
         # Cancel payment
         success = get_payment_service().cancel_payment(payment)
-        
+
         if success:
-            return jsonify({
-                'message': 'Payment cancelled successfully',
-                'payment': serialize_payment(payment)
-            })
+            return success_response(
+                data={
+                    'message': 'Payment cancelled successfully',
+                    'payment': serialize_payment(payment)
+                }
+            )
         else:
-            return jsonify({'error': 'Failed to cancel payment'}), 500
-        
+            return internal_error_response(message='Failed to cancel payment')
+
     except Exception as e:
         current_app.logger.error(f"Cancel payment error: {e}")
-        return jsonify({'error': 'Failed to cancel payment'}), 500
+        return internal_error_response(message='Failed to cancel payment')
 
 
 @payments_bp.route('/cards', methods=['GET'])
@@ -370,19 +379,17 @@ def get_saved_cards():
     """Get user's saved credit cards"""
     try:
         current_user_id = get_jwt_identity()
-        
+
         cards = CreditCard.query.filter_by(
             user_id=current_user_id,
             is_active=True
         ).order_by(CreditCard.created_at.desc()).all()
-        
-        return jsonify({
-            'cards': [serialize_credit_card(card) for card in cards]
-        })
-        
+
+        return success_response(data={'cards': [serialize_credit_card(card) for card in cards]})
+
     except Exception as e:
         current_app.logger.error(f"Get saved cards error: {e}")
-        return jsonify({'error': 'Failed to get saved cards'}), 500
+        return internal_error_response(message='Failed to get saved cards')
 
 
 @payments_bp.route('/cards', methods=['POST'])
@@ -395,7 +402,7 @@ def save_card():
     try:
         current_user_id = get_jwt_identity()
         data = request.get_json()
-        
+
         # Comprehensive input validation
         card_number = data.get('card_number', '').strip()
         expiry_month = data.get('expiry_month')
@@ -403,24 +410,24 @@ def save_card():
         cardholder_name = data.get('cardholder_name', '').strip()
         cvv = data.get('cvv', '').strip()  # Optional for validation
         is_default = data.get('is_default', False)
-        
+
         # Validate required fields are not empty
         if not card_number:
-            return jsonify({'error': 'Card number is required'}), 400
+            return error_response(message='Card number is required')
         if not cardholder_name:
-            return jsonify({'error': 'Cardholder name is required'}), 400
-        
+            return error_response(message='Cardholder name is required')
+
         # Validate expiry month and year data types
         try:
             expiry_month = int(expiry_month)
             expiry_year = int(expiry_year)
         except (ValueError, TypeError):
-            return jsonify({'error': 'Invalid expiry month or year format'}), 400
-        
+            return error_response(message='Invalid expiry month or year format')
+
         # Validate boolean type for is_default
         if not isinstance(is_default, bool):
-            return jsonify({'error': 'is_default must be a boolean'}), 400
-        
+            return error_response(message='is_default must be a boolean')
+
         # Build card data for validation and saving
         card_data = {
             'user_id': current_user_id,
@@ -430,35 +437,37 @@ def save_card():
             'cardholder_name': cardholder_name,
             'is_default': is_default
         }
-        
+
         # Add CVV for validation if provided (not stored)
         if cvv:
             card_data['cvv'] = cvv
-        
+
         # Save card using payment service with comprehensive validation
         payment_service = get_payment_service()
         card = payment_service.save_card(card_data)
-        
+
         # Log successful card save
         current_app.logger.info(f"Credit card saved successfully for user {current_user_id}")
-        
-        return jsonify({
-            'message': 'Card saved successfully',
-            'card': serialize_credit_card(card)
-        }), 201
-        
+
+        return created_response(
+            data={
+                'message': 'Card saved successfully',
+                'card': serialize_credit_card(card)
+            }
+        )
+
     except ValidationError as e:
         # Handle validation errors from our card validation
         current_app.logger.warning(f"Card validation failed for user {current_user_id}: {e}")
-        return jsonify({'error': str(e)}), 400
+        return validation_error_response(errors=str(e))
     except ValueError as e:
         # Handle other value errors
         current_app.logger.warning(f"Invalid card data for user {current_user_id}: {e}")
-        return jsonify({'error': str(e)}), 400
+        return error_response(message=str(e))
     except Exception as e:
         # Handle unexpected errors
         current_app.logger.error(f"Unexpected error saving card for user {current_user_id}: {e}")
-        return jsonify({'error': 'Failed to save card. Please try again.'}), 500
+        return internal_error_response(message='Failed to save card. Please try again.')
 
 
 @payments_bp.route('/cards/<int:card_id>', methods=['DELETE'])
@@ -468,23 +477,23 @@ def delete_card(card_id):
     """Delete a saved credit card"""
     try:
         current_user_id = get_jwt_identity()
-        
+
         # Use payment service to delete card with proper validation
         payment_service = get_payment_service()
         success = payment_service.delete_card(card_id, current_user_id)
-        
+
         if success:
-            return jsonify({'message': 'Card deleted successfully'})
+            return success_response(data={'message': 'Card deleted successfully'})
         else:
-            return jsonify({'error': 'Failed to delete card'}), 500
-        
+            return internal_error_response(message='Failed to delete card')
+
     except NotFoundError as e:
-        return jsonify({'error': str(e)}), 404
+        return not_found_response(message=str(e))
     except ValidationError as e:
-        return jsonify({'error': str(e)}), 400
+        return validation_error_response(errors=str(e))
     except Exception as e:
         current_app.logger.error(f"Delete card error: {e}")
-        return jsonify({'error': 'Failed to delete card'}), 500
+        return internal_error_response(message='Failed to delete card')
 
 
 @payments_bp.route('/statistics', methods=['GET'])
@@ -494,7 +503,7 @@ def get_payment_statistics():
     try:
         current_user_id = get_jwt_identity()
         period = request.args.get('period', 'year')  # month, quarter, year, all
-        
+
         # Calculate date range
         now = datetime.now(UTC)
         if period == 'month':
@@ -506,20 +515,20 @@ def get_payment_statistics():
             start_date = now.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
         else:  # all time
             start_date = None
-        
+
         # Base query
         query = Payment.query.filter_by(user_id=current_user_id)
         if start_date:
             query = query.filter(Payment.created_at >= start_date)
-        
+
         payments = query.all()
-        
+
         # Calculate statistics
         total_payments = len(payments)
         successful_payments = len([p for p in payments if p.status == PaymentStatus.COMPLETED])
         failed_payments = len([p for p in payments if p.status == PaymentStatus.FAILED])
         total_amount = sum(p.amount for p in payments if p.status == PaymentStatus.COMPLETED)
-        
+
         # Payment methods breakdown
         method_stats = {}
         for method in PaymentMethodType:
@@ -527,25 +536,25 @@ def get_payment_statistics():
             method_stats[method.value] = {
                 'count': len(method_payments),
                 'total_amount': sum(p.amount for p in method_payments if p.status == PaymentStatus.COMPLETED),
-                'success_rate': (len([p for p in method_payments if p.status == PaymentStatus.COMPLETED]) / 
+                'success_rate': (len([p for p in method_payments if p.status == PaymentStatus.COMPLETED]) /
                                len(method_payments) * 100) if method_payments else 0
             }
-        
+
         # Monthly spending trend
         monthly_spending = {}
         for i in range(12):
             month_start = (now.replace(day=1) - timedelta(days=32*i)).replace(day=1)
-            month_end = (month_start.replace(month=month_start.month % 12 + 1) 
-                        if month_start.month < 12 
+            month_end = (month_start.replace(month=month_start.month % 12 + 1)
+                        if month_start.month < 12
                         else month_start.replace(year=month_start.year + 1, month=1))
-            
-            month_payments = [p for p in payments 
+
+            month_payments = [p for p in payments
                             if month_start <= p.created_at < month_end and p.status == PaymentStatus.COMPLETED]
             month_total = sum(p.amount for p in month_payments)
-            
+
             monthly_spending[month_start.strftime('%Y-%m')] = month_total
-        
-        return jsonify({
+
+        return success_response(data={
             'period': period,
             'statistics': {
                 'total_payments': total_payments,
@@ -558,22 +567,24 @@ def get_payment_statistics():
                 'monthly_spending_trend': monthly_spending
             }
         })
-        
+
     except Exception as e:
         current_app.logger.error(f"Get payment statistics error: {e}")
-        return jsonify({'error': 'Failed to get payment statistics'}), 500
+        return internal_error_response(message='Failed to get payment statistics')
 
 
 @payments_bp.route('/webhook/<provider>', methods=['POST'])
 @rate_limit(100, 60)  # 100 webhook requests per minute
 def payment_webhook(provider):
     """Handle payment webhooks from providers with replay protection"""
+    # Note: This endpoint must use jsonify() directly for provider-specific response formats
+    # as payment providers (Payme, Click) expect specific JSON structures
     try:
         # Comprehensive webhook validation with replay protection
         payment_service = get_payment_service()
         if not payment_service.validate_webhook_signature(provider, request):
             return jsonify({'error': 'Invalid signature or replay detected'}), 401
-        
+
         # Extract webhook data based on provider
         if provider.lower() == 'payme':
             webhook_data = request.get_json() or {}
@@ -582,7 +593,7 @@ def payment_webhook(provider):
         else:
             current_app.logger.error(f"Unsupported webhook provider: {provider}")
             return jsonify({'error': 'Unsupported provider'}), 400
-        
+
         # Add metadata for processing
         webhook_metadata = {
             'provider': provider.lower(),
@@ -592,10 +603,10 @@ def payment_webhook(provider):
             'received_at': datetime.now(UTC).isoformat(),
             'content_type': request.content_type
         }
-        
+
         # Process webhook asynchronously
         handle_payment_webhook.delay(webhook_metadata, provider.lower())
-        
+
         # Return provider-specific response format
         if provider.lower() == 'payme':
             return jsonify({'jsonrpc': '2.0', 'result': {'status': 'received'}}), 200
@@ -603,10 +614,10 @@ def payment_webhook(provider):
             return jsonify({'error': 0, 'error_note': 'Success'}), 200
         else:
             return jsonify({'status': 'received'}), 200
-        
+
     except Exception as e:
         current_app.logger.error(f"Payment webhook error for {provider}: {e}")
-        
+
         # Log security incident
         from business_app.utils.audit_logger import audit_logger, AuditEventType, AuditSeverity
         audit_logger.log_event(
@@ -621,7 +632,7 @@ def payment_webhook(provider):
                 'remote_addr': request.remote_addr
             }
         )
-        
+
         # Return provider-specific error format
         if provider.lower() == 'payme':
             return jsonify({'jsonrpc': '2.0', 'error': {'code': -32000, 'message': 'Server error'}}), 500
@@ -637,26 +648,26 @@ def verify_payment(payment_id):
     """Manually verify payment status"""
     try:
         current_user_id = get_jwt_identity()
-        
+
         payment = Payment.query.filter_by(
             id=payment_id,
             user_id=current_user_id
         ).first()
-        
+
         if not payment:
-            return jsonify({'error': 'Payment not found'}), 404
-        
+            return not_found_response(message='Payment not found')
+
         # Trigger payment verification
         process_payment_verification.delay(payment_id)
-        
-        return jsonify({
+
+        return success_response(data={
             'message': 'Payment verification initiated',
             'payment_id': payment_id
         })
-        
+
     except Exception as e:
         current_app.logger.error(f"Verify payment error: {e}")
-        return jsonify({'error': 'Failed to verify payment'}), 500
+        return internal_error_response(message='Failed to verify payment')
 
 
 @payments_bp.route('/refund', methods=['POST'])
@@ -668,35 +679,37 @@ def request_refund():
     try:
         current_user_id = get_jwt_identity()
         data = request.get_json()
-        
+
         payment_id = data.get('payment_id')
         reason = data.get('reason', 'Customer request')
-        
+
         payment = Payment.query.filter_by(
             id=payment_id,
             user_id=current_user_id
         ).first()
-        
+
         if not payment:
-            return jsonify({'error': 'Payment not found'}), 404
-        
+            return not_found_response(message='Payment not found')
+
         if payment.status != PaymentStatus.COMPLETED:
-            return jsonify({'error': 'Only completed payments can be refunded'}), 400
-        
+            return error_response(message='Only completed payments can be refunded')
+
         # Request refund
         refund = get_payment_service().request_refund(payment, reason)
-        
-        return jsonify({
-            'message': 'Refund request submitted',
-            'refund_id': refund.id,
-            'status': refund.status.value
-        }), 201
-        
+
+        return created_response(
+            data={
+                'message': 'Refund request submitted',
+                'refund_id': refund.id,
+                'status': refund.status.value
+            }
+        )
+
     except ValueError as e:
-        return jsonify({'error': str(e)}), 400
+        return error_response(message=str(e))
     except Exception as e:
         current_app.logger.error(f"Request refund error: {e}")
-        return jsonify({'error': 'Failed to request refund'}), 500
+        return internal_error_response(message='Failed to request refund')
 
 
 @payments_bp.route('/exchange-rates', methods=['GET'])
@@ -712,12 +725,12 @@ def get_exchange_rates():
                 'updated_at': datetime.now(UTC).isoformat()
             }
         }
-        
-        return jsonify({
+
+        return success_response(data={
             'base_currency': 'UZS',
             'rates': rates
         })
-        
+
     except Exception as e:
         current_app.logger.error(f"Get exchange rates error: {e}")
-        return jsonify({'error': 'Failed to get exchange rates'}), 500
+        return internal_error_response(message='Failed to get exchange rates')

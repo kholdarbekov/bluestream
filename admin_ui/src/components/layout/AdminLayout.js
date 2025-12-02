@@ -23,7 +23,8 @@ import {
   TranslationOutlined,
   SettingOutlined,
   LogoutOutlined,
-  MenuOutlined
+  MenuOutlined,
+  FileTextOutlined
 } from '@ant-design/icons';
 import { useAuthStore } from '../../stores/authStore';
 import { useRealTimeWithFallback } from '../../hooks/useRealTimeUpdates';
@@ -92,6 +93,11 @@ const AdminLayout = ({ children }) => {
       key: '/analytics',
       icon: <BarChartOutlined />,
       label: 'Analytics'
+    },
+    {
+      key: '/blog',
+      icon: <FileTextOutlined />,
+      label: 'Blog'
     },
     {
       key: '/translations',

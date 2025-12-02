@@ -249,17 +249,20 @@ class BusinessLogger:
     def log_order_event(self, order_id: int, event: str, user_id: int = None,
                        amount: float = None, additional_info: Dict = None):
         """Log order-related events"""
-        self.logger.info(
-            f"Order {event}: Order {order_id}",
-            extra={
-                'event_type': 'order_event',
-                'order_id': order_id,
-                'event': event,
-                'user_id': user_id,
-                'amount': amount,
-                'additional_info': additional_info or {}
-            }
-        )
+        try:
+            self.logger.info(
+                f"Order {event}: Order {order_id}",
+                extra={
+                    'event_type': 'order_event',
+                    'order_id': order_id,
+                    'event': event,
+                    'user_id': user_id,
+                    'amount': float(amount),
+                    'additional_info': additional_info or {}
+                }
+            )
+        except Exception as e:
+            self.logger.error(f"EXCEPTION in log_order_event: {e}")
     
     def log_payment_event(self, payment_id: str, event: str, amount: float,
                          method: str, user_id: int = None, order_id: int = None,
@@ -340,14 +343,19 @@ class DatabaseQueryLogger:
 
 def setup_enhanced_logging(app):
     """Setup comprehensive logging configuration"""
-    
+
+    # Prevent duplicate initialization
+    if hasattr(app, '_logging_initialized'):
+        return
+    app._logging_initialized = True
+
     # Create logs directory
     log_dir = Path(app.config['LOG_FILE']).parent
     log_dir.mkdir(exist_ok=True)
-    
+
     # Remove default handlers
     app.logger.handlers.clear()
-    
+
     # Configure root logger
     root_logger = logging.getLogger()
     root_logger.handlers.clear()
@@ -482,7 +490,8 @@ def setup_enhanced_logging(app):
     if app.debug:
         app.logger.addHandler(console_handler)
     app.logger.setLevel(logging.DEBUG if app.debug else getattr(logging, app.config['LOG_LEVEL']))
-    
+    app.logger.propagate = False  # Prevent duplicate logs from propagating to root logger
+
     # EXPLICITLY DISABLE SQLAlchemy logging for debugging
     logging.getLogger('sqlalchemy.engine').setLevel(logging.CRITICAL)
     logging.getLogger('sqlalchemy.dialects').setLevel(logging.CRITICAL)

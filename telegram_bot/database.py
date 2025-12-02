@@ -119,7 +119,7 @@ class BotUserRepository:
         """Update user's language preference"""
         query = """
         UPDATE users 
-        SET preferred_language = $1, telegram_language_code = $1, updated_at = CURRENT_TIMESTAMP
+        SET preferred_language = $1, updated_at = CURRENT_TIMESTAMP
         WHERE telegram_id = $2
         """
         await self.db.execute(query, language_code, str(telegram_id))

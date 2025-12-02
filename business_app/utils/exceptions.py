@@ -212,3 +212,16 @@ class SecurityError(WaterBusinessException):
                  error_code: Optional[str] = None):
         super().__init__(message, details, error_code)
         self.security_rule = security_rule
+
+
+class FileValidationError(WaterBusinessException):
+    """Raised when file validation fails"""
+    
+    def __init__(self, message: str = "File validation failed", 
+                 details: Optional[Dict[str, Any]] = None,
+                 file_name: Optional[str] = None,
+                 validation_errors: Optional[List[str]] = None,
+                 error_code: Optional[str] = None):
+        super().__init__(message, details, error_code)
+        self.file_name = file_name
+        self.validation_errors = validation_errors or []

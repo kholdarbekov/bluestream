@@ -7,10 +7,11 @@ from datetime import datetime, timezone, timedelta
 from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import jwt_required, get_jwt_identity, get_jwt, set_access_cookies, set_refresh_cookies, unset_jwt_cookies
 from flasgger import swag_from
+from pydantic import ValidationError as PydanticValidationError
 
 from business_app.utils.service_factory import get_auth_service
 from business_app.utils.decorators import (
-    require_auth, validate_json, handle_exceptions, 
+    require_auth, validate_json, handle_exceptions,
     rate_limit, log_request
 )
 from business_app.middleware import jwt_required_with_refresh
@@ -18,9 +19,21 @@ from business_app.utils.validators import phone_validator, email_validator
 from business_app.utils.exceptions import ValidationError, UnauthorizedError, ConflictError
 from business_app.utils.helpers import get_current_language
 from business_app.utils.translations import get_translation
+from business_app.utils.constants import UserRole, UserStatus
 from business_app.utils.csrf_protection import csrf_required
 from business_app.models.user import User
 from business_app import db
+from business_app.utils.api_responses import (
+    success_response,
+    error_response,
+    created_response,
+    not_found_response,
+    unauthorized_response,
+    forbidden_response,
+    validation_error_response,
+    internal_error_response,
+    conflict_response
+)
 
 
 # Create blueprint
@@ -31,7 +44,6 @@ logger = logging.getLogger(__name__)
 
 
 @auth_bp.route('/register', methods=['POST'])
-@csrf_required
 @rate_limit(10, 3600)  # 10 registrations per hour
 @validate_json(['email', 'password', 'phone', 'first_name', 'last_name'])
 @handle_exceptions
@@ -121,30 +133,35 @@ def register():
             referral_code=data.get('referral_code')
         )
         
-        return jsonify({
-            'success': True,
-            'message': get_translation('registration_successful'),
-            'data': {
+        return created_response(
+            data={
                 'user': {
                     'id': user.id,
                     'email': user.email,
                     'phone': user.phone,
                     'first_name': user.first_name,
                     'last_name': user.last_name,
-                    'status': user.status,
+                    'status': user.status.value if hasattr(user.status, 'value') else user.status,
                     'email_verified': user.email_verified_at is not None,
                     'phone_verified': user.phone_verified_at is not None
                 },
                 'tokens': tokens
-            }
-        }), 201
-        
-    except (ValidationError, ConflictError) as e:
-        return jsonify({
-            'success': False,
-            'message': e.message,
-            'errors': e.details
-        }), 400 if isinstance(e, ValidationError) else 409
+            },
+            message=get_translation('api.auth.registration_successful')
+        )
+
+    except ValidationError as e:
+        return error_response(
+            message=e.message,
+            errors=e.details,
+            status_code=400
+        )
+    except ConflictError as e:
+        return error_response(
+            message=e.message,
+            errors=e.details,
+            status_code=409
+        )
 
 
 @auth_bp.route('/login', methods=['POST'])
@@ -212,41 +229,41 @@ def login():
             password=data['password']
         )
         
-        # Create response
-        response = jsonify({
-            'success': True,
-            'message': get_translation('login_successful'),
-            'data': {
+        # Create response with standardized format
+        response_data, status_code = success_response(
+            data={
                 'user': {
                     'id': user.id,
                     'email': user.email,
                     'phone': user.phone,
                     'first_name': user.first_name,
                     'last_name': user.last_name,
-                    'role': user.role,
-                    'status': user.status,
+                    'role': user.role.value if hasattr(user.role, 'value') else user.role,
+                    'status': user.status.value if hasattr(user.status, 'value') else user.status,
                     'email_verified': user.email_verified_at is not None,
                     'phone_verified': user.phone_verified_at is not None,
                     'last_login': user.last_login.isoformat() if user.last_login else None
                 },
                 'tokens': tokens,
                 'permissions': get_auth_service().get_user_permissions(user.id)
-            }
-        })
-        
+            },
+            message=get_translation('api.auth.login_successful')
+        )
+
         # Set JWT cookies for frontend navigation
-        set_access_cookies(response, tokens['access_token'])
-        set_refresh_cookies(response, tokens['refresh_token'])
-        
-        return response
-        
-    except (UnauthorizedError, ValidationError) as e:
-        status_code = 401 if isinstance(e, UnauthorizedError) else 423
-        return jsonify({
-            'success': False,
-            'message': e.message,
-            'errors': e.details
-        }), status_code
+        set_access_cookies(response_data, tokens['access_token'])
+        set_refresh_cookies(response_data, tokens['refresh_token'])
+
+        return response_data, status_code
+
+    except UnauthorizedError as e:
+        return unauthorized_response(message=e.message)
+    except ValidationError as e:
+        return error_response(
+            message=e.message,
+            errors=e.details,
+            status_code=423
+        )
 
 
 @auth_bp.route('/send-otp', methods=['POST'])
@@ -287,19 +304,18 @@ def send_otp():
     phone = data.get('phone')
     user_id = get_jwt_identity()
     
-    if not phone_validator(phone):
-        return jsonify({
-            'success': False,
-            'message': get_translation('invalid_phone_format')
-        }), 400
-    
+    if phone_validator(phone):
+        return validation_error_response(
+            errors=[get_translation('error.validation.invalid_phone')]
+        )
+
     # Check if phone number is already in use by another user
     existing_user = User.query.filter(
         User.phone == phone,
         User.id != user_id,
         User.status != 'inactive'
     ).first()
-    
+
     if existing_user:
         # Log suspicious activity
         from business_app.utils.audit_logger import audit_suspicious_activity
@@ -307,10 +323,10 @@ def send_otp():
             f"User {user_id} attempted to verify phone {phone} already in use by user {existing_user.id}",
             additional_data={'target_phone': phone, 'existing_user_id': existing_user.id}
         )
-        return jsonify({
-            'success': False,
-            'message': get_translation('phone_already_in_use')
-        }), 409
+        return error_response(
+            message=get_translation('api.auth.email_already_exists'),
+            status_code=409
+        )
     
     # Store pending phone number in Redis for verification
     auth_service = get_auth_service()
@@ -331,20 +347,18 @@ def send_otp():
     
     # Generate and send OTP to the new phone number
     success = auth_service.send_verification_sms(user_id, phone)
-    
+
     if success:
-        return jsonify({
-            'success': True,
-            'message': get_translation('otp_sent_successfully'),
-            'data': {
+        return success_response(
+            data={
                 'phone_masked': phone[:3] + '***' + phone[-4:] if len(phone) > 7 else '***'
-            }
-        })
+            },
+            message=get_translation('api.auth.phone_verified')
+        )
     else:
-        return jsonify({
-            'success': False,
-            'message': get_translation('failed_to_send_otp')
-        }), 500
+        return internal_error_response(
+            message=get_translation('error.server_error')
+        )
   
 
 @auth_bp.route('/refresh', methods=['POST'])
@@ -395,23 +409,16 @@ def refresh():
             token_service = TokenService()
             tokens = token_service.refresh_access_token(data['refresh_token'])
         
-        return jsonify({
-            'success': True,
-            'message': get_translation('token_refreshed'),
-            'data': tokens
-        })
-        
+        return success_response(
+            data=tokens,
+            message=get_translation('api.auth.token_invalid')
+        )
+
     except UnauthorizedError as e:
-        return jsonify({
-            'success': False,
-            'message': e.message
-        }), 401
+        return unauthorized_response(message=e.message)
     except Exception as e:
         logger.error(f"Token refresh failed: {e}")
-        return jsonify({
-            'success': False,
-            'message': 'Failed to refresh token'
-        }), 401
+        return unauthorized_response(message=get_translation('api.auth.token_invalid'))
 
 
 
@@ -447,17 +454,16 @@ def verify_email():
     data = request.get_json()
     
     success = get_auth_service().verify_email(data['token'])
-    
+
     if success:
-        return jsonify({
-            'success': True,
-            'message': get_translation('email_verified_successfully')
-        })
+        return success_response(
+            message=get_translation('api.auth.phone_verified')
+        )
     else:
-        return jsonify({
-            'success': False,
-            'message': get_translation('invalid_verification_token')
-        }), 400
+        return error_response(
+            message=get_translation('api.auth.token_invalid'),
+            status_code=400
+        )
 
 
 @auth_bp.route('/verify-phone', methods=['POST'])
@@ -522,10 +528,9 @@ def verify_phone():
                 f"User {user_id} attempted phone verification without pending phone number",
                 additional_data={'attempted_otp': data['otp']}
             )
-            return jsonify({
-                'success': False,
-                'message': get_translation('no_pending_phone_verification')
-            }), 404
+            return not_found_response(
+                message=get_translation('error.not_found')
+            )
         
         pending_phone = pending_phone.decode('utf-8')
         
@@ -559,19 +564,17 @@ def verify_phone():
                 )
                 
                 logger.info(f"Phone verified and updated successfully for user {user_id}: {old_phone} -> {pending_phone}")
-                return jsonify({
-                    'success': True,
-                    'message': get_translation('phone_verified_successfully'),
-                    'data': {
+                return success_response(
+                    data={
                         'phone': pending_phone,
                         'phone_verified': True
-                    }
-                })
+                    },
+                    message=get_translation('api.auth.phone_verified')
+                )
             else:
-                return jsonify({
-                    'success': False,
-                    'message': get_translation('user_not_found')
-                }), 404
+                return not_found_response(
+                    message=get_translation('error.not_found')
+                )
         else:
             # Log failed verification attempt
             from business_app.utils.audit_logger import audit_logger, AuditEventType, AuditSeverity
@@ -588,11 +591,11 @@ def verify_phone():
             )
             
             logger.warning(f"Invalid OTP provided for user {user_id}")
-            return jsonify({
-                'success': False,
-                'message': get_translation('invalid_otp')
-            }), 400
-            
+            return error_response(
+                message=get_translation('api.auth.invalid_credentials'),
+                status_code=400
+            )
+
     except Exception as e:
         logger.error(f"Error in verify phone/OTP: {e}")
         # Log system error
@@ -607,10 +610,9 @@ def verify_phone():
             success=False,
             error_message=str(e)
         )
-        return jsonify({
-            'success': False,
-            'message': 'Failed to verify OTP'
-        }), 500
+        return internal_error_response(
+            message=get_translation('error.server_error')
+        )
 
 
 @auth_bp.route('/resend-email-verification', methods=['POST'])
@@ -631,13 +633,12 @@ def resend_email_verification():
         description: Verification email sent
     """
     user_id = get_jwt_identity()
-    
+
     success = get_auth_service().send_verification_email(user_id)
-    
-    return jsonify({
-        'success': success,
-        'message': get_translation('verification_email_sent')
-    })
+
+    return success_response(
+        message=get_translation('success.sent')
+    )
 
 
 @auth_bp.route('/resend-sms-verification', methods=['POST'])
@@ -658,13 +659,12 @@ def resend_sms_verification():
         description: Verification SMS sent
     """
     user_id = get_jwt_identity()
-    
+
     success = get_auth_service().send_verification_sms(user_id)
-    
-    return jsonify({
-        'success': success,
-        'message': get_translation('verification_sms_sent')
-    })
+
+    return success_response(
+        message=get_translation('success.sent')
+    )
 
 
 @auth_bp.route('/forgot-password', methods=['POST'])
@@ -699,11 +699,10 @@ def forgot_password():
     
     # Always return success to prevent email enumeration
     get_auth_service().request_password_reset(data['identifier'].strip())
-    
-    return jsonify({
-        'success': True,
-        'message': get_translation('password_reset_email_sent')
-    })
+
+    return success_response(
+        message=get_translation('success.sent')
+    )
 
 
 @auth_bp.route('/reset-password', methods=['POST'])
@@ -744,24 +743,23 @@ def reset_password():
     
     try:
         success = get_auth_service().reset_password(data['token'], data['new_password'])
-        
+
         if success:
-            return jsonify({
-                'success': True,
-                'message': get_translation('password_reset_successful')
-            })
+            return success_response(
+                message=get_translation('success.updated')
+            )
         else:
-            return jsonify({
-                'success': False,
-                'message': get_translation('invalid_reset_token')
-            }), 400
-            
+            return error_response(
+                message=get_translation('api.auth.token_invalid'),
+                status_code=400
+            )
+
     except ValidationError as e:
-        return jsonify({
-            'success': False,
-            'message': e.message,
-            'errors': e.details
-        }), 400
+        return error_response(
+            message=e.message,
+            errors=e.details,
+            status_code=400
+        )
 
 
 @auth_bp.route('/change-password', methods=['POST'])
@@ -808,29 +806,29 @@ def change_password():
     
     try:
         success = get_auth_service().change_password(
-            user_id, 
-            data['current_password'], 
+            user_id,
+            data['current_password'],
             data['new_password']
         )
-        
+
         if success:
-            return jsonify({
-                'success': True,
-                'message': get_translation('password_changed_successfully')
-            })
+            return success_response(
+                message=get_translation('success.updated')
+            )
         else:
-            return jsonify({
-                'success': False,
-                'message': get_translation('password_change_failed')
-            }), 400
-            
-    except (ValidationError, UnauthorizedError) as e:
-        status_code = 400 if isinstance(e, ValidationError) else 401
-        return jsonify({
-            'success': False,
-            'message': e.message,
-            'errors': e.details if hasattr(e, 'details') else None
-        }), status_code
+            return error_response(
+                message=get_translation('error.server_error'),
+                status_code=400
+            )
+
+    except ValidationError as e:
+        return error_response(
+            message=e.message,
+            errors=e.details,
+            status_code=400
+        )
+    except UnauthorizedError as e:
+        return unauthorized_response(message=e.message)
 
 
 @auth_bp.route('/profile', methods=['GET'])
@@ -860,25 +858,23 @@ def get_profile():
     
     from business_app.models.user import User
     user = User.query.get(user_id)
-    
+
     if not user:
-        return jsonify({
-            'success': False,
-            'message': get_translation('user_not_found')
-        }), 404
-    
-    return jsonify({
-        'success': True,
-        'data': {
+        return not_found_response(
+            message=get_translation('error.not_found')
+        )
+
+    return success_response(
+        data={
             'id': user.id,
             'email': user.email,
             'phone': user.phone,
             'first_name': user.first_name,
             'last_name': user.last_name,
             'date_of_birth': user.date_of_birth.isoformat() if user.date_of_birth else None,
-            'gender': user.gender,
-            'role': user.role,
-            'status': user.status,
+            'gender': user.gender.value if hasattr(user.gender, 'value') else user.gender,
+            'role': user.role.value if hasattr(user.role, 'value') else user.role,
+            'status': user.status.value if hasattr(user.status, 'value') else user.status,
             'email_verified': user.email_verified_at is not None,
             'phone_verified': user.phone_verified_at is not None,
             'created_at': user.created_at.isoformat(),
@@ -886,7 +882,7 @@ def get_profile():
             'preferred_language': getattr(user, 'preferred_language', 'en'),
             'permissions': get_auth_service().get_user_permissions(user_id)
         }
-    })
+    )
 
 
 @auth_bp.route('/permissions', methods=['GET'])
@@ -916,11 +912,10 @@ def get_permissions():
     """
     user_id = get_jwt_identity()
     permissions = get_auth_service().get_user_permissions(user_id)
-    
-    return jsonify({
-        'success': True,
-        'data': permissions
-    })
+
+    return success_response(
+        data=permissions
+    )
 
 
 @auth_bp.route('/addresses', methods=['GET'])
@@ -955,13 +950,12 @@ def get_user_addresses():
     
     from business_app.models.user import UserAddress
     addresses = UserAddress.query.filter_by(user_id=user_id).all()
-    
-    return jsonify({
-        'success': True,
-        'data': {
+
+    return success_response(
+        data={
             'addresses': [addr.to_dict() for addr in addresses]
         }
-    })
+    )
 
 
 @auth_bp.route('/addresses', methods=['POST'])
@@ -1051,14 +1045,13 @@ def add_user_address():
     
     db.session.add(address)
     db.session.commit()
-    
-    return jsonify({
-        'success': True,
-        'message': get_translation('address_added_successfully'),
-        'data': {
+
+    return created_response(
+        data={
             'address': address.to_dict()
-        }
-    }), 201
+        },
+        message=get_translation('address_added_successfully')
+    )
 
 
 @auth_bp.route('/addresses/<int:address_id>', methods=['PUT', 'PATCH'])
@@ -1141,11 +1134,8 @@ def update_user_address(address_id):
     # Find address belonging to current user
     address = UserAddress.query.filter_by(id=address_id, user_id=user_id).first()
     if not address:
-        return jsonify({
-            'success': False,
-            'message': 'Address not found'
-        }), 404
-    
+        return not_found_response(message='Address not found')
+
     # Update address fields (partial update support)
     if 'title' in data:
         address.title = data['title']
@@ -1171,16 +1161,15 @@ def update_user_address(address_id):
         address.floor_number = data['floor_number']
     if 'apartment_number' in data:
         address.apartment_number = data['apartment_number']
-    
+
     db.session.commit()
-    
-    return jsonify({
-        'success': True,
-        'message': 'Address updated successfully',
-        'data': {
+
+    return success_response(
+        data={
             'address': address.to_dict()
-        }
-    })
+        },
+        message='Address updated successfully'
+    )
 
 
 @auth_bp.route('/addresses/<int:address_id>', methods=['DELETE'])
@@ -1215,31 +1204,27 @@ def delete_user_address(address_id):
     # Find address belonging to current user
     address = UserAddress.query.filter_by(id=address_id, user_id=user_id).first()
     if not address:
-        return jsonify({
-            'success': False,
-            'message': 'Address not found'
-        }), 404
-    
+        return not_found_response(message='Address not found')
+
     # Check if trying to delete default address when other addresses exist
     if address.is_default:
         other_addresses_count = UserAddress.query.filter(
             UserAddress.user_id == user_id,
             UserAddress.id != address_id
         ).count()
-        
+
         if other_addresses_count > 0:
-            return jsonify({
-                'success': False,
-                'message': 'Cannot delete default address. Please set another address as default first.'
-            }), 400
-    
+            return error_response(
+                message=get_translation('error.forbidden'),
+                status_code=400
+            )
+
     db.session.delete(address)
     db.session.commit()
-    
-    return jsonify({
-        'success': True,
-        'message': 'Address deleted successfully'
-    })
+
+    return success_response(
+        message=get_translation('success.deleted')
+    )
 
 
 @auth_bp.route('/addresses/<int:address_id>/set-default', methods=['PATCH'])
@@ -1272,25 +1257,21 @@ def set_default_address(address_id):
     # Find address belonging to current user
     address = UserAddress.query.filter_by(id=address_id, user_id=user_id).first()
     if not address:
-        return jsonify({
-            'success': False,
-            'message': 'Address not found'
-        }), 404
-    
+        return not_found_response(message='Address not found')
+
     # Unset all other addresses as default for this user
     UserAddress.query.filter_by(user_id=user_id, is_default=True).update({'is_default': False})
-    
+
     # Set this address as default
     address.is_default = True
     db.session.commit()
-    
-    return jsonify({
-        'success': True,
-        'message': 'Address set as default successfully',
-        'data': {
+
+    return success_response(
+        data={
             'address': address.to_dict()
-        }
-    })
+        },
+        message=get_translation('success.updated')
+    )
 
 
 @auth_bp.route('/profile', methods=['PUT'])
@@ -1344,26 +1325,15 @@ def update_profile():
     
     from business_app.models.user import User
     user = User.query.get(user_id)
-    
+
     if not user:
-        return jsonify({
-            'success': False,
-            'message': get_translation('user_not_found')
-        }), 404
+        return not_found_response(message=get_translation('user_not_found'))
     
     # Update fields if provided
     if 'first_name' in data:
         user.first_name = data['first_name']
     if 'last_name' in data:
         user.last_name = data['last_name']
-    if 'full_name' in data:
-        user.full_name = data['full_name']
-        # Also update first/last name from full name if not already provided
-        if 'first_name' not in data and 'last_name' not in data:
-            name_parts = data['full_name'].split()
-            if name_parts:
-                user.first_name = name_parts[0]
-                user.last_name = ' '.join(name_parts[1:]) if len(name_parts) > 1 else ''
     if 'phone' in data:
         # Log attempt to update phone through profile endpoint
         from business_app.utils.audit_logger import audit_logger, AuditEventType, AuditSeverity
@@ -1394,34 +1364,37 @@ def update_profile():
     from datetime import datetime, timezone
     user.updated_at = datetime.now(timezone.utc)
     db.session.commit()
-    
-    response_data = {
-        'success': True,
-        'message': get_translation('profile_updated_successfully'),
-        'data': {
-            'user': {
-                'id': user.id,
-                'email': user.email,
-                'phone': user.phone,
-                'first_name': user.first_name,
-                'last_name': user.last_name,
-                'full_name': user.full_name,
-                'date_of_birth': user.date_of_birth.isoformat() if user.date_of_birth else None,
-                'gender': user.gender,
-                'role': user.role,
-                'status': user.status,
-                'preferred_language': user.preferred_language,
-                'updated_at': user.updated_at.isoformat()
-            }
-        }
+
+    user_data = {
+        'id': user.id,
+        'email': user.email,
+        'phone': user.phone,
+        'first_name': user.first_name,
+        'last_name': user.last_name,
+        'full_name': user.full_name,
+        'date_of_birth': user.date_of_birth.isoformat() if user.date_of_birth else None,
+        'gender': user.gender,
+        'role': user.role.value if hasattr(user.role, 'value') else user.role,
+        'status': user.status.value if hasattr(user.status, 'value') else user.status,
+        'preferred_language': user.preferred_language,
+        'updated_at': user.updated_at.isoformat()
     }
-    
+
     # Add warning if phone update was attempted
     if 'phone' in data:
-        response_data['warning'] = get_translation('phone_update_requires_verification')
-        response_data['data']['phone_change_instructions'] = get_translation('use_change_phone_endpoint')
-    
-    return jsonify(response_data)
+        user_data['phone_change_instructions'] = get_translation('use_change_phone_endpoint')
+        return success_response(
+            data={
+                'user': user_data,
+                'warning': get_translation('error.forbidden')
+            },
+            message=get_translation('success.updated')
+        )
+
+    return success_response(
+        data={'user': user_data},
+        message=get_translation('profile_updated_successfully')
+    )
 
 
 @auth_bp.route('/change-phone', methods=['POST'])
@@ -1465,25 +1438,23 @@ def change_phone():
     new_phone = data.get('new_phone')
     user_id = get_jwt_identity()
     
-    if not phone_validator(new_phone):
-        return jsonify({
-            'success': False,
-            'message': get_translation('invalid_phone_format')
-        }), 400
-    
+    if phone_validator(new_phone):
+        return validation_error_response(
+            errors=[get_translation('error.validation.invalid_phone')]
+        )
+
     user = User.query.get(user_id)
     if not user:
-        return jsonify({
-            'success': False,
-            'message': get_translation('user_not_found')
-        }), 404
-    
+        return not_found_response(
+            message=get_translation('error.not_found')
+        )
+
     # Check if it's the same as current phone
     if user.phone == new_phone:
-        return jsonify({
-            'success': False,
-            'message': get_translation('phone_already_current')
-        }), 400
+        return error_response(
+            message=get_translation('error.forbidden'),
+            status_code=400
+        )
     
     # Check if phone number is already in use by another user
     existing_user = User.query.filter(
@@ -1499,10 +1470,10 @@ def change_phone():
             f"User {user_id} attempted to change to phone {new_phone} already in use by user {existing_user.id}",
             additional_data={'target_phone': new_phone, 'existing_user_id': existing_user.id}
         )
-        return jsonify({
-            'success': False,
-            'message': get_translation('phone_already_in_use')
-        }), 409
+        return error_response(
+            message=get_translation('api.auth.email_already_exists'),
+            status_code=409
+        )
     
     # Store pending phone number change request with audit
     auth_service = get_auth_service()
@@ -1529,22 +1500,20 @@ def change_phone():
     
     # Generate and send OTP to the new phone number
     success = auth_service.send_verification_sms(user_id, new_phone)
-    
+
     if success:
-        return jsonify({
-            'success': True,
-            'message': get_translation('phone_change_otp_sent'),
-            'data': {
+        return success_response(
+            data={
                 'current_phone': user.phone,
                 'new_phone_masked': new_phone[:3] + '***' + new_phone[-4:] if len(new_phone) > 7 else '***',
                 'expires_in': 1800  # 30 minutes
-            }
-        })
+            },
+            message=get_translation('success.sent')
+        )
     else:
-        return jsonify({
-            'success': False,
-            'message': get_translation('failed_to_send_otp')
-        }), 500
+        return internal_error_response(
+            message=get_translation('error.server_error')
+        )
 
 
 @auth_bp.route('/cancel-phone-change', methods=['POST'])
@@ -1573,16 +1542,15 @@ def cancel_phone_change():
     pending_phone = auth_service.redis_client.get(pending_phone_key)
     
     if not pending_phone:
-        return jsonify({
-            'success': False,
-            'message': get_translation('no_pending_phone_change')
-        }), 404
-    
+        return not_found_response(
+            message=get_translation('error.not_found')
+        )
+
     pending_phone = pending_phone.decode('utf-8')
-    
+
     # Remove pending phone change
     auth_service.redis_client.delete(pending_phone_key)
-    
+
     # Log cancellation with audit
     from business_app.utils.audit_logger import audit_logger, AuditEventType, AuditSeverity
     audit_logger.log_event(
@@ -1594,11 +1562,10 @@ def cancel_phone_change():
         description=f"Phone change to {pending_phone} was cancelled by user",
         additional_data={'cancelled_phone': pending_phone}
     )
-    
-    return jsonify({
-        'success': True,
-        'message': get_translation('phone_change_cancelled')
-    })
+
+    return success_response(
+        message=get_translation('success.deleted')
+    )
 
 
 @auth_bp.route('/telegram-login', methods=['POST'])
@@ -1684,8 +1651,8 @@ def telegram_login():
                     'phone': user.phone,
                     'first_name': user.first_name,
                     'last_name': user.last_name,
-                    'role': user.role,
-                    'status': user.status,
+                    'role': user.role.value if hasattr(user.role, 'value') else user.role,
+                    'status': user.status.value if hasattr(user.status, 'value') else user.status,
                     'is_verified': user.is_verified,
                     'is_premium': user.is_premium
                 }
@@ -1694,31 +1661,47 @@ def telegram_login():
         
         logger.info(f"Returning successful response for user: {user.id}")
         logger.info("=== TELEGRAM LOGIN API SUCCESS ===")
-        return jsonify(response_data)
-        
+        return success_response(
+            data={
+                'access_token': tokens['access_token'],
+                'refresh_token': tokens['refresh_token'],
+                'user': {
+                    'id': user.id,
+                    'telegram_id': user.telegram_id,
+                    'email': user.email,
+                    'phone': user.phone,
+                    'first_name': user.first_name,
+                    'last_name': user.last_name,
+                    'role': user.role.value if hasattr(user.role, 'value') else user.role,
+                    'status': user.status.value if hasattr(user.status, 'value') else user.status,
+                    'is_verified': user.is_verified,
+                    'is_premium': user.is_premium
+                }
+            }
+        )
+
     except UnauthorizedError as e:
         logger.error(f"Unauthorized error during telegram login: {e}")
         # User not found - create a temporary guest user or return specific error
-        return jsonify({
-            'success': False,
-            'message': get_translation('telegram_user_not_registered'),
-            'error_code': 'USER_NOT_REGISTERED',
-            'data': {
+        return error_response(
+            message=get_translation('api.auth.unauthorized'),
+            data={
                 'telegram_id': telegram_id,
-                'registration_required': True
-            }
-        }), 401
+                'registration_required': True,
+                'error_code': 'USER_NOT_REGISTERED'
+            },
+            status_code=401
+        )
     except Exception as e:
         logger.error(f"Unexpected error during telegram login: {e}")
         logger.error(f"Exception type: {type(e)}")
         import traceback
         logger.error(f"Traceback: {traceback.format_exc()}")
         logger.error("=== TELEGRAM LOGIN API ERROR ===")
-        
-        return jsonify({
-            'success': False,
-            'message': get_translation('authentication_failed')
-        }), 500
+
+        return internal_error_response(
+            message=get_translation('api.auth.invalid_credentials')
+        )
 
 
 @auth_bp.route('/telegram-register', methods=['POST'])
@@ -1800,17 +1783,16 @@ def telegram_register():
             from business_app.services.cross_platform_sync_service import cross_platform_sync_service
             sync_suggestions = cross_platform_sync_service.suggest_account_linking(existing_user)
             platform_status = cross_platform_sync_service.get_user_platform_status(existing_user)
-            
-            return jsonify({
-                'success': True,
-                'message': get_translation('user_already_registered'),
-                'data': {
+
+            return success_response(
+                data={
                     'user': existing_user.to_dict(),
                     'tokens': tokens,
                     'platform_status': platform_status,
                     'linking_suggestions': sync_suggestions
-                }
-            })
+                },
+                message=get_translation('api.auth.email_already_exists')
+            )
         
         # Check for potential account matches before creating new user
         from business_app.services.cross_platform_sync_service import cross_platform_sync_service
@@ -1825,16 +1807,15 @@ def telegram_register():
         # If matches found, suggest linking instead of creating new account
         if potential_matches:
             logger.info(f"Found {len(potential_matches)} potential account matches for telegram registration")
-            return jsonify({
-                'success': False,
-                'message': get_translation('account_already_exists_suggest_linking'),
-                'error_code': 'ACCOUNT_MATCH_FOUND',
-                'data': {
+            return error_response(
+                message=get_translation('api.auth.email_already_exists'),
+                data={
+                    'error_code': 'ACCOUNT_MATCH_FOUND',
                     'potential_matches': [
                         {
                             'user_id': match.id,
                             'email': match.email,
-                            'name': match.full_name or f"{match.first_name} {match.last_name}".strip(),
+                            'name': f"{match.first_name} {match.last_name}".strip(),
                             'registration_source': match.registration_source,
                             'has_telegram': bool(match.telegram_id)
                         }
@@ -1847,34 +1828,27 @@ def telegram_register():
                             'endpoint': '/api/v1/auth/link-web-account'
                         }
                     ]
-                }
-            }), 409
+                },
+                status_code=409
+            )
         
         # Create new telegram user in unified table
         logger.info("Creating new telegram user in unified table...")
-        
-        full_name = f"{data.get('first_name', '')} {data.get('last_name', '')}".strip()
-        if not full_name:
-            full_name = f"User {telegram_id}"
         
         user = User(
             telegram_id=str(telegram_id),
             first_name=data.get('first_name', 'Telegram User'),
             last_name=data.get('last_name', ''),
-            full_name=full_name,
             email=f"telegram_{telegram_id}@bluestream.local",  # Placeholder email
             phone=None,  # Phone will be collected later
             password_hash="telegram_user",  # Placeholder, no password needed
-            role='customer',
-            status='active',
+            role=UserRole.CUSTOMER,
+            status=UserStatus.ACTIVE,
             is_verified=False,
             registration_source='telegram',
             preferred_language=data.get('language_code', 'en'),
             # Bot-specific fields in unified table
             telegram_username=data.get('username'),
-            telegram_first_name=data.get('first_name'),
-            telegram_last_name=data.get('last_name'),
-            telegram_language_code=data.get('language_code', 'en'),
             is_bot_active=True,
             bot_state='{}',  # Empty initial state
             last_bot_interaction=datetime.now(timezone.utc)
@@ -1889,26 +1863,22 @@ def telegram_register():
         tokens = token_service.generate_tokens(user)
         
         logger.info(f"Successfully created telegram user with ID: {user.id}")
-        
-        return jsonify({
-            'success': True,
-            'message': get_translation('registration_successful'),
-            'data': {
+
+        return created_response(
+            data={
                 'user': user.to_dict(),
                 'tokens': tokens
-            }
-        }), 201
+            },
+            message=get_translation('api.auth.registration_successful')
+        )
         
     except Exception as e:
         logger.error(f"Unexpected error during telegram registration: {e}")
         import traceback
         logger.error(f"Traceback: {traceback.format_exc()}")
         db.session.rollback()
-        
-        return jsonify({
-            'success': False,
-            'message': get_translation('registration_failed')
-        }), 500
+
+        return internal_error_response(message=get_translation('error.server_error'))
 
 
 @auth_bp.route('/link-telegram', methods=['POST'])
@@ -1962,10 +1932,7 @@ def link_telegram():
     ).first()
     
     if existing_user:
-        return jsonify({
-            'success': False,
-            'message': get_translation('telegram_already_linked')
-        }), 409
+        return conflict_response(message=get_translation('api.auth.email_already_exists'))
     
     # Update current user with telegram info
     user = User.query.get(current_user_id)
@@ -1978,11 +1945,9 @@ def link_telegram():
         user.last_name = data.get('last_name')
     
     db.session.commit()
-    
-    return jsonify({
-        'success': True,
-        'message': get_translation('telegram_linked_successfully'),
-        'data': {
+
+    return success_response(
+        data={
             'user': {
                 'id': user.id,
                 'telegram_id': user.telegram_id,
@@ -1991,8 +1956,9 @@ def link_telegram():
                 'email': user.email,
                 'phone': user.phone
             }
-        }
-    })
+        },
+        message=get_translation('success.saved')
+    )
 
 
 @auth_bp.route('/link-web-account', methods=['POST'])
@@ -2042,25 +2008,16 @@ def link_web_account():
     # Find telegram user
     telegram_user = User.query.filter_by(telegram_id=telegram_id).first()
     if not telegram_user:
-        return jsonify({
-            'success': False,
-            'message': get_translation('telegram_user_not_found')
-        }), 404
+        return not_found_response(message=get_translation('error.not_found'))
     
     # Find web user and verify password
     web_user = User.query.filter_by(email=email).first()
     if not web_user or not web_user.check_password(password):
-        return jsonify({
-            'success': False,
-            'message': get_translation('invalid_credentials')
-        }), 401
+        return unauthorized_response(message=get_translation('api.auth.invalid_credentials'))
     
     # Check if accounts are already linked
     if web_user.telegram_id or telegram_user.email != f"telegram_{telegram_id}@bluestream.local":
-        return jsonify({
-            'success': False,
-            'message': get_translation('account_already_linked')
-        }), 409
+        return conflict_response(message=get_translation('api.auth.email_already_exists'))
     
     # Merge accounts - keep web user as primary, update with telegram info
     web_user.telegram_id = telegram_id
@@ -2082,11 +2039,9 @@ def link_web_account():
     
     # Generate tokens for the merged account
     tokens = get_auth_service()._generate_tokens(web_user)
-    
-    return jsonify({
-        'success': True,
-        'message': get_translation('accounts_linked_successfully'),
-        'data': {
+
+    return success_response(
+        data={
             'user': {
                 'id': web_user.id,
                 'telegram_id': web_user.telegram_id,
@@ -2098,8 +2053,9 @@ def link_web_account():
                 'status': web_user.status
             },
             'tokens': tokens
-        }
-    })
+        },
+        message=get_translation('success.saved')
+    )
 
 
 @auth_bp.route('/sync-profile', methods=['POST'])
@@ -2148,10 +2104,7 @@ def sync_profile():
     
     user = User.query.get(current_user_id)
     if not user:
-        return jsonify({
-            'success': False,
-            'message': get_translation('user_not_found')
-        }), 404
+        return not_found_response(message=get_translation('user_not_found'))
     
     # Update fields based on sync source priority
     sync_source = data.get('sync_source', 'web')
@@ -2205,11 +2158,9 @@ def sync_profile():
         from datetime import datetime, timezone
         user.updated_at = datetime.now(timezone.utc)
         db.session.commit()
-    
-    return jsonify({
-        'success': True,
-        'message': get_translation('profile_synced_successfully'),
-        'data': {
+
+    return success_response(
+        data={
             'updated_fields': updated_fields,
             'user': {
                 'id': user.id,
@@ -2221,8 +2172,9 @@ def sync_profile():
                 'preferred_language': user.preferred_language,
                 'registration_source': user.registration_source
             }
-        }
-    })
+        },
+        message=get_translation('success.updated')
+    )
 
 
 
@@ -2291,18 +2243,18 @@ def admin_create_user():
             data = request.get_json()
             
             # Validate role
-            valid_roles = ['admin', 'manager', 'operator', 'delivery_driver']
+            valid_roles = [UserRole.ADMIN.value, UserRole.MANAGER.value, UserRole.OPERATOR.value, UserRole.DELIVERY_DRIVER.value]
             if data['role'] not in valid_roles:
                 return {
                     'success': False,
                     'message': f'Invalid role. Must be one of: {", ".join(valid_roles)}'
                 }, 400
-            
+
             # Create user using auth service
             auth_service = get_auth_service()
-            
+
             try:
-                if data['role'] == 'admin':
+                if data['role'] == UserRole.ADMIN.value:
                     user = auth_service.create_admin_user(
                         email=data['email'],
                         password=data['password'],
@@ -2333,8 +2285,8 @@ def admin_create_user():
                         'email': user.email,
                         'first_name': user.first_name,
                         'last_name': user.last_name,
-                        'role': user.role,
-                        'status': user.status,
+                        'role': user.role.value if hasattr(user.role, 'value') else user.role,
+                        'status': user.status.value if hasattr(user.status, 'value') else user.status,
                         'created_at': user.created_at.isoformat() if user.created_at else None
                     }
                 }, 201
@@ -2346,7 +2298,7 @@ def admin_create_user():
             
         except Exception as e:
             logger.error(f"Error in admin create user: {e}")
-            return {'success': False, 'message': 'Failed to create user'}, 500
+            return {'success': False, 'message': get_translation('error.server_error')}, 500
     
     return _create_user()
 
@@ -2437,8 +2389,8 @@ def admin_get_users():
                     'first_name': user.first_name,
                     'last_name': user.last_name,
                     'phone': user.phone,
-                    'role': user.role,
-                    'status': user.status,
+                    'role': user.role.value if hasattr(user.role, 'value') else user.role,
+                    'status': user.status.value if hasattr(user.status, 'value') else user.status,
                     'is_verified': user.is_verified,
                     'email_verified': user.email_verified_at is not None,
                     'phone_verified': user.phone_verified_at is not None,
@@ -2463,7 +2415,7 @@ def admin_get_users():
             
         except Exception as e:
             logger.error(f"Error in admin get users: {e}")
-            return {'success': False, 'message': 'Failed to retrieve users'}, 500
+            return {'success': False, 'message': get_translation('error.server_error')}, 500
     
     return _get_users()
 
@@ -2499,9 +2451,8 @@ def get_orders_summary():
             Order.created_at.desc()
         ).limit(5).all()
         
-        return jsonify({
-            'success': True,
-            'data': {
+        return success_response(
+            data={
                 'total_orders': total_orders,
                 'order_stats': [{'status': stat.status, 'count': stat.count} for stat in order_stats],
                 'platform_stats': [{'platform': stat.order_source, 'count': stat.count} for stat in platform_stats],
@@ -2514,13 +2465,10 @@ def get_orders_summary():
                     'created_at': order.created_at.isoformat()
                 } for order in recent_orders]
             }
-        }), 200
+        )
     except Exception as e:
         logger.error(f"Failed to get orders summary: {e}")
-        return jsonify({
-            'success': False,
-            'message': 'Failed to get orders summary'
-        }), 500
+        return internal_error_response(message=get_translation('error.server_error'))
 
 
 @auth_bp.route('/sync-platform-data', methods=['POST'])
@@ -2534,10 +2482,7 @@ def sync_platform_data():
     platform = data.get('platform')
     
     if platform not in ['web', 'telegram']:
-        return jsonify({
-            'success': False,
-            'message': 'Invalid platform specified'
-        }), 400
+        return error_response(message=get_translation('error.forbidden'), status_code=400)
     
     try:
         # Update user's last platform activity
@@ -2556,17 +2501,13 @@ def sync_platform_data():
         # In future implementation, this would sync actual data between platforms
         # For now, we'll just return success
         
-        return jsonify({
-            'success': True,
-            'message': 'Platform data synchronized successfully',
-            'data': sync_results
-        }), 200
+        return success_response(
+            data=sync_results,
+            message=get_translation('success.updated')
+        )
     except Exception as e:
         logger.error(f"Failed to sync platform data: {e}")
-        return jsonify({
-            'success': False,
-            'message': 'Failed to sync platform data'
-        }), 500
+        return internal_error_response(message=get_translation('error.server_error'))
 
 
 @auth_bp.route('/export-data', methods=['POST'])
@@ -2580,10 +2521,7 @@ def export_account_data():
     try:
         user = User.query.get(user_id)
         if not user:
-            return jsonify({
-                'success': False,
-                'message': 'User not found'
-            }), 404
+            return not_found_response(message=get_translation('error.not_found'))
         
         # Collect user data
         from business_app.models.order import Order
@@ -2602,7 +2540,7 @@ def export_account_data():
                 'date_of_birth': user.date_of_birth.isoformat() if user.date_of_birth else None,
                 'gender': user.gender,
                 'preferred_language': user.preferred_language,
-                'status': user.status,
+                'status': user.status.value if hasattr(user.status, 'value') else user.status,
                 'registration_source': user.registration_source,
                 'created_at': user.created_at.isoformat() if user.created_at else None,
                 'email_verified_at': user.email_verified_at.isoformat() if user.email_verified_at else None,
@@ -2641,10 +2579,7 @@ def export_account_data():
         )
     except Exception as e:
         logger.error(f"Failed to export account data: {e}")
-        return jsonify({
-            'success': False,
-            'message': 'Failed to export account data'
-        }), 500
+        return internal_error_response(message=get_translation('error.server_error'))
 
 
 
@@ -2661,38 +2596,27 @@ def validate_token():
         # Get token from header
         auth_header = request.headers.get('Authorization', '')
         if not auth_header.startswith('Bearer '):
-            return jsonify({
-                'success': False,
-                'message': 'Invalid authorization header'
-            }), 401
+            return unauthorized_response(message=get_translation('api.auth.unauthorized'))
         
         token = auth_header.split(' ')[1]
         result = token_service.validate_token_integrity(token)
         
         if result['valid']:
-            return jsonify({
-                'success': True,
-                'message': 'Token is valid',
-                'data': {
+            return success_response(
+                data={
                     'user_id': result['user'].id,
                     'email': result['user'].email,
                     'role': result['user'].role,
                     'verified': result['user'].is_verified
-                }
-            }), 200
+                },
+                message=get_translation('success.saved')
+            )
         else:
-            return jsonify({
-                'success': False,
-                'message': result['reason'],
-                'error_code': result['error_code']
-            }), 401
+            return unauthorized_response(message=result['reason'])
             
     except Exception as e:
         logger.error(f"Token validation failed: {e}")
-        return jsonify({
-            'success': False,
-            'message': 'Token validation failed'
-        }), 401
+        return unauthorized_response(message=get_translation('api.auth.token_invalid'))
 
 
 @auth_bp.route('/sessions', methods=['GET'])
@@ -2721,20 +2645,16 @@ def get_user_sessions():
                 'is_current': session.get('session_id') == get_jwt().get('session_id')
             })
         
-        return jsonify({
-            'success': True,
-            'data': {
+        return success_response(
+            data={
                 'sessions': formatted_sessions,
                 'total_sessions': len(formatted_sessions)
             }
-        }), 200
+        )
         
     except Exception as e:
         logger.error(f"Failed to get user sessions: {e}")
-        return jsonify({
-            'success': False,
-            'message': 'Failed to get sessions'
-        }), 500
+        return internal_error_response(message=get_translation('error.server_error'))
 
 
 @auth_bp.route('/sessions/<session_id>', methods=['DELETE'])
@@ -2759,10 +2679,7 @@ def revoke_session(session_id):
                 break
         
         if not target_session:
-            return jsonify({
-                'success': False,
-                'message': 'Session not found'
-            }), 404
+            return not_found_response(message=get_translation('error.not_found'))
         
         # Blacklist tokens for this session with proper expiry
         if 'access_token_jti' in target_session:
@@ -2777,22 +2694,18 @@ def revoke_session(session_id):
         
         # Check if user revoked their current session
         is_current_session = session_id == current_session_id
-        
-        return jsonify({
-            'success': True,
-            'message': 'Session revoked successfully',
-            'data': {
+
+        return success_response(
+            data={
                 'revoked_session_id': session_id,
                 'is_current_session': is_current_session
-            }
-        }), 200
+            },
+            message=get_translation('success.deleted')
+        )
         
     except Exception as e:
         logger.error(f"Failed to revoke session {session_id}: {e}")
-        return jsonify({
-            'success': False,
-            'message': 'Failed to revoke session'
-        }), 500
+        return internal_error_response(message=get_translation('error.server_error'))
 
 
 
@@ -2827,19 +2740,14 @@ def logout():
             token_service._remove_session_info(user_id, session_id)
         
         # Create response and clear JWT cookies
-        response = jsonify({
-            'success': True,
-            'message': 'Logged out successfully'
-        })
+        response_tuple = success_response(message=get_translation('api.auth.logout_successful'))
+        response = response_tuple[0]  # Extract the response object from tuple
         unset_jwt_cookies(response)
         return response, 200
         
     except Exception as e:
         logger.error(f"Logout failed for user {user_id}: {e}")
-        return jsonify({
-            'success': False,
-            'message': 'Logout failed'
-        }), 500
+        return internal_error_response(message=get_translation('error.server_error'))
 
 
 @auth_bp.route('/logout-all', methods=['POST'])
@@ -2861,29 +2769,20 @@ def logout_all():
         if exclude_current:
             # Revoke all tokens except current session
             success = token_service.revoke_user_tokens(user_id, exclude_session_id=current_session_id)
-            message = 'All other sessions revoked successfully' if success else 'Failed to revoke sessions'
+            message = get_translation('success.deleted') if success else get_translation('error.server_error')
         else:
             # Revoke all user tokens including current
             success = token_service.revoke_user_tokens(user_id)
-            message = 'Logged out from all sessions successfully' if success else 'Failed to logout from all sessions'
+            message = get_translation('api.auth.logout_successful') if success else get_translation('error.server_error')
         
         if success:
-            return jsonify({
-                'success': True,
-                'message': message
-            }), 200
+            return success_response(message=message)
         else:
-            return jsonify({
-                'success': False,
-                'message': message
-            }), 500
+            return internal_error_response(message=message)
             
     except Exception as e:
         logger.error(f"Logout/revoke all failed for user {user_id}: {e}")
-        return jsonify({
-            'success': False,
-            'message': 'Operation failed'
-        }), 500
+        return internal_error_response(message=get_translation('error.server_error'))
 
 
 @auth_bp.route('/platform-status', methods=['GET'])
@@ -2914,25 +2813,21 @@ def get_platform_status():
     """
     user_id = get_jwt_identity()
     user = User.query.get(user_id)
-    
+
     if not user:
-        return jsonify({
-            'success': False,
-            'message': 'User not found'
-        }), 404
-    
+        return not_found_response(message=get_translation('error.not_found'))
+
     from business_app.services.cross_platform_sync_service import cross_platform_sync_service
     
     platform_status = cross_platform_sync_service.get_user_platform_status(user)
     linking_suggestions = cross_platform_sync_service.suggest_account_linking(user)
-    
-    return jsonify({
-        'success': True,
-        'data': {
+
+    return success_response(
+        data={
             'platform_status': platform_status,
             'linking_suggestions': linking_suggestions
         }
-    })
+    )
 
 
 @auth_bp.route('/suggest-auto-link', methods=['POST'])
@@ -2978,26 +2873,17 @@ def suggest_auto_link():
     target_user = User.query.get(target_user_id)
     
     if not current_user or not target_user:
-        return jsonify({
-            'success': False,
-            'message': 'One or both users not found'
-        }), 404
+        return not_found_response(message=get_translation('error.not_found'))
     
     from business_app.services.cross_platform_sync_service import cross_platform_sync_service
     
     if not confirm:
         # Just analyze and return suggestion
         if current_user.registration_source == target_user.registration_source:
-            return jsonify({
-                'success': False,
-                'message': 'Cannot link accounts from the same platform',
-                'error_code': 'SAME_PLATFORM_ACCOUNTS'
-            }), 409
+            return conflict_response(message=get_translation('error.forbidden'))
         
-        return jsonify({
-            'success': True,
-            'message': 'Accounts can be linked',
-            'data': {
+        return success_response(
+            data={
                 'link_preview': {
                     'primary_account': {
                         'id': current_user.id,
@@ -3017,8 +2903,9 @@ def suggest_auto_link():
                         'Synchronized preferences and data'
                     ]
                 }
-            }
-        })
+            },
+            message=get_translation('success.saved')
+        )
     
     # Perform the linking
     result = cross_platform_sync_service.auto_link_accounts(
@@ -3033,21 +2920,19 @@ def suggest_auto_link():
         token_service = TokenService()
         tokens = token_service.generate_tokens(current_user)
         
-        return jsonify({
-            'success': True,
-            'message': result['message'],
-            'data': {
+        return success_response(
+            data={
                 'user': current_user.to_dict(),
                 'tokens': tokens,
                 'link_result': result
-            }
-        })
+            },
+            message=result['message']
+        )
     else:
-        return jsonify({
-            'success': False,
-            'message': result.get('error', 'Failed to link accounts'),
-            'error_code': 'LINKING_FAILED'
-        }), 400
+        return error_response(
+            message=result.get('error', 'Failed to link accounts'),
+            status_code=400
+        )
 
 
 @auth_bp.route('/generate-telegram-auth', methods=['POST'])
@@ -3071,20 +2956,16 @@ def generate_telegram_auth():
     """
     user_id = get_jwt_identity()
     user = User.query.get(user_id)
-    
+
     if not user:
-        return jsonify({
-            'success': False,
-            'message': 'User not found'
-        }), 404
-    
+        return not_found_response(message=get_translation('error.not_found'))
+
     # Check if user already has Telegram access
     if user.telegram_id:
-        return jsonify({
-            'success': False,
-            'message': 'User already has Telegram access',
-            'error_code': 'TELEGRAM_ALREADY_LINKED'
-        }), 400
+        return error_response(
+            message=get_translation('error.forbidden'),
+            status_code=400
+        )
     
     # Generate a secure auth code for Telegram bot linking
     import secrets
@@ -3124,19 +3005,14 @@ def generate_telegram_auth():
             }
     except Exception as e:
         logger.error(f"Failed to store telegram auth code: {e}")
-        return jsonify({
-            'success': False,
-            'message': 'Failed to generate auth code'
-        }), 500
+        return internal_error_response(message='Failed to generate auth code')
     
     # Create Telegram bot link
     bot_username = current_app.config.get('TELEGRAM_BOT_USERNAME', 'bluewaterbot')
     telegram_link = f"https://t.me/{bot_username}?start=auth_{auth_code}"
-    
-    return jsonify({
-        'success': True,
-        'message': 'Telegram authentication code generated',
-        'data': {
+
+    return success_response(
+        data={
             'auth_code': auth_code,
             'telegram_link': telegram_link,
             'expires_in': 300,  # 5 minutes
@@ -3145,8 +3021,9 @@ def generate_telegram_auth():
                 f"Or manually open @{bot_username} and send: /start auth_{auth_code}",
                 "Your accounts will be automatically linked"
             ]
-        }
-    })
+        },
+        message=get_translation('success.saved')
+    )
 
 
 @auth_bp.route('/generate-web-auth', methods=['POST'])
@@ -3185,18 +3062,14 @@ def generate_web_auth():
     # Find telegram user
     user = User.query.filter_by(telegram_id=telegram_id).first()
     if not user:
-        return jsonify({
-            'success': False,
-            'message': 'Telegram user not found'
-        }), 404
+        return not_found_response(message=get_translation('error.not_found'))
     
     # Check if user already has proper web access
     if user.email and not user.email.startswith('telegram_') and user.password_hash != 'telegram_user':
-        return jsonify({
-            'success': False,
-            'message': 'User already has web access',
-            'error_code': 'WEB_ALREADY_LINKED'
-        }), 400
+        return error_response(
+            message=get_translation('error.forbidden'),
+            status_code=400
+        )
     
     # Generate secure temporary web auth token
     from business_app.services.token_service import TokenService
@@ -3238,19 +3111,14 @@ def generate_web_auth():
             }
     except Exception as e:
         logger.error(f"Failed to store web auth token: {e}")
-        return jsonify({
-            'success': False,
-            'message': 'Failed to generate web auth token'
-        }), 500
+        return internal_error_response(message='Failed to generate web auth token')
     
     # Create web app authentication link
     web_app_url = current_app.config.get('WEB_APP_URL', 'https://bluestream.uz')
     web_auth_link = f"{web_app_url}/auth/telegram-login?token={web_auth_token}"
-    
-    return jsonify({
-        'success': True,
-        'message': 'Web authentication token generated',
-        'data': {
+
+    return success_response(
+        data={
             'auth_token': web_auth_token,
             'web_auth_link': web_auth_link,
             'expires_in': 600,  # 10 minutes
@@ -3259,8 +3127,9 @@ def generate_web_auth():
                 "You'll be automatically logged in",
                 "Link expires in 10 minutes for security"
             ]
-        }
-    })
+        },
+        message=get_translation('success.saved')
+    )
 
 
 @auth_bp.route('/verify-telegram-auth/<auth_code>', methods=['POST'])
@@ -3335,34 +3204,26 @@ def verify_telegram_auth(auth_code):
         logger.error(f"Failed to retrieve auth code: {e}")
     
     if not auth_data:
-        return jsonify({
-            'success': False,
-            'message': 'Invalid or expired authentication code'
-        }), 400
+        return error_response(
+            message=get_translation('api.auth.token_expired'),
+            status_code=400
+        )
     
     # Get the web user
     user = User.query.get(auth_data['user_id'])
     if not user:
-        return jsonify({
-            'success': False,
-            'message': 'User not found'
-        }), 404
+        return not_found_response(message=get_translation('error.not_found'))
     
     telegram_id = str(data['telegram_id'])
     
     # Check if this telegram_id is already linked to another account
     existing_telegram_user = User.query.filter_by(telegram_id=telegram_id).first()
     if existing_telegram_user and existing_telegram_user.id != user.id:
-        return jsonify({
-            'success': False,
-            'message': 'Telegram account already linked to another user'
-        }), 409
+        return conflict_response(message=get_translation('api.auth.email_already_exists'))
     
     # Link the telegram account to web user
     user.telegram_id = telegram_id
     user.telegram_username = data.get('telegram_username')
-    user.telegram_first_name = data.get('first_name')
-    user.telegram_last_name = data.get('last_name')
     user.is_bot_active = True
     user.last_bot_interaction = datetime.now(timezone.utc)
     
@@ -3371,23 +3232,18 @@ def verify_telegram_auth(auth_code):
         user.first_name = data['first_name']
     if data.get('last_name') and not user.last_name:
         user.last_name = data['last_name']
-        
-    # Update full name
-    if user.first_name or user.last_name:
-        user.full_name = f"{user.first_name or ''} {user.last_name or ''}".strip()
     
     db.session.commit()
     
     logger.info(f"Successfully linked Telegram account {telegram_id} to web user {user.id}")
-    
-    return jsonify({
-        'success': True,
-        'message': 'Telegram account linked successfully',
-        'data': {
+
+    return success_response(
+        data={
             'user': user.to_dict(),
             'linked_platforms': ['web', 'telegram']
-        }
-    })
+        },
+        message=get_translation('success.saved')
+    )
 
 
 @auth_bp.route('/verify-web-auth/<auth_token>', methods=['GET'])
@@ -3437,30 +3293,26 @@ def verify_web_auth(auth_token):
         logger.error(f"Failed to retrieve web auth token: {e}")
     
     if not auth_data:
-        return jsonify({
-            'success': False,
-            'message': 'Invalid or expired authentication token'
-        }), 400
+        return error_response(
+            message=get_translation('api.auth.token_expired'),
+            status_code=400
+        )
     
     # Get the user
     user = User.query.get(auth_data['user_id'])
     if not user:
-        return jsonify({
-            'success': False,
-            'message': 'User not found'
-        }), 404
+        return not_found_response(message=get_translation('error.not_found'))
     
     # Return the authentication tokens
-    return jsonify({
-        'success': True,
-        'message': 'Web authentication successful',
-        'data': {
+    return success_response(
+        data={
             'user': user.to_dict(),
             'tokens': {
                 'access_token': auth_data['access_token'],
                 'refresh_token': auth_data['refresh_token']
             },
             'linked_platforms': ['telegram', 'web'] if user.email and not user.email.startswith('telegram_') else ['telegram']
-        }
-    })
+        },
+        message=get_translation('api.auth.login_successful')
+    )
   

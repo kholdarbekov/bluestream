@@ -7,7 +7,7 @@ from telegram import Update
 from telegram.ext import ContextTypes
 
 from i18n import i18n
-from keyboards import OrderKeyboards, MenuKeyboards
+from keyboards import OrderKeyboards, MenuKeyboards, ProfileKeyboards
 from api_client import api_client
 from database import db_manager, BotUserRepository
 from utils import user_middleware, format_price, MessageBuilder, authenticate_telegram_user
@@ -44,7 +44,7 @@ class OrderHandlers:
                     await self._handle_api_error(update, response.error, language)
                     return
                 
-                orders = response.data.get('orders', [])
+                orders = response.data.get('data', {}).get('orders', [])
             
             if not orders:
                 no_orders_text = "📦 You have no orders yet.\n\nStart shopping to place your first order!"
@@ -121,15 +121,17 @@ class OrderHandlers:
                     await self._handle_api_error(update, response.error, language)
                     return
                 
-                order = response.data['order']
+                order = response.data['data']['order']
+                delivery = response.data['data']['delivery']
             
             # Format order details
             details_text = MessageBuilder.build_order_summary(order, language)
+            logger.info(f"order_details handler: details_text: {details_text}")
             
             # Add order items if available
-            if order.get('items'):
+            if order.get('order_items'):
                 details_text += "\n\n📋 Items:\n"
-                for item in order['items']:
+                for item in order['order_items']:
                     details_text += f"• {item.get('product_name', 'Unknown')} x{item.get('quantity', 1)}\n"
                     details_text += f"  💰 {format_price(item.get('total_price', 0))} UZS\n"
             
@@ -173,12 +175,12 @@ class OrderHandlers:
                     await self._handle_api_error(update, response.error, language)
                     return
                 
-                addresses = response.data.get('addresses', [])
+                addresses = response.data.get('data', {}).get('addresses', [])
             
             if not addresses:
                 # No addresses, prompt to add one
                 add_address_text = "📍 You need to add a delivery address first.\n\nPlease share your location or enter your address:"
-                
+                keyboard = ProfileKeyboards.location_request(language)
                 if update.callback_query:
                     await update.callback_query.edit_message_text(
                         text=add_address_text,
@@ -192,7 +194,7 @@ class OrderHandlers:
                     )
                 
                 # Set state for address input
-                await self.user_repo.update_user_state(user_id, {'awaiting_input': 'address'})
+                await self.user_repo.update_user_state(user_id, {'awaiting_input': 'address_location'})
                 return
             
             # Show address selection
@@ -291,10 +293,26 @@ class OrderHandlers:
                     await self._handle_auth_error(update, language)
                     return
                 
+                # Get cart items from API
+                response = await client.get_cart(user_token)
+                if not response.success:
+                    await self._handle_api_error(update, response.error, language)
+                    return
+
+                cart = response.data['data']['cart']
+                if not cart or not cart.get('cart_items'):
+                    await self._handle_api_error(update, "❌ Your cart is empty.", language)
+                    return
+                
                 order_data = {
                     'delivery_address_id': address_id,
                     'payment_method': payment_method,
-                    'items': []  # This would come from cart
+                    'items': [
+                        {
+                            'product_id': item['product']['id'],
+                            'quantity': item['quantity'],
+                        } for item in cart['cart_items']
+                    ]
                 }
                 
                 response = await client.create_order(user_token, order_data)
@@ -302,7 +320,14 @@ class OrderHandlers:
                     await self._handle_api_error(update, response.error, language)
                     return
                 
-                order = response.data['order']
+                order = response.data['data']['order']
+
+                # Clear user's cart
+                response = await client.clear_cart(user_token)
+                if not response.success:
+                    await self._handle_api_error(update, response.error, language)
+                    return
+
             
             # Show success message
             success_text = f"✅ {i18n.get('order_placed', language)}\n\n"
@@ -333,26 +358,45 @@ class OrderHandlers:
         # Build confirmation message
         confirmation_text = "📋 Order Confirmation\n\n"
         
-        # Add cart items (mock data for now)
-        confirmation_text += "🛒 Items:\n"
-        confirmation_text += "• Spring Water 1.5L x2\n"
-        confirmation_text += "• Alkaline Water 0.5L x1\n\n"
+        # Get cart items from API by api_client.get_cart and show them
+        cart_total_amount = 0
+        async with api_client as client:
+            user_token = await authenticate_telegram_user(update, client)
+            if not user_token:
+                await self._handle_auth_error(update, language)
+                return
+            
+            response = await client.get_cart(user_token)
+            if not response.success:
+                await self._handle_api_error(update, response.error, language)
+                return
+            
+            cart = response.data['data']['cart']
+            if not cart:
+                await self._handle_api_error(update, "❌ Your cart is empty.", language)
+                return
+            confirmation_text += "🛒 Items:\n"
+            for item in cart.get('cart_items', []):
+                confirmation_text += f"• {item.get('product', {}).get('name', 'Unknown')} x{item.get('quantity', 1)}\n"
+                item_subtotal_price = item.get('product', {}).get('current_price', 0) * item.get('quantity', 1)
+                cart_total_amount += item_subtotal_price
+                confirmation_text += f"  💰 {format_price(item_subtotal_price)} UZS\n\n"
         
         # Add address info
         address_id = context.user_data.get('selected_address_id')
         if address_id:
-            confirmation_text += f"📍 Delivery Address: Selected address #{address_id}\n"
+            confirmation_text += f"📍 Delivery Address: Selected address #{address_id}\n\n"
         
         # Add payment method
         payment_method = context.user_data.get('selected_payment_method')
         if payment_method:
             confirmation_text += f"💳 Payment: {payment_method.title()}\n\n"
         
-        # Add total (mock)
-        confirmation_text += "💰 Total: 25,000 UZS\n"
+        # Add total amount
+        confirmation_text += f"💰 Total: {format_price(cart_total_amount)} UZS\n"
         confirmation_text += "🚚 Delivery Fee: Free\n"
         confirmation_text += "────────────────\n"
-        confirmation_text += "💳 Grand Total: 25,000 UZS"
+        confirmation_text += f"💳 Grand Total: {format_price(cart_total_amount)} UZS"
         
         keyboard = OrderKeyboards.order_confirmation(language)
         

@@ -1,0 +1,207 @@
+{% extends "frontend/base.html" %}
+
+{% block title %}{{ 'Payment Cancelled'|translate(current_language) }} - {{ company_name }}{% endblock %}
+
+{% block extra_head %}
+<style>
+.payment-cancelled-section {
+    padding: 100px 0;
+    min-height: 70vh;
+    display: flex;
+    align-items: center;
+}
+
+.cancelled-content {
+    max-width: 600px;
+    margin: 0 auto;
+    text-align: center;
+    background: #fff;
+    border-radius: 10px;
+    padding: 50px 30px;
+    box-shadow: 0 2px 20px rgba(0, 0, 0, 0.08);
+}
+
+.cancelled-icon {
+    width: 100px;
+    height: 100px;
+    background: linear-gradient(135deg, #ff6b6b 0%, #c92a2a 100%);
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 30px;
+}
+
+.cancelled-icon i {
+    font-size: 50px;
+    color: #fff;
+}
+
+.cancelled-content h2 {
+    font-size: 28px;
+    font-weight: 700;
+    margin-bottom: 15px;
+    color: #222;
+}
+
+.cancelled-content p {
+    font-size: 16px;
+    color: #666;
+    margin-bottom: 10px;
+    line-height: 1.6;
+}
+
+.order-info {
+    background: #f8f9fa;
+    border-radius: 8px;
+    padding: 20px;
+    margin: 30px 0;
+}
+
+.info-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 10px 0;
+    border-bottom: 1px solid #e5e5e5;
+}
+
+.info-row:last-child {
+    border-bottom: none;
+}
+
+.info-label {
+    font-weight: 600;
+    color: #666;
+}
+
+.info-value {
+    color: #222;
+}
+
+.action-buttons {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 15px;
+    margin-top: 30px;
+}
+
+.info-notice {
+    background: #fff3cd;
+    border: 1px solid #ffc107;
+    border-radius: 5px;
+    padding: 15px;
+    margin-top: 20px;
+    font-size: 14px;
+    color: #856404;
+}
+
+@media (max-width: 767px) {
+    .cancelled-content {
+        padding: 40px 20px;
+    }
+
+    .cancelled-content h2 {
+        font-size: 24px;
+    }
+
+    .action-buttons {
+        grid-template-columns: 1fr;
+    }
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<section class="payment-cancelled-section">
+    <div class="auto-container">
+        <div class="cancelled-content">
+            <div class="cancelled-icon">
+                <i class="far fa-times-circle"></i>
+            </div>
+
+            <h2>{{ 'Payment Cancelled'|translate(current_language) }}</h2>
+            <p>{{ 'Your payment was cancelled and no charges were made.'|translate(current_language) }}</p>
+
+            {% if order %}
+            <div class="order-info">
+                <div class="info-row">
+                    <span class="info-label">{{ 'Order Number'|translate(current_language) }}:</span>
+                    <span class="info-value">{{ order.order_number }}</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">{{ 'Total Amount'|translate(current_language) }}:</span>
+                    <span class="info-value">{{ "{:,.0f}".format(order.total_amount) }} UZS</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">{{ 'Order Status'|translate(current_language) }}:</span>
+                    <span class="info-value">
+                        <span class="badge badge-warning">{{ 'Pending Payment'|translate(current_language) }}</span>
+                    </span>
+                </div>
+            </div>
+
+            <div class="info-notice">
+                <i class="far fa-info-circle"></i>
+                {{ 'Your order is still pending. You can retry the payment or choose a different payment method.'|translate(current_language) }}
+            </div>
+
+            <div class="action-buttons">
+                <button onclick="retryPayment()" class="theme-btn btn-one">
+                    <i class="far fa-redo"></i> {{ 'Retry Payment'|translate(current_language) }}
+                </button>
+                <a href="{{ url_for('frontend.my_orders') }}" class="theme-btn btn-two">
+                    <i class="far fa-list"></i> {{ 'My Orders'|translate(current_language) }}
+                </a>
+                <a href="{{ url_for('frontend.shop') }}" class="theme-btn btn-three" style="grid-column: span 2;">
+                    <i class="far fa-shopping-bag"></i> {{ 'Continue Shopping'|translate(current_language) }}
+                </a>
+            </div>
+            {% else %}
+            <div class="action-buttons">
+                <a href="{{ url_for('frontend.cart') }}" class="theme-btn btn-one">
+                    <i class="far fa-shopping-cart"></i> {{ 'View Cart'|translate(current_language) }}
+                </a>
+                <a href="{{ url_for('frontend.shop') }}" class="theme-btn btn-three">
+                    <i class="far fa-shopping-bag"></i> {{ 'Continue Shopping'|translate(current_language) }}
+                </a>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</section>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function retryPayment() {
+    {% if order %}
+    // Show loading
+    showNotification('{{ "Preparing payment..."|translate(current_language) }}', 'info');
+
+    // Retry payment by creating a new payment link
+    fetch('/api/v1/orders/{{ order.id }}/retry-payment', {
+        method: 'POST',
+        headers: {
+            'Authorization': 'Bearer ' + localStorage.getItem('access_token'),
+            'Content-Type': 'application/json'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success && data.data.payment_url) {
+            // Redirect to payment gateway
+            window.location.href = data.data.payment_url;
+        } else {
+            showNotification('{{ "Failed to retry payment. Please try again later."|translate(current_language) }}', 'error');
+        }
+    })
+    .catch(error => {
+        console.error('Error retrying payment:', error);
+        showNotification('{{ "An error occurred. Please try again."|translate(current_language) }}', 'error');
+    });
+    {% else %}
+    window.location.href = '{{ url_for("frontend.cart") }}';
+    {% endif %}
+}
+</script>
+{% endblock %}

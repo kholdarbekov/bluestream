@@ -1,38 +1,42 @@
+import re
 from datetime import datetime, timedelta, timezone
-from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, Text, ForeignKey, Index
+from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, Text, ForeignKey, Index, Enum
 from sqlalchemy.orm import relationship, backref
-from werkzeug.security import generate_password_hash, check_password_hash
 from flask_sqlalchemy import SQLAlchemy
 from business_app import db
 from business_app.models import TimestampMixin
-
+from business_app.utils.constants import UserRole, UserStatus, UserGender
 
 
 class User(db.Model, TimestampMixin):
     __tablename__ = 'users'
     
     id = Column(Integer, primary_key=True)
-    email = Column(String(255), unique=True, nullable=False)
-    phone = Column(String(20), unique=True, nullable=True)
-    password_hash = Column(String(255), nullable=False)
     first_name = Column(String(100), nullable=True)
     last_name = Column(String(100), nullable=True)
-    full_name = Column(String(200), nullable=True)
+    email = Column(String(255), unique=True, nullable=True)
+    phone = Column(String(20), unique=True, nullable=False)
+    password_hash = Column(String(255), nullable=False)
     date_of_birth = Column(DateTime, nullable=True)
-    gender = Column(String(10), nullable=True)
-    role = Column(String(20), default='customer', index=True)
-    status = Column(String(20), default='active', index=True)
+    gender = Column(Enum(UserGender, name='user_gender', values_callable=lambda x: [e.value for e in x]), default=UserGender.UNKNOWN, index=True)
+    role = Column(Enum(UserRole, name='user_role', values_callable=lambda x: [e.value for e in x]), default=UserRole.CUSTOMER, index=True)
+    status = Column(Enum(UserStatus, name='user_status', values_callable=lambda x: [e.value for e in x]), default=UserStatus.ACTIVE, index=True)
     is_verified = Column(Boolean, default=False, index=True)
     is_premium = Column(Boolean, default=False)
     preferred_language = Column(String(5), default='en')
     preferred_currency = Column(String(3), default='UZS')
     timezone = Column(String(50), default='Asia/Tashkent')
+    
+    # Notification preferences
     email_notifications = Column(Boolean, default=True)
     sms_notifications = Column(Boolean, default=True)
     push_notifications = Column(Boolean, default=True)
+    
+    # business account fields
     company_name = Column(String(200), nullable=True)
     tax_id = Column(String(50), nullable=True)
     business_type = Column(String(50), nullable=True)
+
     last_login = Column(DateTime, nullable=True)
     failed_login_attempts = Column(Integer, default=0)
     account_locked_until = Column(DateTime, nullable=True)
@@ -43,17 +47,17 @@ class User(db.Model, TimestampMixin):
     phone_verified_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
-    telegram_id = Column(String(50), unique=True, nullable=True, index=True)
     registration_source = Column(String(50), default='web', index=True)
     
     # Telegram/Bot-specific fields
+    telegram_id = Column(String(50), unique=True, nullable=True, index=True)
     telegram_username = Column(String(255), nullable=True)
-    telegram_first_name = Column(String(255), nullable=True)
-    telegram_last_name = Column(String(255), nullable=True)
-    telegram_language_code = Column(String(10), nullable=True)
     is_bot_active = Column(Boolean, default=False, index=True)
     bot_state = Column(Text, nullable=True)  # JSON string for bot conversation state
     last_bot_interaction = Column(DateTime, nullable=True)
+
+    # Cart
+    cart = relationship("Cart", back_populates="user", uselist=False)
 
     # Relationships
     addresses = relationship('UserAddress', back_populates='user', cascade='all, delete-orphan')
@@ -64,14 +68,6 @@ class User(db.Model, TimestampMixin):
     reviews = relationship('Review', back_populates='user')
     notifications = relationship('Notification', back_populates='user')
     deliveries = relationship('Delivery', foreign_keys='Delivery.delivery_person_id', back_populates='delivery_person')
-    
-    def set_password(self, password):
-        self.password_hash = generate_password_hash(password)
-    
-    def check_password(self, password):
-        if not self.password_hash:
-            return False
-        return check_password_hash(self.password_hash, password)
     
     @staticmethod
     def validate_password_strength(password):
@@ -103,10 +99,8 @@ class User(db.Model, TimestampMixin):
     @staticmethod
     def validate_email(email):
         """Validate email format"""
-        import re
-        
         if not email:
-            return False, "Email is required"
+            return True, "Email is optional"
         
         # Basic email regex
         email_pattern = r'^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$'
@@ -121,10 +115,8 @@ class User(db.Model, TimestampMixin):
     @staticmethod
     def validate_phone(phone):
         """Validate phone number format"""
-        import re
-        
         if not phone:
-            return True, "Phone is optional"  # Phone is optional
+            return False, "Phone is required"
         
         # International format starting with +
         phone_pattern = r'^\+[1-9][0-9]{7,14}$'
@@ -136,8 +128,6 @@ class User(db.Model, TimestampMixin):
     @staticmethod
     def sanitize_user_input(input_text):
         """Sanitize user input to prevent XSS and injection"""
-        import re
-        
         if not input_text:
             return input_text
         
@@ -149,6 +139,15 @@ class User(db.Model, TimestampMixin):
         
         return sanitized if sanitized else None
     
+    @property
+    def full_name(self) -> str:
+        """Get full name by combining first and last names"""
+        parts = []
+        if self.first_name:
+            parts.append(self.first_name)
+        if self.last_name:
+            parts.append(self.last_name)
+        return ' '.join(parts)
     @property
     def email_verified(self) -> bool:
         """Check if email is verified"""
@@ -162,7 +161,7 @@ class User(db.Model, TimestampMixin):
     @property
     def is_admin(self) -> bool:
         """Check if user has admin role"""
-        return self.role == 'admin'
+        return self.role == UserRole.ADMIN if isinstance(self.role, UserRole) else self.role == UserRole.ADMIN.value
 
     def validate_user_data(self):
         """Validate all user data before saving"""
@@ -179,14 +178,20 @@ class User(db.Model, TimestampMixin):
             errors.append(f"Phone: {message}")
 
         # Validate role
-        valid_roles = ['customer', 'admin', 'manager', 'delivery_driver', 'operator']
-        if self.role not in valid_roles:
-            errors.append(f"Role must be one of: {', '.join(valid_roles)}")
+        if self.role and not isinstance(self.role, UserRole):
+            try:
+                self.role = UserRole(self.role) if isinstance(self.role, str) else self.role
+            except ValueError:
+                valid_roles = [r.value for r in UserRole]
+                errors.append(f"Role must be one of: {', '.join(valid_roles)}")
 
         # Validate status
-        valid_statuses = ['active', 'inactive', 'banned', 'pending_verification', 'merged']
-        if self.status not in valid_statuses:
-            errors.append(f"Status must be one of: {', '.join(valid_statuses)}")
+        if self.status and not isinstance(self.status, UserStatus):
+            try:
+                self.status = UserStatus(self.status) if isinstance(self.status, str) else self.status
+            except ValueError:
+                valid_statuses = [s.value for s in UserStatus]
+                errors.append(f"Status must be one of: {', '.join(valid_statuses)}")
 
         # Validate names if provided
         if self.first_name:
@@ -230,18 +235,15 @@ class User(db.Model, TimestampMixin):
             'email': self.email,
             'first_name': self.first_name,
             'last_name': self.last_name,
-            'full_name': self.full_name or '',
-            'role': self.role,
-            'status': self.status,
+            'full_name': f"{self.first_name} {self.last_name}".strip() or '',
+            'role': self.role.value if isinstance(self.role, UserRole) else self.role,
+            'status': self.status.value if isinstance(self.status, UserStatus) else self.status,
             'is_verified': self.is_verified,
             'is_premium': self.is_premium,
             'preferred_language': self.preferred_language,
             'telegram_id': self.telegram_id,
             'registration_source': self.registration_source,
             'telegram_username': self.telegram_username,
-            'telegram_first_name': self.telegram_first_name,
-            'telegram_last_name': self.telegram_last_name,
-            'telegram_language_code': self.telegram_language_code,
             'is_bot_active': self.is_bot_active,
             'bot_state': self.bot_state,
             'last_bot_interaction': self.last_bot_interaction.isoformat() if self.last_bot_interaction else None,
@@ -291,7 +293,6 @@ class UserAddress(db.Model, TimestampMixin):
             'floor_number': self.floor_number,
             'apartment_number': self.apartment_number
         }
-
 
 class UserSession(db.Model, TimestampMixin):
     """User session model for tracking authentication sessions"""

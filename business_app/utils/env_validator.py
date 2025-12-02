@@ -187,15 +187,6 @@ class EnvironmentValidator:
             if not sendgrid_key.startswith('SG.'):
                 self.warnings.append("SENDGRID_API_KEY format appears invalid")
         
-        # SMS service
-        twilio_sid = os.environ.get('TWILIO_ACCOUNT_SID')
-        twilio_token = os.environ.get('TWILIO_AUTH_TOKEN')
-        
-        if twilio_sid and not twilio_token:
-            self.warnings.append("TWILIO_ACCOUNT_SID set but TWILIO_AUTH_TOKEN missing")
-        elif twilio_token and not twilio_sid:
-            self.warnings.append("TWILIO_AUTH_TOKEN set but TWILIO_ACCOUNT_SID missing")
-        
         # Payment gateways
         payme_merchant = os.environ.get('PAYME_MERCHANT_ID')
         payme_secret = os.environ.get('PAYME_SECRET_KEY')

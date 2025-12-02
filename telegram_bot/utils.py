@@ -395,9 +395,9 @@ class MessageBuilder:
     def build_order_summary(order: Dict[str, Any], language: str = 'en') -> str:
         """Build order summary message"""
         lines = [
-            f"📋 {i18n.get('order_number', language, order_number=order.get('order_number', 'N/A'))}",
+            f"📋 {i18n.get('order_number', language, order.get('order_number', 'N/A'))}",
             f"📅 Date: {order.get('created_at', 'N/A')[:10]}",
-            f"💰 {i18n.get('order_total', language, total=format_price(order.get('total_amount', 0)))}"
+            f"💰 {i18n.get('order_total', language, format_price(order.get('total_amount', 0)))}"
         ]
         
         if order.get('status'):
@@ -419,14 +419,14 @@ class MessageBuilder:
         """Build product summary message"""
         lines = [
             f"🏷️ {product.get('name', 'Unknown Product')}",
-            f"💰 {format_price(product.get('base_price', 0))} UZS"
+            f"💰 {format_price(product['pricing'].get('base_price', 0))} UZS"
         ]
         
-        if product.get('volume'):
-            lines.append(f"📦 {product['volume']}{product.get('volume_unit', '')}")
+        if product['specifications'].get('volume'):
+            lines.append(f"📦 {product['specifications']['volume']}{product['specifications'].get('volume_unit', '')}")
         
-        if product.get('stock_quantity') is not None:
-            stock = product['stock_quantity']
+        if product['inventory'].get('stock_quantity') is not None:
+            stock = product['inventory']['stock_quantity']
             status = "✅ In Stock" if stock > 0 else "❌ Out of Stock"
             lines.append(f"📊 {status}")
         

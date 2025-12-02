@@ -70,8 +70,8 @@ class TokenService:
             claims = {
                 'user_id': user.id,
                 'email': user.email,
-                'role': user.role,
-                'status': user.status,
+                'role': user.role.value if hasattr(user.role, 'value') else user.role,
+                'status': user.status.value if hasattr(user.status, 'value') else user.status,
                 'verified': user.is_verified,
                 'platform': getattr(request, 'platform', 'web'),
                 'ip': request.headers.get('X-Forwarded-For', request.remote_addr),
@@ -129,7 +129,7 @@ class TokenService:
                     'email': user.email,
                     'first_name': user.first_name,
                     'last_name': user.last_name,
-                    'role': user.role,
+                    'role': user.role.value if hasattr(user.role, 'value') else user.role,
                     'verified': user.is_verified
                 }
             }
@@ -175,8 +175,8 @@ class TokenService:
             new_claims = {
                 'user_id': user.id,
                 'email': user.email,
-                'role': user.role,
-                'status': user.status,
+                'role': user.role.value if hasattr(user.role, 'value') else user.role,
+                'status': user.status.value if hasattr(user.status, 'value') else user.status,
                 'verified': user.is_verified,
                 'platform': claims.get('platform', 'web'),
                 'ip': request.headers.get('X-Forwarded-For', request.remote_addr),

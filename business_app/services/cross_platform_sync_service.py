@@ -110,7 +110,7 @@ class CrossPlatformSyncService:
                         {
                             'id': match.id,
                             'email': match.email,
-                            'name': match.full_name or f"{match.first_name} {match.last_name}".strip(),
+                            'name': f"{match.first_name} {match.last_name}".strip(),
                             'registration_source': match.registration_source,
                             'created_at': match.created_at.isoformat()
                         }
@@ -167,9 +167,6 @@ class CrossPlatformSyncService:
         # Transfer telegram-specific data to web user
         web_user.telegram_id = telegram_user.telegram_id
         web_user.telegram_username = telegram_user.telegram_username
-        web_user.telegram_first_name = telegram_user.telegram_first_name  
-        web_user.telegram_last_name = telegram_user.telegram_last_name
-        web_user.telegram_language_code = telegram_user.telegram_language_code
         web_user.is_bot_active = telegram_user.is_bot_active
         web_user.bot_state = telegram_user.bot_state
         web_user.last_bot_interaction = telegram_user.last_bot_interaction
@@ -179,9 +176,6 @@ class CrossPlatformSyncService:
             web_user.first_name = telegram_user.first_name
         if not web_user.last_name and telegram_user.last_name:
             web_user.last_name = telegram_user.last_name
-        
-        # Update full name
-        web_user.full_name = f"{web_user.first_name or ''} {web_user.last_name or ''}".strip()
         
         # Mark telegram user as merged
         telegram_user.status = UserStatus.MERGED.value
@@ -224,9 +218,6 @@ class CrossPlatformSyncService:
         telegram_user.email_verified_at = web_user.email_verified_at
         telegram_user.phone_verified_at = web_user.phone_verified_at
         telegram_user.is_verified = web_user.is_verified
-        
-        # Update full name
-        telegram_user.full_name = f"{telegram_user.first_name or ''} {telegram_user.last_name or ''}".strip()
         
         # Mark web user as merged
         web_user.status = UserStatus.MERGED.value

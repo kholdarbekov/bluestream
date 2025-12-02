@@ -59,7 +59,7 @@ class Translation:
         default_translations = {
             'en': {
                 # Main menu
-                'welcome': '🌊 Welcome to BlueStream Water Solutions!\n\nI can help you with:\n• Ordering water\n• Tracking deliveries\n• Managing subscriptions\n• Account management',
+                'welcome': '🌊 Welcome to Aque Element bot!\n\nI can help you with:\n• Ordering water\n• Tracking deliveries\n• Managing subscriptions\n• Account management',
                 'main_menu': '🏠 Main Menu',
                 'back': '⬅️ Back',
                 'cancel': '❌ Cancel',
@@ -123,11 +123,11 @@ class Translation:
                 'success': '✅ Success!',
                 
                 # Registration
-                'registration_welcome': '👋 Welcome! Let\'s set up your account.',
+                'registration_welcome': "🇺🇸 Welcome!\nLet's start by choosing the communication language.",
                 'enter_phone': '📱 Please share your phone number:',
                 'phone_shared': '✅ Phone number received!',
                 'enter_name': '👤 Please enter your full name:',
-                'registration_complete': '🎉 Registration complete! Welcome to BlueStream!',
+                'registration_complete': '🎉 Registration complete! Welcome to Aqua Element bot!',
                 
                 # Payments
                 'payment_cash': '💵 Cash on Delivery',
@@ -156,9 +156,94 @@ class Translation:
                 'frequency_weekly': '📅 Weekly',
                 'frequency_biweekly': '📅 Bi-weekly',
                 'frequency_monthly': '📅 Monthly',
-                'subscription_active': '✅ Active subscriptions: {}',
-                'subscription_paused': '⏸️ Paused subscriptions: {}',
-                
+                'subscription_active': '✅ Active subscriptions',
+                'subscription_paused': '⏸️ Paused subscriptions',
+                'subscription_no_subscriptions': 'You have no active subscriptions. Create one to start!',
+                'subscription_details_title': 'Subscription Details',
+                'subscription_status': 'Status',
+                'subscription_status_active': 'Active',
+                'subscription_status_paused': 'Paused',
+                'subscription_status_cancelled': 'Cancelled',
+                'subscription_status_expired': 'Expired',
+                'subscription_status_trial': 'Trial',
+                'subscription_next_delivery': 'Next Delivery',
+                'subscription_next_billing': 'Next Billing',
+                'subscription_items': 'Items',
+                'subscription_amount': 'Amount',
+                'currency_uzs': 'UZS',
+                'subscription_paused_success': '⏸️ Subscription paused successfully!',
+                'subscription_resumed_success': '▶️ Subscription resumed successfully!',
+                'subscription_cancelled_success': '❌ Subscription cancelled successfully!',
+                'subscription_skip_success': '⏭️ Next delivery skipped!',
+                'subscription_create_template_or_custom': 'How would you like to create your subscription?',
+                'subscription_select_products': 'Select products for your subscription:',
+                'subscription_select_quantity': 'How many would you like?',
+                'subscription_select_frequency': 'How often would you like delivery?',
+                'subscription_select_address': 'Select delivery address:',
+                'subscription_no_addresses': 'You don\'t have any saved addresses. Please add one first.',
+                'add_address': '📍 Add Address',
+                'add_new_address': '➕ Add New Address',
+                'subscription_select_payment': 'Select payment method:',
+                'subscription_confirm_title': '📋 Confirm Subscription',
+                'subscription_total': 'Total',
+                'subscription_trial': '🎁 Includes {} day trial period',
+                'confirm': '✅ Confirm',
+                'subscription_created_success': 'Subscription created successfully',
+                'subscription_id': 'Subscription ID',
+                'view_subscription': '👁️ View Subscription',
+                'back_to_menu': '🏠 Main Menu',
+                'subscription_creation_cancelled': 'Subscription creation cancelled',
+                'auth_error': '❌ Authentication failed. Please restart with /start',
+                'unknown_action': '❌ Unknown action',
+                'subscription_billing_history': '💳 Billing History',
+                'no_billing_history': 'No billing history available yet.',
+
+                # Item Management
+                'manage_subscription_items': '📦 Manage Subscription Items',
+                'current_items': 'Current Items',
+                'no_items_in_subscription': 'No items in this subscription yet.',
+                'select_product_to_add': 'Select a product to add to your subscription:',
+                'select_quantity_for_item': 'How many would you like?',
+                'item_added_successfully': 'Item added successfully to subscription!',
+                'item_updated_successfully': 'Item quantity updated successfully!',
+                'item_removed_successfully': 'Item removed from subscription!',
+                'back_to_items': '📦 Back to Items',
+                'select_new_quantity': 'Select new quantity:',
+                'item_added': '✅ Item added to subscription',
+                'total_items': 'Total items in subscription',
+                'subscription_add_more_or_continue': 'Would you like to add more items or continue?',
+                'add_more_items': 'Add More Items',
+                'continue': 'Continue',
+                'subscription_select_at_least_one_item': 'Please select at least one item for your subscription.',
+                'select': 'Select',
+                'subscription_select_product_footer': '👆 Select products from the list above',
+                'details': 'Details',
+                'page': 'Page',
+                'previous': 'Previous',
+                'next': 'Next',
+
+                # Subscription Editing
+                'edit_subscription_menu': '✏️ Edit Subscription',
+                'select_new_frequency': 'Select new delivery frequency:',
+                'frequency_updated_successfully': 'Delivery frequency updated successfully!',
+                'select_new_payment_method': 'Select new payment method:',
+                'payment_method_updated_successfully': 'Payment method updated successfully!',
+
+                # Statistics
+                'subscription_statistics': 'Subscription Statistics',
+                'total_deliveries': 'Total Deliveries',
+                'total_spent': 'Total Spent',
+                'average_order': 'Average Order Value',
+                'total_savings': 'Total Savings',
+                'favorite_product': 'Favorite Product',
+
+                # Activity Logs
+                'subscription_activity_logs': 'Activity Logs',
+                'no_activity_logs': 'No activity logs available.',
+
+                # Billing
+                'billing_retry_initiated': 'Billing retry initiated. You will be notified of the result.',
+
                 # Admin
                 'admin_panel': '🔧 Admin Panel',
                 'admin_orders': '📊 Orders Overview',
@@ -169,7 +254,7 @@ class Translation:
             
             'uz': {
                 # Main menu
-                'welcome': '🌊 BlueStream Suv Yechimlariga xush kelibsiz!\n\nMen sizga yordam bera olaman:\n• Suv buyurtma qilish\n• Yetkazib berishni kuzatish\n• Obunalarni boshqarish\n• Hisob boshqaruvi',
+                'welcome': '🌊 Aqua Element botiga xush kelibsiz!\n\nMen sizga yordam bera olaman:\n• Suv buyurtma qilish\n• Yetkazib berishni kuzatish\n• Obunalarni boshqarish\n• Hisob boshqaruvi',
                 'main_menu': '🏠 Asosiy menyu',
                 'back': '⬅️ Orqaga',
                 'cancel': '❌ Bekor qilish',
@@ -220,16 +305,16 @@ class Translation:
                 'success': '✅ Muvaffaqiyat!',
                 
                 # Registration
-                'registration_welcome': '👋 Xush kelibsiz! Hisobingizni sozlaylik.',
+                'registration_welcome': '🇺🇿 Xush kelibsiz!\nKeling, muloqot tilini tanlashdan boshlaylik.',
                 'enter_phone': '📱 Iltimos telefon raqamingizni ulashing:',
                 'phone_shared': '✅ Telefon raqami qabul qilindi!',
                 'enter_name': '👤 Iltimos to\'liq ismingizni kiriting:',
-                'registration_complete': '🎉 Ro\'yxatdan o\'tish tugallandi! BlueStream\'ga xush kelibsiz!',
+                'registration_complete': '🎉 Ro\'yxatdan o\'tish tugallandi! Aqua Element botigaga xush kelibsiz!',
             },
             
             'ru': {
                 # Main menu
-                'welcome': '🌊 Добро пожаловать в BlueStream Water Solutions!\n\nЯ могу помочь вам с:\n• Заказом воды\n• Отслеживанием доставки\n• Управлением подписками\n• Управлением аккаунтом',
+                'welcome': '🌊 Добро пожаловать в бот Aqua Element!\n\nЯ могу помочь вам с:\n• Заказом воды\n• Отслеживанием доставки\n• Управлением подписками\n• Управлением аккаунтом',
                 'main_menu': '🏠 Главное меню',
                 'back': '⬅️ Назад',
                 'cancel': '❌ Отмена',
@@ -280,11 +365,11 @@ class Translation:
                 'success': '✅ Успешно!',
                 
                 # Registration
-                'registration_welcome': '👋 Добро пожаловать! Давайте настроим ваш аккаунт.',
+                'registration_welcome': '🇷🇺 Добро пожаловать!\nДавайте начнём с выбора языка общения.',
                 'enter_phone': '📱 Пожалуйста, поделитесь вашим номером телефона:',
                 'phone_shared': '✅ Номер телефона получен!',
                 'enter_name': '👤 Пожалуйста, введите ваше полное имя:',
-                'registration_complete': '🎉 Регистрация завершена! Добро пожаловать в BlueStream!',
+                'registration_complete': '🎉 Регистрация завершена! Добро пожаловать в бот Aqua Element!',
             }
         }
         
@@ -334,9 +419,9 @@ class Translation:
     async def get_user_language(self, telegram_id: int) -> str:
         """Get user's preferred language"""
         query = """
-        SELECT language_code FROM bot_users WHERE telegram_id = $1
+        SELECT preferred_language FROM users WHERE telegram_id = $1
         """
-        language = await db_manager.fetchval(query, telegram_id)
+        language = await db_manager.fetchval(query, str(telegram_id))
         return language or config.localization.default_language
     
     def get_language_flag(self, language_code: str) -> str:

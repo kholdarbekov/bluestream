@@ -363,13 +363,13 @@ const Users = () => {
         {/* Table */}
         <Table
           columns={columns}
-          dataSource={data?.users || []}
+          dataSource={data?.data?.items || []}
           loading={isLoading}
           rowKey="id"
           pagination={{
             current: pagination.page,
             pageSize: pagination.per_page,
-            total: data?.pagination?.total || 0,
+            total: data?.meta?.total || 0,
             showSizeChanger: !responsive.isMobileDevice,
             showQuickJumper: !responsive.isMobileDevice,
             showTotal: (total, range) =>
@@ -427,9 +427,6 @@ const Users = () => {
                 <Col xs={24} sm={12}>
                   <div style={{ marginBottom: 8 }}>
                     <strong>Name:</strong> {selectedUser.first_name} {selectedUser.last_name}
-                  </div>
-                  <div style={{ marginBottom: 8 }}>
-                    <strong>Full Name:</strong> {selectedUser.full_name || 'N/A'}
                   </div>
                   <div style={{ marginBottom: 8 }}>
                     <strong>Email:</strong> 
@@ -491,9 +488,6 @@ const Users = () => {
                     <div style={{ marginBottom: 8 }}>
                       <strong>Username:</strong> {selectedUser.telegram_username ? `@${selectedUser.telegram_username}` : 'N/A'}
                     </div>
-                    <div style={{ marginBottom: 8 }}>
-                      <strong>Telegram Name:</strong> {selectedUser.telegram_first_name || 'N/A'} {selectedUser.telegram_last_name || ''}
-                    </div>
                   </Col>
                   <Col xs={24} sm={12}>
                     <div style={{ marginBottom: 8 }}>
@@ -501,9 +495,6 @@ const Users = () => {
                       <Tag color={selectedUser.is_bot_active ? 'processing' : 'default'} style={{ marginLeft: 8 }}>
                         {selectedUser.is_bot_active ? 'Active' : 'Inactive'}
                       </Tag>
-                    </div>
-                    <div style={{ marginBottom: 8 }}>
-                      <strong>Language Code:</strong> {selectedUser.telegram_language_code || 'N/A'}
                     </div>
                     <div style={{ marginBottom: 8 }}>
                       <strong>Last Bot Interaction:</strong> 

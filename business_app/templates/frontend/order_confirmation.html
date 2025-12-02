@@ -1,0 +1,435 @@
+{% extends "frontend/base.html" %}
+
+{% block title %}{{ 'Order Confirmed'|translate(current_language) }} - {{ company_name }}{% endblock %}
+
+{% block extra_head %}
+<style>
+/* Order Confirmation Styles */
+.confirmation-section {
+    padding: 100px 0;
+}
+
+.confirmation-content {
+    max-width: 800px;
+    margin: 0 auto;
+    background: #fff;
+    border-radius: 10px;
+    box-shadow: 0 2px 20px rgba(0, 0, 0, 0.08);
+    overflow: hidden;
+}
+
+.success-header {
+    background: linear-gradient(135deg, #00d1f9 0%, #002c8f 100%);
+    color: #fff;
+    text-align: center;
+    padding: 50px 30px;
+}
+
+.success-icon {
+    width: 80px;
+    height: 80px;
+    background: #fff;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 20px;
+    animation: scaleIn 0.5s ease;
+}
+
+@keyframes scaleIn {
+    from {
+        transform: scale(0);
+    }
+    to {
+        transform: scale(1);
+    }
+}
+
+.success-icon i {
+    font-size: 40px;
+    color: #28a745;
+}
+
+.success-header h2 {
+    font-size: 32px;
+    font-weight: 700;
+    margin-bottom: 10px;
+}
+
+.success-header p {
+    font-size: 16px;
+    opacity: 0.9;
+}
+
+.order-number {
+    background: rgba(255, 255, 255, 0.2);
+    display: inline-block;
+    padding: 10px 20px;
+    border-radius: 5px;
+    margin-top: 15px;
+    font-size: 18px;
+    font-weight: 600;
+}
+
+.confirmation-body {
+    padding: 40px;
+}
+
+.info-section {
+    margin-bottom: 35px;
+}
+
+.info-section h4 {
+    font-size: 18px;
+    font-weight: 700;
+    margin-bottom: 15px;
+    color: #222;
+    padding-bottom: 10px;
+    border-bottom: 2px solid #f0f0f0;
+}
+
+.info-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 12px 0;
+    border-bottom: 1px solid #f5f5f5;
+}
+
+.info-label {
+    font-weight: 600;
+    color: #666;
+}
+
+.info-value {
+    color: #222;
+    text-align: right;
+}
+
+.order-items {
+    margin-top: 20px;
+}
+
+.order-item {
+    display: flex;
+    align-items: center;
+    padding: 15px 0;
+    border-bottom: 1px solid #f5f5f5;
+}
+
+.item-image {
+    width: 60px;
+    height: 60px;
+    border-radius: 5px;
+    object-fit: cover;
+    margin-right: 15px;
+}
+
+.item-details {
+    flex: 1;
+}
+
+.item-name {
+    font-weight: 600;
+    margin-bottom: 5px;
+    color: #222;
+}
+
+.item-qty {
+    font-size: 14px;
+    color: #666;
+}
+
+.item-price {
+    font-weight: 600;
+    color: #00d1f9;
+}
+
+.totals-section {
+    background: #f8f9fa;
+    padding: 20px;
+    border-radius: 8px;
+    margin-top: 25px;
+}
+
+.total-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 10px 0;
+    font-size: 15px;
+}
+
+.total-row.final {
+    border-top: 2px solid #e0e0e0;
+    margin-top: 10px;
+    padding-top: 15px;
+    font-size: 20px;
+    font-weight: 700;
+    color: #222;
+}
+
+.total-row.final .amount {
+    color: #00d1f9;
+}
+
+.action-buttons {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 15px;
+    margin-top: 35px;
+}
+
+.action-buttons .theme-btn {
+    text-align: center;
+}
+
+.delivery-info-box {
+    background: #e8f5f9;
+    border: 2px solid #00d1f9;
+    border-radius: 8px;
+    padding: 20px;
+    margin-top: 30px;
+}
+
+.delivery-info-box h5 {
+    color: #00d1f9;
+    font-weight: 700;
+    margin-bottom: 15px;
+    display: flex;
+    align-items: center;
+}
+
+.delivery-info-box h5 i {
+    margin-right: 10px;
+    font-size: 24px;
+}
+
+.delivery-info-box p {
+    margin-bottom: 8px;
+    color: #555;
+}
+
+.payment-status {
+    display: inline-block;
+    padding: 8px 16px;
+    border-radius: 20px;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.payment-status.pending {
+    background: #fff3cd;
+    color: #856404;
+}
+
+.payment-status.paid {
+    background: #d4edda;
+    color: #155724;
+}
+
+.payment-status.failed {
+    background: #f8d7da;
+    color: #721c24;
+}
+
+@media (max-width: 767px) {
+    .confirmation-body {
+        padding: 25px;
+    }
+
+    .success-header {
+        padding: 40px 20px;
+    }
+
+    .success-header h2 {
+        font-size: 24px;
+    }
+
+    .action-buttons {
+        grid-template-columns: 1fr;
+    }
+
+    .info-row {
+        flex-direction: column;
+        gap: 5px;
+    }
+
+    .info-value {
+        text-align: left;
+    }
+}
+</style>
+{% endblock %}
+
+{% block content %}
+        <!-- confirmation-section -->
+        <section class="confirmation-section">
+            <div class="auto-container">
+                <div class="confirmation-content">
+                    <!-- Success Header -->
+                    <div class="success-header">
+                        <div class="success-icon">
+                            <i class="far fa-check"></i>
+                        </div>
+                        <h2>{{ 'Order Confirmed!'|translate(current_language) }}</h2>
+                        <p>{{ 'Thank you for your order'|translate(current_language) }}</p>
+                        {% if order %}
+                        <div class="order-number">
+                            {{ 'Order'|translate(current_language) }} #{{ order.order_number }}
+                        </div>
+                        {% endif %}
+                    </div>
+
+                    <!-- Confirmation Body -->
+                    <div class="confirmation-body">
+                        {% if order %}
+                        <!-- Delivery Information -->
+                        <div class="delivery-info-box">
+                            <h5>
+                                <i class="far fa-truck"></i>
+                                {{ 'Delivery Information'|translate(current_language) }}
+                            </h5>
+                            <p><strong>{{ 'Estimated Delivery'|translate(current_language) }}:</strong> {{ order.delivery_date.strftime('%B %d, %Y') if order.delivery_date else 'TBD' }}</p>
+                            <p><strong>{{ 'Status'|translate(current_language) }}:</strong> {{ order.status|title }}</p>
+                            <p><strong>{{ 'Tracking'|translate(current_language) }}:</strong> {{ 'We will notify you when your order is on the way'|translate(current_language) }}</p>
+                        </div>
+
+                        <!-- Order Details -->
+                        <div class="info-section">
+                            <h4>{{ 'Order Details'|translate(current_language) }}</h4>
+
+                            <div class="info-row">
+                                <span class="info-label">{{ 'Order Number'|translate(current_language) }}:</span>
+                                <span class="info-value">{{ order.order_number }}</span>
+                            </div>
+
+                            <div class="info-row">
+                                <span class="info-label">{{ 'Order Date'|translate(current_language) }}:</span>
+                                <span class="info-value">{{ order.created_at.strftime('%B %d, %Y at %I:%M %p') }}</span>
+                            </div>
+
+                            <div class="info-row">
+                                <span class="info-label">{{ 'Payment Method'|translate(current_language) }}:</span>
+                                <span class="info-value">
+                                    {% if order.payment_method == 'cash' %}
+                                        {{ 'Cash on Delivery'|translate(current_language) }}
+                                    {% elif order.payment_method == 'payme' %}
+                                        Payme
+                                    {% elif order.payment_method == 'click' %}
+                                        Click
+                                    {% else %}
+                                        {{ order.payment_method|title }}
+                                    {% endif %}
+                                </span>
+                            </div>
+
+                            <div class="info-row">
+                                <span class="info-label">{{ 'Payment Status'|translate(current_language) }}:</span>
+                                <span class="info-value">
+                                    <span class="payment-status {{ order.payment_status }}">
+                                        {{ order.payment_status|title }}
+                                    </span>
+                                </span>
+                            </div>
+                        </div>
+
+                        <!-- Delivery Address -->
+                        {% if delivery %}
+                        <div class="info-section">
+                            <h4>{{ 'Delivery Address'|translate(current_language) }}</h4>
+                            <p style="color: #666; line-height: 1.8;">
+                                {% if delivery.recipient_name %}{{ delivery.recipient_name }}<br>{% endif %}
+                                {{ delivery.delivery_address_line1 }}<br>
+                                {% if delivery.delivery_address_line2 %}{{ delivery.delivery_address_line2 }}<br>{% endif %}
+                                {{ delivery.delivery_city }}{% if delivery.delivery_postal_code %}, {{ delivery.delivery_postal_code }}{% endif %}<br>
+                                {% if delivery.recipient_phone %}<strong>{{ 'Phone'|translate(current_language) }}:</strong> {{ delivery.recipient_phone }}{% endif %}
+                            </p>
+                        </div>
+                        {% endif %}
+
+                        <!-- Order Items -->
+                        <div class="info-section">
+                            <h4>{{ 'Order Items'|translate(current_language) }} ({{ order.order_items|length }})</h4>
+
+                            <div class="order-items">
+                                {% for item in order.order_items %}
+                                <div class="order-item">
+                                    <img src="{{ item.product.image_url if item.product.image_url else url_for('static', filename='images/resource/shop/shop-1.jpg') }}"
+                                         alt="{{ item.product.name }}"
+                                         class="item-image">
+                                    <div class="item-details">
+                                        <div class="item-name">{{ item.product.name }}</div>
+                                        <div class="item-qty">{{ 'Quantity'|translate(current_language) }}: {{ item.quantity }}</div>
+                                    </div>
+                                    <div class="item-price">{{ "{:,.0f}".format(item.total_price) }} UZS</div>
+                                </div>
+                                {% endfor %}
+                            </div>
+                        </div>
+
+                        <!-- Order Totals -->
+                        <div class="totals-section">
+                            <div class="total-row">
+                                <span>{{ 'Subtotal'|translate(current_language) }}:</span>
+                                <span class="amount">{{ "{:,.0f}".format(order.subtotal) }} UZS</span>
+                            </div>
+                            <div class="total-row">
+                                <span>{{ 'Delivery Fee'|translate(current_language) }}:</span>
+                                <span class="amount">
+                                    {% if order.delivery_fee == 0 %}
+                                        {{ 'Free'|translate(current_language) }}
+                                    {% else %}
+                                        {{ "{:,.0f}".format(order.delivery_fee) }} UZS
+                                    {% endif %}
+                                </span>
+                            </div>
+                            <div class="total-row final">
+                                <span>{{ 'Total'|translate(current_language) }}:</span>
+                                <span class="amount">{{ "{:,.0f}".format(order.total_amount) }} UZS</span>
+                            </div>
+                        </div>
+
+                        <!-- Action Buttons -->
+                        <div class="action-buttons">
+                            <a href="{{ url_for('frontend.order_tracking', order_id=order.id) }}" class="theme-btn btn-one">
+                                <i class="far fa-map-marker-alt"></i> {{ 'Track Order'|translate(current_language) }}
+                            </a>
+                            <a href="{{ url_for('frontend.my_orders') }}" class="theme-btn btn-two">
+                                <i class="far fa-list"></i> {{ 'My Orders'|translate(current_language) }}
+                            </a>
+                            <a href="{{ url_for('frontend.shop') }}" class="theme-btn btn-three">
+                                <i class="far fa-shopping-bag"></i> {{ 'Continue Shopping'|translate(current_language) }}
+                            </a>
+                        </div>
+                        {% else %}
+                        <!-- No Order Found -->
+                        <div style="text-align: center; padding: 40px 20px;">
+                            <i class="flaticon-box" style="font-size: 60px; color: #e0e0e0; margin-bottom: 20px;"></i>
+                            <h3 style="color: #666; margin-bottom: 15px;">{{ 'Order Not Found'|translate(current_language) }}</h3>
+                            <p style="color: #999; margin-bottom: 30px;">{{ 'We could not find your order. Please check your order number.'|translate(current_language) }}</p>
+                            <a href="{{ url_for('frontend.shop') }}" class="theme-btn btn-one">
+                                {{ 'Continue Shopping'|translate(current_language) }}
+                            </a>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </section>
+        <!-- confirmation-section end -->
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// Send order confirmation notification
+document.addEventListener('DOMContentLoaded', function() {
+    // Update cart count to 0
+    updateCartCount();
+
+    // Show success notification
+    {% if order %}
+    showNotification('{{ "Order placed successfully!"|translate(current_language) }}', 'success');
+    {% endif %}
+});
+</script>
+{% endblock %}

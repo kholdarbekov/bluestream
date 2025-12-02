@@ -17,6 +17,7 @@ RUN apt-get update && apt-get install -y \
     g++ \
     libpq-dev \
     curl \
+    libmagic1 \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Set work directory
@@ -47,6 +48,7 @@ RUN chmod u+x /start-gunicorn.sh
 
 # Start command
 CMD ["/start-gunicorn.sh"]
+# CMD ["python", "-Xfrozen_modules=off", "-m", "debugpy", "--listen", "0.0.0.0:5678", "--wait-for-client", "-m", "flask", "--app", "business_app.wsgi:app", "run", "--host", "0.0.0.0", "--port", "80"]
 
 # Telegram Bot Stage
 FROM base AS telegram_bot

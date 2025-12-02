@@ -259,7 +259,6 @@ Get detailed information about a specific product.
       "volume": 19.00,
       "volume_unit": "L",
       "base_price": 15000.00,
-      "cost_price": 10000.00,
       "stock_quantity": 100,
       "min_stock_level": 10,
       "is_active": true,

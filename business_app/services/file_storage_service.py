@@ -61,45 +61,62 @@ class FileStorageService:
         for subdir in subdirs:
             os.makedirs(os.path.join(self.upload_path, subdir), exist_ok=True)
     
-    def upload_file(self, file: BinaryIO, filename: str, folder: str = 'general', 
-                   user_id: int = None, **metadata) -> Dict[str, Any]:
+    def upload_file(self, file: BinaryIO, filename: str, folder: str = 'general',
+                   user_id: int = None, skip_validation: bool = False, **metadata) -> Dict[str, Any]:
         """
         Upload file to storage
-        
+
         Args:
             file: File object to upload
             filename: Original filename
             folder: Storage folder
             user_id: User ID for organizing files
+            skip_validation: Skip validation (for already-validated processed files)
             **metadata: Additional metadata
-        
+
         Returns:
             Dictionary with file information
-        
+
         Raises:
             FileStorageError: If upload fails
         """
         try:
-            # Validate file with enhanced security
-            validation_result = self._validate_file(file, filename, folder)
-            
-            # Use validated information
-            file_info = {
-                'original_filename': validation_result['original_filename'],
-                'filename': validation_result['safe_filename'],
-                'file_path': validation_result['safe_path'],
-                'folder': folder,
-                'extension': validation_result['validation_results']['file_extension'],
-                'user_id': user_id,
-                'validation_results': validation_result['validation_results']
-            }
-            
+            # Validate file with enhanced security (unless already validated)
+            if not skip_validation:
+                validation_result = self._validate_file(file, filename, folder)
+
+                # Use validated information
+                file_info = {
+                    'original_filename': validation_result['original_filename'],
+                    'filename': validation_result['safe_filename'],
+                    'file_path': validation_result['safe_path'],
+                    'folder': folder,
+                    'extension': validation_result['validation_results']['file_extension'],
+                    'user_id': user_id,
+                    'validation_results': validation_result['validation_results']
+                }
+            else:
+                # For processed files (BytesIO), skip validation and generate path
+                from business_app.utils.file_validation import file_validator
+                safe_path = file_validator.generate_safe_path(filename, folder, user_id)
+                file_ext = os.path.splitext(filename)[1].lower()
+
+                file_info = {
+                    'original_filename': filename,
+                    'filename': os.path.basename(safe_path),
+                    'file_path': safe_path,
+                    'folder': folder,
+                    'extension': file_ext,
+                    'user_id': user_id,
+                    'validation_results': {'already_validated': True}
+                }
+
             # Upload based on storage type
             if self.storage_type == 's3':
                 return self._upload_to_s3(file, file_info, metadata)
             else:
                 return self._upload_to_local(file, file_info, metadata)
-                
+
         except Exception as e:
             raise FileStorageError(f"File upload failed: {e}")
     
@@ -131,17 +148,19 @@ class FileStorageService:
                 file, resize, max_width, max_height, quality
             )
             
-            # Upload original/processed image
+            # Upload original/processed image (skip validation - already validated above)
             file_info = self.upload_file(
-                processed_image['main'], filename, folder, user_id
+                processed_image['main'], filename, folder, user_id,
+                skip_validation=True
             )
-            
-            # Upload thumbnails
+
+            # Upload thumbnails (skip validation - already validated)
             thumbnails = {}
             for size_name, thumbnail_data in processed_image.get('thumbnails', {}).items():
                 thumb_filename = f"thumb_{size_name}_{filename}"
                 thumb_info = self.upload_file(
-                    thumbnail_data, thumb_filename, f"{folder}/thumbnails", user_id
+                    thumbnail_data, thumb_filename, f"{folder}/thumbnails", user_id,
+                    skip_validation=True
                 )
                 thumbnails[size_name] = thumb_info
             
@@ -231,7 +250,7 @@ class FileStorageService:
     def _validate_file(self, file: BinaryIO, filename: str, expected_category: str = None):
         """Enhanced file validation with comprehensive security checks"""
         from business_app.utils.file_validation import validate_upload_file, FileValidationError
-        
+
         try:
             # Use comprehensive validation
             validation_result = validate_upload_file(
@@ -243,7 +262,7 @@ class FileStorageService:
             
             # Check against service-specific allowed extensions if configured
             if self.allowed_extensions:
-                extension = validation_result['validation_results']['file_extension']
+                extension = validation_result['validation_results']['file_extension'].split('.')[-1].lower()
                 if extension not in self.allowed_extensions:
                     raise FileStorageError(
                         f"File type '{extension}' not allowed by service configuration. "
@@ -388,7 +407,32 @@ class FileStorageService:
     
     def _get_local_url(self, file_path: str) -> str:
         """Get local file URL"""
-        return url_for('static', filename=f'uploads/{file_path}', _external=True)
+        from flask import request, has_request_context
+        import os
+
+        # Check if we have a configured base URL (for production/staging)
+        base_url = current_app.config.get('BASE_URL')
+        if base_url:
+            url = f"{base_url}/uploads/{file_path}"
+            current_app.logger.info(f"Generated URL from BASE_URL config: {url}")
+            return url
+
+        # Try to use request context for accurate URL generation
+        if has_request_context():
+            # Check for forwarded host (proxy scenarios)
+            host = request.headers.get('X-Forwarded-Host') or request.host
+            scheme = request.headers.get('X-Forwarded-Proto') or request.scheme
+
+            # Log all relevant headers for debugging
+            current_app.logger.info(f"Request headers - Host: {request.host}, X-Forwarded-Host: {request.headers.get('X-Forwarded-Host')}, Referer: {request.headers.get('Referer')}")
+
+            url = f"{scheme}://{host}/uploads/{file_path}"
+            current_app.logger.info(f"Generated URL from request context - scheme: {scheme}, host: {host}, url: {url}")
+            return url
+        else:
+            url = url_for('uploaded_file', filename=file_path, _external=True)
+            current_app.logger.info(f"Generated URL from url_for (no request context): {url}")
+            return url
     
     def _get_local_file_info(self, file_path: str) -> Dict[str, Any]:
         """Get local file information"""

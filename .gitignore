@@ -29,3 +29,4 @@ admin_credentials.txt
 
 telegram_bot/.env
 logs/
+uploads/

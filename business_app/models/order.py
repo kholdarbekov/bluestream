@@ -17,7 +17,7 @@ class Order(db.Model, TimestampMixin):
     id = Column(Integer, primary_key=True)
     order_number = Column(String(50), unique=True, nullable=False, index=True)
     user_id = Column(Integer, ForeignKey('users.id'), nullable=False, index=True)
-    status = Column(Enum(OrderStatus), default=OrderStatus.PENDING, index=True)
+    status = Column(Enum(OrderStatus, name='order_status', values_callable=lambda x: [e.value for e in x]), default=OrderStatus.PENDING, index=True)
     
     # Pricing
     subtotal = Column(Numeric(precision=10, scale=2), nullable=False, default=Decimal('0.00'))
@@ -34,7 +34,7 @@ class Order(db.Model, TimestampMixin):
     is_urgent = Column(Boolean, default=False)
     
     # Payment
-    payment_method = Column(Enum(PaymentMethod), nullable=True)
+    payment_method = Column(Enum(PaymentMethod, name='payment_method', values_callable=lambda x: [e.value for e in x]), nullable=True)
     is_paid = Column(Boolean, default=False, index=True)
     paid_at = Column(DateTime, nullable=True)
     
@@ -120,13 +120,9 @@ class OrderItem(db.Model):
     discount_amount = Column(Numeric(precision=10, scale=2), default=Decimal('0.00'))
     total_price = Column(Numeric(precision=10, scale=2), nullable=False)
     
-    # Additional details
-    product_name = Column(String(200), nullable=False)  # Store name at time of order
-    product_sku = Column(String(50), nullable=False)
-    
     order = relationship('Order', back_populates='order_items')
     # Removed back_populates since Product model doesn't have order_items relationship
-    # product = relationship('Product', back_populates='order_items')
+    product = relationship('Product')
     
     def calculate_total(self):
         """Calculate total price for this item"""
@@ -137,8 +133,6 @@ class OrderItem(db.Model):
         return {
             'id': self.id,
             'product_id': self.product_id,
-            'product_name': self.product_name,
-            'product_sku': self.product_sku,
             'quantity': self.quantity,
             'unit_price': self.unit_price,
             'discount_amount': self.discount_amount,
@@ -146,15 +140,14 @@ class OrderItem(db.Model):
             'product': self.product.to_dict() if self.product else None
         }
 
-
 class OrderStatusHistory(db.Model, TimestampMixin):
     """Track order status changes"""
     __tablename__ = 'order_status_history'
     
     id = Column(Integer, primary_key=True)
     order_id = Column(Integer, ForeignKey('orders.id'), nullable=False, index=True)
-    old_status = Column(Enum(OrderStatus), nullable=False)
-    new_status = Column(Enum(OrderStatus), nullable=False)
+    old_status = Column(Enum(OrderStatus, name='order_status', values_callable=lambda x: [e.value for e in x]), nullable=False)
+    new_status = Column(Enum(OrderStatus, name='order_status', values_callable=lambda x: [e.value for e in x]), nullable=False)
     changed_by = Column(Integer, ForeignKey('users.id'), nullable=True)
     changed_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     notes = Column(Text, nullable=True)

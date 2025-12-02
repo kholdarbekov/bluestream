@@ -42,8 +42,8 @@ class KeyboardBuilder:
         
         for row in buttons:
             keyboard_row = []
-            for button_text in row:
-                keyboard_row.append(KeyboardButton(text=button_text))
+            for button in row:
+                keyboard_row.append(KeyboardButton(text=button['text']))
             keyboard.append(keyboard_row)
         
         return ReplyKeyboardMarkup(
@@ -62,7 +62,12 @@ class MenuKeyboards:
         buttons = [
             [
                 {'text': i18n.get('menu_products', language), 'callback_data': 'menu_products'},
+            ],
+            [
                 {'text': i18n.get('menu_orders', language), 'callback_data': 'menu_orders'}
+            ],
+            [
+                {'text': i18n.get('cart_title', language), 'callback_data': 'cart_view'},
             ],
             [
                 {'text': i18n.get('menu_subscriptions', language), 'callback_data': 'menu_subscriptions'},
@@ -109,6 +114,20 @@ class MenuKeyboards:
 
 class LanguageKeyboards:
     """Language selection keyboards"""
+    @staticmethod
+    def select_language() -> InlineKeyboardMarkup:
+        """Language selection keyboard on start"""
+        buttons = []
+        
+        for lang_code in config.localization.supported_languages:
+            flag = i18n.get_language_flag(lang_code)
+            name = i18n.get_language_name(lang_code, lang_code)
+            buttons.append([{
+                'text': f"{flag} {name}",
+                'callback_data': f'set_language_{lang_code}'
+            }])
+        
+        return KeyboardBuilder.build_inline_keyboard(buttons)
     
     @staticmethod
     def language_selection(current_language: str = 'en') -> InlineKeyboardMarkup:
@@ -177,7 +196,7 @@ class ProductKeyboards:
         # Add product buttons
         for product in products:
             buttons.append([{
-                'text': f"{product['name']} - {product['base_price']} UZS",
+                'text': f"{product['name']} - {product['pricing']['base_price']} UZS",
                 'callback_data': f"product_{product['id']}"
             }])
         
@@ -213,7 +232,34 @@ class ProductKeyboards:
             [{'text': i18n.get('add_to_cart', language), 'callback_data': f'add_to_cart_{product_id}'}],
             [{'text': i18n.get('back', language), 'callback_data': 'back_to_products'}]
         ]
-        
+
+        return KeyboardBuilder.build_inline_keyboard(buttons)
+
+    @staticmethod
+    def product_list_for_subscription(products: List[Dict], language: str = 'en') -> InlineKeyboardMarkup:
+        """Product list keyboard for subscription creation"""
+        buttons = []
+
+        # Add product buttons
+        for product in products:
+            price = product.get('pricing', {}).get('base_price', product.get('base_price', 0))
+            buttons.append([{
+                'text': f"{product['name']} - {price} UZS",
+                'callback_data': f"sub_product_{product['id']}"
+            }])
+
+        # Add navigation buttons
+        buttons.append([
+            {'text': '➕ Add More Items', 'callback_data': 'sub_add_more_items'},
+            {'text': '✅ Done', 'callback_data': 'sub_items_done'}
+        ])
+
+        # Add back button
+        buttons.append([{
+            'text': i18n.get('back', language),
+            'callback_data': 'cancel_subscription_creation'
+        }])
+
         return KeyboardBuilder.build_inline_keyboard(buttons)
     
     @staticmethod
@@ -226,7 +272,7 @@ class ProductKeyboards:
                 {'text': str(current_quantity), 'callback_data': 'qty_current'},
                 {'text': '➕', 'callback_data': f'qty_inc_{product_id}_{current_quantity}'}
             ],
-            [{'text': i18n.get('add_to_cart', language), 'callback_data': f'confirm_add_cart_{product_id}_{current_quantity}'}],
+            [{'text': i18n.get('checkout', language), 'callback_data': f'checkout'}],
             [{'text': i18n.get('back', language), 'callback_data': f'back_to_product_{product_id}'}]
         ]
         
@@ -237,16 +283,24 @@ class OrderKeyboards:
     """Order-related keyboards"""
     
     @staticmethod
-    def cart_actions(language: str = 'en') -> InlineKeyboardMarkup:
+    def cart_actions(language: str = 'en', cart_is_empty: bool = True) -> InlineKeyboardMarkup:
         """Shopping cart action buttons"""
-        buttons = [
-            [{'text': i18n.get('checkout', language), 'callback_data': 'cart_checkout'}],
-            [
-                {'text': '🗑️ Clear Cart', 'callback_data': 'cart_clear'},
-                {'text': '🛍️ Continue Shopping', 'callback_data': 'menu_products'}
-            ],
-            [{'text': i18n.get('back', language), 'callback_data': 'back_to_main'}]
-        ]
+        if cart_is_empty:
+            buttons = [
+                [
+                    {'text': '🛍️ Continue Shopping', 'callback_data': 'menu_products'}
+                ],
+                [{'text': i18n.get('back', language), 'callback_data': 'back_to_main'}]
+            ]
+        else:
+            buttons = [
+                [{'text': i18n.get('checkout', language), 'callback_data': 'cart_checkout'}],
+                [
+                    {'text': '🗑️ Clear Cart', 'callback_data': 'cart_clear'},
+                    {'text': '🛍️ Continue Shopping', 'callback_data': 'menu_products'}
+                ],
+                [{'text': i18n.get('back', language), 'callback_data': 'back_to_main'}]
+            ]
         
         return KeyboardBuilder.build_inline_keyboard(buttons)
     
@@ -402,12 +456,12 @@ class SubscriptionKeyboards:
         """Subscription frequency selection"""
         buttons = [
             [
-                {'text': i18n.get('frequency_daily', language), 'callback_data': 'freq_daily'},
-                {'text': i18n.get('frequency_weekly', language), 'callback_data': 'freq_weekly'}
+                {'text': i18n.get('frequency_daily', language), 'callback_data': 'subscription_freq_daily'},
+                {'text': i18n.get('frequency_weekly', language), 'callback_data': 'subscription_freq_weekly'}
             ],
             [
-                {'text': i18n.get('frequency_biweekly', language), 'callback_data': 'freq_biweekly'},
-                {'text': i18n.get('frequency_monthly', language), 'callback_data': 'freq_monthly'}
+                {'text': i18n.get('frequency_biweekly', language), 'callback_data': 'subscription_freq_biweekly'},
+                {'text': i18n.get('frequency_monthly', language), 'callback_data': 'subscription_freq_monthly'}
             ],
             [{'text': i18n.get('back', language), 'callback_data': 'back_to_subscriptions'}]
         ]
@@ -430,39 +484,124 @@ class SubscriptionKeyboards:
         for sub in subscriptions:
             icon = status_icons.get(sub['status'], '📋')
             buttons.append([{
-                'text': f"{icon} {sub['name']} - {sub['frequency']}",
+                'text': f"{icon} {sub['name']} - {sub['delivery_frequency']}",
                 'callback_data': f"subscription_{sub['id']}"
             }])
         
         buttons.extend([
             [{'text': '➕ Create Subscription', 'callback_data': 'create_subscription'}],
+            [{'text': '📊 My Statistics', 'callback_data': 'subscription_statistics'}],
             [{'text': i18n.get('back', language), 'callback_data': 'back_to_main'}]
         ])
-        
+
         return KeyboardBuilder.build_inline_keyboard(buttons)
     
     @staticmethod
     def subscription_actions(subscription_id: int, status: str, language: str = 'en') -> InlineKeyboardMarkup:
         """Subscription action buttons"""
         buttons = []
-        
+
         if status == 'active':
             buttons.append([{
                 'text': '⏸️ Pause',
                 'callback_data': f'pause_sub_{subscription_id}'
+            }])
+            buttons.append([{
+                'text': '⏭️ Skip Next Delivery',
+                'callback_data': f'skip_sub_{subscription_id}'
             }])
         elif status == 'paused':
             buttons.append([{
                 'text': '▶️ Resume',
                 'callback_data': f'resume_sub_{subscription_id}'
             }])
-        
+
         buttons.extend([
-            [{'text': '✏️ Edit', 'callback_data': f'edit_sub_{subscription_id}'}],
+            [{'text': '✏️ Edit Subscription', 'callback_data': f'edit_sub_{subscription_id}'}],
+            [{'text': '📦 Manage Items', 'callback_data': f'manage_items_{subscription_id}'}],
+            [
+                {'text': '💳 Billing', 'callback_data': f'billing_history_{subscription_id}'},
+                {'text': '📋 Logs', 'callback_data': f'view_logs_{subscription_id}'}
+            ],
             [{'text': '❌ Cancel', 'callback_data': f'cancel_sub_{subscription_id}'}],
             [{'text': i18n.get('back', language), 'callback_data': 'back_to_subscriptions'}]
         ])
-        
+
+        return KeyboardBuilder.build_inline_keyboard(buttons)
+
+    @staticmethod
+    def subscription_creation_options(language: str = 'en') -> InlineKeyboardMarkup:
+        """Options for creating subscription (template or custom)"""
+        buttons = [
+            [{'text': '📋 Use Template', 'callback_data': 'subscription_use_template'}],
+            [{'text': '✨ Create Custom', 'callback_data': 'subscription_custom'}],
+            [{'text': i18n.get('back', language), 'callback_data': 'back_to_subscriptions'}]
+        ]
+        return KeyboardBuilder.build_inline_keyboard(buttons)
+
+    @staticmethod
+    def quantity_selector(language: str = 'en') -> InlineKeyboardMarkup:
+        """Quantity selection keyboard"""
+        buttons = [
+            [
+                {'text': '1', 'callback_data': 'sub_qty_1'},
+                {'text': '2', 'callback_data': 'sub_qty_2'},
+                {'text': '3', 'callback_data': 'sub_qty_3'}
+            ],
+            [
+                {'text': '4', 'callback_data': 'sub_qty_4'},
+                {'text': '5', 'callback_data': 'sub_qty_5'},
+                {'text': '10', 'callback_data': 'sub_qty_10'}
+            ],
+            [{'text': i18n.get('back', language), 'callback_data': 'back_to_product_selection'}]
+        ]
+        return KeyboardBuilder.build_inline_keyboard(buttons)
+
+    @staticmethod
+    def payment_methods(language: str = 'en') -> InlineKeyboardMarkup:
+        """Payment method selection for subscription"""
+        buttons = [
+            [{'text': '💳 Card', 'callback_data': 'sub_payment_card'}],
+            [{'text': '💰 Cash on Delivery', 'callback_data': 'sub_payment_cash'}],
+            [{'text': '📱 Payme', 'callback_data': 'sub_payment_payme'}],
+            [{'text': '🔵 Click', 'callback_data': 'sub_payment_click'}],
+            [{'text': i18n.get('back', language), 'callback_data': 'back_to_address_selection'}]
+        ]
+        return KeyboardBuilder.build_inline_keyboard(buttons)
+
+    @staticmethod
+    def item_management_menu(subscription_id: int, items: List[Dict], language: str = 'en') -> InlineKeyboardMarkup:
+        """Item management keyboard"""
+        buttons = []
+
+        # Add buttons for each existing item
+        for item in items:
+            item_id = item.get('id')
+            product_name = item.get('product', {}).get('name', 'Unknown')
+            quantity = item.get('quantity', 1)
+            buttons.append([
+                {'text': f"✏️ {product_name} x{quantity}", 'callback_data': f'update_item_{subscription_id}_{item_id}'},
+                {'text': '🗑️', 'callback_data': f'remove_item_{subscription_id}_{item_id}'}
+            ])
+
+        # Add new item button
+        buttons.append([{'text': '➕ Add Item', 'callback_data': f'add_item_{subscription_id}'}])
+
+        # Back button
+        buttons.append([{'text': i18n.get('back', language), 'callback_data': f'subscription_{subscription_id}'}])
+
+        return KeyboardBuilder.build_inline_keyboard(buttons)
+
+    @staticmethod
+    def edit_subscription_menu(subscription_id: int, language: str = 'en') -> InlineKeyboardMarkup:
+        """Edit subscription menu"""
+        buttons = [
+            [{'text': '📅 Change Frequency', 'callback_data': f'change_frequency_{subscription_id}'}],
+            [{'text': '💳 Change Payment Method', 'callback_data': f'change_payment_{subscription_id}'}],
+            [{'text': '✏️ Manage Items', 'callback_data': f'manage_items_{subscription_id}'}],
+            [{'text': '📋 View Activity Log', 'callback_data': f'view_logs_{subscription_id}'}],
+            [{'text': i18n.get('back', language), 'callback_data': f'subscription_{subscription_id}'}]
+        ]
         return KeyboardBuilder.build_inline_keyboard(buttons)
 
 
@@ -470,7 +609,7 @@ class ProfileKeyboards:
     """User profile keyboards"""
     
     @staticmethod
-    def profile_menu(language: str = 'en') -> InlineKeyboardMarkup:
+    def profile_menu(language: str = 'en', phone_verified: bool = False) -> InlineKeyboardMarkup:
         """Profile menu keyboard"""
         buttons = [
             [
@@ -478,12 +617,15 @@ class ProfileKeyboards:
                 {'text': '📍 Addresses', 'callback_data': 'manage_addresses'}
             ],
             [
-                {'text': '💳 Payment Methods', 'callback_data': 'payment_methods'},
+                {'text': '📱 Phone Verification', 'callback_data': 'phone_verification'},
                 {'text': '🔔 Notifications', 'callback_data': 'notification_settings'}
+            ],
+            [
+                {'text': '💳 Payment Methods', 'callback_data': 'payment_methods'}
             ],
             [{'text': i18n.get('back', language), 'callback_data': 'back_to_main'}]
         ]
-        
+
         return KeyboardBuilder.build_inline_keyboard(buttons)
     
     @staticmethod

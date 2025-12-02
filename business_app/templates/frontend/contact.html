@@ -2,10 +2,253 @@
 
 {% block title %}{{ 'Contact Us'|translate(current_language) }} - {{ company_name }}{% endblock %}
 
+{% block extra_head %}
+<style>
+/* Professional Page Title with Wavy Border */
+.page-title {
+    position: relative;
+    padding: 180px 0 120px 0 !important;
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+    overflow: hidden;
+}
+
+.page-title .shape {
+    position: absolute;
+    left: 0;
+    bottom: 0;
+    width: 100%;
+    height: 200px;
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+    z-index: 1;
+}
+
+.page-title .auto-container {
+    position: relative;
+    z-index: 2;
+}
+
+.page-title h1 {
+    font-size: 48px;
+    font-weight: 700;
+    color: #222;
+    margin-bottom: 15px;
+    text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+/* Enhanced Contact Section */
+.contact-section {
+    padding: 100px 0;
+    background: linear-gradient(180deg, #f8f9fa 0%, #ffffff 100%);
+}
+
+.contact-section .sec-title {
+    margin-bottom: 40px;
+}
+
+.contact-section .sec-title h2 {
+    font-size: 36px;
+    font-weight: 700;
+    color: #222;
+    margin-bottom: 15px;
+    position: relative;
+    padding-bottom: 20px;
+}
+
+.contact-section .sec-title h2::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    bottom: 0;
+    width: 60px;
+    height: 3px;
+    background: linear-gradient(90deg, #00d1f9 0%, #002c8f 100%);
+    border-radius: 2px;
+}
+
+.contact-section .sec-title p {
+    font-size: 16px;
+    color: #666;
+    line-height: 1.8;
+}
+
+/* Form Styling */
+.form-inner {
+    background: #fff;
+    padding: 50px;
+    border-radius: 15px;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.08);
+    transition: all 0.3s ease;
+}
+
+.form-inner:hover {
+    box-shadow: 0 15px 50px rgba(0, 0, 0, 0.12);
+    transform: translateY(-5px);
+}
+
+.default-form input,
+.default-form textarea {
+    width: 100%;
+    padding: 15px 20px;
+    border: 2px solid #e5e5e5;
+    border-radius: 8px;
+    font-size: 15px;
+    transition: all 0.3s ease;
+    background: #fafafa;
+}
+
+.default-form input:focus,
+.default-form textarea:focus {
+    border-color: #00d1f9;
+    background: #fff;
+    outline: none;
+    box-shadow: 0 0 0 4px rgba(0, 209, 249, 0.1);
+}
+
+.default-form textarea {
+    min-height: 150px;
+    resize: vertical;
+}
+
+.message-btn {
+    margin-top: 10px;
+}
+
+.theme-btn.btn-one {
+    padding: 15px 40px;
+    font-size: 16px;
+    font-weight: 600;
+    border-radius: 8px;
+    transition: all 0.3s ease;
+}
+
+.theme-btn.btn-one:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 25px rgba(0, 209, 249, 0.3);
+}
+
+/* Contact Info Styling */
+.contact-info {
+    background: linear-gradient(135deg, #00d1f9 0%, #002c8f 100%);
+    padding: 50px 40px;
+    border-radius: 15px;
+    color: #fff;
+    height: 100%;
+    box-shadow: 0 10px 40px rgba(0, 44, 143, 0.2);
+}
+
+.contact-info .sec-title h3 {
+    font-size: 28px;
+    font-weight: 700;
+    color: #fff;
+    margin-bottom: 40px;
+    padding-bottom: 20px;
+    border-bottom: 2px solid rgba(255, 255, 255, 0.2);
+}
+
+.contact-info .info-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.contact-info .info-list li {
+    margin-bottom: 35px;
+    position: relative;
+    padding-left: 70px;
+}
+
+.contact-info .info-list li:last-child {
+    margin-bottom: 0;
+}
+
+.contact-info .info-list li i {
+    position: absolute;
+    left: 0;
+    top: 0;
+    font-size: 40px;
+    color: rgba(255, 255, 255, 0.9);
+    width: 55px;
+    height: 55px;
+    line-height: 55px;
+    text-align: center;
+    background: rgba(255, 255, 255, 0.15);
+    border-radius: 10px;
+}
+
+.contact-info .info-list li h5 {
+    font-size: 18px;
+    font-weight: 600;
+    color: #fff;
+    margin-bottom: 8px;
+}
+
+.contact-info .info-list li p {
+    font-size: 15px;
+    color: rgba(255, 255, 255, 0.9);
+    line-height: 1.6;
+}
+
+.contact-info .info-list li a {
+    color: rgba(255, 255, 255, 0.9);
+    transition: all 0.3s ease;
+}
+
+.contact-info .info-list li a:hover {
+    color: #fff;
+    text-decoration: none;
+}
+
+/* Responsive */
+@media (max-width: 991px) {
+    .contact-section {
+        padding: 80px 0;
+    }
+
+    .form-inner {
+        padding: 40px 30px;
+        margin-bottom: 40px;
+    }
+
+    .contact-info {
+        padding: 40px 30px;
+    }
+}
+
+@media (max-width: 767px) {
+    .contact-section .sec-title h2 {
+        font-size: 28px;
+    }
+
+    .form-inner {
+        padding: 30px 20px;
+    }
+
+    .contact-info {
+        padding: 30px 20px;
+    }
+
+    .contact-info .info-list li {
+        padding-left: 60px;
+    }
+
+    .contact-info .info-list li i {
+        font-size: 30px;
+        width: 45px;
+        height: 45px;
+        line-height: 45px;
+    }
+}
+</style>
+{% endblock %}
+
 {% block content %}
         <!-- page-title -->
-        <section class="page-title">
-            <div class="bg-layer" style="background-image: url({{ url_for('static', filename='images/background/page-title.jpg') }});"></div>
+        <section class="page-title centred" style="background-image: url({{ url_for('static', filename='images/background/page-title.jpg') }});">
+            <div class="shape" style="background-image: url({{ url_for('static', filename='images/shape/banner-shap.png') }});"></div>
             <div class="auto-container">
                 <div class="content-box">
                     <h1>{{ 'Contact Us'|translate(current_language) }}</h1>

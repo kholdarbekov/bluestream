@@ -533,7 +533,7 @@ def send_verification_sms_task(self, user_id: int, otp_code: str, phone_number: 
         
         result = notification_service.send_notification(
             user_id,
-            NotificationType.SYSTEM_ALERT,
+            NotificationType.SYSTEM,
             [NotificationChannel.SMS],
             template_data
         )

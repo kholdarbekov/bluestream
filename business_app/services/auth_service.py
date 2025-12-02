@@ -16,6 +16,7 @@ from business_app.utils.validators import EmailValidator, PhoneValidator, Passwo
 from business_app.utils.helpers import generate_otp, format_phone_number, generate_random_string
 from business_app.utils.password_security import hash_password, verify_password, needs_password_rehash
 from business_app.utils.constants import UserRole, UserStatus
+from business_app.utils.translations import get_translation
 from business_app.tasks.notification_tasks import send_verification_sms_task
 from business_app import db
 
@@ -69,20 +70,19 @@ class AuthService:
         
         if existing_user:
             if existing_user.email == email.lower():
-                raise ConflictError("User with this email already exists")
+                raise ConflictError(get_translation('api.auth.email_already_exists'))
             else:
-                raise ConflictError("User with this phone number already exists")
+                raise ConflictError(get_translation('error.validation.phone_already_exists'))
         
         # Create new user
         # Filter out invalid User model fields from kwargs
         valid_user_fields = {
-            'full_name', 'date_of_birth', 'gender', 'role', 'status', 'is_verified', 
+            'date_of_birth', 'gender', 'role', 'status', 'is_verified', 
             'is_premium', 'preferred_language', 'preferred_currency', 'timezone',
             'email_notifications', 'sms_notifications', 'push_notifications',
             'company_name', 'tax_id', 'business_type', 'email_verification_token',
             'email_verified_at', 'telegram_id', 'registration_source',
-            'telegram_username', 'telegram_first_name', 'telegram_last_name',
-            'telegram_language_code', 'is_bot_active', 'bot_state', 'last_bot_interaction'
+            'telegram_username', 'is_bot_active', 'bot_state', 'last_bot_interaction'
         }
         filtered_kwargs = {k: v for k, v in kwargs.items() if k in valid_user_fields}
         
@@ -137,23 +137,21 @@ class AuthService:
 
         if not user:
             self._increment_failed_attempts(identifier)
-            raise UnauthorizedError("Invalid credentials")
+            raise UnauthorizedError(get_translation('api.auth.invalid_credentials'))
 
         # Check if this is a telegram-only user trying to login with placeholder email
         if self._is_telegram_only_user(user) and identifier.lower() == user.email:
-            raise UnauthorizedError(
-                "This account was created via Telegram. Please set a password first "
-                "or use the Telegram bot to access your account."
-            )
+            raise UnauthorizedError(get_translation('api.auth.telegram_account_password_required'))
 
         if not self._verify_password(password, user.password_hash):
             # Increment failed login attempts
             self._increment_failed_attempts(identifier)
-            raise UnauthorizedError("Invalid credentials")
+            raise UnauthorizedError(get_translation('api.auth.invalid_credentials'))
 
         # Check if user is active
-        if user.status in [UserStatus.BANNED.value, UserStatus.INACTIVE.value]:
-            raise UnauthorizedError("Account is disabled")
+        status_value = user.status.value if hasattr(user.status, 'value') else user.status
+        if status_value in [UserStatus.BANNED.value, UserStatus.INACTIVE.value]:
+            raise UnauthorizedError(get_translation('api.auth.account_disabled'))
 
         # Reset failed login attempts
         self._reset_failed_attempts(identifier)
@@ -186,8 +184,13 @@ class AuthService:
             user_id = decoded_token['sub']
             
             user = User.query.get(user_id)
-            if not user or user.status in [UserStatus.BANNED.value, UserStatus.INACTIVE.value]:
-                raise UnauthorizedError("Invalid user")
+            if not user:
+                raise UnauthorizedError(get_translation('api.auth.invalid_user'))
+
+            # Extract status value for comparison
+            status_value = user.status.value if hasattr(user.status, 'value') else user.status
+            if status_value in [UserStatus.BANNED.value, UserStatus.INACTIVE.value]:
+                raise UnauthorizedError(get_translation('api.auth.invalid_user'))
             
             # Generate new tokens
             tokens = self._generate_tokens(user)
@@ -198,7 +201,7 @@ class AuthService:
             return tokens
             
         except Exception:
-            raise UnauthorizedError("Invalid refresh token")
+            raise UnauthorizedError(get_translation('api.auth.token_invalid'))
     
     def logout_user(self, access_token: str = None) -> bool:
         """
@@ -283,16 +286,19 @@ class AuthService:
         
         # Generate OTP
         otp = generate_otp()
-        
+
         # Store OTP in Redis
         key = f"sms_verification:{user.id}"
         self.redis_client.setex(key, self.otp_expiry, otp)
-        
-        # Send SMS
-        send_verification_sms_task.delay(user.id, otp, formatted_phone)
-        
-        logger.info(f"SMS verification sent to {formatted_phone} for user {user_id}")
-        return True
+
+        # Send SMS - call directly instead of using Celery to avoid connection issues
+        try:
+            send_verification_sms_task(user.id, otp, formatted_phone)
+            logger.info(f"SMS verification sent to {formatted_phone} for user {user_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to send SMS verification: {e}")
+            return False
     
     def verify_email(self, token: str) -> bool:
         """Verify email with token"""
@@ -341,7 +347,8 @@ class AuthService:
             user.phone_verified_at = datetime.now(timezone.utc)
 
             # If this was the only pending verification, activate account
-            if user.status == UserStatus.PENDING_VERIFICATION.value and user.email_verified:
+            status_value = user.status.value if hasattr(user.status, 'value') else user.status
+            if status_value == UserStatus.PENDING_VERIFICATION.value and user.email_verified:
                 user.status = UserStatus.ACTIVE.value
                 user.is_verified = True
 
@@ -376,7 +383,7 @@ class AuthService:
         validator = PasswordValidator(new_password, 'password')
         validator.validate()
         if not validator.is_valid():
-            raise ValidationError("Invalid password", {'password': validator.get_errors()})
+            raise ValidationError(get_translation('error.validation.invalid_password'), {'password': validator.get_errors()})
         
         user_id = self._verify_verification_token(token, 'password_reset')
         if not user_id:
@@ -400,16 +407,16 @@ class AuthService:
         user = User.query.get(user_id)
         if not user:
             return False
-        
+
         # Verify current password
         if not self._verify_password(current_password, user.password_hash):
-            raise UnauthorizedError("Current password is incorrect")
-        
+            raise UnauthorizedError(get_translation('api.auth.current_password_incorrect'))
+
         # Validate new password
         validator = PasswordValidator(new_password, 'password')
         validator.validate()
         if not validator.is_valid():
-            raise ValidationError("Invalid password", {'password': validator.get_errors()})
+            raise ValidationError(get_translation('error.validation.invalid_password'), {'password': validator.get_errors()})
         
         # Update password
         user.password_hash = self._hash_password(new_password)
@@ -424,7 +431,7 @@ class AuthService:
         # Check if admin already exists
         existing_admin = User.query.filter_by(role=UserRole.ADMIN.value).first()
         if existing_admin:
-            raise ConflictError("Admin user already exists")
+            raise ConflictError(get_translation('api.auth.admin_already_exists'))
         
         admin_user = User(
             email=email.lower().strip(),
@@ -461,8 +468,12 @@ class AuthService:
             'can_manage_settings': False,
             'can_manage_translations': False,
         }
-        logger.info(f"USER.ROLE: {user.role}, ADMIN ROLES: {[UserRole.ADMIN.value, UserRole.MANAGER.value]}")
-        if user.role in [UserRole.ADMIN.value, UserRole.MANAGER.value]:
+        # Get role value for comparison (handle both enum and string)
+        role_value = user.role.value if hasattr(user.role, 'value') else user.role
+
+        logger.info(f"USER.ROLE: {user.role}, ROLE VALUE: {role_value}, ADMIN ROLES: {[UserRole.ADMIN.value, UserRole.MANAGER.value]}")
+
+        if role_value in [UserRole.ADMIN.value, UserRole.MANAGER.value]:
             permissions.update({
                 'can_view_analytics': True,
                 'can_manage_users': True,
@@ -470,16 +481,16 @@ class AuthService:
                 'can_manage_orders': True,
                 'can_manage_delivery': True,
                 'can_view_admin_panel': True,
-                'can_manage_settings': user.role == UserRole.ADMIN,
-                'can_manage_translations': user.role == UserRole.ADMIN,
+                'can_manage_settings': role_value == UserRole.ADMIN.value,
+                'can_manage_translations': role_value == UserRole.ADMIN.value,
             })
-        elif user.role == UserRole.OPERATOR.value:
+        elif role_value == UserRole.OPERATOR.value:
             permissions.update({
                 'can_view_analytics': True,
                 'can_manage_orders': True,
                 'can_view_admin_panel': True,
             })
-        elif user.role == UserRole.DELIVERY_DRIVER.value:
+        elif role_value == UserRole.DELIVERY_DRIVER.value:
             permissions.update({
                 'can_manage_delivery': True,
                 'can_view_admin_panel': True,
@@ -519,7 +530,7 @@ class AuthService:
             errors['last_name'] = ['Last name is required']
         
         if errors:
-            raise ValidationError("Validation failed", errors)
+            raise ValidationError(get_translation('error.validation.failed'), errors)
     
     def _hash_password(self, password: str) -> str:
         """Hash password with configured bcrypt rounds"""
@@ -659,7 +670,7 @@ class AuthService:
         if attempts and int(attempts) >= self.max_login_attempts:
             lockout_key = f"account_lockout:{identifier}"
             if self.redis_client.exists(lockout_key):
-                raise ValidationError("Account temporarily locked due to too many failed login attempts")
+                raise ValidationError(get_translation('api.auth.account_locked'))
     
     def _increment_failed_attempts(self, identifier: str):
         """Increment failed login attempts"""
@@ -771,14 +782,9 @@ class AuthService:
         if not user:
             # Create a new user with telegram_id in unified table
             logger.info("Creating new telegram user in unified table...")
-            try:
-                full_name = f"{first_name or ''} {last_name or ''}".strip()
-                if not full_name:
-                    full_name = f"User {telegram_id}"
-                    
+            try:    
                 # Generate a secure random password that the user will never use
                 # Telegram users will set their own password if they want web access
-                import secrets
                 random_password = secrets.token_urlsafe(32)
                 secure_password_hash = self._hash_password(random_password)
 
@@ -786,7 +792,6 @@ class AuthService:
                     telegram_id=str(telegram_id),
                     first_name=first_name or "Telegram User",
                     last_name=last_name or "",
-                    full_name=full_name,
                     email=f"telegram_{telegram_id}@bot.internal",  # Placeholder email with proper domain
                     phone=None,  # No phone initially
                     password_hash=secure_password_hash,  # Secure random password hash
@@ -796,8 +801,6 @@ class AuthService:
                     registration_source='telegram',
                     # Bot-specific fields in unified table
                     telegram_username=username,
-                    telegram_first_name=first_name,
-                    telegram_last_name=last_name,
                     is_bot_active=True,
                     bot_state='{}',  # Empty initial state
                     last_bot_interaction=datetime.now(timezone.utc)
@@ -813,7 +816,7 @@ class AuthService:
                 logger.error(f"Error creating telegram user: {e}")
                 logger.error(f"Exception type: {type(e)}")
                 db.session.rollback()
-                raise UnauthorizedError("Failed to create user")
+                raise UnauthorizedError(get_translation('error.server_error'))
         else:
             # Update existing user information from Telegram if provided
             logger.info(f"Found existing user: ID={user.id}")
@@ -835,14 +838,6 @@ class AuthService:
                 logger.info(f"Updating telegram_username: {user.telegram_username} -> {username}")
                 user.telegram_username = username
                 updates_made = True
-                
-            if first_name and first_name != user.telegram_first_name:
-                user.telegram_first_name = first_name
-                updates_made = True
-                
-            if last_name and last_name != user.telegram_last_name:
-                user.telegram_last_name = last_name
-                updates_made = True
             
             # Update bot activity
             user.is_bot_active = True
@@ -859,13 +854,14 @@ class AuthService:
                     logger.error(f"Database error during telegram auth: {e}")
                     logger.error(f"Exception type: {type(e)}")
                     db.session.rollback()
-                    raise UnauthorizedError("Authentication failed")
+                    raise UnauthorizedError(get_translation('api.auth.authentication_failed'))
         
         # Check if user account is active
         logger.info(f"Checking user status: {user.status}")
-        if user.status != UserStatus.ACTIVE.value:
+        status_value = user.status.value if hasattr(user.status, 'value') else user.status
+        if status_value != UserStatus.ACTIVE.value:
             logger.error(f"User account not active: {user.status}")
-            raise UnauthorizedError("User account is not active")
+            raise UnauthorizedError(get_translation('api.auth.account_disabled'))
         
         # Generate tokens
         logger.info("Generating JWT tokens for user")

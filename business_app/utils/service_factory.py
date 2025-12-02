@@ -170,6 +170,24 @@ def get_token_service():
     return ServiceFactory.get_singleton_service(TokenService, 'token_service')
 
 
+def get_product_service():
+    """Get ProductService instance"""
+    from business_app.services.product_service import ProductService
+    return ServiceFactory.get_service(ProductService, 'product_service')
+
+
+def get_review_service():
+    """Get ReviewService instance"""
+    from business_app.services.review_service import ReviewService
+    return ServiceFactory.get_service(ReviewService, 'review_service')
+
+
+def get_cart_service():
+    """Get CartService instance"""
+    from business_app.services.cart_service import CartService
+    return ServiceFactory.get_service(CartService, 'cart_service')
+
+
 # Decorator for automatic service injection
 def inject_services(*service_names):
     """
@@ -198,6 +216,9 @@ def inject_services(*service_names):
                 'maps_service': get_maps_service,
                 'inventory_service': get_inventory_service,
                 'token_service': get_token_service,
+                'product_service': get_product_service,
+                'review_service': get_review_service,
+                'cart_service': get_cart_service,
             }
             
             # Inject requested services
@@ -208,86 +229,6 @@ def inject_services(*service_names):
             return func(*args, **kwargs)
         return wrapper
     return decorator
-
-
-class ServiceConfig:
-    """Configuration validator for services"""
-    
-    @staticmethod
-    def validate_service_config(service_class: Type, required_config: Dict[str, Any]) -> bool:
-        """
-        Validate that required configuration is available for a service
-        
-        Args:
-            service_class: The service class
-            required_config: Dict of config keys and their types/validators
-        
-        Returns:
-            True if all required config is valid
-        """
-        missing_config = []
-        invalid_config = []
-        
-        for config_key, validator in required_config.items():
-            try:
-                value = current_app.config.get(config_key)
-                
-                if value is None:
-                    missing_config.append(config_key)
-                    continue
-                
-                # Validate type if validator is a type
-                if isinstance(validator, type):
-                    if not isinstance(value, validator):
-                        invalid_config.append(f"{config_key}: expected {validator.__name__}, got {type(value).__name__}")
-                
-                # Validate with function if validator is callable
-                elif callable(validator):
-                    if not validator(value):
-                        invalid_config.append(f"{config_key}: validation failed")
-                        
-            except Exception as e:
-                invalid_config.append(f"{config_key}: validation error - {e}")
-        
-        if missing_config or invalid_config:
-            error_msg = f"Service {service_class.__name__} configuration validation failed:"
-            if missing_config:
-                error_msg += f"\nMissing: {', '.join(missing_config)}"
-            if invalid_config:
-                error_msg += f"\nInvalid: {'; '.join(invalid_config)}"
-            
-            logger.error(error_msg)
-            return False
-        
-        return True
-    
-    @staticmethod
-    def get_notification_service_config():
-        """Get required config for NotificationService"""
-        return {
-            'SENDGRID_API_KEY': str,
-            'TWILIO_ACCOUNT_SID': str,
-            'TWILIO_AUTH_TOKEN': str,
-            'TWILIO_PHONE_NUMBER': str,
-        }
-    
-    @staticmethod
-    def get_payment_service_config():
-        """Get required config for PaymentService"""
-        return {
-            'PAYME_MERCHANT_ID': str,
-            'PAYME_SECRET_KEY': str,
-            'CLICK_MERCHANT_ID': str,
-            'CLICK_SECRET_KEY': str,
-        }
-    
-    @staticmethod
-    def get_maps_service_config():
-        """Get required config for MapsService"""
-        return {
-            'MAPS_PROVIDER': str,
-            'GOOGLE_MAPS_API_KEY': str,
-        }
 
 
 class ServiceHealthChecker:
@@ -400,37 +341,6 @@ def init_service_factory(app):
             }), 500
 
 
-# Utility functions for service management
-def validate_all_service_configs():
-    """Validate configuration for all services"""
-    validation_results = {}
-    
-    service_configs = {
-        'NotificationService': ServiceConfig.get_notification_service_config(),
-        'PaymentService': ServiceConfig.get_payment_service_config(),
-        'MapsService': ServiceConfig.get_maps_service_config(),
-    }
-    
-    for service_name, config_requirements in service_configs.items():
-        try:
-            # Import service class dynamically
-            module_name = f"business_app.services.{service_name.lower().replace('service', '_service')}"
-            module = __import__(module_name, fromlist=[service_name])
-            service_class = getattr(module, service_name)
-            
-            is_valid = ServiceConfig.validate_service_config(service_class, config_requirements)
-            validation_results[service_name] = is_valid
-            
-        except ImportError:
-            validation_results[service_name] = False
-            logger.warning(f"Could not import {service_name} for validation")
-        except Exception as e:
-            validation_results[service_name] = False
-            logger.error(f"Error validating {service_name} config: {e}")
-    
-    return validation_results
-
-
 def get_service_metrics():
     """Get metrics about service usage"""
     metrics = {
@@ -440,7 +350,8 @@ def get_service_metrics():
             'auth_service', 'order_service', 'payment_service', 'delivery_service',
             'notification_service', 'loyalty_service', 'analytics_service',
             'subscription_service', 'file_storage_service', 'maps_service',
-            'inventory_service', 'token_service'
+            'inventory_service', 'token_service', 'product_service', 'review_service',
+            'cart_service'
         ]
     }
     

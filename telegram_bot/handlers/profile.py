@@ -8,15 +8,17 @@ from telegram.ext import ContextTypes, ConversationHandler
 from telegram.error import BadRequest
 
 from i18n import i18n
-from keyboards import ProfileKeyboards, MenuKeyboards
+from keyboards import ProfileKeyboards, MenuKeyboards, LanguageKeyboards
+from handlers.menu import main_menu_handler
 from api_client import api_client
 from database import db_manager, BotUserRepository
 from utils import user_middleware, validate_phone_number, normalize_phone_number, authenticate_telegram_user
+from config import config
 
 logger = logging.getLogger('handlers')
 
 # Conversation states
-PHONE, NAME, ADDRESS_LOCATION, ADDRESS_TITLE = range(4)
+SELECT_LANGUAGE, PHONE, NAME, ADDRESS_LOCATION, ADDRESS_TITLE = range(5)
 
 
 class ProfileHandlers:
@@ -73,10 +75,236 @@ class ProfileHandlers:
                 )
             
             logger.info(f"Profile menu shown to user {user_id}")
-            
+
         except Exception as e:
             logger.error(f"Error in profile menu: {e}")
             await self._handle_error(update)
+
+    async def phone_verification_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Show phone verification menu with add/verify options"""
+        try:
+            user = await user_middleware(update)
+            if not user:
+                return
+
+            user_id = update.effective_user.id
+            language = await i18n.get_user_language(user_id)
+
+            # Get user profile from API to check phone status
+            async with api_client as client:
+                user_token = await authenticate_telegram_user(update, client)
+                if not user_token:
+                    await self._handle_auth_error(update, language)
+                    return
+
+                response = await client.get_user_profile(user_token)
+                if not response.success:
+                    await self._handle_api_error(update, response.error, language)
+                    return
+
+                profile = response.data['data']
+
+            phone = profile.get('phone')
+            phone_verified = profile.get('phone_verified_at') is not None or profile.get('phone_verified', False)
+
+            # Build status message
+            if not phone:
+                status_text = "📱 Phone Verification\n\n" \
+                             "Status: ❌ No phone number added\n\n" \
+                             "Please add your phone number to:\n" \
+                             "• Place orders\n" \
+                             "• Receive order updates\n" \
+                             "• Get delivery notifications"
+                buttons = [
+                    [{'text': '📱 Add Phone Number', 'callback_data': 'add_phone_number'}],
+                    [{'text': i18n.get('back', language), 'callback_data': 'menu_profile'}]
+                ]
+            elif not phone_verified:
+                status_text = f"📱 Phone Verification\n\n" \
+                             f"Phone: {phone}\n" \
+                             f"Status: ⚠️ Not verified\n\n" \
+                             f"Please verify your phone number to access all features."
+                buttons = [
+                    [{'text': '✅ Verify Phone Number', 'callback_data': 'verify_phone_number'}],
+                    [{'text': '📝 Change Phone Number', 'callback_data': 'add_phone_number'}],
+                    [{'text': i18n.get('back', language), 'callback_data': 'menu_profile'}]
+                ]
+            else:
+                status_text = f"📱 Phone Verification\n\n" \
+                             f"Phone: {phone}\n" \
+                             f"Status: ✅ Verified\n\n" \
+                             f"Your phone number is verified and active!"
+                buttons = [
+                    [{'text': '📝 Change Phone Number', 'callback_data': 'add_phone_number'}],
+                    [{'text': i18n.get('back', language), 'callback_data': 'menu_profile'}]
+                ]
+
+            from keyboards import KeyboardBuilder
+            keyboard = KeyboardBuilder.build_inline_keyboard(buttons)
+
+            if update.callback_query:
+                await update.callback_query.edit_message_text(
+                    text=status_text,
+                    reply_markup=keyboard
+                )
+                await update.callback_query.answer()
+            else:
+                await update.message.reply_text(
+                    text=status_text,
+                    reply_markup=keyboard
+                )
+
+            logger.info(f"Phone verification menu shown to user {user_id}")
+
+        except Exception as e:
+            logger.error(f"Error in phone verification menu: {e}")
+            await self._handle_error(update)
+
+    async def add_phone_number(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Start phone number addition/change flow"""
+        try:
+            user = await user_middleware(update)
+            if not user:
+                return
+
+            user_id = update.effective_user.id
+            language = await i18n.get_user_language(user_id)
+
+            # Prompt user to share phone
+            phone_prompt = (
+                "📱 *Add Phone Number*\n\n"
+                "Please share your phone number using one of these methods:\n\n"
+                "1️⃣ Click the button below to share your contact\n"
+                "2️⃣ Or type your phone number manually (e.g., +998901234567)"
+            )
+
+            # Send the prompt with reply keyboard
+            keyboard = ProfileKeyboards.phone_request(language)
+
+            if update.callback_query:
+                await update.callback_query.answer()
+                await update.callback_query.message.reply_text(
+                    phone_prompt,
+                    parse_mode='Markdown',
+                    reply_markup=keyboard
+                )
+            else:
+                await update.message.reply_text(
+                    phone_prompt,
+                    parse_mode='Markdown',
+                    reply_markup=keyboard
+                )
+
+            logger.info(f"Phone addition flow started for user {user_id}")
+
+        except Exception as e:
+            logger.error(f"Error starting phone addition: {e}")
+            await self._handle_error(update)
+
+    async def verify_phone_number(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Start phone verification flow for existing phone"""
+        try:
+            user = await user_middleware(update)
+            if not user:
+                return
+
+            user_id = update.effective_user.id
+            language = await i18n.get_user_language(user_id)
+
+            # Get user's phone from profile
+            async with api_client as client:
+                user_token = await authenticate_telegram_user(update, client)
+                if not user_token:
+                    await self._handle_auth_error(update, language)
+                    return
+
+                response = await client.get_user_profile(user_token)
+                if not response.success:
+                    await self._handle_api_error(update, response.error, language)
+                    return
+
+                profile = response.data['data']
+                phone = profile.get('phone')
+
+            if not phone:
+                await update.callback_query.answer("No phone number on file!")
+                await update.callback_query.message.reply_text(
+                    "❌ No phone number found. Please add a phone number first."
+                )
+                return
+
+            # Send verification code
+            async with api_client as client:
+                user_token = await authenticate_telegram_user(update, client)
+                if user_token:
+                    response = await client.send_phone_verification(user_token, phone)
+                    if response.success:
+                        verification_msg = (
+                            "📱 *Phone Verification*\n\n"
+                            f"An SMS with a verification code has been sent to *{phone}*.\n\n"
+                            "Please reply with the 6-digit code to verify your phone number."
+                        )
+
+                        await update.callback_query.answer("Verification code sent!")
+                        await update.callback_query.message.reply_text(
+                            verification_msg,
+                            parse_mode='Markdown'
+                        )
+
+                        # Store awaiting OTP flag
+                        context.user_data['awaiting_otp'] = True
+                        context.user_data['pending_phone_verification'] = phone
+
+                        logger.info(f"Verification SMS sent to {phone} for user {user_id}")
+                    else:
+                        await update.callback_query.answer("Failed to send code!")
+                        await update.callback_query.message.reply_text(
+                            f"❌ Could not send verification SMS: {response.error}\n\n"
+                            "Please try again later."
+                        )
+
+        except Exception as e:
+            logger.error(f"Error in phone verification: {e}")
+            await self._handle_error(update)
+
+    async def start_registration_new(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Start registration process"""
+        try:
+            user_id = update.effective_user.id
+            telegram_language_code = update.effective_user.language_code
+
+            user_repo = BotUserRepository(db_manager)
+            # Check if user already exists
+            existing_user = await user_repo.get_user_by_telegram_id(user_id)
+            logger.info(f"existing_user {existing_user} for user_id {user_id}")
+
+            if not existing_user:
+                welcome_text_en = i18n.get('registration_welcome', "en")
+                welcome_text_uz = i18n.get('registration_welcome', "uz")
+                welcome_text_ru = i18n.get('registration_welcome', "ru")
+                welcome_text = f"{welcome_text_en}\n\n{welcome_text_uz}\n\n{welcome_text_ru}"
+
+                await update.message.reply_text(
+                    welcome_text,
+                    reply_markup=LanguageKeyboards.select_language()
+                )
+
+                return SELECT_LANGUAGE
+            else:
+                # Already registered, show main menu
+                complete_text = i18n.get('welcome', telegram_language_code)
+                keyboard = MenuKeyboards.main_menu(telegram_language_code)
+
+                await update.message.reply_text(
+                    text=complete_text,
+                    reply_markup=keyboard
+                )
+
+                return ConversationHandler.END
+            
+        except Exception as e:
+            logger.error(f"Error starting registration: {e}")
+            return ConversationHandler.END
     
     async def start_registration(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Start registration process"""
@@ -110,6 +338,69 @@ class ProfileHandlers:
             logger.error(f"Error starting registration: {e}")
             return ConversationHandler.END
     
+    async def language_selection(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle language selection during registration"""
+        try:
+            query = update.callback_query
+            user = update.effective_user
+            user_id = user.id
+            language_code = query.data.split('_')[-1]
+            logger.info(f"User {user_id} (@{user.username}) register started with language: {language_code}")
+            
+            # Validate language code
+            if language_code not in config.localization.supported_languages:
+                await query.answer("❌ Invalid language selection")
+                return
+            
+            user_repo = BotUserRepository(db_manager)
+
+            existing_user = await user_repo.get_user_by_telegram_id(user_id)
+            logger.info(f"existing_user {existing_user} for user_id {user_id}")
+
+            if not existing_user:
+                try:
+                    async with api_client as client:
+                        registration_data = {
+                            'first_name': user.first_name,
+                            'last_name': user.last_name,
+                            'username': user.username,
+                            'language_code': language_code
+                        }
+                        response = await client.register_telegram_user(user_id, registration_data)
+                        if not response.success:
+                            logger.error(f"Failed to register telegram user {user_id}: {response.error}")
+                            # Fall back to error message but don't crash the bot
+                            await update.message.reply_text(
+                                "❌ Registration failed. Please try again later or contact support."
+                            )
+                            return
+                except Exception as e:
+                    logger.error(f"Exception during telegram user registration: {e}")
+                    await update.message.reply_text(
+                        "❌ Registration failed. Please try again later."
+                    )
+                    return
+            else:
+                # Update user's preferred language
+                await self.user_repo.update_user_language(user_id, language_code)
+                await query.answer("✅ Language updated")
+            
+            await update.callback_query.delete_message()
+            # Proceed to phone number input
+            phone_text = i18n.get('enter_phone', language_code)
+            keyboard = ProfileKeyboards.phone_request(language_code)
+            
+            await query.message.reply_text(
+                text=phone_text,
+                reply_markup=keyboard
+            )
+            
+            return PHONE
+            
+        except Exception as e:
+            logger.error(f"Error in language selection: {e}")
+            return ConversationHandler.END
+    
     async def phone_received(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle phone number from contact"""
         try:
@@ -129,53 +420,18 @@ class ProfileHandlers:
             # Store phone number and trigger SMS verification
             await self.user_repo.set_user_phone(user_id, phone)
 
+            # Registration complete
+            complete_text = i18n.get('registration_complete', language)
+            keyboard = MenuKeyboards.main_menu(language)
+
             await update.message.reply_text(
-                i18n.get('phone_shared', language),
-                reply_markup=ReplyKeyboardRemove()
+                text=complete_text,
+                reply_markup=keyboard
             )
 
-            # Trigger SMS OTP verification via API
-            try:
-                async with api_client as client:
-                    user_token = await authenticate_telegram_user(update, client)
-                    if user_token:
-                        # Send verification SMS
-                        response = await client.send_phone_verification(user_token, phone)
-                        if response.success:
-                            verification_msg = (
-                                "📱 **Phone Verification**\n\n"
-                                f"An SMS with a verification code has been sent to {phone}.\n\n"
-                                "Please enter the 6-digit code to verify your phone number:"
-                            )
-                            await update.message.reply_text(
-                                verification_msg,
-                                parse_mode='Markdown'
-                            )
+            logger.info(f"Registration completed for user {user_id}")
 
-                            # Store phone in context for OTP verification
-                            context.user_data['pending_phone_verification'] = phone
-                            context.user_data['awaiting_otp'] = True
-
-                            logger.info(f"SMS verification sent to {phone} for user {user_id}")
-                            return NAME  # Reuse NAME state for OTP input
-                        else:
-                            logger.warning(f"Failed to send SMS verification: {response.error}")
-                            await update.message.reply_text(
-                                "⚠️ Could not send verification SMS. Your phone has been saved, "
-                                "but you'll need to verify it later from your profile."
-                            )
-            except Exception as sms_error:
-                logger.error(f"Error sending verification SMS: {sms_error}")
-                await update.message.reply_text(
-                    "⚠️ Could not send verification SMS. Your phone has been saved, "
-                    "but you'll need to verify it later from your profile."
-                )
-
-            # Ask for name
-            name_text = i18n.get('enter_name', language)
-            await update.message.reply_text(name_text)
-
-            return NAME
+            return ConversationHandler.END
 
         except Exception as e:
             logger.error(f"Error handling phone: {e}")
@@ -199,50 +455,18 @@ class ProfileHandlers:
             # Store phone number
             await self.user_repo.set_user_phone(user_id, phone)
 
-            await update.message.reply_text(i18n.get('phone_shared', language))
+            # Registration complete
+            complete_text = i18n.get('registration_complete', language)
+            keyboard = MenuKeyboards.main_menu(language)
 
-            # Trigger SMS OTP verification via API
-            try:
-                async with api_client as client:
-                    user_token = await authenticate_telegram_user(update, client)
-                    if user_token:
-                        # Send verification SMS
-                        response = await client.send_phone_verification(user_token, phone)
-                        if response.success:
-                            verification_msg = (
-                                "📱 **Phone Verification**\n\n"
-                                f"An SMS with a verification code has been sent to {phone}.\n\n"
-                                "Please enter the 6-digit code to verify your phone number:"
-                            )
-                            await update.message.reply_text(
-                                verification_msg,
-                                parse_mode='Markdown'
-                            )
+            await update.message.reply_text(
+                text=complete_text,
+                reply_markup=keyboard
+            )
 
-                            # Store phone in context for OTP verification
-                            context.user_data['pending_phone_verification'] = phone
-                            context.user_data['awaiting_otp'] = True
+            logger.info(f"Registration completed for user {user_id}")
 
-                            logger.info(f"SMS verification sent to {phone} for user {user_id}")
-                            return NAME  # Reuse NAME state for OTP input
-                        else:
-                            logger.warning(f"Failed to send SMS verification: {response.error}")
-                            await update.message.reply_text(
-                                "⚠️ Could not send verification SMS. Your phone has been saved, "
-                                "but you'll need to verify it later from your profile."
-                            )
-            except Exception as sms_error:
-                logger.error(f"Error sending verification SMS: {sms_error}")
-                await update.message.reply_text(
-                    "⚠️ Could not send verification SMS. Your phone has been saved, "
-                    "but you'll need to verify it later from your profile."
-                )
-
-            # Ask for name
-            name_text = i18n.get('enter_name', language)
-            await update.message.reply_text(name_text)
-
-            return NAME
+            return ConversationHandler.END
 
         except Exception as e:
             logger.error(f"Error handling phone text: {e}")
@@ -314,7 +538,6 @@ class ProfileHandlers:
                 user_token = await authenticate_telegram_user(update, client)
                 if user_token:
                     profile_data = {
-                        'full_name': name,
                         'first_name': name.split()[0] if name.split() else name,
                         'last_name': ' '.join(name.split()[1:]) if len(name.split()) > 1 else ''
                     }
@@ -467,13 +690,14 @@ class ProfileHandlers:
             
             if update.callback_query:
                 logger.info(f"Editing message via callback query")
-                await update.callback_query.edit_message_text(
-                    text=location_text
-                )
+                await update.callback_query.delete_message()
+                # await update.callback_query.edit_message_text(
+                #     text=location_text
+                # )
                 await update.callback_query.answer()
                 # Send keyboard in new message
                 await update.callback_query.message.reply_text(
-                    text="Share location:",
+                    text=location_text,
                     reply_markup=keyboard
                 )
                 logger.info(f"Callback query processed and keyboard sent")
@@ -1401,6 +1625,7 @@ class ProfileHandlers:
 profile_handlers = ProfileHandlers()
 
 # Export conversation states
+profile_handlers.SELECT_LANGUAGE = SELECT_LANGUAGE
 profile_handlers.PHONE = PHONE
 profile_handlers.NAME = NAME  
 profile_handlers.ADDRESS_LOCATION = ADDRESS_LOCATION

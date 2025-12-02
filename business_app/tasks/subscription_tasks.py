@@ -1000,3 +1000,95 @@ def send_subscription_reminder(self, subscription_id: int, reminder_type: str):
     except Exception as exc:
         logger.error(f"Subscription reminder sending failed: {exc}")
         raise self.retry(exc=exc)
+
+
+@shared_task(bind=True, max_retries=2)
+def resume_subscription_task(self, subscription_id: int, user_id: int = None):
+    """Resume a paused subscription"""
+    try:
+        logger.info(f"Resuming subscription {subscription_id}")
+
+        subscription = Subscription.query.get(subscription_id)
+
+        if not subscription:
+            logger.error(f"Subscription {subscription_id} not found")
+            return {'success': False, 'error': 'Subscription not found'}
+
+        # Verify user ownership if user_id provided
+        if user_id and subscription.user_id != user_id:
+            logger.error(f"User {user_id} does not own subscription {subscription_id}")
+            return {'success': False, 'error': 'Unauthorized'}
+
+        if subscription.status != SubscriptionStatus.PAUSED:
+            logger.warning(f"Subscription {subscription_id} is not paused (status: {subscription.status})")
+            return {'success': False, 'error': f'Subscription is not paused (current status: {subscription.status})'}
+
+        # Resume the subscription
+        subscription.status = SubscriptionStatus.ACTIVE
+        subscription.pause_start_date = None
+        subscription.pause_end_date = None
+        subscription.updated_at = datetime.now(timezone.utc)
+
+        # If next billing date has passed, calculate new billing date
+        if subscription.next_billing_date and subscription.next_billing_date < datetime.now(timezone.utc).date():
+            # Calculate next billing date from today
+            subscription_service = SubscriptionService()
+            billing_cycle = subscription.billing_cycle or 'MONTHLY'
+            subscription.next_billing_date = subscription_service._calculate_next_billing_date(
+                datetime.now(timezone.utc),
+                billing_cycle
+            )
+
+        # If next delivery date has passed, calculate new delivery date
+        if subscription.next_delivery_date and subscription.next_delivery_date < datetime.now(timezone.utc).date():
+            subscription_service = SubscriptionService()
+            delivery_frequency = subscription.delivery_frequency or 'WEEKLY'
+            subscription.next_delivery_date = subscription_service._calculate_next_delivery_date(
+                datetime.now(timezone.utc),
+                delivery_frequency,
+                subscription.delivery_day_of_week,
+                subscription.delivery_day_of_month
+            )
+
+        # Reset failed payment count on resume
+        subscription.failed_payment_count = 0
+
+        db.session.commit()
+
+        # Send resume notification
+        notification_service = NotificationService()
+        notification_service.send_notification(
+            subscription.user_id,
+            'subscription_resumed',
+            template_data={
+                'subscription_name': subscription.name,
+                'next_billing_date': subscription.next_billing_date.isoformat() if subscription.next_billing_date else None,
+                'next_delivery_date': subscription.next_delivery_date.isoformat() if subscription.next_delivery_date else None
+            }
+        )
+
+        # Schedule next billing if auto-renew enabled
+        if subscription.auto_renew and subscription.next_billing_date:
+            process_subscription_billing.apply_async(
+                args=[subscription_id],
+                eta=subscription.next_billing_date
+            )
+
+        # Schedule next delivery
+        if subscription.next_delivery_date:
+            create_subscription_delivery_task.apply_async(
+                args=[subscription_id],
+                eta=datetime.combine(subscription.next_delivery_date, datetime.min.time())
+            )
+
+        logger.info(f"Subscription {subscription_id} resumed successfully")
+        return {
+            'success': True,
+            'subscription_id': subscription_id,
+            'next_billing_date': subscription.next_billing_date.isoformat() if subscription.next_billing_date else None,
+            'next_delivery_date': subscription.next_delivery_date.isoformat() if subscription.next_delivery_date else None
+        }
+
+    except Exception as exc:
+        logger.error(f"Failed to resume subscription: {exc}")
+        raise self.retry(exc=exc)

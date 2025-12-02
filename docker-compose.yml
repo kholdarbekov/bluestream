@@ -86,13 +86,15 @@ services:
       - STORAGE_TYPE=${STORAGE_TYPE:-local}
       - MAPS_PROVIDER=${MAPS_PROVIDER:-google}
       - SENDGRID_API_KEY=${SENDGRID_API_KEY}
-      - TWILIO_ACCOUNT_SID=${TWILIO_ACCOUNT_SID}
-      - TWILIO_AUTH_TOKEN=${TWILIO_AUTH_TOKEN}
-      - TWILIO_PHONE_NUMBER=${TWILIO_PHONE_NUMBER}
+      - ESKIZ_EMAIL=${ESKIZ_EMAIL}
+      - ESKIZ_PASSWORD=${ESKIZ_PASSWORD}
+      - ESKIZ_FROM=${ESKIZ_FROM:-4546}
       - GUNICORN_WORKERS=${GUNICORN_WORKERS:-4}
       - GUNICORN_WORKER_CONNECTIONS=${GUNICORN_WORKER_CONNECTIONS:-1000}
       - GUNICORN_MAX_REQUESTS=${GUNICORN_MAX_REQUESTS:-1000}
       - GUNICORN_MAX_REQUESTS_JITTER=${GUNICORN_MAX_REQUESTS_JITTER:-100}
+    env_file:
+      - .env
     volumes:
       - ./business_app:/app/business_app
       - ./shared:/app/shared
@@ -100,6 +102,7 @@ services:
       - ./logs:/app/logs
     ports:
       - "5000:80"
+      - "5678:5678"
     depends_on:
       postgres:
         condition: service_healthy

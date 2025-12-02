@@ -86,8 +86,8 @@
             The page you are looking for does not exist. It might have been moved, deleted, or you entered the wrong URL.
         </p>
         <div class="btn-box">
-            <a href="/" class="btn">Back to Home</a>
-            <a href="/contact" class="btn btn-secondary">Contact Support</a>
+            <a href="{{ url_for('frontend.index') }}" class="btn">Back to Home</a>
+            <a href="{{ url_for('frontend.contact') }}" class="btn btn-secondary">Contact Support</a>
         </div>
     </div>
 </body>

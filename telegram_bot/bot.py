@@ -14,7 +14,7 @@ import json
 from telegram import Update, BotCommand, ReplyKeyboardRemove
 from telegram.ext import (
     Application, CommandHandler, MessageHandler, CallbackQueryHandler,
-    ConversationHandler, filters, ContextTypes
+    ConversationHandler, filters, ContextTypes, TypeHandler
 )
 from telegram.error import TelegramError
 
@@ -36,7 +36,7 @@ from handlers import (
     profile_handlers, loyalty_handlers, admin_handlers,
     support_handlers, payment_handlers
 )
-from utils import error_handler, rate_limiter, user_middleware
+from utils import error_handler, rate_limiter, user_middleware, authenticate_telegram_user
 from keyboards import MenuKeyboards
 
 logger = logging.getLogger('bot')
@@ -99,7 +99,21 @@ class WaterBusinessBot:
             # Set up error handling
             self.application.add_error_handler(error_handler)
             logger.info("Error handler setup completed!")
+
+            # Add middleware to log ALL updates
+            async def log_all_updates(update: Update, context: ContextTypes.DEFAULT_TYPE):
+                logger.info(f"!!! UPDATE RECEIVED: type={type(update).__name__}")
+                if update.message:
+                    logger.info(f"!!! Message update from user {update.effective_user.id}, update.message: {update.message}")
+                if update.callback_query:
+                    logger.info(f"!!! CALLBACK QUERY: {update.callback_query.data} from user {update.effective_user.id}")
+                if update.edited_message:
+                    logger.info(f"!!! Edited message update")
+
             
+            self.application.add_handler(TypeHandler(Update, log_all_updates), group=-10)
+            logger.info("Update logging middleware installed!")
+
             logger.info("Bot initialization completed successfully")
             
         except Exception as e:
@@ -112,7 +126,7 @@ class WaterBusinessBot:
         """Set up all bot handlers"""
         
         # Command handlers
-        self.application.add_handler(CommandHandler("start", start_handler))
+        # self.application.add_handler(CommandHandler("start", start_handler))
         self.application.add_handler(CommandHandler("menu", main_menu_handler))
         self.application.add_handler(CommandHandler("help", support_handlers.help_handler))
         self.application.add_handler(CommandHandler("language", language_handler.language_menu))
@@ -125,10 +139,11 @@ class WaterBusinessBot:
             # Main menu callbacks
             CallbackQueryHandler(main_menu_handler, pattern="^back_to_main$"),
             CallbackQueryHandler(language_handler.language_menu, pattern="^menu_language$"),
-            CallbackQueryHandler(language_handler.set_language, pattern="^set_language_"),
+            # CallbackQueryHandler(language_handler.set_language, pattern="^set_language_"),
             
             # Product callbacks
             CallbackQueryHandler(product_handlers.products_menu, pattern="^menu_products$"),
+            CallbackQueryHandler(product_handlers.products_menu, pattern="^back_to_categories$"),
             CallbackQueryHandler(product_handlers.category_handler, pattern="^category_"),
             CallbackQueryHandler(product_handlers.product_details, pattern="^product_"),
             CallbackQueryHandler(product_handlers.add_to_cart, pattern="^add_to_cart_"),
@@ -145,12 +160,31 @@ class WaterBusinessBot:
             
             # Subscription callbacks
             CallbackQueryHandler(subscription_handlers.subscriptions_menu, pattern="^menu_subscriptions$"),
-            CallbackQueryHandler(subscription_handlers.subscription_details, pattern="^subscription_"),
-            CallbackQueryHandler(subscription_handlers.create_subscription, pattern="^create_subscription$"),
+            CallbackQueryHandler(subscription_handlers.subscriptions_menu, pattern="^back_to_subscriptions$"),
+            CallbackQueryHandler(subscription_handlers.subscription_details, pattern="^subscription_\\d+$"),
             CallbackQueryHandler(subscription_handlers.subscription_actions, pattern="^(pause|resume|cancel)_sub_"),
-            
+            CallbackQueryHandler(subscription_handlers.skip_delivery, pattern="^skip_sub_"),
+            CallbackQueryHandler(subscription_handlers.view_billing_history, pattern="^billing_history_"),
+
+            # Subscription item management
+            CallbackQueryHandler(subscription_handlers.manage_subscription_items, pattern="^manage_items_"),
+            CallbackQueryHandler(subscription_handlers.remove_item_confirm, pattern="^remove_item_"),
+
+            # Subscription editing
+            CallbackQueryHandler(subscription_handlers.edit_subscription_menu, pattern="^edit_sub_"),
+            CallbackQueryHandler(subscription_handlers.change_frequency, pattern="^change_frequency_"),
+            CallbackQueryHandler(subscription_handlers.change_payment_method_menu, pattern="^change_payment_"),
+
+            # Statistics and logs
+            CallbackQueryHandler(subscription_handlers.view_subscription_statistics, pattern="^subscription_statistics$"),
+            CallbackQueryHandler(subscription_handlers.view_subscription_logs, pattern="^view_logs_"),
+            CallbackQueryHandler(subscription_handlers.retry_failed_billing, pattern="^retry_billing_"),
+
             # Profile callbacks
             CallbackQueryHandler(profile_handlers.profile_menu, pattern="^menu_profile$"),
+            CallbackQueryHandler(profile_handlers.phone_verification_menu, pattern="^phone_verification$"),
+            CallbackQueryHandler(profile_handlers.add_phone_number, pattern="^add_phone_number$"),
+            CallbackQueryHandler(profile_handlers.verify_phone_number, pattern="^verify_phone_number$"),
             CallbackQueryHandler(profile_handlers.edit_profile, pattern="^edit_profile$"),
             CallbackQueryHandler(profile_handlers.manage_addresses, pattern="^manage_addresses$"),
             CallbackQueryHandler(profile_handlers.view_address, pattern="^view_address_"),
@@ -185,10 +219,12 @@ class WaterBusinessBot:
         # Add logging callback handler to catch all callbacks for debugging
         async def debug_callback_handler(update, context):
             if update.callback_query:
-                logger.info(f"=== CALLBACK QUERY DEBUG ===")
-                logger.info(f"User: {update.effective_user.id}")
-                logger.info(f"Callback data: {update.callback_query.data}")
-                logger.info(f"Message ID: {update.callback_query.message.message_id}")
+                logger.error(f"========================================")
+                logger.error(f"=== CALLBACK QUERY RECEIVED ===")
+                logger.error(f"User: {update.effective_user.id}")
+                logger.error(f"Callback data: {update.callback_query.data}")
+                logger.error(f"Message ID: {update.callback_query.message.message_id}")
+                logger.error(f"========================================")
                 # Don't process, just log and let other handlers handle it
             
         # Add debug handler that catches all callbacks but doesn't interfere
@@ -200,15 +236,21 @@ class WaterBusinessBot:
         
         # Conversation handlers for complex flows
         registration_handler = ConversationHandler(
-            entry_points=[CallbackQueryHandler(profile_handlers.start_registration, pattern="^register$")],
+            entry_points=[
+                CommandHandler("start", profile_handlers.start_registration_new),
+                # CallbackQueryHandler(profile_handlers.start_registration_new, pattern="^/start$")
+            ],
             states={
+                profile_handlers.SELECT_LANGUAGE: [
+                    CallbackQueryHandler(profile_handlers.language_selection, pattern="^set_language_")
+                ],
                 profile_handlers.PHONE: [
                     MessageHandler(filters.CONTACT, profile_handlers.phone_received),
                     MessageHandler(filters.TEXT, profile_handlers.phone_text_received)
                 ],
-                profile_handlers.NAME: [
-                    MessageHandler(filters.TEXT & ~filters.COMMAND, profile_handlers.name_received)
-                ],
+                # profile_handlers.NAME: [
+                #     MessageHandler(filters.TEXT & ~filters.COMMAND, profile_handlers.name_received)
+                # ],
             },
             fallbacks=[CommandHandler("cancel", profile_handlers.cancel_registration)]
         )
@@ -236,7 +278,127 @@ class WaterBusinessBot:
         # Add conversation handler in higher priority group
         self.application.add_handler(address_handler, group=-2)
         logger.info(f"Address conversation handler registered with states: {list(address_handler.states.keys())}")
-        
+
+        # Subscription creation conversation
+        subscription_creation_handler = ConversationHandler(
+            entry_points=[CallbackQueryHandler(subscription_handlers.create_subscription_start, pattern="^create_subscription$")],
+            states={
+                subscription_handlers.SELECT_PRODUCTS: [
+                    CallbackQueryHandler(subscription_handlers.select_products, pattern="^subscription_custom$"),
+                    CallbackQueryHandler(subscription_handlers.select_products, pattern="^subscription_use_template$"),
+                ],
+                subscription_handlers.SELECT_QUANTITY: [
+                    CallbackQueryHandler(subscription_handlers.select_quantity, pattern="^sub_product_"),
+                    # Handle "add more items" button on product list
+                    CallbackQueryHandler(subscription_handlers.add_more_items, pattern="^sub_add_more_items$"),
+                    # Handle "done with items" button on product list
+                    CallbackQueryHandler(subscription_handlers.items_selection_done, pattern="^sub_items_done$"),
+                ],
+                subscription_handlers.SELECT_FREQUENCY: [
+                    # After selecting quantity, add item and show "add more" or "done" options
+                    CallbackQueryHandler(subscription_handlers.add_item_with_quantity, pattern="^sub_qty_"),
+                    # Handle "add more items" - go back to product selection
+                    CallbackQueryHandler(subscription_handlers.add_more_items, pattern="^sub_add_more_items$"),
+                    # Handle "done with items" - proceed to frequency selection
+                    CallbackQueryHandler(subscription_handlers.items_selection_done, pattern="^sub_items_done$"),
+                ],
+                subscription_handlers.SELECT_ADDRESS: [
+                    CallbackQueryHandler(subscription_handlers.select_address, pattern="^subscription_freq_"),
+                ],
+                subscription_handlers.SELECT_PAYMENT: [
+                    CallbackQueryHandler(subscription_handlers.select_payment, pattern="^addr_"),
+                ],
+                subscription_handlers.CONFIRM_SUBSCRIPTION: [
+                    CallbackQueryHandler(subscription_handlers.confirm_subscription, pattern="^sub_payment_"),
+                    CallbackQueryHandler(subscription_handlers.create_subscription_confirmed, pattern="^confirm_create_subscription$"),
+                    CallbackQueryHandler(subscription_handlers.cancel_subscription_creation, pattern="^cancel_subscription_creation$"),
+                ],
+            },
+            fallbacks=[
+                CallbackQueryHandler(subscription_handlers.cancel_subscription_creation, pattern="^cancel_subscription_creation$"),
+                CommandHandler("cancel", subscription_handlers.cancel_subscription_creation)
+            ],
+            per_chat=True,
+            per_user=True,
+            name="subscription_creation",
+            conversation_timeout=600,  # 10 minutes timeout
+            allow_reentry=True
+        )
+        self.application.add_handler(subscription_creation_handler, group=-2)
+        logger.info(f"Subscription creation conversation handler registered with states: {list(subscription_creation_handler.states.keys())}")
+
+        # Subscription item management conversation
+        item_management_handler = ConversationHandler(
+            entry_points=[CallbackQueryHandler(subscription_handlers.add_item_start, pattern="^add_item_")],
+            states={
+                subscription_handlers.ITEM_SELECT_PRODUCT: [
+                    CallbackQueryHandler(subscription_handlers.add_item_select_quantity, pattern="^sub_product_"),
+                ],
+                subscription_handlers.ITEM_SELECT_QUANTITY: [
+                    CallbackQueryHandler(subscription_handlers.add_item_confirm, pattern="^sub_qty_"),
+                    CallbackQueryHandler(subscription_handlers.update_item_confirm, pattern="^sub_qty_"),
+                ],
+            },
+            fallbacks=[CommandHandler("cancel", subscription_handlers.cancel_subscription_creation)],
+            per_chat=True,
+            per_user=True,
+            name="item_management",
+            conversation_timeout=300,
+            allow_reentry=True
+        )
+        self.application.add_handler(item_management_handler, group=-2)
+        logger.info(f"Item management conversation handler registered")
+
+        # Subscription frequency update conversation
+        frequency_update_handler = ConversationHandler(
+            entry_points=[CallbackQueryHandler(subscription_handlers.change_frequency, pattern="^change_frequency_")],
+            states={
+                0: [CallbackQueryHandler(subscription_handlers.update_frequency_confirm, pattern="^subscription_freq_")],
+            },
+            fallbacks=[],
+            per_chat=True,
+            per_user=True,
+            name="frequency_update",
+            conversation_timeout=300,
+            allow_reentry=True,
+            map_to_parent={}
+        )
+        # Note: This is handled inline, no need for separate conversation handler
+
+        # Subscription payment method update conversation
+        payment_update_handler = ConversationHandler(
+            entry_points=[CallbackQueryHandler(subscription_handlers.change_payment_method_menu, pattern="^change_payment_")],
+            states={
+                0: [CallbackQueryHandler(subscription_handlers.change_payment_method_confirm, pattern="^sub_payment_")],
+            },
+            fallbacks=[],
+            per_chat=True,
+            per_user=True,
+            name="payment_update",
+            conversation_timeout=300,
+            allow_reentry=True,
+            map_to_parent={}
+        )
+        # Note: This is handled inline, no need for separate conversation handler
+
+        # Item quantity update conversation
+        update_item_handler = ConversationHandler(
+            entry_points=[CallbackQueryHandler(subscription_handlers.update_item_quantity, pattern="^update_item_")],
+            states={
+                subscription_handlers.ITEM_SELECT_QUANTITY: [
+                    CallbackQueryHandler(subscription_handlers.update_item_confirm, pattern="^sub_qty_"),
+                ],
+            },
+            fallbacks=[],
+            per_chat=True,
+            per_user=True,
+            name="update_item",
+            conversation_timeout=300,
+            allow_reentry=True
+        )
+        self.application.add_handler(update_item_handler, group=-2)
+        logger.info(f"Update item conversation handler registered")
+
         # Message handlers (catch-all)
         self.application.add_handler(
             MessageHandler(filters.TEXT & ~filters.COMMAND, self._handle_text_message)
@@ -290,33 +452,95 @@ class WaterBusinessBot:
         try:
             user_id = update.effective_user.id
             text = update.message.text.strip()
-            
+
+            logger.info(f"=== GENERAL TEXT MESSAGE HANDLER CALLED ===")
+            logger.info(f"User: {user_id}, Message: {text}")
+
             # Apply rate limiting
             if not await rate_limiter.allow_request(user_id):
                 await update.message.reply_text("⏳ Please slow down. Try again in a moment.")
                 return
-            
+
             # Apply user middleware
             user = await user_middleware(update)
             if not user:
                 return
-            
+
             language = await i18n.get_user_language(user_id)
-            
+
+            # Check if user is awaiting OTP verification (stored in context)
+            if context.user_data.get('awaiting_otp'):
+                await self._handle_otp_verification(update, context, text, language)
+                return
+
             # Check if user is in a conversation state
             user_state = await self.user_repository.get_user_state(user_id)
-            
+
             if user_state.get('awaiting_input'):
                 # Handle contextual input
                 await self._handle_contextual_input(update, context, user_state, language)
-            else:
-                # Handle general text input (could be search, commands, etc.)
-                await self._handle_general_input(update, context, text, language)
+            # else:
+            #     # Handle general text input (could be search, commands, etc.)
+            #     logger.info(f"Handling general text input from user {user_id}: {text}")
+            #     await self._handle_general_input(update, context, text, language)
                 
         except Exception as e:
             logger.error(f"Error handling text message: {e}")
             await update.message.reply_text(i18n.get('error_occurred', language))
-    
+
+    async def _handle_otp_verification(self, update: Update, context: ContextTypes.DEFAULT_TYPE,
+                                       text: str, language: str):
+        """Handle OTP verification from user input"""
+        try:
+            user_id = update.effective_user.id
+
+            # Validate OTP format (6 digits)
+            if not text.isdigit() or len(text) != 6:
+                await update.message.reply_text(
+                    "❌ Invalid code format. Please enter the 6-digit verification code:"
+                )
+                return
+
+            # Verify OTP via API
+            async with api_client as client:
+                user_token = await authenticate_telegram_user(update, client)
+                if not user_token:
+                    await update.message.reply_text(
+                        "❌ Authentication error. Please try again later."
+                    )
+                    context.user_data.pop('awaiting_otp', None)
+                    context.user_data.pop('pending_phone_verification', None)
+                    return
+
+                response = await client.verify_phone_otp(user_token, text)
+                if response.success:
+                    await update.message.reply_text(
+                        "✅ *Phone verified successfully!*\n\n"
+                        "Your phone number has been verified. "
+                        "You can now place orders and receive notifications.",
+                        parse_mode='Markdown',
+                        reply_markup=MenuKeyboards.main_menu(language)
+                    )
+
+                    # Clear OTP flags
+                    context.user_data.pop('awaiting_otp', None)
+                    context.user_data.pop('pending_phone_verification', None)
+
+                    logger.info(f"Phone verification successful for user {user_id}")
+                else:
+                    await update.message.reply_text(
+                        f"❌ Verification failed: {response.error}\n\n"
+                        "Please enter the correct code or click /cancel to stop:"
+                    )
+
+        except Exception as e:
+            logger.error(f"Error verifying OTP: {e}")
+            await update.message.reply_text(
+                "❌ Verification failed. Please try again later."
+            )
+            context.user_data.pop('awaiting_otp', None)
+            context.user_data.pop('pending_phone_verification', None)
+
     async def _handle_contextual_input(self, update: Update, context: ContextTypes.DEFAULT_TYPE,
                                      user_state: Dict, language: str):
         """Handle input based on user's current state"""
@@ -355,6 +579,7 @@ class WaterBusinessBot:
             await order_handlers.orders_menu(update, context)
         else:
             # Default response
+            logger.info(f"General text input from user {update.effective_user.id}: {text}")
             await main_menu_handler(update, context)
     
     async def _handle_contact(self, update: Update, context: ContextTypes.DEFAULT_TYPE):

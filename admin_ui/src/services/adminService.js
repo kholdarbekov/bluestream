@@ -302,6 +302,75 @@ class AdminService {
     const response = await api.get('/admin/translations/missing', { params });
     return response.data;
   }
+
+  // Blog management
+  async getBlogPosts(params = {}) {
+    const response = await api.get('/admin/blog/posts', { params });
+    return response.data;
+  }
+
+  async getBlogPost(postId) {
+    const response = await api.get(`/admin/blog/posts/${postId}`);
+    return response.data;
+  }
+
+  async createBlogPost(postData) {
+    const response = await api.post('/admin/blog/posts', postData);
+    return response.data;
+  }
+
+  async updateBlogPost(postId, postData) {
+    const response = await api.put(`/admin/blog/posts/${postId}`, postData);
+    return response.data;
+  }
+
+  async deleteBlogPost(postId) {
+    const response = await api.delete(`/admin/blog/posts/${postId}`);
+    return response.data;
+  }
+
+  async publishBlogPost(postId) {
+    const response = await api.post(`/admin/blog/posts/${postId}/publish`);
+    return response.data;
+  }
+
+  async unpublishBlogPost(postId) {
+    const response = await api.post(`/admin/blog/posts/${postId}/unpublish`);
+    return response.data;
+  }
+
+  // File upload
+  async uploadImage(file, options = {}) {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    // Add optional parameters
+    if (options.folder) formData.append('folder', options.folder);
+    if (options.resize !== undefined) formData.append('resize', options.resize);
+    if (options.max_width) formData.append('max_width', options.max_width);
+    if (options.max_height) formData.append('max_height', options.max_height);
+    if (options.quality) formData.append('quality', options.quality);
+
+    const response = await api.post('/admin/upload/image', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+    return response.data;
+  }
+
+  async uploadFile(file, folder = 'documents') {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('folder', folder);
+
+    const response = await api.post('/admin/upload/file', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+    return response.data;
+  }
 }
 
 export default new AdminService();

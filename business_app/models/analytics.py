@@ -154,7 +154,7 @@ class AnalyticsReport(db.Model, TimestampMixin):
     # Report metadata
     start_date = Column(DateTime, nullable=False)
     end_date = Column(DateTime, nullable=False)
-    generated_by = Column(Integer, nullable=True)  # User ID who generated
+    generated_by = Column(Integer, ForeignKey('users.id'), nullable=True)  # User ID who generated
     
     # Report data
     report_data = Column(JSON, nullable=False)
@@ -179,9 +179,9 @@ class AnalyticsReport(db.Model, TimestampMixin):
 class UserBehavior(db.Model, TimestampMixin):
     """Track user behavior for analytics"""
     __tablename__ = 'user_behavior'
-    
+
     id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=False, index=True)
     session_id = Column(String(100), nullable=True)
     
     # Action details

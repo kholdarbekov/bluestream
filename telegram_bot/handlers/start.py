@@ -7,7 +7,7 @@ from telegram.ext import ContextTypes
 
 from database import db_manager, BotUserRepository
 from i18n import i18n
-from keyboards import MenuKeyboards
+from keyboards import MenuKeyboards, LanguageKeyboards
 from api_client import api_client
 from utils import user_middleware, authenticate_telegram_user
 
@@ -108,7 +108,7 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.info("=== START HANDLER CALLED ===")
         user = update.effective_user
         user_id = user.id
-        logger.info(f"User {user_id} (@{user.username}) called /start")
+        logger.info(f"User {user_id} (@{user.username}) called /start, context.args: {context.args}")
         
         # Check if this is an authentication linking request
         if context.args and len(context.args) > 0:
@@ -128,16 +128,18 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         # Check if user already exists
         existing_user = await user_repo.get_user_by_telegram_id(user_id)
+        logger.info(f"existing_user {existing_user} for user_id {user_id}")
         
         if not existing_user:
             # Register user through business API (unified user creation)
             try:
                 async with api_client as client:
+                    language_code = user.language_code if user.language_code in ('en', 'uz', 'ru') else 'ru'
                     registration_data = {
                         'first_name': user.first_name,
                         'last_name': user.last_name,
                         'username': user.username,
-                        'language_code': user.language_code or 'en'
+                        'language_code': language_code
                     }
                     response = await client.register_telegram_user(user_id, registration_data)
                     if not response.success:
@@ -160,24 +162,17 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         # Get user's language preference
         language = await i18n.get_user_language(user_id)
+        logger.info(f"language {language} for user_id {user_id}")
 
         # Send welcome message
         if is_new_user:
-            welcome_text = i18n.get('registration_welcome', language)
+            welcome_text_en = i18n.get('registration_welcome', "en")
+            welcome_text_uz = i18n.get('registration_welcome', "uz")
+            welcome_text_ru = i18n.get('registration_welcome', "ru")
+            welcome_text = f"{welcome_text_en}\n\n{welcome_text_uz}\n\n{welcome_text_ru}"
             await update.message.reply_text(
                 welcome_text,
-                reply_markup=MenuKeyboards.main_menu(language)
-            )
-
-            # Prompt for phone verification after welcome
-            phone_verification_prompt = (
-                "\n📱 **Phone Verification Required**\n\n"
-                "To place orders and access all features, please verify your phone number.\n\n"
-                "Use the 'My Profile' menu to add and verify your phone number."
-            )
-            await update.message.reply_text(
-                phone_verification_prompt,
-                parse_mode='Markdown'
+                reply_markup=LanguageKeyboards.select_language()
             )
         else:
             welcome_text = i18n.get('welcome', language)
@@ -185,37 +180,6 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 welcome_text,
                 reply_markup=MenuKeyboards.main_menu(language)
             )
-
-            # Check if user needs phone verification
-            try:
-                async with api_client as client:
-                    user_token = None
-                    try:
-                        user_token = await authenticate_telegram_user(update, client)
-                    except:
-                        pass
-
-                    if user_token:
-                        response = await client.get_user_profile(user_token)
-                        if response.success:
-                            profile = response.data.get('data', {})
-                            phone_verified = profile.get('phone_verified_at') is not None or profile.get('phone_verified', False)
-                            has_phone = profile.get('phone') is not None and profile.get('phone') != ''
-
-                            if not phone_verified or not has_phone:
-                                phone_verification_reminder = (
-                                    "\n⚠️ **Phone Verification Needed**\n\n"
-                                    "Your phone number is not verified. To place orders, please:\n"
-                                    "1. Go to 'My Profile'\n"
-                                    "2. Add/verify your phone number\n\n"
-                                    "This ensures we can contact you about your orders."
-                                )
-                                await update.message.reply_text(
-                                    phone_verification_reminder,
-                                    parse_mode='Markdown'
-                                )
-            except Exception as e:
-                logger.warning(f"Could not check phone verification status: {e}")
 
         # Log user interaction
         logger.info(f"User {user_id} started bot (new_user: {is_new_user})")

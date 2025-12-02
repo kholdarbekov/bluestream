@@ -174,8 +174,8 @@ def generate_inventory_report_task(self, report_type: str = 'daily'):
                     })
                 
                 # Calculate inventory value
-                if product.cost_price and inventory_status['current_stock']:
-                    total_inventory_value += float(product.cost_price) * inventory_status['current_stock']
+                if product.base_price and inventory_status['current_stock']:
+                    total_inventory_value += float(product.base_price) * inventory_status['current_stock']
                     
             except Exception as e:
                 logger.error(f"Error processing product {product.id} for inventory report: {e}")

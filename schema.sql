@@ -68,6 +68,10 @@ CREATE TYPE user_status AS ENUM (
     'active', 'inactive', 'banned', 'pending_verification', 'merged'
 );
 
+CREATE TYPE user_gender AS ENUM (
+    'male', 'female', 'other', 'unknown'
+);
+
 -- Notification related enums
 CREATE TYPE notification_type AS ENUM (
     'order_confirmation', 'order_status_update', 'delivery_update', 
@@ -90,7 +94,7 @@ CREATE TYPE product_category_enum AS ENUM (
 );
 
 CREATE TYPE product_size_enum AS ENUM (
-    '0.5L', '1L', '1.5L', '5L', '19L'
+    '0.5L', '1L', '1.5L', '5L', '10L', '19L'
 );
 
 -- General enums
@@ -126,6 +130,16 @@ CREATE TYPE log_level AS ENUM (
     'debug', 'info', 'warning', 'error', 'critical'
 );
 
+-- Blog related enums
+CREATE TYPE blog_status AS ENUM (
+    'draft', 'published', 'archived'
+);
+
+CREATE TYPE blog_category AS ENUM (
+    'health_tips', 'water_benefits', 'company_news',
+    'quality_assurance', 'lifestyle', 'environment'
+);
+
 -- =========================================================================
 -- CORE USER MANAGEMENT TABLES
 -- =========================================================================
@@ -133,16 +147,15 @@ CREATE TYPE log_level AS ENUM (
 -- Users table (matches User model)
 CREATE TABLE users (
     id SERIAL PRIMARY KEY,
-    email VARCHAR(255) UNIQUE NOT NULL,
-    phone VARCHAR(20) UNIQUE,
+    email VARCHAR(255) UNIQUE,
+    phone VARCHAR(20) UNIQUE NOT NULL,
     password_hash VARCHAR(255) NOT NULL,
-    
+
     -- Personal information
     first_name VARCHAR(100),
     last_name VARCHAR(100),
-    full_name VARCHAR(200),
     date_of_birth TIMESTAMP WITH TIME ZONE,
-    gender VARCHAR(10),
+    gender user_gender DEFAULT 'unknown',
     
     -- Account status and role
     role user_role DEFAULT 'customer',
@@ -176,11 +189,8 @@ CREATE TABLE users (
     -- Telegram/Bot integration fields
     telegram_id VARCHAR(50) UNIQUE,
     telegram_username VARCHAR(255),
-    telegram_first_name VARCHAR(255),
-    telegram_last_name VARCHAR(255),
-    telegram_language_code VARCHAR(10),
     is_bot_active BOOLEAN DEFAULT FALSE,
-    bot_state JSONB DEFAULT '{}', -- Bot conversation state
+    bot_state TEXT, -- Bot conversation state (JSON string)
     last_bot_interaction TIMESTAMP WITH TIME ZONE,
     
     -- Registration source tracking
@@ -272,7 +282,6 @@ CREATE TABLE products (
     
     -- Pricing (using NUMERIC for precision)
     base_price NUMERIC(10,2) NOT NULL,
-    cost_price NUMERIC(10,2),
     discount_price NUMERIC(10,2),
     
     -- Product details
@@ -388,11 +397,8 @@ CREATE TABLE order_items (
     quantity INTEGER NOT NULL,
     unit_price NUMERIC(10,2) NOT NULL,
     discount_amount NUMERIC(10,2) DEFAULT 0.00,
-    total_price NUMERIC(10,2) NOT NULL,
-    
-    -- Product snapshot (stored at time of order)
-    product_name VARCHAR(200) NOT NULL,
-    product_sku VARCHAR(50) NOT NULL
+    total_price NUMERIC(10,2) NOT NULL
+    -- Note: product details accessed via product relationship, no snapshot fields needed
 );
 
 -- Order status history table (matches OrderStatusHistory model)
@@ -414,6 +420,34 @@ CREATE TABLE order_status_history (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
+
+
+-- =========================================================================
+-- CART MANAGEMENT TABLES
+-- =========================================================================
+
+-- Shopping carts table (matches Cart model)
+CREATE TABLE carts (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+    
+    -- Cart metadata
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Cart items table (matches CartItem model)
+CREATE TABLE cart_items (
+    id SERIAL PRIMARY KEY,
+    cart_id INTEGER NOT NULL REFERENCES carts(id) ON DELETE CASCADE,
+    product_id INTEGER NOT NULL REFERENCES products(id),
+    quantity INTEGER NOT NULL,
+    
+    -- Cart item metadata
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
 
 -- =========================================================================
 -- PAYMENT PROCESSING TABLES
@@ -587,19 +621,25 @@ CREATE TABLE subscriptions (
     delivery_day_of_month INTEGER,
     delivery_time_slot VARCHAR(20) NOT NULL,
     delivery_address_id INTEGER NOT NULL REFERENCES addresses(id),
-    
+    next_delivery_date TIMESTAMP WITH TIME ZONE,
+    last_delivery_date TIMESTAMP WITH TIME ZONE,
+
     -- Subscription period
     start_date TIMESTAMP WITH TIME ZONE NOT NULL,
     end_date TIMESTAMP WITH TIME ZONE,
     auto_renew BOOLEAN DEFAULT TRUE,
-    
+
     -- Payment settings
     payment_method payment_method NOT NULL,
     auto_payment BOOLEAN DEFAULT TRUE,
-    
+    payment_token VARCHAR(255),
+    failed_payment_count INTEGER DEFAULT 0,
+
     -- Pause/Resume functionality
     paused_at TIMESTAMP WITH TIME ZONE,
     pause_reason VARCHAR(255),
+    pause_start_date TIMESTAMP WITH TIME ZONE,
+    pause_end_date TIMESTAMP WITH TIME ZONE,
     resume_date TIMESTAMP WITH TIME ZONE,
     
     -- Analytics
@@ -625,10 +665,11 @@ CREATE TABLE subscription_items (
     quantity INTEGER NOT NULL,
     unit_price NUMERIC(10,2) NOT NULL,
     total_price NUMERIC(10,2) NOT NULL,
-    
-    -- Product snapshot
-    product_name VARCHAR(200) NOT NULL,
-    product_sku VARCHAR(50) NOT NULL
+    special_instructions TEXT,
+
+    -- Timestamps
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Subscription logs table (matches SubscriptionLog model)
@@ -1008,11 +1049,11 @@ CREATE TABLE notification_templates (
     name VARCHAR(100) NOT NULL,
     notification_type VARCHAR(50) NOT NULL,
     channel VARCHAR(20) NOT NULL, -- email, sms, push, in_app
-    language VARCHAR(5) DEFAULT 'uz',
     subject VARCHAR(255),
     content TEXT NOT NULL,
     is_active BOOLEAN DEFAULT TRUE,
-    
+    -- Note: Uses TranslatableMixin for multi-language support via translations table
+
     -- Timestamps (TimestampMixin)
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
@@ -1118,6 +1159,60 @@ CREATE TABLE reviews (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
+
+-- =========================================================================
+-- BLOG SYSTEM TABLES
+-- =========================================================================
+
+-- Blog posts table (matches BlogPost model)
+CREATE TABLE blog_posts (
+    id SERIAL PRIMARY KEY,
+
+    -- Content fields
+    title VARCHAR(255) NOT NULL,
+    slug VARCHAR(300) NOT NULL UNIQUE,
+    excerpt TEXT,
+    content TEXT NOT NULL,
+
+    -- Author information
+    author_name VARCHAR(100),
+    author_id INTEGER REFERENCES users(id),
+
+    -- Categorization
+    category blog_category NOT NULL DEFAULT 'health_tips',
+    tags VARCHAR(500),
+
+    -- Media
+    featured_image TEXT,
+    image_alt_text VARCHAR(255),
+
+    -- Publishing
+    status blog_status NOT NULL DEFAULT 'draft',
+    published_at TIMESTAMP WITH TIME ZONE,
+
+    -- Display settings
+    is_featured BOOLEAN DEFAULT FALSE,
+    sort_order INTEGER DEFAULT 0,
+    view_count INTEGER DEFAULT 0,
+
+    -- SEO
+    meta_title VARCHAR(100),
+    meta_description TEXT,
+
+    -- Timestamps (TimestampMixin)
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Blog indexes
+CREATE INDEX idx_blog_status_published ON blog_posts(status, published_at);
+CREATE INDEX idx_blog_featured ON blog_posts(is_featured, published_at);
+CREATE INDEX idx_blog_category ON blog_posts(category, published_at);
+CREATE INDEX idx_blog_slug ON blog_posts(slug);
+CREATE INDEX idx_blog_author ON blog_posts(author_id);
+
+-- Blog trigger
+CREATE TRIGGER update_blog_posts_updated_at BEFORE UPDATE ON blog_posts FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 -- =========================================================================
 -- ANALYTICS & TRACKING TABLES (from analytics.py)
@@ -1713,10 +1808,153 @@ INSERT INTO notification_channels (name, display_name, description, is_active, r
 ('in_app', 'In-App', 'Ilova ichidagi xabarnomalar', true, 1000, 5);
 
 -- =========================================================================
+-- SECURITY & AUDIT TABLES
+-- =========================================================================
+
+-- Failed login attempts audit table
+CREATE TABLE failed_login_audit (
+    id SERIAL PRIMARY KEY,
+    attempted_email VARCHAR(255),
+    attempted_phone VARCHAR(20),
+    attempted_telegram_id VARCHAR(50),
+    ip_address INET,
+    user_agent TEXT,
+    failure_reason VARCHAR(100) NOT NULL DEFAULT 'invalid_credentials',
+    is_suspicious BOOLEAN DEFAULT FALSE,
+    additional_data JSONB DEFAULT '{}',
+    attempted_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Indexes for failed login audit
+CREATE INDEX idx_failed_login_audit_attempted_at ON failed_login_audit(attempted_at);
+CREATE INDEX idx_failed_login_audit_ip_address ON failed_login_audit(ip_address) WHERE is_suspicious = TRUE;
+CREATE INDEX idx_failed_login_audit_telegram_id ON failed_login_audit(attempted_telegram_id) WHERE attempted_telegram_id IS NOT NULL;
+CREATE INDEX idx_failed_login_audit_suspicious ON failed_login_audit(is_suspicious, attempted_at) WHERE is_suspicious = TRUE;
+
+COMMENT ON TABLE failed_login_audit IS 'Audit log for failed authentication attempts across all platforms';
+
+-- =========================================================================
+-- AUDIT HELPER FUNCTIONS
+-- =========================================================================
+
+-- Function to log failed authentication attempts
+CREATE OR REPLACE FUNCTION log_failed_authentication(
+    p_email VARCHAR DEFAULT NULL,
+    p_phone VARCHAR DEFAULT NULL,
+    p_telegram_id VARCHAR DEFAULT NULL,
+    p_ip_address INET DEFAULT NULL,
+    p_user_agent TEXT DEFAULT NULL,
+    p_failure_reason VARCHAR DEFAULT 'invalid_credentials',
+    p_is_suspicious BOOLEAN DEFAULT FALSE
+) RETURNS VOID AS $$
+BEGIN
+    INSERT INTO failed_login_audit (
+        attempted_email,
+        attempted_phone,
+        attempted_telegram_id,
+        ip_address,
+        user_agent,
+        failure_reason,
+        is_suspicious,
+        additional_data
+    ) VALUES (
+        p_email,
+        p_phone,
+        p_telegram_id,
+        p_ip_address,
+        p_user_agent,
+        p_failure_reason,
+        p_is_suspicious,
+        jsonb_build_object(
+            'timestamp', CURRENT_TIMESTAMP,
+            'server_info', version()
+        )
+    );
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+COMMENT ON FUNCTION log_failed_authentication IS 'Log failed authentication attempts for security monitoring';
+
+-- Grant execute permission to all users
+GRANT EXECUTE ON FUNCTION log_failed_authentication TO PUBLIC;
+
+-- =========================================================================
+-- AUDIT LOGGING SYSTEM
+-- =========================================================================
+
+-- Audit event type enum
+CREATE TYPE audit_event_type AS ENUM (
+    'login_success', 'login_failure', 'logout', 'password_change', 'password_reset',
+    'user_created', 'user_updated', 'user_deleted', 'user_role_changed', 'user_status_changed',
+    'order_created', 'order_updated', 'order_cancelled', 'order_processed', 'order_delivered',
+    'payment_processed', 'payment_refunded', 'payment_failed',
+    'product_created', 'product_updated', 'product_deleted', 'inventory_updated',
+    'settings_changed', 'system_maintenance', 'data_export', 'bulk_operation',
+    'permission_denied', 'suspicious_activity', 'emergency_operation', 'sensitive_data_access',
+    'api_key_created', 'api_key_revoked', 'webhook_received'
+);
+
+-- Audit severity enum
+CREATE TYPE audit_severity AS ENUM ('low', 'medium', 'high', 'critical');
+
+-- Comprehensive audit log table
+CREATE TABLE audit_logs (
+    id SERIAL PRIMARY KEY,
+    event_id VARCHAR(36) UNIQUE NOT NULL,
+    event_type audit_event_type NOT NULL,
+    severity audit_severity NOT NULL,
+
+    -- User context
+    user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    user_role VARCHAR(50),
+    session_id VARCHAR(255),
+
+    -- Request context
+    ip_address VARCHAR(45),  -- IPv6 compatible
+    user_agent TEXT,
+    endpoint VARCHAR(255),
+    method VARCHAR(10),
+
+    -- Event details
+    resource_type VARCHAR(100),
+    resource_id VARCHAR(100),
+    action VARCHAR(100) NOT NULL,
+    description TEXT,
+
+    -- Data changes
+    old_values JSONB,
+    new_values JSONB,
+
+    -- Metadata
+    duration_ms INTEGER,
+    success BOOLEAN NOT NULL DEFAULT TRUE,
+    error_message TEXT,
+    additional_data JSONB,
+
+    -- Timestamps
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Indexes for audit_logs
+CREATE INDEX idx_audit_logs_event_id ON audit_logs(event_id);
+CREATE INDEX idx_audit_logs_event_type ON audit_logs(event_type);
+CREATE INDEX idx_audit_logs_severity ON audit_logs(severity);
+CREATE INDEX idx_audit_logs_user_id ON audit_logs(user_id);
+CREATE INDEX idx_audit_logs_ip_address ON audit_logs(ip_address);
+CREATE INDEX idx_audit_logs_endpoint ON audit_logs(endpoint);
+CREATE INDEX idx_audit_logs_resource ON audit_logs(resource_type, resource_id);
+CREATE INDEX idx_audit_logs_action ON audit_logs(action);
+CREATE INDEX idx_audit_logs_success ON audit_logs(success);
+CREATE INDEX idx_audit_logs_created_at ON audit_logs(created_at);
+
+COMMENT ON TABLE audit_logs IS 'Comprehensive audit trail for all system activities';
+
+-- =========================================================================
 -- COMMENTS FOR DOCUMENTATION
 -- =========================================================================
 
-COMMENT ON DATABASE bluestream IS 'BlueStream Water Business Platform - Complete 52 table schema';
+COMMENT ON DATABASE bluestream IS 'BlueStream Water Business Platform - Complete 53 table schema';
 
 -- Key table comments
 COMMENT ON TABLE users IS 'Primary user accounts with full profile and Telegram bot integration';

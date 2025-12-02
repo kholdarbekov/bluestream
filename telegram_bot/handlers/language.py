@@ -9,6 +9,7 @@ from i18n import i18n
 from keyboards import LanguageKeyboards, MenuKeyboards
 from database import db_manager, BotUserRepository
 from utils import user_middleware
+from config import config
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +71,6 @@ class LanguageHandler:
             language_code = query.data.split('_')[-1]
             
             # Validate language code
-            from config import config
             if language_code not in config.localization.supported_languages:
                 await query.answer("❌ Invalid language selection")
                 return

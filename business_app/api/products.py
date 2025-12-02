@@ -2,7 +2,7 @@
 Products API endpoints
 This file should be placed in business_app/api/products.py
 """
-from flask import Blueprint, request, jsonify, current_app, g
+from flask import Blueprint, request, current_app, g
 from flask_jwt_extended import jwt_required, get_jwt_identity, jwt_required
 from sqlalchemy import and_, or_, func
 from datetime import datetime, UTC
@@ -11,69 +11,33 @@ from business_app.models.product import Product, ProductCategory, PriceRule
 from business_app.models.review import Review
 from business_app.models.user import User
 # from business_app.services.recommendation_service import RecommendationService
-from business_app.utils.service_factory import get_analytics_service
+from business_app.utils.service_factory import (
+    get_analytics_service,
+    get_product_service,
+    get_review_service
+)
 from business_app.utils.helpers import get_current_language
-# Basic serializer functions - replace with proper serializers later
-def product_to_dict(product, language='uz', user=None, quantity=1):
-    return {
-        'id': product.id,
-        'name': product.get_translated('name', language),
-        'description': product.get_translated('description', language),
-        'sku': product.sku,
-        'base_price': product.base_price,
-        'current_price': product.current_price,
-        'image_urls': product.image_urls or [],
-        'is_active': product.is_active,
-        'is_featured': product.is_featured,
-        'stock_quantity': product.stock_quantity if product.track_inventory else None,
-        'average_rating': product.average_rating,
-        'review_count': product.review_count,
-        'created_at': product.created_at.isoformat() if product.created_at else None
-    }
+from business_app.utils.translations import get_translation
+from business_app.utils.exceptions import ValidationError, NotFoundError, ConflictError, ForbiddenError
 
-def product_category_to_dict(category, language='uz'):
-    return {
-        'id': category.id,
-        'name': category.get_translated('name', language),
-        'description': category.get_translated('description', language),
-        'icon_url': category.icon_url,
-        'is_active': category.is_active,
-        'sort_order': category.sort_order
-    }
+# Import proper serializers
+from business_app.serializers.product_serializers import (
+    serialize_product,
+    serialize_product_list,
+    serialize_product_category
+)
+from business_app.serializers.review_serializers import ReviewSerializer
 
-def review_to_dict(review):
-    return {
-        'id': review.id,
-        'rating': review.rating,
-        'title': review.title,
-        'comment': review.comment,
-        'user_name': review.user.first_name + ' ' + review.user.last_name if review.user else 'Anonymous',
-        'created_at': review.created_at.isoformat() if review.created_at else None
-    }
-
-class ProductSerializer:
-    def __init__(self, product):
-        self.product = product
-    
-    def to_dict(self, language='uz', user=None, quantity=1):
-        return product_to_dict(self.product, language, user, quantity)
-
-class ProductCategorySerializer:
-    def __init__(self, category):
-        self.category = category
-    
-    def to_dict(self, language='uz'):
-        return product_category_to_dict(self.category, language)
-
-class ReviewSerializer:
-    def __init__(self, review):
-        self.review = review
-    
-    def to_dict(self):
-        return review_to_dict(self.review)
 from business_app.utils.decorators import validate_json, cache_response
 from business_app.utils.constants import PriceRuleType
 from business_app import db
+
+# Import API response helpers
+from business_app.utils.api_responses import (
+    success_response, error_response, paginated_response, created_response,
+    not_found_response, validation_error_response, forbidden_response,
+    conflict_response, internal_error_response
+)
 
 products_bp = Blueprint('products', __name__)
 
@@ -84,21 +48,20 @@ def get_categories():
     """Get all product categories"""
     try:
         language = request.args.get('language', 'uz')
-        
-        categories = ProductCategory.query.filter_by(is_active=True).order_by(
-            ProductCategory.sort_order, ProductCategory.name
-        ).all()
-        
-        return jsonify({
+        product_service = get_product_service()
+
+        categories = product_service.get_categories()
+
+        return success_response(data={
             'categories': [
-                ProductCategorySerializer(cat).to_dict(language=language) 
+                serialize_product_category(cat, language)
                 for cat in categories
             ]
         })
-        
+
     except Exception as e:
         current_app.logger.error(f"Get categories error: {e}")
-        return jsonify({'error': 'Failed to get categories'}), 500
+        return internal_error_response(message=get_translation('error.server_error'))
 
 
 @products_bp.route('/categories/<int:category_id>', methods=['GET'])
@@ -107,21 +70,22 @@ def get_category(category_id):
     """Get specific category"""
     try:
         language = request.args.get('language', 'uz')
-        
-        category = ProductCategory.query.filter_by(
-            id=category_id, is_active=True
-        ).first()
-        
+        product_service = get_product_service()
+
+        category = product_service.get_category_by_id(category_id)
+
         if not category:
-            return jsonify({'error': 'Category not found'}), 404
-        
-        return jsonify({
-            'category': ProductCategorySerializer(category).to_dict(language=language)
+            return not_found_response(message=get_translation('error.not_found'))
+
+        return success_response(data={
+            'category': serialize_product_category(category, language)
         })
-        
+
+    except NotFoundError as e:
+        return not_found_response(message=str(e))
     except Exception as e:
         current_app.logger.error(f"Get category error: {e}")
-        return jsonify({'error': 'Failed to get category'}), 500
+        return internal_error_response(message=get_translation('error.server_error'))
 
 
 @products_bp.route('/', methods=['GET'])
@@ -139,7 +103,8 @@ def get_products():
         min_price = request.args.get('min_price', type=float)
         max_price = request.args.get('max_price', type=float)
         language = request.args.get('language', 'uz')
-        
+        in_stock_only = request.args.get('in_stock_only', type=bool, default=False)
+
         # Get current user for personalized pricing
         current_user = None
         try:
@@ -151,86 +116,43 @@ def get_products():
                     current_user = User.query.get(user_id)
         except:
             pass  # Continue without user context
-        
-        # Build query
-        query = Product.query.filter_by(is_active=True)
-        
-        # Apply filters
-        if category_id:
-            query = query.filter_by(category_id=category_id)
-        
-        if search:
-            search_term = f"%{search}%"
-            query = query.filter(or_(
-                Product.name.ilike(search_term),
-                Product.description.ilike(search_term),
-                Product.sku.ilike(search_term)
-            ))
-        
-        if is_featured is not None:
-            query = query.filter_by(is_featured=is_featured)
-        
-        if min_price is not None:
-            query = query.filter(Product.current_price >= min_price)
-        
-        if max_price is not None:
-            query = query.filter(Product.current_price <= max_price)
-        
-        # Apply sorting
-        if sort_by == 'price':
-            order_field = Product.current_price
-        elif sort_by == 'rating':
-            order_field = Product.average_rating
-        elif sort_by == 'popularity':
-            order_field = Product.total_sold
-        else:  # default to name
-            order_field = Product.name
-        
-        if sort_order == 'desc':
-            order_field = order_field.desc()
-        
-        query = query.order_by(order_field)
-        
-        # Paginate
-        pagination = query.paginate(
-            page=page, per_page=per_page, error_out=False
+
+        # Use ProductService to get products
+        product_service = get_product_service()
+        products, total, page, per_page, metadata = product_service.get_products_with_filters(
+            page=page,
+            per_page=per_page,
+            category_id=category_id,
+            search=search,
+            sort_by=sort_by,
+            sort_order=sort_order,
+            is_featured=is_featured,
+            min_price=min_price,
+            max_price=max_price,
+            in_stock_only=in_stock_only,
+            current_user=current_user,
+            language=language
         )
-        
-        products = pagination.items
-        
-        # Track product views for analytics
-        if search:
-            get_analytics_service().track_search(search, len(products))
-        
-        return jsonify({
-            'products': [
-                ProductSerializer(product).to_dict(
-                    language=language, 
-                    user=current_user
+
+        return paginated_response(
+            items=[
+                serialize_product(
+                    product,
+                    language,
+                    current_user
                 ) for product in products
             ],
-            'pagination': {
-                'page': page,
-                'pages': pagination.pages,
-                'per_page': per_page,
-                'total': pagination.total,
-                'has_next': pagination.has_next,
-                'has_prev': pagination.has_prev
-            },
-            'filters': {
-                'category_id': category_id,
-                'search': search,
-                'sort_by': sort_by,
-                'sort_order': sort_order,
-                'is_featured': is_featured,
-                'min_price': min_price,
-                'max_price': max_price
-            }
-        })
-        
+            page=page,
+            per_page=per_page,
+            total=total,
+            additional_meta=metadata
+        )
+
+    except ValidationError as e:
+        return validation_error_response(errors=str(e))
     except Exception as e:
         current_app.logger.error(f"Get products error: {e}")
-        return jsonify({'error': 'Failed to get products'}), 500
+        return internal_error_response(message=get_translation('error.server_error'))
 
 
 @products_bp.route('/<int:product_id>', methods=['GET'])
@@ -239,11 +161,7 @@ def get_product(product_id):
     try:
         language = request.args.get('language', 'uz')
         quantity = int(request.args.get('quantity', 1))
-        
-        product = Product.query.filter_by(id=product_id, is_active=True).first()
-        if not product:
-            return jsonify({'error': 'Product not found'}), 404
-        
+
         # Get current user for personalized pricing
         current_user = None
         try:
@@ -255,43 +173,50 @@ def get_product(product_id):
                     current_user = User.query.get(user_id)
         except:
             pass
-        
-        # Track product view
-        get_analytics_service().track_product_view(product_id, user_id=current_user.id if current_user else None)
-        
-        # Increment view count
-        product.view_count += 1
-        
+
+        # Use ProductService to get product
+        product_service = get_product_service()
+        product = product_service.get_product_by_id(
+            product_id=product_id,
+            current_user_id=current_user.id if current_user else None
+        )
+
         # Get related products
         # related_products = recommendation_service.get_related_products(
         #     product_id, limit=4, user=current_user
         # )
-        
-        # Get recent reviews
-        reviews = Review.query.filter_by(
-            product_id=product_id, is_approved=True
-        ).order_by(Review.created_at.desc()).limit(5).all()
-        
-        db.session.commit()
-        
-        return jsonify({
-            'product': ProductSerializer(product).to_dict(
-                language=language, 
-                user=current_user, 
-                quantity=quantity
+
+        # Use ReviewService to get recent reviews
+        review_service = get_review_service()
+        reviews, _, _, _ = review_service.get_product_reviews(
+            product_id=product_id,
+            page=1,
+            per_page=5,
+            sort_by='recent',
+            approved_only=True
+        )
+
+        return success_response(data={
+            'product': serialize_product(
+                product,
+                language,
+                current_user,
+                quantity
             ),
             # 'related_products': [
-            #     ProductSerializer(p).to_dict(language=language, user=current_user) 
+            #     serialize_product(p, language, current_user)
             #     for p in related_products
             # ],
             'reviews': [
                 ReviewSerializer(review).to_dict() for review in reviews
             ]
         })
-        
+
+    except NotFoundError as e:
+        return not_found_response(message=str(e))
     except Exception as e:
         current_app.logger.error(f"Get product error: {e}")
-        return jsonify({'error': 'Failed to get product'}), 500
+        return internal_error_response(message=get_translation('error.server_error'))
 
 
 @products_bp.route('/<int:product_id>/reviews', methods=['GET'])
@@ -300,54 +225,49 @@ def get_product_reviews(product_id):
     try:
         page = int(request.args.get('page', 1))
         per_page = min(int(request.args.get('per_page', 10)), 50)
-        sort_by = request.args.get('sort_by', 'created_at')  # created_at, rating, helpful
-        sort_order = request.args.get('sort_order', 'desc')
-        
-        product = Product.query.filter_by(id=product_id, is_active=True).first()
-        if not product:
-            return jsonify({'error': 'Product not found'}), 404
-        
-        query = Review.query.filter_by(product_id=product_id, is_approved=True)
-        
-        # Apply sorting
-        if sort_by == 'rating':
-            order_field = Review.rating
-        elif sort_by == 'helpful':
-            order_field = Review.helpful_count
-        else:  # default to created_at
-            order_field = Review.created_at
-        
-        if sort_order == 'desc':
-            order_field = order_field.desc()
-        
-        query = query.order_by(order_field)
-        
-        pagination = query.paginate(
-            page=page, per_page=per_page, error_out=False
+        sort_by_param = request.args.get('sort_by', 'created_at')  # created_at, rating, helpful
+
+        # Map API sort_by values to ReviewService values
+        sort_by_mapping = {
+            'created_at': 'recent',
+            'rating': 'highest',
+            'helpful': 'helpful'
+        }
+        sort_by = sort_by_mapping.get(sort_by_param, 'recent')
+
+        # Verify product exists
+        product_service = get_product_service()
+
+        # Use ReviewService to get reviews
+        review_service = get_review_service()
+        reviews, total, page, per_page = review_service.get_product_reviews(
+            product_id=product_id,
+            page=page,
+            per_page=per_page,
+            sort_by=sort_by,
+            approved_only=True
         )
-        
-        return jsonify({
-            'reviews': [
-                ReviewSerializer(review).to_dict() for review in pagination.items
+
+        # Get review statistics
+        review_stats = review_service.get_product_review_stats(product_id)
+
+        return paginated_response(
+            items=[
+                ReviewSerializer(review).to_dict() for review in reviews
             ],
-            'pagination': {
-                'page': page,
-                'pages': pagination.pages,
-                'per_page': per_page,
-                'total': pagination.total,
-                'has_next': pagination.has_next,
-                'has_prev': pagination.has_prev
-            },
-            'summary': {
-                'average_rating': product.average_rating,
-                'total_reviews': product.review_count,
-                'rating_distribution': get_analytics_service().get_rating_distribution(product_id)
+            page=page,
+            per_page=per_page,
+            total=total,
+            additional_meta={
+                'summary': review_stats
             }
-        })
-        
+        )
+
+    except NotFoundError as e:
+        return not_found_response(message=str(e))
     except Exception as e:
         current_app.logger.error(f"Get product reviews error: {e}")
-        return jsonify({'error': 'Failed to get reviews'}), 500
+        return internal_error_response(message=get_translation('error.server_error'))
 
 
 @products_bp.route('/<int:product_id>/reviews', methods=['POST'])
@@ -358,62 +278,47 @@ def add_product_review(product_id):
     try:
         current_user_id = get_jwt_identity()
         data = request.get_json()
-        
-        product = Product.query.filter_by(id=product_id, is_active=True).first()
-        if not product:
-            return jsonify({'error': 'Product not found'}), 404
-        
-        # Check if user has purchased this product
+
+        # Find the order that contains this product
         from business_app.models.order import Order, OrderItem
         has_purchased = db.session.query(OrderItem).join(Order).filter(
             Order.user_id == current_user_id,
             OrderItem.product_id == product_id,
             Order.status == 'delivered'
         ).first()
-        
-        if not has_purchased:
-            return jsonify({'error': 'You can only review products you have purchased'}), 403
-        
-        # Check if user already reviewed this product
-        existing_review = Review.query.filter_by(
-            user_id=current_user_id, 
-            product_id=product_id
-        ).first()
-        
-        if existing_review:
-            return jsonify({'error': 'You have already reviewed this product'}), 409
-        
-        rating = data.get('rating')
-        if not isinstance(rating, int) or rating < 1 or rating > 5:
-            return jsonify({'error': 'Rating must be between 1 and 5'}), 400
-        
-        review = Review(
+
+        order_id = has_purchased.order_id if has_purchased else None
+
+        # Use ReviewService to create review
+        review_service = get_review_service()
+        review = review_service.create_review(
             user_id=current_user_id,
             product_id=product_id,
-            order_id=has_purchased.order_id,
-            rating=rating,
+            rating=data.get('rating'),
             title=data.get('title'),
             comment=data.get('comment'),
-            photos=data.get('photos', []),
-            is_approved=True  # Auto-approve for now, can add moderation later
+            order_id=order_id,
+            photos=data.get('photos', [])
         )
-        
-        db.session.add(review)
-        
-        # Update product rating
-        product.update_rating()
-        
-        db.session.commit()
-        
-        return jsonify({
-            'message': 'Review added successfully',
-            'review': ReviewSerializer(review).to_dict()
-        }), 201
-        
+
+        return created_response(
+            data={
+                'review': ReviewSerializer(review).to_dict()
+            },
+            message=get_translation('success.saved')
+        )
+
+    except ValidationError as e:
+        return validation_error_response(errors=str(e))
+    except NotFoundError as e:
+        return not_found_response(message=str(e))
+    except ConflictError as e:
+        return conflict_response(message=str(e))
+    except ForbiddenError as e:
+        return forbidden_response(message=str(e))
     except Exception as e:
-        db.session.rollback()
         current_app.logger.error(f"Add review error: {e}")
-        return jsonify({'error': 'Failed to add review'}), 500
+        return internal_error_response(message=get_translation('error.server_error'))
 
 
 @products_bp.route('/featured', methods=['GET'])
@@ -423,7 +328,7 @@ def get_featured_products():
     try:
         language = request.args.get('language', 'uz')
         limit = min(int(request.args.get('limit', 8)), 20)
-        
+
         # Get current user for personalized pricing
         current_user = None
         try:
@@ -435,24 +340,97 @@ def get_featured_products():
                     current_user = User.query.get(user_id)
         except:
             pass
-        
-        products = Product.query.filter_by(
-            is_active=True, 
-            is_featured=True
-        ).order_by(Product.total_sold.desc()).limit(limit).all()
-        
-        return jsonify({
+
+        # Use ProductService to get featured products
+        product_service = get_product_service()
+        products = product_service.get_featured_products(
+            limit=limit,
+            current_user=current_user
+        )
+
+        return success_response(data={
             'featured_products': [
-                ProductSerializer(product).to_dict(
-                    language=language, 
-                    user=current_user
+                serialize_product(
+                    product,
+                    language,
+                    current_user
                 ) for product in products
             ]
         })
-        
+
     except Exception as e:
         current_app.logger.error(f"Get featured products error: {e}")
-        return jsonify({'error': 'Failed to get featured products'}), 500
+        return internal_error_response(message=get_translation('error.server_error'))
+
+
+@products_bp.route('/bulk', methods=['POST'])
+def get_products_bulk():
+    """
+    Get multiple products by IDs
+    Used by cart page to fetch product details for cart items
+    """
+    try:
+        data = request.get_json()
+
+        if not data or 'product_ids' not in data:
+            return validation_error_response(
+                errors={'product_ids': 'Product IDs are required'}
+            )
+
+        product_ids = data.get('product_ids', [])
+
+        if not isinstance(product_ids, list):
+            return validation_error_response(
+                errors={'product_ids': 'Product IDs must be a list'}
+            )
+
+        if len(product_ids) == 0:
+            return success_response(data={'products': []})
+
+        if len(product_ids) > 50:
+            return validation_error_response(
+                errors={'product_ids': 'Maximum 50 products can be fetched at once'}
+            )
+
+        language = request.args.get('language') or data.get('language', 'uz')
+
+        # Get current user for personalized pricing
+        current_user = None
+        try:
+            if request.headers.get('Authorization'):
+                from flask_jwt_extended import verify_jwt_in_request, get_jwt_identity
+                verify_jwt_in_request(optional=True)
+                user_id = get_jwt_identity()
+                if user_id:
+                    current_user = User.query.get(user_id)
+        except:
+            pass
+
+        # Fetch products
+        products = Product.query.filter(
+            Product.id.in_(product_ids),
+            Product.is_active == True
+        ).all()
+
+        # Create a dictionary for quick lookup
+        products_dict = {p.id: p for p in products}
+
+        # Build response maintaining order of requested IDs
+        result = []
+        for product_id in product_ids:
+            if product_id in products_dict:
+                product = products_dict[product_id]
+                result.append(serialize_product(product, language, current_user))
+
+        return success_response(data={
+            'products': result,
+            'found_count': len(result),
+            'requested_count': len(product_ids)
+        })
+
+    except Exception as e:
+        current_app.logger.error(f"Get products bulk error: {e}")
+        return internal_error_response(message=get_translation('error.server_error'))
 
 
 # @products_bp.route('/recommendations', methods=['GET'])
@@ -463,22 +441,23 @@ def get_featured_products():
 #         current_user_id = get_jwt_identity()
 #         language = request.args.get('language', 'uz')
 #         limit = min(int(request.args.get('limit', 10)), 20)
-        
+
 #         current_user = User.query.get(current_user_id)
 #         if not current_user:
 #             return jsonify({'error': 'User not found'}), 404
-        
+
 #         recommendations = recommendation_service.get_personalized_recommendations(
-#             user_id=current_user_id, 
+#             user_id=current_user_id,
 #             limit=limit
 #         )
-        
+
 #         return jsonify({
 #             'recommendations': [
 #                 {
-#                     'product': ProductSerializer(rec['product']).to_dict(
-#                         language=language, 
-#                         user=current_user
+#                     'product': serialize_product(
+#                         rec['product'],
+#                         language,
+#                         current_user
 #                     ),
 #                     'score': rec['score'],
 #                     'reason': rec['reason']
@@ -486,7 +465,7 @@ def get_featured_products():
 #                 for rec in recommendations
 #             ]
 #         })
-        
+
 #     except Exception as e:
 #         current_app.logger.error(f"Get recommendations error: {e}")
 #         return jsonify({'error': 'Failed to get recommendations'}), 500
@@ -499,57 +478,23 @@ def get_search_suggestions():
         query = request.args.get('q', '').strip()
         language = request.args.get('language', 'uz')
         limit = min(int(request.args.get('limit', 5)), 10)
-        
+
         if len(query) < 2:
-            return jsonify({'suggestions': []})
-        
-        # Search in product names and categories
-        search_term = f"%{query}%"
-        
-        # Product suggestions
-        products = Product.query.filter(
-            and_(
-                Product.is_active == True,
-                or_(
-                    Product.name.ilike(search_term),
-                    Product.sku.ilike(search_term)
-                )
-            )
-        ).limit(limit).all()
-        
-        # Category suggestions
-        categories = ProductCategory.query.filter(
-            and_(
-                ProductCategory.is_active == True,
-                ProductCategory.name.ilike(search_term)
-            )
-        ).limit(3).all()
-        
-        suggestions = []
-        
-        # Add product suggestions
-        for product in products:
-            suggestions.append({
-                'type': 'product',
-                'id': product.id,
-                'name': product.get_translated('name', language),
-                'image_url': product.image_urls[0] if product.image_urls else None
-            })
-        
-        # Add category suggestions
-        for category in categories:
-            suggestions.append({
-                'type': 'category',
-                'id': category.id,
-                'name': category.get_translated('name', language),
-                'icon_url': category.icon_url
-            })
-        
-        return jsonify({'suggestions': suggestions})
-        
+            return success_response(data={'suggestions': []})
+
+        # Use ProductService to get search suggestions
+        product_service = get_product_service()
+        suggestions = product_service.get_search_suggestions(
+            query=query,
+            limit=limit,
+            language=language
+        )
+
+        return success_response(data={'suggestions': suggestions})
+
     except Exception as e:
         current_app.logger.error(f"Get search suggestions error: {e}")
-        return jsonify({'error': 'Failed to get suggestions'}), 500
+        return internal_error_response(message=get_translation('error.server_error'))
 
 
 @products_bp.route('/popular', methods=['GET'])
@@ -560,7 +505,7 @@ def get_popular_products():
         language = request.args.get('language', 'uz')
         limit = min(int(request.args.get('limit', 10)), 20)
         period = request.args.get('period', 'week')  # week, month, all
-        
+
         # Get current user for personalized pricing
         current_user = None
         try:
@@ -572,57 +517,31 @@ def get_popular_products():
                     current_user = User.query.get(user_id)
         except:
             pass
-        
-        # Base query
-        query = Product.query.filter_by(is_active=True)
-        
-        # Apply time period filter for sales data
-        if period in ['week', 'month']:
-            from business_app.models.order import OrderItem, Order
-            from datetime import timedelta
-            
-            if period == 'week':
-                date_threshold = datetime.now(UTC) - timedelta(days=7)
-            else:  # month
-                date_threshold = datetime.now(UTC) - timedelta(days=30)
-            
-            # Get products with recent sales
-            recent_sales = db.session.query(
-                OrderItem.product_id,
-                func.sum(OrderItem.quantity).label('recent_sales')
-            ).join(Order).filter(
-                Order.created_at >= date_threshold,
-                Order.status.in_(['confirmed', 'delivered'])
-            ).group_by(OrderItem.product_id).subquery()
-            
-            query = query.outerjoin(
-                recent_sales, Product.id == recent_sales.c.product_id
-            ).order_by(
-                func.coalesce(recent_sales.c.recent_sales, 0).desc(),
-                Product.view_count.desc()
-            )
-        else:
-            # All time popularity
-            query = query.order_by(
-                Product.total_sold.desc(),
-                Product.view_count.desc()
-            )
-        
-        products = query.limit(limit).all()
-        
-        return jsonify({
-            'popular_products': [
-                ProductSerializer(product).to_dict(
-                    language=language, 
-                    user=current_user
-                ) for product in products
-            ],
-            'period': period
-        })
-        
+
+        # Use ProductService to get popular products
+        product_service = get_product_service()
+        products = product_service.get_popular_products(
+            limit=limit,
+            period=period,
+            current_user=current_user
+        )
+
+        return success_response(
+            data={
+                'popular_products': [
+                    serialize_product(
+                        product,
+                        language,
+                        current_user
+                    ) for product in products
+                ]
+            },
+            meta={'period': period}
+        )
+
     except Exception as e:
         current_app.logger.error(f"Get popular products error: {e}")
-        return jsonify({'error': 'Failed to get popular products'}), 500
+        return internal_error_response(message=get_translation('error.server_error'))
 
 
 @products_bp.route('/price-calculator', methods=['POST'])
@@ -633,14 +552,10 @@ def calculate_price():
         data = request.get_json()
         product_id = data.get('product_id')
         quantity = data.get('quantity', 1)
-        
-        product = Product.query.filter_by(id=product_id, is_active=True).first()
-        if not product:
-            return jsonify({'error': 'Product not found'}), 404
-        
+
         if quantity < 1:
-            return jsonify({'error': 'Quantity must be at least 1'}), 400
-        
+            return validation_error_response(errors=get_translation('error.validation.min_value'))
+
         # Get current user for personalized pricing
         current_user = None
         try:
@@ -652,56 +567,22 @@ def calculate_price():
                     current_user = User.query.get(user_id)
         except:
             pass
-        
-        # Calculate pricing
-        base_price = product.base_price
-        unit_price = product.calculate_price(user=current_user, quantity=quantity)
-        total_price = unit_price * quantity
-        
-        # Calculate savings
-        base_total = base_price * quantity
-        total_savings = base_total - total_price
-        
-        # Get applicable discounts
-        applicable_discounts = []
-        
-        for rule in product.price_rules:
-            if (rule.is_active and 
-                quantity >= rule.min_quantity and 
-                (not rule.max_quantity or quantity <= rule.max_quantity)):
-                
-                if rule.rule_type == PriceRuleType.BULK_DISCOUNT:
-                    applicable_discounts.append({
-                        'type': 'bulk',
-                        'name': rule.name,
-                        'description': rule.description,
-                        'discount_value': rule.discount_value,
-                        'discount_type': rule.discount_type
-                    })
-                elif (rule.rule_type == PriceRuleType.VIP_DISCOUNT and 
-                      current_user and current_user.is_vip):
-                    applicable_discounts.append({
-                        'type': 'vip',
-                        'name': rule.name,
-                        'description': rule.description,
-                        'discount_value': rule.discount_value,
-                        'discount_type': rule.discount_type
-                    })
-        
-        return jsonify({
-            'product_id': product_id,
-            'quantity': quantity,
-            'pricing': {
-                'base_price': base_price,
-                'unit_price': unit_price,
-                'total_price': total_price,
-                'total_savings': total_savings,
-                'savings_percentage': round((total_savings / base_total * 100), 2) if base_total > 0 else 0
-            },
-            'applicable_discounts': applicable_discounts,
-            'is_vip_customer': current_user.is_vip if current_user else False
-        })
-        
+
+        # Use ProductService to calculate price
+        product_service = get_product_service()
+        pricing_data = product_service.calculate_product_price(
+            product_id=product_id,
+            quantity=quantity,
+            user=current_user,
+            promo_code=data.get('promo_code')
+        )
+
+        return success_response(data=pricing_data)
+
+    except NotFoundError as e:
+        return not_found_response(message=str(e))
+    except ValidationError as e:
+        return validation_error_response(errors=str(e))
     except Exception as e:
         current_app.logger.error(f"Calculate price error: {e}")
-        return jsonify({'error': 'Failed to calculate price'}), 500
+        return internal_error_response(message=get_translation('error.server_error'))

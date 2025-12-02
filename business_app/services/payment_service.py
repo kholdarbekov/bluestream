@@ -21,6 +21,7 @@ from business_app.utils.constants import PaymentStatus, PaymentMethod
 from business_app.utils.helpers import generate_random_string
 from business_app.utils.audit_logger import audit_logger, AuditEventType, AuditSeverity
 from business_app.utils.card_validation import CardValidator, CardSecurityValidator
+from business_app.utils.translations import get_translation
 from business_app import db
 
 
@@ -61,23 +62,23 @@ class PaymentService:
                       amount: int = None, **kwargs) -> Payment:
         """
         Create payment record
-        
+
         Args:
             order_id: Order ID
             payment_method: Payment method
             amount: Payment amount (defaults to order total)
             **kwargs: Additional payment data
-        
+
         Returns:
             Payment object
-        
+
         Raises:
             NotFoundError: If order not found
             ValidationError: If payment data invalid
         """
         order = Order.query.get(order_id)
         if not order:
-            raise NotFoundError("Order not found")
+            raise NotFoundError(get_translation('error.not_found'))
         
         # Use order total if amount not specified
         if amount is None:
@@ -85,10 +86,10 @@ class PaymentService:
         
         # Validate amount
         if amount <= 0:
-            raise ValidationError("Payment amount must be positive")
-        
+            raise ValidationError(get_translation('error.validation.invalid_amount'))
+
         if amount > order.total_amount:
-            raise ValidationError("Payment amount cannot exceed order total")
+            raise ValidationError(get_translation('error.validation.amount_exceeds_total'))
         
         # Create payment record
         payment = Payment(
@@ -109,32 +110,32 @@ class PaymentService:
     def create_payment_link(self, payment_id: int) -> Dict[str, str]:
         """
         Create payment link for external payment gateways
-        
+
         Args:
             payment_id: Payment ID
-        
+
         Returns:
             Dictionary with payment URL and other details
         """
         payment = Payment.query.get(payment_id)
         if not payment:
-            raise NotFoundError("Payment not found")
+            raise NotFoundError(get_translation('error.not_found'))
         
         if payment.method == PaymentMethod.PAYME:
             return self._create_payme_link(payment)
         elif payment.method == PaymentMethod.CLICK:
             return self._create_click_link(payment)
         else:
-            raise PaymentError(f"Payment links not supported for {payment.method.value}")
+            raise PaymentError(get_translation('error.payment.unsupported_method'))
     
     def process_cash_payment(self, payment_id: int, collected_by: int = None) -> Payment:
         """Process cash payment"""
         payment = Payment.query.get(payment_id)
         if not payment:
-            raise NotFoundError("Payment not found")
-        
+            raise NotFoundError(get_translation('error.not_found'))
+
         if payment.method != PaymentMethod.CASH:
-            raise ValidationError("Payment method is not cash")
+            raise ValidationError(get_translation('error.payment.invalid_method'))
         
         # Update payment status
         payment.status = PaymentStatus.COMPLETED
@@ -158,55 +159,267 @@ class PaymentService:
         """Process payment using loyalty points"""
         payment = Payment.query.get(payment_id)
         if not payment:
-            raise NotFoundError("Payment not found")
-        
+            raise NotFoundError(get_translation('error.not_found'))
+
         if payment.method != PaymentMethod.LOYALTY_POINTS:
-            raise ValidationError("Payment method is not loyalty points")
-        
+            raise ValidationError(get_translation('error.payment.invalid_method'))
+
         # Check user points balance
         from .loyalty_service import LoyaltyService
         loyalty_service = LoyaltyService()
-        
+
         user_points = loyalty_service.get_user_points(payment.user_id)
         if user_points < points_used:
-            raise ValidationError("Insufficient loyalty points")
-        
+            raise ValidationError(get_translation('api.loyalty.insufficient_points'))
+
         # Calculate payment amount from points
         from ..utils.helpers import calculate_discount_from_points
         payment_amount = calculate_discount_from_points(points_used)
-        
+
         if payment_amount < payment.amount:
-            raise ValidationError("Insufficient points for full payment")
-        
+            raise ValidationError(get_translation('api.loyalty.insufficient_points'))
+
         # Deduct points
         loyalty_service.deduct_points(
-            payment.user_id, 
-            points_used, 
+            payment.user_id,
+            points_used,
             f"Payment for order #{payment.order.order_number}"
         )
-        
+
         # Update payment
         payment.status = PaymentStatus.COMPLETED
         payment.paid_at = datetime.now(timezone.utc)
         payment.provider_data['points_used'] = points_used
-        
+
         self._create_transaction(payment, 'payment_completed', {
             'points_used': points_used,
             'points_value': payment_amount
         })
-        
+
         db.session.commit()
-        
+
         self._handle_successful_payment(payment)
-        
+
         return payment
+
+    def process_card_payment(self, order_id: int, card_id: int, user_id: int,
+                            amount: Optional[int] = None) -> Payment:
+        """
+        Process payment using a stored credit card
+
+        Args:
+            order_id: Order ID to pay for
+            card_id: Saved card ID
+            user_id: User ID (for security verification)
+            amount: Payment amount (optional, defaults to order total)
+
+        Returns:
+            Payment object
+
+        Raises:
+            NotFoundError: If order or card not found
+            ValidationError: If card is invalid or payment fails
+            PaymentError: If payment processing fails
+        """
+        # Validate order exists
+        order = Order.query.get(order_id)
+        if not order:
+            raise NotFoundError(get_translation('error.not_found'))
+
+        # Verify order belongs to user
+        if order.user_id != user_id:
+            raise ValidationError(get_translation('error.forbidden'))
+
+        # Use order total if amount not specified
+        if amount is None:
+            amount = order.total_amount
+
+        # Validate card
+        is_valid, error_message = self.validate_card_for_payment(card_id, user_id, amount)
+        if not is_valid:
+            raise ValidationError(error_message)
+
+        # Get card details
+        card = self.get_card_by_id(card_id, user_id)
+
+        # Determine payment provider based on card brand
+        if card.provider == 'payme':
+            payment_method = PaymentMethod.PAYME
+        elif card.provider == 'click':
+            payment_method = PaymentMethod.CLICK
+        else:
+            # Default to Payme for international cards
+            payment_method = PaymentMethod.PAYME
+
+        # Create payment record
+        payment = self.create_payment(
+            order_id=order_id,
+            payment_method=payment_method,
+            amount=amount,
+            card_id=card_id,
+            card_token=card.card_token,
+            card_brand=card.card_brand,
+            last_four_digits=card.last_four_digits
+        )
+
+        try:
+            # Process payment through gateway
+            if payment_method == PaymentMethod.PAYME:
+                result = self._process_payme_card_payment(payment, card)
+            elif payment_method == PaymentMethod.CLICK:
+                result = self._process_click_card_payment(payment, card)
+            else:
+                raise PaymentError(get_translation('error.payment.unsupported_method'))
+
+            # Update payment status based on gateway response
+            if result.get('success'):
+                payment.status = PaymentStatus.COMPLETED
+                payment.paid_at = datetime.now(timezone.utc)
+                payment.gateway_reference = result.get('transaction_id')
+                payment.gateway_response = result
+
+                # Mark card as verified on first successful payment
+                if not card.is_verified:
+                    card.is_verified = True
+
+                self._create_transaction(payment, 'payment_completed', result)
+                db.session.commit()
+
+                self._handle_successful_payment(payment)
+
+                # Log successful payment
+                audit_logger.log_event(
+                    event_type=AuditEventType.DATA_MODIFICATION,
+                    action="card_payment_successful",
+                    severity=AuditSeverity.MEDIUM,
+                    resource_type="payment",
+                    resource_id=str(payment.id),
+                    user_id=user_id,
+                    description=f"Card payment successful for order {order_id}",
+                    additional_data={
+                        'order_id': order_id,
+                        'amount': amount,
+                        'card_last_four': card.last_four_digits,
+                        'payment_method': payment_method.value
+                    }
+                )
+            else:
+                payment.status = PaymentStatus.FAILED
+                payment.gateway_response = result
+                self._create_transaction(payment, 'payment_failed', result)
+                db.session.commit()
+
+                # Log failed payment
+                audit_logger.log_event(
+                    event_type=AuditEventType.SECURITY_EVENT,
+                    action="card_payment_failed",
+                    severity=AuditSeverity.MEDIUM,
+                    resource_type="payment",
+                    resource_id=str(payment.id),
+                    user_id=user_id,
+                    description=f"Card payment failed for order {order_id}",
+                    additional_data={
+                        'order_id': order_id,
+                        'amount': amount,
+                        'card_last_four': card.last_four_digits,
+                        'error': result.get('error_message')
+                    }
+                )
+
+                raise PaymentError(result.get('error_message', get_translation('api.payments.failed')))
+
+            return payment
+
+        except Exception as e:
+            current_app.logger.error(f"Card payment processing error for order {order_id}: {e}")
+            payment.status = PaymentStatus.FAILED
+            db.session.commit()
+            raise PaymentError(get_translation('api.payments.failed'))
+
+    def _process_payme_card_payment(self, payment: Payment, card: CreditCard) -> Dict[str, Any]:
+        """
+        Process card payment through Payme gateway
+        (Simplified implementation - integrate with actual Payme card API)
+
+        Args:
+            payment: Payment object
+            card: CreditCard object
+
+        Returns:
+            Dict with success status and transaction details
+        """
+        try:
+            # In production, integrate with Payme's card payment API
+            # This is a simplified placeholder
+            current_app.logger.info(f"Processing Payme card payment for payment {payment.id}")
+
+            # Simulate payment processing
+            # In real implementation, call Payme API with card token
+            if self.payme_test_mode:
+                # Test mode - always succeed for non-test cards
+                return {
+                    'success': True,
+                    'transaction_id': f"payme_{int(datetime.now(timezone.utc).timestamp())}",
+                    'amount': payment.amount,
+                    'card_token': card.card_token,
+                    'timestamp': datetime.now(timezone.utc).isoformat()
+                }
+            else:
+                # Production mode - actual API call would go here
+                raise NotImplementedError("Payme card payment API integration required")
+
+        except Exception as e:
+            current_app.logger.error(f"Payme card payment error: {e}")
+            return {
+                'success': False,
+                'error_message': str(e)
+            }
+
+    def _process_click_card_payment(self, payment: Payment, card: CreditCard) -> Dict[str, Any]:
+        """
+        Process card payment through Click gateway
+        (Simplified implementation - integrate with actual Click card API)
+
+        Args:
+            payment: Payment object
+            card: CreditCard object
+
+        Returns:
+            Dict with success status and transaction details
+        """
+        try:
+            # In production, integrate with Click's card payment API
+            # This is a simplified placeholder
+            current_app.logger.info(f"Processing Click card payment for payment {payment.id}")
+
+            # Simulate payment processing
+            # In real implementation, call Click API with card token
+            if self.click_test_mode:
+                # Test mode - always succeed for non-test cards
+                return {
+                    'success': True,
+                    'transaction_id': f"click_{int(datetime.now(timezone.utc).timestamp())}",
+                    'amount': payment.amount,
+                    'card_token': card.card_token,
+                    'timestamp': datetime.now(timezone.utc).isoformat()
+                }
+            else:
+                # Production mode - actual API call would go here
+                raise NotImplementedError("Click card payment API integration required")
+
+        except Exception as e:
+            current_app.logger.error(f"Click card payment error: {e}")
+            return {
+                'success': False,
+                'error_message': str(e)
+            }
     
     def handle_payme_webhook(self, webhook_data: Dict[str, Any]) -> Dict[str, Any]:
         """Handle Payme webhook"""
         try:
             # Verify webhook signature
             if not self._verify_payme_signature(webhook_data):
-                raise PaymentError("Invalid webhook signature")
+                raise PaymentError(get_translation('error.payment.invalid_signature'))
             
             method = webhook_data.get('method')
             params = webhook_data.get('params', {})
@@ -222,7 +435,7 @@ class PaymentService:
             elif method == 'CheckTransaction':
                 return self._payme_check_transaction(params)
             else:
-                raise PaymentError(f"Unknown Payme method: {method}")
+                raise PaymentError(get_translation('error.payment.unknown_method'))
                 
         except Exception as e:
             current_app.logger.error(f"Payme webhook error: {e}")
@@ -233,7 +446,7 @@ class PaymentService:
         try:
             # Verify webhook signature
             if not self._verify_click_signature(webhook_data):
-                raise PaymentError("Invalid webhook signature")
+                raise PaymentError(get_translation('error.payment.invalid_signature'))
             
             action = webhook_data.get('action')
             
@@ -242,7 +455,7 @@ class PaymentService:
             elif action == 'complete':
                 return self._click_complete(webhook_data)
             else:
-                raise PaymentError(f"Unknown Click action: {action}")
+                raise PaymentError(get_translation('error.payment.unknown_action'))
                 
         except Exception as e:
             current_app.logger.error(f"Click webhook error: {e}")
@@ -252,13 +465,13 @@ class PaymentService:
         """Process payment refund"""
         payment = Payment.query.get(payment_id)
         if not payment:
-            raise NotFoundError("Payment not found")
-        
+            raise NotFoundError(get_translation('error.not_found'))
+
         if payment.status != PaymentStatus.COMPLETED:
-            raise ValidationError("Can only refund completed payments")
-        
+            raise ValidationError(get_translation('error.payment.cannot_refund'))
+
         if amount > payment.amount:
-            raise ValidationError("Refund amount cannot exceed payment amount")
+            raise ValidationError(get_translation('error.validation.amount_exceeds_total'))
         
         # Process refund based on payment method
         if payment.method in [PaymentMethod.PAYME, PaymentMethod.CLICK]:
@@ -524,7 +737,7 @@ class PaymentService:
         """Get payment status and details"""
         payment = Payment.query.get(payment_id)
         if not payment:
-            raise NotFoundError("Payment not found")
+            raise NotFoundError(get_translation('error.not_found'))
         
         return {
             'id': payment.id,
@@ -652,18 +865,19 @@ class PaymentService:
     # Private methods for Click integration
     def _create_click_link(self, payment: Payment) -> Dict[str, str]:
         """Create Click payment link"""
+        base_url = current_app.config.get('COMPANY_WEBSITE', 'http://localhost:5000')
         params = {
             'service_id': self.click_service_id,
             'merchant_id': self.click_merchant_id,
             'amount': payment.amount,
             'transaction_param': payment.payment_id,
-            'return_url': f"{current_app.config.get('COMPANY_WEBSITE')}/payment/success",
-            'cancel_url': f"{current_app.config.get('COMPANY_WEBSITE')}/payment/cancel"
+            'return_url': f"{base_url}/payment/success?order_id={payment.order_id}",
+            'cancel_url': f"{base_url}/payment/cancel?order_id={payment.order_id}"
         }
-        
+
         query_string = '&'.join([f"{k}={v}" for k, v in params.items()])
         payment_url = f"{self.click_endpoint}?{query_string}"
-        
+
         return {
             'payment_url': payment_url,
             'reference': payment.payment_id,
@@ -825,12 +1039,12 @@ class PaymentService:
             user_id = card_data.get('user_id')
             user = User.query.get(user_id)
             if not user:
-                raise NotFoundError("User not found")
+                raise NotFoundError(get_translation('error.not_found'))
             
             # Comprehensive card validation
             validation_result = CardValidator.validate_complete_card(card_data)
             if not validation_result.is_valid:
-                raise ValidationError(f"Card validation failed: {'; '.join(validation_result.errors)}")
+                raise ValidationError(get_translation('error.validation.card_invalid'))
             
             # Additional security validations
             card_number = card_data.get('card_number')
@@ -838,10 +1052,10 @@ class PaymentService:
             
             # Check for obviously fake or test cards
             if not CardSecurityValidator.validate_no_sequential_numbers(cleaned_number):
-                raise ValidationError("Card number appears to be invalid")
-            
+                raise ValidationError(get_translation('error.validation.card_invalid'))
+
             if not CardSecurityValidator.validate_not_test_card(cleaned_number):
-                raise ValidationError("Test card numbers are not allowed")
+                raise ValidationError(get_translation('error.validation.test_card_not_allowed'))
             
             # Generate card fingerprint to detect duplicates
             fingerprint = CardValidator.generate_card_fingerprint(
@@ -858,7 +1072,7 @@ class PaymentService:
             ).first()
             
             if existing_card:
-                raise ValidationError("This card is already saved")
+                raise ValidationError(get_translation('error.validation.card_already_saved'))
             
             # Tokenize card with payment provider (simplified for this implementation)
             # In production, you would integrate with actual tokenization service
@@ -919,34 +1133,257 @@ class PaymentService:
         except Exception as e:
             current_app.logger.error(f"Unexpected error saving card for user {user_id}: {e}")
             db.session.rollback()
-            raise PaymentError("Failed to save credit card")
+            raise PaymentError(get_translation('error.payment.card_save_failed'))
     
-    def get_user_cards(self, user_id: int) -> List[CreditCard]:
+    def get_user_cards(self, user_id: int, include_expired: bool = False) -> List[CreditCard]:
         """
         Get all active credit cards for a user
-        
+
         Args:
             user_id: User ID
-        
+            include_expired: Whether to include expired cards (default: False)
+
         Returns:
-            List of CreditCard objects
+            List of CreditCard objects ordered by default status then creation date
         """
-        return CreditCard.query.filter_by(
+        query = CreditCard.query.filter_by(
             user_id=user_id,
             is_active=True
-        ).order_by(CreditCard.is_default.desc(), CreditCard.created_at.desc()).all()
-    
-    def delete_card(self, card_id: int, user_id: int) -> bool:
+        )
+
+        # Filter out expired cards if requested
+        if not include_expired:
+            current_date = datetime.now(timezone.utc)
+            query = query.filter(
+                db.or_(
+                    CreditCard.expiry_year > current_date.year,
+                    db.and_(
+                        CreditCard.expiry_year == current_date.year,
+                        CreditCard.expiry_month >= current_date.month
+                    )
+                )
+            )
+
+        return query.order_by(
+            CreditCard.is_default.desc(),
+            CreditCard.created_at.desc()
+        ).all()
+
+    def get_default_card(self, user_id: int) -> Optional[CreditCard]:
         """
-        Delete (deactivate) a credit card
-        
+        Get user's default payment card
+
+        Args:
+            user_id: User ID
+
+        Returns:
+            CreditCard object or None if no default card
+        """
+        current_date = datetime.now(timezone.utc)
+
+        # First try to get non-expired default card
+        card = CreditCard.query.filter_by(
+            user_id=user_id,
+            is_default=True,
+            is_active=True
+        ).filter(
+            db.or_(
+                CreditCard.expiry_year > current_date.year,
+                db.and_(
+                    CreditCard.expiry_year == current_date.year,
+                    CreditCard.expiry_month >= current_date.month
+                )
+            )
+        ).first()
+
+        # If no valid default card, try to get any non-expired card
+        if not card:
+            card = CreditCard.query.filter_by(
+                user_id=user_id,
+                is_active=True
+            ).filter(
+                db.or_(
+                    CreditCard.expiry_year > current_date.year,
+                    db.and_(
+                        CreditCard.expiry_year == current_date.year,
+                        CreditCard.expiry_month >= current_date.month
+                    )
+                )
+            ).order_by(CreditCard.created_at.desc()).first()
+
+        return card
+
+    def get_card_by_id(self, card_id: int, user_id: int) -> Optional[CreditCard]:
+        """
+        Get specific card by ID with user ownership verification
+
+        Args:
+            card_id: Card ID
+            user_id: User ID (for ownership verification)
+
+        Returns:
+            CreditCard object or None if not found
+
+        Raises:
+            NotFoundError: If card not found or doesn't belong to user
+        """
+        card = CreditCard.query.filter_by(
+            id=card_id,
+            user_id=user_id,
+            is_active=True
+        ).first()
+
+        if not card:
+            raise NotFoundError(get_translation('error.not_found'))
+
+        return card
+
+    def validate_card_for_payment(self, card_id: int, user_id: int, amount: int) -> tuple[bool, Optional[str]]:
+        """
+        Validate that a card can be used for payment
+
+        Args:
+            card_id: Card ID
+            user_id: User ID
+            amount: Payment amount in smallest currency unit
+
+        Returns:
+            Tuple of (is_valid, error_message)
+            - (True, None) if valid
+            - (False, "error message") if invalid
+        """
+        try:
+            # Check card exists and belongs to user
+            card = CreditCard.query.filter_by(
+                id=card_id,
+                user_id=user_id,
+                is_active=True
+            ).first()
+
+            if not card:
+                return False, get_translation('error.not_found')
+
+            # Check if card is expired
+            current_date = datetime.now(timezone.utc)
+            is_expired = (
+                card.expiry_year < current_date.year or
+                (card.expiry_year == current_date.year and card.expiry_month < current_date.month)
+            )
+
+            if is_expired:
+                return False, get_translation('error.validation.card_expired')
+
+            # Check if card is verified (has been used successfully at least once)
+            if not card.is_verified and current_app.config.get('REQUIRE_CARD_VERIFICATION', False):
+                return False, get_translation('error.validation.card_not_verified')
+
+            # Validate amount is positive
+            if amount <= 0:
+                return False, get_translation('error.validation.invalid_amount')
+
+            # Check if provider is available for this card brand
+            if not self._is_provider_available(card.provider):
+                return False, get_translation('error.payment.provider_unavailable')
+
+            return True, None
+
+        except Exception as e:
+            current_app.logger.error(f"Card validation error: {e}")
+            return False, get_translation('error.validation.card_invalid')
+
+    def _is_provider_available(self, provider: str) -> bool:
+        """
+        Check if payment provider is available
+
+        Args:
+            provider: Provider name (payme, click, uzcard, humo)
+
+        Returns:
+            bool: True if provider is configured and available
+        """
+        if provider == 'payme':
+            return bool(self.payme_merchant_id and self.payme_secret_key)
+        elif provider == 'click':
+            return bool(self.click_merchant_id and self.click_secret_key)
+        elif provider in ['uzcard', 'humo']:
+            # These typically go through Payme or Click
+            return bool(self.payme_merchant_id or self.click_merchant_id)
+        else:
+            return False
+    
+    def set_default_card(self, card_id: int, user_id: int) -> CreditCard:
+        """
+        Set a card as the default payment method
+
         Args:
             card_id: Card ID
             user_id: User ID (for security)
-        
+
+        Returns:
+            CreditCard: Updated card object
+
+        Raises:
+            NotFoundError: If card not found
+            ValidationError: If card is expired
+        """
+        card = CreditCard.query.filter_by(
+            id=card_id,
+            user_id=user_id,
+            is_active=True
+        ).first()
+
+        if not card:
+            raise NotFoundError(get_translation('error.not_found'))
+
+        # Check if card is expired
+        current_date = datetime.now(timezone.utc)
+        is_expired = (
+            card.expiry_year < current_date.year or
+            (card.expiry_year == current_date.year and card.expiry_month < current_date.month)
+        )
+
+        if is_expired:
+            raise ValidationError(get_translation('error.validation.card_expired'))
+
+        # Unset current default card
+        CreditCard.query.filter_by(
+            user_id=user_id,
+            is_default=True,
+            is_active=True
+        ).update({'is_default': False})
+
+        # Set new default card
+        card.is_default = True
+        db.session.commit()
+
+        # Log event
+        audit_logger.log_event(
+            event_type=AuditEventType.DATA_MODIFICATION,
+            action="credit_card_set_as_default",
+            severity=AuditSeverity.LOW,
+            resource_type="credit_card",
+            resource_id=str(card.id),
+            user_id=user_id,
+            description=f"Card ending in {card.last_four_digits} set as default",
+            additional_data={
+                'card_brand': card.card_brand,
+                'last_four_digits': card.last_four_digits
+            }
+        )
+
+        return card
+
+    def delete_card(self, card_id: int, user_id: int) -> bool:
+        """
+        Delete (deactivate) a credit card
+
+        Args:
+            card_id: Card ID
+            user_id: User ID (for security)
+
         Returns:
             bool: True if successful
-        
+
         Raises:
             NotFoundError: If card not found
             ValidationError: If card cannot be deleted
@@ -956,20 +1393,20 @@ class PaymentService:
             user_id=user_id,
             is_active=True
         ).first()
-        
+
         if not card:
-            raise NotFoundError("Credit card not found")
-        
+            raise NotFoundError(get_translation('error.not_found'))
+
         # Prevent deletion of default card if it's the only card
         if card.is_default:
             other_cards_count = CreditCard.query.filter_by(
                 user_id=user_id,
                 is_active=True
             ).filter(CreditCard.id != card_id).count()
-            
+
             if other_cards_count == 0:
-                raise ValidationError("Cannot delete the only remaining card")
-            
+                raise ValidationError(get_translation('error.validation.cannot_delete_last_card'))
+
             # If deleting default card, make another card default
             if other_cards_count > 0:
                 next_card = CreditCard.query.filter_by(
@@ -977,13 +1414,13 @@ class PaymentService:
                     is_active=True
                 ).filter(CreditCard.id != card_id).first()
                 next_card.is_default = True
-        
+
         # Soft delete
         card.is_active = False
         card.deleted_at = datetime.now(timezone.utc)
-        
+
         db.session.commit()
-        
+
         # Log card deletion for audit
         audit_logger.log_event(
             event_type=AuditEventType.DATA_DELETION,
@@ -998,7 +1435,7 @@ class PaymentService:
                 'last_four_digits': card.last_four_digits
             }
         )
-        
+
         return True
     
     def _tokenize_card(self, card_number: str, card_brand: str) -> str:

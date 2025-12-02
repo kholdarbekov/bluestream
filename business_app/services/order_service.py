@@ -35,8 +35,8 @@ class OrderService:
     
     def _get_inventory_service(self):
         """Get inventory service with lazy loading to avoid circular imports"""
-        from business_app.services.inventory_service import inventory_service
-        return inventory_service
+        from business_app.services.inventory_service import get_inventory_service
+        return get_inventory_service()
     
     @log_service_call(operation_type='order', track_performance=True)
     @log_business_event(event_type='created', entity_type='order')
@@ -86,13 +86,9 @@ class OrderService:
             subtotal=subtotal,
             delivery_fee=delivery_fee,
             total_amount=total_amount,
-            delivery_address_street=delivery_address['street'],
-            delivery_address_city=delivery_address.get('city', 'Tashkent'),
-            delivery_address_latitude=delivery_address['latitude'],
-            delivery_address_longitude=delivery_address['longitude'],
-            delivery_instructions=order_data.get('delivery_instructions'),
-            preferred_delivery_time=order_data.get('preferred_delivery_time'),
-            notes=order_data.get('notes')
+            delivery_address_id=delivery_address['delivery_address_id'],
+            # preferred_delivery_time=order_data.get('preferred_delivery_time'),
+            delivery_notes=order_data.get('delivery_notes')
         )
         
         db.session.add(order)
@@ -104,12 +100,13 @@ class OrderService:
                 order_id=order.id,
                 product_id=item_data['product_id'],
                 quantity=item_data['quantity'],
-                unit_price=item_data['unit_price'],
+                unit_price=item_data['unit_price'],  # Use current price at order time
                 total_price=item_data['total_price']
             )
             db.session.add(order_item)
         
         db.session.commit()
+        logger.info(f"CREATE ORDER: Order has been inserted successfully")
         
         # Reserve inventory for this order
         try:
@@ -118,6 +115,7 @@ class OrderService:
                 items=items_data,
                 user_id=user_id
             )
+            logger.info(f"CREATE ORDER: reservation_result: {reservation_result}")
             
             if not reservation_result['success']:
                 # If reservation fails, cancel the order
@@ -125,6 +123,7 @@ class OrderService:
                 db.session.commit()
                 raise ValidationError(f"Inventory reservation failed: {reservation_result['reason']}")
             
+            logger.info(f"CREATE ORDER: AUDIT LOGGER starting")
             # Log successful reservation
             audit_logger.log_event(
                 event_type=AuditEventType.ORDER_CREATED,
@@ -140,6 +139,7 @@ class OrderService:
                     'items_count': len(items_data)
                 }
             )
+            logger.info(f"CREATE ORDER: FINISHED")
             
         except Exception as e:
             # If reservation fails, cancel the order
@@ -149,10 +149,10 @@ class OrderService:
             raise ValidationError(f"Failed to reserve inventory: {str(e)}")
         
         # Send order confirmation notification
-        self._send_order_notification(order, 'order_created')
+        # self._send_order_notification(order, 'order_created')
         
         # Schedule automatic confirmation if enabled
-        self._schedule_auto_confirmation(order.id)
+        # self._schedule_auto_confirmation(order.id)
         
         return order
     
@@ -169,6 +169,11 @@ class OrderService:
         
         return order
     
+    # implement order timeline retrieval
+    def get_order_timeline(self, order_id):
+        return []
+
+
     def get_user_orders(self, user_id: int, status: OrderStatus = None, 
                        page: int = 1, per_page: int = 20) -> Dict[str, Any]:
         """Get user's orders with pagination"""
@@ -413,7 +418,7 @@ class OrderService:
         
         # Process items and calculate pricing
         for item in items_data:
-            product = Product.query.get(item['product_id'])
+            product: Product = Product.query.get(item['product_id'])
             if not product:
                 raise NotFoundError(f"Product {item['product_id']} not found")
             
@@ -431,7 +436,6 @@ class OrderService:
                 'quantity': quantity,
                 'unit_price': unit_price,
                 'total_price': total_price,
-                'product_name': product.name  # For logging
             })
             
             subtotal += total_price

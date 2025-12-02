@@ -69,7 +69,8 @@ def super_admin_required(f):
         # Additional validation for super admin operations
         from business_app.models.user import User
         user = User.query.get(user_id)
-        if not user or not user.is_admin or user.status != UserStatus.ACTIVE.value:
+        status_value = user.status.value if user and hasattr(user.status, 'value') else (user.status if user else None)
+        if not user or not user.is_admin or status_value != UserStatus.ACTIVE.value:
             raise ForbiddenError("Active admin account required")
         
         g.current_user_id = user_id
@@ -95,16 +96,18 @@ def manager_or_higher_required(f):
         
         if role_enum.value not in [UserRole.ADMIN.value, UserRole.MANAGER.value]:
             raise ForbiddenError("Manager or admin access required")
-        
+
         # Additional validation
         from business_app.models.user import User
         user = User.query.get(user_id)
-        if not user or user.status != UserStatus.ACTIVE.value:
+        status_value = user.status.value if user and hasattr(user.status, 'value') else (user.status if user else None)
+        if not user or status_value != UserStatus.ACTIVE.value:
             raise ForbiddenError("Active account required")
-        
+
         # Check if user still has the claimed role
-        if user.role != role_enum.value:
-            current_app.logger.warning(f"Role mismatch for user {user_id}: JWT claims {user_role}, DB has {user.role}")
+        role_value = user.role.value if hasattr(user.role, 'value') else user.role
+        if role_value != role_enum.value:
+            current_app.logger.warning(f"Role mismatch for user {user_id}: JWT claims {user_role}, DB has {role_value}")
             raise ForbiddenError("Role validation failed")
         
         g.current_user_id = user_id
@@ -130,16 +133,18 @@ def staff_or_higher_required(f):
         
         if role_enum.value not in [UserRole.ADMIN.value, UserRole.MANAGER.value, UserRole.OPERATOR.value]:
             raise ForbiddenError("Staff access required")
-        
+
         # Additional validation
         from business_app.models.user import User
         user = User.query.get(user_id)
-        if not user or user.status != UserStatus.ACTIVE.value:
+        status_value = user.status.value if user and hasattr(user.status, 'value') else (user.status if user else None)
+        if not user or status_value != UserStatus.ACTIVE.value:
             raise ForbiddenError("Active account required")
-        
+
         # Check if user still has the claimed role
-        if user.role != role_enum.value:
-            current_app.logger.warning(f"Role mismatch for user {user_id}: JWT claims {user_role}, DB has {user.role}")
+        role_value = user.role.value if hasattr(user.role, 'value') else user.role
+        if role_value != role_enum.value:
+            current_app.logger.warning(f"Role mismatch for user {user_id}: JWT claims {user_role}, DB has {role_value}")
             raise ForbiddenError("Role validation failed")
         
         g.current_user_id = user_id
@@ -161,13 +166,17 @@ def validate_admin_action(required_permissions: List[str] = None):
             user = User.query.get(user_id)
             if not user:
                 raise ForbiddenError("User not found")
-            
+
+            # Extract role and status values for comparison
+            role_value = user.role.value if hasattr(user.role, 'value') else user.role
+            status_value = user.status.value if hasattr(user.status, 'value') else user.status
+
             # Check if user has admin privileges
-            if user.role not in [UserRole.ADMIN.value, UserRole.MANAGER.value, UserRole.OPERATOR.value]:
+            if role_value not in [UserRole.ADMIN.value, UserRole.MANAGER.value, UserRole.OPERATOR.value]:
                 raise ForbiddenError("Administrative access required")
-            
+
             # Check account status
-            if user.status != UserStatus.ACTIVE.value:
+            if status_value != UserStatus.ACTIVE.value:
                 raise ForbiddenError("Account suspended or inactive")
             
             # Check specific permissions if provided
@@ -175,15 +184,15 @@ def validate_admin_action(required_permissions: List[str] = None):
                 # This would integrate with a permission system
                 # For now, we'll implement basic role-based checks
                 user_permissions = []
-                
-                if user.role == UserRole.ADMIN.value:
+
+                if role_value == UserRole.ADMIN.value:
                     user_permissions = ['all']  # Admin has all permissions
-                elif user.role == UserRole.MANAGER.value:
+                elif role_value == UserRole.MANAGER.value:
                     user_permissions = [
-                        'view_users', 'manage_orders', 'view_reports', 
+                        'view_users', 'manage_orders', 'view_reports',
                         'manage_products', 'view_analytics'
                     ]
-                elif user.role == UserRole.OPERATOR.value:
+                elif role_value == UserRole.OPERATOR.value:
                     user_permissions = [
                         'view_orders', 'update_orders', 'view_products'
                     ]
@@ -332,19 +341,28 @@ def cache_response(timeout: int = 300, key_prefix: str = None):
                 
                 # Execute function and cache response
                 result = f(*args, **kwargs)
-                
+
                 # Extract response data and status code
-                if hasattr(result, 'get_json') and hasattr(result, 'status_code'):
-                    # Flask Response object
+                if isinstance(result, tuple) and len(result) == 2:
+                    # (response, status_code) tuple from jsonify()
+                    response_obj, status_code = result
+                    if hasattr(response_obj, 'get_json'):
+                        # Flask Response object
+                        response_data = {
+                            'data': response_obj.get_json(),
+                            'status_code': status_code
+                        }
+                    else:
+                        # Plain dict response
+                        response_data = {
+                            'data': response_obj,
+                            'status_code': status_code
+                        }
+                elif hasattr(result, 'get_json') and hasattr(result, 'status_code'):
+                    # Flask Response object without tuple
                     response_data = {
                         'data': result.get_json(),
                         'status_code': result.status_code
-                    }
-                elif isinstance(result, tuple) and len(result) == 2:
-                    # (response_dict, status_code) tuple
-                    response_data = {
-                        'data': result[0],
-                        'status_code': result[1]
                     }
                 else:
                     # Plain response dict
@@ -352,7 +370,7 @@ def cache_response(timeout: int = 300, key_prefix: str = None):
                         'data': result,
                         'status_code': 200
                     }
-                
+
                 redis_client.setex(cache_key, timeout, json.dumps(response_data, default=str))
                 return result
             
@@ -680,7 +698,7 @@ def require_verification(verification_type: str = 'email'):
             user_id = get_jwt_identity()
             
             # Import here to avoid circular imports
-            from ..models import User
+            from business_app.models.user import User
             
             user = User.query.get(user_id)
             if not user:

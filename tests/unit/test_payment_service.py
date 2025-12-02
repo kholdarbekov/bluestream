@@ -465,3 +465,547 @@ class TestPaymentPerformance:
         # Verify all payments processed without conflicts
         assert len(results) == 5
         assert all('error' not in result for result in results)
+
+
+@pytest.mark.critical
+@pytest.mark.payment
+class TestCardManagement:
+    """Test credit card management functionality"""
+
+    @pytest.fixture
+    def sample_card(self, db, sample_user):
+        """Create a sample credit card"""
+        from business_app.models.credit_card import CreditCard
+        from datetime import datetime, timezone
+
+        card = CreditCard(
+            user_id=sample_user.id,
+            card_token='tok_test_123',
+            card_brand='visa',
+            last_four_digits='4242',
+            expiry_month=12,
+            expiry_year=datetime.now(timezone.utc).year + 2,
+            cardholder_name='Test User',
+            provider='payme',
+            is_default=True,
+            is_verified=True,
+            is_active=True
+        )
+        db.session.add(card)
+        db.session.commit()
+        return card
+
+    def test_get_user_cards(self, payment_service, sample_user, sample_card, db):
+        """Test retrieving user's cards"""
+        cards = payment_service.get_user_cards(sample_user.id)
+
+        assert len(cards) == 1
+        assert cards[0].id == sample_card.id
+        assert cards[0].last_four_digits == '4242'
+
+    def test_get_user_cards_excludes_expired(self, payment_service, sample_user, db):
+        """Test that expired cards are excluded by default"""
+        from business_app.models.credit_card import CreditCard
+        from datetime import datetime, timezone
+
+        # Create expired card
+        expired_card = CreditCard(
+            user_id=sample_user.id,
+            card_token='tok_expired',
+            card_brand='visa',
+            last_four_digits='1111',
+            expiry_month=1,
+            expiry_year=2020,  # Expired
+            cardholder_name='Test User',
+            provider='payme',
+            is_active=True
+        )
+        db.session.add(expired_card)
+        db.session.commit()
+
+        cards = payment_service.get_user_cards(sample_user.id, include_expired=False)
+
+        assert all(
+            card.expiry_year >= datetime.now(timezone.utc).year
+            for card in cards
+        )
+
+    def test_get_user_cards_include_expired(self, payment_service, sample_user, sample_card, db):
+        """Test retrieving cards including expired ones"""
+        from business_app.models.credit_card import CreditCard
+
+        # Create expired card
+        expired_card = CreditCard(
+            user_id=sample_user.id,
+            card_token='tok_expired',
+            card_brand='visa',
+            last_four_digits='1111',
+            expiry_month=1,
+            expiry_year=2020,
+            cardholder_name='Test User',
+            provider='payme',
+            is_active=True
+        )
+        db.session.add(expired_card)
+        db.session.commit()
+
+        cards = payment_service.get_user_cards(sample_user.id, include_expired=True)
+
+        assert len(cards) == 2
+
+    def test_get_default_card(self, payment_service, sample_user, sample_card, db):
+        """Test getting user's default card"""
+        default_card = payment_service.get_default_card(sample_user.id)
+
+        assert default_card is not None
+        assert default_card.id == sample_card.id
+        assert default_card.is_default is True
+
+    def test_get_default_card_no_default(self, payment_service, sample_user, db):
+        """Test getting default card when none is set"""
+        from business_app.models.credit_card import CreditCard
+        from datetime import datetime, timezone
+
+        # Create card without default flag
+        card = CreditCard(
+            user_id=sample_user.id,
+            card_token='tok_test',
+            card_brand='visa',
+            last_four_digits='4242',
+            expiry_month=12,
+            expiry_year=datetime.now(timezone.utc).year + 2,
+            cardholder_name='Test User',
+            provider='payme',
+            is_default=False,
+            is_active=True
+        )
+        db.session.add(card)
+        db.session.commit()
+
+        # Should return the most recent card even if not marked default
+        default_card = payment_service.get_default_card(sample_user.id)
+
+        assert default_card is not None
+        assert default_card.id == card.id
+
+    def test_get_card_by_id(self, payment_service, sample_user, sample_card, db):
+        """Test getting card by ID"""
+        card = payment_service.get_card_by_id(sample_card.id, sample_user.id)
+
+        assert card is not None
+        assert card.id == sample_card.id
+
+    def test_get_card_by_id_wrong_user(self, payment_service, sample_card, db):
+        """Test getting card with wrong user ID"""
+        from business_app.utils.exceptions import NotFoundError
+
+        with pytest.raises(NotFoundError, match="Credit card not found"):
+            payment_service.get_card_by_id(sample_card.id, 99999)
+
+    def test_validate_card_for_payment_success(self, payment_service, sample_user, sample_card, db):
+        """Test successful card validation"""
+        is_valid, error = payment_service.validate_card_for_payment(
+            card_id=sample_card.id,
+            user_id=sample_user.id,
+            amount=10000
+        )
+
+        assert is_valid is True
+        assert error is None
+
+    def test_validate_card_for_payment_expired(self, payment_service, sample_user, db):
+        """Test validation of expired card"""
+        from business_app.models.credit_card import CreditCard
+
+        expired_card = CreditCard(
+            user_id=sample_user.id,
+            card_token='tok_expired',
+            card_brand='visa',
+            last_four_digits='4242',
+            expiry_month=1,
+            expiry_year=2020,
+            cardholder_name='Test User',
+            provider='payme',
+            is_active=True
+        )
+        db.session.add(expired_card)
+        db.session.commit()
+
+        is_valid, error = payment_service.validate_card_for_payment(
+            card_id=expired_card.id,
+            user_id=sample_user.id,
+            amount=10000
+        )
+
+        assert is_valid is False
+        assert 'expired' in error.lower()
+
+    def test_validate_card_for_payment_not_found(self, payment_service, sample_user, db):
+        """Test validation of non-existent card"""
+        is_valid, error = payment_service.validate_card_for_payment(
+            card_id=99999,
+            user_id=sample_user.id,
+            amount=10000
+        )
+
+        assert is_valid is False
+        assert 'not found' in error.lower()
+
+    def test_validate_card_for_payment_invalid_amount(self, payment_service, sample_user, sample_card, db):
+        """Test validation with invalid amount"""
+        is_valid, error = payment_service.validate_card_for_payment(
+            card_id=sample_card.id,
+            user_id=sample_user.id,
+            amount=0  # Invalid amount
+        )
+
+        assert is_valid is False
+        assert 'positive' in error.lower()
+
+    def test_set_default_card(self, payment_service, sample_user, db):
+        """Test setting a card as default"""
+        from business_app.models.credit_card import CreditCard
+        from datetime import datetime, timezone
+
+        # Create two cards
+        card1 = CreditCard(
+            user_id=sample_user.id,
+            card_token='tok_1',
+            card_brand='visa',
+            last_four_digits='1111',
+            expiry_month=12,
+            expiry_year=datetime.now(timezone.utc).year + 2,
+            cardholder_name='Test User',
+            provider='payme',
+            is_default=True,
+            is_active=True
+        )
+        card2 = CreditCard(
+            user_id=sample_user.id,
+            card_token='tok_2',
+            card_brand='mastercard',
+            last_four_digits='2222',
+            expiry_month=12,
+            expiry_year=datetime.now(timezone.utc).year + 2,
+            cardholder_name='Test User',
+            provider='payme',
+            is_default=False,
+            is_active=True
+        )
+        db.session.add_all([card1, card2])
+        db.session.commit()
+
+        # Set card2 as default
+        updated_card = payment_service.set_default_card(card2.id, sample_user.id)
+
+        assert updated_card.is_default is True
+
+        # Verify card1 is no longer default
+        db.session.refresh(card1)
+        assert card1.is_default is False
+
+    def test_set_default_card_expired(self, payment_service, sample_user, db):
+        """Test setting expired card as default fails"""
+        from business_app.models.credit_card import CreditCard
+
+        expired_card = CreditCard(
+            user_id=sample_user.id,
+            card_token='tok_expired',
+            card_brand='visa',
+            last_four_digits='4242',
+            expiry_month=1,
+            expiry_year=2020,
+            cardholder_name='Test User',
+            provider='payme',
+            is_active=True
+        )
+        db.session.add(expired_card)
+        db.session.commit()
+
+        with pytest.raises(ValidationError, match="Cannot set expired card as default"):
+            payment_service.set_default_card(expired_card.id, sample_user.id)
+
+    def test_delete_card(self, payment_service, sample_user, db):
+        """Test deleting a card"""
+        from business_app.models.credit_card import CreditCard
+        from datetime import datetime, timezone
+
+        # Create two cards
+        card1 = CreditCard(
+            user_id=sample_user.id,
+            card_token='tok_1',
+            card_brand='visa',
+            last_four_digits='1111',
+            expiry_month=12,
+            expiry_year=datetime.now(timezone.utc).year + 2,
+            cardholder_name='Test User',
+            provider='payme',
+            is_default=False,
+            is_active=True
+        )
+        card2 = CreditCard(
+            user_id=sample_user.id,
+            card_token='tok_2',
+            card_brand='mastercard',
+            last_four_digits='2222',
+            expiry_month=12,
+            expiry_year=datetime.now(timezone.utc).year + 2,
+            cardholder_name='Test User',
+            provider='payme',
+            is_default=True,
+            is_active=True
+        )
+        db.session.add_all([card1, card2])
+        db.session.commit()
+
+        # Delete non-default card
+        result = payment_service.delete_card(card1.id, sample_user.id)
+
+        assert result is True
+
+        # Verify card is deactivated
+        db.session.refresh(card1)
+        assert card1.is_active is False
+
+    def test_delete_only_card_fails(self, payment_service, sample_user, sample_card, db):
+        """Test deleting the only card fails"""
+        sample_card.is_default = True
+        db.session.commit()
+
+        with pytest.raises(ValidationError, match="Cannot delete the only remaining card"):
+            payment_service.delete_card(sample_card.id, sample_user.id)
+
+    def test_delete_default_card_sets_new_default(self, payment_service, sample_user, db):
+        """Test deleting default card sets another as default"""
+        from business_app.models.credit_card import CreditCard
+        from datetime import datetime, timezone
+
+        # Create two cards
+        card1 = CreditCard(
+            user_id=sample_user.id,
+            card_token='tok_1',
+            card_brand='visa',
+            last_four_digits='1111',
+            expiry_month=12,
+            expiry_year=datetime.now(timezone.utc).year + 2,
+            cardholder_name='Test User',
+            provider='payme',
+            is_default=True,
+            is_active=True
+        )
+        card2 = CreditCard(
+            user_id=sample_user.id,
+            card_token='tok_2',
+            card_brand='mastercard',
+            last_four_digits='2222',
+            expiry_month=12,
+            expiry_year=datetime.now(timezone.utc).year + 2,
+            cardholder_name='Test User',
+            provider='payme',
+            is_default=False,
+            is_active=True
+        )
+        db.session.add_all([card1, card2])
+        db.session.commit()
+
+        # Delete default card
+        payment_service.delete_card(card1.id, sample_user.id)
+
+        # Verify card2 is now default
+        db.session.refresh(card2)
+        assert card2.is_default is True
+
+
+@pytest.mark.critical
+@pytest.mark.payment
+class TestCardPaymentProcessing:
+    """Test card payment processing functionality"""
+
+    @pytest.fixture
+    def sample_card(self, db, sample_user):
+        """Create a sample credit card"""
+        from business_app.models.credit_card import CreditCard
+        from datetime import datetime, timezone
+
+        card = CreditCard(
+            user_id=sample_user.id,
+            card_token='tok_test_123',
+            card_brand='visa',
+            last_four_digits='4242',
+            expiry_month=12,
+            expiry_year=datetime.now(timezone.utc).year + 2,
+            cardholder_name='Test User',
+            provider='payme',
+            is_default=True,
+            is_verified=True,
+            is_active=True
+        )
+        db.session.add(card)
+        db.session.commit()
+        return card
+
+    def test_process_card_payment_success(self, payment_service, sample_user, sample_order, sample_card, db):
+        """Test successful card payment processing"""
+        with patch.object(payment_service, '_process_payme_card_payment') as mock_process:
+            mock_process.return_value = {
+                'success': True,
+                'transaction_id': 'payme_123456',
+                'amount': sample_order.total_amount
+            }
+
+            payment = payment_service.process_card_payment(
+                order_id=sample_order.id,
+                card_id=sample_card.id,
+                user_id=sample_user.id
+            )
+
+            assert payment is not None
+            assert payment.status == PaymentStatus.COMPLETED
+            assert payment.gateway_reference == 'payme_123456'
+
+    def test_process_card_payment_order_not_found(self, payment_service, sample_user, sample_card, db):
+        """Test card payment with non-existent order"""
+        from business_app.utils.exceptions import NotFoundError
+
+        with pytest.raises(NotFoundError, match="Order not found"):
+            payment_service.process_card_payment(
+                order_id=99999,
+                card_id=sample_card.id,
+                user_id=sample_user.id
+            )
+
+    def test_process_card_payment_wrong_user(self, payment_service, sample_order, sample_card, db):
+        """Test card payment with wrong user"""
+        with pytest.raises(ValidationError, match="Order does not belong to user"):
+            payment_service.process_card_payment(
+                order_id=sample_order.id,
+                card_id=sample_card.id,
+                user_id=99999
+            )
+
+    def test_process_card_payment_invalid_card(self, payment_service, sample_user, sample_order, db):
+        """Test card payment with invalid card"""
+        with pytest.raises(ValidationError):
+            payment_service.process_card_payment(
+                order_id=sample_order.id,
+                card_id=99999,
+                user_id=sample_user.id
+            )
+
+    def test_process_card_payment_failure(self, payment_service, sample_user, sample_order, sample_card, db):
+        """Test failed card payment"""
+        from business_app.utils.exceptions import PaymentError
+
+        with patch.object(payment_service, '_process_payme_card_payment') as mock_process:
+            mock_process.return_value = {
+                'success': False,
+                'error_message': 'Insufficient funds'
+            }
+
+            with pytest.raises(PaymentError, match="Insufficient funds"):
+                payment_service.process_card_payment(
+                    order_id=sample_order.id,
+                    card_id=sample_card.id,
+                    user_id=sample_user.id
+                )
+
+    def test_process_card_payment_verifies_card(self, payment_service, sample_user, sample_order, db):
+        """Test that first successful payment verifies the card"""
+        from business_app.models.credit_card import CreditCard
+        from datetime import datetime, timezone
+
+        # Create unverified card
+        unverified_card = CreditCard(
+            user_id=sample_user.id,
+            card_token='tok_unverified',
+            card_brand='visa',
+            last_four_digits='4242',
+            expiry_month=12,
+            expiry_year=datetime.now(timezone.utc).year + 2,
+            cardholder_name='Test User',
+            provider='payme',
+            is_verified=False,
+            is_active=True
+        )
+        db.session.add(unverified_card)
+        db.session.commit()
+
+        with patch.object(payment_service, '_process_payme_card_payment') as mock_process:
+            mock_process.return_value = {
+                'success': True,
+                'transaction_id': 'payme_123456',
+                'amount': sample_order.total_amount
+            }
+
+            payment_service.process_card_payment(
+                order_id=sample_order.id,
+                card_id=unverified_card.id,
+                user_id=sample_user.id
+            )
+
+            # Card should now be verified
+            db.session.refresh(unverified_card)
+            assert unverified_card.is_verified is True
+
+    def test_payme_card_payment_test_mode(self, payment_service, sample_card, db):
+        """Test Payme card payment in test mode"""
+        from business_app.models.payment import Payment
+
+        payment = Payment(
+            order_id=1,
+            user_id=sample_card.user_id,
+            amount=Decimal('10000.00'),
+            payment_method=PaymentMethod.PAYME,
+            status=PaymentStatus.PENDING
+        )
+        db.session.add(payment)
+        db.session.commit()
+
+        # Enable test mode
+        payment_service.payme_test_mode = True
+
+        result = payment_service._process_payme_card_payment(payment, sample_card)
+
+        assert result['success'] is True
+        assert 'transaction_id' in result
+        assert result['card_token'] == sample_card.card_token
+
+    def test_click_card_payment_test_mode(self, payment_service, db):
+        """Test Click card payment in test mode"""
+        from business_app.models.credit_card import CreditCard
+        from business_app.models.payment import Payment
+        from datetime import datetime, timezone
+
+        # Create Click card
+        card = CreditCard(
+            user_id=1,
+            card_token='tok_click',
+            card_brand='uzcard',
+            last_four_digits='5555',
+            expiry_month=12,
+            expiry_year=datetime.now(timezone.utc).year + 2,
+            cardholder_name='Test User',
+            provider='click',
+            is_verified=True,
+            is_active=True
+        )
+        db.session.add(card)
+
+        payment = Payment(
+            order_id=1,
+            user_id=1,
+            amount=Decimal('10000.00'),
+            payment_method=PaymentMethod.CLICK,
+            status=PaymentStatus.PENDING
+        )
+        db.session.add(payment)
+        db.session.commit()
+
+        # Enable test mode
+        payment_service.click_test_mode = True
+
+        result = payment_service._process_click_card_payment(payment, card)
+
+        assert result['success'] is True
+        assert 'transaction_id' in result
+        assert result['card_token'] == card.card_token

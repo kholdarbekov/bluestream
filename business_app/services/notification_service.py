@@ -3,11 +3,13 @@ Notification service for the Water Business Platform
 Handles SMS, Email, Telegram, and Push notifications
 """
 import json
+import logging
+from celery.utils.log import get_task_logger
 from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
 from flask import current_app
 import requests
-from twilio.rest import Client as TwilioClient
+from eskiz_sms import EskizSMS
 from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import Mail
 
@@ -22,6 +24,20 @@ from business_app.utils.constants import NotificationType, NotificationChannel
 from business_app.utils.translations import get_translation
 from business_app import db
 
+# Use standard logging that works in both Flask and Celery contexts
+# logger = logging.getLogger(__name__)
+logger = get_task_logger(__name__)
+
+# Configure logger to ensure it outputs in both Flask and Celery
+# if not logger.handlers:
+#     handler = logging.StreamHandler()
+#     handler.setFormatter(logging.Formatter(
+#         '[%(asctime)s] %(levelname)s in %(module)s: %(message)s'
+#     ))
+#     logger.addHandler(handler)
+#     logger.setLevel(logging.INFO)
+#     logger.propagate = True
+
 
 class NotificationService:
     """Service for handling notifications across multiple channels"""
@@ -30,17 +46,17 @@ class NotificationService:
         # Email configuration
         self.sendgrid_api_key = current_app.config.get('SENDGRID_API_KEY')
         self.default_sender = current_app.config.get('MAIL_DEFAULT_SENDER')
-        
-        # SMS configuration
-        self.twilio_account_sid = current_app.config.get('TWILIO_ACCOUNT_SID')
-        self.twilio_auth_token = current_app.config.get('TWILIO_AUTH_TOKEN')
-        self.twilio_phone_number = current_app.config.get('TWILIO_PHONE_NUMBER')
+
+        # SMS configuration (Eskiz)
+        self.eskiz_email = current_app.config.get('ESKIZ_EMAIL')
+        self.eskiz_password = current_app.config.get('ESKIZ_PASSWORD')
+        self.eskiz_from = current_app.config.get('ESKIZ_FROM', '4546')
         
         # Telegram configuration
         self.telegram_bot_token = current_app.config.get('TELEGRAM_BOT_TOKEN')
         
         # Company information
-        self.company_name = current_app.config.get('COMPANY_NAME', 'AquaPure')
+        self.company_name = current_app.config.get('COMPANY_NAME', 'Aqua Element')
         self.company_phone = current_app.config.get('COMPANY_PHONE')
         self.company_email = current_app.config.get('COMPANY_EMAIL')
         
@@ -54,12 +70,25 @@ class NotificationService:
             self.sendgrid_client = SendGridAPIClient(api_key=self.sendgrid_api_key)
         else:
             self.sendgrid_client = None
-        
-        # Twilio client
-        if self.twilio_account_sid and self.twilio_auth_token:
-            self.twilio_client = TwilioClient(self.twilio_account_sid, self.twilio_auth_token)
+
+        # Eskiz SMS client
+        logger.info(f"DEBUG: Initializing Eskiz SMS - email: {self.eskiz_email}, has_password: {bool(self.eskiz_password)}")
+        if self.eskiz_email and self.eskiz_password:
+            try:
+                logger.info("DEBUG: Creating EskizSMS client instance...")
+                self.eskiz_client = EskizSMS(
+                    email=self.eskiz_email,
+                    password=self.eskiz_password,
+                    save_token=True,
+                    env_file_path='.env'
+                )
+                logger.info(f"DEBUG: Eskiz SMS client initialized successfully: {type(self.eskiz_client)}")
+            except Exception as e:
+                logger.error(f"Failed to initialize Eskiz SMS client: {e}", exc_info=True)
+                self.eskiz_client = None
         else:
-            self.twilio_client = None
+            logger.warning(f"DEBUG: Eskiz credentials missing - email: {bool(self.eskiz_email)}, password: {bool(self.eskiz_password)}")
+            self.eskiz_client = None
     
     def send_notification(self, user_id: int, notification_type: NotificationType,
                          channels: List[NotificationChannel] = None,
@@ -80,7 +109,7 @@ class NotificationService:
         """
         user = User.query.get(user_id)
         if not user:
-            raise NotificationError("User not found")
+            raise NotificationError(get_translation('error.not_found'))
         
         # Get user's notification preferences
         if channels is None:
@@ -115,7 +144,7 @@ class NotificationService:
                 results[channel.value] = result
                 
             except Exception as e:
-                current_app.logger.error(f"Failed to send {channel.value} notification: {e}")
+                logger.error(f"Failed to send {channel.value} notification: {e}")
                 results[channel.value] = {'success': False, 'error': str(e)}
         
         # Create notification record
@@ -151,7 +180,7 @@ class NotificationService:
         """Send order-related notification"""
         order = Order.query.get(order_id)
         if not order:
-            raise NotificationError("Order not found")
+            raise NotificationError(get_translation('error.not_found'))
         
         # Map event types to notification types
         event_mapping = {
@@ -187,7 +216,7 @@ class NotificationService:
         """Send delivery-related notification"""
         delivery = Delivery.query.get(delivery_id)
         if not delivery:
-            raise NotificationError("Delivery not found")
+            raise NotificationError(get_translation('error.not_found'))
         
         template_data = {
             'tracking_code': delivery.tracking_code,
@@ -209,7 +238,7 @@ class NotificationService:
         """Send payment confirmation notification"""
         payment = Payment.query.get(payment_id)
         if not payment:
-            raise NotificationError("Payment not found")
+            raise NotificationError(get_translation('error.not_found'))
         
         template_data = {
             'order_number': payment.order.order_number,
@@ -229,7 +258,7 @@ class NotificationService:
         """Send subscription-related notification"""
         subscription = Subscription.query.get(subscription_id)
         if not subscription:
-            raise NotificationError("Subscription not found")
+            raise NotificationError(get_translation('error.not_found'))
         
         template_data = {
             'subscription_id': subscription.id,
@@ -288,7 +317,7 @@ class NotificationService:
             return True
             
         except Exception as e:
-            current_app.logger.error(f"Failed to update notification preferences: {e}")
+            logger.error(f"Failed to update notification preferences: {e}")
             db.session.rollback()
             return False
     
@@ -331,22 +360,26 @@ class NotificationService:
                                 template_data: Dict[str, Any], language: str) -> Dict[str, Any]:
         """Send email notification"""
         if not self.sendgrid_client:
-            raise ConfigurationError("SendGrid not configured")
-        
+            raise ConfigurationError(get_translation('error.configuration.sendgrid_not_configured'))
+
         if not user.email:
-            return {'success': False, 'error': 'User has no email address'}
+            return {'success': False, 'error': get_translation('error.validation.no_email_address')}
         
         # Get template
         template = self._get_notification_template(
             notification_type, NotificationChannel.EMAIL, language
         )
-        
+
         if not template:
-            return {'success': False, 'error': 'Email template not found'}
-        
+            return {'success': False, 'error': get_translation('error.template_not_found')}
+
+        # Get translated content (or fallback to default)
+        template_subject = template.get_translated('subject', language) if hasattr(template, 'get_translated') else template.subject
+        template_content = template.get_translated('content', language) if hasattr(template, 'get_translated') else template.content
+
         # Render template
-        subject = self._render_template(template.subject, template_data, language)
-        content = self._render_template(template.content, template_data, language)
+        subject = self._render_template(template_subject, template_data, language)
+        content = self._render_template(template_content, template_data, language)
         
         # Create email
         message = Mail(
@@ -368,60 +401,100 @@ class NotificationService:
     
     def _send_sms_notification(self, user: User, notification_type: NotificationType,
                               template_data: Dict[str, Any], language: str) -> Dict[str, Any]:
-        """Send SMS notification"""
-        if not self.twilio_client:
-            raise ConfigurationError("Twilio not configured")
-        
+        """Send SMS notification using Eskiz"""
+        logger.info(f"_send_sms_notification started {user=}, {notification_type=}, {template_data=}, {language=}")
+        if not self.eskiz_client:
+            logger.error(f"_send_sms_notification error Eskiz SMS not configured")
+            raise ConfigurationError(get_translation('error.configuration.sms_not_configured'))
+
         if not user.phone:
-            return {'success': False, 'error': 'User has no phone number'}
-        
+            logger.error(f"_send_sms_notification error User has no phone number, user.phone={user.phone}")
+            return {'success': False, 'error': get_translation('error.validation.no_phone_number')}
+
         # Get template
         template = self._get_notification_template(
             notification_type, NotificationChannel.SMS, language
         )
-        
+
         if not template:
-            return {'success': False, 'error': 'SMS template not found'}
-        
+            logger.error(f"_send_sms_notification error SMS template not found")
+            return {'success': False, 'error': get_translation('error.template_not_found')}
+
+        # Get translated content (or fallback to default)
+        template_content = template.get_translated('content', language) if hasattr(template, 'get_translated') else template.content
+        logger.info(f"_send_sms_notification template_content: {template_content}")
         # Render template
-        content = self._render_template(template.content, template_data, language)
-        
+        content = self._render_template(template_content, template_data, language)
+        logger.info(f"_send_sms_notification rendered content: {content}")
+
         try:
-            message = self.twilio_client.messages.create(
-                body=content,
-                from_=self.twilio_phone_number,
-                to=user.phone
+            # Clean phone number (Eskiz expects format like 998901234567)
+            phone = user.phone.replace('+', '').replace(' ', '').replace('-', '')
+
+            # Send SMS via Eskiz
+            response = self.eskiz_client.send_sms(
+                mobile_phone=phone,
+                message=content,
+                from_whom=self.eskiz_from
             )
-            
-            return {
-                'success': True,
-                'message_sid': message.sid,
-                'status': message.status
-            }
+
+            # Check if SMS was sent successfully
+            # Eskiz returns Response object with status field
+            if response and hasattr(response, 'status'):
+                if response.status == 'success':
+                    logger.info(f"SMS sent successfully to {phone}. Message ID: {getattr(response, 'id', 'N/A')}")
+                    return {
+                        'success': True,
+                        'message_id': getattr(response, 'id', None),
+                        'phone': phone,
+                        'response': response
+                    }
+                else:
+                    # SMS service returned an error status
+                    error_msg = getattr(response, 'message', 'Unknown error from SMS provider')
+                    logger.error(f"Eskiz SMS failed for {phone}: status={response.status}, message={error_msg}")
+                    return {
+                        'success': False,
+                        'error': f"SMS provider returned status: {response.status}",
+                        'details': error_msg
+                    }
+            else:
+                # Unexpected response format
+                logger.warning(f"Eskiz SMS returned unexpected response format: {response}")
+                return {
+                    'success': False,
+                    'error': 'Unexpected response from SMS provider',
+                    'response': response
+                }
+
         except Exception as e:
+            logger.error(f"Eskiz SMS error: {e}", exc_info=True)
             return {'success': False, 'error': str(e)}
     
     def _send_telegram_notification(self, user: User, notification_type: NotificationType,
                                    template_data: Dict[str, Any], language: str) -> Dict[str, Any]:
         """Send Telegram notification"""
         if not self.telegram_bot_token:
-            raise ConfigurationError("Telegram bot not configured")
-        
+            raise ConfigurationError(get_translation('error.configuration.telegram_not_configured'))
+
         # Get user's Telegram chat ID
         telegram_chat_id = getattr(user, 'telegram_chat_id', None)
         if not telegram_chat_id:
-            return {'success': False, 'error': 'User has no Telegram chat ID'}
+            return {'success': False, 'error': get_translation('error.validation.no_telegram_chat_id')}
         
         # Get template
         template = self._get_notification_template(
             notification_type, NotificationChannel.TELEGRAM, language
         )
-        
+
         if not template:
-            return {'success': False, 'error': 'Telegram template not found'}
-        
+            return {'success': False, 'error': get_translation('error.template_not_found')}
+
+        # Get translated content (or fallback to default)
+        template_content = template.get_translated('content', language) if hasattr(template, 'get_translated') else template.content
+
         # Render template
-        content = self._render_template(template.content, template_data, language)
+        content = self._render_template(template_content, template_data, language)
         
         # Send via Telegram Bot API
         url = f"https://api.telegram.org/bot{self.telegram_bot_token}/sendMessage"
@@ -448,7 +521,7 @@ class NotificationService:
         """Send push notification"""
         # Push notification implementation would depend on your chosen service
         # (Firebase, OneSignal, etc.) - placeholder for now
-        return {'success': False, 'error': 'Push notifications not implemented'}
+        return {'success': False, 'error': get_translation('error.push_not_implemented')}
     
     def _get_user_preferred_channels(self, user_id: int, 
                                    notification_type: NotificationType) -> List[NotificationChannel]:
@@ -470,7 +543,7 @@ class NotificationService:
             NotificationType.PAYMENT_CONFIRMATION: [NotificationChannel.EMAIL],
             NotificationType.SUBSCRIPTION_REMINDER: [NotificationChannel.EMAIL],
             NotificationType.PROMOTIONAL: [NotificationChannel.EMAIL],
-            NotificationType.SYSTEM_ALERT: [NotificationChannel.EMAIL, NotificationChannel.SMS],
+            NotificationType.SYSTEM: [NotificationChannel.EMAIL, NotificationChannel.SMS],
             NotificationType.LOYALTY_REWARD: [NotificationChannel.EMAIL, NotificationChannel.TELEGRAM]
         }
         
@@ -479,22 +552,14 @@ class NotificationService:
     def _get_notification_template(self, notification_type: NotificationType,
                                  channel: NotificationChannel, language: str) -> Optional[NotificationTemplate]:
         """Get notification template"""
+        # NotificationTemplate uses TranslatableMixin, so we don't filter by language
+        # Instead, we get the template and then retrieve translated content
         template = NotificationTemplate.query.filter_by(
             notification_type=notification_type.value,
             channel=channel.value,
-            language=language,
             is_active=True
         ).first()
-        
-        # Fallback to English if template not found in requested language
-        if not template and language != 'en':
-            template = NotificationTemplate.query.filter_by(
-                notification_type=notification_type.value,
-                channel=channel.value,
-                language='en',
-                is_active=True
-            ).first()
-        
+
         return template
     
     def _render_template(self, template: str, data: Dict[str, Any], language: str) -> str:
@@ -523,7 +588,7 @@ class NotificationService:
             return rendered
             
         except Exception as e:
-            current_app.logger.error(f"Template rendering failed: {e}")
+            logger.error(f"Template rendering failed: {e}")
             return template
     
     def _create_notification_record(self, user_id: int, notification_type: NotificationType,
@@ -531,21 +596,34 @@ class NotificationService:
                                   results: Dict[str, Any]):
         """Create notification record in database"""
         try:
-            notification = Notification(
-                user_id=user_id,
-                notification_type=notification_type,
-                channels=[channel.value for channel in channels],
-                template_data=template_data,
-                delivery_results=results,
-                status='sent' if any(r.get('success') for r in results.values()) else 'failed',
-                created_at=datetime.now(timezone.utc)
-            )
-            
-            db.session.add(notification)
+            # Create a notification record for each channel
+            for channel in channels:
+                result = results.get(channel.value, {})
+
+                # Extract message from template_data or use a default
+                message = template_data.get('message', template_data.get('otp_code', 'Notification sent'))
+                title = template_data.get('title', notification_type.value.replace('_', ' ').title())
+
+                notification = Notification(
+                    user_id=user_id,
+                    notification_type=notification_type.value,
+                    channel=channel.value,
+                    title=title,
+                    message=str(message),
+                    is_sent=result.get('success', False),
+                    sent_at=datetime.now(timezone.utc) if result.get('success') else None,
+                    delivery_status='sent' if result.get('success') else 'failed',
+                    failure_reason=result.get('error') if not result.get('success') else None,
+                    extra_data=template_data
+                )
+
+                db.session.add(notification)
+
             db.session.commit()
-            
+
         except Exception as e:
-            current_app.logger.error(f"Failed to create notification record: {e}")
+            logger.error(f"Failed to create notification record: {e}")
+            db.session.rollback()
 
 
 # Default notification templates

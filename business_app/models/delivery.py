@@ -18,7 +18,7 @@ class Delivery(db.Model, TimestampMixin):
     id = Column(Integer, primary_key=True)
     order_id = Column(Integer, ForeignKey('orders.id'), nullable=False, unique=True, index=True)
     delivery_person_id = Column(Integer, ForeignKey('users.id'), nullable=True, index=True)
-    status = Column(Enum(DeliveryStatus), default=DeliveryStatus.SCHEDULED, index=True)
+    status = Column(Enum(DeliveryStatus, name='delivery_status', values_callable=lambda x: [e.value for e in x]), default=DeliveryStatus.SCHEDULED, index=True)
     
     # Scheduling
     scheduled_date = Column(DateTime, nullable=False)
@@ -234,8 +234,8 @@ class DeliveryStatusHistory(db.Model, TimestampMixin):
     
     id = Column(Integer, primary_key=True)
     delivery_id = Column(Integer, ForeignKey('deliveries.id'), nullable=False, index=True)
-    old_status = Column(Enum(DeliveryStatus), nullable=False)
-    new_status = Column(Enum(DeliveryStatus), nullable=False)
+    old_status = Column(Enum(DeliveryStatus, name='delivery_status', values_callable=lambda x: [e.value for e in x]), nullable=False)
+    new_status = Column(Enum(DeliveryStatus, name='delivery_status', values_callable=lambda x: [e.value for e in x]), nullable=False)
     changed_by = Column(Integer, ForeignKey('users.id'), nullable=True)
     changed_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     

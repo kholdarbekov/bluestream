@@ -20,10 +20,8 @@ class ProductCategoryEnum(enum.Enum):
     SPRING_WATER = 'spring_water'
 
 class ProductSizeEnum(enum.Enum):
-    SIZE_05L = '0.5L'
-    SIZE_1L = '1L'
-    SIZE_15L = '1.5L'
     SIZE_5L = '5L'
+    SIZE_10L = '10L'
     SIZE_19L = '19L'
 
 
@@ -55,12 +53,11 @@ class Product(db.Model, TimestampMixin, TranslatableMixin):
     
     # Pricing
     base_price = Column(Numeric(precision=10, scale=2), nullable=False)
-    cost_price = Column(Numeric(precision=10, scale=2), nullable=True)
     discount_price = Column(Numeric(precision=10, scale=2), nullable=True)
     
     # Product details
     category_id = Column(Integer, ForeignKey('product_categories.id'), nullable=False)
-    size = Column(Enum(ProductSizeEnum), nullable=False)
+    size = Column(Enum(ProductSizeEnum, name='product_size_enum', values_callable=lambda x: [e.value for e in x]), nullable=False)
     volume = Column(Float, nullable=True)
     volume_unit = Column(String(10), default='L')
     weight = Column(Float, nullable=True)
@@ -114,7 +111,6 @@ class Product(db.Model, TimestampMixin, TranslatableMixin):
         result.update({
             'base_price': float(self.base_price) if self.base_price else 0,
             'current_price': float(self.calculate_price(user, quantity)),
-            'cost_price': float(self.cost_price) if self.cost_price else None,
             'discount_price': float(self.discount_price) if self.discount_price else None,
             'category': self.category.to_dict(language) if self.category else None,
             'size': self.size.value if self.size else None,
@@ -133,7 +129,7 @@ class PriceRule(db.Model, TimestampMixin, TranslatableMixin):
     
     id = Column(Integer, primary_key=True)
     product_id = Column(Integer, ForeignKey('products.id'), nullable=False, index=True)
-    rule_type = Column(Enum(PriceRuleType), nullable=False)
+    rule_type = Column(Enum(PriceRuleType, name='price_rule_type'), nullable=False)
     name = Column(String(100), nullable=False)        # Default/fallback name (Uzbek)
     description = Column(Text, nullable=True)         # Default/fallback description (Uzbek)
     

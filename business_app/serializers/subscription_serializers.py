@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field, field_validator, ConfigDict
 from pydantic.alias_generators import to_camel
 
 from business_app.utils.constants import SubscriptionStatus, PaymentMethod
+from business_app.models.subscription import SubscriptionItem
 
 
 class BillingCycle(str, Enum):
@@ -368,7 +369,7 @@ def serialize_subscription(subscription, include_items=False, include_address=Fa
             'billing_cycle': subscription.billing_cycle,
             'billing_amount': float(subscription.billing_amount),
             'discount_percentage': getattr(subscription, 'discount_percentage', 0.0),
-            'delivery_frequency': subscription.delivery_frequency,
+            'delivery_frequency': subscription.delivery_frequency.value,
             'delivery_day_of_week': getattr(subscription, 'delivery_day_of_week', None),
             'delivery_day_of_month': getattr(subscription, 'delivery_day_of_month', None),
             'delivery_time_slot': getattr(subscription, 'delivery_time_slot', 'morning'),
@@ -412,28 +413,23 @@ def serialize_subscription(subscription, include_items=False, include_address=Fa
         }
 
 
-def serialize_subscription_item(item) -> Dict[str, Any]:
+def serialize_subscription_item(item: SubscriptionItem) -> Dict[str, Any]:
     """Serialize subscription item object"""
     try:
         return {
             'id': item.id,
             'subscription_id': item.subscription_id,
             'product_id': item.product_id,
-            'product_name': item.product_name,
-            'product_sku': getattr(item, 'product_sku', None),
             'quantity': item.quantity,
             'unit_price': float(item.unit_price),
             'total_price': float(item.total_price),
-            'product_image_url': getattr(item, 'product_image_url', None),
-            'product_description': getattr(item, 'product_description', None),
-            'special_instructions': getattr(item, 'special_instructions', None)
+            'product': item.product.to_dict()
         }
     except Exception:
         return {
             'id': item.id,
             'subscription_id': item.subscription_id,
             'product_id': item.product_id,
-            'product_name': item.product_name,
             'quantity': item.quantity,
             'unit_price': float(item.unit_price),
             'total_price': float(item.total_price)

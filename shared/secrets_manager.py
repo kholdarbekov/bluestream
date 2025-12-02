@@ -224,7 +224,6 @@ def validate_required_secrets() -> bool:
         'payme_secret_key',
         'click_secret_key',
         'sendgrid_api_key',
-        'twilio_auth_token',
         'google_maps_api_key',
         'yandex_maps_api_key',
         'aws_secret_access_key',

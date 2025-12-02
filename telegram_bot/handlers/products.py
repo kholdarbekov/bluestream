@@ -8,7 +8,7 @@ from telegram import Update
 from telegram.ext import ContextTypes
 
 from i18n import i18n
-from keyboards import ProductKeyboards, MenuKeyboards
+from keyboards import ProductKeyboards, MenuKeyboards, OrderKeyboards
 from api_client import api_client
 from database import db_manager, BotUserRepository
 from utils import user_middleware, format_price, authenticate_telegram_user
@@ -47,25 +47,50 @@ class ProductHandlers:
                 if not response.success:
                     await self._handle_api_error(update, response.error, language)
                     return
-                
-                categories = response.data.get('categories', [])
-            
+
+                logger.info(f"API Response data type: {type(response.data)}")
+                logger.info(f"API Response data: {response.data}")
+
+                # Handle nested data structure
+                if isinstance(response.data, dict) and 'data' in response.data:
+                    categories = response.data['data'].get('categories', [])
+                elif isinstance(response.data, dict):
+                    categories = response.data.get('categories', [])
+                else:
+                    logger.error(f"Unexpected response.data structure: {response.data}")
+                    categories = []
+
+            logger.info(f"Retrieved {len(categories)} categories from API")
+            logger.info(f"Categories data: {categories}")
+
             # Show categories
             menu_text = i18n.get('products_title', language)
             keyboard = ProductKeyboards.product_categories(categories, language)
+
+            logger.info(f"Menu text: {menu_text}")
+            logger.info(f"Keyboard created with {len(keyboard.inline_keyboard)} rows")
             
             if update.callback_query:
-                await update.callback_query.edit_message_text(
-                    text=menu_text,
-                    reply_markup=keyboard
-                )
-                await update.callback_query.answer()
+                logger.info("Editing message via callback query...")
+                try:
+                    await update.callback_query.edit_message_text(
+                        text=menu_text,
+                        reply_markup=keyboard
+                    )
+                    logger.info("Message edited successfully")
+                    await update.callback_query.answer()
+                    logger.info("Callback query answered")
+                except Exception as edit_error:
+                    logger.error(f"Error editing message: {edit_error}")
+                    raise
             else:
+                logger.info("Sending new message...")
                 await update.message.reply_text(
                     text=menu_text,
                     reply_markup=keyboard
                 )
-            
+                logger.info("New message sent")
+
             logger.info(f"Product categories shown to user {user_id}")
             
         except Exception as e:
@@ -100,15 +125,20 @@ class ProductHandlers:
                 if not response.success:
                     await self._handle_api_error(update, response.error, language)
                     return
-                
-                products_data = response.data
-                products = products_data.get('products', [])
-                total_pages = products_data.get('total_pages', 1)
+
+                # Handle nested data structure
+                if isinstance(response.data, dict) and 'data' in response.data:
+                    products = response.data['data'].get('items', [])
+                    total_pages = response.data.get('meta', {}).get('pages', 1)
+                else:
+                    # Fallback to old structure
+                    products = response.data.get('products', [])
+                    total_pages = response.data.get('total_pages', 1)
             
             # Store category for pagination
             context.user_data['current_category'] = category_id
             context.user_data['current_page'] = page
-            
+
             if not products:
                 await query.edit_message_text(
                     text="No products found in this category.",
@@ -116,17 +146,19 @@ class ProductHandlers:
                 )
                 await query.answer()
                 return
-            
-            # Format products list
+
+            # Format product list text
             products_text = self._format_products_list(products, language)
+
+            # Create inline keyboard with product buttons
             keyboard = ProductKeyboards.product_list(products, page, total_pages, language)
-            
+
             await query.edit_message_text(
                 text=products_text,
                 reply_markup=keyboard
             )
             await query.answer()
-            
+
             logger.info(f"Products in category {category_id} shown to user {user_id}")
             
         except Exception as e:
@@ -156,7 +188,7 @@ class ProductHandlers:
                     await self._handle_api_error(update, response.error, language)
                     return
                 
-                product = response.data['product']
+                product = response.data['data']['product']
             
             # Format product details
             details_text = self._format_product_details(product, language)
@@ -169,9 +201,9 @@ class ProductHandlers:
             await query.answer()
             
             # Send product image if available
-            if product.get('images') and len(product['images']) > 0:
+            if product.get('media', {}).get('images') and len(product.get('media', {})['images']) > 0:
                 try:
-                    image_url = product['images'][0]
+                    image_url = product.get('media', {})['images'][0]
                     await context.bot.send_photo(
                         chat_id=user_id,
                         photo=image_url,
@@ -208,10 +240,21 @@ class ProductHandlers:
                     await self._handle_api_error(update, response.error, language)
                     return
                 
-                product = response.data['product']
+                product = response.data['data']['product']
+
+                # Add product to cart via API
+                add_response = await client.add_to_cart(
+                    user_token,
+                    product_id,
+                    quantity=1
+                )
+                if not add_response.success:
+                    await self._handle_api_error(update, add_response.error, language)
+                    return
+                
             
             # Show quantity selector
-            quantity_text = f"🛒 {product['name']}\n\n{i18n.get('quantity', language)} 1\n{i18n.get('price', language)} {format_price(product['base_price'])} UZS"
+            quantity_text = f"🛒 {product['name']}\n\n{i18n.get('quantity', language)} 1\n{i18n.get('price', language)} {format_price(product['pricing']['base_price'])} UZS"
             keyboard = ProductKeyboards.quantity_selector(product_id, 1, language)
             
             await query.edit_message_text(
@@ -250,12 +293,22 @@ class ProductHandlers:
                 user_token = await authenticate_telegram_user(update, client)
                 response = await client.get_product(user_token, product_id)
                 if response.success:
-                    product = response.data['product']
-                    total_price = product['base_price'] * new_qty
+                    product = response.data['data']['product']
+                    total_price = product['pricing']['base_price'] * new_qty
                     
                     # Update quantity display
                     quantity_text = f"🛒 {product['name']}\n\n{i18n.get('quantity', language)} {new_qty}\n{i18n.get('total', language)} {format_price(total_price)} UZS"
                     keyboard = ProductKeyboards.quantity_selector(product_id, new_qty, language)
+
+                    # Update cart via API
+                    update_response = await client.update_cart_item(
+                        user_token,
+                        product_id,
+                        quantity=new_qty
+                    )
+                    if not update_response.success:
+                        await self._handle_api_error(update, update_response.error, language)
+                        return
                     
                     await query.edit_message_text(
                         text=quantity_text,
@@ -346,26 +399,26 @@ class ProductHandlers:
         
         formatted_lines = []
         for product in products:
-            price_str = format_price(product['base_price'])
-            stock_indicator = "✅" if product.get('stock_quantity', 0) > 0 else "❌"
+            price_str = format_price(product['pricing']['base_price'])
+            stock_indicator = "✅" if product['inventory'].get('stock_quantity', 0) > 0 else "❌"
             
             formatted_lines.append(
                 f"{stock_indicator} **{product['name']}**\n"
-                f"   💰 {price_str} UZS | 📦 {product.get('volume', 'N/A')}{product.get('volume_unit', '')}"
+                f"   💰 {price_str} UZS | 📦 {product['specifications'].get('volume', 'N/A')}{product['specifications'].get('volume_unit', '')}"
             )
         
         return "\n\n".join(formatted_lines)
     
     def _format_product_details(self, product: Dict, language: str) -> str:
         """Format single product details"""
-        price_str = format_price(product['base_price'])
-        stock = product.get('stock_quantity', 0)
+        price_str = format_price(product['pricing']['base_price'])
+        stock = product['inventory'].get('stock_quantity', 0)
         stock_status = "✅ In Stock" if stock > 0 else "❌ Out of Stock"
         
         details = [
             f"🏷️ **{product['name']}**",
             f"💰 {i18n.get('price', language)}: {price_str} UZS",
-            f"📦 Volume: {product.get('volume', 'N/A')}{product.get('volume_unit', '')}",
+            f"📦 Volume: {product['specifications'].get('volume', 'N/A')}{product['specifications'].get('volume_unit', '')}",
             f"📊 Stock: {stock_status}",
         ]
         
@@ -379,13 +432,45 @@ class ProductHandlers:
     
     async def _show_cart(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Show shopping cart contents"""
-        # This would typically load cart from Redis or database
-        # For now, show empty cart message
+        # This loads cart from database
         user_id = update.effective_user.id
         language = await i18n.get_user_language(user_id)
+        async with api_client as client:
+            user_token = await authenticate_telegram_user(update, client)
+            if not user_token:
+                await self._handle_auth_error(update, language)
+                return
+            
+            response = await client.get_cart(user_token)
+            if not response.success:
+                await self._handle_api_error(update, response.error, language)
+                return
+            
+            cart_data = response.data
+            cart = cart_data.get('data', {}).get('cart', {})
+            cart_items = cart.get('cart_items', [])
         
-        cart_text = i18n.get('cart_empty', language)
-        keyboard = MenuKeyboards.back_button(language)
+        cart_is_empty = None
+        if not cart_items:
+            cart_text = i18n.get('cart_empty', language)
+            cart_is_empty = True
+        else:
+            lines = [i18n.get('cart_title', language) + ":\n"]
+            total_amount = 0
+            for item in cart_items:
+                product = item['product']
+                quantity = item['quantity']
+                price = product['current_price']
+                line_total = price * quantity
+                total_amount += line_total
+                
+                lines.append(
+                    f"🛒 {product['name']} x {quantity} = {format_price(line_total)} UZS"
+                )
+            cart_is_empty = total_amount <= 0
+            lines.append(f"\n💰 {i18n.get('cart_total', language)}: {format_price(total_amount)} UZS")
+            cart_text = "\n".join(lines)
+        keyboard = OrderKeyboards.cart_actions(language, cart_is_empty)
         
         await update.callback_query.edit_message_text(
             text=cart_text,
@@ -398,7 +483,18 @@ class ProductHandlers:
         user_id = update.effective_user.id
         language = await i18n.get_user_language(user_id)
         
-        # Clear cart logic here
+        # Clear cart
+        async with api_client as client:
+            user_token = await authenticate_telegram_user(update, client)
+            if not user_token:
+                await self._handle_auth_error(update, language)
+                return
+            
+            response = await client.clear_cart(user_token)
+            if not response.success:
+                await self._handle_api_error(update, response.error, language)
+                return
+        
         await update.callback_query.answer("🗑️ Cart cleared!")
         await self._show_cart(update, context)
     

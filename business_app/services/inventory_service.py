@@ -90,7 +90,7 @@ class InventoryService:
         if self.redis_client is None:
             try:
                 import redis
-                from business_app.services.auth_service import get_auth_service
+                from business_app.utils.service_factory import get_auth_service
                 auth_service = get_auth_service()
                 self.redis_client = auth_service.redis_client
             except Exception as e:
@@ -199,8 +199,7 @@ class InventoryService:
             Dictionary with reservation details
         """
         if not self.redis_client:
-            logger.warning("Redis not available, skipping inventory reservation")
-            return {'success': False, 'reason': 'Reservation system not available'}
+            self.redis_client = self._get_redis_client()
         
         ttl = ttl or self.reservation_ttl
         expires_at = datetime.now(timezone.utc) + timedelta(seconds=ttl)

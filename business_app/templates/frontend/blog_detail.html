@@ -1,0 +1,355 @@
+{% extends "frontend/base.html" %}
+
+{% block title %}{{ post.get_translated('title', current_language) }} - {{ company_name }}{% endblock %}
+
+{% block extra_meta %}
+{% set meta_title = post.get_translated('meta_title', current_language) or post.get_translated('title', current_language) %}
+{% set meta_description = post.get_translated('meta_description', current_language) or post.get_translated('excerpt', current_language) %}
+<meta name="description" content="{{ meta_description }}">
+<meta property="og:title" content="{{ meta_title }}">
+<meta property="og:description" content="{{ meta_description }}">
+<meta property="og:type" content="article">
+<meta property="og:image" content="{{ post.featured_image or url_for('static', filename='images/logo.png') }}">
+<meta property="article:published_time" content="{{ post.published_at.isoformat() if post.published_at else '' }}">
+<meta property="article:author" content="{{ post.author_name or 'Admin' }}">
+{% endblock %}
+
+{% block content %}
+    <!-- page-title -->
+    <section class="page-title">
+        <div class="bg-layer" style="background-image: url({{ post.featured_image or url_for('static', filename='images/background/page-title.jpg') }});"></div>
+        <div class="auto-container">
+            <div class="content-box">
+                <h1>{{ post.get_translated('title', current_language) }}</h1>
+                <ul class="bread-crumb clearfix">
+                    <li><a href="{{ url_for('frontend.index') }}">{{ 'Home'|translate(current_language) }}</a></li>
+                    <li><a href="{{ url_for('frontend.blog_list') }}">{{ 'Blog'|translate(current_language) }}</a></li>
+                    <li>{{ post.get_category_display(current_language) }}</li>
+                </ul>
+            </div>
+        </div>
+    </section>
+    <!-- page-title end -->
+
+    <!-- blog-details -->
+    <section class="blog-details">
+        <div class="auto-container">
+            <div class="row clearfix">
+                <div class="col-lg-8 col-md-12 col-sm-12 content-side">
+                    <div class="blog-details-content">
+                        <div class="news-block-one">
+                            <div class="inner-box">
+                                {% if post.featured_image %}
+                                <figure class="image-box">
+                                    <img src="{{ post.featured_image }}" alt="{{ post.image_alt_text or post.get_translated('title', current_language) }}">
+                                </figure>
+                                {% endif %}
+                                <div class="lower-content">
+                                    <div class="post-meta">
+                                        <div class="category">
+                                            <a href="{{ url_for('frontend.blog_list', category=post.category.value) }}">
+                                                {{ post.get_category_display(current_language) }}
+                                            </a>
+                                        </div>
+                                        <ul class="post-info clearfix">
+                                            <li><i class="far fa-user"></i> {{ post.author_name or 'Admin' }}</li>
+                                            <li><i class="far fa-calendar"></i> {{ post.published_at.strftime('%B %d, %Y') if post.published_at else '' }}</li>
+                                            <li><i class="far fa-eye"></i> {{ post.view_count }} {{ 'views'|translate(current_language) }}</li>
+                                        </ul>
+                                    </div>
+
+                                    <div class="text">
+                                        <h2>{{ post.get_translated('title', current_language) }}</h2>
+                                        <div class="blog-content">
+                                            {{ post.get_translated('content', current_language)|safe }}
+                                        </div>
+                                    </div>
+
+                                    {% if post.tags %}
+                                    <div class="post-tags">
+                                        <h5>{{ 'Tags'|translate(current_language) }}:</h5>
+                                        {% for tag in post.tags.split(',') %}
+                                        <a href="{{ url_for('frontend.blog_list', tag=tag.strip()) }}" class="tag">{{ tag.strip() }}</a>
+                                        {% endfor %}
+                                    </div>
+                                    {% endif %}
+
+                                    <div class="post-share-option">
+                                        <h5>{{ 'Share this post'|translate(current_language) }}:</h5>
+                                        <ul class="social-links clearfix">
+                                            <li><a href="https://www.facebook.com/sharer/sharer.php?u={{ request.url }}" target="_blank"><i class="fab fa-facebook-f"></i></a></li>
+                                            <li><a href="https://twitter.com/intent/tweet?url={{ request.url }}&text={{ post.get_translated('title', current_language) }}" target="_blank"><i class="fab fa-twitter"></i></a></li>
+                                            <li><a href="https://t.me/share/url?url={{ request.url }}&text={{ post.get_translated('title', current_language) }}" target="_blank"><i class="fab fa-telegram-plane"></i></a></li>
+                                        </ul>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-lg-4 col-md-12 col-sm-12 sidebar-side">
+                    <div class="blog-sidebar">
+                        <!-- Categories Widget -->
+                        <div class="sidebar-widget category-widget">
+                            <div class="widget-title">
+                                <h4>{{ 'Categories'|translate(current_language) }}</h4>
+                            </div>
+                            <div class="widget-content">
+                                <ul class="category-list clearfix">
+                                    <li><a href="{{ url_for('frontend.blog_list') }}">{{ 'All Posts'|translate(current_language) }}</a></li>
+                                    <li><a href="{{ url_for('frontend.blog_list', category='health_tips') }}">{{ 'Health Tips'|translate(current_language) }}</a></li>
+                                    <li><a href="{{ url_for('frontend.blog_list', category='water_benefits') }}">{{ 'Water Benefits'|translate(current_language) }}</a></li>
+                                    <li><a href="{{ url_for('frontend.blog_list', category='company_news') }}">{{ 'Company News'|translate(current_language) }}</a></li>
+                                    <li><a href="{{ url_for('frontend.blog_list', category='quality_assurance') }}">{{ 'Quality Assurance'|translate(current_language) }}</a></li>
+                                </ul>
+                            </div>
+                        </div>
+
+                        <!-- Recent Posts Widget -->
+                        {% if recent_posts %}
+                        <div class="sidebar-widget recent-posts-widget">
+                            <div class="widget-title">
+                                <h4>{{ 'Recent Posts'|translate(current_language) }}</h4>
+                            </div>
+                            <div class="widget-content">
+                                {% for recent_post in recent_posts %}
+                                <div class="recent-post">
+                                    <div class="post-inner">
+                                        {% if recent_post.featured_image %}
+                                        <figure class="post-thumb">
+                                            <a href="{{ url_for('frontend.blog_detail', slug=recent_post.slug) }}">
+                                                <img src="{{ recent_post.featured_image }}" alt="{{ recent_post.get_translated('title', current_language) }}">
+                                            </a>
+                                        </figure>
+                                        {% endif %}
+                                        <h5><a href="{{ url_for('frontend.blog_detail', slug=recent_post.slug) }}">{{ recent_post.get_translated('title', current_language) }}</a></h5>
+                                        <span class="post-date">{{ recent_post.published_at.strftime('%B %d, %Y') if recent_post.published_at else '' }}</span>
+                                    </div>
+                                </div>
+                                {% endfor %}
+                            </div>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+    <!-- blog-details end -->
+{% endblock %}
+
+{% block extra_css %}
+<style>
+.blog-content {
+    font-size: 16px;
+    line-height: 1.8;
+    color: #666;
+    margin-top: 30px;
+}
+
+.blog-content h1,
+.blog-content h2,
+.blog-content h3,
+.blog-content h4,
+.blog-content h5,
+.blog-content h6 {
+    color: #222;
+    margin-top: 30px;
+    margin-bottom: 15px;
+    font-weight: 700;
+}
+
+.blog-content p {
+    margin-bottom: 20px;
+}
+
+.blog-content img {
+    max-width: 100%;
+    height: auto;
+    border-radius: 8px;
+    margin: 20px 0;
+}
+
+.blog-content ul,
+.blog-content ol {
+    margin: 20px 0;
+    padding-left: 30px;
+}
+
+.blog-content li {
+    margin-bottom: 10px;
+}
+
+.post-meta {
+    margin-bottom: 30px;
+}
+
+.post-meta .category {
+    margin-bottom: 15px;
+}
+
+.post-meta .category a {
+    display: inline-block;
+    padding: 5px 15px;
+    background: #00d1f9;
+    color: #fff;
+    border-radius: 20px;
+    font-size: 14px;
+    font-weight: 600;
+    transition: all 0.3s ease;
+}
+
+.post-meta .category a:hover {
+    background: #002c8f;
+}
+
+.post-tags {
+    margin-top: 30px;
+    padding-top: 30px;
+    border-top: 1px solid #f0f0f0;
+}
+
+.post-tags h5 {
+    font-size: 16px;
+    font-weight: 700;
+    color: #222;
+    margin-bottom: 15px;
+}
+
+.post-tags .tag {
+    display: inline-block;
+    padding: 5px 12px;
+    background: #f8f9fa;
+    color: #666;
+    border-radius: 4px;
+    font-size: 13px;
+    margin-right: 8px;
+    margin-bottom: 8px;
+    transition: all 0.3s ease;
+}
+
+.post-tags .tag:hover {
+    background: #00d1f9;
+    color: #fff;
+}
+
+.post-share-option {
+    margin-top: 30px;
+    padding-top: 30px;
+    border-top: 1px solid #f0f0f0;
+}
+
+.post-share-option h5 {
+    font-size: 16px;
+    font-weight: 700;
+    color: #222;
+    margin-bottom: 15px;
+}
+
+.post-share-option .social-links {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    gap: 10px;
+}
+
+.post-share-option .social-links li a {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    background: #f8f9fa;
+    color: #666;
+    border-radius: 50%;
+    font-size: 16px;
+    transition: all 0.3s ease;
+}
+
+.post-share-option .social-links li a:hover {
+    background: #00d1f9;
+    color: #fff;
+    transform: translateY(-3px);
+}
+
+.blog-sidebar .sidebar-widget {
+    background: #fff;
+    padding: 25px;
+    margin-bottom: 30px;
+    border-radius: 8px;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+    border: 1px solid #f0f0f0;
+}
+
+.blog-sidebar .widget-title h4 {
+    font-size: 18px;
+    font-weight: 700;
+    color: #222;
+    margin-bottom: 20px;
+    padding-bottom: 15px;
+    border-bottom: 2px solid #00d1f9;
+}
+
+.recent-post {
+    padding: 15px 0;
+    border-bottom: 1px solid #f0f0f0;
+}
+
+.recent-post:last-child {
+    border-bottom: none;
+}
+
+.recent-post .post-inner {
+    display: flex;
+    gap: 15px;
+    align-items: flex-start;
+}
+
+.recent-post .post-thumb {
+    flex-shrink: 0;
+    width: 80px;
+    height: 80px;
+    margin: 0;
+}
+
+.recent-post .post-thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: 6px;
+}
+
+.recent-post h5 {
+    font-size: 15px;
+    font-weight: 600;
+    margin: 0 0 8px 0;
+    line-height: 1.4;
+}
+
+.recent-post h5 a {
+    color: #222;
+    transition: all 0.3s ease;
+}
+
+.recent-post h5 a:hover {
+    color: #00d1f9;
+}
+
+.recent-post .post-date {
+    font-size: 12px;
+    color: #999;
+}
+
+@media only screen and (max-width: 767px) {
+    .blog-content {
+        font-size: 15px;
+    }
+
+    .post-share-option .social-links {
+        flex-wrap: wrap;
+    }
+}
+</style>
+{% endblock %}

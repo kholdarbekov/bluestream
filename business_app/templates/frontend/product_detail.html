@@ -1,0 +1,372 @@
+{% extends "frontend/base.html" %}
+
+{% block title %}{{ product.name }} - {{ company_name }}{% endblock %}
+
+{% block extra_meta %}
+<meta name="description" content="{{ product.short_description or product.description }}">
+<meta property="og:title" content="{{ product.name }}">
+<meta property="og:description" content="{{ product.short_description or product.description }}">
+<meta property="og:type" content="product">
+{% if product.images and product.images|length > 0 %}
+<meta property="og:image" content="{{ product.images[0] }}">
+{% endif %}
+<meta property="product:price:amount" content="{{ product.base_price }}">
+<meta property="product:price:currency" content="UZS">
+{% endblock %}
+
+{% block extra_head %}
+<link href="{{ url_for('static', filename='css/product-detail.css') }}" rel="stylesheet">
+<style>
+/* Professional Page Title with Wavy Border */
+.page-title {
+    position: relative;
+    padding: 180px 0 120px 0 !important;
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+    overflow: hidden;
+}
+
+.page-title .shape {
+    position: absolute;
+    left: 0;
+    bottom: 0;
+    width: 100%;
+    height: 200px;
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+    z-index: 1;
+}
+
+.page-title .auto-container {
+    position: relative;
+    z-index: 2;
+}
+
+.page-title h1 {
+    font-size: 48px;
+    font-weight: 700;
+    color: #222;
+    margin-bottom: 15px;
+    text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.1);
+}
+</style>
+{% endblock %}
+
+{% block content %}
+    <!-- UPDATED: Professional Layout v3.0 - Cache Bust: 2025-11-30-1823 -->
+    <!-- page-title -->
+    <section class="page-title centred" style="background-image: url({{ url_for('static', filename='images/background/page-title.jpg') }});">
+        <div class="shape" style="background-image: url({{ url_for('static', filename='images/shape/banner-shap.png') }});"></div>
+        <div class="auto-container">
+            <div class="content-box">
+                <h1>{{ product.name }}</h1>
+                <ul class="bread-crumb clearfix">
+                    <li><a href="{{ url_for('frontend.index') }}">{{ 'Home'|translate(current_language) }}</a></li>
+                    <li><a href="{{ url_for('frontend.shop') }}">{{ 'Shop'|translate(current_language) }}</a></li>
+                    {% if product.category %}
+                    <li><a href="{{ url_for('frontend.shop', category=product.category.id) }}">{{ product.category.name }}</a></li>
+                    {% endif %}
+                    <li>{{ product.name }}</li>
+                </ul>
+            </div>
+        </div>
+    </section>
+    <!-- page-title end -->
+
+    <!-- product-details -->
+    <section class="product-details">
+        <div class="auto-container">
+            <div class="row clearfix">
+                <!-- Product Image - Left 40% -->
+                <div class="col-lg-5 col-md-12 col-sm-12 image-column">
+                    <div class="product-image-box">
+                        {% if product.images and product.images|length > 0 %}
+                            <div class="main-image-wrapper">
+                                <img src="{{ product.images[0] }}" alt="{{ product.name }}" id="mainProductImage" class="main-product-img">
+                            </div>
+                            {% if product.images|length > 1 %}
+                            <div class="thumb-gallery">
+                                {% for image in product.images[:4] %}
+                                <div class="thumb-item {% if loop.first %}active{% endif %}" onclick="changeImage('{{ image }}', this)">
+                                    <img src="{{ image }}" alt="{{ product.name }}">
+                                </div>
+                                {% endfor %}
+                            </div>
+                            {% endif %}
+                        {% else %}
+                            <div class="main-image-wrapper">
+                                <img src="{{ url_for('static', filename='images/resource/shop/shop-1.jpg') }}" alt="{{ product.name }}" class="main-product-img">
+                            </div>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <!-- Product Info - Right 60% -->
+                <div class="col-lg-7 col-md-12 col-sm-12 content-column">
+                    <div class="product-info-box">
+
+                        <!-- Category Badge -->
+                        {% if product.category %}
+                        <span class="category-tag">{{ product.category.name }}</span>
+                        {% endif %}
+
+                        <!-- Product Title -->
+                        <h2 class="product-title">{{ product.name }}</h2>
+
+                        <!-- Rating -->
+                        {% if product.average_rating %}
+                        <div class="rating-wrapper">
+                            <div class="stars">
+                                {% for i in range(5) %}
+                                    {% if i < product.average_rating|int %}
+                                    <i class="fas fa-star"></i>
+                                    {% elif i < product.average_rating %}
+                                    <i class="fas fa-star-half-alt"></i>
+                                    {% else %}
+                                    <i class="far fa-star"></i>
+                                    {% endif %}
+                                {% endfor %}
+                            </div>
+                            <span class="rating-num">{{ product.average_rating|round(1) }}</span>
+                            <span class="reviews-text">({{ product.review_count or 0 }} {{ 'reviews'|translate(current_language) }})</span>
+                        </div>
+                        {% endif %}
+
+                        <!-- Price Row -->
+                        <div class="price-row">
+                            <div class="price-box">
+                                {% if product.discount_price and product.discount_price > 0 %}
+                                <div class="price-group">
+                                    <span class="price-new">{{ product.discount_price|format_price }} <small>UZS</small></span>
+                                    <span class="price-old">{{ product.base_price|format_price }} UZS</span>
+                                    <span class="save-tag">-{{ ((product.base_price - product.discount_price) / product.base_price * 100)|int }}%</span>
+                                </div>
+                                {% else %}
+                                <div class="price-group">
+                                    <span class="price-new">{{ product.base_price|format_price }} <small>UZS</small></span>
+                                </div>
+                                {% endif %}
+                            </div>
+                            <div class="stock-box">
+                                {% if product.stock_quantity > 0 %}
+                                    {% if product.stock_quantity <= 10 %}
+                                    <span class="stock-label stock-low">
+                                        <i class="fas fa-exclamation-circle"></i>
+                                        {{ 'Only'|translate(current_language) }} {{ product.stock_quantity }} {{ 'left'|translate(current_language) }}
+                                    </span>
+                                    {% else %}
+                                    <span class="stock-label stock-available">
+                                        <i class="fas fa-check-circle"></i>
+                                        {{ 'In Stock'|translate(current_language) }}
+                                    </span>
+                                    {% endif %}
+                                {% else %}
+                                <span class="stock-label stock-out">
+                                    <i class="fas fa-times-circle"></i>
+                                    {{ 'Out of Stock'|translate(current_language) }}
+                                </span>
+                                {% endif %}
+                            </div>
+                        </div>
+
+                        <!-- Description -->
+                        {% if product.short_description %}
+                        <div class="product-desc">
+                            <p>{{ product.short_description }}</p>
+                        </div>
+                        {% endif %}
+
+                        <!-- Features Grid - 3 Columns -->
+                        <div class="features-grid">
+                            {% if product.volume %}
+                            <div class="feature-card">
+                                <div class="icon-wrap">
+                                    <i class="fas fa-tint"></i>
+                                </div>
+                                <div class="feature-info">
+                                    <strong>{{ product.volume }} {{ product.volume_unit or 'L' }}</strong>
+                                    <span>{{ 'Volume'|translate(current_language) }}</span>
+                                </div>
+                            </div>
+                            {% endif %}
+                            <div class="feature-card">
+                                <div class="icon-wrap">
+                                    <i class="fas fa-shield-alt"></i>
+                                </div>
+                                <div class="feature-info">
+                                    <strong>{{ '100% Pure'|translate(current_language) }}</strong>
+                                    <span>{{ 'Quality'|translate(current_language) }}</span>
+                                </div>
+                            </div>
+                            <div class="feature-card">
+                                <div class="icon-wrap">
+                                    <i class="fas fa-certificate"></i>
+                                </div>
+                                <div class="feature-info">
+                                    <strong>{{ 'Certified'|translate(current_language) }}</strong>
+                                    <span>{{ 'Quality Assured'|translate(current_language) }}</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Purchase Box -->
+                        <div class="purchase-box">
+                            <div class="quantity-selector">
+                                <label>{{ 'Soni'|translate(current_language) }}</label>
+                                <div class="qty-buttons">
+                                    <button type="button" class="qty-minus" onclick="changeQty(-1)">-</button>
+                                    <input type="text" id="qtyInput" value="1" readonly>
+                                    <button type="button" class="qty-plus" onclick="changeQty(1)">+</button>
+                                </div>
+                            </div>
+                            <button class="add-to-cart-btn theme-btn btn-one" onclick="addToCart({{ product.id }})" {% if product.stock_quantity <= 0 %}disabled{% endif %}>
+                                <i class="far fa-shopping-cart"></i>
+                                Savatga qo'shish
+                            </button>
+                            
+                            <button class="wishlist-btn" onclick="addToWishlist({{ product.id }})" title="{{ 'Add to Wishlist'|translate(current_language) }}">
+                                <i class="far fa-heart"></i>
+                            </button>
+                        </div>
+
+                        <!-- Benefits -->
+                        <div class="benefits-section">
+                            <div class="benefit-row">
+                                <div class="benefit-item">
+                                    <i class="fas fa-truck"></i>
+                                    <div>
+                                        <strong>{{ 'Fast Delivery'|translate(current_language) }}</strong>
+                                        <p>{{ 'Same day delivery available'|translate(current_language) }}</p>
+                                    </div>
+                                </div>
+                                <div class="benefit-item">
+                                    <i class="fas fa-undo-alt"></i>
+                                    <div>
+                                        <strong>{{ 'Easy Returns'|translate(current_language) }}</strong>
+                                        <p>{{ '7 days return policy'|translate(current_language) }}</p>
+                                    </div>
+                                </div>
+                                <div class="benefit-item">
+                                    <i class="fas fa-lock"></i>
+                                    <div>
+                                        <strong>{{ 'Secure Payment'|translate(current_language) }}</strong>
+                                        <p>{{ '100% secure transactions'|translate(current_language) }}</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tabs Section -->
+            <div class="tabs-section">
+                <ul class="nav nav-tabs">
+                    <li class="nav-item">
+                        <a class="nav-link active" data-toggle="tab" href="#tab-description">{{ 'Description'|translate(current_language) }}</a>
+                    </li>
+                    {% if product.specifications %}
+                    <li class="nav-item">
+                        <a class="nav-link" data-toggle="tab" href="#tab-specs">{{ 'Specifications'|translate(current_language) }}</a>
+                    </li>
+                    {% endif %}
+                    <li class="nav-item">
+                        <a class="nav-link" data-toggle="tab" href="#tab-reviews">{{ 'Reviews'|translate(current_language) }} ({{ product.review_count or 0 }})</a>
+                    </li>
+                </ul>
+                <div class="tab-content">
+                    <div id="tab-description" class="tab-pane fade show active">
+                        {{ product.description|safe if product.description else 'No description available.'|translate(current_language) }}
+                    </div>
+                    {% if product.specifications %}
+                    <div id="tab-specs" class="tab-pane fade">
+                        <table class="specs-table">
+                            {% for key, value in product.specifications.items() %}
+                            <tr>
+                                <th>{{ key|title }}</th>
+                                <td>{{ value }}</td>
+                            </tr>
+                            {% endfor %}
+                        </table>
+                    </div>
+                    {% endif %}
+                    <div id="tab-reviews" class="tab-pane fade">
+                        <p>{{ 'Loading reviews...'|translate(current_language) }}</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Related Products -->
+            {% if related_products and related_products|length > 0 %}
+            <div class="related-section">
+                <h3>{{ 'Related Products'|translate(current_language) }}</h3>
+                <div class="row clearfix">
+                    {% for rel_product in related_products %}
+                    <div class="col-lg-3 col-md-6 col-sm-12 shop-block">
+                        <div class="shop-block-one">
+                            <div class="inner-box">
+                                <figure class="image-box">
+                                    {% if rel_product.images and rel_product.images|length > 0 %}
+                                        <img src="{{ rel_product.images[0] }}" alt="{{ rel_product.name }}">
+                                    {% else %}
+                                        <img src="{{ url_for('static', filename='images/resource/shop/shop-1.jpg') }}" alt="{{ rel_product.name }}">
+                                    {% endif %}
+                                </figure>
+                                <div class="lower-content">
+                                    <div class="shape" style="background-image: url({{ url_for('static', filename='images/shape/shape-7.png') }});"></div>
+                                    <span>{{ rel_product.volume }}{{ rel_product.volume_unit or 'L' }} - {{ rel_product.category.name if rel_product.category else 'Water' }}</span>
+                                    <h4><a href="{{ url_for('frontend.product_detail', product_id=rel_product.id) }}">{{ rel_product.name }}</a></h4>
+                                    <div class="price">
+                                        {% if rel_product.discount_price and rel_product.discount_price > 0 %}
+                                        <span class="old-price">{{ rel_product.base_price|format_price }} UZS</span>
+                                        <span class="new-price">{{ rel_product.discount_price|format_price }} UZS</span>
+                                        {% else %}
+                                        <h6>{{ rel_product.base_price|format_price }} UZS</h6>
+                                        {% endif %}
+                                    </div>
+                                    <div class="btn-box">
+                                        <button onclick="addToCart({{ rel_product.id }})" class="theme-btn btn-two">
+                                            <i class="far fa-shopping-cart"></i> {{ 'Add to Cart'|translate(current_language) }}
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </section>
+    <!-- product-details end -->
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let qty = 1;
+const maxQty = {{ product.stock_quantity or 999 }};
+
+function changeQty(delta) {
+    const newQty = qty + delta;
+    if (newQty >= 1 && newQty <= maxQty) {
+        qty = newQty;
+        document.getElementById('qtyInput').value = qty;
+    }
+}
+
+function changeImage(src, element) {
+    document.getElementById('mainProductImage').src = src;
+    document.querySelectorAll('.thumb-item').forEach(el => el.classList.remove('active'));
+    element.classList.add('active');
+}
+
+function addToWishlist(id) {
+    alert('{{ "Added to wishlist!"|translate(current_language) }}');
+}
+</script>
+{% endblock %}
+

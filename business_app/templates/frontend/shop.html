@@ -2,10 +2,49 @@
 
 {% block title %}{{ 'Shop'|translate(current_language) }} - {{ company_name }}{% endblock %}
 
+{% block extra_head %}
+<style>
+/* Professional Page Title with Wavy Border */
+.page-title {
+    position: relative;
+    padding: 180px 0 120px 0 !important;
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+    overflow: hidden;
+}
+
+.page-title .shape {
+    position: absolute;
+    left: 0;
+    bottom: 0;
+    width: 100%;
+    height: 200px;
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+    z-index: 1;
+}
+
+.page-title .auto-container {
+    position: relative;
+    z-index: 2;
+}
+
+.page-title h1 {
+    font-size: 48px;
+    font-weight: 700;
+    color: #222;
+    margin-bottom: 15px;
+    text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.1);
+}
+</style>
+{% endblock %}
+
 {% block content %}
         <!-- page-title -->
-        <section class="page-title">
-            <div class="bg-layer" style="background-image: url({{ url_for('static', filename='images/background/page-title.jpg') }});"></div>
+        <section class="page-title centred" style="background-image: url({{ url_for('static', filename='images/background/page-title.jpg') }});">
+            <div class="shape" style="background-image: url({{ url_for('static', filename='images/shape/banner-shap.png') }});"></div>
             <div class="auto-container">
                 <div class="content-box">
                     <h1>{{ 'Our Products'|translate(current_language) }}</h1>
@@ -63,11 +102,19 @@
                                 <div class="widget-title">
                                     <h4>{{ 'Price Range'|translate(current_language) }}</h4>
                                 </div>
-                                <div class="price-range-slider">
-                                    <div id="slider-range"></div>
-                                    <div class="input">
-                                        <div class="input-group">
-                                            <input type="text" id="amount" readonly="">
+                                <div class="price-range-slider" id="slider-range"></div>
+                                <div class="price-inputs">
+                                    <div class="input-row">
+                                        <div class="input-wrapper">
+                                            <label>{{ 'Min'|translate(current_language) }}</label>
+                                            <input type="text" id="price-min" class="price-input" placeholder="0" inputmode="numeric">
+                                            <span class="currency">UZS</span>
+                                        </div>
+                                        <div class="input-separator">-</div>
+                                        <div class="input-wrapper">
+                                            <label>{{ 'Max'|translate(current_language) }}</label>
+                                            <input type="text" id="price-max" class="price-input" placeholder="500 000" inputmode="numeric">
+                                            <span class="currency">UZS</span>
                                         </div>
                                     </div>
                                 </div>
@@ -103,30 +150,42 @@
                                     <div class="shop-block-one">
                                         <div class="inner-box">
                                             <figure class="image-box">
-                                                {% if product.image_url %}
-                                                <img src="{{ product.image_url }}" alt="{{ product.name }}">
+                                                {% set product_images = product.get('media', {}).get('images', product.get('images', [])) %}
+                                                {% if product_images and product_images|length > 0 %}
+                                                    <img src="{{ product_images[0] }}" alt="{{ product.get('name', 'Product') }}">
                                                 {% else %}
-                                                <img src="{{ url_for('static', filename='images/resource/shop/shop-1.jpg') }}" alt="{{ product.name }}">
+                                                    <img src="{{ url_for('static', filename='images/resource/shop/shop-1.jpg') }}" alt="{{ product.get('name', 'Product') }}">
                                                 {% endif %}
-                                                {% if product.discount_percentage > 0 %}
-                                                <div class="sale-tag">-{{ product.discount_percentage }}%</div>
+                                                {% set discount_pct = product.get('pricing', {}).get('discount_percentage', 0) %}
+                                                {% if discount_pct > 0 %}
+                                                <div class="sale-tag">-{{ discount_pct }}%</div>
                                                 {% endif %}
                                             </figure>
                                             <div class="lower-content">
                                                 <div class="shape" style="background-image: url({{ url_for('static', filename='images/shape/shape-7.png') }});"></div>
-                                                <span>{{ product.volume }}L - {{ product.category.name if product.category else 'Water' }}</span>
-                                                <h4><a href="{{ url_for('frontend.product_detail', product_id=product.id) }}">{{ product.name }}</a></h4>
+                                                {% set volume = product.get('specifications', {}).get('volume', product.get('volume', 'N/A')) %}
+                                                {% set volume_unit = product.get('specifications', {}).get('volume_unit', 'L') %}
+                                                {% set category_name = product.get('category', {}).get('name', 'Water') if product.get('category') else 'Water' %}
+                                                <span>{{ volume }}{{ volume_unit }} - {{ category_name }}</span>
+                                                <h4><a href="{{ url_for('frontend.product_detail', product_id=product.id) }}">{{ product.get('name', 'Product') }}</a></h4>
                                                 <div class="price">
-                                                    {% if product.discount_percentage > 0 %}
-                                                    <span class="old-price">{{ product.price|format_price }}</span>
-                                                    <span class="new-price">{{ (product.price * (100 - product.discount_percentage) / 100)|format_price }}</span>
+                                                    {% set base_price = product.get('pricing', {}).get('base_price', product.get('base_price', 0)) %}
+                                                    {% set discount_price = product.get('pricing', {}).get('discount_price', 0) %}
+                                                    {% if discount_price and discount_price > 0 %}
+                                                    <span class="old-price">{{ base_price|format_price }} UZS</span>
+                                                    <span class="new-price">{{ discount_price|format_price }} UZS</span>
                                                     {% else %}
-                                                    <h6>{{ product.price|format_price }}</h6>
+                                                    <h6>{{ base_price|format_price }} UZS</h6>
                                                     {% endif %}
                                                 </div>
-                                                <p>{{ product.description[:60] }}{% if product.description|length > 60 %}...{% endif %}</p>
+                                                {% set description = product.get('short_description', product.get('description', '')) %}
+                                                {% if description %}
+                                                    <p>{{ description[:80] }}{% if description|length > 80 %}...{% endif %}</p>
+                                                {% endif %}
                                                 <div class="btn-box">
-                                                    <button onclick="addToCart({{ product.id }})" class="theme-btn btn-two">{{ 'Add to Cart'|translate(current_language) }}</button>
+                                                    <button onclick="addToCart({{ product.id }})" class="theme-btn btn-two">
+                                                        <i class="far fa-shopping-cart"></i> {{ 'Add to Cart'|translate(current_language) }}
+                                                    </button>
                                                 </div>
                                             </div>
                                         </div>
@@ -171,31 +230,151 @@
 
 {% block extra_js %}
 <script>
-// Price range slider
+// Price range slider with input sync
 $(function() {
-    $("#slider-range").slider({
-        range: true,
-        min: 0,
-        max: 500000,
-        values: [0, 500000],
-        slide: function(event, ui) {
-            $("#amount").val(ui.values[0] + " UZS - " + ui.values[1] + " UZS");
+    const minPrice = 0;
+    const maxPrice = 10000000; // 10 million UZS
+
+    // Format number with thousand separators
+    function formatNumber(num) {
+        return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+    }
+
+    // Remove formatting to get raw number
+    function parseFormattedNumber(str) {
+        if (!str) return 0;
+        return parseInt(str.toString().replace(/\s/g, '')) || 0;
+    }
+
+    // Wait for theme's script.js to initialize, then override
+    setTimeout(function() {
+        if ($('.price-range-slider').length) {
+            $('.price-range-slider').slider('destroy');
+            $('.price-range-slider').slider({
+                range: true,
+                min: minPrice,
+                max: maxPrice,
+                values: [minPrice, maxPrice],
+                slide: function(event, ui) {
+                    // Update input fields when slider moves with formatted numbers
+                    $('#price-min').val(formatNumber(ui.values[0]));
+                    $('#price-max').val(formatNumber(ui.values[1]));
+                },
+                change: function(event, ui) {
+                    // Also update on programmatic changes
+                    $('#price-min').val(formatNumber(ui.values[0]));
+                    $('#price-max').val(formatNumber(ui.values[1]));
+                }
+            });
+
+            // Initialize input fields with slider values
+            $('#price-min').val(formatNumber($('.price-range-slider').slider("values", 0)));
+            $('#price-max').val(formatNumber($('.price-range-slider').slider("values", 1)));
+        }
+    }, 100);
+
+    // Update slider when min input changes
+    $('#price-min').on('input', function() {
+        let minVal = parseFormattedNumber($(this).val());
+        let maxVal = parseFormattedNumber($('#price-max').val());
+
+        // Ensure min doesn't exceed max
+        if (minVal > maxVal) {
+            minVal = maxVal;
+        }
+
+        // Ensure within bounds
+        if (minVal < minPrice) minVal = minPrice;
+        if (minVal > maxPrice) minVal = maxPrice;
+
+        // Update slider
+        $('.price-range-slider').slider('values', [minVal, maxVal]);
+    });
+
+    // Update slider when max input changes
+    $('#price-max').on('input', function() {
+        let minVal = parseFormattedNumber($('#price-min').val());
+        let maxVal = parseFormattedNumber($(this).val());
+
+        // Ensure max doesn't go below min
+        if (maxVal < minVal) {
+            maxVal = minVal;
+        }
+
+        // Ensure within bounds
+        if (maxVal < minPrice) maxVal = minPrice;
+        if (maxVal > maxPrice) maxVal = maxPrice;
+
+        // Update slider
+        $('.price-range-slider').slider('values', [minVal, maxVal]);
+    });
+
+    // Format numbers with thousand separators on blur
+    $('.price-input').on('blur', function() {
+        let val = parseFormattedNumber($(this).val());
+        if (val >= 0) {
+            $(this).val(formatNumber(val));
+        } else {
+            $(this).val('0');
         }
     });
-    $("#amount").val($("#slider-range").slider("values", 0) + " UZS - " + $("#slider-range").slider("values", 1) + " UZS");
+
+    // Format as user types (with debounce effect)
+    let formatTimeout;
+    $('.price-input').on('input', function() {
+        // Clear previous timeout
+        clearTimeout(formatTimeout);
+
+        // Get cursor position
+        let input = this;
+        let cursorPos = input.selectionStart;
+        let oldLength = input.value.length;
+
+        // Remove all non-digits
+        let cleanValue = input.value.replace(/\D/g, '');
+
+        // Parse and format
+        if (cleanValue) {
+            let numValue = parseInt(cleanValue);
+            if (!isNaN(numValue) && numValue <= maxPrice) {
+                let formatted = formatNumber(numValue);
+                input.value = formatted;
+
+                // Adjust cursor position after formatting
+                let newLength = formatted.length;
+                let diff = newLength - oldLength;
+                input.setSelectionRange(cursorPos + diff, cursorPos + diff);
+            }
+        }
+    });
+
+    // Allow only numbers and spaces during keypress
+    $('.price-input').on('keypress', function(e) {
+        const char = String.fromCharCode(e.which);
+        if (!/[\d]/.test(char) && e.which !== 8 && e.which !== 0) {
+            e.preventDefault();
+        }
+    });
 });
 
 // Sort products
 function sortProducts(sortBy) {
     const url = new URL(window.location.href);
     url.searchParams.set('sort', sortBy);
-    url.searchParams.set('page', '1'); // Reset to first page
+    url.searchParams.set('page', '1');
     window.location.href = url.toString();
 }
 
-// Initialize select menu styling
+// Initialize select menu styling - wait for theme's initialization, then refresh
 $(document).ready(function() {
-    $('.selectmenu').niceSelect();
+    // Wait a bit for theme's script.js to initialize nice-select
+    setTimeout(function() {
+        // Destroy and reinitialize to ensure proper rendering
+        if ($('.selectmenu').length) {
+            $('.selectmenu').niceSelect('destroy');
+            $('.selectmenu').niceSelect();
+        }
+    }, 150);
 });
 </script>
 {% endblock %}

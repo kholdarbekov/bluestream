@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "@ant-design/icons": "^5.0.0",
+    "@tinymce/tinymce-react": "^6.3.0",
     "antd": "^5.2.0",
     "axios": "^1.7.9",
     "chart.js": "^4.2.1",
@@ -35,6 +36,7 @@
     "react-hot-toast": "^2.4.0",
     "react-leaflet": "^4.2.1",
     "react-query": "^3.39.3",
+    "react-quill": "^2.0.0",
     "react-responsive": "^10.0.1",
     "react-router-dom": "^6.8.0",
     "react-scripts": "5.0.1",

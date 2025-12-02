@@ -401,9 +401,9 @@ def email_validator(value: Any, field: str) -> List[str]:
     return EmailValidator(value, field).validate().get_errors()
 
 
-def phone_validator(value: Any, field: str) -> List[str]:
+def phone_validator(value: Any) -> List[str]:
     """Phone validator"""
-    return PhoneValidator(value, field).validate().get_errors()
+    return PhoneValidator(value).validate().get_errors()
 
 
 def password_validator(value: Any, field: str) -> List[str]:

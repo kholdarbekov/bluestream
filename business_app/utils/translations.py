@@ -43,8 +43,8 @@ class TranslationService:
             Translated string
         """
         # Debug logging
-        if current_app.debug:
-            current_app.logger.debug(f"Translation requested: '{key}' in language '{language}'")
+        # if current_app.debug:
+            # current_app.logger.debug(f"Translation requested: '{key}' in language '{language}'")
         # Try cache first
         cached_translation = self._get_cached_translation(key, language)
         if cached_translation:
@@ -64,8 +64,8 @@ class TranslationService:
                 return self._format_translation(en_translation, **kwargs)
         
         # Return key with indicator if no translation found (helps identify missing translations)
-        if current_app.debug:
-            current_app.logger.warning(f"Missing translation for key '{key}' in language '{language}'")
+        # if current_app.debug:
+        #     current_app.logger.warning(f"Missing translation for key '{key}' in language '{language}'")
         return key
     
     def _get_cached_translation(self, key: str, language: str) -> Optional[str]:
@@ -95,29 +95,20 @@ class TranslationService:
     
     def _get_db_translation(self, key: str, language: str) -> Optional[str]:
         """Get translation from database"""
-        # ALWAYS PRINT DB QUERY DEBUG
-        print(f"🔍🔍🔍 DB_TRANSLATION_QUERY: key='{key}' lang='{language}'", flush=True)
-        
         try:
             translation = Translation.query.filter_by(
                 key=key,
                 language=language,
                 is_active=True
             ).first()
-            
-            # ALWAYS PRINT DB RESULT
-            if translation:
-                print(f"🔍🔍🔍 DB_RESULT_FOUND: '{key}' [{language}] = '{translation.value}'", flush=True)
-            else:
-                print(f"🔍🔍🔍 DB_RESULT_NOT_FOUND: '{key}' [{language}]", flush=True)
-            
-            # Debug logging
-            if current_app.debug:
-                if translation:
-                    current_app.logger.debug(f"DB translation found for '{key}' [{language}]: {translation.value[:50]}...")
-                else:
-                    current_app.logger.debug(f"No DB translation found for '{key}' [{language}]")
-            
+
+            # Debug logging (only in debug mode)
+            # if current_app.debug:
+            #     if translation:
+            #         current_app.logger.debug(f"DB translation found for '{key}' [{language}]: {translation.value[:50]}...")
+            #     else:
+            #         current_app.logger.debug(f"No DB translation found for '{key}' [{language}]")
+
             return translation.value if translation else None
         except Exception as e:
             # Handle database transaction errors by rolling back
@@ -312,39 +303,18 @@ def get_translation(key: str, language: str = None, **kwargs) -> str:
     Returns:
         Translated string
     """
-    # ALWAYS PRINT CRITICAL DEBUG
-    request_url = request.url if request else 'NO_REQUEST'
-    print(f"💥💥💥 GET_TRANSLATION: key='{key}' lang_param={language} URL={request_url}", flush=True)
-    
-    # COMPREHENSIVE LOGGING - Step 1: Function Entry
-    logger.info(f"⚡ GET_TRANSLATION CALLED: key='{key}', language_param={language}")
-    
+    # Resolve language parameter
     if language is None:
-        # COMPREHENSIVE LOGGING - Step 2: Language Resolution
-        g_language = getattr(g, 'language', 'NOT_SET')
-        default_language = current_app.config.get('DEFAULT_LANGUAGE', 'en')
-        logger.info(f"⚡ LANGUAGE RESOLUTION: g.language='{g_language}', default='{default_language}'")
-        print(f"💥💥💥 LANGUAGE_RESOLUTION: g.language='{g_language}' default='{default_language}'", flush=True)
-        
-        if g_language != 'NOT_SET':
-            language = g_language
-            logger.info(f"⚡ USING g.language: '{language}'")
-            print(f"💥💥💥 USING_G_LANGUAGE: '{language}'", flush=True)
-        else:
-            language = default_language
-            logger.info(f"⚡ USING DEFAULT: '{language}'")
-            print(f"💥💥💥 USING_DEFAULT: '{language}'", flush=True)
-    else:
-        logger.info(f"⚡ USING PROVIDED LANGUAGE: '{language}'")
-        print(f"💥💥💥 USING_PROVIDED: '{language}'", flush=True)
-    
-    # COMPREHENSIVE LOGGING - Step 3: Service Call
-    logger.info(f"⚡ CALLING translation_service.get_translation('{key}', '{language}', {kwargs})")
-    print(f"💥💥💥 CALLING_SERVICE: translation_service.get_translation('{key}', '{language}')", flush=True)
+        g_language = getattr(g, 'language', None)
+        language = g_language if g_language else current_app.config.get('DEFAULT_LANGUAGE', 'en')
+
+    # Debug logging (only in debug mode)
+    # if current_app.debug:
+    #     logger.debug(f"get_translation: key='{key}', language='{language}'")
+
+    # Get translation from service
     result = translation_service.get_translation(key, language, **kwargs)
-    logger.info(f"⚡ SERVICE RESULT: '{key}' [{language}] -> '{result}'")
-    print(f"💥💥💥 SERVICE_RESULT: '{key}' [{language}] -> '{result}'", flush=True)
-    
+
     return result
 
 

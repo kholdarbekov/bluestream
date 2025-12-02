@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field, field_validator, ConfigDict
 from pydantic.alias_generators import to_camel
 
 from business_app.utils.constants import OrderStatus, PaymentMethod, PaymentStatus, DeliveryStatus
+from business_app.models.order import Order, OrderItem
 
 
 class OrderItemSchema(BaseModel):
@@ -314,7 +315,7 @@ __all__ = [
 ]
 
 
-def serialize_order(order, include_items=False, include_delivery=False, include_payment=False) -> Dict[str, Any]:
+def serialize_order(order: Order, include_items=False, include_delivery=False, include_payment=False) -> Dict[str, Any]:
     """
     Serialize order object to dictionary
     
@@ -332,8 +333,7 @@ def serialize_order(order, include_items=False, include_delivery=False, include_
             'id': order.id,
             'order_number': order.order_number,
             'user_id': order.user_id,
-            'status': order.status.value if hasattr(order.status, 'value') else str(order.status),
-            'subtotal_amount': float(order.subtotal_amount),
+            'status': order.status.value,
             'tax_amount': float(getattr(order, 'tax_amount', 0)),
             'delivery_fee': float(getattr(order, 'delivery_fee', 0)),
             'discount_amount': float(getattr(order, 'discount_amount', 0)),
@@ -359,8 +359,8 @@ def serialize_order(order, include_items=False, include_delivery=False, include_
         if include_delivery and hasattr(order, 'delivery') and order.delivery:
             order_data['delivery_info'] = serialize_order_delivery(order.delivery)
         
-        if include_payment and hasattr(order, 'payment') and order.payment:
-            order_data['payment_info'] = serialize_order_payment(order.payment)
+        if include_payment and hasattr(order, 'payments') and order.payments:
+            order_data['payment_info'] = [serialize_order_payment(payment) for payment in order.payments]
         
         return order_data
         
@@ -377,19 +377,18 @@ def serialize_order(order, include_items=False, include_delivery=False, include_
         }
 
 
-def serialize_order_item(order_item) -> Dict[str, Any]:
+def serialize_order_item(order_item: OrderItem) -> Dict[str, Any]:
     """Serialize order item object"""
     try:
         return {
             'id': order_item.id,
             'product_id': order_item.product_id,
-            'product_name': order_item.product_name,
-            'product_sku': getattr(order_item, 'product_sku', ''),
+            'product_name': order_item.product.name,
+            'product_sku': order_item.product.sku,
             'quantity': order_item.quantity,
             'unit_price': float(order_item.unit_price),
             'total_price': float(order_item.total_price),
-            'special_instructions': getattr(order_item, 'special_instructions', None),
-            'product_image_url': getattr(order_item, 'product_image_url', None)
+            # 'product_image_url': getattr(order_item, 'product_image_url', None)
         }
     except Exception:
         return {

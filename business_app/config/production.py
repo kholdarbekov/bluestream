@@ -165,7 +165,7 @@ class ProductionConfig(BaseConfig):
         'style-src': ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],  # Allow inline styles
         'font-src': ["'self'", "https://fonts.gstatic.com"],
         'img-src': ["'self'", "data:", "https://bluestream.uz", "https:"],
-        'connect-src': ["'self'", "https://api.bluestream.uz"],
+        'connect-src': ["'self'", "https://api.bluestream.uz", "https://bluestream.uz", "wss://bluestream.uz", "wss://api.bluestream.uz"],  # Allow API and WebSocket connections
         'frame-src': ["'self'", "https://www.youtube.com", "https://www.youtube-nocookie.com"],  # Allow YouTube embeds
         'object-src': ["'none'"],
         'base-uri': ["'self'"],
@@ -187,14 +187,14 @@ class ProductionConfig(BaseConfig):
     # Content Security Policy - Production settings
     CSP_REPORT_ONLY = False  # Enforce CSP in production
     CSP_SOURCES = {
-        'script-src': ["'self'"],  # No unsafe-inline in production
-        'style-src': ["'self'", "'unsafe-inline'", 'fonts.googleapis.com'],  # Allow Google Fonts
+        'script-src': ["'self'", "'unsafe-inline'"],  # Allow inline scripts for React
+        'style-src': ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],  # Allow Google Fonts
         'img-src': ["'self'", 'data:', 'https:'],
-        'connect-src': ["'self'"],
-        'font-src': ["'self'", 'fonts.gstatic.com'],
+        'connect-src': ["'self'", 'https://api.bluestream.uz', 'https://bluestream.uz', 'wss://bluestream.uz', 'wss://api.bluestream.uz'],  # Allow API connections
+        'font-src': ["'self'", 'https://fonts.gstatic.com'],
         'media-src': ["'self'"],
         'object-src': ["'none'"],
-        'frame-src': ["'none'"]
+        'frame-src': ["'self'", 'https://www.youtube.com', 'https://www.youtube-nocookie.com']  # Allow YouTube embeds
     }
     
     # Feature flags for production

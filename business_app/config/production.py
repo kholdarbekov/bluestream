@@ -311,8 +311,8 @@ class ProductionConfig(BaseConfig):
                 strict_transport_security_preload=True,
                 content_security_policy=cls.CONTENT_SECURITY_POLICY,
                 referrer_policy='strict-origin-when-cross-origin',
-                feature_policy=cls.SECURITY_HEADERS.get('Permissions-Policy', ''),
-                content_security_policy_nonce_in=['script-src', 'style-src']
+                feature_policy=cls.SECURITY_HEADERS.get('Permissions-Policy', '')
+                # Removed content_security_policy_nonce_in to allow 'unsafe-inline' to work
             )
         except ImportError:
             raise ImportError("Flask-Talisman is required in production environment")

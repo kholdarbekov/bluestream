@@ -2,9 +2,9 @@ services:
   postgres:
     image: postgres:17-alpine
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-bluestream_db}
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-dummy_password}
+      POSTGRES_DB: ${DB_NAME:-bluestream_db}
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-dummy_password}
       POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256
     volumes:
       - postgres_data_new:/var/lib/postgresql/data

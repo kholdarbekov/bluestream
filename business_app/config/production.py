@@ -184,7 +184,7 @@ class ProductionConfig(BaseConfig):
     }
     
     # Content Security Policy - Production settings
-    CSP_REPORT_ONLY = False  # Enforce CSP in production
+    CSP_REPORT_ONLY = True  # Enforce CSP in production
     CSP_SOURCES = {
         'script-src': ["'self'"],  # No unsafe-inline in production
         'style-src': ["'self'", "'unsafe-inline'", 'fonts.googleapis.com'],  # Allow Google Fonts

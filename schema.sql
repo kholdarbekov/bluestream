@@ -1211,9 +1211,6 @@ CREATE INDEX idx_blog_category ON blog_posts(category, published_at);
 CREATE INDEX idx_blog_slug ON blog_posts(slug);
 CREATE INDEX idx_blog_author ON blog_posts(author_id);
 
--- Blog trigger
-CREATE TRIGGER update_blog_posts_updated_at BEFORE UPDATE ON blog_posts FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
-
 -- =========================================================================
 -- ANALYTICS & TRACKING TABLES (from analytics.py)
 -- =========================================================================
@@ -1709,7 +1706,7 @@ CREATE TRIGGER update_conversion_events_updated_at BEFORE UPDATE ON conversion_e
 CREATE TRIGGER update_revenue_metrics_updated_at BEFORE UPDATE ON revenue_metrics FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 CREATE TRIGGER update_user_segments_updated_at BEFORE UPDATE ON user_segments FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 CREATE TRIGGER update_translations_updated_at BEFORE UPDATE ON translations FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
-
+CREATE TRIGGER update_blog_posts_updated_at BEFORE UPDATE ON blog_posts FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 -- =========================================================================
 -- SEED DATA FOR ESSENTIAL RECORDS
 -- =========================================================================

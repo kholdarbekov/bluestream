@@ -161,10 +161,10 @@ class ProductionConfig(BaseConfig):
     # Content Security Policy - Strict
     CONTENT_SECURITY_POLICY = {
         'default-src': ["'self'"],
-        'script-src': ["'self'"],
-        'style-src': ["'self'", "https://fonts.googleapis.com"],
+        'script-src': ["'self'", "'unsafe-inline'"],  # Allow inline scripts for dynamic content
+        'style-src': ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],  # Allow inline styles
         'font-src': ["'self'", "https://fonts.gstatic.com"],
-        'img-src': ["'self'", "data:", "https://bluestream.uz"],
+        'img-src': ["'self'", "data:", "https://bluestream.uz", "https:"],
         'connect-src': ["'self'", "https://api.bluestream.uz"],
         'object-src': ["'none'"],
         'base-uri': ["'self'"],
@@ -184,7 +184,7 @@ class ProductionConfig(BaseConfig):
     }
     
     # Content Security Policy - Production settings
-    CSP_REPORT_ONLY = True  # Enforce CSP in production
+    CSP_REPORT_ONLY = False  # Enforce CSP in production
     CSP_SOURCES = {
         'script-src': ["'self'"],  # No unsafe-inline in production
         'style-src': ["'self'", "'unsafe-inline'", 'fonts.googleapis.com'],  # Allow Google Fonts

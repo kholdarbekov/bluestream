@@ -38,7 +38,7 @@ class ProductionConfig(BaseConfig):
         'max_overflow': 20,
         'pool_pre_ping': True,
         'connect_args': {
-            'sslmode': 'require',  # Require SSL for database connections
+            'sslmode': 'prefer',  # Prefer SSL but allow fallback if not supported
             'connect_timeout': 10,
             'application_name': 'bluestream_prod'
         }

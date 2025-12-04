@@ -351,10 +351,14 @@ class AdminService {
     if (options.max_height) formData.append('max_height', options.max_height);
     if (options.quality) formData.append('quality', options.quality);
 
+    const csrfToken = getCookie('csrf_access_token');
+
     const response = await api.post('/admin/upload/image', formData, {
       headers: {
         'Content-Type': 'multipart/form-data',
+        'X-CSRF-TOKEN': csrfToken,
       },
+      withCredentials: true,
     });
     return response.data;
   }

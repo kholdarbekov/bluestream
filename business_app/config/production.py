@@ -133,7 +133,7 @@ class ProductionConfig(BaseConfig):
     MAX_CONTENT_LENGTH = 10 * 1024 * 1024  # 10MB limit
     
     # Logging Configuration
-    LOG_LEVEL = 'WARNING'
+    LOG_LEVEL = 'INFO'
     LOG_FILE = 'logs/production.log'
     
     # Error tracking - Optional in production

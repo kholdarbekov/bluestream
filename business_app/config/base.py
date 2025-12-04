@@ -85,6 +85,7 @@ class BaseConfig:
     @property
     def JWT_SECRET_KEY(self):
         return get_secret('secret_key', 'JWT_SECRET_KEY', default=self.SECRET_KEY, required=True)
+    
     JWT_ACCESS_TOKEN_EXPIRES = timedelta(hours=1)
     JWT_REFRESH_TOKEN_EXPIRES = timedelta(days=30)
     JWT_ALGORITHM = 'HS256'
@@ -266,8 +267,8 @@ For complete documentation, examples, and SDKs visit: [API Documentation](/docs/
         'uz': 'O\'zbek',
         'ru': 'Русский'
     }
-    DEFAULT_LANGUAGE = 'en'
-    BABEL_DEFAULT_LOCALE = 'en'
+    DEFAULT_LANGUAGE = 'uz'
+    BABEL_DEFAULT_LOCALE = 'uz'
     BABEL_DEFAULT_TIMEZONE = 'Asia/Tashkent'
     
     # Timezone Configuration

@@ -318,6 +318,9 @@ class ProductionConfig(BaseConfig):
         except ImportError:
             raise ImportError("Flask-Talisman is required in production environment")
         
+        from werkzeug.middleware.proxy_fix import ProxyFix
+        app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+
         # Setup structured logging for production
         import logging
         import json

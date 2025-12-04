@@ -590,6 +590,7 @@
         
         // Enhanced API helper functions with httpOnly cookie authentication
         async function apiRequest(url, options = {}) {
+            console.info('API_BASE_URL:', API_BASE_URL);
             const headers = {
                 'Content-Type': 'application/json',
                 ...options.headers

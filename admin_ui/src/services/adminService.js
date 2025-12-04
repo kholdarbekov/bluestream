@@ -1,4 +1,4 @@
-import api from './api';
+import api, { getCookie } from './api';
 
 class AdminService {
   // Dashboard API calls

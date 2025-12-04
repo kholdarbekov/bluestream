@@ -141,5 +141,5 @@ api.interceptors.response.use(
 );
 
 // Export the API instance and CSRF token management
-export { fetchCSRFToken };
+export { fetchCSRFToken, getCookie };
 export default api;

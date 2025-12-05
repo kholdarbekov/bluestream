@@ -126,9 +126,9 @@ class ProductionConfig(BaseConfig):
     MAIL_SUBJECT_PREFIX = ''
     
     # File Storage - S3 production bucket
-    STORAGE_TYPE = 's3'
+    STORAGE_TYPE = 'local'
     AWS_S3_BUCKET = os.environ.get('AWS_S3_BUCKET', 'bluestream-production')
-    UPLOAD_FOLDER = 'uploads/prod/'
+    UPLOAD_FOLDER = 'uploads/'
     
     # Enhanced security for file uploads
     ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'pdf'}  # Restricted set

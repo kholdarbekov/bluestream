@@ -91,12 +91,14 @@ class BaseConfig:
     JWT_ALGORITHM = 'HS256'
     JWT_CSRF_METHODS = ['POST', 'PUT', 'PATCH', 'DELETE']  # Enable CSRF for state-changing methods
     JWT_COOKIE_CSRF_PROTECT = True
-    
+    JWT_CSRF_IN_COOKIES = True  # Store CSRF token in separate cookie (readable by JS)
+    JWT_CSRF_CHECK_FORM = False  # Only check headers, not form data
+
     # Support both cookies and headers for JWT tokens
     JWT_TOKEN_LOCATION = ['headers', 'cookies']
     JWT_ACCESS_COOKIE_NAME = 'access_token_cookie'
     JWT_REFRESH_COOKIE_NAME = 'refresh_token_cookie'
-    JWT_COOKIE_HTTPONLY = True  # Prevent JavaScript access to cookies
+    JWT_COOKIE_HTTPONLY = True  # Prevent JavaScript access to cookies (only for JWT, not CSRF)
     JWT_COOKIE_SAMESITE = 'Lax'
     
     # File Storage Configuration

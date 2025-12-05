@@ -214,7 +214,12 @@ def setup_jwt_handlers(app):
     
     @jwt.unauthorized_loader
     def missing_token_callback(error):
+        # Enhanced logging to debug CSRF issues
+        from flask import request
         app.logger.error(f'JWT Missing Token Error: {error}')
+        app.logger.error(f'Request cookies: {list(request.cookies.keys())}')
+        app.logger.error(f'Request headers: Authorization={request.headers.get("Authorization")}, X-CSRF-TOKEN={request.headers.get("X-CSRF-TOKEN")}')
+        app.logger.error(f'CSRF token cookie: {request.cookies.get("csrf_access_token")}')
         return jsonify({
             'error': 'Authorization Required',
             'message': 'Request does not contain an access token.'

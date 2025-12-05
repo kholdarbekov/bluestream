@@ -105,6 +105,8 @@ class ProductionConfig(BaseConfig):
     JWT_ACCESS_TOKEN_EXPIRES = timedelta(minutes=30)  # Shorter tokens in production
     JWT_REFRESH_TOKEN_EXPIRES = timedelta(days=7)
     JWT_COOKIE_SECURE = True  # Force HTTPS
+    JWT_COOKIE_DOMAIN = '.bluestream.uz'  # Allow cookies across subdomains
+    JWT_COOKIE_PATH = '/'  # Make cookies available to entire site
     
     # Session Configuration - Maximum security
     SESSION_COOKIE_SECURE = True

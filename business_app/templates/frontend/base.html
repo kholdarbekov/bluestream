@@ -588,6 +588,14 @@
             alert(message); // Simple implementation for now
         }
         
+        // Helper to get cookie value by name
+        function getCookie(name) {
+            const value = `; ${document.cookie}`;
+            const parts = value.split(`; ${name}=`);
+            if (parts.length === 2) return parts.pop().split(';').shift();
+            return null;
+        }
+
         // Enhanced API helper functions with httpOnly cookie authentication
         async function apiRequest(url, options = {}) {
             console.info('API_BASE_URL:', API_BASE_URL);
@@ -595,10 +603,19 @@
                 'Content-Type': 'application/json',
                 ...options.headers
             };
-            
+
             // Add platform header for cross-platform tracking
             headers['X-Platform'] = 'web';
-            
+
+            // Add CSRF token for state-changing methods (POST, PUT, PATCH, DELETE)
+            const method = (options.method || 'GET').toUpperCase();
+            if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
+                const csrfToken = getCookie('csrf_access_token');
+                if (csrfToken) {
+                    headers['X-CSRF-TOKEN'] = csrfToken;
+                }
+            }
+
             const response = await fetch(API_BASE_URL + url, {
                 ...options,
                 headers,

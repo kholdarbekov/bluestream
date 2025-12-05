@@ -321,25 +321,8 @@ class ProductionConfig(BaseConfig):
         from werkzeug.middleware.proxy_fix import ProxyFix
         app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 
-        # Setup structured logging for production
-        import logging
-        import json
-        from pythonjsonlogger import jsonlogger
-        
-        class CustomJsonFormatter(jsonlogger.JsonFormatter):
-            def add_fields(self, log_record, record, message_dict):
-                super(CustomJsonFormatter, self).add_fields(log_record, record, message_dict)
-                log_record['environment'] = 'production'
-                log_record['service'] = 'bluestream'
-        
-        # Configure structured logging
-        formatter = CustomJsonFormatter(
-            '%(asctime)s %(name)s %(levelname)s %(message)s'
-        )
-        
-        handler = logging.StreamHandler()
-        handler.setFormatter(formatter)
-        app.logger.addHandler(handler)
-        app.logger.setLevel(getattr(logging, cls.LOG_LEVEL))
-        
+        # Note: Logging is configured in business_app.utils.logging_config.setup_enhanced_logging()
+        # which is called from setup_logging() in __init__.py
+        # This ensures consistent logging across all environments with proper console output for Docker
+
         # Note: Health check endpoint is defined in the main app factory

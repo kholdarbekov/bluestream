@@ -436,13 +436,21 @@ def setup_enhanced_logging(app):
     error_handler.setLevel(logging.ERROR)
     handlers['error'] = error_handler
     
-    # Console handler for development
+    # Console handler for both development and production
+    # Docker containers need stdout/stderr logging for `docker logs` to work
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.addFilter(security_filter)
+
     if app.debug:
-        console_handler = logging.StreamHandler(sys.stdout)
+        # Development: Human-readable format
         console_handler.setFormatter(human_formatter)
-        console_handler.addFilter(security_filter)
         console_handler.setLevel(logging.DEBUG)
-        handlers['console'] = console_handler
+    else:
+        # Production: Structured JSON format for log aggregation
+        console_handler.setFormatter(structured_formatter)
+        console_handler.setLevel(getattr(logging, app.config['LOG_LEVEL']))
+
+    handlers['console'] = console_handler
     
     # Configure specific loggers
     loggers_config = {
@@ -458,11 +466,11 @@ def setup_enhanced_logging(app):
         'gunicorn': ['main', 'error'],
     }
     
-    # Add console handler to all loggers in debug mode
-    if app.debug:
-        for logger_names in loggers_config.values():
-            if 'console' not in logger_names:
-                logger_names.append('console')
+    # Add console handler to all loggers (both development and production)
+    # This ensures logs appear in docker logs output
+    for logger_names in loggers_config.values():
+        if 'console' not in logger_names:
+            logger_names.append('console')
     
     # Setup loggers
     for logger_name, handler_names in loggers_config.items():
@@ -479,16 +487,14 @@ def setup_enhanced_logging(app):
     # Setup root logger with main handlers
     root_logger.addHandler(main_handler)
     root_logger.addHandler(error_handler)
-    if app.debug:
-        root_logger.addHandler(console_handler)
+    root_logger.addHandler(console_handler)  # Always add console handler for Docker logs
     root_logger.setLevel(logging.DEBUG if app.debug else getattr(logging, app.config['LOG_LEVEL']))
     
     # Setup app logger
     app.logger.handlers.clear()
     app.logger.addHandler(main_handler)
     app.logger.addHandler(error_handler)
-    if app.debug:
-        app.logger.addHandler(console_handler)
+    app.logger.addHandler(console_handler)  # Always add console handler for Docker logs
     app.logger.setLevel(logging.DEBUG if app.debug else getattr(logging, app.config['LOG_LEVEL']))
     app.logger.propagate = False  # Prevent duplicate logs from propagating to root logger
 

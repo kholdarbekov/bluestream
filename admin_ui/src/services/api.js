@@ -122,7 +122,34 @@ api.interceptors.response.use(
     }
 
     if (error.response?.status === 401) {
-      // Clear any remaining localStorage data (migration cleanup)
+      // Don't retry if this is the refresh endpoint itself
+      const isRefreshEndpoint = error.config?.url?.includes('/auth/refresh-token');
+
+      // Attempt token refresh before redirecting to login
+      if (!isRefreshEndpoint && !error.config?.__isRetryAfterRefresh) {
+        try {
+          console.log('Access token expired, attempting refresh...');
+
+          // Call refresh token endpoint directly (bypassing interceptor to avoid recursion)
+          const refreshResponse = await api.post('/auth/refresh-token', {}, {
+            withCredentials: true
+          });
+
+          if (refreshResponse.status === 200) {
+            console.log('Token refreshed successfully, retrying original request...');
+
+            // Retry the original request with new tokens (sent via cookies)
+            error.config.__isRetryAfterRefresh = true;
+            return api.request(error.config);
+          }
+        } catch (refreshError) {
+          console.error('Token refresh failed:', refreshError);
+          // Fall through to logout
+        }
+      }
+
+      // If refresh failed, this is refresh endpoint, or already retried, logout
+      console.log('Logging out due to expired session');
       localStorage.removeItem('admin_token');
       localStorage.removeItem('admin_user');
       localStorage.removeItem('admin_permissions');

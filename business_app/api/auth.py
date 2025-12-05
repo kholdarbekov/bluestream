@@ -2776,7 +2776,41 @@ def logout():
             status_code = 200
 
         # Clear JWT cookies - this removes both access and refresh token cookies
+        logger.info(f"Clearing JWT cookies for user {user_id}")
         unset_jwt_cookies(response)
+
+        # Also manually clear CSRF cookies (Flask-JWT-Extended only clears JWT cookies)
+        # Get cookie configuration from app config
+        cookie_domain = current_app.config.get('JWT_COOKIE_DOMAIN', None)
+        cookie_path = current_app.config.get('JWT_COOKIE_PATH', '/')
+        cookie_secure = current_app.config.get('JWT_COOKIE_SECURE', False)
+        cookie_samesite = current_app.config.get('JWT_COOKIE_SAMESITE', 'Lax')
+
+        # Clear CSRF token cookies explicitly
+        response.set_cookie(
+            'csrf_access_token',
+            value='',
+            max_age=0,
+            expires=0,
+            path=cookie_path,
+            domain=cookie_domain,
+            secure=cookie_secure,
+            httponly=False,
+            samesite=cookie_samesite
+        )
+        response.set_cookie(
+            'csrf_refresh_token',
+            value='',
+            max_age=0,
+            expires=0,
+            path=cookie_path,
+            domain=cookie_domain,
+            secure=cookie_secure,
+            httponly=False,
+            samesite=cookie_samesite
+        )
+
+        logger.info(f"JWT cookies cleared, response Set-Cookie headers: {response.headers.getlist('Set-Cookie')}")
 
         logger.info(f"User {user_id} logged out successfully")
         return response, status_code

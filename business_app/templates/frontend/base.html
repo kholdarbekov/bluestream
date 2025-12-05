@@ -461,6 +461,15 @@
             // Actual token removal is handled by the server during logout
         }
         
+        // Helper to delete a cookie
+        function deleteCookie(name, path = '/', domain = null) {
+            let cookieString = `${name}=; Max-Age=0; Path=${path};`;
+            if (domain) {
+                cookieString += ` Domain=${domain};`;
+            }
+            document.cookie = cookieString;
+        }
+
         // Enhanced logout function with API call
         async function logout() {
             try {
@@ -473,19 +482,22 @@
                 console.error('Logout API call failed:', error);
                 // Continue with client-side logout even if API fails
             }
-            
+
             // Clear local storage
             removeAuthTokens();
             cart = [];
             localStorage.removeItem('cart');
-            
-            // Show logout message
-            showNotification('{{ "Logged out successfully"|translate(current_language) }}', 'success');
-            
-            // Redirect to login
-            setTimeout(() => {
-                window.location.href = '{{ url_for("frontend.login") }}';
-            }, 1000);
+
+            // Manually clear all auth-related cookies (JavaScript-accessible ones)
+            // This is a fallback in case server-side cookie clearing doesn't work
+            deleteCookie('csrf_access_token', '/', '.bluestream.uz');
+            deleteCookie('csrf_refresh_token', '/', '.bluestream.uz');
+            deleteCookie('csrf_access_token', '/');  // Also try without domain
+            deleteCookie('csrf_refresh_token', '/');
+
+            // Force redirect to login (using replace to prevent back button)
+            // This ensures cookies are properly cleared before next page load
+            window.location.replace('{{ url_for("frontend.login") }}');
         }
         
         // Logout from all sessions

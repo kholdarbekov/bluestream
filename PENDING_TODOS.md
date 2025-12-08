@@ -94,7 +94,7 @@ This document contains all the pending tasks that need to be completed for the B
 
 ### 58. Add constraints to prevent negative quantities in orders
 - **Description**: Add database and application constraints for order quantities
-- **Files**: `schema.sql`, `business_app/models/order.py`
+- **Files**: `business_app/models/order.py`
 - **Actions**: Add CHECK constraints and validation logic
 - **Impact**: Data integrity for order quantities
 

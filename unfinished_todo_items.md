@@ -20,7 +20,6 @@
 - [ ] Force token refresh on role change
 - [ ] Add admin audit log for role changes
 - [ ] Implement token invalidation on role/permission changes
-- [ ] Create dedicated audit_logs table in schema.sql
 - [ ] Log all authentication events (login, logout, failures)
 - [ ] Log authorization failures to audit trail
 - [ ] Add retention policy for audit logs
@@ -44,7 +43,6 @@
 ## ⚙️ INFRASTRUCTURE
 
 - [ ] Set up Flask-Migrate properly with migrations/ directory
-- [ ] Create initial migration from schema.sql
 - [ ] Add migration testing workflow
 - [ ] Document database migration strategy
 - [ ] Fix unused postgres_data volume in docker-compose

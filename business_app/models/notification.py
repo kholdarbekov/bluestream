@@ -84,7 +84,7 @@ class NotificationTemplate(db.Model, TimestampMixin, TranslatableMixin):
     id = Column(Integer, primary_key=True)
     name = Column(String(100), nullable=False)          # Default/fallback name (Uzbek)
     notification_type = Column(String(50), nullable=False)
-    channel = Column(String(20), nullable=False)        # email, sms, push, in_app - Note: schema.sql uses VARCHAR, not enum for templates
+    channel = Column(String(20), nullable=False)        # email, sms, push, in_app
     subject = Column(String(255), nullable=True)        # Default/fallback subject (Uzbek)
     content = Column(Text, nullable=False)              # Default/fallback content (Uzbek)
     is_active = Column(Boolean, default=True)

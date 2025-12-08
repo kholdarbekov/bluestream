@@ -364,7 +364,7 @@ MULTILINGUAL_CSS = """
 }
 
 .language-badge.language-en {
-    background-color: #007bff;
+    background-color: #00d1f9;
     color: white;
 }
 

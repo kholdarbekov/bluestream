@@ -285,7 +285,8 @@ class ProductService:
     def get_category_by_id(
         self,
         category_id: int,
-        language: str = 'uz'
+        language: str = 'uz',
+        include_inactive: bool = False
     ) -> ProductCategory:
         """
         Get category by ID
@@ -293,6 +294,7 @@ class ProductService:
         Args:
             category_id: Category ID
             language: Language for translations
+            include_inactive: Include inactive categories
 
         Returns:
             ProductCategory object
@@ -300,15 +302,165 @@ class ProductService:
         Raises:
             NotFoundError: If category not found
         """
-        category = ProductCategory.query.filter_by(
-            id=category_id,
-            is_active=True
-        ).first()
+        query = ProductCategory.query.filter_by(id=category_id)
+
+        if not include_inactive:
+            query = query.filter_by(is_active=True)
+
+        category = query.first()
 
         if not category:
             raise NotFoundError(f"Category with ID {category_id} not found")
 
         return category
+
+    @log_service_call(operation_type='create_category', track_performance=True)
+    def create_category(
+        self,
+        name: str,
+        description: str = None,
+        icon_url: str = None,
+        sort_order: int = 0,
+        is_active: bool = True
+    ) -> ProductCategory:
+        """
+        Create a new product category
+
+        Args:
+            name: Category name
+            description: Category description
+            icon_url: URL to category icon
+            sort_order: Sort order for display
+            is_active: Whether category is active
+
+        Returns:
+            Created ProductCategory object
+
+        Raises:
+            ValidationError: If validation fails
+        """
+        from business_app.utils.exceptions import ConflictError
+
+        if not name or len(name.strip()) == 0:
+            raise ValidationError("Category name is required")
+
+        # Check if category with same name already exists
+        existing = ProductCategory.query.filter_by(name=name.strip()).first()
+        if existing:
+            raise ConflictError(f"Category with name '{name}' already exists")
+
+        category = ProductCategory(
+            name=name.strip(),
+            description=description,
+            icon_url=icon_url,
+            sort_order=sort_order,
+            is_active=is_active
+        )
+
+        db.session.add(category)
+        db.session.commit()
+
+        logger.info(f"Created category: {category.name} (ID: {category.id})")
+
+        return category
+
+    @log_service_call(operation_type='update_category', track_performance=True)
+    def update_category(
+        self,
+        category_id: int,
+        name: str = None,
+        description: str = None,
+        icon_url: str = None,
+        sort_order: int = None,
+        is_active: bool = None
+    ) -> ProductCategory:
+        """
+        Update a product category
+
+        Args:
+            category_id: Category ID
+            name: New category name
+            description: New category description
+            icon_url: New icon URL
+            sort_order: New sort order
+            is_active: New active status
+
+        Returns:
+            Updated ProductCategory object
+
+        Raises:
+            NotFoundError: If category not found
+            ValidationError: If validation fails
+        """
+        from business_app.utils.exceptions import ConflictError
+
+        category = self.get_category_by_id(category_id, include_inactive=True)
+
+        if name is not None:
+            name = name.strip()
+            if len(name) == 0:
+                raise ValidationError("Category name cannot be empty")
+
+            # Check if another category with same name exists
+            existing = ProductCategory.query.filter(
+                ProductCategory.name == name,
+                ProductCategory.id != category_id
+            ).first()
+            if existing:
+                raise ConflictError(f"Category with name '{name}' already exists")
+
+            category.name = name
+
+        if description is not None:
+            category.description = description
+
+        if icon_url is not None:
+            category.icon_url = icon_url
+
+        if sort_order is not None:
+            category.sort_order = sort_order
+
+        if is_active is not None:
+            category.is_active = is_active
+
+        db.session.commit()
+
+        logger.info(f"Updated category: {category.name} (ID: {category.id})")
+
+        return category
+
+    @log_service_call(operation_type='delete_category', track_performance=True)
+    def delete_category(self, category_id: int) -> bool:
+        """
+        Delete a product category (soft delete by setting is_active=False)
+
+        Args:
+            category_id: Category ID
+
+        Returns:
+            True if successful
+
+        Raises:
+            NotFoundError: If category not found
+            ValidationError: If category has products
+        """
+        category = self.get_category_by_id(category_id, include_inactive=True)
+
+        # Check if category has products
+        product_count = Product.query.filter_by(category_id=category_id).count()
+        if product_count > 0:
+            raise ValidationError(
+                f"Cannot delete category with {product_count} products. "
+                "Please reassign or delete the products first."
+            )
+
+        # Soft delete
+        category.is_active = False
+        db.session.commit()
+
+        logger.info(f"Deleted category: {category.name} (ID: {category.id})")
+
+        return True
 
     @log_service_call(operation_type='search_suggestions', track_performance=True)
     def get_search_suggestions(

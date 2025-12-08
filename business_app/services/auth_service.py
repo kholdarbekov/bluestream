@@ -441,6 +441,7 @@ class AuthService:
             password_hash=self._hash_password(password),
             role=UserRole.ADMIN.value,
             status=UserStatus.ACTIVE.value,
+            phone_verified_at=datetime.now(timezone.utc),
             email_verified_at=datetime.now(timezone.utc)
         )
         

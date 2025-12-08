@@ -7,7 +7,7 @@ from typing import List, Dict, Any, Optional
 from flask import current_app
 from dateutil.relativedelta import relativedelta
 
-from business_app.models.subscription import Subscription, SubscriptionPlan, SubscriptionItem
+from business_app.models.subscription import Subscription, SubscriptionItem
 from business_app.models.user import User
 from business_app.models.product import Product
 from business_app.utils.exceptions import ValidationError, NotFoundError, ConflictError
@@ -41,15 +41,8 @@ class SubscriptionService:
         if not user:
             raise NotFoundError("User not found")
 
-        # Check if user already has active subscription with same name
-        existing_subscription = Subscription.query.filter_by(
-            user_id=user_id,
-            name=subscription_data.get('name'),
-            status=SubscriptionStatus.ACTIVE
-        ).first()
-
-        if existing_subscription:
-            raise ConflictError("User already has an active subscription with this name")
+        # Note: Users can have multiple subscriptions with the same name
+        # This allows flexibility in naming (e.g., "Weekly Water - Home" for different products)
 
         # Validate items
         if not items or len(items) == 0:
@@ -143,7 +136,7 @@ class SubscriptionService:
             current_app.logger.error(f"Failed to schedule delivery task: {e}")
             current_app.logger.warning(f"Subscription {subscription.id} created but delivery task not scheduled")
 
-        return subscription
+        return subscription.to_dict()
     
     def update_subscription(self, subscription_id: int, user_id: int = None,
                           **updates) -> Subscription:
@@ -452,25 +445,8 @@ class SubscriptionService:
             'frequency_breakdown': self._get_frequency_breakdown(subscriptions)
         }
     
-    def create_subscription_plan(self, name: str, description: str,
-                               frequency: SubscriptionFrequency,
-                               discount_percentage: float = 0,
-                               features: List[str] = None) -> SubscriptionPlan:
-        """Create a new subscription plan"""
-        plan = SubscriptionPlan(
-            name=name,
-            description=description,
-            frequency=frequency,
-            discount_percentage=discount_percentage,
-            features=features or [],
-            is_active=True
-        )
-        
-        db.session.add(plan)
-        db.session.commit()
-        
-        return plan
-    
+    # create_subscription_plan removed - users create custom subscriptions instead
+
     # Private helper methods
     def _validate_subscription_items(self, items: List[Dict[str, Any]]):
         """Validate subscription items"""
@@ -491,22 +467,8 @@ class SubscriptionService:
             if item['quantity'] <= 0:
                 raise ValidationError("Item quantity must be positive")
     
-    def _calculate_subscription_total(self, items: List[Dict[str, Any]], 
-                                    plan: SubscriptionPlan) -> int:
-        """Calculate subscription total amount"""
-        total = 0
-        
-        for item in items:
-            product: Product = Product.query.get(item['product_id'])
-            if product:
-                total += product.base_price * item['quantity']
-        
-        # Apply plan discount
-        if plan.discount_percentage > 0:
-            total = total * (1 - plan.discount_percentage / 100)
-        
-        return int(total)
-    
+    # _calculate_subscription_total with plan removed - discounts applied directly to subscriptions
+
     def _calculate_next_billing_date(self, start_date: datetime, 
                                    frequency: SubscriptionFrequency) -> datetime:
         """Calculate next billing date based on frequency"""
@@ -655,9 +617,14 @@ class SubscriptionService:
         # Calculate days until next billing
         days_until_billing = 0
         if subscription.next_billing_date:
-            current_app.logger.info(f"get_billing_info: subscription.next_billing_date: {subscription.next_billing_date}, type: {type(subscription.next_billing_date)}, tzinfo: {subscription.next_billing_date.tzinfo}")
-            current_app.logger.info(f"get_billing_info: now: {datetime.combine(datetime.now(timezone.utc), time.min)}, type: {type(datetime.combine(datetime.now(timezone.utc), time.min))}, tzinfo: {type(datetime.combine(datetime.now(timezone.utc), time.min, tzinfo=timezone.utc)).tzinfo}")
-            days_until_billing = (subscription.next_billing_date - datetime.combine(datetime.now(timezone.utc), time.min, tzinfo=timezone.utc)).days
+            # Ensure both datetimes are timezone-aware for comparison
+            next_billing = subscription.next_billing_date
+            if next_billing.tzinfo is None:
+                # If next_billing_date is naive, assume UTC
+                next_billing = next_billing.replace(tzinfo=timezone.utc)
+
+            now = datetime.now(timezone.utc)
+            days_until_billing = (next_billing.date() - now.date()).days
 
         return {
             'subscription_id': subscription_id,

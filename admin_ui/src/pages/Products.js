@@ -56,6 +56,17 @@ const Products = () => {
 
   const queryClient = useQueryClient();
 
+  // Fetch categories
+  const { data: categoriesData } = useQuery(
+    'categories',
+    () => adminService.getCategories({ per_page: 100 }),
+    {
+      staleTime: 5 * 60 * 1000 // Cache for 5 minutes
+    }
+  );
+
+  const categories = categoriesData?.data?.items || [];
+
   // Fetch products
   const { data, isLoading } = useQuery(
     ['products', pagination, searchText, categoryFilter, statusFilter],
@@ -156,9 +167,12 @@ const Products = () => {
       dataIndex: 'category_id',
       key: 'category_id',
       width: 120,
-      render: (category_id) => (
-        <Tag color="blue">{category_id}</Tag>
-      )
+      render: (category_id) => {
+        const category = categories.find(c => c.id === category_id);
+        return (
+          <Tag color="blue">{category ? category.name : `ID: ${category_id}`}</Tag>
+        );
+      }
     },
     {
       title: 'Price',
@@ -390,14 +404,14 @@ const Products = () => {
               placeholder="Filter by category"
               allowClear
               onChange={handleCategoryFilter}
-              style={{ width: 150 }}
+              style={{ width: 200 }}
+              loading={!categoriesData}
             >
-              <Option value="4">Drinking Water</Option>
-              <Option value="5">Sparkling Water</Option>
-              <Option value="6">Flavored Water</Option>
-              <Option value="7">Alkaline Water</Option>
-              <Option value="8">Distilled Water</Option>
-              <Option value="9">Spring Water</Option>
+              {categories.filter(c => c.is_active).map(category => (
+                <Option key={category.id} value={category.id}>
+                  {category.name}
+                </Option>
+              ))}
             </Select>
             <Select
               placeholder="Filter by status"
@@ -469,7 +483,7 @@ const Products = () => {
               <Col span={16}>
                 <h3>{selectedProduct.name}</h3>
                 <p><strong>SKU:</strong> {selectedProduct.sku}</p>
-                <p><strong>Category:</strong> {selectedProduct.category_id}</p>
+                <p><strong>Category:</strong> {categories.find(c => c.id === selectedProduct.category_id)?.name || selectedProduct.category_id}</p>
                 <p><strong>Price:</strong> UZS{selectedProduct.price?.toFixed(2)}</p>
                 <p><strong>Volume:</strong> {selectedProduct.volume}</p>
                 <p><strong>Stock:</strong> {selectedProduct.stock_quantity} units</p>
@@ -553,7 +567,7 @@ const Products = () => {
             </Form.Item>
             </Col>
           </Row>
-          
+
 
           <Row gutter={16}>
             <Col span={12}>
@@ -562,13 +576,16 @@ const Products = () => {
                 label="Category"
                 rules={[{ required: true, message: 'Please select category' }]}
               >
-                <Select placeholder="Select category">
-                  <Option value="4">Drinking Water</Option>
-                  <Option value="5">Sparkling Water</Option>
-                  <Option value="6">Flavored Water</Option>
-                  <Option value="7">Alkaline Water</Option>
-                  <Option value="8">Distilled Water</Option>
-                  <Option value="9">Spring Water</Option>
+                <Select
+                  placeholder="Select category"
+                  loading={!categoriesData}
+                  notFoundContent={categories.length === 0 ? "No categories found. Please create a category first." : "No categories"}
+                >
+                  {categories.filter(c => c.is_active).map(category => (
+                    <Option key={category.id} value={category.id}>
+                      {category.name}
+                    </Option>
+                  ))}
                 </Select>
               </Form.Item>
             </Col>
@@ -695,13 +712,16 @@ const Products = () => {
                 label="Category"
                 rules={[{ required: true, message: 'Please select category' }]}
               >
-                <Select placeholder="Select category">
-                  <Option value="4">Drinking Water</Option>
-                  <Option value="5">Sparkling Water</Option>
-                  <Option value="6">Flavored Water</Option>
-                  <Option value="7">Alkaline Water</Option>
-                  <Option value="8">Distilled Water</Option>
-                  <Option value="9">Spring Water</Option>
+                <Select
+                  placeholder="Select category"
+                  loading={!categoriesData}
+                  notFoundContent={categories.length === 0 ? "No categories found. Please create a category first." : "No categories"}
+                >
+                  {categories.filter(c => c.is_active).map(category => (
+                    <Option key={category.id} value={category.id}>
+                      {category.name}
+                    </Option>
+                  ))}
                 </Select>
               </Form.Item>
             </Col>

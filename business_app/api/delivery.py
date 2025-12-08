@@ -7,7 +7,7 @@ from flask_jwt_extended import jwt_required, get_jwt_identity
 from sqlalchemy import func
 from datetime import datetime, UTC, timedelta, date
 
-from business_app.models.delivery import Delivery
+from business_app.models.delivery import Delivery, DeliveryTimeSlot
 from business_app.models.order import Order
 from business_app.models.user import User
 from business_app.utils.service_factory import (
@@ -219,11 +219,15 @@ def get_time_slots():
         if target_date < date.today():
             return jsonify({'error': 'Cannot book delivery for past dates'}), 400
 
-        # Get available time slots
-        available_slots = get_delivery_service().get_available_time_slots(target_date)
+        # Get all active time slots from database
+        all_slots = DeliveryTimeSlot.query.filter_by(is_active=True).all()
 
         slots_data = []
-        for slot in available_slots:
+        for slot in all_slots:
+            # Check if slot is available on this date
+            if not slot.is_available_on_date(target_date):
+                continue
+
             current_bookings = slot.get_current_orders_count(target_date)
             available_capacity = slot.max_orders - current_bookings
 
@@ -233,10 +237,10 @@ def get_time_slots():
                 'start_time': slot.start_time,
                 'end_time': slot.end_time,
                 'time_range': f"{slot.start_time}-{slot.end_time}",
-                'delivery_fee': slot.delivery_fee,
+                'delivery_fee': float(slot.delivery_fee),
                 'is_premium': slot.is_premium,
-                'premium_fee': slot.premium_fee if slot.is_premium else 0,
-                'total_fee': slot.delivery_fee + (slot.premium_fee if slot.is_premium else 0),
+                'premium_fee': float(slot.premium_fee) if slot.is_premium else 0,
+                'total_fee': float(slot.delivery_fee) + (float(slot.premium_fee) if slot.is_premium else 0),
                 'available_capacity': available_capacity,
                 'is_available': available_capacity > 0
             })

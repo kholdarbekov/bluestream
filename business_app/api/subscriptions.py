@@ -185,28 +185,28 @@ def create_subscription():
             user.id,
             NotificationType.SUBSCRIPTION_CREATED,
             template_data={
-                'subscription_name': subscription.get_translated('name', language),
-                'billing_amount': subscription.billing_amount,
-                'billing_cycle': subscription.billing_cycle,
-                'next_billing_date': subscription.next_billing_date.strftime('%Y-%m-%d')
+                'subscription_name': subscription.get('name'),
+                'billing_amount': subscription.get('billing_amount'),
+                'billing_cycle': subscription.get('billing_cycle'),
+                'next_billing_date': subscription.get('next_billing_date')
             }
         )
 
         current_app.logger.info(f"Create subscription: SUCCESSFULL send_notification")
 
         # Use Pydantic schema for response
-        subscription_response = serialize_database_model(subscription, SubscriptionSchema)
-        current_app.logger.info(f"Create subscription: SUCCESSFULL serialize_database_model(subscription), subscription_response: {subscription_response}")
-        if subscription.subscription_items:
-            subscription_response['subscription_items'] = [
-                serialize_database_model(item, SubscriptionItemSchema)
-                for item in subscription.subscription_items
-            ]
+        # subscription_response = serialize_database_model(subscription, SubscriptionSchema)
+        # current_app.logger.info(f"Create subscription: SUCCESSFULL serialize_database_model(subscription), subscription_response: {subscription_response}")
+        # if subscription.subscription_items:
+        #     subscription_response['subscription_items'] = [
+        #         serialize_database_model(item, SubscriptionItemSchema)
+        #         for item in subscription.subscription_items
+        #     ]
 
-            current_app.logger.info(f"Create subscription: SUCCESSFULL serialize_database_model(subscription_items), subscription_response['subscription_items']: {subscription_response['subscription_items']}")
+        #     current_app.logger.info(f"Create subscription: SUCCESSFULL serialize_database_model(subscription_items), subscription_response['subscription_items']: {subscription_response['subscription_items']}")
 
         return created_response(
-            data={'subscription': subscription_response},
+            data={'subscription': subscription},
             message='Subscription created successfully'
         )
 

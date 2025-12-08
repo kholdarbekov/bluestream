@@ -5,7 +5,7 @@
 
 /* Loyalty Badge Styles */
 .loyalty-badge {
-    background: linear-gradient(45deg, #007bff, #0056b3);
+    background: linear-gradient(45deg, #00d1f9, #002c8f);
     color: white;
     padding: 2px 8px;
     border-radius: 12px;
@@ -14,7 +14,7 @@
 }
 
 .points-balance {
-    color: #007bff;
+    color: #00d1f9;
     font-weight: 600;
 }
 

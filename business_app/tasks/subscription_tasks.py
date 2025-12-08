@@ -9,7 +9,7 @@ from typing import Dict, Any, List
 from flask import current_app
 from sqlalchemy import func, and_, or_, text
 
-from business_app.models.subscription import Subscription, SubscriptionPlan
+from business_app.models.subscription import Subscription
 from business_app.models.user import User
 from business_app.models.order import Order
 from business_app.services.subscription_service import SubscriptionService

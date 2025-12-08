@@ -8,7 +8,7 @@ from sqlalchemy import desc
 from . import frontend_bp
 from business_app.models.product import Product, ProductCategory
 from business_app.models.order import Order
-from business_app.models.subscription import Subscription, SubscriptionPlan
+from business_app.models.subscription import Subscription
 from business_app.models.user import User
 from business_app.models.loyalty import LoyaltyPoints, LoyaltyReward
 from business_app.models.blog import BlogPost, BlogStatus, BlogCategory
@@ -42,13 +42,8 @@ def index():
         print(f"Error getting categories: {e}")
         categories = []
     
-    # Get subscription plans (defensive)
-    try:
-        subscription_plans = SubscriptionPlan.query.filter_by(is_active=True).order_by(SubscriptionPlan.sort_order).limit(3).all()
-        subscription_plans = [sp.to_dict(language=language) for sp in subscription_plans]
-    except Exception as e:
-        print(f"Error getting subscription plans: {e}")
-        subscription_plans = []
+    # Subscription plans removed - users create custom subscriptions
+    subscription_plans = []
     
     # Get loyalty rewards (defensive)
     try:
@@ -313,12 +308,14 @@ def order_tracking():
 
 @frontend_bp.route('/subscriptions')
 def subscriptions():
-    """Subscription plans page"""
+    """Subscription constructor page - users create custom subscriptions"""
     language = get_current_language()
-    plans = SubscriptionPlan.query.filter_by(is_active=True).order_by(SubscriptionPlan.sort_order).all()
-    plans = [plan.to_dict(language=language) for plan in plans]
-    
-    return render_template('frontend/subscriptions.html', plans=plans)
+
+    # Get active products for subscription constructor
+    products = Product.query.filter_by(is_active=True).all()
+    products = [p.to_dict(language=language) for p in products]
+
+    return render_template('frontend/subscriptions.html', products=products)
 
 
 @frontend_bp.route('/my-subscriptions')

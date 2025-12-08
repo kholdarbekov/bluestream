@@ -68,6 +68,34 @@ class AdminService {
     return response.data;
   }
 
+  // Product Category management
+  async getCategories(params = {}) {
+    const response = await api.get('/admin/categories', { params });
+    return response.data;
+  }
+
+  async getCategory(categoryId) {
+    const response = await api.get(`/admin/categories/${categoryId}`);
+    return response.data;
+  }
+
+  async createCategory(categoryData) {
+    const response = await api.post('/admin/categories', categoryData);
+    return response.data;
+  }
+
+  async updateCategory(categoryId, categoryData) {
+    const response = await api.put(`/admin/categories/${categoryId}`, categoryData);
+    return response.data;
+  }
+
+  async deleteCategory(categoryId, force = false) {
+    const response = await api.delete(`/admin/categories/${categoryId}`, {
+      params: { force }
+    });
+    return response.data;
+  }
+
   // Delivery management
   async getDeliveryPersonnel(params = {}) {
     const response = await api.get('/admin/delivery-personnel', { params });
@@ -84,9 +112,35 @@ class AdminService {
     return response.data;
   }
 
+  // Delivery Time Slot management
+  async getTimeSlots(params = {}) {
+    const response = await api.get('/admin/delivery/time-slots', { params });
+    return response.data;
+  }
+
+  async getTimeSlot(slotId) {
+    const response = await api.get(`/admin/delivery/time-slots/${slotId}`);
+    return response.data;
+  }
+
+  async createTimeSlot(slotData) {
+    const response = await api.post('/admin/delivery/time-slots', slotData);
+    return response.data;
+  }
+
+  async updateTimeSlot(slotId, slotData) {
+    const response = await api.put(`/admin/delivery/time-slots/${slotId}`, slotData);
+    return response.data;
+  }
+
+  async deleteTimeSlot(slotId) {
+    const response = await api.delete(`/admin/delivery/time-slots/${slotId}`);
+    return response.data;
+  }
+
   // Loyalty Program management
   async getLoyaltyPrograms(params = {}) {
-    const response = await api.get('/admin/loyalty-programs', { params });
+    const response = await api.get('/admin/loyalty/programs', { params });
     return response.data;
   }
 
@@ -96,12 +150,17 @@ class AdminService {
   }
 
   async createLoyaltyProgram(programData) {
-    const response = await api.post('/admin/loyalty-programs', programData);
+    const response = await api.post('/admin/loyalty/programs', programData);
     return response.data;
   }
 
   async updateLoyaltyProgram(programId, programData) {
-    const response = await api.put(`/admin/loyalty-programs/${programId}`, programData);
+    const response = await api.put(`/admin/loyalty/programs/${programId}`, programData);
+    return response.data;
+  }
+
+  async deleteLoyaltyProgram(programId) {
+    const response = await api.delete(`/admin/loyalty/programs/${programId}`);
     return response.data;
   }
 

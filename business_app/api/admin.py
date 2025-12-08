@@ -11,7 +11,7 @@ from business_app.models.user import User, UserAddress
 from business_app.models.order import Order, OrderItem
 from business_app.models.product import Product, ProductCategory, ProductSizeEnum
 from business_app.models.payment import Payment, PaymentTransaction
-from business_app.models.delivery import Delivery, DeliveryPerson, DeliveryRoute
+from business_app.models.delivery import Delivery, DeliveryPerson, DeliveryRoute, DeliveryTimeSlot
 from business_app.models.subscription import Subscription
 from business_app.models.loyalty import LoyaltyProgram, LoyaltyReward, LoyaltyPoints, LoyaltyTransaction
 from business_app.models.notification import NotificationTemplate
@@ -1567,6 +1567,204 @@ def reorder_category(category_id):
         db.session.rollback()
         current_app.logger.error(f"Reorder category error: {e}")
         return internal_error_response('Failed to reorder category')
+
+
+# ==================== DELIVERY TIME SLOT MANAGEMENT ====================
+
+@admin_bp.route('/delivery/time-slots', methods=['GET'])
+@jwt_required()
+@validate_admin_action(['view_delivery', 'manage_delivery'])
+def get_time_slots_admin():
+    """Get all delivery time slots with filtering"""
+    try:
+        page = int(request.args.get('page', 1))
+        per_page = min(int(request.args.get('per_page', 50)), 100)
+        is_active = request.args.get('is_active', type=bool)
+
+        # Build query
+        query = DeliveryTimeSlot.query
+
+        # Apply filters
+        if is_active is not None:
+            query = query.filter_by(is_active=is_active)
+
+        # Order by start time
+        query = query.order_by(DeliveryTimeSlot.start_time)
+
+        # Paginate
+        pagination = query.paginate(
+            page=page, per_page=per_page, error_out=False
+        )
+
+        # Serialize time slots
+        items = []
+        for slot in pagination.items:
+            items.append({
+                'id': slot.id,
+                'name': slot.name,
+                'start_time': slot.start_time,
+                'end_time': slot.end_time,
+                'time_range': f"{slot.start_time}-{slot.end_time}",
+                'is_active': slot.is_active,
+                'max_orders': slot.max_orders,
+                'delivery_fee': float(slot.delivery_fee),
+                'is_premium': slot.is_premium,
+                'premium_fee': float(slot.premium_fee),
+                'available_days': slot.available_days
+            })
+
+        return paginated_response(
+            items=items,
+            page=page,
+            per_page=per_page,
+            total=pagination.total
+        )
+
+    except Exception as e:
+        current_app.logger.error(f"Get time slots error: {e}")
+        return internal_error_response('Failed to get time slots')
+
+
+@admin_bp.route('/delivery/time-slots/<int:slot_id>', methods=['GET'])
+@jwt_required()
+@validate_admin_action(['view_delivery', 'manage_delivery'])
+def get_time_slot_admin(slot_id):
+    """Get a specific time slot"""
+    try:
+        slot = DeliveryTimeSlot.query.get(slot_id)
+
+        if not slot:
+            return not_found_response('Time slot not found')
+
+        return success_response(data={
+            'id': slot.id,
+            'name': slot.name,
+            'start_time': slot.start_time,
+            'end_time': slot.end_time,
+            'is_active': slot.is_active,
+            'max_orders': slot.max_orders,
+            'delivery_fee': float(slot.delivery_fee),
+            'is_premium': slot.is_premium,
+            'premium_fee': float(slot.premium_fee),
+            'available_days': slot.available_days
+        })
+
+    except Exception as e:
+        current_app.logger.error(f"Get time slot error: {e}")
+        return internal_error_response('Failed to get time slot')
+
+
+@admin_bp.route('/delivery/time-slots', methods=['POST'])
+@jwt_required()
+@validate_admin_action(['manage_delivery'])
+def create_time_slot():
+    """Create a new delivery time slot"""
+    try:
+        data = request.get_json()
+
+        # Validate required fields
+        required_fields = ['name', 'start_time', 'end_time', 'max_orders', 'delivery_fee']
+        for field in required_fields:
+            if field not in data:
+                return validation_error_response(f'{field} is required')
+
+        # Create time slot
+        time_slot = DeliveryTimeSlot(
+            name=data['name'],
+            start_time=data['start_time'],
+            end_time=data['end_time'],
+            is_active=data.get('is_active', True),
+            max_orders=data['max_orders'],
+            delivery_fee=data['delivery_fee'],
+            is_premium=data.get('is_premium', False),
+            premium_fee=data.get('premium_fee', 0),
+            available_days=data.get('available_days', [0, 1, 2, 3, 4, 5, 6])
+        )
+
+        db.session.add(time_slot)
+        db.session.commit()
+
+        current_app.logger.info(f"Time slot created: {time_slot.name} (ID: {time_slot.id})")
+
+        return created_response(
+            message='Time slot created successfully',
+            data={'id': time_slot.id}
+        )
+
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(f"Create time slot error: {e}")
+        return internal_error_response('Failed to create time slot')
+
+
+@admin_bp.route('/delivery/time-slots/<int:slot_id>', methods=['PUT'])
+@jwt_required()
+@validate_admin_action(['manage_delivery'])
+def update_time_slot(slot_id):
+    """Update a delivery time slot"""
+    try:
+        slot = DeliveryTimeSlot.query.get(slot_id)
+
+        if not slot:
+            return not_found_response('Time slot not found')
+
+        data = request.get_json()
+
+        # Update fields
+        if 'name' in data:
+            slot.name = data['name']
+        if 'start_time' in data:
+            slot.start_time = data['start_time']
+        if 'end_time' in data:
+            slot.end_time = data['end_time']
+        if 'is_active' in data:
+            slot.is_active = data['is_active']
+        if 'max_orders' in data:
+            slot.max_orders = data['max_orders']
+        if 'delivery_fee' in data:
+            slot.delivery_fee = data['delivery_fee']
+        if 'is_premium' in data:
+            slot.is_premium = data['is_premium']
+        if 'premium_fee' in data:
+            slot.premium_fee = data['premium_fee']
+        if 'available_days' in data:
+            slot.available_days = data['available_days']
+
+        db.session.commit()
+
+        current_app.logger.info(f"Time slot updated: {slot.name} (ID: {slot_id})")
+
+        return success_response(message='Time slot updated successfully')
+
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(f"Update time slot error: {e}")
+        return internal_error_response('Failed to update time slot')
+
+
+@admin_bp.route('/delivery/time-slots/<int:slot_id>', methods=['DELETE'])
+@jwt_required()
+@validate_admin_action(['manage_delivery'])
+def delete_time_slot(slot_id):
+    """Delete a delivery time slot"""
+    try:
+        slot = DeliveryTimeSlot.query.get(slot_id)
+
+        if not slot:
+            return not_found_response('Time slot not found')
+
+        slot_name = slot.name
+        db.session.delete(slot)
+        db.session.commit()
+
+        current_app.logger.info(f"Time slot deleted: {slot_name} (ID: {slot_id})")
+
+        return success_response(message='Time slot deleted successfully')
+
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(f"Delete time slot error: {e}")
+        return internal_error_response('Failed to delete time slot')
 
 
 @admin_bp.route('/delivery-personnel', methods=['GET'])
@@ -5559,6 +5757,54 @@ def get_loyalty_programs():
         return internal_error_response('Failed to get loyalty programs')
 
 
+@admin_bp.route('/loyalty/programs', methods=['POST'])
+@jwt_required()
+@validate_admin_action(['manage_loyalty'])
+def create_loyalty_program():
+    """Create a new loyalty program"""
+    try:
+        data = request.get_json()
+
+        # Validate required fields
+        if not data.get('name'):
+            return validation_error_response('Program name is required')
+
+        # Create new program
+        program = LoyaltyProgram(
+            name=data['name'],
+            description=data.get('description'),
+            is_active=data.get('is_active', True),
+            is_default=data.get('is_default', False),
+            points_per_uzs=data.get('points_per_uzs', 1.0),
+            signup_bonus=data.get('signup_bonus', 100),
+            referral_bonus=data.get('referral_bonus', 50),
+            birthday_bonus=data.get('birthday_bonus', 25),
+            points_expiry_days=data.get('points_expiry_days', 365),
+            min_redemption_points=data.get('min_redemption_points', 100),
+            tier_thresholds=data.get('tier_thresholds', {}),
+            tier_multipliers=data.get('tier_multipliers', {}),
+            terms_and_conditions=data.get('terms_and_conditions'),
+            start_date=data.get('start_date'),
+            end_date=data.get('end_date')
+        )
+
+        db.session.add(program)
+        db.session.commit()
+
+        current_app.logger.info(f"Loyalty program created: {program.name} (ID: {program.id})")
+
+        return success_response(
+            data={'program': program.to_dict()},
+            message='Loyalty program created successfully',
+            status_code=201
+        )
+
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(f"Create loyalty program error: {e}")
+        return internal_error_response('Failed to create loyalty program')
+
+
 @admin_bp.route('/loyalty/programs/<int:program_id>', methods=['PUT'])
 @jwt_required()
 @validate_admin_action(['manage_loyalty'])
@@ -5609,6 +5855,45 @@ def update_loyalty_program(program_id):
         db.session.rollback()
         current_app.logger.error(f"Update loyalty program error: {e}")
         return internal_error_response('Failed to update loyalty program')
+
+
+@admin_bp.route('/loyalty/programs/<int:program_id>', methods=['DELETE'])
+@jwt_required()
+@validate_admin_action(['manage_loyalty'])
+def delete_loyalty_program(program_id):
+    """Delete a loyalty program"""
+    try:
+        program = LoyaltyProgram.query.get(program_id)
+
+        if not program:
+            return not_found_response('Loyalty program not found')
+
+        # Check if this is the default program
+        if program.is_default:
+            return validation_error_response('Cannot delete the default loyalty program')
+
+        # Check if program has active members
+        from business_app.models.loyalty import LoyaltyPoints
+        member_count = LoyaltyPoints.query.filter_by(program_id=program_id).count()
+
+        if member_count > 0:
+            # Soft delete - just deactivate
+            program.is_active = False
+            db.session.commit()
+            current_app.logger.info(f"Loyalty program deactivated: {program.name} (ID: {program.id})")
+            return success_response(message=f'Program deactivated (has {member_count} members)')
+        else:
+            # Hard delete if no members
+            program_name = program.name
+            db.session.delete(program)
+            db.session.commit()
+            current_app.logger.info(f"Loyalty program deleted: {program_name} (ID: {program_id})")
+            return success_response(message='Loyalty program deleted successfully')
+
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(f"Delete loyalty program error: {e}")
+        return internal_error_response('Failed to delete loyalty program')
 
 
 @admin_bp.route('/loyalty/analytics', methods=['GET'])

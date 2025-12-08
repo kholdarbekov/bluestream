@@ -24,7 +24,8 @@ import {
   SettingOutlined,
   LogoutOutlined,
   MenuOutlined,
-  FileTextOutlined
+  FileTextOutlined,
+  TagsOutlined
 } from '@ant-design/icons';
 import { useAuthStore } from '../../stores/authStore';
 import { useRealTimeWithFallback } from '../../hooks/useRealTimeUpdates';
@@ -75,14 +76,39 @@ const AdminLayout = ({ children }) => {
       label: 'Products'
     },
     {
+      key: '/product-categories',
+      icon: <TagsOutlined />,
+      label: 'Categories'
+    },
+    {
       key: '/delivery',
       icon: <TruckOutlined />,
-      label: 'Delivery'
+      label: 'Delivery',
+      children: [
+        {
+          key: '/delivery',
+          label: 'Deliveries'
+        },
+        {
+          key: '/delivery-time-slots',
+          label: 'Time Slots'
+        }
+      ]
     },
     {
       key: '/loyalty',
       icon: <GiftOutlined />,
-      label: 'Loyalty'
+      label: 'Loyalty',
+      children: [
+        {
+          key: '/loyalty',
+          label: 'Customers'
+        },
+        {
+          key: '/loyalty-programs',
+          label: 'Programs'
+        }
+      ]
     },
     {
       key: '/notifications',

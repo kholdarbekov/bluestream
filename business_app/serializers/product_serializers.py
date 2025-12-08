@@ -552,8 +552,13 @@ def is_new_product(product) -> bool:
     """Check if product is new (created within last 30 days)"""
     if not product.created_at:
         return False
-    
-    days_since_creation = (datetime.now(timezone.utc) - product.created_at).days
+
+    # Make created_at timezone-aware if it's naive
+    created_at = product.created_at
+    if created_at.tzinfo is None:
+        created_at = created_at.replace(tzinfo=timezone.utc)
+
+    days_since_creation = (datetime.now(timezone.utc) - created_at).days
     return days_since_creation <= 30
 
 

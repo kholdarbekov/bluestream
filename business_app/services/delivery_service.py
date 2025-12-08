@@ -28,18 +28,18 @@ class DeliveryService:
         self.store_longitude = TASHKENT_COORDINATES['longitude']
     
     def create_delivery(self, order_id: int, delivery_type: DeliveryType = DeliveryType.STANDARD,
-                       preferred_time_slot: str = None) -> Delivery:
+                       scheduled_time_slot: str = None) -> Delivery:
         """
         Create delivery for an order
-        
+
         Args:
             order_id: Order ID
             delivery_type: Type of delivery
-            preferred_time_slot: Preferred delivery time slot
-        
+            scheduled_time_slot: Scheduled delivery time slot
+
         Returns:
             Delivery object
-        
+
         Raises:
             NotFoundError: If order not found
             ValidationError: If delivery cannot be created
@@ -72,18 +72,11 @@ class DeliveryService:
         # Create delivery record
         delivery = Delivery(
             order_id=order_id,
-            tracking_code=generate_tracking_code(),
-            status=DeliveryStatus.PENDING,
-            delivery_type=delivery_type,
+            status=DeliveryStatus.SCHEDULED,
             distance_km=round(distance, 2),
-            delivery_zone=zone,
             estimated_delivery_time=estimated_time,
-            delivery_address_street=order.delivery_address_street,
-            delivery_address_city=order.delivery_address_city,
-            delivery_address_latitude=order.delivery_address_latitude,
-            delivery_address_longitude=order.delivery_address_longitude,
-            delivery_instructions=order.delivery_instructions,
-            preferred_time_slot=preferred_time_slot
+            scheduled_date=order.delivery_date or datetime.now(),
+            scheduled_time_slot=scheduled_time_slot or "09:00-12:00"
         )
         
         db.session.add(delivery)
@@ -461,13 +454,13 @@ class DeliveryService:
         # Get deliveries scheduled for this slot
         start_of_day = datetime.combine(date, datetime.min.time())
         end_of_day = datetime.combine(date, datetime.max.time())
-        
+
         slot_deliveries = Delivery.query.filter(
-            Delivery.preferred_time_slot == time_slot,
+            Delivery.scheduled_time_slot == time_slot,
             Delivery.created_at.between(start_of_day, end_of_day),
             Delivery.status != DeliveryStatus.FAILED
         ).count()
-        
+
         # Allow up to 20 deliveries per time slot
         return slot_deliveries < 20
     

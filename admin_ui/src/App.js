@@ -7,13 +7,16 @@ import Dashboard from './pages/Dashboard';
 import Users from './pages/Users';
 import Orders from './pages/Orders';
 import Products from './pages/Products';
+import ProductCategories from './pages/ProductCategories';
 import Delivery from './pages/Delivery';
 import Loyalty from './pages/Loyalty';
+import LoyaltyPrograms from './pages/LoyaltyPrograms';
 import Notifications from './pages/Notifications';
 import Analytics from './pages/Analytics';
 import Translations from './pages/Translations';
 import Settings from './pages/Settings';
 import Blog from './pages/Blog';
+import TimeSlots from './pages/TimeSlots';
 import { useAuthStore } from './stores/authStore';
 import ProtectedRoute from './components/common/ProtectedRoute';
 
@@ -38,8 +41,11 @@ function App() {
                   <Route path="/users" element={<Users />} />
                   <Route path="/orders" element={<Orders />} />
                   <Route path="/products" element={<Products />} />
+                  <Route path="/product-categories" element={<ProductCategories />} />
                   <Route path="/delivery" element={<Delivery />} />
+                  <Route path="/delivery-time-slots" element={<TimeSlots />} />
                   <Route path="/loyalty" element={<Loyalty />} />
+                  <Route path="/loyalty-programs" element={<LoyaltyPrograms />} />
                   <Route path="/notifications" element={<Notifications />} />
                   <Route path="/analytics" element={<Analytics />} />
                   <Route path="/blog" element={<Blog />} />

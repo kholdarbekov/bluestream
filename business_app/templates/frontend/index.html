@@ -427,103 +427,151 @@
         </section>
         <!-- blog-section end -->
 
-        <!-- pricing-section -->
-        <section class="pricing-section">
+        <!-- subscription-constructor-section -->
+        <section class="subscription-constructor-section" id="subscription-constructor">
+            <div class="pattern-layer"></div>
             <div class="auto-container">
-                <div class="pricing-tabs">
-                    <div class="row align-items-center clearfix">
-                        <div class="col-lg-6 col-md-12 col-sm-12 content-column">
-                            <div class="content-box">
-                                <div class="sec-title">
-                                    <h2>{{ 'Choose Your Best Pricing Plan'|translate(current_language) }}</h2>
-                                </div>
-                                <div class="text">
-                                    <p>{{ 'Save money and enjoy convenient water delivery with our flexible subscription plans. Choose between monthly and yearly billing cycles to fit your needs.'|translate(current_language) }}</p>
-                                </div>
-                                <div class="tab-btn-box">
-                                    <ul class="tab-btns tab-buttons clearfix">
-                                        <li class="tab-btn active-btn" data-tab="#tab-1">{{ 'Monthly'|translate(current_language) }}</li>
-                                        <li class="tab-btn" data-tab="#tab-2">{{ 'Yearly'|translate(current_language) }}</li>
-                                    </ul>
-                                </div>
+                <div class="sec-title">
+                    <h2>{{ 'Build Your Custom'|translate(current_language) }} <br />{{ 'Subscription'|translate(current_language) }}</h2>
+                    <p>{{ 'Create a personalized subscription with any products, in any quantity, delivered at your preferred frequency'|translate(current_language) }}</p>
+                </div>
+
+                <div class="constructor-container">
+                    <!-- Step Indicators -->
+                    <div class="constructor-steps">
+                        <div class="constructor-step" data-step="1">
+                            <div class="step-number">1</div>
+                            <div class="step-label">{{ 'Products'|translate(current_language) }}</div>
+                        </div>
+                        <div class="constructor-step" data-step="2">
+                            <div class="step-number">2</div>
+                            <div class="step-label">{{ 'Schedule'|translate(current_language) }}</div>
+                        </div>
+                        <div class="constructor-step" data-step="3">
+                            <div class="step-number">3</div>
+                            <div class="step-label">{{ 'Address'|translate(current_language) }}</div>
+                        </div>
+                        <div class="constructor-step" data-step="4">
+                            <div class="step-number">4</div>
+                            <div class="step-label">{{ 'Payment'|translate(current_language) }}</div>
+                        </div>
+                        <div class="constructor-step" data-step="5">
+                            <div class="step-number">5</div>
+                            <div class="step-label">{{ 'Review'|translate(current_language) }}</div>
+                        </div>
+                    </div>
+
+                    <!-- Constructor Content -->
+                    <div class="constructor-content">
+                        <!-- Step 1: Select Products -->
+                        <div class="constructor-panel active" id="step-1">
+                            <h3 style="margin-bottom: 30px; text-align: center;">{{ 'Choose Your Products'|translate(current_language) }}</h3>
+                            <div class="product-grid" id="products-grid">
+                                <!-- Products will be dynamically loaded -->
                             </div>
                         </div>
-                        <div class="col-lg-6 col-md-12 col-sm-12 inner-column">
-                            <div class="inner-box">
-                                <div class="inner-pattern" style="background-image: url({{ url_for('static', filename='images/shape/shape-31.png') }});"></div>
-                                <div class="pr-content">
-                                    <div class="pr-tab active-tab" id="tab-1">
-                                        <div class="pricing-block-one">
-                                            <div class="pricing-table">
-                                                <div class="shape-layer" style="background-image: url({{ url_for('static', filename='images/shape/shape-28.png') }});"></div>
-                                                <div class="table-header">
-                                                    <div class="price-box">
-                                                        <div class="price-shape">
-                                                            <div class="shape-1" style="background-image: url({{ url_for('static', filename='images/shape/shape-29.png') }});"></div>
-                                                            <div class="shape-2" style="background-image: url({{ url_for('static', filename='images/shape/shape-30.png') }});"></div>
-                                                        </div>
-                                                        <h3>$29</h3>
-                                                        <span>{{ 'Monthly'|translate(current_language) }}</span>
-                                                    </div>
-                                                    <div class="title">
-                                                        <h3>{{ 'Standard Plan'|translate(current_language) }}</h3>
-                                                    </div>
-                                                </div>
-                                                <div class="table-content">
-                                                    <ul class="feature-list clearfix">
-                                                        <li>{{ '4 Bottles Per Month'|translate(current_language) }}</li>
-                                                        <li>{{ 'Free Delivery'|translate(current_language) }}</li>
-                                                        <li>{{ 'Flexible Scheduling'|translate(current_language) }}</li>
-                                                        <li>{{ '24/7 Customer Support'|translate(current_language) }}</li>
-                                                        <li>{{ 'Premium Water Quality'|translate(current_language) }}</li>
-                                                    </ul>
-                                                </div>
-                                                <div class="table-footer">
-                                                    <a href="{{ url_for('frontend.subscriptions') }}" class="theme-btn btn-one">{{ 'Choose Plan'|translate(current_language) }}</a>
-                                                </div>
-                                            </div>
-                                        </div>
+
+                        <!-- Step 2: Delivery Frequency & Schedule -->
+                        <div class="constructor-panel" id="step-2">
+                            <h3 style="margin-bottom: 30px; text-align: center;">{{ 'Set Your Delivery Schedule'|translate(current_language) }}</h3>
+
+                            <!-- Frequency Selection -->
+                            <div style="margin-bottom: 40px;">
+                                <h4 style="margin-bottom: 20px; color: #262626;">{{ 'Delivery Frequency'|translate(current_language) }}</h4>
+                                <div class="frequency-options">
+                                    <div class="frequency-option" data-frequency="weekly">
+                                        <div class="frequency-icon">📅</div>
+                                        <div class="frequency-name">{{ 'Weekly'|translate(current_language) }}</div>
+                                        <div class="frequency-description">{{ 'Delivered once a week'|translate(current_language) }}</div>
                                     </div>
-                                    <div class="pr-tab" id="tab-2">
-                                        <div class="pricing-block-one">
-                                            <div class="pricing-table">
-                                                <div class="shape-layer" style="background-image: url({{ url_for('static', filename='images/shape/shape-28.png') }});"></div>
-                                                <div class="table-header">
-                                                    <div class="price-box">
-                                                        <div class="price-shape">
-                                                            <div class="shape-1" style="background-image: url({{ url_for('static', filename='images/shape/shape-29.png') }});"></div>
-                                                            <div class="shape-2" style="background-image: url({{ url_for('static', filename='images/shape/shape-30.png') }});"></div>
-                                                        </div>
-                                                        <h3>$299</h3>
-                                                        <span>{{ 'Yearly'|translate(current_language) }}</span>
-                                                    </div>
-                                                    <div class="title">
-                                                        <h3>{{ 'Premium Plan'|translate(current_language) }}</h3>
-                                                    </div>
-                                                </div>
-                                                <div class="table-content">
-                                                    <ul class="feature-list clearfix">
-                                                        <li>{{ '48 Bottles Per Year'|translate(current_language) }}</li>
-                                                        <li>{{ 'Free Delivery'|translate(current_language) }}</li>
-                                                        <li>{{ 'Priority Support'|translate(current_language) }}</li>
-                                                        <li>{{ '15% Annual Discount'|translate(current_language) }}</li>
-                                                        <li>{{ 'Loyalty Rewards'|translate(current_language) }}</li>
-                                                    </ul>
-                                                </div>
-                                                <div class="table-footer">
-                                                    <a href="{{ url_for('frontend.subscriptions') }}" class="theme-btn btn-one">{{ 'Choose Plan'|translate(current_language) }}</a>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>           
+                                    <div class="frequency-option" data-frequency="biweekly">
+                                        <div class="frequency-icon">📆</div>
+                                        <div class="frequency-name">{{ 'Bi-Weekly'|translate(current_language) }}</div>
+                                        <div class="frequency-description">{{ 'Delivered every two weeks'|translate(current_language) }}</div>
+                                    </div>
+                                    <div class="frequency-option" data-frequency="monthly">
+                                        <div class="frequency-icon">📋</div>
+                                        <div class="frequency-name">{{ 'Monthly'|translate(current_language) }}</div>
+                                        <div class="frequency-description">{{ 'Delivered once a month'|translate(current_language) }}</div>
+                                    </div>
                                 </div>
+                            </div>
+
+                            <!-- Day Selection -->
+                            <div class="schedule-selector" id="day-selector" style="display: none; margin-bottom: 40px;">
+                                <h4 style="margin-bottom: 20px; color: #262626;">{{ 'Delivery Day'|translate(current_language) }}</h4>
+                                <div class="day-selector">
+                                    <button type="button" class="day-btn" data-day="1">{{ 'Monday'|translate(current_language) }}</button>
+                                    <button type="button" class="day-btn" data-day="2">{{ 'Tuesday'|translate(current_language) }}</button>
+                                    <button type="button" class="day-btn" data-day="3">{{ 'Wednesday'|translate(current_language) }}</button>
+                                    <button type="button" class="day-btn" data-day="4">{{ 'Thursday'|translate(current_language) }}</button>
+                                    <button type="button" class="day-btn" data-day="5">{{ 'Friday'|translate(current_language) }}</button>
+                                    <button type="button" class="day-btn" data-day="6">{{ 'Saturday'|translate(current_language) }}</button>
+                                    <button type="button" class="day-btn" data-day="0">{{ 'Sunday'|translate(current_language) }}</button>
+                                </div>
+                            </div>
+
+                            <!-- Time Slot Selection -->
+                            <div>
+                                <h4 style="margin-bottom: 20px; color: #262626;">{{ 'Preferred Time Slot'|translate(current_language) }}</h4>
+                                <select id="time-slots-select" style="width: 100%; padding: 12px 16px; border: 2px solid #e5e5e5; border-radius: 8px; font-size: 16px; font-weight: 500; color: #333; background: #fff; cursor: pointer; transition: all 0.3s ease;">
+                                    <option value="">{{ 'Select a time slot'|translate(current_language) }}</option>
+                                    <!-- Time slots will be dynamically loaded -->
+                                </select>
+                            </div>
+                        </div>
+
+                        <!-- Step 3: Delivery Address -->
+                        <div class="constructor-panel" id="step-3">
+                            <h3 style="margin-bottom: 30px; text-align: center;">{{ 'Select Delivery Address'|translate(current_language) }}</h3>
+                            <div id="addresses-list" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px;">
+                                <!-- Addresses will be dynamically loaded -->
+                            </div>
+                        </div>
+
+                        <!-- Step 4: Payment Method -->
+                        <div class="constructor-panel" id="step-4">
+                            <h3 style="margin-bottom: 30px; text-align: center;">{{ 'Choose Payment Method'|translate(current_language) }}</h3>
+                            <div id="payment-methods-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; max-width: 800px; margin: 0 auto;">
+                                <!-- Payment methods will be dynamically loaded -->
+                            </div>
+                        </div>
+
+                        <!-- Step 5: Review & Confirm -->
+                        <div class="constructor-panel" id="step-5">
+                            <h3 style="margin-bottom: 30px; text-align: center;">{{ 'Review Your Subscription'|translate(current_language) }}</h3>
+                            <div id="review-container">
+                                <!-- Review will be dynamically rendered -->
                             </div>
                         </div>
                     </div>
+
+                    <!-- Navigation -->
+                    <div class="constructor-navigation">
+                        <button type="button" class="nav-btn nav-btn-prev" style="display: none;">
+                            {{ 'Previous'|translate(current_language) }}
+                        </button>
+                        <button type="button" class="nav-btn nav-btn-next">
+                            {{ 'Next'|translate(current_language) }}
+                        </button>
+                        <button type="button" class="nav-btn nav-btn-submit" style="display: none;">
+                            {{ 'Create Subscription'|translate(current_language) }}
+                        </button>
+                    </div>
+                </div>
+
+                <!-- View All Subscriptions Button -->
+                <div class="more-btn centred" style="margin-top: 50px;">
+                    <a href="{{ url_for('frontend.subscriptions') }}" class="theme-btn btn-one">{{ 'Manage My Subscriptions'|translate(current_language) }}</a>
                 </div>
             </div>
         </section>
-        <!-- pricing-section end -->
+        <!-- subscription-constructor-section end -->
+
+        <!-- Loading Overlay -->
+        <div class="loading-overlay" id="loading-overlay">
+            <div class="loading-spinner"></div>
+        </div>
 
         <!-- testimonial-style-two -->
         <section class="testimonial-style-two centred bg-color-1">
@@ -698,6 +746,11 @@
         <!-- news-section end -->
 {% endblock %}
 
+{% block extra_head %}
+<link href="{{ url_for('static', filename='css/subscription-constructor.css') }}" rel="stylesheet">
+{% endblock %}
+
 {% block extra_js %}
 <script src="{{ url_for('static', filename='js/custom-index.js') }}"></script>
+<script src="{{ url_for('static', filename='js/subscription-constructor.js') }}"></script>
 {% endblock %}

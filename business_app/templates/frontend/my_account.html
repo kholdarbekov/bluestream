@@ -241,10 +241,10 @@
                                                 <div class="subscription-card">
                                                     <div class="card">
                                                         <div class="card-body">
-                                                            <h6>{{ subscription.plan.name }}</h6>
-                                                            <p class="text-muted">{{ subscription.plan.description }}</p>
+                                                            <h6>{{ subscription.name }}</h6>
+                                                            <p class="text-muted">{{ subscription.description }}</p>
                                                             <div class="d-flex justify-content-between align-items-center">
-                                                                <span class="text-primary">${{ "%.2f"|format(subscription.plan.price) }}/{{ subscription.plan.frequency }}</span>
+                                                                <span class="text-primary">${{ "%.2f"|format(subscription.billing_amount) }}/{{ subscription.delivery_frequency }}</span>
                                                                 <span class="badge badge-success">{{ 'Active'|translate(current_language) }}</span>
                                                             </div>
                                                         </div>

@@ -493,7 +493,7 @@ class SubscriptionHandlers:
                     'items': context_data.get('items', []),
                     'auto_payment': True,
                     'auto_renew': True,
-                    'delivery_time_slot': 'morning',  # Default time slot
+                    'delivery_time_slot_id': context_data.get('delivery_time_slot_id'),  # Optional: user preference
                     'discount_percentage': context_data.get('discount_percentage', 0.0)
                 }
 

@@ -63,12 +63,24 @@ class SubscriptionService:
         if start_date is None:
             start_date = datetime.now(timezone.utc)
 
+        # Get and validate billing cycle and delivery frequency
+        billing_cycle_str = subscription_data.get('billing_cycle', 'monthly')
+        delivery_frequency_str = subscription_data.get('delivery_frequency', 'weekly')
+
+        # Convert to enum
+        try:
+            billing_cycle = SubscriptionFrequency(billing_cycle_str)
+            delivery_frequency = SubscriptionFrequency(delivery_frequency_str)
+        except ValueError as e:
+            raise ValidationError(f"Invalid frequency value: {e}")
+
+        # Validate billing vs delivery frequency
+        self._validate_billing_frequency(billing_cycle, delivery_frequency)
+
         # Calculate next billing date based on billing cycle
-        billing_cycle = subscription_data.get('billing_cycle', 'MONTHLY')
         next_billing_date = self._calculate_next_billing_date(start_date, billing_cycle)
 
         # Calculate next delivery date based on delivery frequency
-        delivery_frequency = subscription_data.get('delivery_frequency', 'WEEKLY')
         next_delivery_date = self._calculate_next_delivery_date(
             start_date,
             delivery_frequency,
@@ -86,7 +98,7 @@ class SubscriptionService:
             delivery_frequency=delivery_frequency,
             delivery_day_of_week=subscription_data.get('delivery_day_of_week'),
             delivery_day_of_month=subscription_data.get('delivery_day_of_month'),
-            delivery_time_slot=subscription_data.get('delivery_time_slot'),
+            delivery_time_slot_id=subscription_data.get('delivery_time_slot_id'),
             delivery_address_id=subscription_data.get('delivery_address_id'),
             payment_method=subscription_data.get('payment_method', PaymentMethod.CASH),
             auto_payment=subscription_data.get('auto_payment', False),
@@ -469,7 +481,30 @@ class SubscriptionService:
     
     # _calculate_subscription_total with plan removed - discounts applied directly to subscriptions
 
-    def _calculate_next_billing_date(self, start_date: datetime, 
+    def _validate_billing_frequency(self, billing_cycle: SubscriptionFrequency,
+                                    delivery_frequency: SubscriptionFrequency):
+        """
+        Validate that billing cycle is appropriate for delivery frequency.
+        Billing period should not be shorter than delivery period.
+        """
+        frequency_order = {
+            SubscriptionFrequency.DAILY: 1,
+            SubscriptionFrequency.WEEKLY: 2,
+            SubscriptionFrequency.BIWEEKLY: 3,
+            SubscriptionFrequency.MONTHLY: 4
+        }
+
+        billing_rank = frequency_order.get(billing_cycle, 4)
+        delivery_rank = frequency_order.get(delivery_frequency, 2)
+
+        if billing_rank < delivery_rank:
+            raise ValidationError(
+                f"Billing cycle ({billing_cycle.value}) cannot be shorter than "
+                f"delivery frequency ({delivery_frequency.value}). "
+                f"Example: You cannot bill monthly for daily deliveries."
+            )
+
+    def _calculate_next_billing_date(self, start_date: datetime,
                                    frequency: SubscriptionFrequency) -> datetime:
         """Calculate next billing date based on frequency"""
         if frequency == SubscriptionFrequency.DAILY:
@@ -528,14 +563,14 @@ class SubscriptionService:
 
         return total
 
-    def _calculate_next_delivery_date(self, start_date: datetime, frequency: str,
+    def _calculate_next_delivery_date(self, start_date: datetime, frequency: SubscriptionFrequency,
                                      day_of_week: Optional[int] = None,
                                      day_of_month: Optional[int] = None) -> datetime:
         """Calculate next delivery date based on frequency and preferences"""
-        if frequency == 'DAILY':
+        if frequency == SubscriptionFrequency.DAILY:
             return start_date + timedelta(days=1)
 
-        elif frequency == 'WEEKLY':
+        elif frequency == SubscriptionFrequency.WEEKLY:
             # If day_of_week specified, find next occurrence of that day
             if day_of_week is not None:
                 days_ahead = day_of_week - start_date.weekday()
@@ -545,7 +580,7 @@ class SubscriptionService:
             else:
                 return start_date + timedelta(weeks=1)
 
-        elif frequency == 'BIWEEKLY':
+        elif frequency == SubscriptionFrequency.BIWEEKLY:
             if day_of_week is not None:
                 days_ahead = day_of_week - start_date.weekday()
                 if days_ahead <= 0:
@@ -556,7 +591,7 @@ class SubscriptionService:
             else:
                 return start_date + timedelta(weeks=2)
 
-        elif frequency == 'MONTHLY':
+        elif frequency == SubscriptionFrequency.MONTHLY:
             # If day_of_month specified, use that day
             if day_of_month is not None:
                 next_month = start_date + relativedelta(months=1)

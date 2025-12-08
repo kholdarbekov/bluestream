@@ -10,6 +10,7 @@ from business_app import db
 from business_app.utils.constants import SubscriptionStatus, PaymentMethod, SubscriptionFrequency
 from business_app.models import TimestampMixin
 from business_app.models.translatable import TranslatableMixin, translatable
+from business_app.models.delivery import DeliveryTimeSlot
 
 
 @translatable('name', 'description')
@@ -26,16 +27,16 @@ class Subscription(db.Model, TimestampMixin, TranslatableMixin):
     description = Column(Text, nullable=True)         # Default/fallback description (Uzbek)
     
     # Billing cycle
-    billing_cycle = Column(String(20), nullable=False)  # daily, weekly, monthly
+    billing_cycle = Column(Enum(SubscriptionFrequency, name='subscription_frequency', values_callable=lambda x: [e.value for e in x]), nullable=False)
     billing_amount = Column(Numeric(precision=10, scale=2), nullable=False)
     next_billing_date = Column(DateTime, nullable=False)
     last_billing_date = Column(DateTime, nullable=True)
-    
+
     # Delivery schedule
     delivery_frequency = Column(Enum(SubscriptionFrequency, name='subscription_frequency', values_callable=lambda x: [e.value for e in x]), nullable=False)
     delivery_day_of_week = Column(Integer, nullable=True)  # 1=Monday, 7=Sunday
     delivery_day_of_month = Column(Integer, nullable=True)  # 1-31
-    delivery_time_slot = Column(String(20), nullable=False)
+    delivery_time_slot_id = Column(Integer, ForeignKey('delivery_time_slots.id'), nullable=True)  # User may not have preference
     delivery_address_id = Column(Integer, ForeignKey('addresses.id'), nullable=False)
     next_delivery_date = Column(DateTime, nullable=True)
     last_delivery_date = Column(DateTime, nullable=True)
@@ -71,6 +72,7 @@ class Subscription(db.Model, TimestampMixin, TranslatableMixin):
     # Relationships
     user = relationship('User', back_populates='subscriptions')
     delivery_address = relationship('UserAddress')
+    delivery_time_slot = relationship('DeliveryTimeSlot', foreign_keys=[delivery_time_slot_id])
     subscription_items = relationship('SubscriptionItem', back_populates='subscription', cascade='all, delete-orphan')
     orders = relationship('Order', back_populates='subscription')
     payments = relationship('Payment', back_populates='subscription')
@@ -184,11 +186,12 @@ class Subscription(db.Model, TimestampMixin, TranslatableMixin):
         result.update({
             'subscription_number': self.subscription_number,
             'status': self.status.value if hasattr(self.status, 'value') else self.status,
-            'billing_cycle': self.billing_cycle,
+            'billing_cycle': self.billing_cycle.value if hasattr(self.billing_cycle, 'value') else self.billing_cycle,
             'billing_amount': float(self.billing_amount),
             'next_billing_date': self.next_billing_date.isoformat() if self.next_billing_date else None,
             'delivery_frequency': self.delivery_frequency.value if hasattr(self.delivery_frequency, 'value') else self.delivery_frequency,
-            'delivery_time_slot': self.delivery_time_slot,
+            'delivery_time_slot_id': self.delivery_time_slot_id,
+            'delivery_time_slot': self.delivery_time_slot.to_dict() if self.delivery_time_slot else None,
             'start_date': self.start_date.isoformat() if self.start_date else None,
             'end_date': self.end_date.isoformat() if self.end_date else None,
             'auto_renew': self.auto_renew,

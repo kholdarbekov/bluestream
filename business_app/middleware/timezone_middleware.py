@@ -41,11 +41,18 @@ class TimezoneMiddleware:
         try:
             # Set user timezone in global context
             g.user_timezone = get_user_timezone()
-            
+
             # Convert datetime strings in request JSON to UTC
-            if request.is_json and request.json:
-                self._convert_request_datetimes(request.json)
-                
+            # Only process if there's actual JSON data
+            if request.is_json and request.content_length and request.content_length > 0:
+                try:
+                    json_data = request.get_json(silent=True)
+                    if json_data:
+                        self._convert_request_datetimes(json_data)
+                except Exception as json_error:
+                    # Ignore JSON parsing errors (malformed JSON, empty body, etc.)
+                    logger.debug(f"Could not parse request JSON: {json_error}")
+
         except Exception as e:
             logger.warning(f"Error in timezone middleware before_request: {e}")
     

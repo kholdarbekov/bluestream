@@ -158,17 +158,24 @@ def create_subscription():
         if not address:
             return not_found_response('Invalid delivery address')
 
+        # Validate delivery_time_slot_id if provided
+        if validated_data.delivery_time_slot_id:
+            from business_app.models.delivery import DeliveryTimeSlot
+            time_slot = DeliveryTimeSlot.query.get(validated_data.delivery_time_slot_id)
+            if not time_slot or not time_slot.is_active:
+                return not_found_response('Invalid or inactive delivery time slot')
+
         # Create subscription using validated data
         language = get_current_language()
         subscription_data = {
             'user_id': current_user_id,
             'name': validated_data.name,
             'description': validated_data.description or '',
-            'billing_cycle': validated_data.billing_cycle.value,
-            'delivery_frequency': validated_data.delivery_frequency.value,
+            'billing_cycle': validated_data.billing_cycle,  # Now a string
+            'delivery_frequency': validated_data.delivery_frequency,  # Now a string
             'delivery_day_of_week': validated_data.delivery_day_of_week,
             'delivery_day_of_month': validated_data.delivery_day_of_month,
-            'delivery_time_slot': validated_data.delivery_time_slot,
+            'delivery_time_slot_id': validated_data.delivery_time_slot_id,
             'delivery_address_id': delivery_address_id,
             'payment_method': PaymentMethod(validated_data.payment_method),
             'auto_payment': validated_data.auto_payment,
@@ -255,6 +262,13 @@ def update_subscription(subscription_id):
                     ).first()
                     if not address:
                         return not_found_response('Invalid delivery address')
+
+                # Special validation for delivery time slot
+                if field == 'delivery_time_slot_id' and new_value is not None:
+                    from business_app.models.delivery import DeliveryTimeSlot
+                    time_slot = DeliveryTimeSlot.query.get(new_value)
+                    if not time_slot or not time_slot.is_active:
+                        return not_found_response('Invalid or inactive delivery time slot')
 
                 # Special handling for payment method
                 if field == 'payment_method':

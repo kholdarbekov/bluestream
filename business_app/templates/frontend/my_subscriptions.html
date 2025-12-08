@@ -120,8 +120,8 @@
                             <div class="col-md-4">
                                 <div class="card stat-card">
                                     <div class="card-body text-center">
-                                        <i class="far fa-dollar-sign fa-2x text-warning mb-3"></i>
-                                        <h3 class="text-warning">$<span id="monthlySavings">0</span></h3>
+                                        <i class="far fa-money-bill fa-2x text-warning mb-3"></i>
+                                        <h3 class="text-warning"><span id="monthlySavings">0</span></h3>
                                         <p class="text-muted">{{ 'Monthly Savings'|translate(current_language) }}</p>
                                     </div>
                                 </div>
@@ -488,7 +488,8 @@ async function loadSubscriptionOverview() {
             const totalMonthlyBilling = subscriptions.reduce((sum, sub) => {
                 return sum + (sub.billing_amount || 0);
             }, 0);
-            const monthlySavings = Math.round(totalMonthlyBilling * 0.1);
+            // const monthlySavings = Math.round(totalMonthlyBilling * 0.1);
+            const monthlySavings = 0;
 
             document.getElementById('activeSubscriptionsCount').textContent = activeCount;
             document.getElementById('nextDeliveryCount').textContent = deliveriesThisMonth;

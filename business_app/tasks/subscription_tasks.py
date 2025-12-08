@@ -957,10 +957,15 @@ def send_subscription_reminder(self, subscription_id: int, reminder_type: str):
             
         elif reminder_type == 'upcoming_delivery':
             notification_type = 'subscription_delivery_reminder'
+            # Include time slot details if available
+            time_slot_info = None
+            if subscription.delivery_time_slot:
+                time_slot_info = f"{subscription.delivery_time_slot.start_time} - {subscription.delivery_time_slot.end_time}"
+
             template_data = {
                 'subscription_name': subscription.name,
-                'delivery_frequency': subscription.delivery_frequency,
-                'delivery_time_slot': subscription.delivery_time_slot
+                'delivery_frequency': subscription.delivery_frequency.value if hasattr(subscription.delivery_frequency, 'value') else str(subscription.delivery_frequency),
+                'delivery_time_slot': time_slot_info or 'Flexible'
             }
             
         elif reminder_type == 'renewal_due':
@@ -1033,7 +1038,9 @@ def resume_subscription_task(self, subscription_id: int, user_id: int = None):
         if subscription.next_billing_date and subscription.next_billing_date < datetime.now(timezone.utc).date():
             # Calculate next billing date from today
             subscription_service = SubscriptionService()
-            billing_cycle = subscription.billing_cycle or 'MONTHLY'
+            from business_app.utils.constants import SubscriptionFrequency
+            # billing_cycle and delivery_frequency are now enums
+            billing_cycle = subscription.billing_cycle or SubscriptionFrequency.MONTHLY
             subscription.next_billing_date = subscription_service._calculate_next_billing_date(
                 datetime.now(timezone.utc),
                 billing_cycle
@@ -1042,7 +1049,8 @@ def resume_subscription_task(self, subscription_id: int, user_id: int = None):
         # If next delivery date has passed, calculate new delivery date
         if subscription.next_delivery_date and subscription.next_delivery_date < datetime.now(timezone.utc).date():
             subscription_service = SubscriptionService()
-            delivery_frequency = subscription.delivery_frequency or 'WEEKLY'
+            from business_app.utils.constants import SubscriptionFrequency
+            delivery_frequency = subscription.delivery_frequency or SubscriptionFrequency.WEEKLY
             subscription.next_delivery_date = subscription_service._calculate_next_delivery_date(
                 datetime.now(timezone.utc),
                 delivery_frequency,

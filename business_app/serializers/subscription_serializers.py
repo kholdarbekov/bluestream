@@ -10,20 +10,8 @@ from decimal import Decimal
 from pydantic import BaseModel, Field, field_validator, ConfigDict
 from pydantic.alias_generators import to_camel
 
-from business_app.utils.constants import SubscriptionStatus, PaymentMethod
+from business_app.utils.constants import SubscriptionStatus, PaymentMethod, SubscriptionFrequency
 from business_app.models.subscription import SubscriptionItem
-
-
-class BillingCycle(str, Enum):
-    DAILY = "daily"
-    WEEKLY = "weekly"
-    MONTHLY = "monthly"
-
-
-class DeliveryFrequency(str, Enum):
-    DAILY = "daily"
-    WEEKLY = "weekly"
-    MONTHLY = "monthly"
 
 
 class SubscriptionItemSchema(BaseModel):
@@ -90,7 +78,8 @@ class SubscriptionSchema(BaseModel):
     delivery_frequency: str
     delivery_day_of_week: Optional[int] = None  # 0=Monday, 6=Sunday
     delivery_day_of_month: Optional[int] = None  # 1-31
-    delivery_time_slot: str = Field(default="morning")
+    delivery_time_slot_id: Optional[int] = None
+    delivery_time_slot: Optional[Dict[str, Any]] = None  # Full time slot details
     
     # Payment configuration
     payment_method: str
@@ -131,11 +120,11 @@ class CreateSubscriptionRequest(BaseModel):
     """Create subscription request schema"""
     name: str = Field(..., min_length=3, max_length=100)
     description: Optional[str] = Field(None, max_length=500)
-    billing_cycle: BillingCycle
-    delivery_frequency: DeliveryFrequency
+    billing_cycle: str  # Will be validated as SubscriptionFrequency value
+    delivery_frequency: str  # Will be validated as SubscriptionFrequency value
     delivery_day_of_week: Optional[int] = Field(None, ge=0, le=6)
     delivery_day_of_month: Optional[int] = Field(None, ge=1, le=31)
-    delivery_time_slot: str = Field(default="morning")
+    delivery_time_slot_id: Optional[int] = Field(None, gt=0)
     delivery_address_id: int = Field(..., gt=0)
     payment_method: str
     auto_payment: bool = Field(default=True)
@@ -152,7 +141,7 @@ class UpdateSubscriptionRequest(BaseModel):
     description: Optional[str] = Field(None, max_length=500)
     delivery_day_of_week: Optional[int] = Field(None, ge=0, le=6)
     delivery_day_of_month: Optional[int] = Field(None, ge=1, le=31)
-    delivery_time_slot: Optional[str] = None
+    delivery_time_slot_id: Optional[int] = Field(None, gt=0)
     delivery_address_id: Optional[int] = Field(None, gt=0)
     payment_method: Optional[str] = None
     auto_payment: Optional[bool] = None
@@ -186,8 +175,8 @@ class UpdateSubscriptionItemRequest(BaseModel):
 
 class SubscriptionPreviewRequest(BaseModel):
     """Subscription preview request schema"""
-    billing_cycle: BillingCycle
-    delivery_frequency: DeliveryFrequency
+    billing_cycle: str  # SubscriptionFrequency value
+    delivery_frequency: str  # SubscriptionFrequency value
     items: List[Dict[str, Any]] = Field(..., min_length=1)
     discount_percentage: float = Field(default=0.0, ge=0.0, le=100.0)
 
@@ -341,9 +330,7 @@ __all__ = [
     'SubscriptionTemplate',
     'ChangePaymentMethodRequest',
     'SkipDeliveryRequest',
-    'SubscriptionResponseSchema',
-    'BillingCycle',
-    'DeliveryFrequency'
+    'SubscriptionResponseSchema'
 ]
 
 
@@ -366,13 +353,14 @@ def serialize_subscription(subscription, include_items=False, include_address=Fa
             'name': subscription.name,
             'description': getattr(subscription, 'description', None),
             'status': subscription.status.value if hasattr(subscription.status, 'value') else str(subscription.status),
-            'billing_cycle': subscription.billing_cycle,
+            'billing_cycle': subscription.billing_cycle.value if hasattr(subscription.billing_cycle, 'value') else str(subscription.billing_cycle),
             'billing_amount': float(subscription.billing_amount),
             'discount_percentage': getattr(subscription, 'discount_percentage', 0.0),
             'delivery_frequency': subscription.delivery_frequency.value,
             'delivery_day_of_week': getattr(subscription, 'delivery_day_of_week', None),
             'delivery_day_of_month': getattr(subscription, 'delivery_day_of_month', None),
-            'delivery_time_slot': getattr(subscription, 'delivery_time_slot', 'morning'),
+            'delivery_time_slot_id': getattr(subscription, 'delivery_time_slot_id', None),
+            'delivery_time_slot': subscription.delivery_time_slot.to_dict() if getattr(subscription, 'delivery_time_slot', None) else None,
             'payment_method': subscription.payment_method.value if hasattr(subscription.payment_method, 'value') else str(subscription.payment_method),
             'auto_payment': getattr(subscription, 'auto_payment', True),
             'auto_renew': getattr(subscription, 'auto_renew', True),

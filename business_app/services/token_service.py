@@ -21,13 +21,28 @@ logger = logging.getLogger(__name__)
 
 class TokenService:
     """Service for managing JWT tokens and sessions"""
-    
+
+    _instance = None
+    _initialized = False
+
+    def __new__(cls):
+        """Singleton pattern to ensure only one instance exists"""
+        if cls._instance is None:
+            cls._instance = super(TokenService, cls).__new__(cls)
+        return cls._instance
+
     def __init__(self):
+        # Only initialize once (singleton pattern)
+        if TokenService._initialized:
+            return
+
         # Initialize Redis connection for token blacklist and session management
         self.redis_client = None
         self.redis_available = False
         self._in_memory_blacklist = {}  # Changed to dict to store expiry times
         self._initialize_redis()
+
+        TokenService._initialized = True
     
     def _initialize_redis(self):
         """Initialize Redis connection with proper fallback"""
@@ -40,19 +55,25 @@ class TokenService:
             except RuntimeError:
                 # No application context available
                 pass
-            
+
             if not redis_url:
                 redis_url = os.environ.get('REDIS_URL', 'redis://localhost:6379/0')
-            
+
             self.redis_client = redis.from_url(redis_url, decode_responses=True)
             # Test connection
             self.redis_client.ping()
             self.redis_available = True
-            logger.info(f"Redis connected successfully to {redis_url}")
+            # Only log on initial connection or reconnection
+            if not hasattr(self, '_redis_connected'):
+                logger.info(f"Redis connected successfully to {redis_url}")
+                self._redis_connected = True
         except Exception as e:
-            logger.warning(f"Redis not available, using in-memory blacklist: {e}")
+            # Only log if this is first connection attempt or status changed
+            if not hasattr(self, '_redis_connected') or self.redis_available:
+                logger.warning(f"Redis not available, using in-memory blacklist: {e}")
             self.redis_available = False
             self.redis_client = None
+            self._redis_connected = False
     
     def generate_tokens(self, user: User, additional_claims: Optional[Dict] = None) -> Dict[str, Any]:
         """
@@ -211,18 +232,16 @@ class TokenService:
     def blacklist_token(self, token_jti: str, expires_delta: Optional[timedelta] = None, token: Optional[str] = None) -> bool:
         """
         Add token to blacklist with proper TTL matching token expiration
-        
+
         Args:
             token_jti: JTI (JWT ID) of the token to blacklist
             expires_delta: How long to keep token in blacklist (defaults to calculated expiry)
             token: The actual token to extract expiry from (optional)
-            
+
         Returns:
             True if successfully blacklisted
         """
         try:
-            self._ensure_redis_connection()
-            
             # Calculate proper expiry time
             if expires_delta:
                 expiry_seconds = int(expires_delta.total_seconds())
@@ -277,7 +296,6 @@ class TokenService:
             True if token is blacklisted
         """
         try:
-            self._ensure_redis_connection()
             if self.redis_available:
                 is_blacklisted = bool(self.redis_client.exists(f"blacklist:{token_jti}"))
                 if is_blacklisted:
@@ -522,13 +540,23 @@ class TokenService:
     
     def _ensure_redis_connection(self):
         """Ensure Redis connection is available, reinitialize if needed"""
+        # Only attempt reconnection if we know it's not available
+        # Avoid redundant pings on every operation
         if not self.redis_available or not self.redis_client:
-            self._initialize_redis()
+            try:
+                # Quick check if connection exists and is responsive
+                if self.redis_client:
+                    self.redis_client.ping()
+                    self.redis_available = True
+                else:
+                    self._initialize_redis()
+            except Exception:
+                # Connection failed, reinitialize
+                self._initialize_redis()
     
     def _store_session_info(self, user_id: int, session_id: str, session_data: Dict) -> bool:
         """Store session information"""
         try:
-            self._ensure_redis_connection()
             if not self.redis_available:
                 return True
             
@@ -546,7 +574,6 @@ class TokenService:
     def _update_session_info(self, user_id: int, session_id: str, updates: Dict) -> bool:
         """Update existing session information"""
         try:
-            self._ensure_redis_connection()
             if not self.redis_available:
                 return True
             

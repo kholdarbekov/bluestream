@@ -40,7 +40,7 @@ from business_app.utils.query_optimization import (
     PaginationOptimizer, AggregationOptimizer
 )
 from business_app.services.inventory_service import get_inventory_service, InventoryOperationType
-from business_app.utils.constants import UserRole, SubscriptionStatus, OrderStatus, DeliveryStatus, UserStatus
+from business_app.utils.constants import UserRole, SubscriptionStatus, OrderStatus, DeliveryStatus, UserStatus, SubscriptionFrequency
 # from business_app.tasks.admin_tasks import send_bulk_email_task, generate_report_task
 from business_app import db
 from business_app.utils.helpers import get_current_language
@@ -2361,10 +2361,10 @@ def get_subscriptions():
                 'status': sub.status,
                 'name': sub.name,
                 'description': sub.description,
-                'billing_cycle': sub.billing_cycle,
+                'billing_cycle': sub.billing_cycle.value if hasattr(sub.billing_cycle, 'value') else str(sub.billing_cycle),
                 'billing_amount': float(sub.billing_amount),
                 'next_billing_date': sub.next_billing_date.isoformat() if sub.next_billing_date else None,
-                'delivery_frequency': sub.delivery_frequency,
+                'delivery_frequency': sub.delivery_frequency.value if hasattr(sub.delivery_frequency, 'value') else str(sub.delivery_frequency),
                 'auto_renew': sub.auto_renew,
                 'paused_at': sub.paused_at.isoformat() if sub.paused_at else None,
                 'pause_reason': sub.pause_reason,
@@ -2444,11 +2444,11 @@ def get_subscription(subscription_id):
             'status': subscription.status,
             'name': subscription.name,
             'description': subscription.description,
-            'billing_cycle': subscription.billing_cycle,
+            'billing_cycle': subscription.billing_cycle.value if hasattr(subscription.billing_cycle, 'value') else str(subscription.billing_cycle),
             'billing_amount': float(subscription.billing_amount),
             'next_billing_date': subscription.next_billing_date.isoformat() if subscription.next_billing_date else None,
             'last_billing_date': subscription.last_billing_date.isoformat() if subscription.last_billing_date else None,
-            'delivery_frequency': subscription.delivery_frequency,
+            'delivery_frequency': subscription.delivery_frequency.value if hasattr(subscription.delivery_frequency, 'value') else str(subscription.delivery_frequency),
             'delivery_day_of_week': subscription.delivery_day_of_week,
             'delivery_day_of_month': subscription.delivery_day_of_month,
             'delivery_time_slot': subscription.delivery_time_slot,
@@ -4885,7 +4885,7 @@ def _generate_subscription_report(start_dt, end_dt, filters):
         func.sum(Subscription.billing_amount)
     ).filter_by(
         status='active',
-        billing_cycle='monthly'
+        billing_cycle=SubscriptionFrequency.MONTHLY
     ).scalar() or 0
 
     return {

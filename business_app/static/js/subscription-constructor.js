@@ -276,9 +276,9 @@ class SubscriptionConstructor {
 
         // Build all options including placeholder
         const allOptionsHTML = `
-            <option value="">Select a time slot</option>
+            <option value="">Select a time slot (optional)</option>
             ${this.timeSlots.map(slot => `
-                <option value="${slot.value}" ${this.selectedTimeSlot === slot.value ? 'selected' : ''}>
+                <option value="${slot.id}" ${this.selectedTimeSlot === slot.id ? 'selected' : ''}>
                     ${slot.label}${slot.fee ? ` (+${this.formatPrice(slot.fee)} UZS)` : ''}
                 </option>
             `).join('')}
@@ -500,7 +500,7 @@ class SubscriptionConstructor {
                             ` : ''}
                             <div style="display: flex; justify-content: space-between; align-items: center; padding-top: 12px; border-top: 1px solid #d9f7be;">
                                 <span style="font-size: 14px; color: #595959; font-weight: 500;">Time Slot</span>
-                                <span style="font-size: 15px; font-weight: 600; color: #262626;">${this.selectedTimeSlot || 'Not selected'}</span>
+                                <span style="font-size: 15px; font-weight: 600; color: #262626;">${this.getSelectedTimeSlotLabel() || 'Not selected (flexible)'}</span>
                             </div>
                         </div>
                     </div>
@@ -655,7 +655,8 @@ class SubscriptionConstructor {
         const timeSlotSelect = document.getElementById('time-slots-select');
         if (timeSlotSelect) {
             timeSlotSelect.addEventListener('change', (e) => {
-                this.selectedTimeSlot = e.target.value;
+                // Store time slot ID (integer) instead of string value
+                this.selectedTimeSlot = e.target.value ? parseInt(e.target.value) : null;
                 this.saveState();
             });
         }
@@ -964,7 +965,7 @@ class SubscriptionConstructor {
                 billing_cycle: this.selectedFrequency,
                 delivery_frequency: this.selectedFrequency,
                 delivery_day_of_week: this.selectedDay,
-                delivery_time_slot: this.selectedTimeSlot,
+                delivery_time_slot_id: this.selectedTimeSlot,  // Now sends integer ID (or null)
                 delivery_address_id: this.selectedAddress.id,
                 payment_method: this.selectedPaymentMethod,
                 auto_payment: this.selectedPaymentMethod !== 'cash',
@@ -1053,6 +1054,14 @@ class SubscriptionConstructor {
             'monthly': 'Monthly'
         };
         return names[frequency] || frequency;
+    }
+
+    getSelectedTimeSlotLabel() {
+        if (!this.selectedTimeSlot) {
+            return null;
+        }
+        const slot = this.timeSlots.find(s => s.id === this.selectedTimeSlot);
+        return slot ? slot.label : null;
     }
 
     getDayName(dayNumber) {

@@ -177,7 +177,7 @@
                                 </figure>
                                 <div class="lower-content">
                                     <div class="shape" style="background-image: url({{ url_for('static', filename='images/shape/shape-7.png') }});"></div>
-                                    <span>{{ product.volume if product.volume }}{{ product.volume_unit }} {{ product.category }}</span>
+                                    <span>{% if product.volume %}{{ product.volume }}{{ product.volume_unit }}{% endif %} {% if product.category %}{{ product.category.name }}{% endif %}</span>
                                     <h4><a href="{{ url_for('frontend.product_detail', product_id=product.id) }}">{{ product.name }}</a></h4>
                                     <h6>{{ product.current_price|format_price }}</h6>
                                     <p>{{ product.short_description[:60] if product.short_description }}{% if product.short_description and product.short_description|length > 60 %}...{% endif %}</p>

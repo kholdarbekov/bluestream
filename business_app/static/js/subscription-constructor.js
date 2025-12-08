@@ -782,7 +782,7 @@ class SubscriptionConstructor {
             // Load data for the next step
             await this.loadStepData(this.currentStep);
 
-            this.showStep(this.currentStep);
+            this.showStep(this.currentStep, true); // Scroll when navigating to next step
             this.saveState();
         }
     }
@@ -790,7 +790,7 @@ class SubscriptionConstructor {
     previousStep() {
         if (this.currentStep > 1) {
             this.currentStep--;
-            this.showStep(this.currentStep);
+            this.showStep(this.currentStep, true); // Scroll when navigating to previous step
             this.saveState();
         }
     }
@@ -830,7 +830,7 @@ class SubscriptionConstructor {
         }
     }
 
-    showStep(stepNumber) {
+    showStep(stepNumber, shouldScroll = false) {
         // Hide all panels
         document.querySelectorAll('.constructor-panel').forEach(panel => {
             panel.classList.remove('active');
@@ -848,11 +848,13 @@ class SubscriptionConstructor {
         // Update navigation buttons
         this.updateNavigation();
 
-        // Scroll to constructor
-        const constructorSection = document.getElementById('subscription-constructor');
-        if (constructorSection) {
-            const offsetTop = constructorSection.offsetTop - 100;
-            window.scrollTo({ top: offsetTop, behavior: 'smooth' });
+        // Only scroll to constructor when explicitly requested (e.g., when clicking Next/Previous)
+        if (shouldScroll) {
+            const constructorSection = document.getElementById('subscription-constructor');
+            if (constructorSection) {
+                const offsetTop = constructorSection.offsetTop - 100;
+                window.scrollTo({ top: offsetTop, behavior: 'smooth' });
+            }
         }
     }
 

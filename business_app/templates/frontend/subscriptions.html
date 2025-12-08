@@ -1,17 +1,18 @@
 {% extends "frontend/base.html" %}
 
-{% block title %}{{ 'Subscription Plans - '|translate(current_language) }}{{ super() }}{% endblock %}
+{% block title %}{{ 'Water Subscriptions - '|translate(current_language) }}{{ super() }}{% endblock %}
 
 {% block extra_head %}
 <style>
-/* Professional Page Title with Wavy Border */
+/* ===== MODERN SUBSCRIPTION PAGE STYLES ===== */
+
+/* Page Title - Matching Theme Style */
 .page-title {
     position: relative;
-    padding: 180px 0 120px 0 !important;
+    padding: 180px 0 120px 0;
     background-size: cover;
     background-position: center;
     background-repeat: no-repeat;
-    overflow: hidden;
 }
 
 .page-title .shape {
@@ -23,414 +24,869 @@
     background-size: cover;
     background-position: center;
     background-repeat: no-repeat;
-    z-index: 1;
 }
 
-.page-title .auto-container {
+.page-title .content-box {
     position: relative;
     z-index: 2;
 }
 
 .page-title h1 {
-    font-size: 48px;
+    font-size: 60px;
     font-weight: 700;
     color: #222;
-    margin-bottom: 15px;
-    text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.1);
+    margin-bottom: 20px;
+    line-height: 1.2;
 }
 
-/* Enhanced Subscription Section */
-.subscription-section {
-    padding: 100px 0;
-    background: linear-gradient(180deg, #f8f9fa 0%, #ffffff 100%);
+.page-title .bread-crumb {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    justify-content: center;
+    gap: 10px;
 }
 
-.subscription-section .sec-title {
-    margin-bottom: 60px;
-}
-
-.subscription-section .sec-title p {
+.page-title .bread-crumb li {
     font-size: 16px;
-    color: #00d1f9;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-    margin-bottom: 15px;
+    color: #666;
 }
 
-.subscription-section .sec-title h2 {
-    font-size: 42px;
+.page-title .bread-crumb li a {
+    color: #00d1f9;
+    transition: all 0.3s ease;
+}
+
+.page-title .bread-crumb li a:hover {
+    color: #002c8f;
+}
+
+.page-title .bread-crumb li:not(:last-child)::after {
+    content: '/';
+    margin-left: 10px;
+    color: #999;
+}
+
+/* Intro Section */
+.subscription-intro {
+    padding: 80px 0;
+    background: #fff;
+}
+
+.subscription-intro .intro-content {
+    max-width: 900px;
+    margin: 0 auto;
+    text-align: center;
+}
+
+.subscription-intro h2 {
+    font-size: 38px;
     font-weight: 700;
     color: #222;
     margin-bottom: 20px;
     line-height: 1.3;
 }
 
-.subscription-section .sec-title .title-text {
+.subscription-intro .subtitle {
     font-size: 18px;
     color: #666;
     line-height: 1.8;
-    max-width: 800px;
-    margin: 0 auto;
-}
-
-/* Pricing Cards Enhancement */
-.pricing-block-one {
     margin-bottom: 30px;
 }
 
-.pricing-block-one .pricing-table {
+.subscription-intro .stats-row {
+    display: flex;
+    justify-content: center;
+    gap: 60px;
+    margin-top: 50px;
+    flex-wrap: wrap;
+}
+
+.subscription-intro .stat-box {
+    text-align: center;
+}
+
+.subscription-intro .stat-number {
+    font-size: 42px;
+    font-weight: 800;
+    color: #00d1f9;
+    display: block;
+    margin-bottom: 8px;
+}
+
+.subscription-intro .stat-label {
+    font-size: 14px;
+    color: #666;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+/* How It Works Section */
+.how-it-works-section {
+    padding: 100px 0;
+    background: linear-gradient(180deg, #f8f9fa 0%, #fff 100%);
+}
+
+.how-it-works-section .sec-title {
+    margin-bottom: 70px;
+}
+
+.how-it-works-section .sec-title span {
+    font-size: 16px;
+    color: #00d1f9;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    display: block;
+    margin-bottom: 15px;
+}
+
+.how-it-works-section .sec-title h2 {
+    font-size: 42px;
+    font-weight: 800;
+    color: #222;
+    line-height: 1.3;
+}
+
+.how-it-works-section .sec-title .subtitle {
+    font-size: 18px;
+    color: #666;
+    margin-top: 20px;
+    line-height: 1.7;
+}
+
+.steps-container {
+    display: flex;
+    justify-content: space-between;
+    gap: 40px;
+    position: relative;
+}
+
+.steps-container::before {
+    content: '';
+    position: absolute;
+    top: 80px;
+    left: 20%;
+    right: 20%;
+    height: 2px;
+    background: linear-gradient(90deg, #00d1f9 0%, #002c8f 100%);
+    z-index: 0;
+}
+
+.step-item {
+    flex: 1;
+    text-align: center;
+    position: relative;
+    z-index: 1;
+}
+
+.step-icon {
+    width: 160px;
+    height: 160px;
+    margin: 0 auto 30px;
     background: #fff;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    transition: all 0.4s ease;
+    box-shadow: 0 8px 25px rgba(0, 0, 0, 0.08);
+    border: 3px solid #f8f9fa;
+}
+
+.step-item:hover .step-icon {
+    transform: translateY(-10px);
+    box-shadow: 0 15px 40px rgba(0, 209, 249, 0.25);
+    background: linear-gradient(135deg, #00d1f9 0%, #002c8f 100%);
+    border-color: #00d1f9;
+}
+
+.step-icon i {
+    font-size: 60px;
+    color: #00d1f9;
+    transition: all 0.4s ease;
+}
+
+.step-item:hover .step-icon i {
+    color: #fff;
+    transform: scale(1.1);
+}
+
+.step-number {
+    position: absolute;
+    top: -10px;
+    right: 10px;
+    width: 40px;
+    height: 40px;
+    background: #002c8f;
+    color: #fff;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    font-weight: 800;
+    box-shadow: 0 4px 15px rgba(0, 44, 143, 0.4);
+}
+
+.step-item h3 {
+    font-size: 22px;
+    font-weight: 700;
+    color: #222;
+    margin-bottom: 15px;
+}
+
+.step-item p {
+    font-size: 15px;
+    color: #666;
+    line-height: 1.7;
+}
+
+/* Features Showcase */
+.features-showcase {
+    padding: 100px 0;
+    background: #fff;
+}
+
+.features-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 35px;
+    margin-top: 60px;
+}
+
+.feature-card {
+    background: #fff;
+    padding: 40px 30px;
     border-radius: 20px;
-    overflow: hidden;
-    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.08);
+    text-align: center;
+    transition: all 0.4s ease;
+    box-shadow: 0 8px 25px rgba(0, 0, 0, 0.06);
+    border: 2px solid #f8f9fa;
+}
+
+.feature-card:hover {
+    transform: translateY(-8px);
+    box-shadow: 0 15px 45px rgba(0, 209, 249, 0.2);
+    border-color: #00d1f9;
+}
+
+.feature-icon {
+    width: 80px;
+    height: 80px;
+    margin: 0 auto 25px;
+    background: linear-gradient(135deg, #00d1f9 0%, #002c8f 100%);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.4s ease;
+}
+
+.feature-card:hover .feature-icon {
+    transform: rotate(360deg);
+}
+
+.feature-icon i {
+    font-size: 36px;
+    color: #fff;
+}
+
+.feature-card h4 {
+    font-size: 20px;
+    font-weight: 700;
+    color: #222;
+    margin-bottom: 15px;
+}
+
+.feature-card p {
+    font-size: 15px;
+    color: #666;
+    line-height: 1.7;
+    margin: 0;
+}
+
+/* Use Cases Section */
+.use-cases-section {
+    padding: 100px 0;
+    background: linear-gradient(180deg, #f8f9fa 0%, #fff 100%);
+}
+
+.use-cases-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 30px;
+    margin-top: 60px;
+}
+
+.use-case-card {
+    background: #fff;
+    padding: 50px 35px;
+    border-radius: 20px;
+    text-align: center;
     transition: all 0.4s ease;
     position: relative;
-    height: 100%;
-    display: flex;
-    flex-direction: column;
+    overflow: hidden;
+    border: 2px solid #f8f9fa;
 }
 
-.pricing-block-one .pricing-table:hover {
-    transform: translateY(-10px);
-    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.15);
+.use-case-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 5px;
+    background: linear-gradient(90deg, #00d1f9 0%, #002c8f 100%);
+    transform: scaleX(0);
+    transition: transform 0.4s ease;
 }
 
-.pricing-block-one.active-block .pricing-table {
-    transform: translateY(-10px) scale(1.05);
-    box-shadow: 0 25px 70px rgba(0, 209, 249, 0.25);
-    border: 3px solid #00d1f9;
+.use-case-card:hover::before {
+    transform: scaleX(1);
 }
 
-/* COMPLETELY REDESIGNED HEADER - Override ALL theme styles */
-.pricing-block-one .table-header {
-    background: #fff !important;
-    padding: 0 !important;
-    text-align: center !important;
-    position: relative !important;
-    border-bottom: 1px solid #f0f0f0 !important;
-    overflow: visible !important;
+.use-case-card:hover {
+    transform: translateY(-8px);
+    box-shadow: 0 15px 40px rgba(0, 0, 0, 0.1);
+    border-color: #00d1f9;
 }
 
-.pricing-block-one.active-block .table-header {
-    background: #fff !important;
-    border-bottom: 1px solid rgba(0, 209, 249, 0.2) !important;
+.use-case-icon {
+    font-size: 50px;
+    color: #00d1f9;
+    margin-bottom: 25px;
 }
 
-/* Popular Badge - Above card */
-.pricing-block-one .popular-tag {
-    position: absolute !important;
-    top: -12px !important;
-    left: 50% !important;
-    right: auto !important;
-    transform: translateX(-50%) !important;
-    background: linear-gradient(135deg, #ffd700 0%, #ffb800 100%) !important;
-    color: #000 !important;
-    padding: 6px 18px !important;
-    border-radius: 20px !important;
-    font-size: 10px !important;
-    font-weight: 800 !important;
-    text-transform: uppercase !important;
-    letter-spacing: 0.5px !important;
-    box-shadow: 0 4px 15px rgba(255, 215, 0, 0.4) !important;
-    z-index: 10 !important;
-    white-space: nowrap !important;
-    width: auto !important;
-    height: auto !important;
+.use-case-card h4 {
+    font-size: 22px;
+    font-weight: 700;
+    color: #222;
+    margin-bottom: 15px;
 }
 
-/* Plan Title Section - Override ALL positioning */
-.pricing-block-one .plan-title {
-    display: block !important;
-    padding: 35px 30px 25px 30px !important;
-    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%) !important;
-    margin: 0 !important;
-    position: static !important;
-    width: 100% !important;
-    text-align: center !important;
+.use-case-card p {
+    font-size: 15px;
+    color: #666;
+    line-height: 1.7;
 }
 
-.pricing-block-one.active-block .plan-title {
-    background: linear-gradient(135deg, #00d1f9 0%, #0099cc 100%) !important;
-}
-
-.pricing-block-one .plan-title h3 {
-    font-size: 26px !important;
-    font-weight: 700 !important;
-    color: #222 !important;
-    margin: 0 0 8px 0 !important;
-    padding: 0 !important;
-    line-height: 1.2 !important;
-    position: static !important;
-    transform: none !important;
-}
-
-.pricing-block-one.active-block .plan-title h3 {
-    color: #fff !important;
-}
-
-.pricing-block-one .plan-title p {
-    font-size: 13px !important;
-    color: #666 !important;
-    margin: 0 !important;
-    padding: 0 !important;
-    line-height: 1.4 !important;
-    position: static !important;
-    transform: none !important;
-}
-
-.pricing-block-one.active-block .plan-title p {
-    color: rgba(255, 255, 255, 0.9) !important;
-}
-
-/* Price Box - Override ALL theme positioning and backgrounds */
-.pricing-block-one .price-box {
-    display: block !important;
-    padding: 30px 30px !important;
-    margin: 0 !important;
-    background: #fff !important;
-    position: static !important;
-    width: 100% !important;
-    text-align: center !important;
-    top: auto !important;
-    right: auto !important;
-    left: auto !important;
-    bottom: auto !important;
-    transform: none !important;
-    border-radius: 0 !important;
-}
-
-.pricing-block-one .price-box h2 {
-    font-size: 46px !important;
-    font-weight: 800 !important;
-    color: #00d1f9 !important;
-    margin: 0 !important;
-    padding: 0 !important;
-    line-height: 1 !important;
-    letter-spacing: -1px !important;
-    display: inline-block !important;
-    position: static !important;
-    transform: none !important;
-    background: transparent !important;
-    border-radius: 0 !important;
-    width: auto !important;
-    height: auto !important;
-}
-
-.pricing-block-one.active-block .price-box h2 {
-    color: #00d1f9 !important;
-    background: transparent !important;
-}
-
-.pricing-block-one .price-box h2 span {
-    font-size: 15px !important;
-    font-weight: 600 !important;
-    color: #666 !important;
-    margin-left: 5px !important;
-    letter-spacing: 0 !important;
-    vertical-align: middle !important;
-    background: transparent !important;
-    padding: 0 !important;
-    border-radius: 0 !important;
-    position: static !important;
-    transform: none !important;
-}
-
-.pricing-block-one.active-block .price-box h2 span {
-    color: #666 !important;
-    background: transparent !important;
-}
-
-/* Override any absolute positioning from theme */
-.pricing-block-one .table-header * {
-    box-sizing: border-box !important;
-}
-
-.pricing-block-one .table-header > *:not(.popular-tag) {
-    position: static !important;
-}
-
-.pricing-block-one .table-content {
-    padding: 35px 30px 30px 30px;
-    flex-grow: 1;
-    display: flex;
-    flex-direction: column;
-}
-
-.pricing-block-one .feature-list {
+.use-case-list {
     list-style: none;
     padding: 0;
-    margin: 0 0 25px 0;
-    flex-grow: 1;
+    margin: 20px 0 0 0;
+    text-align: left;
 }
 
-.pricing-block-one .feature-list li {
-    padding: 4px 0;
-    color: #555;
-    font-size: 14px;
-    line-height: 1.6;
-    position: relative;
+.use-case-list li {
+    padding: 8px 0;
     padding-left: 28px;
-    margin-bottom: 0;
+    font-size: 14px;
+    color: #555;
+    position: relative;
 }
 
-.pricing-block-one .feature-list li:last-child {
-    margin-bottom: 0;
-}
-
-.pricing-block-one .feature-list li:before {
+.use-case-list li::before {
     content: '\f00c';
     font-family: 'Font Awesome 5 Free';
     font-weight: 900;
     position: absolute;
     left: 0;
-    top: 6px;
     color: #00d1f9;
     font-size: 12px;
-    width: 16px;
-    height: 16px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
 }
 
-.pricing-block-one.active-block .feature-list li:before {
+/* Subscription Builder Section */
+.subscription-builder {
+    padding: 100px 0;
+    background: #fff;
+}
+
+.subscription-builder .sec-title span {
     color: #00d1f9;
 }
 
-.pricing-block-one .btn-box {
-    margin-top: auto;
+.builder-container {
+    background: #f8f9fa;
+    border-radius: 30px;
+    padding: 60px;
+    margin-top: 60px;
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.08);
 }
 
-.pricing-block-one .theme-btn {
-    width: 100%;
-    padding: 15px 30px;
+.builder-info-box {
+    background: linear-gradient(135deg, #00d1f9 0%, #002c8f 100%);
+    color: #fff;
+    padding: 30px;
+    border-radius: 20px;
+    margin-bottom: 50px;
+    text-align: center;
+}
+
+.builder-info-box h3 {
+    font-size: 24px;
+    font-weight: 700;
+    margin-bottom: 15px;
+}
+
+.builder-info-box p {
     font-size: 16px;
-    font-weight: 600;
-    border-radius: 10px;
+    margin: 0;
+    opacity: 0.95;
+}
+
+.builder-step {
+    margin-bottom: 50px;
+}
+
+.builder-step:last-child {
+    margin-bottom: 0;
+}
+
+.builder-step h3 {
+    font-size: 24px;
+    font-weight: 700;
+    color: #222;
+    margin-bottom: 25px;
+    padding-bottom: 15px;
+    border-bottom: 2px solid #e9ecef;
+}
+
+.frequency-options {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 20px;
+}
+
+.frequency-option {
+    background: #fff;
+    padding: 25px 20px;
+    border-radius: 15px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    border: 3px solid transparent;
+}
+
+.frequency-option:hover {
+    background: #fff;
+    transform: translateY(-3px);
+    box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1);
+}
+
+.frequency-option.selected {
+    background: #00d1f9;
+    color: #fff;
+    border-color: #002c8f;
+    box-shadow: 0 8px 25px rgba(0, 209, 249, 0.3);
+}
+
+.frequency-option i {
+    font-size: 32px;
+    color: #00d1f9;
+    display: block;
+    margin-bottom: 15px;
+}
+
+.frequency-option.selected i {
+    color: #fff;
+}
+
+.frequency-option h4 {
+    font-size: 18px;
+    font-weight: 700;
+    margin-bottom: 8px;
+}
+
+.frequency-option p {
+    font-size: 13px;
+    margin: 0;
+    opacity: 0.8;
+}
+
+.subscription-preview {
+    background: #fff;
+    padding: 40px;
+    border-radius: 20px;
+    margin-top: 40px;
+    border: 2px solid #e9ecef;
+}
+
+.subscription-preview h3 {
+    font-size: 26px;
+    font-weight: 700;
+    color: #222;
+    margin-bottom: 25px;
+    text-align: center;
+}
+
+.preview-details {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 25px;
+    margin-bottom: 30px;
+}
+
+.preview-item {
+    text-align: center;
+}
+
+.preview-item .label {
+    font-size: 13px;
+    color: #666;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 8px;
+}
+
+.preview-item .value {
+    font-size: 28px;
+    font-weight: 800;
+    color: #00d1f9;
+}
+
+.preview-item .value span {
+    font-size: 16px;
+    color: #666;
+}
+
+.preview-cta {
+    text-align: center;
+    margin-top: 35px;
+}
+
+.preview-cta .theme-btn {
+    padding: 18px 50px;
+    font-size: 18px;
+    font-weight: 700;
+    border-radius: 50px;
+    text-transform: uppercase;
     transition: all 0.3s ease;
 }
 
-.pricing-block-one .theme-btn:hover {
+.preview-cta .theme-btn:hover {
     transform: translateY(-3px);
-    box-shadow: 0 10px 25px rgba(0, 209, 249, 0.3);
+    box-shadow: 0 12px 35px rgba(0, 209, 249, 0.4);
 }
 
-.pricing-block-one.active-block .theme-btn {
-    background: linear-gradient(135deg, #00d1f9 0%, #002c8f 100%);
+/* FAQ Section */
+.faq-section {
+    padding: 100px 0;
+    background: linear-gradient(180deg, #f8f9fa 0%, #fff 100%);
+}
+
+.faq-section .sec-title span {
+    color: #00d1f9;
+}
+
+.faq-section .accordion-box {
+    max-width: 900px;
+    margin: 0 auto;
+}
+
+.faq-section .accordion.block {
+    background: #fff;
+    border-radius: 15px;
+    margin-bottom: 20px;
+    box-shadow: 0 5px 20px rgba(0, 0, 0, 0.05);
+    overflow: hidden;
+    transition: all 0.3s ease;
+    border: 2px solid transparent;
+}
+
+.faq-section .accordion.block:hover {
+    box-shadow: 0 8px 30px rgba(0, 209, 249, 0.15);
+    border-color: #e9ecef;
+}
+
+.faq-section .acc-btn {
+    padding: 25px 30px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    transition: all 0.3s ease;
+    background: #fff;
+}
+
+.faq-section .acc-btn:hover {
+    background: #f8f9fa;
+}
+
+.faq-section .acc-btn.active {
+    background: #00d1f9;
+}
+
+.faq-section .acc-btn .icon-outer {
+    width: 40px;
+    height: 40px;
+    background: #e9ecef;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.3s ease;
+    flex-shrink: 0;
+}
+
+.faq-section .acc-btn.active .icon-outer {
+    background: #fff;
+    transform: rotate(45deg);
+}
+
+.faq-section .acc-btn .icon-outer i {
+    color: #00d1f9;
+    font-size: 14px;
+    transition: all 0.3s ease;
+}
+
+.faq-section .acc-btn.active .icon-outer i {
+    color: #00d1f9;
+}
+
+.faq-section .acc-btn h4 {
+    font-size: 18px;
+    font-weight: 700;
+    color: #222;
+    margin: 0;
+    flex: 1;
+    transition: all 0.3s ease;
+}
+
+.faq-section .acc-btn.active h4 {
+    color: #fff;
+}
+
+.faq-section .acc-content {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.4s ease, padding 0.4s ease;
+    background: #fff;
+    padding: 0;
+}
+
+.faq-section .acc-content.current {
+    max-height: 800px;
+    padding: 0 30px 30px 90px;
+}
+
+.faq-section .acc-content .text {
+    padding: 0;
+}
+
+.faq-section .acc-content .text p {
+    font-size: 15px;
+    color: #666;
+    line-height: 1.8;
+    margin: 0;
+}
+
+/* CTA Section */
+.cta-section {
+    padding: 100px 0;
+    margin-bottom: 80px;
+    background: linear-gradient(135deg, #002c8f 0%, #00d1f9 100%);
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+}
+
+.cta-section::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: url({{ url_for('static', filename='images/shape/shape-12.png') }}) repeat;
+    opacity: 0.05;
+}
+
+.cta-section .auto-container {
+    position: relative;
+    z-index: 2;
+}
+
+.cta-section h2 {
+    font-size: 48px;
+    font-weight: 800;
+    color: #fff;
+    margin-bottom: 20px;
+    line-height: 1.3;
+}
+
+.cta-section p {
+    font-size: 20px;
+    color: rgba(255, 255, 255, 0.95);
+    margin-bottom: 40px;
+    max-width: 700px;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+.cta-section .cta-buttons {
+    display: flex;
+    gap: 20px;
+    justify-content: center;
+    flex-wrap: wrap;
+}
+
+.cta-section .theme-btn {
+    padding: 18px 45px;
+    font-size: 16px;
+    font-weight: 700;
+    border-radius: 50px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    transition: all 0.3s ease;
+    display: inline-block;
+}
+
+.cta-section .btn-primary {
+    background: #fff;
+    color: #002c8f;
+    box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+}
+
+.cta-section .btn-primary:hover {
+    background: #ffd700;
+    color: #000;
+    transform: translateY(-3px);
+    box-shadow: 0 12px 35px rgba(255, 215, 0, 0.4);
+}
+
+.cta-section .btn-secondary {
+    background: transparent;
+    color: #fff;
+    border: 2px solid rgba(255, 255, 255, 0.8);
+}
+
+.cta-section .btn-secondary:hover {
+    background: rgba(255, 255, 255, 0.15);
+    border-color: #fff;
     color: #fff;
 }
 
 /* Responsive */
 @media (max-width: 991px) {
-    .subscription-section {
-        padding: 80px 0;
+    .page-title h1 {
+        font-size: 48px;
     }
 
-    .subscription-section .sec-title h2 {
+    .subscription-intro h2 {
+        font-size: 32px;
+    }
+
+    .steps-container {
+        flex-direction: column;
+    }
+
+    .steps-container::before {
+        display: none;
+    }
+
+    .builder-container {
+        padding: 40px 30px;
+    }
+
+    .how-it-works-section .sec-title h2,
+    .features-showcase .sec-title h2,
+    .use-cases-section .sec-title h2 {
         font-size: 36px;
-    }
-
-    .pricing-block-one.active-block .pricing-table {
-        transform: translateY(-5px) scale(1.02);
-    }
-
-    .pricing-block-one .plan-title {
-        padding: 30px 25px 20px 25px;
-    }
-
-    .pricing-block-one .plan-title h3 {
-        font-size: 24px;
-    }
-
-    .pricing-block-one .price-box {
-        padding: 25px 25px;
-    }
-
-    .pricing-block-one .price-box h2 {
-        font-size: 42px;
     }
 }
 
 @media (max-width: 767px) {
-    .subscription-section {
+    .page-title {
+        padding: 150px 0 100px 0;
+    }
+
+    .page-title h1 {
+        font-size: 36px;
+    }
+
+    .subscription-intro {
         padding: 60px 0;
     }
 
-    .subscription-section .sec-title h2 {
-        font-size: 30px;
+    .subscription-intro h2 {
+        font-size: 28px;
     }
 
-    .subscription-section .sec-title .title-text {
+    .subscription-intro .stats-row {
+        gap: 30px;
+    }
+
+    .how-it-works-section,
+    .features-showcase,
+    .use-cases-section,
+    .subscription-builder,
+    .faq-section,
+    .cta-section {
+        padding: 60px 0;
+    }
+
+    .how-it-works-section .sec-title h2,
+    .features-showcase .sec-title h2,
+    .use-cases-section .sec-title h2,
+    .subscription-builder .sec-title h2,
+    .cta-section h2 {
+        font-size: 28px;
+    }
+
+    .step-icon {
+        width: 120px;
+        height: 120px;
+    }
+
+    .step-icon i {
+        font-size: 45px;
+    }
+
+    .builder-container {
+        padding: 30px 20px;
+    }
+
+    .faq-section .acc-content.current {
+        padding: 0 20px 25px 20px;
+    }
+
+    .faq-section .acc-content .text {
+        padding: 0;
+    }
+
+    .cta-section {
+        margin-bottom: 60px;
+    }
+
+    .cta-section h2 {
+        font-size: 32px;
+    }
+
+    .cta-section p {
         font-size: 16px;
     }
 
-    .pricing-block-one {
-        margin-bottom: 30px;
-    }
-
-    .pricing-block-one.active-block .pricing-table {
-        transform: none;
-        scale: 1;
-    }
-
-    .pricing-block-one .plan-title {
-        padding: 30px 20px 20px 20px;
-    }
-
-    .pricing-block-one .plan-title h3 {
-        font-size: 22px;
-        margin-bottom: 6px;
-    }
-
-    .pricing-block-one .plan-title p {
-        font-size: 12px;
-    }
-
-    .pricing-block-one .price-box {
-        padding: 25px 20px;
-    }
-
-    .pricing-block-one .price-box h2 {
-        font-size: 38px;
-    }
-
-    .pricing-block-one .price-box h2 span {
-        font-size: 14px;
-    }
-
-    .pricing-block-one .popular-tag {
-        font-size: 9px;
-        padding: 5px 14px;
-        top: -10px;
-    }
-
-    .pricing-block-one .table-content {
-        padding: 30px 20px 25px 20px;
-    }
-
-    .pricing-block-one .feature-list li {
-        font-size: 13px;
-        padding: 3px 0;
-        padding-left: 26px;
-        margin-bottom: 0;
-    }
-
-    .pricing-block-one .feature-list li:before {
-        font-size: 11px;
-        top: 5px;
+    .cta-section .cta-buttons {
+        flex-direction: column;
+        align-items: stretch;
+        max-width: 300px;
+        margin: 0 auto;
     }
 }
 </style>
 {% endblock %}
 
 {% block content %}
-<!-- Page Title -->
+
+<!-- Page Title - Matching Theme -->
 <section class="page-title centred" style="background-image: url({{ url_for('static', filename='images/background/page-title.jpg') }});">
     <div class="shape" style="background-image: url({{ url_for('static', filename='images/shape/banner-shap.png') }});"></div>
     <div class="auto-container">
         <div class="content-box">
-            <h1>{{ 'Subscription Plans'|translate(current_language) }}</h1>
+            <h1>{{ 'Water Subscriptions'|translate(current_language) }}</h1>
             <ul class="bread-crumb clearfix">
                 <li><a href="{{ url_for('frontend.index') }}">{{ 'Home'|translate(current_language) }}</a></li>
                 <li>{{ 'Subscriptions'|translate(current_language) }}</li>
@@ -440,400 +896,502 @@
 </section>
 <!-- End Page Title -->
 
-<!-- subscription-section -->
-<section class="pricing-section subscription-section">
+<!-- Intro Section -->
+<section class="subscription-intro centred">
     <div class="auto-container">
-        <div class="sec-title centred">
-            <p>{{ 'Choose Your Plan'|translate(current_language) }}</p>
-            <h2>{{ 'Water Delivery Subscription Plans'|translate(current_language) }}</h2>
-            <div class="title-text">{{ 'Select the perfect plan for your water needs. All plans include free delivery, quality guarantee, and flexible scheduling.'|translate(current_language) }}</div>
-        </div>
-        
-        <div class="row clearfix">
-            
-            <!-- Basic Plan -->
-            <div class="col-lg-4 col-md-6 col-sm-12 pricing-block">
-                <div class="pricing-block-one">
-                    <div class="pricing-table">
-                        <div class="table-header">
-                            <div class="plan-title">
-                                <h3>{{ 'Basic Plan'|translate(current_language) }}</h3>
-                                <p>{{ 'Perfect for small families'|translate(current_language) }}</p>
-                            </div>
-                            <div class="price-box">
-                                <h2>$29<span>/{{ 'month'|translate(current_language) }}</span></h2>
-                            </div>
-                        </div>
-                        <div class="table-content">
-                            <ul class="feature-list clearfix">
-                                <li>{{ '4 bottles of 19L water per month'|translate(current_language) }}</li>
-                                <li>{{ 'Free water cooler rental'|translate(current_language) }}</li>
-                                <li>{{ 'Weekly delivery schedule'|translate(current_language) }}</li>
-                                <li>{{ 'Basic water quality testing'|translate(current_language) }}</li>
-                                <li>{{ 'Email customer support'|translate(current_language) }}</li>
-                                <li>{{ 'Flexible pause/resume options'|translate(current_language) }}</li>
-                            </ul>
-                            <div class="btn-box">
-                                <a href="#" class="theme-btn btn-one subscription-btn" data-plan="basic">{{ 'Choose Basic Plan'|translate(current_language) }}</a>
-                            </div>
-                        </div>
-                    </div>
+        <div class="intro-content">
+            <h2>{{ 'Never Run Out of Pure Water'|translate(current_language) }}</h2>
+            <p class="subtitle">
+                {{ 'Create your perfect water delivery schedule. Choose your products, set your frequency, and enjoy automatic deliveries tailored to your needs. No contracts, fully flexible, cancel anytime.'|translate(current_language) }}
+            </p>
+
+            <div class="stats-row">
+                <div class="stat-box">
+                    <span class="stat-number">10,000+</span>
+                    <span class="stat-label">{{ 'Active Subscriptions'|translate(current_language) }}</span>
                 </div>
-            </div>
-            
-            <!-- Premium Plan -->
-            <div class="col-lg-4 col-md-6 col-sm-12 pricing-block">
-                <div class="pricing-block-one active-block">
-                    <div class="pricing-table">
-                        <div class="table-header">
-                            <div class="popular-tag">{{ 'Most Popular'|translate(current_language) }}</div>
-                            <div class="plan-title">
-                                <h3>{{ 'Premium Plan'|translate(current_language) }}</h3>
-                                <p>{{ 'Most popular for families'|translate(current_language) }}</p>
-                            </div>
-                            <div class="price-box">
-                                <h2>$49<span>/{{ 'month'|translate(current_language) }}</span></h2>
-                            </div>
-                        </div>
-                        <div class="table-content">
-                            <ul class="feature-list clearfix">
-                                <li>{{ '8 bottles of 19L water per month'|translate(current_language) }}</li>
-                                <li>{{ 'Free premium water cooler'|translate(current_language) }}</li>
-                                <li>{{ 'Bi-weekly delivery schedule'|translate(current_language) }}</li>
-                                <li>{{ 'Advanced water quality testing'|translate(current_language) }}</li>
-                                <li>{{ '24/7 phone & chat support'|translate(current_language) }}</li>
-                                <li>{{ 'Priority delivery scheduling'|translate(current_language) }}</li>
-                                <li>{{ 'Free maintenance service'|translate(current_language) }}</li>
-                                <li>{{ 'Emergency water supply'|translate(current_language) }}</li>
-                            </ul>
-                            <div class="btn-box">
-                                <a href="#" class="theme-btn btn-one subscription-btn" data-plan="premium">{{ 'Choose Premium Plan'|translate(current_language) }}</a>
-                            </div>
-                        </div>
-                    </div>
+                <div class="stat-box">
+                    <span class="stat-number">99.8%</span>
+                    <span class="stat-label">{{ 'Satisfaction Rate'|translate(current_language) }}</span>
                 </div>
-            </div>
-            
-            <!-- Business Plan -->
-            <div class="col-lg-4 col-md-6 col-sm-12 pricing-block">
-                <div class="pricing-block-one">
-                    <div class="pricing-table">
-                        <div class="table-header">
-                            <div class="plan-title">
-                                <h3>{{ 'Business Plan'|translate(current_language) }}</h3>
-                                <p>{{ 'Ideal for offices & businesses'|translate(current_language) }}</p>
-                            </div>
-                            <div class="price-box">
-                                <h2>$99<span>/{{ 'month'|translate(current_language) }}</span></h2>
-                            </div>
-                        </div>
-                        <div class="table-content">
-                            <ul class="feature-list clearfix">
-                                <li>{{ '20 bottles of 19L water per month'|translate(current_language) }}</li>
-                                <li>{{ 'Multiple premium coolers'|translate(current_language) }}</li>
-                                <li>{{ 'Custom delivery schedule'|translate(current_language) }}</li>
-                                <li>{{ 'Comprehensive water analysis'|translate(current_language) }}</li>
-                                <li>{{ 'Dedicated account manager'|translate(current_language) }}</li>
-                                <li>{{ 'Same-day emergency delivery'|translate(current_language) }}</li>
-                                <li>{{ 'Free installation & maintenance'|translate(current_language) }}</li>
-                                <li>{{ 'Volume discounts available'|translate(current_language) }}</li>
-                                <li>{{ 'Invoice billing options'|translate(current_language) }}</li>
-                            </ul>
-                            <div class="btn-box">
-                                <a href="#" class="theme-btn btn-one subscription-btn" data-plan="business">{{ 'Choose Business Plan'|translate(current_language) }}</a>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            
-        </div>
-        
-        <!-- Additional Information -->
-        <div class="subscription-info">
-            <div class="row clearfix">
-                <div class="col-lg-6 col-md-12 col-sm-12 info-column">
-                    <div class="info-block">
-                        <h3>{{ 'Why Choose Our Subscription Service?'|translate(current_language) }}</h3>
-                        <ul class="list-style-one clearfix">
-                            <li>{{ 'Never run out of pure, clean water'|translate(current_language) }}</li>
-                            <li>{{ 'Convenient regular deliveries to your door'|translate(current_language) }}</li>
-                            <li>{{ 'Cost-effective compared to one-time purchases'|translate(current_language) }}</li>
-                            <li>{{ 'Flexible scheduling and easy management'|translate(current_language) }}</li>
-                            <li>{{ 'Quality guarantee on every bottle'|translate(current_language) }}</li>
-                            <li>{{ 'No contracts - cancel or modify anytime'|translate(current_language) }}</li>
-                        </ul>
-                    </div>
-                </div>
-                <div class="col-lg-6 col-md-12 col-sm-12 info-column">
-                    <div class="info-block">
-                        <h3>{{ 'Subscription Management'|translate(current_language) }}</h3>
-                        <ul class="list-style-one clearfix">
-                            <li>{{ 'Easy online account management'|translate(current_language) }}</li>
-                            <li>{{ 'Mobile app for schedule changes'|translate(current_language) }}</li>
-                            <li>{{ 'Automatic billing and payment'|translate(current_language) }}</li>
-                            <li>{{ 'Delivery tracking and notifications'|translate(current_language) }}</li>
-                            <li>{{ 'Pause subscriptions for vacations'|translate(current_language) }}</li>
-                            <li>{{ 'Upgrade or downgrade plans anytime'|translate(current_language) }}</li>
-                        </ul>
-                    </div>
+                <div class="stat-box">
+                    <span class="stat-number">24/7</span>
+                    <span class="stat-label">{{ 'Delivery Available'|translate(current_language) }}</span>
                 </div>
             </div>
         </div>
-        
     </div>
 </section>
-<!-- subscription-section end -->
 
-<!-- FAQ Section for Subscriptions -->
+<!-- How It Works Section -->
+<section class="how-it-works-section" id="how-it-works">
+    <div class="auto-container">
+        <div class="sec-title centred">
+            <span>{{ 'Simple & Flexible'|translate(current_language) }}</span>
+            <h2>{{ 'How Water Subscriptions Work'|translate(current_language) }}</h2>
+            <p class="subtitle">{{ 'Get started in three easy steps and enjoy hassle-free water delivery on your schedule'|translate(current_language) }}</p>
+        </div>
+
+        <div class="steps-container">
+            <div class="step-item">
+                <div class="step-icon">
+                    <i class="fal fa-shopping-cart"></i>
+                    <span class="step-number">1</span>
+                </div>
+                <h3>{{ 'Choose Your Products'|translate(current_language) }}</h3>
+                <p>{{ 'Select from our range of premium water products. Pick bottle sizes, quantities, and any additional items you need for your subscription.'|translate(current_language) }}</p>
+            </div>
+
+            <div class="step-item">
+                <div class="step-icon">
+                    <i class="fal fa-calendar-alt"></i>
+                    <span class="step-number">2</span>
+                </div>
+                <h3>{{ 'Set Your Schedule'|translate(current_language) }}</h3>
+                <p>{{ 'Choose your delivery frequency (daily, weekly, biweekly, or monthly) and preferred delivery time slots that fit your lifestyle.'|translate(current_language) }}</p>
+            </div>
+
+            <div class="step-item">
+                <div class="step-icon">
+                    <i class="fal fa-sync-alt"></i>
+                    <span class="step-number">3</span>
+                </div>
+                <h3>{{ 'Relax & Enjoy'|translate(current_language) }}</h3>
+                <p>{{ 'Sit back while we handle the rest. Manage, pause, or modify your subscription anytime through your online account.'|translate(current_language) }}</p>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- Features Showcase -->
+<section class="features-showcase">
+    <div class="auto-container">
+        <div class="sec-title centred">
+            <span>{{ 'Why Choose Subscriptions'|translate(current_language) }}</span>
+            <h2>{{ 'Benefits You\'ll Love'|translate(current_language) }}</h2>
+        </div>
+
+        <div class="features-grid">
+            <div class="feature-card">
+                <div class="feature-icon">
+                    <i class="fal fa-badge-percent"></i>
+                </div>
+                <h4>{{ 'Save Money'|translate(current_language) }}</h4>
+                <p>{{ 'Get up to 20% discount on subscription orders compared to one-time purchases. The more you subscribe, the more you save.'|translate(current_language) }}</p>
+            </div>
+
+            <div class="feature-card">
+                <div class="feature-icon">
+                    <i class="fal fa-truck"></i>
+                </div>
+                <h4>{{ 'Free Delivery'|translate(current_language) }}</h4>
+                <p>{{ 'Enjoy complimentary delivery on all subscription orders. No minimum order requirements or hidden fees.'|translate(current_language) }}</p>
+            </div>
+
+            <div class="feature-card">
+                <div class="feature-icon">
+                    <i class="fal fa-sliders-h"></i>
+                </div>
+                <h4>{{ 'Fully Flexible'|translate(current_language) }}</h4>
+                <p>{{ 'Pause, skip, reschedule, or cancel anytime. Change products and quantities with just a few clicks.'|translate(current_language) }}</p>
+            </div>
+
+            <div class="feature-card">
+                <div class="feature-icon">
+                    <i class="fal fa-shield-check"></i>
+                </div>
+                <h4>{{ 'Quality Guaranteed'|translate(current_language) }}</h4>
+                <p>{{ 'Every bottle meets our strict quality standards. 100% satisfaction guarantee or your money back.'|translate(current_language) }}</p>
+            </div>
+
+            <div class="feature-card">
+                <div class="feature-icon">
+                    <i class="fal fa-star"></i>
+                </div>
+                <h4>{{ 'Loyalty Rewards'|translate(current_language) }}</h4>
+                <p>{{ 'Earn bonus loyalty points on subscription orders. Redeem for discounts, free products, and exclusive perks.'|translate(current_language) }}</p>
+            </div>
+
+            <div class="feature-card">
+                <div class="feature-icon">
+                    <i class="fal fa-headset"></i>
+                </div>
+                <h4>{{ 'Priority Support'|translate(current_language) }}</h4>
+                <p>{{ 'Get dedicated customer support 24/7. Subscription members receive priority assistance for any issues.'|translate(current_language) }}</p>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- Use Cases Section -->
+<section class="use-cases-section">
+    <div class="auto-container">
+        <div class="sec-title centred">
+            <span>{{ 'Perfect For Everyone'|translate(current_language) }}</span>
+            <h2>{{ 'Who Benefits from Subscriptions?'|translate(current_language) }}</h2>
+        </div>
+
+        <div class="use-cases-grid">
+            <div class="use-case-card">
+                <i class="fal fa-home use-case-icon"></i>
+                <h4>{{ 'Families'|translate(current_language) }}</h4>
+                <p>{{ 'Ensure your family always has access to clean, safe drinking water.'|translate(current_language) }}</p>
+                <ul class="use-case-list">
+                    <li>{{ 'Weekly deliveries'|translate(current_language) }}</li>
+                    <li>{{ 'Family-sized quantities'|translate(current_language) }}</li>
+                    <li>{{ 'Consistent supply'|translate(current_language) }}</li>
+                </ul>
+            </div>
+
+            <div class="use-case-card">
+                <i class="fal fa-building use-case-icon"></i>
+                <h4>{{ 'Offices'|translate(current_language) }}</h4>
+                <p>{{ 'Keep your team hydrated with reliable office water delivery.'|translate(current_language) }}</p>
+                <ul class="use-case-list">
+                    <li>{{ 'Bulk pricing available'|translate(current_language) }}</li>
+                    <li>{{ 'Multiple coolers'|translate(current_language) }}</li>
+                    <li>{{ 'Invoice billing'|translate(current_language) }}</li>
+                </ul>
+            </div>
+
+            <div class="use-case-card">
+                <i class="fal fa-dumbbell use-case-icon"></i>
+                <h4>{{ 'Fitness Enthusiasts'|translate(current_language) }}</h4>
+                <p>{{ 'Stay optimally hydrated for peak performance and recovery.'|translate(current_language) }}</p>
+                <ul class="use-case-list">
+                    <li>{{ 'Flexible quantities'|translate(current_language) }}</li>
+                    <li>{{ 'Premium water options'|translate(current_language) }}</li>
+                    <li>{{ 'On-demand adjustments'|translate(current_language) }}</li>
+                </ul>
+            </div>
+
+            <div class="use-case-card">
+                <i class="fal fa-glass-whiskey use-case-icon"></i>
+                <h4>{{ 'Events & Catering'|translate(current_language) }}</h4>
+                <p>{{ 'Plan ahead for events with scheduled bulk water deliveries.'|translate(current_language) }}</p>
+                <ul class="use-case-list">
+                    <li>{{ 'Custom schedules'|translate(current_language) }}</li>
+                    <li>{{ 'Large volumes'|translate(current_language) }}</li>
+                    <li>{{ 'Event-day delivery'|translate(current_language) }}</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- Subscription Builder -->
+<section class="subscription-builder" id="builder">
+    <div class="auto-container">
+        <div class="sec-title centred">
+            <span>{{ 'Build Your Plan'|translate(current_language) }}</span>
+            <h2>{{ 'Preview Your Subscription'|translate(current_language) }}</h2>
+            <p class="subtitle">{{ 'Choose a delivery frequency below to see estimated costs and savings'|translate(current_language) }}</p>
+        </div>
+
+        <div class="builder-container">
+            <div class="builder-info-box">
+                <h3><i class="fal fa-info-circle"></i> {{ 'How to Create Your Subscription'|translate(current_language) }}</h3>
+                <p>{{ 'First, browse our shop and add products to your cart. Then select "Subscribe" at checkout to set up recurring deliveries with your preferred schedule.'|translate(current_language) }}</p>
+            </div>
+
+            <div class="builder-step">
+                <h3><i class="fal fa-calendar-check"></i> {{ 'Choose Delivery Frequency'|translate(current_language) }}</h3>
+                <div class="frequency-options">
+                    <div class="frequency-option" data-frequency="daily">
+                        <i class="fal fa-calendar-day"></i>
+                        <h4>{{ 'Daily'|translate(current_language) }}</h4>
+                        <p>{{ 'Every day'|translate(current_language) }}</p>
+                    </div>
+                    <div class="frequency-option" data-frequency="weekly">
+                        <i class="fal fa-calendar-week"></i>
+                        <h4>{{ 'Weekly'|translate(current_language) }}</h4>
+                        <p>{{ 'Once per week'|translate(current_language) }}</p>
+                    </div>
+                    <div class="frequency-option" data-frequency="biweekly">
+                        <i class="fal fa-calendar-alt"></i>
+                        <h4>{{ 'Bi-weekly'|translate(current_language) }}</h4>
+                        <p>{{ 'Every 2 weeks'|translate(current_language) }}</p>
+                    </div>
+                    <div class="frequency-option" data-frequency="monthly">
+                        <i class="fal fa-calendar"></i>
+                        <h4>{{ 'Monthly'|translate(current_language) }}</h4>
+                        <p>{{ 'Once per month'|translate(current_language) }}</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="subscription-preview">
+                <h3>{{ 'Estimated Subscription Savings'|translate(current_language) }}</h3>
+                <div class="preview-details">
+                    <div class="preview-item">
+                        <div class="label">{{ 'Delivery Frequency'|translate(current_language) }}</div>
+                        <div class="value" id="preview-frequency">{{ 'Select above'|translate(current_language) }}</div>
+                    </div>
+                    <div class="preview-item">
+                        <div class="label">{{ 'Your Savings'|translate(current_language) }}</div>
+                        <div class="value" id="preview-savings">0%</div>
+                    </div>
+                </div>
+
+                <div class="preview-cta">
+                    <a href="{{ url_for('frontend.shop') }}" class="theme-btn btn-one">
+                        {{ 'Browse Products to Subscribe'|translate(current_language) }} <i class="fal fa-arrow-right"></i>
+                    </a>
+                    <p style="margin-top: 15px; font-size: 14px; color: #666;">
+                        {{ 'Select your products, then choose subscription at checkout'|translate(current_language) }}
+                    </p>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- FAQ Section -->
 <section class="faq-section">
     <div class="auto-container">
         <div class="sec-title centred">
-            <p>{{ 'Got Questions?'|translate(current_language) }}</p>
+            <span>{{ 'Got Questions?'|translate(current_language) }}</span>
             <h2>{{ 'Subscription FAQ'|translate(current_language) }}</h2>
         </div>
-        
-        <div class="row clearfix">
-            <div class="col-lg-12 col-md-12 col-sm-12 content-column">
-                <div class="content_block_1">
-                    <div class="content-box">
-                        <ul class="accordion-box">
-                            <li class="accordion block active-block">
-                                <div class="acc-btn active">
-                                    <div class="icon-outer"><i class="fal fa-plus"></i></div>
-                                    <h4>{{ 'Can I change my subscription plan?'|translate(current_language) }}</h4>
-                                </div>
-                                <div class="acc-content current">
-                                    <div class="text">
-                                        <p>{{ 'Yes, you can upgrade or downgrade your subscription plan at any time. Changes will take effect with your next billing cycle. Contact our customer service team or manage your subscription through your online account.'|translate(current_language) }}</p>
-                                    </div>
-                                </div>
-                            </li>
-                            <li class="accordion block">
-                                <div class="acc-btn">
-                                    <div class="icon-outer"><i class="fal fa-plus"></i></div>
-                                    <h4>{{ 'What if I need to pause my subscription?'|translate(current_language) }}</h4>
-                                </div>
-                                <div class="acc-content">
-                                    <div class="text">
-                                        <p>{{ 'You can pause your subscription for up to 3 months for vacations or other reasons. Simply log into your account or call our customer service team at least 48 hours before your next scheduled delivery.'|translate(current_language) }}</p>
-                                    </div>
-                                </div>
-                            </li>
-                            <li class="accordion block">
-                                <div class="acc-btn">
-                                    <div class="icon-outer"><i class="fal fa-plus"></i></div>
-                                    <h4>{{ 'Are there any setup fees or contracts?'|translate(current_language) }}</h4>
-                                </div>
-                                <div class="acc-content">
-                                    <div class="text">
-                                        <p>{{ 'No setup fees and no long-term contracts required. You can cancel your subscription at any time with 30 days notice. Water cooler rental is included in all plans at no extra cost.'|translate(current_language) }}</p>
-                                    </div>
-                                </div>
-                            </li>
-                            <li class="accordion block">
-                                <div class="acc-btn">
-                                    <div class="icon-outer"><i class="fal fa-plus"></i></div>
-                                    <h4>{{ 'What payment methods do you accept?'|translate(current_language) }}</h4>
-                                </div>
-                                <div class="acc-content">
-                                    <div class="text">
-                                        <p>{{ 'We accept all major credit cards, bank transfers, and automatic monthly billing. Business accounts can also use invoice billing with net 30 terms after credit approval.'|translate(current_language) }}</p>
-                                    </div>
-                                </div>
-                            </li>
-                            <li class="accordion block">
-                                <div class="acc-btn">
-                                    <div class="icon-outer"><i class="fal fa-plus"></i></div>
-                                    <h4>{{ 'What happens if I miss a delivery?'|translate(current_language) }}</h4>
-                                </div>
-                                <div class="acc-content">
-                                    <div class="text">
-                                        <p>{{ 'We will attempt to reschedule your delivery within 24-48 hours at no extra charge. Our drivers will leave a note if you are not available. You can also reschedule deliveries through your online account.'|translate(current_language) }}</p>
-                                    </div>
-                                </div>
-                            </li>
-                        </ul>
+
+        <ul class="accordion-box">
+            <li class="accordion block">
+                <div class="acc-btn">
+                    <div class="icon-outer"><i class="fal fa-plus"></i></div>
+                    <h4>{{ 'How do subscriptions work?'|translate(current_language) }}</h4>
+                </div>
+                <div class="acc-content">
+                    <div class="text">
+                        <p>{{ 'Subscriptions let you create a custom recurring water delivery schedule. Choose your products, select how often you want deliveries (daily, weekly, biweekly, or monthly), and we\'ll automatically deliver to your door. You can modify, pause, or cancel anytime.'|translate(current_language) }}</p>
                     </div>
                 </div>
-            </div>
+            </li>
+
+            <li class="accordion block">
+                <div class="acc-btn">
+                    <div class="icon-outer"><i class="fal fa-plus"></i></div>
+                    <h4>{{ 'Can I customize my subscription?'|translate(current_language) }}</h4>
+                </div>
+                <div class="acc-content">
+                    <div class="text">
+                        <p>{{ 'Absolutely! Unlike fixed plans, our subscriptions are fully customizable. Choose any products from our catalog, set your own quantities, select your preferred delivery frequency, and even set specific delivery days. Change items, quantities, or frequency anytime through your account.'|translate(current_language) }}</p>
+                    </div>
+                </div>
+            </li>
+
+            <li class="accordion block">
+                <div class="acc-btn">
+                    <div class="icon-outer"><i class="fal fa-plus"></i></div>
+                    <h4>{{ 'What if I need to pause or skip a delivery?'|translate(current_language) }}</h4>
+                </div>
+                <div class="acc-content">
+                    <div class="text">
+                        <p>{{ 'You can pause your subscription anytime for up to 3 months, perfect for vacations or extended travel. You can also skip individual deliveries with 48 hours notice. Both options are available through your online account or by contacting our support team.'|translate(current_language) }}</p>
+                    </div>
+                </div>
+            </li>
+
+            <li class="accordion block">
+                <div class="acc-btn">
+                    <div class="icon-outer"><i class="fal fa-plus"></i></div>
+                    <h4>{{ 'Are there any contracts or cancellation fees?'|translate(current_language) }}</h4>
+                </div>
+                <div class="acc-content">
+                    <div class="text">
+                        <p>{{ 'No contracts, no commitments, no cancellation fees. You can cancel your subscription at any time with no penalties. We believe in earning your business through great service, not locking you into contracts.'|translate(current_language) }}</p>
+                    </div>
+                </div>
+            </li>
+
+            <li class="accordion block">
+                <div class="acc-btn">
+                    <div class="icon-outer"><i class="fal fa-plus"></i></div>
+                    <h4>{{ 'How much can I save with a subscription?'|translate(current_language) }}</h4>
+                </div>
+                <div class="acc-content">
+                    <div class="text">
+                        <p>{{ 'Subscription members save up to 20% compared to one-time purchases. You also get free delivery, earn bonus loyalty points (up to 2x multiplier), and access exclusive subscriber-only promotions. The exact savings depend on your chosen products and frequency.'|translate(current_language) }}</p>
+                    </div>
+                </div>
+            </li>
+
+            <li class="accordion block">
+                <div class="acc-btn">
+                    <div class="icon-outer"><i class="fal fa-plus"></i></div>
+                    <h4>{{ 'What payment methods do you accept?'|translate(current_language) }}</h4>
+                </div>
+                <div class="acc-content">
+                    <div class="text">
+                        <p>{{ 'We accept credit/debit cards, Payme, Click, and cash on delivery. For automatic billing, you can securely save your payment method. Business subscribers can also use invoice billing with NET 30 terms after credit approval.'|translate(current_language) }}</p>
+                    </div>
+                </div>
+            </li>
+
+            <li class="accordion block">
+                <div class="acc-btn">
+                    <div class="icon-outer"><i class="fal fa-plus"></i></div>
+                    <h4>{{ 'Can I change my delivery address?'|translate(current_language) }}</h4>
+                </div>
+                <div class="acc-content">
+                    <div class="text">
+                        <p>{{ 'Yes, you can update your delivery address anytime through your account. Changes made at least 48 hours before your next scheduled delivery will take effect immediately. For last-minute changes, please contact our support team.'|translate(current_language) }}</p>
+                    </div>
+                </div>
+            </li>
+
+            <li class="accordion block">
+                <div class="acc-btn">
+                    <div class="icon-outer"><i class="fal fa-plus"></i></div>
+                    <h4>{{ 'What happens if a payment fails?'|translate(current_language) }}</h4>
+                </div>
+                <div class="acc-content">
+                    <div class="text">
+                        <p>{{ 'If automatic payment fails, we\'ll notify you immediately via email and SMS. You\'ll have 48 hours to update your payment method. After 3 failed payment attempts, your subscription will be automatically paused until payment is resolved. No penalties or fees apply.'|translate(current_language) }}</p>
+                    </div>
+                </div>
+            </li>
+        </ul>
+    </div>
+</section>
+
+<!-- CTA Section -->
+<section class="cta-section">
+    <div class="auto-container">
+        <h2>{{ 'Ready to Start Your Subscription?'|translate(current_language) }}</h2>
+        <p>{{ 'Join thousands of satisfied customers enjoying convenient, reliable water delivery'|translate(current_language) }}</p>
+        <div class="cta-buttons">
+            <a href="{{ url_for('frontend.shop') }}" class="theme-btn btn-primary">
+                {{ 'Browse Products'|translate(current_language) }}
+            </a>
+            <a href="{{ url_for('frontend.contact') }}" class="theme-btn btn-secondary">
+                {{ 'Contact Us'|translate(current_language) }}
+            </a>
         </div>
     </div>
 </section>
-<!-- FAQ section end -->
-
-<!-- Subscription Modal -->
-<div class="modal fade" id="subscriptionModal" tabindex="-1" role="dialog" aria-labelledby="subscriptionModalLabel" aria-hidden="true">
-    <div class="modal-dialog modal-lg" role="document">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title" id="subscriptionModalLabel">{{ 'Subscribe to Plan'|translate(current_language) }}</h5>
-                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
-                    <span aria-hidden="true">&times;</span>
-                </button>
-            </div>
-            <div class="modal-body">
-                <form id="subscriptionForm">
-                    <div class="row">
-                        <div class="col-md-6">
-                            <div class="form-group">
-                                <label for="firstName">{{ 'First Name'|translate(current_language) }}</label>
-                                <input type="text" class="form-control" id="firstName" required>
-                            </div>
-                        </div>
-                        <div class="col-md-6">
-                            <div class="form-group">
-                                <label for="lastName">{{ 'Last Name'|translate(current_language) }}</label>
-                                <input type="text" class="form-control" id="lastName" required>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="row">
-                        <div class="col-md-6">
-                            <div class="form-group">
-                                <label for="email">{{ 'Email Address'|translate(current_language) }}</label>
-                                <input type="email" class="form-control" id="email" required>
-                            </div>
-                        </div>
-                        <div class="col-md-6">
-                            <div class="form-group">
-                                <label for="phone">{{ 'Phone Number'|translate(current_language) }}</label>
-                                <input type="tel" class="form-control" id="phone" required>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="form-group">
-                        <label for="address">{{ 'Delivery Address'|translate(current_language) }}</label>
-                        <textarea class="form-control" id="address" rows="3" required></textarea>
-                    </div>
-                    <div class="row">
-                        <div class="col-md-6">
-                            <div class="form-group">
-                                <label for="deliveryDay">{{ 'Preferred Delivery Day'|translate(current_language) }}</label>
-                                <select class="form-control" id="deliveryDay" required>
-                                    <option value="">{{ 'Select Day'|translate(current_language) }}</option>
-                                    <option value="monday">{{ 'Monday'|translate(current_language) }}</option>
-                                    <option value="tuesday">{{ 'Tuesday'|translate(current_language) }}</option>
-                                    <option value="wednesday">{{ 'Wednesday'|translate(current_language) }}</option>
-                                    <option value="thursday">{{ 'Thursday'|translate(current_language) }}</option>
-                                    <option value="friday">{{ 'Friday'|translate(current_language) }}</option>
-                                    <option value="saturday">{{ 'Saturday'|translate(current_language) }}</option>
-                                </select>
-                            </div>
-                        </div>
-                        <div class="col-md-6">
-                            <div class="form-group">
-                                <label for="deliveryTime">{{ 'Preferred Time'|translate(current_language) }}</label>
-                                <select class="form-control" id="deliveryTime" required>
-                                    <option value="">{{ 'Select Time'|translate(current_language) }}</option>
-                                    <option value="morning">{{ '9:00 AM - 12:00 PM'|translate(current_language) }}</option>
-                                    <option value="afternoon">{{ '12:00 PM - 3:00 PM'|translate(current_language) }}</option>
-                                    <option value="evening">{{ '3:00 PM - 6:00 PM'|translate(current_language) }}</option>
-                                </select>
-                            </div>
-                        </div>
-                    </div>
-                    <input type="hidden" id="selectedPlan" name="plan">
-                </form>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-dismiss="modal">{{ 'Cancel'|translate(current_language) }}</button>
-                <button type="button" class="btn theme-btn btn-one" id="confirmSubscription">{{ 'Subscribe Now'|translate(current_language) }}</button>
-            </div>
-        </div>
-    </div>
-</div>
 
 {% endblock %}
 
 {% block extra_js %}
 <script>
 document.addEventListener('DOMContentLoaded', function() {
-    // Subscription button handlers
-    const subscriptionBtns = document.querySelectorAll('.subscription-btn');
-    const modal = document.getElementById('subscriptionModal');
-    const confirmBtn = document.getElementById('confirmSubscription');
-    const form = document.getElementById('subscriptionForm');
-    let selectedPlan = '';
-    
-    subscriptionBtns.forEach(btn => {
-        btn.addEventListener('click', function(e) {
-            e.preventDefault();
-            selectedPlan = this.dataset.plan;
-            document.getElementById('selectedPlan').value = selectedPlan;
-            
-            // Update modal title
-            const modalTitle = document.getElementById('subscriptionModalLabel');
-            modalTitle.textContent = `{{ 'Subscribe to '|translate(current_language) }}${selectedPlan.charAt(0).toUpperCase() + selectedPlan.slice(1)} {{ 'Plan'|translate(current_language) }}`;
-            
-            // Show modal
-            $('#subscriptionModal').modal('show');
+    // Subscription builder functionality
+    const frequencyOptions = document.querySelectorAll('.frequency-option');
+    const previewFrequency = document.getElementById('preview-frequency');
+    const previewSavings = document.getElementById('preview-savings');
+
+    let selectedFrequency = null;
+
+    // Frequency selection handler
+    frequencyOptions.forEach(option => {
+        option.addEventListener('click', function() {
+            // Remove selected class from all options
+            frequencyOptions.forEach(opt => opt.classList.remove('selected'));
+
+            // Add selected class to clicked option
+            this.classList.add('selected');
+
+            // Get selected frequency
+            selectedFrequency = this.dataset.frequency;
+
+            // Update preview
+            updatePreview();
         });
     });
-    
-    // Confirm subscription
-    confirmBtn.addEventListener('click', async function() {
-        if (form.checkValidity()) {
-            try {
-                const formData = new FormData(form);
-                const subscriptionData = {
-                    plan: selectedPlan,
-                    first_name: formData.get('firstName') || document.getElementById('firstName').value,
-                    last_name: formData.get('lastName') || document.getElementById('lastName').value,
-                    email: formData.get('email') || document.getElementById('email').value,
-                    phone: formData.get('phone') || document.getElementById('phone').value,
-                    address: formData.get('address') || document.getElementById('address').value,
-                    delivery_day: formData.get('deliveryDay') || document.getElementById('deliveryDay').value,
-                    delivery_time: formData.get('deliveryTime') || document.getElementById('deliveryTime').value
-                };
-                
-                const response = await apiRequest('/subscriptions/create', {
-                    method: 'POST',
-                    body: JSON.stringify(subscriptionData)
+
+    function updatePreview() {
+        if (!selectedFrequency) return;
+
+        // Update frequency display
+        const frequencyLabels = {
+            'daily': '{{ 'Daily'|translate(current_language) }}',
+            'weekly': '{{ 'Weekly'|translate(current_language) }}',
+            'biweekly': '{{ 'Bi-weekly'|translate(current_language) }}',
+            'monthly': '{{ 'Monthly'|translate(current_language) }}'
+        };
+
+        previewFrequency.textContent = frequencyLabels[selectedFrequency];
+
+        // Calculate discount based on frequency
+        const discounts = {
+            'daily': 5,
+            'weekly': 10,
+            'biweekly': 15,
+            'monthly': 20
+        };
+
+        const discount = discounts[selectedFrequency] || 0;
+        previewSavings.textContent = `${discount}%`;
+    }
+
+    // Smooth scrolling for anchor links
+    document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+        anchor.addEventListener('click', function (e) {
+            e.preventDefault();
+            const href = this.getAttribute('href');
+            if (href === '#') return;
+
+            const target = document.querySelector(href);
+            if (target) {
+                target.scrollIntoView({
+                    behavior: 'smooth',
+                    block: 'start'
                 });
-                
-                const result = await response.json();
-                
-                if (response.ok && result.success) {
-                    showNotification('{{ "Subscription created successfully! We will contact you to confirm delivery details."|translate(current_language) }}', 'success');
-                    $('#subscriptionModal').modal('hide');
-                    form.reset();
-                } else {
-                    showNotification(result.message || '{{ "Failed to create subscription. Please try again."|translate(current_language) }}', 'error');
-                }
-            } catch (error) {
-                console.error('Subscription error:', error);
-                showNotification('{{ "An error occurred. Please try again later."|translate(current_language) }}', 'error');
             }
-        } else {
-            form.reportValidity();
-        }
+        });
     });
-    
-    // Accordion functionality
-    const accordionButtons = document.querySelectorAll('.acc-btn');
+
+    // Accordion functionality - Fixed
+    const accordionButtons = document.querySelectorAll('.faq-section .acc-btn');
+
     accordionButtons.forEach(btn => {
-        btn.addEventListener('click', function() {
-            const accordionBlock = this.parentElement;
+        btn.addEventListener('click', function(e) {
+            e.preventDefault();
+
+            const accordionBlock = this.closest('.accordion.block');
             const content = accordionBlock.querySelector('.acc-content');
-            const isActive = accordionBlock.classList.contains('active-block');
-            
-            // Close all accordion blocks
-            accordionButtons.forEach(button => {
-                const block = button.parentElement;
+            const isActive = this.classList.contains('active');
+
+            // Close all accordion blocks first
+            document.querySelectorAll('.faq-section .accordion.block').forEach(block => {
+                const blockBtn = block.querySelector('.acc-btn');
                 const blockContent = block.querySelector('.acc-content');
+
                 block.classList.remove('active-block');
-                button.classList.remove('active');
+                blockBtn.classList.remove('active');
                 blockContent.classList.remove('current');
             });
-            
-            // Open clicked accordion if it wasn't active
+
+            // If the clicked item wasn't active, open it
             if (!isActive) {
                 accordionBlock.classList.add('active-block');
                 this.classList.add('active');
                 content.classList.add('current');
             }
         });
+    });
+
+    // Animation on scroll
+    const observerOptions = {
+        threshold: 0.1,
+        rootMargin: '0px 0px -100px 0px'
+    };
+
+    const observer = new IntersectionObserver(function(entries) {
+        entries.forEach(entry => {
+            if (entry.isIntersecting) {
+                entry.target.style.opacity = '1';
+                entry.target.style.transform = 'translateY(0)';
+            }
+        });
+    }, observerOptions);
+
+    // Observe elements for animation
+    document.querySelectorAll('.step-item, .feature-card, .use-case-card').forEach(el => {
+        el.style.opacity = '0';
+        el.style.transform = 'translateY(30px)';
+        el.style.transition = 'opacity 0.6s ease, transform 0.6s ease';
+        observer.observe(el);
     });
 });
 </script>

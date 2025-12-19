@@ -1,6 +1,6 @@
 {% extends "frontend/base.html" %}
 
-{% block title %}{{ 'Checkout'|translate(current_language) }} - {{ company_name }}{% endblock %}
+{% block title %}{{ 'landing.button.checkout'|t }} - {{ company_name }}{% endblock %}
 
 {% block extra_head %}
 <style>
@@ -499,11 +499,11 @@
             <div class="bg-layer" style="background-image: url({{ url_for('static', filename='images/background/page-title.jpg') }});"></div>
             <div class="auto-container">
                 <div class="content-box">
-                    <h1>{{ 'Checkout'|translate(current_language) }}</h1>
+                    <h1>{{ 'landing.button.checkout'|t }}</h1>
                     <ul class="bread-crumb clearfix">
-                        <li><a href="{{ url_for('frontend.index') }}">{{ 'Home'|translate(current_language) }}</a></li>
-                        <li><a href="{{ url_for('frontend.cart') }}">{{ 'Cart'|translate(current_language) }}</a></li>
-                        <li>{{ 'Checkout'|translate(current_language) }}</li>
+                        <li><a href="{{ url_for('frontend.index') }}">{{ 'landing.nav.home'|t }}</a></li>
+                        <li><a href="{{ url_for('frontend.cart') }}">{{ 'Cart'|t }}</a></li>
+                        <li>{{ 'landing.button.checkout'|t }}</li>
                     </ul>
                 </div>
             </div>
@@ -519,19 +519,19 @@
                         <div class="step-number">
                             <i class="far fa-check"></i>
                         </div>
-                        <div class="step-label">{{ 'Cart'|translate(current_language) }}</div>
+                        <div class="step-label">{{ 'Cart'|t }}</div>
                     </div>
                     <div class="step active">
                         <div class="step-number">2</div>
-                        <div class="step-label">{{ 'Checkout'|translate(current_language) }}</div>
+                        <div class="step-label">{{ 'landing.button.checkout'|t }}</div>
                     </div>
                     <div class="step">
                         <div class="step-number">3</div>
-                        <div class="step-label">{{ 'Payment'|translate(current_language) }}</div>
+                        <div class="step-label">{{ 'Payment'|t }}</div>
                     </div>
                     <div class="step">
                         <div class="step-number">4</div>
-                        <div class="step-label">{{ 'Confirmation'|translate(current_language) }}</div>
+                        <div class="step-label">{{ 'Confirmation'|t }}</div>
                     </div>
                 </div>
 
@@ -543,7 +543,7 @@
                             <div class="form-section" id="address-section">
                                 <h4>
                                     <i class="far fa-map-marker-alt"></i>
-                                    {{ 'Delivery Address'|translate(current_language) }}
+                                    {{ 'Delivery Address'|t }}
                                 </h4>
 
                                 <div class="address-grid" id="address-grid">
@@ -557,7 +557,7 @@
                                                    value="{{ address.id }}"
                                                    {% if loop.first %}checked{% endif %}>
                                             <div class="address-name">
-                                                {% if address.label %}{{ address.label }}{% else %}{{ 'Address'|translate(current_language) }} {{ loop.index }}{% endif %}
+                                                {% if address.label %}{{ address.label }}{% else %}{{ 'landing.contact.info.address'|t }} {{ loop.index }}{% endif %}
                                             </div>
                                             <div class="address-details">
                                                 {{ address.address_line1 }}<br>
@@ -576,7 +576,7 @@
                                     <!-- Add New Address -->
                                     <div class="address-card add-address-card" onclick="showAddAddressModal()">
                                         <i class="far fa-plus-circle"></i>
-                                        <div>{{ 'Add New Address'|translate(current_language) }}</div>
+                                        <div>{{ 'Add New Address'|t }}</div>
                                     </div>
                                 </div>
                             </div>
@@ -585,12 +585,12 @@
                             <div class="form-section" id="delivery-time-section">
                                 <h4>
                                     <i class="far fa-clock"></i>
-                                    {{ 'Delivery Time'|translate(current_language) }}
+                                    {{ 'Delivery Time'|t }}
                                 </h4>
 
                                 <div class="delivery-time-grid">
                                     <div class="date-selector">
-                                        <label>{{ 'Select Delivery Date'|translate(current_language) }}:</label>
+                                        <label>{{ 'Select Delivery Date'|t }}:</label>
                                         <input type="date"
                                                id="delivery-date"
                                                name="delivery_date"
@@ -599,11 +599,11 @@
                                     </div>
 
                                     <div>
-                                        <label>{{ 'Select Time Slot'|translate(current_language) }}:</label>
+                                        <label>{{ 'Select Time Slot'|t }}:</label>
                                         <div class="time-slots" id="time-slots-container">
                                             <!-- Time slots will be loaded dynamically -->
                                             <div style="grid-column: 1 / -1; text-align: center; padding: 20px; color: #999;">
-                                                {{ 'Please select a date first'|translate(current_language) }}
+                                                {{ 'Please select a date first'|t }}
                                             </div>
                                         </div>
                                     </div>
@@ -614,26 +614,55 @@
                             <div class="form-section" id="payment-section">
                                 <h4>
                                     <i class="far fa-credit-card"></i>
-                                    {{ 'Payment Method'|translate(current_language) }}
+                                    {{ 'Payment Method'|t }}
                                 </h4>
 
                                 <div class="payment-methods">
                                     <div class="payment-method selected" onclick="selectPaymentMethod('cash')" data-method="cash">
                                         <i class="far fa-money-bill-wave"></i>
-                                        <div class="payment-method-name">{{ 'Cash on Delivery'|translate(current_language) }}</div>
-                                        <div class="payment-method-desc">{{ 'Pay when you receive'|translate(current_language) }}</div>
+                                        <div class="payment-method-name">{{ 'Cash on Delivery'|t }}</div>
+                                        <div class="payment-method-desc">{{ 'Pay when you receive'|t }}</div>
                                     </div>
 
                                     <div class="payment-method" onclick="selectPaymentMethod('payme')" data-method="payme">
                                         <i class="far fa-mobile-alt"></i>
                                         <div class="payment-method-name">Payme</div>
-                                        <div class="payment-method-desc">{{ 'Pay via Payme'|translate(current_language) }}</div>
+                                        <div class="payment-method-desc">{{ 'Pay via Payme'|t }}</div>
                                     </div>
 
                                     <div class="payment-method" onclick="selectPaymentMethod('click')" data-method="click">
                                         <i class="far fa-credit-card"></i>
                                         <div class="payment-method-name">Click</div>
-                                        <div class="payment-method-desc">{{ 'Pay via Click'|translate(current_language) }}</div>
+                                        <div class="payment-method-desc">{{ 'Pay via Click'|t }}</div>
+                                    </div>
+                                </div>
+
+                                <!-- Card Input Form (Initially Hidden) -->
+                                <div id="card-input-container" style="display: none; margin-top: 25px; padding: 20px; background: #f9f9f9; border-radius: 8px;">
+                                    <h5 style="margin-bottom: 15px; font-weight: 600;">{{ 'Enter Card Details'|t }}</h5>
+                                    
+                                    <div class="form-group" style="margin-bottom: 15px;">
+                                        <label style="display: block; margin-bottom: 5px;">{{ 'Card Number'|t }}</label>
+                                        <input type="text" id="card-number" placeholder="8600 0000 0000 0000" maxlength="19"
+                                               style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;"
+                                               oninput="formatCardNumber(this)">
+                                    </div>
+                                    
+                                    <div class="row" style="display: flex; gap: 15px;">
+                                        <div class="form-group" style="flex: 1;">
+                                            <label style="display: block; margin-bottom: 5px;">{{ 'Expiry Date'|t }}</label>
+                                            <input type="text" id="card-expiry" placeholder="MM/YY" maxlength="5"
+                                                   style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;"
+                                                   oninput="formatCardExpiry(this)">
+                                        </div>
+                                        <div class="form-group" style="flex: 1;">
+                                            <label style="display: block; margin-bottom: 5px;">{{ 'Cardholder Name'|t }}</label>
+                                            <input type="text" id="card-holder" placeholder="{{ 'Name on card'|t }}"
+                                                   style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+                                        </div>
+                                    </div>
+                                    <div style="margin-top: 15px; font-size: 12px; color: #666;">
+                                        <i class="fas fa-lock"></i> {{ 'Your card details are securely processed by Payme.'|t }}
                                     </div>
                                 </div>
 
@@ -644,13 +673,13 @@
                             <div class="form-section" id="notes-section">
                                 <h4>
                                     <i class="far fa-comment-alt"></i>
-                                    {{ 'Order Notes'|translate(current_language) }} ({{ 'Optional'|translate(current_language) }})
+                                    {{ 'Order Notes'|t }} ({{ 'Optional'|t }})
                                 </h4>
 
                                 <div class="order-notes">
                                     <textarea id="order-notes"
                                               name="order_notes"
-                                              placeholder="{{ 'Special instructions for delivery...'|translate(current_language) }}"></textarea>
+                                              placeholder="{{ 'Special instructions for delivery...'|t }}"></textarea>
                                 </div>
                             </div>
 
@@ -661,9 +690,9 @@
                                            id="agree-terms"
                                            style="width: 20px; height: 20px; margin-right: 10px;">
                                     <span>
-                                        {{ 'I agree to the'|translate(current_language) }}
+                                        {{ 'I agree to the'|t }}
                                         <a href="{{ url_for('frontend.terms') }}" target="_blank" style="color: #00d1f9;">
-                                            {{ 'Terms and Conditions'|translate(current_language) }}
+                                            {{ 'Terms and Conditions'|t }}
                                         </a>
                                     </span>
                                 </label>
@@ -674,7 +703,7 @@
                     <!-- Right Column - Order Summary -->
                     <div class="col-lg-4 col-md-12">
                         <div class="order-summary">
-                            <h4>{{ 'Order Summary'|translate(current_language) }}</h4>
+                            <h4>{{ 'Order Summary'|t }}</h4>
 
                             <div class="summary-items" id="summary-items">
                                 <!-- Items will be loaded from cart -->
@@ -682,25 +711,25 @@
 
                             <ul class="summary-totals">
                                 <li>
-                                    {{ 'Subtotal'|translate(current_language) }}:
+                                    {{ 'Subtotal'|t }}:
                                     <span id="summary-subtotal">0 UZS</span>
                                 </li>
                                 <li>
-                                    {{ 'Delivery Fee'|translate(current_language) }}:
+                                    {{ 'Delivery Fee'|t }}:
                                     <span id="summary-delivery">0 UZS</span>
                                 </li>
                                 <li class="total">
-                                    {{ 'Total'|translate(current_language) }}:
+                                    {{ 'Total'|t }}:
                                     <span id="summary-total">0 UZS</span>
                                 </li>
                             </ul>
 
                             <div class="checkout-actions">
                                 <a href="{{ url_for('frontend.cart') }}" class="theme-btn btn-two">
-                                    <i class="far fa-arrow-left"></i> {{ 'Back to Cart'|translate(current_language) }}
+                                    <i class="far fa-arrow-left"></i> {{ 'Back to Cart'|t }}
                                 </a>
                                 <button onclick="placeOrder()" class="theme-btn btn-one" id="place-order-btn">
-                                    {{ 'Place Order'|translate(current_language) }}
+                                    {{ 'Place Order'|t }}
                                     <i class="far fa-arrow-right"></i>
                                 </button>
                             </div>
@@ -715,7 +744,7 @@
         <div id="address-modal" class="modal-overlay" style="display: none;">
             <div class="modal-content" style="max-width: 600px; width: 90%; max-height: 90vh; overflow-y: auto;">
                 <div class="modal-header" style="display: flex; justify-content: space-between; align-items: center; padding: 20px; border-bottom: 2px solid #f0f0f0;">
-                    <h3 id="modal-title" style="margin: 0;">{{ 'Add New Address'|translate(current_language) }}</h3>
+                    <h3 id="modal-title" style="margin: 0;">{{ 'Add New Address'|t }}</h3>
                     <button onclick="closeAddressModal()" style="background: none; border: none; font-size: 24px; cursor: pointer; color: #666;">
                         <i class="far fa-times"></i>
                     </button>
@@ -723,70 +752,70 @@
                 <div class="modal-body" style="padding: 30px;">
                     <form id="address-form" onsubmit="saveAddress(event)">
                         <div class="form-group" style="margin-bottom: 20px;">
-                            <label style="display: block; margin-bottom: 8px; font-weight: 600;">{{ 'Label'|translate(current_language) }} ({{ 'Optional'|translate(current_language) }})</label>
-                            <input type="text" id="address-label" placeholder="{{ 'e.g., Home, Office'|translate(current_language) }}"
+                            <label style="display: block; margin-bottom: 8px; font-weight: 600;">{{ 'Label'|t }} ({{ 'Optional'|t }})</label>
+                            <input type="text" id="address-label" placeholder="{{ 'e.g., Home, Office'|t }}"
                                    style="width: 100%; padding: 12px; border: 2px solid #e5e5e5; border-radius: 5px; font-size: 15px;">
                         </div>
 
                         <div class="form-group" style="margin-bottom: 20px;">
-                            <label style="display: block; margin-bottom: 8px; font-weight: 600;">{{ 'Address Line 1'|translate(current_language) }} *</label>
-                            <input type="text" id="address-line1" required placeholder="{{ 'Street address'|translate(current_language) }}"
+                            <label style="display: block; margin-bottom: 8px; font-weight: 600;">{{ 'Address Line 1'|t }} *</label>
+                            <input type="text" id="address-line1" required placeholder="{{ 'Street address'|t }}"
                                    style="width: 100%; padding: 12px; border: 2px solid #e5e5e5; border-radius: 5px; font-size: 15px;">
                         </div>
 
                         <div class="form-group" style="margin-bottom: 20px;">
-                            <label style="display: block; margin-bottom: 8px; font-weight: 600;">{{ 'Address Line 2'|translate(current_language) }} ({{ 'Optional'|translate(current_language) }})</label>
-                            <input type="text" id="address-line2" placeholder="{{ 'Apartment, suite, etc.'|translate(current_language) }}"
+                            <label style="display: block; margin-bottom: 8px; font-weight: 600;">{{ 'Address Line 2'|t }} ({{ 'Optional'|t }})</label>
+                            <input type="text" id="address-line2" placeholder="{{ 'Apartment, suite, etc.'|t }}"
                                    style="width: 100%; padding: 12px; border: 2px solid #e5e5e5; border-radius: 5px; font-size: 15px;">
                         </div>
 
                         <div class="row" style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px;">
                             <div class="form-group">
-                                <label style="display: block; margin-bottom: 8px; font-weight: 600;">{{ 'City'|translate(current_language) }} *</label>
-                                <input type="text" id="address-city" required placeholder="{{ 'City'|translate(current_language) }}"
+                                <label style="display: block; margin-bottom: 8px; font-weight: 600;">{{ 'City'|t }} *</label>
+                                <input type="text" id="address-city" required placeholder="{{ 'City'|t }}"
                                        style="width: 100%; padding: 12px; border: 2px solid #e5e5e5; border-radius: 5px; font-size: 15px;">
                             </div>
 
                             <div class="form-group">
-                                <label style="display: block; margin-bottom: 8px; font-weight: 600;">{{ 'State/Region'|translate(current_language) }} ({{ 'Optional'|translate(current_language) }})</label>
-                                <input type="text" id="address-state" placeholder="{{ 'State'|translate(current_language) }}"
+                                <label style="display: block; margin-bottom: 8px; font-weight: 600;">{{ 'State/Region'|t }} ({{ 'Optional'|t }})</label>
+                                <input type="text" id="address-state" placeholder="{{ 'State'|t }}"
                                        style="width: 100%; padding: 12px; border: 2px solid #e5e5e5; border-radius: 5px; font-size: 15px;">
                             </div>
                         </div>
 
                         <div class="row" style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px;">
                             <div class="form-group">
-                                <label style="display: block; margin-bottom: 8px; font-weight: 600;">{{ 'Postal Code'|translate(current_language) }} ({{ 'Optional'|translate(current_language) }})</label>
-                                <input type="text" id="address-postal-code" placeholder="{{ 'Postal code'|translate(current_language) }}"
+                                <label style="display: block; margin-bottom: 8px; font-weight: 600;">{{ 'Postal Code'|t }} ({{ 'Optional'|t }})</label>
+                                <input type="text" id="address-postal-code" placeholder="{{ 'Postal code'|t }}"
                                        style="width: 100%; padding: 12px; border: 2px solid #e5e5e5; border-radius: 5px; font-size: 15px;">
                             </div>
 
                             <div class="form-group">
-                                <label style="display: block; margin-bottom: 8px; font-weight: 600;">{{ 'Phone Number'|translate(current_language) }}</label>
+                                <label style="display: block; margin-bottom: 8px; font-weight: 600;">{{ 'Phone Number'|t }}</label>
                                 <input type="tel" id="address-phone" placeholder="+998901234567"
                                        style="width: 100%; padding: 12px; border: 2px solid #e5e5e5; border-radius: 5px; font-size: 15px;">
                             </div>
                         </div>
 
                         <div class="form-group" style="margin-bottom: 20px;">
-                            <label style="display: block; margin-bottom: 8px; font-weight: 600;">{{ 'Delivery Instructions'|translate(current_language) }} ({{ 'Optional'|translate(current_language) }})</label>
-                            <textarea id="delivery-instructions" rows="3" placeholder="{{ 'Any special instructions for delivery'|translate(current_language) }}"
+                            <label style="display: block; margin-bottom: 8px; font-weight: 600;">{{ 'Delivery Instructions'|t }} ({{ 'Optional'|t }})</label>
+                            <textarea id="delivery-instructions" rows="3" placeholder="{{ 'Any special instructions for delivery'|t }}"
                                       style="width: 100%; padding: 12px; border: 2px solid #e5e5e5; border-radius: 5px; font-size: 15px; resize: vertical;"></textarea>
                         </div>
 
                         <div class="form-group" style="margin-bottom: 25px;">
                             <label style="display: flex; align-items: center; cursor: pointer;">
                                 <input type="checkbox" id="is-default" style="width: 20px; height: 20px; margin-right: 10px;">
-                                <span>{{ 'Set as default address'|translate(current_language) }}</span>
+                                <span>{{ 'Set as default address'|t }}</span>
                             </label>
                         </div>
 
                         <div style="display: flex; gap: 15px;">
                             <button type="button" onclick="closeAddressModal()" class="theme-btn btn-three" style="flex: 1;">
-                                {{ 'Cancel'|translate(current_language) }}
+                                {{ 'Cancel'|t }}
                             </button>
                             <button type="submit" class="theme-btn btn-one" style="flex: 1;">
-                                <i class="far fa-save"></i> {{ 'Save Address'|translate(current_language) }}
+                                <i class="far fa-save"></i> {{ 'Save Address'|t }}
                             </button>
                         </div>
                     </form>
@@ -798,8 +827,8 @@
         <div id="loading-overlay" class="loading-overlay" style="display: none;">
             <div class="loading-content">
                 <div class="loading-spinner"></div>
-                <h4>{{ 'Processing your order...'|translate(current_language) }}</h4>
-                <p>{{ 'Please wait'|translate(current_language) }}</p>
+                <h4>{{ 'Processing your order...'|t }}</h4>
+                <p>{{ 'Please wait'|t }}</p>
             </div>
         </div>
 {% endblock %}
@@ -888,7 +917,7 @@ function renderOrderSummary(products) {
                      class="summary-item-image">
                 <div class="summary-item-details">
                     <div class="summary-item-name">${product.name}</div>
-                    <div class="summary-item-qty">{{ 'Qty'|translate(current_language) }}: ${cartItem.quantity}</div>
+                    <div class="summary-item-qty">{{ 'Qty'|t }}: ${cartItem.quantity}</div>
                 </div>
                 <div class="summary-item-price">${formatPrice(itemTotal)}</div>
             </div>
@@ -909,7 +938,7 @@ function updateSummaryTotals(subtotal) {
 
     document.getElementById('summary-subtotal').textContent = formatPrice(subtotal);
     document.getElementById('summary-delivery').textContent = deliveryFee === 0
-        ? '{{ "Free"|translate(current_language) }}'
+        ? '{{ "Free"|t }}'
         : formatPrice(deliveryFee);
     document.getElementById('summary-total').textContent = formatPrice(total);
 }
@@ -976,7 +1005,7 @@ function renderTimeSlots(slots) {
                  onclick="${isAvailable ? `selectTimeSlot(${slot.id}, '${slot.start_time}', '${slot.end_time}')` : ''}"
                  data-slot-id="${slot.id}">
                 <div class="time-slot-time">${slot.start_time} - ${slot.end_time}</div>
-                <div class="time-slot-info">${isAvailable ? '{{ "Available"|translate(current_language) }}' : '{{ "Full"|translate(current_language) }}'}</div>
+                <div class="time-slot-info">${isAvailable ? '{{ "Available"|t }}' : '{{ "Full"|t }}'}</div>
             </div>
         `;
     });
@@ -992,10 +1021,10 @@ function renderTimeSlots(slots) {
 // Render default time slots (fallback)
 function renderDefaultTimeSlots() {
     const defaultSlots = [
-        { time: '09:00 - 12:00', label: '{{ "Morning"|translate(current_language) }}' },
-        { time: '12:00 - 15:00', label: '{{ "Afternoon"|translate(current_language) }}' },
-        { time: '15:00 - 18:00', label: '{{ "Evening"|translate(current_language) }}' },
-        { time: '18:00 - 21:00', label: '{{ "Night"|translate(current_language) }}' }
+        { time: '09:00 - 12:00', label: '{{ "Morning"|t }}' },
+        { time: '12:00 - 15:00', label: '{{ "Afternoon"|t }}' },
+        { time: '15:00 - 18:00', label: '{{ "Evening"|t }}' },
+        { time: '18:00 - 21:00', label: '{{ "Night"|t }}' }
     ];
 
     const container = document.getElementById('time-slots-container');
@@ -1045,34 +1074,64 @@ function selectPaymentMethod(method) {
     event.target.closest('.payment-method').classList.add('selected');
     selectedPaymentMethod = method;
     document.getElementById('selected-payment-method').value = method;
+
+    // Show/Hide card input
+    const cardContainer = document.getElementById('card-input-container');
+    if (method === 'payme') {
+        cardContainer.style.display = 'block';
+    } else {
+        cardContainer.style.display = 'none';
+    }
+}
+
+// Format Card Number
+function formatCardNumber(input) {
+    let value = input.value.replace(/\D/g, '');
+    let formattedValue = '';
+    for (let i = 0; i < value.length; i++) {
+        if (i > 0 && i % 4 === 0) {
+            formattedValue += ' ';
+        }
+        formattedValue += value[i];
+    }
+    input.value = formattedValue;
+}
+
+// Format Expiry
+function formatCardExpiry(input) {
+    let value = input.value.replace(/\D/g, '');
+    if (value.length >= 2) {
+        value = value.substring(0, 2) + '/' + value.substring(2, 4);
+    }
+    input.value = value;
 }
 
 // Show add address modal (placeholder)
 function showAddAddressModal() {
-    alert('{{ "Address management feature coming soon!"|translate(current_language) }}\n{{ "For now, please add addresses through your account settings."|translate(current_language) }}');
+    alert('{{ "Address management feature coming soon!"|t }}\n{{ "For now, please add addresses through your account settings."|t }}');
 }
 
 // Place order
 async function placeOrder() {
     // Validation
     if (!selectedAddress) {
-        showNotification('{{ "Please select a delivery address"|translate(current_language) }}', 'warning');
+        showNotification('{{ "Please select a delivery address"|t }}', 'warning');
         return;
     }
 
     if (!deliveryDate) {
-        showNotification('{{ "Please select a delivery date"|translate(current_language) }}', 'warning');
+        showNotification('{{ "Please select a delivery date"|t }}', 'warning');
         return;
     }
 
     if (!selectedTimeSlot) {
-        showNotification('{{ "Please select a delivery time"|translate(current_language) }}', 'warning');
+        showNotification('{{ "Please select a delivery time"|t }}', 'warning');
         return;
     }
 
     const agreedToTerms = document.getElementById('agree-terms').checked;
     if (!agreedToTerms) {
-        showNotification('{{ "Please agree to the terms and conditions"|translate(current_language) }}', 'warning');
+        showNotification('{{ "Please agree to the terms and conditions"|t }}', 'warning');
         return;
     }
 
@@ -1081,6 +1140,53 @@ async function placeOrder() {
     document.getElementById('place-order-btn').disabled = true;
 
     try {
+        // Create order logic
+        let savedCardId = null;
+
+        // If Payme is selected, Tokenize -> Save -> Order
+        if (selectedPaymentMethod === 'payme') {
+            const cardNum = document.getElementById('card-number').value.replace(/\s/g, '');
+            const cardExp = document.getElementById('card-expiry').value;
+            const cardName = document.getElementById('card-holder').value;
+
+            if (!cardNum || cardNum.length < 16) throw new Error('{{ "Invalid card number"|t }}');
+            if (!cardExp || cardExp.length < 5) throw new Error('{{ "Invalid expiry date"|t }}');
+            if (!cardName) throw new Error('{{ "Cardholder name required"|t }}');
+
+            // 1. Tokenize
+            const tokenResp = await apiRequest('/payments/tokenize', {
+                method: 'POST',
+                body: JSON.stringify({ card_number: cardNum, expiry: cardExp })
+            });
+
+            if (!tokenResp.ok) {
+                 const err = await tokenResp.json();
+                 throw new Error(err.message || 'Card validation failed');
+            }
+            const tokenData = await tokenResp.json();
+            const token = tokenData.data.token;
+            
+            // 2. Save Card (Temporary or Permanent)
+            const saveResp = await apiRequest('/payments/cards', {
+                method: 'POST',
+                body: JSON.stringify({
+                    card_token: token,
+                    cardholder_name: cardName,
+                    expiry_month: parseInt(cardExp.split('/')[0]),
+                    expiry_year: parseInt('20' + cardExp.split('/')[1]),
+                    card_number: '**** **** **** ' + cardNum.slice(-4), // Send masked number only
+                    is_default: false
+                })
+            });
+
+            if (!saveResp.ok) {
+                 const err = await saveResp.json();
+                 throw new Error(err.message || 'Failed to save card');
+            }
+            const cardData = await saveResp.json();
+            savedCardId = cardData.data.card.id;
+        }
+
         // Prepare order data
         const orderData = {
             items: cartItems,
@@ -1090,6 +1196,7 @@ async function placeOrder() {
             delivery_date: deliveryDate,
             delivery_time_slot: selectedTimeSlot,
             payment_method: selectedPaymentMethod,
+            saved_card_id: savedCardId, // Pass the new card ID
             delivery_notes: document.getElementById('order-notes').value || null
         };
 
@@ -1123,7 +1230,7 @@ async function placeOrder() {
         }
     } catch (error) {
         console.error('Error placing order:', error);
-        showNotification(error.message || '{{ "Failed to place order. Please try again."|translate(current_language) }}', 'error');
+        showNotification(error.message || '{{ "Failed to place order. Please try again."|t }}', 'error');
         document.getElementById('loading-overlay').style.display = 'none';
         document.getElementById('place-order-btn').disabled = false;
     }

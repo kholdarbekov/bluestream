@@ -44,11 +44,13 @@ from business_app.utils.constants import UserRole, SubscriptionStatus, OrderStat
 # from business_app.tasks.admin_tasks import send_bulk_email_task, generate_report_task
 from business_app import db
 from business_app.utils.helpers import get_current_language
+from business_app.utils.translations import get_translation
 from business_app.utils.api_responses import (
     success_response, error_response, paginated_response, created_response,
     not_found_response, validation_error_response, internal_error_response,
     forbidden_response
 )
+from business_app.utils.bot_webhook import trigger_translation_reload
 
 admin_bp = Blueprint('admin', __name__)
 
@@ -1533,7 +1535,7 @@ def delete_category(category_id):
             db.session.delete(category)
             db.session.commit()
             current_app.logger.info(f"Category deleted: {category_name} (ID: {category_id})")
-            return success_response(message='Category deleted successfully')
+            return success_response(message=get_translation('api.admin.success.category_deleted'))
 
     except Exception as e:
         db.session.rollback()
@@ -1561,7 +1563,7 @@ def reorder_category(category_id):
         category.sort_order = new_sort_order
         db.session.commit()
 
-        return success_response(message='Category order updated successfully')
+        return success_response(message=get_translation('api.admin.success.category_order_updated'))
 
     except Exception as e:
         db.session.rollback()
@@ -1734,7 +1736,7 @@ def update_time_slot(slot_id):
 
         current_app.logger.info(f"Time slot updated: {slot.name} (ID: {slot_id})")
 
-        return success_response(message='Time slot updated successfully')
+        return success_response(message=get_translation('api.admin.success.time_slot_updated'))
 
     except Exception as e:
         db.session.rollback()
@@ -1759,7 +1761,7 @@ def delete_time_slot(slot_id):
 
         current_app.logger.info(f"Time slot deleted: {slot_name} (ID: {slot_id})")
 
-        return success_response(message='Time slot deleted successfully')
+        return success_response(message=get_translation('api.admin.success.time_slot_deleted'))
 
     except Exception as e:
         db.session.rollback()
@@ -2142,7 +2144,7 @@ def delete_delivery_route(route_id):
         db.session.delete(route)
         db.session.commit()
 
-        return success_response(message='Delivery route deleted successfully')
+        return success_response(message=get_translation('api.admin.success.delivery_route_deleted'))
 
     except Exception as e:
         db.session.rollback()
@@ -3352,7 +3354,7 @@ def delete_review(review_id):
 
         if success:
             current_app.logger.info(f"Review deleted by admin: {review_id}")
-            return success_response(message='Review deleted successfully')
+            return success_response(message=get_translation('api.admin.success.review_deleted'))
         else:
             return internal_error_response('Failed to delete review')
 
@@ -3828,13 +3830,13 @@ def delete_campaign(campaign_id):
             # Don't delete, just deactivate
             campaign.is_active = False
             db.session.commit()
-            return success_response(message='Campaign deactivated (has usage history)')
+            return success_response(message=get_translation('api.admin.success.campaign_deactivated'))
 
         # Safe to delete
         db.session.delete(campaign)
         db.session.commit()
 
-        return success_response(message='Campaign deleted successfully')
+        return success_response(message=get_translation('api.admin.success.campaign_deleted'))
 
     except Exception as e:
         db.session.rollback()
@@ -4288,7 +4290,7 @@ def delete_price_rule(rule_id):
         db.session.delete(rule)
         db.session.commit()
 
-        return success_response(message='Price rule deleted successfully')
+        return success_response(message=get_translation('api.admin.success.price_rule_deleted'))
 
     except Exception as e:
         db.session.rollback()
@@ -5726,13 +5728,13 @@ def delete_loyalty_reward(reward_id):
             # Don't delete, just deactivate
             reward.is_active = False
             db.session.commit()
-            return success_response(message='Loyalty reward deactivated (has redemption history)')
+            return success_response(message=get_translation('api.admin.success.loyalty_reward_deactivated'))
 
         # Safe to delete
         db.session.delete(reward)
         db.session.commit()
 
-        return success_response(message='Loyalty reward deleted successfully')
+        return success_response(message=get_translation('api.admin.success.loyalty_reward_deleted'))
 
     except Exception as e:
         db.session.rollback()
@@ -5888,7 +5890,7 @@ def delete_loyalty_program(program_id):
             db.session.delete(program)
             db.session.commit()
             current_app.logger.info(f"Loyalty program deleted: {program_name} (ID: {program_id})")
-            return success_response(message='Loyalty program deleted successfully')
+            return success_response(message=get_translation('api.admin.success.loyalty_program_deleted'))
 
     except Exception as e:
         db.session.rollback()
@@ -6253,7 +6255,7 @@ def delete_notification_template(template_id):
         template.is_active = False
         db.session.commit()
 
-        return success_response(message='Notification template deactivated successfully')
+        return success_response(message=get_translation('api.admin.success.template_deactivated'))
 
     except Exception as e:
         db.session.rollback()
@@ -7682,11 +7684,11 @@ def get_translations():
         
         # Filter by translation type
         if translation_type == 'static':
-            # Static translations have simple keys (no dots indicating EntityType.field.ID)
-            query = query.filter(~Translation.key.like('%.%.%'))
+            # Static translations have category NOT starting with 'entity_'
+            query = query.filter(~Translation.category.like('entity_%'))
         elif translation_type == 'entity' or entity_type or entity_id or field_name:
-            # Entity translations have EntityType.field.ID format
-            query = query.filter(Translation.key.like('%.%.%'))
+            # Entity translations have category starting with 'entity_'
+            query = query.filter(Translation.category.like('entity_%'))
         
         # Apply filters for entity translations
         if entity_type:
@@ -7708,16 +7710,17 @@ def get_translations():
             page=page, per_page=per_page, error_out=False
         )
         
-        # Format results based on type
+        # Format results based on category (already filtered by query)
         translations = []
         for item in pagination.items:
-            if '.' in item.key and len(item.key.split('.')) == 3:
-                # Entity translation
+            # Check if it's an entity translation based on category
+            if item.category and item.category.startswith('entity_'):
+                # Entity translation - format with entity structure
                 entity_trans = format_entity_translation(item)
                 if entity_trans:
                     translations.append(entity_trans)
             else:
-                # Static translation
+                # Static translation - format with standard structure
                 translations.append({
                     'id': item.id,
                     'key': item.key,
@@ -7730,11 +7733,21 @@ def get_translations():
                     'updated_at': item.updated_at.isoformat() if item.updated_at else None
                 })
         
-        # Get statistics
-        total_translations = Translation.query.count()
-        entity_translations = Translation.query.filter(Translation.key.like('%.%.%')).count()
-        static_translations = total_translations - entity_translations
-        
+        # Get statistics - count individual translation records (each key-language pair is one record)
+        # Entity translations have category starting with 'entity_'
+        total_translation_records = Translation.query.count()
+        entity_translation_records = Translation.query.filter(Translation.category.like('entity_%')).count()
+        static_translation_records = total_translation_records - entity_translation_records
+
+        # Count unique translatable items (not individual records)
+        unique_entity_items = db.session.query(Translation.key).filter(
+            Translation.category.like('entity_%')
+        ).distinct().count()
+
+        unique_static_keys = db.session.query(Translation.key).filter(
+            ~Translation.category.like('entity_%')
+        ).distinct().count()
+
         # Language breakdown
         language_stats = db.session.query(
             Translation.language,
@@ -7745,10 +7758,14 @@ def get_translations():
             data={
                 'translations': translations,
                 'statistics': {
-                    'total_translations': total_translations,
-                    'entity_translations': entity_translations,
-                    'static_translations': static_translations,
-                    'language_stats': [{'language': lang, 'count': count} for lang, count in language_stats]
+                    'total_records': total_translation_records,
+                    'entity_records': entity_translation_records,
+                    'static_records': static_translation_records,
+                    'unique_entity_items': unique_entity_items,
+                    'unique_static_keys': unique_static_keys,
+                    'total_unique_items': unique_entity_items + unique_static_keys,
+                    'language_stats': [{'language': lang, 'count': count} for lang, count in language_stats],
+                    'description': 'Records = individual key-language pairs, Items = unique translatable content'
                 }
             },
             meta={
@@ -7769,7 +7786,7 @@ def get_translations():
 @admin_bp.route('/translations/<int:translation_id>', methods=['GET'])
 @jwt_required()
 @manager_or_higher_required
-def get_translation(translation_id):
+def get_translation_by_id(translation_id):
     """Get a specific translation by ID"""
     try:
         translation = Translation.query.get_or_404(translation_id)
@@ -7832,6 +7849,11 @@ def create_translation():
             
             if success:
                 db.session.commit()
+
+                # Trigger bot translation reload if telegram category
+                if data.get('category') == 'telegram':
+                    trigger_translation_reload()
+
                 return created_response(message='Entity translation created successfully')
             else:
                 return internal_error_response('Failed to create entity translation')
@@ -7845,7 +7867,7 @@ def create_translation():
 
             if existing:
                 return validation_error_response('Translation already exists')
-            
+
             translation = Translation(
                 key=data['key'],
                 language=data['language'],
@@ -7856,12 +7878,16 @@ def create_translation():
                 created_by=get_jwt_identity(),
                 updated_by=get_jwt_identity()
             )
-            
+
             db.session.add(translation)
         else:
             return validation_error_response('Invalid translation data format')
 
         db.session.commit()
+
+        # Trigger bot translation reload if telegram category
+        if data.get('category') == 'telegram':
+            trigger_translation_reload()
 
         return created_response(message='Translation created successfully')
 
@@ -7898,7 +7924,11 @@ def update_translation(translation_id):
 
         db.session.commit()
 
-        return success_response(message='Translation updated successfully')
+        # Trigger bot translation reload if telegram category
+        if translation.category == 'telegram':
+            trigger_translation_reload()
+
+        return success_response(message=get_translation('api.admin.success.translation_updated'))
 
     except Exception as e:
         db.session.rollback()
@@ -7913,11 +7943,18 @@ def delete_translation(translation_id):
     """Delete a translation"""
     try:
         translation = Translation.query.get_or_404(translation_id)
-        
+
+        # Check if it's a telegram translation before deletion
+        is_telegram = translation.category == 'telegram'
+
         db.session.delete(translation)
         db.session.commit()
 
-        return success_response(message='Translation deleted successfully')
+        # Trigger bot translation reload if telegram category
+        if is_telegram:
+            trigger_translation_reload()
+
+        return success_response(message=get_translation('api.admin.success.translation_deleted'))
 
     except Exception as e:
         db.session.rollback()
@@ -8179,84 +8216,118 @@ def import_translations():
 @jwt_required()
 @manager_or_higher_required
 def get_translation_completion():
-    """Get translation completion statistics"""
+    """Get translation completion statistics for both entity and static translations"""
     try:
         # Get all languages from config
         languages = ['en', 'uz', 'ru']  # From config
-        entity_type = request.args.get('entity_type')
-        
-        # Get all entity translations (keys with EntityType.field.ID format)
-        entity_translations_query = Translation.query.filter(Translation.key.like('%.%.%'))
-        
-        if entity_type:
+        entity_type_filter = request.args.get('entity_type')
+
+        # ========== ENTITY TRANSLATIONS ==========
+        # Get all entity translations (category starts with 'entity_')
+        entity_translations_query = Translation.query.filter(Translation.category.like('entity_%'))
+
+        if entity_type_filter:
             entity_translations_query = entity_translations_query.filter(
-                Translation.category == f'entity_{entity_type.lower()}'
+                Translation.category == f'entity_{entity_type_filter.lower()}'
             )
-        
+
         all_entity_translations = entity_translations_query.all()
-        
-        # Parse unique entity/field combinations from keys
-        unique_combinations = set()
+
+        # Parse unique entity/field combinations from keys (format: EntityType.field.ID)
+        unique_entity_combinations = set()
         for trans in all_entity_translations:
             key_parts = trans.key.split('.')
             if len(key_parts) == 3:
                 entity_type_name, field_name, entity_id = key_parts
-                unique_combinations.add((trans.category, entity_id, field_name))
-        
-        unique_fields = list(unique_combinations)
-        
+                unique_entity_combinations.add((trans.category, entity_id, field_name))
+
+        unique_entity_fields = list(unique_entity_combinations)
+
+        # ========== STATIC TRANSLATIONS ==========
+        # Get all static translations (category does NOT start with 'entity_')
+        static_translations_query = Translation.query.filter(~Translation.category.like('entity_%'))
+        all_static_translations = static_translations_query.all()
+
+        # Parse unique static keys (each unique key should have translations for all languages)
+        unique_static_keys = set()
+        for trans in all_static_translations:
+            unique_static_keys.add((trans.category, trans.key))
+
+        unique_static_keys = list(unique_static_keys)
+
+        # ========== OVERALL STATS INITIALIZATION ==========
         completion_stats = []
+
+        # Separate entity and static totals for clarity
+        total_entity_fields = len(unique_entity_fields)
+        total_static_keys = len(unique_static_keys)
+        total_translatable_items = total_entity_fields + total_static_keys
+
         overall_stats = {
-            'total_translatable_fields': len(unique_fields),
-            'total_possible_translations': len(unique_fields) * len(languages),
+            'total_translatable_items': total_translatable_items,
+            'entity_translatable_fields': total_entity_fields,
+            'static_translatable_keys': total_static_keys,
+            'total_possible_translations': total_translatable_items * len(languages),
+            'entity_possible_translations': total_entity_fields * len(languages),
+            'static_possible_translations': total_static_keys * len(languages),
             'total_actual_translations': 0,
+            'entity_actual_translations': 0,
+            'static_actual_translations': 0,
             'overall_completion_percentage': 0.0,
             'language_breakdown': {}
         }
-        
+
         for lang in languages:
             overall_stats['language_breakdown'][lang] = {
                 'translated': 0,
-                'total': len(unique_fields),
+                'entity_translated': 0,
+                'static_translated': 0,
+                'total': total_translatable_items,
                 'percentage': 0.0
             }
-        
-        # Calculate completion for each entity type
-        entity_types = db.session.query(Translation.category).distinct().all()
-        
-        for (entity_type_name,) in entity_types:
-            if entity_type and entity_type != entity_type_name:
+
+        # ========== ENTITY TRANSLATION COMPLETION BY CATEGORY ==========
+        entity_categories = db.session.query(Translation.category).filter(
+            Translation.category.like('entity_%')
+        ).distinct().all()
+
+        for (category_name,) in entity_categories:
+            if entity_type_filter and category_name != f'entity_{entity_type_filter.lower()}':
                 continue
-                
-            # Get all fields for this entity type
-            entity_fields = [uf for uf in unique_fields if uf[0] == entity_type_name]
-            
+
+            # Get all fields for this entity category
+            entity_fields = [uf for uf in unique_entity_fields if uf[0] == category_name]
+
             # Count translations per language
             lang_stats = {}
             for lang in languages:
-                translated_count = Translation.query.filter(Translation.key.like("%.%.%")).filter(
-                    Translation.category == entity_type_name,
+                translated_count = Translation.query.filter(
+                    Translation.category == category_name,
                     Translation.language == lang,
                     Translation.is_active == True
                 ).count()
-                
+
                 lang_stats[lang] = {
                     'translated': translated_count,
                     'total': len(entity_fields),
                     'percentage': round((translated_count / len(entity_fields) * 100) if entity_fields else 0, 2)
                 }
-                
+
                 # Add to overall stats
                 overall_stats['language_breakdown'][lang]['translated'] += translated_count
+                overall_stats['language_breakdown'][lang]['entity_translated'] += translated_count
                 overall_stats['total_actual_translations'] += translated_count
-            
-            # Calculate overall completion for this entity type
+                overall_stats['entity_actual_translations'] += translated_count
+
+            # Calculate overall completion for this entity category
             total_possible = len(entity_fields) * len(languages)
             total_actual = sum(lang_stats[lang]['translated'] for lang in languages)
             completion_percentage = round((total_actual / total_possible * 100) if total_possible else 0, 2)
-            
+
             completion_stats.append({
-                'entity_type': entity_type_name,
+                'type': 'entity',
+                'category': category_name,
+                'display_name': category_name.replace('entity_', '').title(),
                 'total_fields': len(entity_fields),
                 'total_possible_translations': total_possible,
                 'total_actual_translations': total_actual,
@@ -8264,17 +8335,64 @@ def get_translation_completion():
                 'language_breakdown': lang_stats,
                 'missing_translations': total_possible - total_actual
             })
-        
-        # Calculate overall percentages
+
+        # ========== STATIC TRANSLATION COMPLETION BY CATEGORY ==========
+        static_categories = db.session.query(Translation.category).filter(
+            ~Translation.category.like('entity_%')
+        ).distinct().all()
+
+        for (category_name,) in static_categories:
+            # Get all keys for this static category
+            static_keys = [sk for sk in unique_static_keys if sk[0] == category_name]
+
+            # Count translations per language
+            lang_stats = {}
+            for lang in languages:
+                translated_count = Translation.query.filter(
+                    Translation.category == category_name,
+                    Translation.language == lang,
+                    Translation.is_active == True
+                ).count()
+
+                lang_stats[lang] = {
+                    'translated': translated_count,
+                    'total': len(static_keys),
+                    'percentage': round((translated_count / len(static_keys) * 100) if static_keys else 0, 2)
+                }
+
+                # Add to overall stats
+                overall_stats['language_breakdown'][lang]['translated'] += translated_count
+                overall_stats['language_breakdown'][lang]['static_translated'] += translated_count
+                overall_stats['total_actual_translations'] += translated_count
+                overall_stats['static_actual_translations'] += translated_count
+
+            # Calculate overall completion for this static category
+            total_possible = len(static_keys) * len(languages)
+            total_actual = sum(lang_stats[lang]['translated'] for lang in languages)
+            completion_percentage = round((total_actual / total_possible * 100) if total_possible else 0, 2)
+
+            completion_stats.append({
+                'type': 'static',
+                'category': category_name,
+                'display_name': category_name.title(),
+                'total_keys': len(static_keys),
+                'total_possible_translations': total_possible,
+                'total_actual_translations': total_actual,
+                'completion_percentage': completion_percentage,
+                'language_breakdown': lang_stats,
+                'missing_translations': total_possible - total_actual
+            })
+
+        # ========== CALCULATE OVERALL PERCENTAGES ==========
         if overall_stats['total_possible_translations'] > 0:
             overall_stats['overall_completion_percentage'] = round(
                 (overall_stats['total_actual_translations'] / overall_stats['total_possible_translations'] * 100), 2
             )
-        
+
         for lang in languages:
             if overall_stats['language_breakdown'][lang]['total'] > 0:
                 overall_stats['language_breakdown'][lang]['percentage'] = round(
-                    (overall_stats['language_breakdown'][lang]['translated'] / 
+                    (overall_stats['language_breakdown'][lang]['translated'] /
                      overall_stats['language_breakdown'][lang]['total'] * 100), 2
                 )
 
@@ -8294,82 +8412,137 @@ def get_translation_completion():
 @jwt_required()
 @manager_or_higher_required
 def get_missing_translations():
-    """Get list of missing translations"""
+    """Get list of missing translations for both entity and static translations"""
     try:
         languages = ['en', 'uz', 'ru']
         entity_type = request.args.get('entity_type')
         language = request.args.get('language')
+        translation_type = request.args.get('type')  # 'entity', 'static', or None for all
         page = request.args.get('page', 1, type=int)
         per_page = min(request.args.get('per_page', 50, type=int), 100)
-        
-        # Get all entity translations to parse unique combinations
-        entity_translations_query = Translation.query.filter(Translation.key.like('%.%.%'))
-        
-        if entity_type:
-            entity_translations_query = entity_translations_query.filter(
-                Translation.category == f'entity_{entity_type.lower()}'
-            )
-        
-        all_entity_translations = entity_translations_query.all()
-        
-        # Parse unique entity/field combinations from keys
-        unique_combinations = set()
-        for trans in all_entity_translations:
-            key_parts = trans.key.split('.')
-            if len(key_parts) == 3:
-                entity_type_name, field_name, entity_id = key_parts
-                unique_combinations.add((trans.category, entity_id, field_name))
-        
-        unique_combinations = list(unique_combinations)
-        
+
         missing_translations = []
-        
-        for entity_type_val, entity_id, field_name in unique_combinations:
-            check_languages = [language] if language else languages
-            
-            for lang in check_languages:
-                # Construct the expected key format: EntityType.field.ID
-                # Extract entity type name from category (entity_product -> Product)
-                category = entity_type_val
-                if category.startswith('entity_'):
-                    entity_type_name = category.replace('entity_', '').title()
-                    expected_key = f"{entity_type_name}.{field_name}.{entity_id}"
-                    
-                    # Check if translation exists
+
+        # ========== CHECK MISSING ENTITY TRANSLATIONS ==========
+        if not translation_type or translation_type == 'entity':
+            # Get all entity translations (category starts with 'entity_')
+            entity_translations_query = Translation.query.filter(Translation.category.like('entity_%'))
+
+            if entity_type:
+                entity_translations_query = entity_translations_query.filter(
+                    Translation.category == f'entity_{entity_type.lower()}'
+                )
+
+            all_entity_translations = entity_translations_query.all()
+
+            # Parse unique entity/field combinations from keys
+            unique_entity_combinations = set()
+            for trans in all_entity_translations:
+                key_parts = trans.key.split('.')
+                if len(key_parts) == 3:
+                    entity_type_name, field_name, entity_id = key_parts
+                    unique_entity_combinations.add((trans.category, entity_id, field_name))
+
+            unique_entity_combinations = list(unique_entity_combinations)
+
+            for entity_type_val, entity_id, field_name in unique_entity_combinations:
+                check_languages = [language] if language else languages
+
+                for lang in check_languages:
+                    # Construct the expected key format: EntityType.field.ID
+                    # Extract entity type name from category (entity_product -> Product)
+                    category = entity_type_val
+                    expected_key = None
+                    existing = None
+
+                    if category.startswith('entity_'):
+                        entity_type_name = category.replace('entity_', '').title()
+                        expected_key = f"{entity_type_name}.{field_name}.{entity_id}"
+
+                        # Check if translation exists
+                        existing = Translation.query.filter_by(
+                            key=expected_key,
+                            language=lang,
+                            is_active=True
+                        ).first()
+
+                    if not existing and expected_key:
+                        missing_translations.append({
+                            'type': 'entity',
+                            'category': entity_type_val,
+                            'entity_id': entity_id,
+                            'field_name': field_name,
+                            'key': expected_key,
+                            'language': lang,
+                            'priority': 'high' if lang == 'uz' else 'medium'  # Uzbek (default) translations higher priority
+                        })
+
+        # ========== CHECK MISSING STATIC TRANSLATIONS ==========
+        if not translation_type or translation_type == 'static':
+            # Get all static translations (category does NOT start with 'entity_')
+            static_translations_query = Translation.query.filter(~Translation.category.like('entity_%'))
+            all_static_translations = static_translations_query.all()
+
+            # Parse unique static keys (each unique key should have translations for all languages)
+            unique_static_keys = {}  # key -> category mapping
+            for trans in all_static_translations:
+                if trans.key not in unique_static_keys:
+                    unique_static_keys[trans.key] = trans.category
+
+            # Check each unique static key for all languages
+            for static_key, category in unique_static_keys.items():
+                check_languages = [language] if language else languages
+
+                for lang in check_languages:
+                    # Check if translation exists for this language
                     existing = Translation.query.filter_by(
-                        key=expected_key,
+                        key=static_key,
                         language=lang,
                         is_active=True
                     ).first()
-                else:
-                    existing = None
-                
-                if not existing:
-                    missing_translations.append({
-                        'entity_type': entity_type_val,
-                        'entity_id': entity_id,
-                        'field_name': field_name,
-                        'language': lang,
-                        'priority': 'high' if lang == 'en' else 'medium'  # English translations higher priority
-                    })
-        
-        # Sort by priority and entity type
-        missing_translations.sort(key=lambda x: (x['priority'] == 'medium', x['entity_type'], x['entity_id']))
-        
+
+                    if not existing:
+                        missing_translations.append({
+                            'type': 'static',
+                            'category': category,
+                            'key': static_key,
+                            'language': lang,
+                            'priority': 'high' if lang == 'uz' else 'medium'  # Uzbek (default) translations higher priority
+                        })
+
+        # Sort by priority, type, and category
+        missing_translations.sort(key=lambda x: (
+            x['priority'] == 'medium',  # high priority first
+            x['type'],  # entity before static
+            x['category'],
+            x.get('entity_id', ''),
+            x['language']
+        ))
+
         # Manual pagination
         start = (page - 1) * per_page
         end = start + per_page
         paginated_missing = missing_translations[start:end]
-        
-        total_pages = (len(missing_translations) + per_page - 1) // per_page
+
+        total_pages = (len(missing_translations) + per_page - 1) // per_page if missing_translations else 1
+
+        # Calculate summary statistics
+        entity_missing = len([m for m in missing_translations if m['type'] == 'entity'])
+        static_missing = len([m for m in missing_translations if m['type'] == 'static'])
 
         return success_response(
             data={
                 'missing_translations': paginated_missing,
                 'summary': {
                     'total_missing': len(missing_translations),
+                    'entity_missing': entity_missing,
+                    'static_missing': static_missing,
                     'high_priority': len([m for m in missing_translations if m['priority'] == 'high']),
-                    'medium_priority': len([m for m in missing_translations if m['priority'] == 'medium'])
+                    'medium_priority': len([m for m in missing_translations if m['priority'] == 'medium']),
+                    'by_language': {
+                        lang: len([m for m in missing_translations if m['language'] == lang])
+                        for lang in languages
+                    }
                 }
             },
             meta={
@@ -8385,6 +8558,275 @@ def get_missing_translations():
     except Exception as e:
         current_app.logger.error(f"Get missing translations error: {e}")
         return internal_error_response('Failed to get missing translations')
+
+
+@admin_bp.route('/translations/completeness', methods=['GET'])
+@jwt_required()
+@manager_or_higher_required
+def get_translation_completeness():
+    """
+    Get comprehensive translation completeness statistics for both system and entity translations
+
+    Query Parameters:
+    - include_entities: Include entity translations (default: true)
+    - include_system: Include system translations (default: true)
+    """
+    try:
+        languages = ['uz', 'en', 'ru']  # Uzbek is default
+        include_entities = request.args.get('include_entities', 'true').lower() == 'true'
+        include_system = request.args.get('include_system', 'true').lower() == 'true'
+
+        completeness_data = {
+            'summary': {
+                'total_unique_keys': 0,
+                'total_possible_translations': 0,
+                'total_actual_translations': 0,
+                'overall_completion_percentage': 0.0
+            },
+            'by_language': {},
+            'by_category': {},
+            'system_translations': None,
+            'entity_translations': None
+        }
+
+        # Initialize language stats
+        for lang in languages:
+            completeness_data['by_language'][lang] = {
+                'total_keys': 0,
+                'translated': 0,
+                'missing': 0,
+                'percentage': 0.0
+            }
+
+        # ===========================
+        # SYSTEM TRANSLATIONS (api.*, error.*, ui.*, etc.)
+        # ===========================
+        if include_system:
+            # Get all translations and filter in Python (regex in DB varies by engine)
+            all_translations = Translation.query.filter(Translation.is_active == True).all()
+
+            # Filter system translations (keys that don't match EntityType.field.ID format)
+            import re
+            entity_pattern = re.compile(r'^[A-Z][a-zA-Z]+\.[a-z_]+\.\d+$')
+            system_translations = [
+                trans for trans in all_translations
+                if not entity_pattern.match(trans.key)
+            ]
+
+            # Group by key to find unique keys
+            system_keys = {}
+            for trans in system_translations:
+                if trans.key not in system_keys:
+                    system_keys[trans.key] = {
+                        'key': trans.key,
+                        'category': trans.category,
+                        'languages': {}
+                    }
+                system_keys[trans.key]['languages'][trans.language] = {
+                    'value': trans.value,
+                    'translation_id': trans.id
+                }
+
+            # Calculate system translation completeness
+            system_stats = {
+                'total_unique_keys': len(system_keys),
+                'total_possible': len(system_keys) * len(languages),
+                'by_language': {},
+                'by_category': {}
+            }
+
+            for lang in languages:
+                translated_count = sum(1 for key_data in system_keys.values() if lang in key_data['languages'])
+                missing_count = len(system_keys) - translated_count
+                system_stats['by_language'][lang] = {
+                    'translated': translated_count,
+                    'missing': missing_count,
+                    'total': len(system_keys),
+                    'percentage': round((translated_count / len(system_keys) * 100) if system_keys else 0, 2)
+                }
+
+            # Group by category
+            categories = {}
+            for key, data in system_keys.items():
+                category = data['category'] or 'uncategorized'
+                if category not in categories:
+                    categories[category] = {
+                        'total_keys': 0,
+                        'by_language': {lang: {'translated': 0, 'missing': 0} for lang in languages}
+                    }
+                categories[category]['total_keys'] += 1
+                for lang in languages:
+                    if lang in data['languages']:
+                        categories[category]['by_language'][lang]['translated'] += 1
+                    else:
+                        categories[category]['by_language'][lang]['missing'] += 1
+
+            # Add percentages to categories
+            for category, stats in categories.items():
+                for lang in languages:
+                    total = stats['total_keys']
+                    translated = stats['by_language'][lang]['translated']
+                    stats['by_language'][lang]['percentage'] = round((translated / total * 100) if total > 0 else 0, 2)
+
+            system_stats['by_category'] = categories
+            system_stats['total_actual'] = sum(
+                system_stats['by_language'][lang]['translated'] for lang in languages
+            )
+            system_stats['overall_percentage'] = round(
+                (system_stats['total_actual'] / system_stats['total_possible'] * 100) if system_stats['total_possible'] > 0 else 0,
+                2
+            )
+
+            completeness_data['system_translations'] = system_stats
+
+            # Update summary
+            completeness_data['summary']['total_unique_keys'] += system_stats['total_unique_keys']
+            completeness_data['summary']['total_possible_translations'] += system_stats['total_possible']
+            completeness_data['summary']['total_actual_translations'] += system_stats['total_actual']
+
+            # Update language stats
+            for lang in languages:
+                completeness_data['by_language'][lang]['total_keys'] += system_stats['by_language'][lang]['total']
+                completeness_data['by_language'][lang]['translated'] += system_stats['by_language'][lang]['translated']
+                completeness_data['by_language'][lang]['missing'] += system_stats['by_language'][lang]['missing']
+
+        # ===========================
+        # ENTITY TRANSLATIONS (Product.name.123, etc.)
+        # ===========================
+        if include_entities:
+            # Filter entity translations (keys matching EntityType.field.ID format)
+            if not include_system:
+                # Need to fetch all translations if we haven't already
+                all_translations = Translation.query.filter(Translation.is_active == True).all()
+                import re
+                entity_pattern = re.compile(r'^[A-Z][a-zA-Z]+\.[a-z_]+\.\d+$')
+
+            entity_translations = [
+                trans for trans in all_translations
+                if entity_pattern.match(trans.key)
+            ]
+
+            # Group by key to find unique keys
+            entity_keys = {}
+            for trans in entity_translations:
+                if trans.key not in entity_keys:
+                    # Parse entity type, field, and ID from key
+                    parts = trans.key.split('.')
+                    if len(parts) == 3:
+                        entity_type, field, entity_id = parts
+                        entity_keys[trans.key] = {
+                            'key': trans.key,
+                            'entity_type': entity_type,
+                            'field': field,
+                            'entity_id': entity_id,
+                            'category': trans.category,
+                            'languages': {}
+                        }
+                if trans.key in entity_keys:
+                    entity_keys[trans.key]['languages'][trans.language] = {
+                        'value': trans.value,
+                        'translation_id': trans.id
+                    }
+
+            # Calculate entity translation completeness
+            entity_stats = {
+                'total_unique_keys': len(entity_keys),
+                'total_possible': len(entity_keys) * len(languages),
+                'by_language': {},
+                'by_entity_type': {}
+            }
+
+            for lang in languages:
+                translated_count = sum(1 for key_data in entity_keys.values() if lang in key_data['languages'])
+                missing_count = len(entity_keys) - translated_count
+                entity_stats['by_language'][lang] = {
+                    'translated': translated_count,
+                    'missing': missing_count,
+                    'total': len(entity_keys),
+                    'percentage': round((translated_count / len(entity_keys) * 100) if entity_keys else 0, 2)
+                }
+
+            # Group by entity type
+            entity_types = {}
+            for key, data in entity_keys.items():
+                entity_type = data['entity_type']
+                if entity_type not in entity_types:
+                    entity_types[entity_type] = {
+                        'total_keys': 0,
+                        'by_language': {lang: {'translated': 0, 'missing': 0} for lang in languages}
+                    }
+                entity_types[entity_type]['total_keys'] += 1
+                for lang in languages:
+                    if lang in data['languages']:
+                        entity_types[entity_type]['by_language'][lang]['translated'] += 1
+                    else:
+                        entity_types[entity_type]['by_language'][lang]['missing'] += 1
+
+            # Add percentages to entity types
+            for entity_type, stats in entity_types.items():
+                for lang in languages:
+                    total = stats['total_keys']
+                    translated = stats['by_language'][lang]['translated']
+                    stats['by_language'][lang]['percentage'] = round((translated / total * 100) if total > 0 else 0, 2)
+
+            entity_stats['by_entity_type'] = entity_types
+            entity_stats['total_actual'] = sum(
+                entity_stats['by_language'][lang]['translated'] for lang in languages
+            )
+            entity_stats['overall_percentage'] = round(
+                (entity_stats['total_actual'] / entity_stats['total_possible'] * 100) if entity_stats['total_possible'] > 0 else 0,
+                2
+            )
+
+            completeness_data['entity_translations'] = entity_stats
+
+            # Update summary
+            completeness_data['summary']['total_unique_keys'] += entity_stats['total_unique_keys']
+            completeness_data['summary']['total_possible_translations'] += entity_stats['total_possible']
+            completeness_data['summary']['total_actual_translations'] += entity_stats['total_actual']
+
+            # Update language stats
+            for lang in languages:
+                completeness_data['by_language'][lang]['total_keys'] += entity_stats['by_language'][lang]['total']
+                completeness_data['by_language'][lang]['translated'] += entity_stats['by_language'][lang]['translated']
+                completeness_data['by_language'][lang]['missing'] += entity_stats['by_language'][lang]['missing']
+
+        # Calculate overall percentages
+        if completeness_data['summary']['total_possible_translations'] > 0:
+            completeness_data['summary']['overall_completion_percentage'] = round(
+                (completeness_data['summary']['total_actual_translations'] /
+                 completeness_data['summary']['total_possible_translations'] * 100),
+                2
+            )
+
+        for lang in languages:
+            total = completeness_data['by_language'][lang]['total_keys']
+            translated = completeness_data['by_language'][lang]['translated']
+            completeness_data['by_language'][lang]['percentage'] = round(
+                (translated / total * 100) if total > 0 else 0,
+                2
+            )
+
+        # Group completeness by category (for both system and entity)
+        all_categories = {}
+
+        # Add system categories
+        if include_system and completeness_data['system_translations']:
+            for category, stats in completeness_data['system_translations']['by_category'].items():
+                all_categories[f"system:{category}"] = stats
+
+        # Add entity categories
+        if include_entities and completeness_data['entity_translations']:
+            for entity_type, stats in completeness_data['entity_translations']['by_entity_type'].items():
+                all_categories[f"entity:{entity_type}"] = stats
+
+        completeness_data['by_category'] = all_categories
+
+        return success_response(data=completeness_data)
+
+    except Exception as e:
+        current_app.logger.error(f"Get translation completeness error: {e}", exc_info=True)
+        return internal_error_response('Failed to get translation completeness statistics')
 
 
 # ============================================================================
@@ -8756,7 +9198,7 @@ def admin_delete_blog_post(post_id):
 
         current_app.logger.info(f"Blog post deleted: {post_id}")
 
-        return success_response(message='Blog post deleted successfully')
+        return success_response(message=get_translation('api.admin.success.blog_post_deleted'))
 
     except Exception as e:
         db.session.rollback()

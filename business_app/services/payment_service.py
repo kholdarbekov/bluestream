@@ -5,6 +5,7 @@ Supports Payme, Click, Cash, and Loyalty Points payments
 import hashlib
 import hmac
 import json
+import random
 import uuid
 import time
 from datetime import datetime, timedelta, timezone
@@ -349,24 +350,38 @@ class PaymentService:
             Dict with success status and transaction details
         """
         try:
-            # In production, integrate with Payme's card payment API
-            # This is a simplified placeholder
-            current_app.logger.info(f"Processing Payme card payment for payment {payment.id}")
-
-            # Simulate payment processing
-            # In real implementation, call Payme API with card token
-            if self.payme_test_mode:
-                # Test mode - always succeed for non-test cards
-                return {
-                    'success': True,
-                    'transaction_id': f"payme_{int(datetime.now(timezone.utc).timestamp())}",
-                    'amount': payment.amount,
-                    'card_token': card.card_token,
-                    'timestamp': datetime.now(timezone.utc).isoformat()
+            # Payme Subscribe API: Charge saved card
+            # Step 1: Create receipt (invoice)
+            amount_tiyin = int(payment.amount * 100)
+            create_receipt = self._payme_request('receipts.create', {
+                'amount': amount_tiyin,
+                'account': {
+                    'order_id': str(payment.order_id)
                 }
-            else:
-                # Production mode - actual API call would go here
-                raise NotImplementedError("Payme card payment API integration required")
+            })
+            
+            if 'error' in create_receipt:
+                 raise PaymentError(f"Failed to create Payme receipt: {create_receipt['error'].get('message')}")
+                 
+            receipt_id = create_receipt['result']['receipt']['_id']
+            
+            # Step 2: Pay receipt with card token (Verify)
+            pay_receipt = self._payme_request('receipts.pay', {
+                'id': receipt_id,
+                'token': card.card_token
+            })
+            
+            if 'error' in pay_receipt:
+                raise PaymentError(f"Failed to process card payment: {pay_receipt['error'].get('message')}")
+
+            # Return success
+            return {
+                'success': True,
+                'transaction_id': receipt_id,
+                'amount': payment.amount,
+                'timestamp': datetime.now(timezone.utc).isoformat(),
+                'provider_response': pay_receipt['result']
+            }
 
         except Exception as e:
             current_app.logger.error(f"Payme card payment error: {e}")
@@ -374,6 +389,47 @@ class PaymentService:
                 'success': False,
                 'error_message': str(e)
             }
+
+    def _payme_request(self, method: str, params: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Send request to Payme Subscribe API
+        
+        Args:
+            method: JSON-RPC method name (e.g., 'receipts.create')
+            params: Parameters for the method
+            
+        Returns:
+            Dict: JSON-RPC response
+        """
+        try:
+             # Subscribe API uses X-Auth headers
+             print(f"Payme: method: {method}, url: {self.payme_endpoint}, {self.payme_merchant_id}:{self.payme_secret_key}")
+             print(f"payme_secret_key: {self.payme_secret_key}")
+             print(f"payme_merchant_id: {self.payme_merchant_id}")
+             print(f"params: {params}")
+             headers = {
+                 'X-Auth': f"{self.payme_merchant_id}:{self.payme_secret_key}",
+                 'Content-Type': 'application/json'
+             }
+             
+             payload = {
+                 'method': method,
+                 'params': params,
+                 'id': random.randint(1, 1000000),
+                 'jsonrpc': '2.0'
+             }
+             
+             response = requests.post(
+                 self.payme_endpoint, # Typically ends with /api for Subscribe API
+                 json=payload,
+                 headers=headers,
+                 timeout=30
+             )
+             
+             return response.json()
+        except Exception as e:
+             current_app.logger.error(f"Payme API request error ({method}): {e}")
+             return {'error': {'code': -1, 'message': str(e)}}
 
     def _process_click_card_payment(self, payment: Payment, card: CreditCard) -> Dict[str, Any]:
         """
@@ -766,17 +822,12 @@ class PaymentService:
         }
     
     # Private methods for Payme integration
-    def _create_payme_link(self, payment: Payment) -> Dict[str, str]:
         """Create Payme payment link"""
-        params = {
-            'm': self.payme_merchant_id,
-            'ac.order_id': payment.order_id,
-            'a': payment.amount,
-            'c': payment.payment_id
-        }
+        import base64
         
-        query_string = '&'.join([f"{k}={v}" for k, v in params.items()])
-        payment_url = f"{self.payme_endpoint}?{query_string}"
+        params = f"m={self.payme_merchant_id};ac.order_id={payment.order_id};a={int(payment.amount * 100)}"
+        encoded_params = base64.b64encode(params.encode('utf-8')).decode('utf-8')
+        payment_url = f"{self.payme_endpoint}/{encoded_params}"
         
         return {
             'payment_url': payment_url,
@@ -858,7 +909,120 @@ class PaymentService:
             'result': {
                 'create_time': int(transaction.created_at.timestamp() * 1000),
                 'transaction': str(transaction.id),
-                'state': 1
+                'state': 1  # State 1: Transaction created
+            }
+        }
+
+    def _payme_perform_transaction(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle Payme PerformTransaction"""
+        transaction_id = params.get('id')
+        
+        # Check if transaction exists
+        # In this simplistic model, we look up by Payme's ID (which we stored as gateway_transaction_id)
+        # However, typically Payme expects us to use our own ID or tracking.
+        # Based on Payme docs: 'id' is their transaction ID.
+        
+        transaction = PaymentTransaction.query.filter_by(gateway_transaction_id=transaction_id).first()
+        if not transaction:
+            return {'error': {'code': -31003, 'message': 'Transaction not found'}}
+            
+        payment = transaction.payment
+        
+        if payment.status == PaymentStatus.COMPLETED:
+             return {
+                'result': {
+                    'transaction': str(transaction.id),
+                    'perform_time': int(transaction.processed_at.timestamp() * 1000) if transaction.processed_at else int(datetime.now(timezone.utc).timestamp() * 1000),
+                    'state': 2 # State 2: Transaction completed
+                }
+            }
+            
+        if payment.status == PaymentStatus.CANCELLED:
+             return {'error': {'code': -31008, 'message': 'Transaction cancelled'}}
+
+        # Mark as paid
+        payment.status = PaymentStatus.COMPLETED
+        payment.paid_at = datetime.now(timezone.utc)
+        
+        transaction.status = 'completed'
+        transaction.processed_at = payment.paid_at
+        
+        db.session.commit()
+        
+        self._handle_successful_payment(payment)
+        
+        return {
+            'result': {
+                'transaction': str(transaction.id),
+                'perform_time': int(transaction.processed_at.timestamp() * 1000),
+                'state': 2
+            }
+        }
+
+    def _payme_cancel_transaction(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle Payme CancelTransaction"""
+        transaction_id = params.get('id')
+        reason = params.get('reason')
+        
+        transaction = PaymentTransaction.query.filter_by(gateway_transaction_id=transaction_id).first()
+        if not transaction:
+            return {'error': {'code': -31003, 'message': 'Transaction not found'}}
+            
+        payment = transaction.payment
+        
+        if payment.status == PaymentStatus.COMPLETED:
+             # Check if reversible
+             if not self.process_refund(payment.id, payment.amount, f"Payme Cancel: {reason}"):
+                 return {'error': {'code': -31007, 'message': 'Could not cancel transaction'}}
+             return {
+                 'result': {
+                     'transaction': str(transaction.id),
+                     'cancel_time': int(datetime.now(timezone.utc).timestamp() * 1000),
+                     'state': -2
+                 }
+             }
+
+        payment.status = PaymentStatus.CANCELLED
+        transaction.status = 'cancelled'
+        db.session.commit()
+        
+        return {
+            'result': {
+                'transaction': str(transaction.id),
+                'cancel_time': int(datetime.now(timezone.utc).timestamp() * 1000),
+                'state': -1
+            }
+        }
+
+    def _payme_check_transaction(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle Payme CheckTransaction"""
+        transaction_id = params.get('id')
+        transaction = PaymentTransaction.query.filter_by(gateway_transaction_id=transaction_id).first()
+        
+        if not transaction:
+             return {'error': {'code': -31003, 'message': 'Transaction not found'}}
+             
+        payment = transaction.payment
+        
+        # Determine state
+        state = 0
+        if payment.status == PaymentStatus.PENDING:
+            state = 1
+        elif payment.status == PaymentStatus.COMPLETED:
+            state = 2
+        elif payment.status == PaymentStatus.CANCELLED:
+            state = -1
+        elif payment.status == PaymentStatus.REFUNDED:
+            state = -2
+            
+        return {
+            'result': {
+                'create_time': int(transaction.created_at.timestamp() * 1000),
+                'perform_time': int(transaction.processed_at.timestamp() * 1000) if transaction.processed_at else 0,
+                'cancel_time': 0, # Should store cancel time if cancelled
+                'transaction': str(transaction.id),
+                'state': state,
+                'reason': None
             }
         }
     
@@ -1074,24 +1238,34 @@ class PaymentService:
             if existing_card:
                 raise ValidationError(get_translation('error.validation.card_already_saved'))
             
-            # Tokenize card with payment provider (simplified for this implementation)
-            # In production, you would integrate with actual tokenization service
-            card_token = self._tokenize_card(cleaned_number, validation_result.card_brand)
+            # In production, card_token should be passed from frontend (generated by Payme SDK)
+            # If card_token is provided, we use it directly
+            card_token = card_data.get('card_token')
+            if not card_token:
+                # If no token provided (legacy/unsafe flow), we strictly reject or fail
+                # For this implementation, we require 'card_token'
+                raise ValidationError("Secure card token is required. Please use client-side tokenization.")
+
+            # Optional: Verify token with Payme Subscribe API
+            # verify_result = self._payme_request('cards.check', {'token': card_token})
+            # if not verify_result.get('success'):
+            #     raise ValidationError("Invalid card token")
             
-            # Extract card details
-            last_four_digits = CardValidator.get_last_four_digits(cleaned_number)
+            # Extract card details from data (passed for display purposes only)
+            masked_number = card_data.get('card_number', '****0000')[-8:]
+            last_four_digits = masked_number[-4:] if len(masked_number) >= 4 else '0000'
             
             # Create card record
             credit_card = CreditCard(
                 user_id=user_id,
                 card_token=card_token,
-                card_brand=validation_result.card_brand,
+                card_brand=validation_result.card_brand,  # Detected or passed from frontend
                 last_four_digits=last_four_digits,
                 expiry_month=card_data.get('expiry_month'),
                 expiry_year=card_data.get('expiry_year'),
                 cardholder_name=card_data.get('cardholder_name').strip(),
                 is_default=card_data.get('is_default', False),
-                provider=self._get_provider_for_brand(validation_result.card_brand),
+                provider='payme',  # Defaulting to Payme for tokenized cards
                 fingerprint=fingerprint,
                 is_verified=False  # Will be verified on first successful payment
             )
@@ -1120,7 +1294,7 @@ class PaymentService:
                     'card_brand': validation_result.card_brand,
                     'last_four_digits': last_four_digits,
                     'is_default': credit_card.is_default,
-                    'fingerprint': fingerprint[:8]  # Only log partial fingerprint
+                    'fingerprint': fingerprint[:8]
                 }
             )
             
@@ -1415,6 +1589,10 @@ class PaymentService:
                 ).filter(CreditCard.id != card_id).first()
                 next_card.is_default = True
 
+        # Call Payme verify API if needed to remove token invalidation
+        # For now, we assume removal is successful and just deactivate locally
+        # Ideally: self._payme_request('cards.remove', {'token': card.card_token})
+
         # Soft delete
         card.is_active = False
         card.deleted_at = datetime.now(timezone.utc)
@@ -1450,21 +1628,42 @@ class PaymentService:
         Returns:
             str: Card token
         """
-        # Generate secure token - in production, use payment processor's tokenization service
-        import secrets
-        token_prefix = {
-            'visa': 'visa_',
-            'mastercard': 'mc_',
-            'uzcard': 'uz_',
-            'humo': 'hu_'
-        }.get(card_brand, 'card_')
-        
-        # Create token that doesn't contain actual card data
-        timestamp = int(datetime.now(timezone.utc).timestamp())
-        random_part = secrets.token_urlsafe(16)
-        
-        return f"{token_prefix}{timestamp}_{random_part}"
+        return card_token
     
+    def create_card_token(self, number: str, expire: str, save: bool = False) -> Dict[str, Any]:
+        """
+        Create card token via Payme API
+        
+        Args:
+            number: Card number (16 digits)
+            expire: Expiration date (MMYY or similar)
+            save: Whether to save the card
+            
+        Returns:
+            Dict containing token and card metadata
+        """
+        # Ensure expire format is valid for Payme (usually starts with MM...)
+        # Payme expects simple string, often checking len. 
+        # Typically Payme docs example: "0399".
+        
+        # Call Payme cards.create
+        response = self._payme_request('cards.create', {
+            'card': {
+                'number': number,
+                'expire': expire
+            },
+            'save': save
+        })
+        
+        if 'error' in response:
+            raise PaymentError(f"Payme tokenization failed: {response['error'].get('message')}, response: {response}")
+            
+        result = response.get('result', {}).get('card', {})
+        if not result.get('token'):
+             raise PaymentError("Payme did not return a token")
+             
+        return result
+
     def _get_provider_for_brand(self, card_brand: str) -> str:
         """
         Get payment provider for card brand

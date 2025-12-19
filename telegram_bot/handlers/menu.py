@@ -24,8 +24,8 @@ async def main_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = update.effective_user.id
         logger.info(f"Main menu requested by user {user_id}")
         language = await i18n.get_user_language(user_id)
-        
-        menu_text = i18n.get('main_menu', language)
+
+        menu_text = i18n.get('telegram.main_menu', language)
         keyboard = MenuKeyboards.main_menu(language)
         
         if update.callback_query:
@@ -50,7 +50,7 @@ async def main_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Try to send error message
         try:
             language = await i18n.get_user_language(update.effective_user.id)
-            error_msg = i18n.get('error_occurred', language)
+            error_msg = i18n.get('telegram.error_occurred', language)
             
             if update.callback_query:
                 await update.callback_query.answer(error_msg)

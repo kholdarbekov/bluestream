@@ -28,7 +28,12 @@ if use_fallback:
     
     def get_database_url():
         """Fallback database URL builder"""
-        host = os.environ.get('POSTGRES_HOST', 'localhost')
+        # Check if full DATABASE_URL is provided first
+        if os.environ.get('DATABASE_URL'):
+            return os.environ.get('DATABASE_URL')
+
+        # Otherwise build from components
+        host = os.environ.get('POSTGRES_HOST', 'postgres')  # Default to 'postgres' for Docker
         port = os.environ.get('POSTGRES_PORT', '5432')
         database = os.environ.get('POSTGRES_DB', 'bluestream_db')
         user = os.environ.get('POSTGRES_USER', 'postgres')
@@ -37,7 +42,12 @@ if use_fallback:
     
     def get_redis_url():
         """Fallback Redis URL builder"""
-        host = os.environ.get('REDIS_HOST', 'localhost')
+        # Check if full REDIS_URL is provided first
+        if os.environ.get('REDIS_URL'):
+            return os.environ.get('REDIS_URL')
+
+        # Otherwise build from components
+        host = os.environ.get('REDIS_HOST', 'redis')  # Default to 'redis' for Docker
         port = os.environ.get('REDIS_PORT', '6379')
         db = os.environ.get('REDIS_DB', '1')
         password = os.environ.get('REDIS_PASSWORD')

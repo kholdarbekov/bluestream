@@ -119,6 +119,12 @@ class BaseConfig:
         return get_secret('telegram_bot_token', 'TELEGRAM_BOT_TOKEN', required=True)
     WEBHOOK_URL = os.environ.get('WEBHOOK_URL')
     TELEGRAM_ADMIN_CHAT_ID = os.environ.get('TELEGRAM_ADMIN_CHAT_ID')
+
+    # Bot Webhook Configuration (for backend -> bot communication)
+    BOT_WEBHOOK_URL = os.environ.get('BOT_WEBHOOK_URL', 'http://telegram_bot:8080')
+    @property
+    def BOT_WEBHOOK_SECRET(self):
+        return get_secret('bot_webhook_secret', 'BOT_WEBHOOK_SECRET', default=self.SECRET_KEY, required=False)
     
     # Maps Configuration
     MAPS_PROVIDER = os.environ.get('MAPS_PROVIDER', 'google')  # 'google', 'yandex', 'osm'
@@ -139,6 +145,19 @@ class BaseConfig:
     ESKIZ_EMAIL = os.environ.get('ESKIZ_EMAIL')
     ESKIZ_PASSWORD = os.environ.get('ESKIZ_PASSWORD')
     ESKIZ_FROM = os.environ.get('ESKIZ_FROM', '4546')
+    
+    # Payment Gateway Credentials
+    PAYME_MERCHANT_ID = get_secret('payme_merchant_id', 'PAYME_MERCHANT_ID', required=False)
+    if PAYME_MERCHANT_ID:
+        PAYME_MERCHANT_ID = PAYME_MERCHANT_ID.strip("'").strip('"')
+        
+    PAYME_SECRET_KEY = get_secret('payme_secret_key', 'PAYME_SECRET_KEY', required=False)
+    if PAYME_SECRET_KEY:
+        PAYME_SECRET_KEY = PAYME_SECRET_KEY.strip("'").strip('"')
+        
+    CLICK_MERCHANT_ID = get_secret('click_merchant_id', 'CLICK_MERCHANT_ID', required=False)
+    CLICK_SERVICE_ID = get_secret('click_service_id', 'CLICK_SERVICE_ID', required=False)
+    CLICK_SECRET_KEY = get_secret('click_secret_key', 'CLICK_SECRET_KEY', required=False)
     
     # Business Configuration
     COMPANY_NAME = os.environ.get('COMPANY_NAME', 'BlueStream Water Delivery')
@@ -301,7 +320,15 @@ For complete documentation, examples, and SDKs visit: [API Documentation](/docs/
     # Monitoring Configuration
     METRICS_ENABLED = os.environ.get('METRICS_ENABLED', 'False').lower() == 'true'
     METRICS_ENDPOINT = '/metrics'
-    
+
+    # Audit Trail Configuration
+    AUDIT_LOG_ENABLED = os.environ.get('AUDIT_LOG_ENABLED', 'True').lower() == 'true'
+    AUDIT_LOG_RETENTION_DAYS = int(os.environ.get('AUDIT_LOG_RETENTION_DAYS', 90))
+    AUDIT_LOG_PRESERVE_CRITICAL = os.environ.get('AUDIT_LOG_PRESERVE_CRITICAL', 'True').lower() == 'true'
+    AUDIT_LOG_BATCH_SIZE = int(os.environ.get('AUDIT_LOG_BATCH_SIZE', 1000))
+    AUDIT_LOG_ARCHIVE_ENABLED = os.environ.get('AUDIT_LOG_ARCHIVE_ENABLED', 'False').lower() == 'true'
+    AUDIT_LOG_ARCHIVE_FORMAT = os.environ.get('AUDIT_LOG_ARCHIVE_FORMAT', 'json')  # 'json' or 'csv'
+
     # Content Security Policy settings
     CSP_REPORT_ONLY = os.environ.get('CSP_REPORT_ONLY', 'False').lower() == 'true'
     CSP_REPORT_URI = '/csp-report'

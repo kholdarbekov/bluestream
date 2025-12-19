@@ -1,6 +1,6 @@
 {% extends "frontend/base.html" %}
 
-{% block title %}{{ 'My Subscriptions'|translate(current_language) }} - {{ company_name }}{% endblock %}
+{% block title %}{{ 'My Subscriptions'|t }} - {{ company_name }}{% endblock %}
 
 {% block content %}
 <!-- page-title -->
@@ -8,11 +8,11 @@
     <div class="bg-layer" style="background-image: url({{ url_for('static', filename='images/background/page-title.jpg') }});"></div>
     <div class="auto-container">
         <div class="content-box">
-            <h1>{{ 'My Subscriptions'|translate(current_language) }}</h1>
+            <h1>{{ 'My Subscriptions'|t }}</h1>
             <ul class="bread-crumb clearfix">
-                <li><a href="{{ url_for('frontend.index') }}">{{ 'Home'|translate(current_language) }}</a></li>
-                <li><a href="{{ url_for('frontend.my_account') }}">{{ 'My Account'|translate(current_language) }}</a></li>
-                <li>{{ 'Subscriptions'|translate(current_language) }}</li>
+                <li><a href="{{ url_for('frontend.index') }}">{{ 'landing.nav.home'|t }}</a></li>
+                <li><a href="{{ url_for('frontend.my_account') }}">{{ 'landing.nav.my_account'|t }}</a></li>
+                <li>{{ 'landing.nav.subscriptions'|t }}</li>
             </ul>
         </div>
     </div>
@@ -40,42 +40,42 @@
                         <ul class="list-unstyled">
                             <li>
                                 <a href="{{ url_for('frontend.my_account') }}">
-                                    <i class="far fa-tachometer-alt"></i> {{ 'Dashboard'|translate(current_language) }}
+                                    <i class="far fa-tachometer-alt"></i> {{ 'Dashboard'|t }}
                                 </a>
                             </li>
                             <li>
                                 <a href="{{ url_for('frontend.profile_settings') }}">
-                                    <i class="far fa-user-edit"></i> {{ 'Profile Settings'|translate(current_language) }}
+                                    <i class="far fa-user-edit"></i> {{ 'Profile Settings'|t }}
                                 </a>
                             </li>
                             <li>
                                 <a href="{{ url_for('frontend.my_orders') }}">
-                                    <i class="far fa-shopping-bag"></i> {{ 'My Orders'|translate(current_language) }}
+                                    <i class="far fa-shopping-bag"></i> {{ 'landing.account.orders'|t }}
                                 </a>
                             </li>
                             <li>
                                 <a href="{{ url_for('frontend.addresses') }}">
-                                    <i class="far fa-map-marker-alt"></i> {{ 'Addresses'|translate(current_language) }}
+                                    <i class="far fa-map-marker-alt"></i> {{ 'Addresses'|t }}
                                 </a>
                             </li>
                             <li class="active">
                                 <a href="{{ url_for('frontend.my_subscriptions') }}">
-                                    <i class="far fa-sync-alt"></i> {{ 'Subscriptions'|translate(current_language) }}
+                                    <i class="far fa-sync-alt"></i> {{ 'landing.nav.subscriptions'|t }}
                                 </a>
                             </li>
                             <li>
                                 <a href="{{ url_for('frontend.my_loyalty') }}">
-                                    <i class="far fa-star"></i> {{ 'Loyalty Program'|translate(current_language) }}
+                                    <i class="far fa-star"></i> {{ 'landing.account.loyalty'|t }}
                                 </a>
                             </li>
                             <li>
                                 <a href="{{ url_for('frontend.account_security') }}">
-                                    <i class="far fa-shield-alt"></i> {{ 'Security'|translate(current_language) }}
+                                    <i class="far fa-shield-alt"></i> {{ 'Security'|t }}
                                 </a>
                             </li>
                             <li>
                                 <a href="#" onclick="logout()">
-                                    <i class="far fa-sign-out-alt"></i> {{ 'Logout'|translate(current_language) }}
+                                    <i class="far fa-sign-out-alt"></i> {{ 'landing.nav.logout'|t }}
                                 </a>
                             </li>
                         </ul>
@@ -89,9 +89,9 @@
                     <!-- Subscriptions Header -->
                     <div class="content-header mb-4">
                         <div class="d-flex justify-content-between align-items-center">
-                            <h2><i class="far fa-sync-alt"></i> {{ 'My Subscriptions'|translate(current_language) }}</h2>
+                            <h2><i class="far fa-sync-alt"></i> {{ 'My Subscriptions'|t }}</h2>
                             <a href="{{ url_for('frontend.subscriptions') }}" class="btn btn-primary">
-                                <i class="far fa-plus"></i> {{ 'Browse Plans'|translate(current_language) }}
+                                <i class="far fa-plus"></i> {{ 'Browse Plans'|t }}
                             </a>
                         </div>
                     </div>
@@ -104,7 +104,7 @@
                                     <div class="card-body text-center">
                                         <i class="far fa-sync-alt fa-2x text-primary mb-3"></i>
                                         <h3 class="text-primary" id="activeSubscriptionsCount">0</h3>
-                                        <p class="text-muted">{{ 'Active Subscriptions'|translate(current_language) }}</p>
+                                        <p class="text-muted">{{ 'Active Subscriptions'|t }}</p>
                                     </div>
                                 </div>
                             </div>
@@ -113,7 +113,7 @@
                                     <div class="card-body text-center">
                                         <i class="far fa-calendar-alt fa-2x text-success mb-3"></i>
                                         <h3 class="text-success" id="nextDeliveryCount">0</h3>
-                                        <p class="text-muted">{{ 'Deliveries This Month'|translate(current_language) }}</p>
+                                        <p class="text-muted">{{ 'Deliveries This Month'|t }}</p>
                                     </div>
                                 </div>
                             </div>
@@ -122,7 +122,7 @@
                                     <div class="card-body text-center">
                                         <i class="far fa-money-bill fa-2x text-warning mb-3"></i>
                                         <h3 class="text-warning"><span id="monthlySavings">0</span></h3>
-                                        <p class="text-muted">{{ 'Monthly Savings'|translate(current_language) }}</p>
+                                        <p class="text-muted">{{ 'Monthly Savings'|t }}</p>
                                     </div>
                                 </div>
                             </div>
@@ -133,13 +133,13 @@
                     <div class="active-subscriptions mb-4">
                         <div class="card">
                             <div class="card-header">
-                                <h5><i class="far fa-check-circle"></i> {{ 'Active Subscriptions'|translate(current_language) }}</h5>
+                                <h5><i class="far fa-check-circle"></i> {{ 'Active Subscriptions'|t }}</h5>
                             </div>
                             <div class="card-body">
                                 <div class="subscriptions-list" id="activeSubscriptionsList">
                                     <div class="text-center py-4">
                                         <i class="far fa-spinner fa-spin fa-2x"></i>
-                                        <p class="mt-2">{{ 'Loading your subscriptions...'|translate(current_language) }}</p>
+                                        <p class="mt-2">{{ 'Loading your subscriptions...'|t }}</p>
                                     </div>
                                 </div>
                             </div>
@@ -150,13 +150,13 @@
                     <div class="upcoming-deliveries mb-4">
                         <div class="card">
                             <div class="card-header">
-                                <h5><i class="far fa-truck"></i> {{ 'Upcoming Deliveries'|translate(current_language) }}</h5>
+                                <h5><i class="far fa-truck"></i> {{ 'Upcoming Deliveries'|t }}</h5>
                             </div>
                             <div class="card-body">
                                 <div class="deliveries-list" id="upcomingDeliveriesList">
                                     <div class="text-center py-4">
                                         <i class="far fa-spinner fa-spin fa-2x"></i>
-                                        <p class="mt-2">{{ 'Loading upcoming deliveries...'|translate(current_language) }}</p>
+                                        <p class="mt-2">{{ 'Loading upcoming deliveries...'|t }}</p>
                                     </div>
                                 </div>
                             </div>
@@ -167,13 +167,13 @@
                     <div class="inactive-subscriptions">
                         <div class="card">
                             <div class="card-header">
-                                <h5><i class="far fa-pause-circle"></i> {{ 'Paused & Cancelled Subscriptions'|translate(current_language) }}</h5>
+                                <h5><i class="far fa-pause-circle"></i> {{ 'Paused & Cancelled Subscriptions'|t }}</h5>
                             </div>
                             <div class="card-body">
                                 <div class="inactive-subscriptions-list" id="inactiveSubscriptionsList">
                                     <div class="text-center py-4">
                                         <i class="far fa-spinner fa-spin fa-2x"></i>
-                                        <p class="mt-2">{{ 'Loading inactive subscriptions...'|translate(current_language) }}</p>
+                                        <p class="mt-2">{{ 'Loading inactive subscriptions...'|t }}</p>
                                     </div>
                                 </div>
                             </div>
@@ -190,7 +190,7 @@
     <div class="modal-dialog modal-lg" role="document">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title" id="subscriptionModalLabel">{{ 'Manage Subscription'|translate(current_language) }}</h5>
+                <h5 class="modal-title" id="subscriptionModalLabel">{{ 'Manage Subscription'|t }}</h5>
                 <button type="button" class="close" data-dismiss="modal" aria-label="Close">
                     <span aria-hidden="true">&times;</span>
                 </button>
@@ -199,18 +199,18 @@
                 <!-- Subscription details will be loaded here -->
             </div>
             <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-dismiss="modal">{{ 'Close'|translate(current_language) }}</button>
+                <button type="button" class="btn btn-secondary" data-dismiss="modal">{{ 'Close'|t }}</button>
                 <button type="button" class="btn btn-warning" id="pauseSubscriptionBtn" style="display: none;">
-                    <i class="far fa-pause"></i> {{ 'Pause Subscription'|translate(current_language) }}
+                    <i class="far fa-pause"></i> {{ 'Pause Subscription'|t }}
                 </button>
                 <button type="button" class="btn btn-success" id="resumeSubscriptionBtn" style="display: none;">
-                    <i class="far fa-play"></i> {{ 'Resume Subscription'|translate(current_language) }}
+                    <i class="far fa-play"></i> {{ 'Resume Subscription'|t }}
                 </button>
                 <button type="button" class="btn btn-primary" id="modifySubscriptionBtn" style="display: none;">
-                    <i class="far fa-edit"></i> {{ 'Modify Plan'|translate(current_language) }}
+                    <i class="far fa-edit"></i> {{ 'Modify Plan'|t }}
                 </button>
                 <button type="button" class="btn btn-danger" id="cancelSubscriptionBtn" style="display: none;">
-                    <i class="far fa-times"></i> {{ 'Cancel Subscription'|translate(current_language) }}
+                    <i class="far fa-times"></i> {{ 'Cancel Subscription'|t }}
                 </button>
             </div>
         </div>
@@ -222,7 +222,7 @@
     <div class="modal-dialog" role="document">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title" id="modifyModalLabel">{{ 'Modify Subscription'|translate(current_language) }}</h5>
+                <h5 class="modal-title" id="modifyModalLabel">{{ 'Modify Subscription'|t }}</h5>
                 <button type="button" class="close" data-dismiss="modal" aria-label="Close">
                     <span aria-hidden="true">&times;</span>
                 </button>
@@ -230,37 +230,37 @@
             <div class="modal-body">
                 <form id="modifySubscriptionForm">
                     <div class="form-group">
-                        <label for="newPlan">{{ 'Select New Plan'|translate(current_language) }}</label>
+                        <label for="newPlan">{{ 'Select New Plan'|t }}</label>
                         <select class="form-control" id="newPlan" required>
-                            <option value="">{{ 'Choose Plan'|translate(current_language) }}</option>
-                            <option value="basic">{{ 'Basic Plan - $29/month'|translate(current_language) }}</option>
-                            <option value="premium">{{ 'Premium Plan - $49/month'|translate(current_language) }}</option>
-                            <option value="business">{{ 'Business Plan - $99/month'|translate(current_language) }}</option>
+                            <option value="">{{ 'Choose Plan'|t }}</option>
+                            <option value="basic">{{ 'Basic Plan - $29/month'|t }}</option>
+                            <option value="premium">{{ 'Premium Plan - $49/month'|t }}</option>
+                            <option value="business">{{ 'Business Plan - $99/month'|t }}</option>
                         </select>
                     </div>
                     <div class="form-group">
-                        <label for="newQuantity">{{ 'Number of Bottles per Delivery'|translate(current_language) }}</label>
+                        <label for="newQuantity">{{ 'Number of Bottles per Delivery'|t }}</label>
                         <input type="number" class="form-control" id="newQuantity" min="1" max="50" required>
                     </div>
                     <div class="form-group">
-                        <label for="newFrequency">{{ 'Delivery Frequency'|translate(current_language) }}</label>
+                        <label for="newFrequency">{{ 'Delivery Frequency'|t }}</label>
                         <select class="form-control" id="newFrequency" required>
-                            <option value="">{{ 'Choose Frequency'|translate(current_language) }}</option>
-                            <option value="weekly">{{ 'Weekly'|translate(current_language) }}</option>
-                            <option value="biweekly">{{ 'Bi-weekly'|translate(current_language) }}</option>
-                            <option value="monthly">{{ 'Monthly'|translate(current_language) }}</option>
+                            <option value="">{{ 'Choose Frequency'|t }}</option>
+                            <option value="weekly">{{ 'Weekly'|t }}</option>
+                            <option value="biweekly">{{ 'Bi-weekly'|t }}</option>
+                            <option value="monthly">{{ 'Monthly'|t }}</option>
                         </select>
                     </div>
                     <div class="form-group">
-                        <label for="effectiveDate">{{ 'Changes Effective From'|translate(current_language) }}</label>
+                        <label for="effectiveDate">{{ 'Changes Effective From'|t }}</label>
                         <input type="date" class="form-control" id="effectiveDate" required>
                     </div>
                     <input type="hidden" id="subscriptionIdToModify">
                 </form>
             </div>
             <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-dismiss="modal">{{ 'Cancel'|translate(current_language) }}</button>
-                <button type="button" class="btn btn-primary" onclick="confirmModifySubscription()">{{ 'Update Subscription'|translate(current_language) }}</button>
+                <button type="button" class="btn btn-secondary" data-dismiss="modal">{{ 'Cancel'|t }}</button>
+                <button type="button" class="btn btn-primary" onclick="confirmModifySubscription()">{{ 'Update Subscription'|t }}</button>
             </div>
         </div>
     </div>
@@ -517,10 +517,10 @@ async function loadActiveSubscriptions() {
                 subscriptionsList.innerHTML = `
                     <div class="text-center py-4">
                         <i class="far fa-sync-alt fa-3x text-muted mb-3"></i>
-                        <h5>{{ 'No Active Subscriptions'|translate(current_language) }}</h5>
-                        <p class="text-muted">{{ 'You dont have any active subscriptions'|translate(current_language) }}</p>
+                        <h5>{{ 'No Active Subscriptions'|t }}</h5>
+                        <p class="text-muted">{{ 'You dont have any active subscriptions'|t }}</p>
                         <a href="{{ url_for('frontend.subscriptions') }}" class="btn btn-primary">
-                            <i class="far fa-plus"></i> {{ 'Browse Plans'|translate(current_language) }}
+                            <i class="far fa-plus"></i> {{ 'Browse Plans'|t }}
                         </a>
                     </div>
                 `;
@@ -528,11 +528,11 @@ async function loadActiveSubscriptions() {
                 displaySubscriptions(subscriptions, subscriptionsList);
             }
         } else {
-            subscriptionsList.innerHTML = '<div class="text-center py-4"><p class="text-muted">{{ "Failed to load subscriptions"|translate(current_language) }}</p></div>';
+            subscriptionsList.innerHTML = '<div class="text-center py-4"><p class="text-muted">{{ "Failed to load subscriptions"|t }}</p></div>';
         }
     } catch (error) {
         console.error('Failed to load active subscriptions:', error);
-        subscriptionsList.innerHTML = '<div class="text-center py-4"><p class="text-muted">{{ "Failed to load subscriptions"|translate(current_language) }}</p></div>';
+        subscriptionsList.innerHTML = '<div class="text-center py-4"><p class="text-muted">{{ "Failed to load subscriptions"|t }}</p></div>';
     }
 }
 
@@ -545,16 +545,16 @@ async function loadUpcomingDeliveries() {
         
         if (response.ok && result.success) {
             if (result.data.deliveries.length === 0) {
-                deliveriesList.innerHTML = '<div class="text-center py-4"><p class="text-muted">{{ "No upcoming deliveries"|translate(current_language) }}</p></div>';
+                deliveriesList.innerHTML = '<div class="text-center py-4"><p class="text-muted">{{ "No upcoming deliveries"|t }}</p></div>';
             } else {
                 displayDeliveries(result.data.deliveries, deliveriesList);
             }
         } else {
-            deliveriesList.innerHTML = '<div class="text-center py-4"><p class="text-muted">{{ "Failed to load deliveries"|translate(current_language) }}</p></div>';
+            deliveriesList.innerHTML = '<div class="text-center py-4"><p class="text-muted">{{ "Failed to load deliveries"|t }}</p></div>';
         }
     } catch (error) {
         console.error('Failed to load upcoming deliveries:', error);
-        deliveriesList.innerHTML = '<div class="text-center py-4"><p class="text-muted">{{ "Failed to load deliveries"|translate(current_language) }}</p></div>';
+        deliveriesList.innerHTML = '<div class="text-center py-4"><p class="text-muted">{{ "Failed to load deliveries"|t }}</p></div>';
     }
 }
 
@@ -568,16 +568,16 @@ async function loadInactiveSubscriptions() {
         if (response.ok && result.success) {
             const subscriptions = result.data.items || result.data.subscriptions || [];
             if (subscriptions.length === 0) {
-                inactiveList.innerHTML = '<div class="text-center py-4"><p class="text-muted">{{ "No paused or cancelled subscriptions"|translate(current_language) }}</p></div>';
+                inactiveList.innerHTML = '<div class="text-center py-4"><p class="text-muted">{{ "No paused or cancelled subscriptions"|t }}</p></div>';
             } else {
                 displaySubscriptions(subscriptions, inactiveList);
             }
         } else {
-            inactiveList.innerHTML = '<div class="text-center py-4"><p class="text-muted">{{ "Failed to load inactive subscriptions"|translate(current_language) }}</p></div>';
+            inactiveList.innerHTML = '<div class="text-center py-4"><p class="text-muted">{{ "Failed to load inactive subscriptions"|t }}</p></div>';
         }
     } catch (error) {
         console.error('Failed to load inactive subscriptions:', error);
-        inactiveList.innerHTML = '<div class="text-center py-4"><p class="text-muted">{{ "Failed to load inactive subscriptions"|translate(current_language) }}</p></div>';
+        inactiveList.innerHTML = '<div class="text-center py-4"><p class="text-muted">{{ "Failed to load inactive subscriptions"|t }}</p></div>';
     }
 }
 
@@ -600,11 +600,11 @@ async function displaySubscriptions(subscriptions, container) {
                         `<li>${item.quantity}x ${item.product_name || 'Product'} (${formatPrice(item.unit_price)} each)</li>`
                     ).join('');
                 } else {
-                    productsDisplay = '<li class="text-muted">{{ "No products"|translate(current_language) }}</li>';
+                    productsDisplay = '<li class="text-muted">{{ "No products"|t }}</li>';
                 }
             } catch (error) {
                 console.error('Error loading subscription items:', error);
-                productsDisplay = '<li class="text-muted">{{ "Failed to load products"|translate(current_language) }}</li>';
+                productsDisplay = '<li class="text-muted">{{ "Failed to load products"|t }}</li>';
             }
         }
 
@@ -629,7 +629,7 @@ async function displaySubscriptions(subscriptions, container) {
                 <div class="row">
                     <div class="col-md-8">
                         <div class="mb-3">
-                            <small class="text-muted">{{ 'Products'|translate(current_language) }}:</small>
+                            <small class="text-muted">{{ 'Products'|t }}:</small>
                             <ul class="mb-0 mt-1" style="padding-left: 20px; list-style: none;">
                                 ${productsDisplay}
                             </ul>
@@ -637,19 +637,19 @@ async function displaySubscriptions(subscriptions, container) {
                         <div class="subscription-details">
                             <div class="row">
                                 <div class="col-6">
-                                    <small class="text-muted">{{ 'Delivery frequency'|translate(current_language) }}</small>
+                                    <small class="text-muted">{{ 'Delivery frequency'|t }}</small>
                                     <div><strong>${subscription.delivery_frequency}</strong></div>
                                 </div>
                                 <div class="col-6">
-                                    <small class="text-muted">{{ 'Time Slot'|translate(current_language) }}</small>
+                                    <small class="text-muted">{{ 'Time Slot'|t }}</small>
                                     <div><strong>${subscription.delivery_time_slot || 'N/A'}</strong></div>
                                 </div>
                                 <div class="col-6 mt-2">
-                                    <small class="text-muted">{{ 'Next delivery'|translate(current_language) }}</small>
+                                    <small class="text-muted">{{ 'Next delivery'|t }}</small>
                                     <div><strong>${subscription.next_delivery_date ? formatDate(subscription.next_delivery_date) : 'N/A'}</strong></div>
                                 </div>
                                 <div class="col-6 mt-2">
-                                    <small class="text-muted">{{ 'Next billing'|translate(current_language) }}</small>
+                                    <small class="text-muted">{{ 'Next billing'|t }}</small>
                                     <div><strong>${subscription.next_billing_date ? formatDate(subscription.next_billing_date) : 'N/A'}</strong></div>
                                 </div>
                             </div>
@@ -658,14 +658,14 @@ async function displaySubscriptions(subscriptions, container) {
                     <div class="col-md-4">
                         <div class="subscription-meta">
                             <div class="mb-2">
-                                <small class="text-muted">{{ 'Started'|translate(current_language) }}</small>
+                                <small class="text-muted">{{ 'Started'|t }}</small>
                                 <div><strong>${formatDate(subscription.created_at)}</strong></div>
                             </div>
                             <div class="mb-2">
-                                <small class="text-muted">{{ 'Payment Method'|translate(current_language) }}</small>
+                                <small class="text-muted">{{ 'Payment Method'|t }}</small>
                                 <div><strong>${subscription.payment_method.toUpperCase()}</strong></div>
                             </div>
-                            ${subscription.auto_renew ? '<div><span class="badge badge-success">{{ "Auto-renew"|translate(current_language) }}</span></div>' : ''}
+                            ${subscription.auto_renew ? '<div><span class="badge badge-success">{{ "Auto-renew"|t }}</span></div>' : ''}
                         </div>
                     </div>
                 </div>
@@ -673,19 +673,19 @@ async function displaySubscriptions(subscriptions, container) {
             <div class="subscription-footer">
                 <div class="d-flex justify-content-between align-items-center">
                     <div>
-                        <small class="text-muted">{{ 'Subscription'|translate(current_language) }} #${subscription.id}</small>
+                        <small class="text-muted">{{ 'Subscription'|t }} #${subscription.id}</small>
                     </div>
                     <div>
                         <button class="btn btn-sm btn-outline-primary" onclick="event.stopPropagation(); manageSubscription(${subscription.id})">
-                            {{ 'Manage'|translate(current_language) }}
+                            {{ 'Manage'|t }}
                         </button>
                         ${subscription.status === 'active' ? `
                             <button class="btn btn-sm btn-outline-warning ml-2" onclick="event.stopPropagation(); quickPauseSubscription(${subscription.id})">
-                                {{ 'Pause'|translate(current_language) }}
+                                {{ 'Pause'|t }}
                             </button>
                         ` : subscription.status === 'paused' ? `
                             <button class="btn btn-sm btn-outline-success ml-2" onclick="event.stopPropagation(); resumeSubscription(${subscription.id})">
-                                {{ 'Resume'|translate(current_language) }}
+                                {{ 'Resume'|t }}
                             </button>
                         ` : ''}
                     </div>
@@ -708,10 +708,10 @@ function displayDeliveries(deliveries, container) {
                     <small class="text-muted">${delivery.delivery_address.street}, ${delivery.delivery_address.city}</small>
                 </div>
                 <div>
-                    <span class="delivery-status badge badge-${delivery.is_urgent ? 'danger' : 'primary'}">${delivery.is_urgent ? '{{ "Urgent"|translate(current_language) }}' : '{{ "Scheduled"|translate(current_language) }}'}</span>
+                    <span class="delivery-status badge badge-${delivery.is_urgent ? 'danger' : 'primary'}">${delivery.is_urgent ? '{{ "Urgent"|t }}' : '{{ "Scheduled"|t }}'}</span>
                     <br>
                     <button class="btn btn-sm btn-outline-primary mt-2" onclick="rescheduleDelivery(${delivery.id})">
-                        {{ 'Reschedule'|translate(current_language) }}
+                        {{ 'Reschedule'|t }}
                     </button>
                 </div>
             </div>
@@ -731,11 +731,11 @@ async function manageSubscription(subscriptionId) {
             currentSubscription = result.data.subscription;
             showSubscriptionModal(result.data);
         } else {
-            showNotification(result.message || '{{ "Failed to load subscription details"|translate(current_language) }}', 'error');
+            showNotification(result.message || '{{ "Failed to load subscription details"|t }}', 'error');
         }
     } catch (error) {
         console.error('Failed to load subscription details:', error);
-        showNotification('{{ "Failed to load subscription details"|translate(current_language) }}', 'error');
+        showNotification('{{ "Failed to load subscription details"|t }}', 'error');
     }
 }
 
@@ -769,7 +769,7 @@ function showSubscriptionModal(data) {
             `<li>${item.quantity}x ${item.product_name || 'Product'} - ${formatPrice(item.unit_price)} each</li>`
         ).join('');
     } else {
-        productsHtml = '<li class="text-muted">{{ "No products"|translate(current_language) }}</li>';
+        productsHtml = '<li class="text-muted">{{ "No products"|t }}</li>';
     }
 
     modalContent.innerHTML = `
@@ -781,14 +781,14 @@ function showSubscriptionModal(data) {
                     <p class="text-muted">${subscription.description || ''}</p>
                     <div class="subscription-meta">
                         <div class="meta-item">
-                            <strong>{{ 'Status'|translate(current_language) }}:</strong>
+                            <strong>{{ 'Status'|t }}:</strong>
                             <span class="subscription-status status-${subscription.status}">${subscription.status.toUpperCase()}</span>
                         </div>
                         <div class="meta-item">
-                            <strong>{{ 'Subscription ID'|translate(current_language) }}:</strong> #${subscription.id}
+                            <strong>{{ 'Subscription ID'|t }}:</strong> #${subscription.id}
                         </div>
                         <div class="meta-item">
-                            <strong>{{ 'Started'|translate(current_language) }}:</strong> ${formatDate(subscription.created_at)}
+                            <strong>{{ 'Started'|t }}:</strong> ${formatDate(subscription.created_at)}
                         </div>
                     </div>
                 </div>
@@ -796,10 +796,10 @@ function showSubscriptionModal(data) {
                     <div class="subscription-pricing">
                         <h3>${formatPrice(subscription.billing_amount)}<small>/${subscription.delivery_frequency}</small></h3>
                         <div class="pricing-details">
-                            <div><strong>{{ 'Products'|translate(current_language) }}:</strong></div>
+                            <div><strong>{{ 'Products'|t }}:</strong></div>
                             <ul style="padding-left: 20px; margin-top: 5px;">${productsHtml}</ul>
-                            <div>{{ 'Delivery frequency'|translate(current_language) }}: <strong>${subscription.delivery_frequency}</strong></div>
-                            <div>{{ 'Next billing'|translate(current_language) }}: <strong>${subscription.next_billing_date ? formatDate(subscription.next_billing_date) : 'N/A'}</strong></div>
+                            <div>{{ 'Delivery frequency'|t }}: <strong>${subscription.delivery_frequency}</strong></div>
+                            <div>{{ 'Next billing'|t }}: <strong>${subscription.next_billing_date ? formatDate(subscription.next_billing_date) : 'N/A'}</strong></div>
                             ${billingInfo.days_until_billing !== undefined ? `<div class="text-muted"><small>${billingInfo.days_until_billing} days until next billing</small></div>` : ''}
                         </div>
                     </div>
@@ -808,32 +808,32 @@ function showSubscriptionModal(data) {
 
             <!-- Delivery Information -->
             <div class="delivery-info mb-4">
-                <h5>{{ 'Delivery Information'|translate(current_language) }}</h5>
+                <h5>{{ 'Delivery Information'|t }}</h5>
                 <div class="row">
                     <div class="col-md-6">
                         <div class="info-group">
-                            <strong>{{ 'Next Delivery'|translate(current_language) }}:</strong>
+                            <strong>{{ 'Next Delivery'|t }}:</strong>
                             <div>${subscription.next_delivery_date ? formatDate(subscription.next_delivery_date) : 'N/A'}</div>
                         </div>
                         <div class="info-group">
-                            <strong>{{ 'Time Slot'|translate(current_language) }}:</strong>
+                            <strong>{{ 'Time Slot'|t }}:</strong>
                             <div>${subscription.delivery_time_slot || 'N/A'}</div>
                         </div>
                         <div class="info-group">
-                            <strong>{{ 'Payment Method'|translate(current_language) }}:</strong>
+                            <strong>{{ 'Payment Method'|t }}:</strong>
                             <div>${subscription.payment_method ? subscription.payment_method.toUpperCase() : 'N/A'}</div>
                         </div>
                     </div>
                     <div class="col-md-6">
                         <div class="info-group">
-                            <strong>{{ 'Recent Orders'|translate(current_language) }}:</strong>
+                            <strong>{{ 'Recent Orders'|t }}:</strong>
                             ${recentOrders.length > 0 ? `
                                 <ul style="padding-left: 20px;">
                                     ${recentOrders.slice(0, 5).map(order => `
                                         <li>${order.order_number} - ${order.status.toUpperCase()} - ${formatPrice(order.total_amount)}</li>
                                     `).join('')}
                                 </ul>
-                            ` : '<div class="text-muted">{{ "No orders yet"|translate(current_language) }}</div>'}
+                            ` : '<div class="text-muted">{{ "No orders yet"|t }}</div>'}
                         </div>
                     </div>
                 </div>
@@ -842,17 +842,17 @@ function showSubscriptionModal(data) {
             <!-- Billing Information -->
             ${billingInfo && Object.keys(billingInfo).length > 0 ? `
                 <div class="billing-info-section mb-4">
-                    <h5>{{ 'Billing Information'|translate(current_language) }}</h5>
+                    <h5>{{ 'Billing Information'|t }}</h5>
                     <div class="row">
                         <div class="col-md-6">
                             <div class="info-group">
-                                <strong>{{ 'Current Period'|translate(current_language) }}:</strong>
+                                <strong>{{ 'Current Period'|t }}:</strong>
                                 <div>${billingInfo.current_period || 'N/A'}</div>
                             </div>
                         </div>
                         <div class="col-md-6">
                             <div class="info-group">
-                                <strong>{{ 'Total Paid'|translate(current_language) }}:</strong>
+                                <strong>{{ 'Total Paid'|t }}:</strong>
                                 <div>${billingInfo.total_paid ? formatPrice(billingInfo.total_paid) : 'N/A'}</div>
                             </div>
                         </div>
@@ -899,21 +899,21 @@ async function confirmModifySubscription() {
         const result = await response.json();
         
         if (response.ok && result.success) {
-            showNotification('{{ "Subscription updated successfully!"|translate(current_language) }}', 'success');
+            showNotification('{{ "Subscription updated successfully!"|t }}', 'success');
             $('#modifyModal').modal('hide');
             loadActiveSubscriptions();
             loadSubscriptionOverview();
         } else {
-            showNotification(result.message || '{{ "Failed to update subscription"|translate(current_language) }}', 'error');
+            showNotification(result.message || '{{ "Failed to update subscription"|t }}', 'error');
         }
     } catch (error) {
         console.error('Failed to modify subscription:', error);
-        showNotification('{{ "Failed to update subscription"|translate(current_language) }}', 'error');
+        showNotification('{{ "Failed to update subscription"|t }}', 'error');
     }
 }
 
 async function pauseSubscription(subscriptionId) {
-    if (!confirm('{{ "Are you sure you want to pause this subscription?"|translate(current_language) }}')) {
+    if (!confirm('{{ "Are you sure you want to pause this subscription?"|t }}')) {
         return;
     }
     
@@ -925,17 +925,17 @@ async function pauseSubscription(subscriptionId) {
         const result = await response.json();
         
         if (response.ok && result.success) {
-            showNotification('{{ "Subscription paused successfully"|translate(current_language) }}', 'success');
+            showNotification('{{ "Subscription paused successfully"|t }}', 'success');
             $('#subscriptionModal').modal('hide');
             loadActiveSubscriptions();
             loadInactiveSubscriptions();
             loadSubscriptionOverview();
         } else {
-            showNotification(result.message || '{{ "Failed to pause subscription"|translate(current_language) }}', 'error');
+            showNotification(result.message || '{{ "Failed to pause subscription"|t }}', 'error');
         }
     } catch (error) {
         console.error('Failed to pause subscription:', error);
-        showNotification('{{ "Failed to pause subscription"|translate(current_language) }}', 'error');
+        showNotification('{{ "Failed to pause subscription"|t }}', 'error');
     }
 }
 
@@ -948,26 +948,26 @@ async function resumeSubscription(subscriptionId) {
         const result = await response.json();
         
         if (response.ok && result.success) {
-            showNotification('{{ "Subscription resumed successfully"|translate(current_language) }}', 'success');
+            showNotification('{{ "Subscription resumed successfully"|t }}', 'success');
             $('#subscriptionModal').modal('hide');
             loadActiveSubscriptions();
             loadInactiveSubscriptions();
             loadSubscriptionOverview();
         } else {
-            showNotification(result.message || '{{ "Failed to resume subscription"|translate(current_language) }}', 'error');
+            showNotification(result.message || '{{ "Failed to resume subscription"|t }}', 'error');
         }
     } catch (error) {
         console.error('Failed to resume subscription:', error);
-        showNotification('{{ "Failed to resume subscription"|translate(current_language) }}', 'error');
+        showNotification('{{ "Failed to resume subscription"|t }}', 'error');
     }
 }
 
 async function cancelSubscription(subscriptionId) {
-    if (!confirm('{{ "Are you sure you want to cancel this subscription? This action cannot be undone."|translate(current_language) }}')) {
+    if (!confirm('{{ "Are you sure you want to cancel this subscription? This action cannot be undone."|t }}')) {
         return;
     }
     
-    const reason = prompt('{{ "Please provide a reason for cancellation (optional)"|translate(current_language) }}:');
+    const reason = prompt('{{ "Please provide a reason for cancellation (optional)"|t }}:');
     
     try {
         const response = await apiRequest(`/subscriptions/${subscriptionId}/cancel`, {
@@ -978,17 +978,17 @@ async function cancelSubscription(subscriptionId) {
         const result = await response.json();
         
         if (response.ok && result.success) {
-            showNotification('{{ "Subscription cancelled successfully"|translate(current_language) }}', 'success');
+            showNotification('{{ "Subscription cancelled successfully"|t }}', 'success');
             $('#subscriptionModal').modal('hide');
             loadActiveSubscriptions();
             loadInactiveSubscriptions();
             loadSubscriptionOverview();
         } else {
-            showNotification(result.message || '{{ "Failed to cancel subscription"|translate(current_language) }}', 'error');
+            showNotification(result.message || '{{ "Failed to cancel subscription"|t }}', 'error');
         }
     } catch (error) {
         console.error('Failed to cancel subscription:', error);
-        showNotification('{{ "Failed to cancel subscription"|translate(current_language) }}', 'error');
+        showNotification('{{ "Failed to cancel subscription"|t }}', 'error');
     }
 }
 
@@ -997,7 +997,7 @@ async function quickPauseSubscription(subscriptionId) {
 }
 
 function rescheduleDelivery(deliveryId) {
-    showNotification('{{ "Delivery rescheduling feature coming soon!"|translate(current_language) }}', 'info');
+    showNotification('{{ "Delivery rescheduling feature coming soon!"|t }}', 'info');
     // This would open a modal to reschedule the delivery
 }
 

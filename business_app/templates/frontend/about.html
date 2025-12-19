@@ -1,6 +1,6 @@
 {% extends "frontend/base.html" %}
 
-{% block title %}{{ 'About Us'|translate(current_language) }} - {{ company_name }}{% endblock %}
+{% block title %}{{ 'landing.footer.about_us'|t }} - {{ company_name }}{% endblock %}
 
 {% block extra_head %}
 <style>
@@ -47,10 +47,10 @@
             <div class="shape" style="background-image: url({{ url_for('static', filename='images/shape/banner-shap.png') }});"></div>
             <div class="auto-container">
                 <div class="content-box">
-                    <h1>{{ 'About Us'|translate(current_language) }}</h1>
+                    <h1>{{ 'landing.footer.about_us'|t }}</h1>
                     <ul class="bread-crumb clearfix">
-                        <li><a href="{{ url_for('frontend.index') }}">{{ 'Home'|translate(current_language) }}</a></li>
-                        <li>{{ 'About'|translate(current_language) }}</li>
+                        <li><a href="{{ url_for('frontend.index') }}">{{ 'landing.nav.home'|t }}</a></li>
+                        <li>{{ 'landing.about.breadcrumb'|t }}</li>
                     </ul>
                 </div>
             </div>
@@ -64,11 +64,11 @@
                     <div class="col-lg-6 col-md-12 col-sm-12 image-column">
                         <div class="image_block_2">
                             <div class="image-box">
-                                <figure class="image image-1 clearfix"><img src="{{ url_for('static', filename='images/resource/about-2.png') }}" alt="{{ 'About Us'|translate(current_language) }}"></figure>
-                                <figure class="image image-2"><img src="{{ url_for('static', filename='images/resource/about-3.png') }}" alt="{{ 'Quality Water'|translate(current_language) }}"></figure>
+                                <figure class="image image-1 clearfix"><img src="{{ url_for('static', filename='images/resource/about-2.png') }}" alt="{{ 'landing.footer.about_us'|t }}"></figure>
+                                <figure class="image image-2"><img src="{{ url_for('static', filename='images/resource/about-3.png') }}" alt="{{ 'landing.image.quality_water'|t }}"></figure>
                                 <div class="text">
                                     <h2>10+</h2>
-                                    <h6>{{ 'Years Experience'|translate(current_language) }}</h6>
+                                    <h6>{{ 'landing.about.years_experience'|t }}</h6>
                                 </div>
                             </div>
                         </div>
@@ -77,11 +77,11 @@
                         <div class="content_block_1">
                             <div class="content-box">
                                 <div class="sec-title">
-                                    <h2>{{ 'Leading Water Delivery Service in Uzbekistan'|translate(current_language) }}</h2>
+                                    <h2>{{ 'landing.about.page.title'|t }}</h2>
                                 </div>
                                 <div class="text">
-                                    <p>{{ 'Blue Stream Group has been serving communities across Uzbekistan with premium water delivery services for over a decade. Our commitment to quality, reliability, and customer satisfaction has made us the trusted choice for thousands of families and businesses.'|translate(current_language) }}</p>
-                                    <p>{{ 'We use state-of-the-art filtration technology and maintain the highest standards of hygiene and safety in our production and delivery processes.'|translate(current_language) }}</p>
+                                    <p>{{ 'landing.about.page.description_1'|t }}</p>
+                                    <p>{{ 'landing.about.page.description_2'|t }}</p>
                                 </div>
                             </div>
                         </div>

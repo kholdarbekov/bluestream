@@ -1,6 +1,6 @@
 {% extends "frontend/base.html" %}
 
-{% block title %}{{ 'Register'|translate(current_language) }} - {{ company_name }}{% endblock %}
+{% block title %}{{ 'landing.nav.register'|t }} - {{ company_name }}{% endblock %}
 
 {% block content %}
         <!-- page-title -->
@@ -8,10 +8,10 @@
             <div class="bg-layer" style="background-image: url({{ url_for('static', filename='images/background/page-title.jpg') }});"></div>
             <div class="auto-container">
                 <div class="content-box">
-                    <h1>{{ 'Register'|translate(current_language) }}</h1>
+                    <h1>{{ 'landing.nav.register'|t }}</h1>
                     <ul class="bread-crumb clearfix">
-                        <li><a href="{{ url_for('frontend.index') }}">{{ 'Home'|translate(current_language) }}</a></li>
-                        <li>{{ 'Register'|translate(current_language) }}</li>
+                        <li><a href="{{ url_for('frontend.index') }}">{{ 'landing.nav.home'|t }}</a></li>
+                        <li>{{ 'landing.nav.register'|t }}</li>
                     </ul>
                 </div>
             </div>
@@ -25,32 +25,32 @@
                     <div class="col-lg-8 col-md-12 col-sm-12 offset-lg-2">
                         <div class="form-inner">
                             <div class="sec-title centred">
-                                <h2>{{ 'Create Account'|translate(current_language) }}</h2>
-                                <p>{{ 'Join us today and enjoy premium water delivery services'|translate(current_language) }}</p>
+                                <h2>{{ 'Create Account'|t }}</h2>
+                                <p>{{ 'Join us today and enjoy premium water delivery services'|t }}</p>
                             </div>
                             
                             <form id="registerForm" class="default-form">
                                 <div class="row clearfix">
                                     <div class="col-lg-6 col-md-6 col-sm-12 form-group">
-                                        <input type="text" name="first_name" placeholder="{{ 'First Name'|translate(current_language) }}" required>
+                                        <input type="text" name="first_name" placeholder="{{ 'First Name'|t }}" required>
                                     </div>
                                     <div class="col-lg-6 col-md-6 col-sm-12 form-group">
-                                        <input type="text" name="last_name" placeholder="{{ 'Last Name'|translate(current_language) }}" required>
+                                        <input type="text" name="last_name" placeholder="{{ 'Last Name'|t }}" required>
                                     </div>
                                     <div class="col-lg-12 col-md-12 col-sm-12 form-group">
-                                        <input type="email" name="email" placeholder="{{ 'Email Address'|translate(current_language) }}" required>
+                                        <input type="email" name="email" placeholder="{{ 'Email Address'|t }}" required>
                                     </div>
                                     <div class="col-lg-12 col-md-12 col-sm-12 form-group">
-                                        <input type="tel" name="phone" placeholder="{{ 'Phone Number'|translate(current_language) }}" required>
+                                        <input type="tel" name="phone" placeholder="{{ 'Phone Number'|t }}" required>
                                     </div>
                                     <div class="col-lg-6 col-md-6 col-sm-12 form-group">
-                                        <input type="password" name="password" placeholder="{{ 'Password'|translate(current_language) }}" required>
+                                        <input type="password" name="password" placeholder="{{ 'Password'|t }}" required>
                                     </div>
                                     <div class="col-lg-6 col-md-6 col-sm-12 form-group">
-                                        <input type="password" name="confirm_password" placeholder="{{ 'Confirm Password'|translate(current_language) }}" required>
+                                        <input type="password" name="confirm_password" placeholder="{{ 'Confirm Password'|t }}" required>
                                     </div>
                                     <div class="col-lg-12 col-md-12 col-sm-12 form-group">
-                                        <input type="text" name="referral_code" placeholder="{{ 'Referral Code (Optional)'|translate(current_language) }}">
+                                        <input type="text" name="referral_code" placeholder="{{ 'Referral Code (Optional)'|t }}">
                                     </div>
                                     
                                     <!-- Telegram Account Linking Section -->
@@ -58,21 +58,21 @@
                                         <div class="telegram-section" style="border: 1px solid #e0e0e0; padding: 15px; border-radius: 5px; background-color: #f9f9f9;">
                                             <h4 style="margin-bottom: 10px; color: #0088cc;">
                                                 <i class="fab fa-telegram-plane" style="margin-right: 8px;"></i>
-                                                {{ 'Link Telegram Account (Optional)'|translate(current_language) }}
+                                                {{ 'Link Telegram Account (Optional)'|t }}
                                             </h4>
                                             <p style="font-size: 14px; color: #666; margin-bottom: 10px;">
-                                                {{ 'Link your Telegram account to use our bot and sync your data across platforms'|translate(current_language) }}
+                                                {{ 'Link your Telegram account to use our bot and sync your data across platforms'|t }}
                                             </p>
                                             <div class="check-box">
                                                 <input class="check" type="checkbox" id="link_telegram" name="link_telegram">
-                                                <label for="link_telegram">{{ 'I want to link my Telegram account'|translate(current_language) }}</label>
+                                                <label for="link_telegram">{{ 'I want to link my Telegram account'|t }}</label>
                                             </div>
                                             <div id="telegram_linking_info" style="display: none; margin-top: 10px; padding: 10px; background-color: #e3f2fd; border-radius: 4px;">
                                                 <p style="font-size: 13px; margin: 0; color: #1976d2;">
-                                                    <strong>{{ 'After registration:'|translate(current_language) }}</strong><br>
-                                                    1. {{ 'Open our Telegram bot'|translate(current_language) }}: <a href="https://t.me/bluestream_bot" target="_blank">@bluestream_bot</a><br>
-                                                    2. {{ 'Use the linking code that will be provided'|translate(current_language) }}<br>
-                                                    3. {{ 'Enjoy unified access across web and Telegram!'|translate(current_language) }}
+                                                    <strong>{{ 'After registration:'|t }}</strong><br>
+                                                    1. {{ 'Open our Telegram bot'|t }}: <a href="https://t.me/bluestream_bot" target="_blank">@bluestream_bot</a><br>
+                                                    2. {{ 'Use the linking code that will be provided'|t }}<br>
+                                                    3. {{ 'Enjoy unified access across web and Telegram!'|t }}
                                                 </p>
                                             </div>
                                         </div>
@@ -81,23 +81,23 @@
                                     <div class="col-lg-12 col-md-12 col-sm-12 form-group">
                                         <div class="check-box">
                                             <input class="check" type="checkbox" id="terms" name="terms" required>
-                                            <label for="terms">{{ 'I agree to the'|translate(current_language) }} <a href="#">{{ 'Terms & Conditions'|translate(current_language) }}</a></label>
+                                            <label for="terms">{{ 'I agree to the'|t }} <a href="#">{{ 'Terms & Conditions'|t }}</a></label>
                                         </div>
                                     </div>
                                     <div class="col-lg-12 col-md-12 col-sm-12 form-group">
                                         <div class="check-box">
                                             <input class="check" type="checkbox" id="newsletter" name="newsletter">
-                                            <label for="newsletter">{{ 'Subscribe to our newsletter for updates and offers'|translate(current_language) }}</label>
+                                            <label for="newsletter">{{ 'Subscribe to our newsletter for updates and offers'|t }}</label>
                                         </div>
                                     </div>
                                     <div class="col-lg-12 col-md-12 col-sm-12 form-group message-btn">
-                                        <button type="submit" class="theme-btn btn-one">{{ 'Create Account'|translate(current_language) }}</button>
+                                        <button type="submit" class="theme-btn btn-one">{{ 'Create Account'|t }}</button>
                                     </div>
                                 </div>
                             </form>
                             
                             <div class="other-option centred">
-                                <p>{{ 'Already have an account?'|translate(current_language) }} <a href="{{ url_for('frontend.login') }}">{{ 'Login Here'|translate(current_language) }}</a></p>
+                                <p>{{ 'Already have an account?'|t }} <a href="{{ url_for('frontend.login') }}">{{ 'Login Here'|t }}</a></p>
                             </div>
                         </div>
                     </div>
@@ -122,7 +122,7 @@ document.getElementById('registerForm').addEventListener('submit', async functio
     
     // Validate password confirmation
     if (formData.get('password') !== formData.get('confirm_password')) {
-        showNotification('{{ "Passwords do not match"|translate(current_language) }}', 'error');
+        showNotification('{{ "Passwords do not match"|t }}', 'error');
         return;
     }
     
@@ -147,7 +147,7 @@ document.getElementById('registerForm').addEventListener('submit', async functio
         
         if (response.ok) {
             // Handle successful registration
-            let message = '{{ "Account created successfully! Please check your email to verify your account."|translate(current_language) }}';
+            let message = '{{ "Account created successfully! Please check your email to verify your account."|t }}';
             
             if (data.link_telegram) {
                 // Generate and store a unique linking code
@@ -155,8 +155,8 @@ document.getElementById('registerForm').addEventListener('submit', async functio
                 localStorage.setItem('telegram_linking_code', linkingCode);
                 localStorage.setItem('user_id_for_linking', result.data.user.id);
                 
-                message += '\n\n{{ "Telegram Linking Code"|translate(current_language) }}: ' + linkingCode + 
-                          '\n{{ "Save this code to link your Telegram account"|translate(current_language) }}';
+                message += '\n\n{{ "Telegram Linking Code"|t }}: ' + linkingCode + 
+                          '\n{{ "Save this code to link your Telegram account"|t }}';
                 
                 // Show the code in a modal or dedicated section
                 showTelegramLinkingCode(linkingCode, result.data.user.id);
@@ -174,10 +174,10 @@ document.getElementById('registerForm').addEventListener('submit', async functio
             }, 5000); // Longer delay if showing telegram code
             
         } else {
-            showNotification(result.message || '{{ "Registration failed"|translate(current_language) }}', 'error');
+            showNotification(result.message || '{{ "Registration failed"|t }}', 'error');
         }
     } catch (error) {
-        showNotification('{{ "Network error. Please try again."|translate(current_language) }}', 'error');
+        showNotification('{{ "Network error. Please try again."|t }}', 'error');
     }
 });
 
@@ -204,29 +204,29 @@ function showTelegramLinkingCode(code, userId) {
     modal.innerHTML = `
         <h3 style="color: #0088cc; margin-bottom: 20px;">
             <i class="fab fa-telegram-plane" style="margin-right: 10px;"></i>
-            {{ 'Telegram Account Linking'|translate(current_language) }}
+            {{ 'Telegram Account Linking'|t }}
         </h3>
-        <p style="margin-bottom: 20px;">{{ 'Your account has been created successfully!'|translate(current_language) }}</p>
+        <p style="margin-bottom: 20px;">{{ 'Your account has been created successfully!'|t }}</p>
         <div style="background: #f0f8ff; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
-            <p><strong>{{ 'Linking Code'|translate(current_language) }}:</strong></p>
+            <p><strong>{{ 'Linking Code'|t }}:</strong></p>
             <div style="font-size: 24px; font-weight: bold; color: #0088cc; letter-spacing: 2px; margin: 10px 0;">
                 ${code}
             </div>
             <button onclick="copyToClipboard('${code}')" style="padding: 5px 15px; background: #0088cc; color: white; border: none; border-radius: 4px; cursor: pointer;">
-                {{ 'Copy Code'|translate(current_language) }}
+                {{ 'Copy Code'|t }}
             </button>
         </div>
         <div style="text-align: left; font-size: 14px; line-height: 1.6;">
-            <p><strong>{{ 'To link your Telegram account'|translate(current_language) }}:</strong></p>
+            <p><strong>{{ 'To link your Telegram account'|t }}:</strong></p>
             <ol>
-                <li>{{ 'Open Telegram and find our bot'|translate(current_language) }}: <a href="https://t.me/bluestream_bot" target="_blank">@bluestream_bot</a></li>
-                <li>{{ 'Send the command'|translate(current_language) }}: <code>/link ${code}</code></li>
-                <li>{{ 'Follow the bot instructions'|translate(current_language) }}</li>
+                <li>{{ 'Open Telegram and find our bot'|t }}: <a href="https://t.me/bluestream_bot" target="_blank">@bluestream_bot</a></li>
+                <li>{{ 'Send the command'|t }}: <code>/link ${code}</code></li>
+                <li>{{ 'Follow the bot instructions'|t }}</li>
             </ol>
         </div>
         <button onclick="this.parentElement.parentElement.remove()" 
                 style="margin-top: 20px; padding: 10px 20px; background: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer;">
-            {{ 'Continue'|translate(current_language) }}
+            {{ 'Continue'|t }}
         </button>
     `;
     
@@ -236,7 +236,7 @@ function showTelegramLinkingCode(code, userId) {
 
 function copyToClipboard(text) {
     navigator.clipboard.writeText(text).then(() => {
-        showNotification('{{ "Code copied to clipboard"|translate(current_language) }}', 'success');
+        showNotification('{{ "Code copied to clipboard"|t }}', 'success');
     });
 }
 

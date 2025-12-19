@@ -37,7 +37,7 @@
         <!-- preloader -->
         <div class="loader-wrap">
             <div class="preloader">
-                <div class="preloader-close">{{ 'Preloader Close'|translate(current_language) }}</div>
+                <div class="preloader-close">{{ 'landing.common.preloader_close'|t }}</div>
                 <div id="handle-preloader" class="handle-preloader">
                     <div class="animation-preloader">
                         <div class="spinner"></div>
@@ -46,7 +46,7 @@
                             <span data-text-preloader="{{ letter }}" class="letters-loading">{{ letter }}</span>
                             {% endfor %}
                         </div>
-                    </div>  
+                    </div>
                 </div>
             </div>
         </div>
@@ -75,12 +75,10 @@
                             <div class="collapse navbar-collapse show clearfix" id="navbarSupportedContent">
                                 <ul class="navigation clearfix">
                                     <li class="{% if request.endpoint == 'frontend.index' %}current{% endif %}">
-                                        <!-- DEBUG: Home translation - current_lang={{ get_current_lang() }}, g_lang={{ g.get('language', 'NOT_SET') }}, URL_lang={{ request.args.get('lang', 'NOT_SET') }} -->
-                                        <a href="{{ url_for('frontend.index') }}" data-debug="home-link" data-lang="{{ get_current_lang() }}">{{ 'Home'|translate(current_language) }}</a>
-                                        <!-- DEBUG: Home translation result: {{ 'Home'|translate(current_language) }} -->
+                                        <a href="{{ url_for('frontend.index') }}">{{ 'landing.nav.home'|t }}</a>
                                     </li>
                                     <li class="dropdown {% if request.endpoint in ['frontend.shop', 'frontend.product_detail'] %}current{% endif %}">
-                                        <a href="{{ url_for('frontend.shop') }}">{{ 'Shop'|translate(current_language) }}</a>
+                                        <a href="{{ url_for('frontend.shop') }}">{{ 'landing.nav.shop'|t }}</a>
                                         {% if nav_categories %}
                                         <ul>
                                             {% for category in nav_categories[:6] %}
@@ -90,17 +88,17 @@
                                         {% endif %}
                                     </li>
                                     <li class="{% if request.endpoint == 'frontend.subscriptions' %}current{% endif %}">
-                                        <a href="{{ url_for('frontend.subscriptions') }}">{{ 'Subscriptions'|translate(current_language) }}</a>
+                                        <a href="{{ url_for('frontend.subscriptions') }}">{{ 'landing.nav.subscriptions'|t }}</a>
                                     </li>
                                     <li class="{% if request.endpoint == 'frontend.services' %}current{% endif %}">
-                                        <a href="{{ url_for('frontend.services') }}">{{ 'Services'|translate(current_language) }}</a>
+                                        <a href="{{ url_for('frontend.services') }}">{{ 'landing.nav.services'|t }}</a>
                                     </li>
                                     <li class="dropdown">
-                                        <a href="#">{{ 'Pages'|translate(current_language) }}</a>
+                                        <a href="#">{{ 'landing.nav.pages'|t }}</a>
                                         <ul>
-                                            <li><a href="{{ url_for('frontend.about') }}">{{ 'About Us'|translate(current_language) }}</a></li>
-                                            <li><a href="{{ url_for('frontend.gallery') }}">{{ 'Gallery'|translate(current_language) }}</a></li>
-                                            <li><a href="{{ url_for('frontend.contact') }}">{{ 'Contact'|translate(current_language) }}</a></li>
+                                            <li><a href="{{ url_for('frontend.about') }}">{{ 'landing.nav.about'|t }}</a></li>
+                                            <li><a href="{{ url_for('frontend.gallery') }}">{{ 'landing.nav.gallery'|t }}</a></li>
+                                            <li><a href="{{ url_for('frontend.contact') }}">{{ 'landing.nav.contact'|t }}</a></li>
                                         </ul>
                                     </li>
                                 </ul>
@@ -117,7 +115,7 @@
                                     <div class="form-container">
                                         <form method="get" action="{{ url_for('frontend.shop') }}">
                                             <div class="form-group">
-                                                <input type="search" name="search" placeholder="{{ 'Search products...'|translate(current_language) }}" required>
+                                                <input type="search" name="search" placeholder="{{ 'landing.common.search_placeholder'|t }}" required>
                                                 <button type="submit" class="search-btn"><span class="fas fa-search"></span></button>
                                             </div>
                                         </form>
@@ -157,17 +155,17 @@
                                 </button>
                                 <div class="dropdown-menu">
                                     <a class="dropdown-item" href="{{ url_for('frontend.my_account') }}">
-                                        <i class="far fa-user-circle"></i> {{ 'My Account'|translate(current_language) }}
+                                        <i class="far fa-user-circle"></i> {{ 'landing.nav.my_account'|t }}
                                     </a>
                                     <a class="dropdown-item" href="{{ url_for('frontend.my_orders') }}">
-                                        <i class="far fa-list"></i> {{ 'My Orders'|translate(current_language) }}
+                                        <i class="far fa-list"></i> {{ 'landing.account.orders'|t }}
                                     </a>
                                     <a class="dropdown-item" href="{{ url_for('frontend.my_loyalty') }}">
-                                        <i class="far fa-star"></i> {{ 'Loyalty Program'|translate(current_language) }}
+                                        <i class="far fa-star"></i> {{ 'landing.account.loyalty'|t }}
                                     </a>
                                     <div class="dropdown-divider"></div>
                                     <a class="dropdown-item" href="#" onclick="logout()">
-                                        <i class="far fa-sign-out"></i> {{ 'Logout'|translate(current_language) }}
+                                        <i class="far fa-sign-out"></i> {{ 'landing.nav.logout'|t }}
                                     </a>
                                 </div>
                             </div>
@@ -175,7 +173,7 @@
                         {% else %}
                         <li class="account-info">
                             <a href="{{ url_for('frontend.login') }}" class="theme-btn btn-one btn-sm">
-                                <i class="far fa-user"></i> {{ 'Login'|translate(current_language) }}
+                                <i class="far fa-user"></i> {{ 'landing.nav.login'|t }}
                             </a>
                         </li>
                         {% endif %}
@@ -204,7 +202,7 @@
                                     <div class="form-container">
                                         <form method="get" action="{{ url_for('frontend.shop') }}">
                                             <div class="form-group">
-                                                <input type="search" name="search" placeholder="{{ 'Search products...'|translate(current_language) }}" required>
+                                                <input type="search" name="search" placeholder="{{ 'landing.common.search_placeholder'|t }}" required>
                                                 <button type="submit" class="search-btn"><span class="fas fa-search"></span></button>
                                             </div>
                                         </form>
@@ -244,17 +242,17 @@
                                 </button>
                                 <div class="dropdown-menu">
                                     <a class="dropdown-item" href="{{ url_for('frontend.my_account') }}">
-                                        <i class="far fa-user-circle"></i> {{ 'My Account'|translate(current_language) }}
+                                        <i class="far fa-user-circle"></i> {{ 'landing.nav.my_account'|t }}
                                     </a>
                                     <a class="dropdown-item" href="{{ url_for('frontend.my_orders') }}">
-                                        <i class="far fa-list"></i> {{ 'My Orders'|translate(current_language) }}
+                                        <i class="far fa-list"></i> {{ 'landing.account.orders'|t }}
                                     </a>
                                     <a class="dropdown-item" href="{{ url_for('frontend.my_loyalty') }}">
-                                        <i class="far fa-star"></i> {{ 'Loyalty Program'|translate(current_language) }}
+                                        <i class="far fa-star"></i> {{ 'landing.account.loyalty'|t }}
                                     </a>
                                     <div class="dropdown-divider"></div>
                                     <a class="dropdown-item" href="#" onclick="logout()">
-                                        <i class="far fa-sign-out"></i> {{ 'Logout'|translate(current_language) }}
+                                        <i class="far fa-sign-out"></i> {{ 'landing.nav.logout'|t }}
                                     </a>
                                 </div>
                             </div>
@@ -262,7 +260,7 @@
                         {% else %}
                         <li class="account-info">
                             <a href="{{ url_for('frontend.login') }}" class="theme-btn btn-one btn-sm">
-                                <i class="far fa-user"></i> {{ 'Login'|translate(current_language) }}
+                                <i class="far fa-user"></i> {{ 'landing.nav.login'|t }}
                             </a>
                         </li>
                         {% endif %}
@@ -281,7 +279,7 @@
                 <div class="nav-logo"><a href="{{ url_for('frontend.index') }}"><img src="{{ url_for('static', filename='images/logo.png') }}" alt="{{ company_name }}" title="{{ company_name }}"></a></div>
                 <div class="menu-outer"><!--Here Menu Will Come Automatically Via Javascript / Same Menu as in Header--></div>
                 <div class="contact-info">
-                    <h4>{{ 'Contact Info'|translate(current_language) }}</h4>
+                    <h4>{{ 'landing.footer.contact_info'|t }}</h4>
                     <ul>
                         <li>{{ company_phone }}</li>
                         <li>{{ company_email }}</li>
@@ -291,7 +289,7 @@
                     <ul class="clearfix">
                         <li><a href="#"><span class="fab fa-facebook-square"></span></a></li>
                         <li><a href="#"><span class="fab fa-instagram"></span></a></li>
-                        <li><a href="t.me/aqua_element_bot"><span class="fab fa-telegram"></span></a></li>
+                        <li><a href="https://t.me/aqua_element_bot"><span class="fab fa-telegram"></span></a></li>
                     </ul>
                 </div>
             </nav>
@@ -311,7 +309,11 @@
                 <div class="footer-top clearfix">
                     <div class="line-shape" style="background-image: url({{ url_for('static', filename='images/shape/shape-11.png') }});"></div>
                     <div class="text pull-left">
-                        <h2>{{ 'Please'|translate(current_language) }} <span>{{ 'Call Us'|translate(current_language) }}</span> {{ 'to Take an Extraordinary Service'|translate(current_language) }}</h2>
+                        {% if current_language == 'uz' %}
+                        <h2>{{ 'landing.footer.cta_suffix'|t }} <span>{{ 'landing.common.call_us'|t }}</span> {{ 'landing.footer.cta_prefix'|t }}</h2>
+                        {% else %}
+                        <h2>{{ 'landing.footer.cta_prefix'|t }} <span>{{ 'landing.common.call_us'|t }}</span> {{ 'landing.footer.cta_suffix'|t }}</h2>
+                        {% endif %}
                     </div>
                     <div class="support-box pull-right">
                         <a href="tel:{{ company_phone }}"><i class="fas fa-phone"></i>{{ company_phone }}</a>
@@ -323,13 +325,13 @@
                             <div class="footer-widget logo-widget">
                                 <figure class="footer-logo"><a href="{{ url_for('frontend.index') }}"><img src="{{ url_for('static', filename='images/footer-logo.png') }}" alt="{{ company_name }}"></a></figure>
                                 <div class="text">
-                                    <p>{{ 'Premium water delivery services with a commitment to quality and customer satisfaction.'|translate(current_language) }}</p>
+                                    <p>{{ 'landing.footer.tagline'|t }}</p>
                                 </div>
                                 <div class="schedule-box">
-                                    <h6>{{ 'Open Hours:'|translate(current_language) }}</h6>
+                                    <h6>{{ 'landing.contact.info.hours'|t }}</h6>
                                     <ul class="list clearfix">
-                                        <li>{{ 'Mon - Sat: 9AM - 6PM.'|translate(current_language) }}</li>
-                                        <li>{{ 'Delivery: 24/7'|translate(current_language) }}</li>
+                                        <li>{{ 'landing.footer.business_hours'|t }}</li>
+                                        <li>{{ 'landing.footer.delivery_hours'|t }}</li>
                                     </ul>
                                 </div>
                             </div>
@@ -337,12 +339,12 @@
                         <div class="col-lg-3 col-md-6 col-sm-12 footer-column">
                             <div class="footer-widget contact-widget ml-70">
                                 <div class="widget-title">
-                                    <h4>{{ 'Address'|translate(current_language) }}</h4>
+                                    <h4>{{ 'landing.contact.info.address'|t }}</h4>
                                 </div>
                                 <div class="widget-content">
                                     <ul class="info-list clearfix">
-                                        <li><i class="fal fa-map-marker-alt"></i>{{ 'Tashkent, Uzbekistan'|translate(current_language) }}</li>
-                                        <li><i class="fal fa-phone"></i>{{ 'Call Us:'|translate(current_language) }} <a href="tel:{{ company_phone }}">{{ company_phone }}</a></li>
+                                        <li><i class="fal fa-map-marker-alt"></i>{{ 'landing.contact.location'|t }}</li>
+                                        <li><i class="fal fa-phone"></i>{{ 'landing.common.call_us'|t }} <a href="tel:{{ company_phone }}">{{ company_phone }}</a></li>
                                         <li><i class="fal fa-envelope-open-text"></i><a href="mailto:{{ company_email }}">{{ company_email }}</a></li>
                                     </ul>
                                 </div>
@@ -351,15 +353,15 @@
                         <div class="col-lg-3 col-md-6 col-sm-12 footer-column">
                             <div class="footer-widget links-widget ml-70">
                                 <div class="widget-title">
-                                    <h4>{{ 'Useful Links'|translate(current_language) }}</h4>
+                                    <h4>{{ 'landing.footer.useful_links'|t }}</h4>
                                 </div>
                                 <div class="widget-content">
                                     <ul class="links-list clearfix">
-                                        <li><a href="{{ url_for('frontend.about') }}">{{ 'About Company'|translate(current_language) }}</a></li>
-                                        <li><a href="{{ url_for('frontend.services') }}">{{ 'Services'|translate(current_language) }}</a></li>
-                                        <li><a href="{{ url_for('frontend.shop') }}">{{ 'Our Products'|translate(current_language) }}</a></li>
-                                        <li><a href="#">{{ 'Our Blog'|translate(current_language) }}</a></li>
-                                        <li><a href="{{ url_for('frontend.contact') }}">{{ 'Contact Us'|translate(current_language) }}</a></li>
+                                        <li><a href="{{ url_for('frontend.about') }}">{{ 'landing.footer.about_company'|t }}</a></li>
+                                        <li><a href="{{ url_for('frontend.services') }}">{{ 'landing.nav.services'|t }}</a></li>
+                                        <li><a href="{{ url_for('frontend.shop') }}">{{ 'landing.shop.page_title'|t }}</a></li>
+                                        <li><a href="#">{{ 'landing.footer.our_blog'|t }}</a></li>
+                                        <li><a href="{{ url_for('frontend.contact') }}">{{ 'landing.nav.contact'|t }}</a></li>
                                     </ul>
                                 </div>
                             </div>
@@ -367,14 +369,14 @@
                         <div class="col-lg-3 col-md-6 col-sm-12 footer-column">
                             <div class="footer-widget subscribe-widget">
                                 <div class="widget-title">
-                                    <h4>{{ 'Subscribe'|translate(current_language) }}</h4>
+                                    <h4>{{ 'landing.footer.subscribe'|t }}</h4>
                                 </div>
                                 <div class="widget-content">
-                                    <p>{{ 'Stay updated with our latest news, offers, and water delivery tips.'|translate(current_language) }}</p>
+                                    <p>{{ 'landing.footer.subscribe_text'|t }}</p>
                                     <div class="form-inner">
                                         <form action="{{ url_for('frontend.contact') }}" method="post">
                                             <div class="form-group">
-                                                <input type="email" name="email" placeholder="{{ 'Your Email'|translate(current_language) }}" required="">
+                                                <input type="email" name="email" placeholder="{{ 'landing.footer.email_placeholder'|t }}" required="">
                                                 <button type="submit"><i class="far fa-long-arrow-alt-right"></i></button>
                                             </div>
                                         </form>
@@ -389,16 +391,16 @@
                 <div class="auto-container">
                     <div class="bottom-inner">
                         <div class="copyright">
-                            <p><a href="/">Blue Stream Group</a> &copy; 2025 {{ 'All Rights Reserved'|translate(current_language) }}</p>
+                            <p><a href="/">Blue Stream Group</a> &copy; 2025 {{ 'landing.footer.all_rights_reserved'|t }}</p>
                         </div>
                         <ul class="social-links clearfix">
                             <li><a href="#"><i class="fab fa-facebook-f"></i></a></li>
                             <li><a href="#"><i class="fab fa-instagram"></i></a></li>
-                            <li><a href="t.me/aqua_element_bot"><i class="fab fa-telegram"></i></a></li>
+                            <li><a href="https://t.me/aqua_element_bot"><i class="fab fa-telegram"></i></a></li>
                         </ul>
                         <ul class="footer-nav clearfix">
-                            <li><a href="#">{{ 'Terms of Service'|translate(current_language) }}</a></li>
-                            <li><a href="#">{{ 'Privacy Policy'|translate(current_language) }}</a></li>
+                            <li><a href="#">{{ 'landing.footer.terms_of_service'|t }}</a></li>
+                            <li><a href="#">{{ 'landing.footer.privacy_policy'|t }}</a></li>
                         </ul>
                     </div>
                 </div>
@@ -516,7 +518,7 @@
             cart = [];
             localStorage.removeItem('cart');
             
-            showNotification('{{ "Logged out from all sessions"|translate(current_language) }}', 'success');
+            showNotification('{{ "landing.notification.logged_out"|t }}', 'success');
             
             setTimeout(() => {
                 window.location.href = '{{ url_for("frontend.login") }}';
@@ -582,7 +584,7 @@
             }
             localStorage.setItem('cart', JSON.stringify(cart));
             updateCartCount();
-            showNotification('{{ "Product added to cart"|translate(current_language) }}', 'success');
+            showNotification('{{ "landing.notification.product_added_to_cart"|t }}', 'success');
         }
         
         function removeFromCart(productId) {
@@ -687,7 +689,7 @@
             setInterval(async () => {
                 const isValid = await validateSession();
                 if (!isValid) {
-                    showNotification('{{ "Your session has expired. Please login again."|translate(current_language) }}', 'warning');
+                    showNotification('{{ "landing.notification.session_expired"|t }}', 'warning');
                     setTimeout(logout, 3000);
                 }
             }, 15 * 60 * 1000);

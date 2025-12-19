@@ -47,7 +47,7 @@ class OrderHandlers:
                 orders = response.data.get('data', {}).get('orders', [])
             
             if not orders:
-                no_orders_text = "📦 You have no orders yet.\n\nStart shopping to place your first order!"
+                no_orders_text = i18n.get('telegram.orders.no_orders', language)
                 keyboard = MenuKeyboards.main_menu(language)
                 
                 if update.callback_query:
@@ -71,7 +71,7 @@ class OrderHandlers:
                 return
             
             # Show orders list
-            orders_text = f"📦 Your Orders ({len(orders)}):\n\n"
+            orders_text = i18n.get('telegram.orders.your_orders', language, count=len(orders)) + "\n\n"
             keyboard = OrderKeyboards.order_list(orders, language)
             
             if update.callback_query:
@@ -130,14 +130,14 @@ class OrderHandlers:
             
             # Add order items if available
             if order.get('order_items'):
-                details_text += "\n\n📋 Items:\n"
+                details_text += f"\n\n📋 {i18n.get('telegram.orders.items_header', language)}:\n"
                 for item in order['order_items']:
                     details_text += f"• {item.get('product_name', 'Unknown')} x{item.get('quantity', 1)}\n"
                     details_text += f"  💰 {format_price(item.get('total_price', 0))} UZS\n"
             
             # Add delivery info if available
             if order.get('delivery_address'):
-                details_text += f"\n📍 Delivery Address:\n{order['delivery_address']}"
+                details_text += f"\n📍 {i18n.get('telegram.orders.delivery_info', language)}:\n{order['delivery_address']}"
             
             keyboard = OrderKeyboards.order_details(order_id, order.get('status', ''), language)
             
@@ -179,7 +179,7 @@ class OrderHandlers:
             
             if not addresses:
                 # No addresses, prompt to add one
-                add_address_text = "📍 You need to add a delivery address first.\n\nPlease share your location or enter your address:"
+                add_address_text = i18n.get('telegram.orders.no_address_prompt', language)
                 keyboard = ProfileKeyboards.location_request(language)
                 if update.callback_query:
                     await update.callback_query.edit_message_text(
@@ -198,7 +198,7 @@ class OrderHandlers:
                 return
             
             # Show address selection
-            address_text = f"{i18n.get('delivery_address', language)}\n\nSelect delivery address:"
+            address_text = i18n.get('telegram.orders.select_address', language)
             keyboard = OrderKeyboards.delivery_addresses(addresses, language)
             
             if update.callback_query:
@@ -232,13 +232,13 @@ class OrderHandlers:
             
             # Show payment methods
             payment_methods = [
-                {'type': 'cash', 'name': i18n.get('payment_cash', language)},
-                {'type': 'card', 'name': i18n.get('payment_card', language)},
-                {'type': 'payme', 'name': i18n.get('payment_payme', language)},
-                {'type': 'click', 'name': i18n.get('payment_click', language)},
+                {'type': 'cash', 'name': i18n.get('telegram.payment_cash', language)},
+                {'type': 'card', 'name': i18n.get('telegram.payment_card', language)},
+                {'type': 'payme', 'name': i18n.get('telegram.payment_payme', language)},
+                {'type': 'click', 'name': i18n.get('telegram.payment_click', language)},
             ]
-            
-            payment_text = f"{i18n.get('payment_method', language)}\n\nSelect payment method:"
+
+            payment_text = i18n.get('telegram.orders.select_payment', language)
             keyboard = OrderKeyboards.payment_methods(payment_methods, language)
             
             await query.edit_message_text(
@@ -283,7 +283,7 @@ class OrderHandlers:
             payment_method = context.user_data.get('selected_payment_method')
             
             if not address_id or not payment_method:
-                await query.answer("❌ Missing order information. Please start over.")
+                await query.answer(i18n.get('telegram.orders.missing_info', language))
                 return
             
             # Create order
@@ -301,7 +301,7 @@ class OrderHandlers:
 
                 cart = response.data['data']['cart']
                 if not cart or not cart.get('cart_items'):
-                    await self._handle_api_error(update, "❌ Your cart is empty.", language)
+                    await self._handle_api_error(update, i18n.get('telegram.orders.cart_empty', language), language)
                     return
                 
                 order_data = {
@@ -330,16 +330,16 @@ class OrderHandlers:
 
             
             # Show success message
-            success_text = f"✅ {i18n.get('order_placed', language)}\n\n"
+            success_text = i18n.get('telegram.orders.placed_success', language) + "\n\n"
             success_text += MessageBuilder.build_order_summary(order, language)
-            
+
             keyboard = MenuKeyboards.main_menu(language)
-            
+
             await query.edit_message_text(
                 text=success_text,
                 reply_markup=keyboard
             )
-            await query.answer("🎉 Order placed successfully!")
+            await query.answer(i18n.get('telegram.orders.placed_success', language))
             
             # Clear order data
             context.user_data.clear()
@@ -356,7 +356,7 @@ class OrderHandlers:
         language = await i18n.get_user_language(user_id)
         
         # Build confirmation message
-        confirmation_text = "📋 Order Confirmation\n\n"
+        confirmation_text = i18n.get('telegram.orders.confirmation_title', language) + "\n\n"
         
         # Get cart items from API by api_client.get_cart and show them
         cart_total_amount = 0
@@ -373,9 +373,9 @@ class OrderHandlers:
             
             cart = response.data['data']['cart']
             if not cart:
-                await self._handle_api_error(update, "❌ Your cart is empty.", language)
+                await self._handle_api_error(update, i18n.get('telegram.orders.cart_empty', language), language)
                 return
-            confirmation_text += "🛒 Items:\n"
+            confirmation_text += f"🛒 {i18n.get('telegram.orders.items_header', language)}:\n"
             for item in cart.get('cart_items', []):
                 confirmation_text += f"• {item.get('product', {}).get('name', 'Unknown')} x{item.get('quantity', 1)}\n"
                 item_subtotal_price = item.get('product', {}).get('current_price', 0) * item.get('quantity', 1)
@@ -385,18 +385,18 @@ class OrderHandlers:
         # Add address info
         address_id = context.user_data.get('selected_address_id')
         if address_id:
-            confirmation_text += f"📍 Delivery Address: Selected address #{address_id}\n\n"
-        
+            confirmation_text += f"📍 {i18n.get('telegram.delivery_address', language)}: Selected address #{address_id}\n\n"
+
         # Add payment method
         payment_method = context.user_data.get('selected_payment_method')
         if payment_method:
-            confirmation_text += f"💳 Payment: {payment_method.title()}\n\n"
-        
+            confirmation_text += f"💳 {i18n.get('telegram.orders.payment_info', language)}: {payment_method.title()}\n\n"
+
         # Add total amount
-        confirmation_text += f"💰 Total: {format_price(cart_total_amount)} UZS\n"
-        confirmation_text += "🚚 Delivery Fee: Free\n"
+        confirmation_text += f"💰 {i18n.get('telegram.total', language)}: {format_price(cart_total_amount)} UZS\n"
+        confirmation_text += f"🚚 {i18n.get('telegram.orders.delivery_fee', language)}: Free\n"
         confirmation_text += "────────────────\n"
-        confirmation_text += f"💳 Grand Total: {format_price(cart_total_amount)} UZS"
+        confirmation_text += f"💳 {i18n.get('telegram.orders.grand_total', language)}: {format_price(cart_total_amount)} UZS"
         
         keyboard = OrderKeyboards.order_confirmation(language)
         
@@ -408,8 +408,8 @@ class OrderHandlers:
     
     async def _handle_auth_error(self, update: Update, language: str):
         """Handle authentication error"""
-        error_msg = "❌ Authentication failed. Please restart the bot with /start"
-        
+        error_msg = i18n.get('telegram.error.auth_failed', language)
+
         if update.callback_query:
             await update.callback_query.edit_message_text(error_msg)
             await update.callback_query.answer()
@@ -429,10 +429,10 @@ class OrderHandlers:
         """Handle general error"""
         try:
             language = await i18n.get_user_language(update.effective_user.id)
-            error_msg = i18n.get('error_occurred', language)
+            error_msg = i18n.get('telegram.error_occurred', language)
         except:
-            error_msg = "❌ An error occurred. Please try again."
-        
+            error_msg = i18n.get('telegram.error_occurred', 'en')
+
         if update.callback_query:
             await update.callback_query.answer(error_msg)
         else:

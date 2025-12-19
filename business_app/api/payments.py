@@ -19,6 +19,7 @@ from business_app.models.user import User
 from business_app.models.subscription import Subscription
 from business_app.utils.service_factory import get_payment_service, get_notification_service
 from business_app.utils.helpers import get_current_language
+from business_app.utils.translations import get_translation
 from business_app.serializers.payment_serializers import (
     serialize_payment, serialize_payment_list, serialize_credit_card,
     get_available_payment_methods, PaymentSchema, CreditCardSchema,
@@ -32,7 +33,7 @@ from business_app.utils.validation_helpers import (
 )
 from business_app.utils.error_handlers import handle_api_exception, create_success_response
 from business_app.utils.exceptions import ValidationError, NotFoundError
-from business_app.utils.csrf_protection import csrf_required
+from business_app.utils.exceptions import ValidationError, NotFoundError
 from business_app.tasks.payment_tasks import process_payment_verification, handle_payment_webhook
 from business_app.utils.api_responses import (
     success_response, error_response, paginated_response, created_response,
@@ -116,12 +117,11 @@ def get_payment_methods():
 
     except Exception as e:
         current_app.logger.error(f"Get payment methods error: {e}")
-        return internal_error_response(message='Failed to get payment methods')
+        return internal_error_response(message=get_translation('api.payments.error.get_methods_failed'))
 
 
 @payments_bp.route('/create', methods=['POST'])
 @jwt_required()
-@csrf_required
 @validate_json(['order_id', 'payment_method'])
 def create_payment():
     """Create a new payment for an order"""
@@ -142,7 +142,7 @@ def create_payment():
             return not_found_response(message='Order not found')
 
         if order.is_paid:
-            return error_response(message='Order is already paid')
+            return error_response(message=get_translation('api.payments.error.already_paid'))
 
         # Create payment
         payment_data = {
@@ -199,7 +199,7 @@ def create_payment():
         return error_response(message=str(e))
     except Exception as e:
         current_app.logger.error(f"Create payment error: {e}")
-        return internal_error_response(message='Failed to create payment')
+        return internal_error_response(message=get_translation('api.payments.error.create_failed'))
 
 
 @payments_bp.route('/subscription', methods=['POST'])
@@ -254,7 +254,7 @@ def create_subscription_payment():
         return error_response(message=str(e))
     except Exception as e:
         current_app.logger.error(f"Create subscription payment error: {e}")
-        return internal_error_response(message='Failed to create subscription payment')
+        return internal_error_response(message=get_translation('api.payments.error.subscription_create_failed'))
 
 
 @payments_bp.route('/<int:payment_id>/status', methods=['GET'])
@@ -280,7 +280,7 @@ def get_payment_status(payment_id):
 
     except Exception as e:
         current_app.logger.error(f"Get payment status error: {e}")
-        return internal_error_response(message='Failed to get payment status')
+        return internal_error_response(message=get_translation('api.payments.error.get_status_failed'))
 
 
 @payments_bp.route('/', methods=['GET'])
@@ -353,7 +353,7 @@ def cancel_payment(payment_id):
             return not_found_response(message='Payment not found')
 
         if payment.status != PaymentStatus.PENDING:
-            return error_response(message='Only pending payments can be cancelled')
+            return error_response(message=get_translation('api.payments.error.only_pending_cancellable'))
 
         # Cancel payment
         success = get_payment_service().cancel_payment(payment)
@@ -366,11 +366,11 @@ def cancel_payment(payment_id):
                 }
             )
         else:
-            return internal_error_response(message='Failed to cancel payment')
+            return internal_error_response(message=get_translation('api.payments.error.cancel_failed'))
 
     except Exception as e:
         current_app.logger.error(f"Cancel payment error: {e}")
-        return internal_error_response(message='Failed to cancel payment')
+        return internal_error_response(message=get_translation('api.payments.error.cancel_failed'))
 
 
 @payments_bp.route('/cards', methods=['GET'])
@@ -389,13 +389,41 @@ def get_saved_cards():
 
     except Exception as e:
         current_app.logger.error(f"Get saved cards error: {e}")
-        return internal_error_response(message='Failed to get saved cards')
+        return internal_error_response(message=get_translation('api.payments.error.get_cards_failed'))
+
+
+@payments_bp.route('/tokenize', methods=['POST'])
+@jwt_required()
+@validate_json(['card_number', 'expiry'])
+@rate_limit(10, 60)
+def tokenize_card():
+    """Tokenize card via Payme (Proxy)"""
+    try:
+        data = request.get_json()
+        card_number = data.get('card_number', '').replace(' ', '')
+        expiry = data.get('expiry', '').replace('/', '') # Expecting MM/YY -> MMYY
+        
+        if len(expiry) != 4:
+             return error_response(message="Invalid expiry format. Use MM/YY")
+             
+        payment_service = get_payment_service()
+        token_data = payment_service.create_card_token(card_number, expiry)
+        
+        return success_response(data={
+            'token': token_data.get('token'),
+            'number': token_data.get('number'), # Masked
+            'expire': token_data.get('expire'),
+            'type': 'payme'
+        })
+        
+    except Exception as e:
+        current_app.logger.error(f"Tokenization error: {e}")
+        return internal_error_response(message=str(e))
 
 
 @payments_bp.route('/cards', methods=['POST'])
 @jwt_required()
-@csrf_required
-@validate_json(['card_number', 'expiry_month', 'expiry_year', 'cardholder_name'])
+@validate_json(['cardholder_name']) # Removed card_number requirement here as we might use token
 @rate_limit(5, 60)  # Limit card saves to 5 per minute per user
 def save_card():
     """Save a new credit card with comprehensive validation"""
@@ -405,32 +433,36 @@ def save_card():
 
         # Comprehensive input validation
         card_number = data.get('card_number', '').strip()
+        card_token = data.get('card_token')
         expiry_month = data.get('expiry_month')
         expiry_year = data.get('expiry_year')
         cardholder_name = data.get('cardholder_name', '').strip()
         cvv = data.get('cvv', '').strip()  # Optional for validation
         is_default = data.get('is_default', False)
 
-        # Validate required fields are not empty
-        if not card_number:
-            return error_response(message='Card number is required')
+        # Validate required fields
+        # If we have a token, card_number is treated as masked/optional or last 4 digits
+        if not card_token and not card_number:
+            return error_response(message=get_translation('error.validation.card_number_required'))
+            
         if not cardholder_name:
-            return error_response(message='Cardholder name is required')
+            return error_response(message=get_translation('error.validation.cardholder_name_required'))
 
         # Validate expiry month and year data types
         try:
             expiry_month = int(expiry_month)
             expiry_year = int(expiry_year)
         except (ValueError, TypeError):
-            return error_response(message='Invalid expiry month or year format')
+            return error_response(message=get_translation('error.validation.invalid_card_expiry'))
 
         # Validate boolean type for is_default
         if not isinstance(is_default, bool):
-            return error_response(message='is_default must be a boolean')
+            return error_response(message=get_translation('error.validation.invalid_boolean'))
 
         # Build card data for validation and saving
         card_data = {
             'user_id': current_user_id,
+            'card_token': card_token,
             'card_number': card_number,
             'expiry_month': expiry_month,
             'expiry_year': expiry_year,
@@ -467,12 +499,11 @@ def save_card():
     except Exception as e:
         # Handle unexpected errors
         current_app.logger.error(f"Unexpected error saving card for user {current_user_id}: {e}")
-        return internal_error_response(message='Failed to save card. Please try again.')
+        return internal_error_response(message=get_translation('api.payments.error.save_card_failed'))
 
 
 @payments_bp.route('/cards/<int:card_id>', methods=['DELETE'])
 @jwt_required()
-@csrf_required
 def delete_card(card_id):
     """Delete a saved credit card"""
     try:
@@ -485,7 +516,7 @@ def delete_card(card_id):
         if success:
             return success_response(data={'message': 'Card deleted successfully'})
         else:
-            return internal_error_response(message='Failed to delete card')
+            return internal_error_response(message=get_translation('api.payments.error.delete_card_failed'))
 
     except NotFoundError as e:
         return not_found_response(message=str(e))
@@ -493,7 +524,7 @@ def delete_card(card_id):
         return validation_error_response(errors=str(e))
     except Exception as e:
         current_app.logger.error(f"Delete card error: {e}")
-        return internal_error_response(message='Failed to delete card')
+        return internal_error_response(message=get_translation('api.payments.error.delete_card_failed'))
 
 
 @payments_bp.route('/statistics', methods=['GET'])
@@ -570,7 +601,7 @@ def get_payment_statistics():
 
     except Exception as e:
         current_app.logger.error(f"Get payment statistics error: {e}")
-        return internal_error_response(message='Failed to get payment statistics')
+        return internal_error_response(message=get_translation('api.payments.error.get_stats_failed'))
 
 
 @payments_bp.route('/webhook/<provider>', methods=['POST'])
@@ -594,6 +625,11 @@ def payment_webhook(provider):
             current_app.logger.error(f"Unsupported webhook provider: {provider}")
             return jsonify({'error': 'Unsupported provider'}), 400
 
+        if provider.lower() == 'payme':
+            # Payme REQUIRES synchronous response with JSON-RPC result
+            response_data = payment_service.handle_payme_webhook(webhook_data)
+            return jsonify(response_data)
+        
         # Add metadata for processing
         webhook_metadata = {
             'provider': provider.lower(),
@@ -608,9 +644,7 @@ def payment_webhook(provider):
         handle_payment_webhook.delay(webhook_metadata, provider.lower())
 
         # Return provider-specific response format
-        if provider.lower() == 'payme':
-            return jsonify({'jsonrpc': '2.0', 'result': {'status': 'received'}}), 200
-        elif provider.lower() == 'click':
+        if provider.lower() == 'click':
             return jsonify({'error': 0, 'error_note': 'Success'}), 200
         else:
             return jsonify({'status': 'received'}), 200
@@ -667,12 +701,11 @@ def verify_payment(payment_id):
 
     except Exception as e:
         current_app.logger.error(f"Verify payment error: {e}")
-        return internal_error_response(message='Failed to verify payment')
+        return internal_error_response(message=get_translation('api.payments.error.verify_failed'))
 
 
 @payments_bp.route('/refund', methods=['POST'])
 @jwt_required()
-@csrf_required
 @validate_json(['payment_id'])
 def request_refund():
     """Request payment refund"""
@@ -692,7 +725,7 @@ def request_refund():
             return not_found_response(message='Payment not found')
 
         if payment.status != PaymentStatus.COMPLETED:
-            return error_response(message='Only completed payments can be refunded')
+            return error_response(message=get_translation('api.payments.error.only_completed_refundable'))
 
         # Request refund
         refund = get_payment_service().request_refund(payment, reason)
@@ -709,7 +742,7 @@ def request_refund():
         return error_response(message=str(e))
     except Exception as e:
         current_app.logger.error(f"Request refund error: {e}")
-        return internal_error_response(message='Failed to request refund')
+        return internal_error_response(message=get_translation('api.payments.error.refund_failed'))
 
 
 @payments_bp.route('/exchange-rates', methods=['GET'])
@@ -733,4 +766,4 @@ def get_exchange_rates():
 
     except Exception as e:
         current_app.logger.error(f"Get exchange rates error: {e}")
-        return internal_error_response(message='Failed to get exchange rates')
+        return internal_error_response(message=get_translation('api.payments.error.get_rates_failed'))

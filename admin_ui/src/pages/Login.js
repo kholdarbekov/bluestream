@@ -3,10 +3,12 @@ import { Form, Input, Button, Card, Typography, Space, Divider, Alert } from 'an
 import { UserOutlined, LockOutlined, SettingOutlined } from '@ant-design/icons';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../stores/authStore';
+import { useTranslation } from 'react-i18next';
 
 const { Title, Text } = Typography;
 
 const Login = () => {
+  const { t } = useTranslation();
   const [form] = Form.useForm();
   const navigate = useNavigate();
   const location = useLocation();
@@ -40,14 +42,14 @@ const Login = () => {
       >
         <div style={{ textAlign: 'center', marginBottom: 24 }}>
           <Title level={2} style={{ color: '#1890ff', marginBottom: 8 }}>
-            Blue Stream
+            {t('ui.login.app_name')}
           </Title>
-          <Text type="secondary">Admin Dashboard</Text>
+          <Text type="secondary">{t('ui.login.subtitle')}</Text>
         </div>
 
         <Alert
-          message="Restricted Access"
-          description="This is an administrative interface. Only authorized personnel with admin or manager roles are permitted to access this system."
+          message={t('ui.login.restricted_access')}
+          description={t('ui.login.restricted_description')}
           type="warning"
           icon={<SettingOutlined />}
           showIcon
@@ -65,26 +67,26 @@ const Login = () => {
         >
           <Form.Item
             name="email"
-            label="Email or Phone"
+            label={t('ui.login.email_or_phone')}
             rules={[
-              { required: true, message: 'Please enter your email or phone number' }
+              { required: true, message: t('ui.login.email_required') }
             ]}
           >
             <Input
               prefix={<UserOutlined />}
-              placeholder="admin@bluestream.com or +998901234567"
+              placeholder={t('ui.login.email_or_phone_placeholder')}
               size="large"
             />
           </Form.Item>
 
           <Form.Item
             name="password"
-            label="Password"
-            rules={[{ required: true, message: 'Please enter your password' }]}
+            label={t('ui.login.password')}
+            rules={[{ required: true, message: t('ui.login.password_required') }]}
           >
             <Input.Password
               prefix={<LockOutlined />}
-              placeholder="Enter your password"
+              placeholder={t('ui.login.password_placeholder')}
               size="large"
             />
           </Form.Item>
@@ -98,14 +100,14 @@ const Login = () => {
               block
               style={{ marginTop: 8 }}
             >
-              Sign In
+              {t('ui.login.sign_in')}
             </Button>
           </Form.Item>
         </Form>
 
         <div style={{ textAlign: 'center', marginTop: 16 }}>
           <Text type="secondary" style={{ fontSize: '12px' }}>
-            © 2024 Blue Stream Water Business. All rights reserved.
+            {t('ui.login.copyright')}
           </Text>
         </div>
       </Card>

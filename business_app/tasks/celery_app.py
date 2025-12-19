@@ -24,7 +24,9 @@ def make_celery(app=None):
             'business_app.tasks.delivery_tasks',
             'business_app.tasks.analytics_tasks',
             'business_app.tasks.subscription_tasks',
-            'business_app.tasks.order_tasks'
+            'business_app.tasks.order_tasks',
+            'business_app.tasks.audit_tasks',
+            'business_app.tasks.session_tasks'
         ]
     )
     
@@ -103,6 +105,28 @@ def make_celery(app=None):
         'update-customer-segments': {
             'task': 'business_app.tasks.analytics_tasks.update_customer_segments',
             'schedule': crontab(hour=3, minute=0, day_of_month=1),  # 1st day of month at 3 AM
+        },
+
+        # Clean up old audit logs weekly (Sunday at 3 AM)
+        # Configuration can be overridden via environment variables:
+        # - AUDIT_LOG_RETENTION_DAYS (default: 90)
+        # - AUDIT_LOG_BATCH_SIZE (default: 1000)
+        # - AUDIT_LOG_PRESERVE_CRITICAL (default: true)
+        'cleanup-old-audit-logs': {
+            'task': 'business_app.tasks.audit_tasks.cleanup_old_audit_logs_task',
+            'schedule': crontab(hour=3, minute=0, day_of_week=0),  # Sunday at 3 AM
+            'kwargs': {
+                'retention_days': int(os.getenv('AUDIT_LOG_RETENTION_DAYS', 90)),
+                'batch_size': int(os.getenv('AUDIT_LOG_BATCH_SIZE', 1000)),
+                'preserve_critical': os.getenv('AUDIT_LOG_PRESERVE_CRITICAL', 'true').lower() == 'true'
+            }
+        },
+
+        # Clean up expired sessions daily at 4 AM
+        'cleanup-expired-sessions': {
+            'task': 'business_app.tasks.session_tasks.cleanup_expired_sessions_task',
+            'schedule': crontab(hour=4, minute=0),  # Daily at 4 AM
+            'kwargs': {'batch_size': 1000}
         }
     }
     
@@ -120,37 +144,39 @@ def make_celery(app=None):
 
 
 # Create default celery app
-celery_app = make_celery()
+celery = make_celery()
 
 
 # Task routing configuration
-celery_app.conf.task_routes = {
+celery.conf.task_routes = {
     'business_app.tasks.payment_tasks.*': {'queue': 'payment'},
     'business_app.tasks.notification_tasks.*': {'queue': 'notifications'},
     'business_app.tasks.delivery_tasks.*': {'queue': 'delivery'},
     'business_app.tasks.analytics_tasks.*': {'queue': 'analytics'},
     'business_app.tasks.subscription_tasks.*': {'queue': 'subscriptions'},
     'business_app.tasks.order_tasks.*': {'queue': 'orders'},
+    'business_app.tasks.audit_tasks.*': {'queue': 'maintenance'},
+    'business_app.tasks.session_tasks.*': {'queue': 'maintenance'},
 }
 
 
 # Task priority configuration
-celery_app.conf.task_default_priority = 5
-celery_app.conf.worker_prefetch_multiplier = 1
-celery_app.conf.task_acks_late = True
-celery_app.conf.worker_disable_rate_limits = False
+celery.conf.task_default_priority = 5
+celery.conf.worker_prefetch_multiplier = 1
+celery.conf.task_acks_late = True
+celery.conf.worker_disable_rate_limits = False
 
 
 # Error handling configuration
-celery_app.conf.task_reject_on_worker_lost = True
-celery_app.conf.task_ignore_result = False
-celery_app.conf.result_expires = 3600  # 1 hour
+celery.conf.task_reject_on_worker_lost = True
+celery.conf.task_ignore_result = False
+celery.conf.result_expires = 3600  # 1 hour
 
 
 # Monitoring configuration
-celery_app.conf.worker_send_task_events = True
-celery_app.conf.task_send_sent_event = True
+celery.conf.worker_send_task_events = True
+celery.conf.task_send_sent_event = True
 
 
 if __name__ == '__main__':
-    celery_app.start()
+    celery.start()

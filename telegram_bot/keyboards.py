@@ -131,27 +131,41 @@ class LanguageKeyboards:
     
     @staticmethod
     def language_selection(current_language: str = 'en') -> InlineKeyboardMarkup:
-        """Language selection keyboard"""
+        """Language selection keyboard with enhanced visual layout"""
         buttons = []
-        
+        language_row = []
+
         for lang_code in config.localization.supported_languages:
             flag = i18n.get_language_flag(lang_code)
             name = i18n.get_language_name(lang_code, current_language)
-            
-            text = f"{flag} {name}"
+
+            # Enhanced visual indicator for current language
             if lang_code == current_language:
-                text += " ✓"
-            
-            buttons.append([{
+                text = f"✅ {flag} {name}"
+            else:
+                text = f"{flag} {name}"
+
+            language_row.append({
                 'text': text,
                 'callback_data': f'set_language_{lang_code}'
-            }])
-        
+            })
+
+            # Create rows of 2 languages for better mobile UX
+            # With 3 languages (uz, en, ru), we'll have 2 in first row, 1 in second
+            if len(language_row) == 2:
+                buttons.append(language_row)
+                language_row = []
+
+        # Add remaining languages if any
+        if language_row:
+            buttons.append(language_row)
+
+        # Add back button on its own row
         buttons.append([{
             'text': i18n.get('back', current_language),
             'callback_data': 'back_to_main'
         }])
-        
+
         return KeyboardBuilder.build_inline_keyboard(buttons)
 
 

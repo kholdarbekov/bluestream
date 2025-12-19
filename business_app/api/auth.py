@@ -3075,7 +3075,7 @@ def generate_telegram_auth():
             }
     except Exception as e:
         logger.error(f"Failed to store telegram auth code: {e}")
-        return internal_error_response(message='Failed to generate auth code')
+        return internal_error_response(message=get_translation('api.auth.error.auth_code_failed'))
     
     # Create Telegram bot link
     bot_username = current_app.config.get('TELEGRAM_BOT_USERNAME', 'bluewaterbot')
@@ -3181,7 +3181,7 @@ def generate_web_auth():
             }
     except Exception as e:
         logger.error(f"Failed to store web auth token: {e}")
-        return internal_error_response(message='Failed to generate web auth token')
+        return internal_error_response(message=get_translation('api.auth.error.web_token_failed'))
     
     # Create web app authentication link
     web_app_url = current_app.config.get('WEB_APP_URL', 'https://bluestream.uz')

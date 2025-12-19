@@ -80,7 +80,7 @@ class StagingConfig(BaseConfig):
     
     # Payment Gateway Configuration - Test mode
     PAYME_TEST_MODE = True
-    PAYME_ENDPOINT_URL = 'https://checkout.test.paycom.uz'
+    PAYME_ENDPOINT_URL = 'https://checkout.test.paycom.uz/api'
     CLICK_TEST_MODE = True
     CLICK_ENDPOINT_URL = 'https://api.click.uz/v2/merchant'
     

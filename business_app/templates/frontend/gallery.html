@@ -1,6 +1,6 @@
 {% extends "frontend/base.html" %}
 
-{% block title %}{{ 'Gallery - '|translate(current_language) }}{{ super() }}{% endblock %}
+{% block title %}{{ 'landing.gallery.page_title'|t }} - {{ company_name }}{% endblock %}
 
 {% block content %}
 <!-- Page Title -->
@@ -8,10 +8,10 @@
     <div class="shape" style="background-image: url({{ url_for('static', filename='images/shape/banner-shap.png') }});"></div>
     <div class="auto-container">
         <div class="content-box">
-            <h1>{{ 'Gallery'|translate(current_language) }}</h1>
+            <h1>{{ 'landing.nav.gallery'|t }}</h1>
             <ul class="bread-crumb clearfix">
-                <li><a href="{{ url_for('frontend.index') }}">{{ 'Home'|translate(current_language) }}</a></li>
-                <li>{{ 'Gallery'|translate(current_language) }}</li>
+                <li><a href="{{ url_for('frontend.index') }}">{{ 'landing.nav.home'|t }}</a></li>
+                <li>{{ 'landing.nav.gallery'|t }}</li>
             </ul>
         </div>
     </div>
@@ -22,17 +22,17 @@
 <section class="gallery-section centred">
     <div class="auto-container">
         <div class="sec-title centred">
-            <p>{{ 'Explore Our World'|translate(current_language) }}</p>
-            <h2>{{ 'Water Quality & Services Gallery'|translate(current_language) }}</h2>
+            <p>{{ 'landing.gallery.subtitle'|t }}</p>
+            <h2>{{ 'landing.gallery.heading'|t }}</h2>
         </div>
         <div class="sortable-masonry">
             <div class="filters">
                 <ul class="filter-tabs filter-btns clearfix">
-                    <li class="active filter" data-role="button" data-filter=".all">{{ 'All'|translate(current_language) }}</li>
-                    <li class="filter" data-role="button" data-filter=".water_quality">{{ 'Water Quality'|translate(current_language) }}</li>
-                    <li class="filter" data-role="button" data-filter=".delivery">{{ 'Delivery'|translate(current_language) }}</li>
-                    <li class="filter" data-role="button" data-filter=".products">{{ 'Products'|translate(current_language) }}</li>
-                    <li class="filter" data-role="button" data-filter=".facilities">{{ 'Facilities'|translate(current_language) }}</li>
+                    <li class="active filter" data-role="button" data-filter=".all">{{ 'landing.gallery.filter.all'|t }}</li>
+                    <li class="filter" data-role="button" data-filter=".water_quality">{{ 'landing.gallery.filter.water_quality'|t }}</li>
+                    <li class="filter" data-role="button" data-filter=".delivery">{{ 'landing.gallery.filter.delivery'|t }}</li>
+                    <li class="filter" data-role="button" data-filter=".products">{{ 'landing.gallery.filter.products'|t }}</li>
+                    <li class="filter" data-role="button" data-filter=".facilities">{{ 'landing.gallery.filter.facilities'|t }}</li>
                 </ul>
             </div>
             <div class="items-container row clearfix">
@@ -40,10 +40,10 @@
                 <div class="col-lg-4 col-md-6 col-sm-12 masonry-item small-column all water_quality">
                     <div class="gallery-block-one">
                         <div class="inner-box">
-                            <figure class="image-box"><img src="{{ url_for('static', filename='images/gallery/water-testing.jpg') }}" alt="{{ 'Water Quality Testing'|translate(current_language) }}"></figure>
+                            <figure class="image-box"><img src="{{ url_for('static', filename='images/gallery/water-testing.jpg') }}" alt="{{ 'landing.gallery.item.water_testing.title'|t }}"></figure>
                             <div class="content-box">
-                                <h4>{{ 'Water Quality Testing'|translate(current_language) }}</h4>
-                                <p>{{ 'Professional laboratory testing'|translate(current_language) }}</p>
+                                <h4>{{ 'landing.gallery.item.water_testing.title'|t }}</h4>
+                                <p>{{ 'landing.gallery.item.water_testing.description'|t }}</p>
                             </div>
                             <div class="link">
                                 <a href="{{ url_for('static', filename='images/gallery/water-testing.jpg') }}" class="lightbox-image" data-fancybox="gallery"><i class="fal fa-plus"></i></a>
@@ -56,10 +56,10 @@
                 <div class="col-lg-4 col-md-6 col-sm-12 masonry-item small-column all delivery">
                     <div class="gallery-block-one">
                         <div class="inner-box">
-                            <figure class="image-box"><img src="{{ url_for('static', filename='images/gallery/delivery-truck.jpg') }}" alt="{{ 'Water Delivery Service'|translate(current_language) }}"></figure>
+                            <figure class="image-box"><img src="{{ url_for('static', filename='images/gallery/delivery-truck.jpg') }}" alt="{{ 'landing.gallery.item.delivery.alt'|t }}"></figure>
                             <div class="content-box">
-                                <h4>{{ 'Professional Delivery'|translate(current_language) }}</h4>
-                                <p>{{ 'On-time delivery to your doorstep'|translate(current_language) }}</p>
+                                <h4>{{ 'landing.gallery.item.delivery.title'|t }}</h4>
+                                <p>{{ 'landing.gallery.item.delivery.description'|t }}</p>
                             </div>
                             <div class="link">
                                 <a href="{{ url_for('static', filename='images/gallery/delivery-truck.jpg') }}" class="lightbox-image" data-fancybox="gallery"><i class="fal fa-plus"></i></a>
@@ -72,10 +72,10 @@
                 <div class="col-lg-4 col-md-6 col-sm-12 masonry-item small-column all products">
                     <div class="gallery-block-one">
                         <div class="inner-box">
-                            <figure class="image-box"><img src="{{ url_for('static', filename='images/gallery/water-bottles.jpg') }}" alt="{{ 'Premium Water Bottles'|translate(current_language) }}"></figure>
+                            <figure class="image-box"><img src="{{ url_for('static', filename='images/gallery/water-bottles.jpg') }}" alt="{{ 'landing.gallery.item.bottles.title'|t }}"></figure>
                             <div class="content-box">
-                                <h4>{{ 'Premium Water Bottles'|translate(current_language) }}</h4>
-                                <p>{{ 'Various sizes available'|translate(current_language) }}</p>
+                                <h4>{{ 'landing.gallery.item.bottles.title'|t }}</h4>
+                                <p>{{ 'landing.gallery.item.bottles.description'|t }}</p>
                             </div>
                             <div class="link">
                                 <a href="{{ url_for('static', filename='images/gallery/water-bottles.jpg') }}" class="lightbox-image" data-fancybox="gallery"><i class="fal fa-plus"></i></a>
@@ -88,10 +88,10 @@
                 <div class="col-lg-4 col-md-6 col-sm-12 masonry-item small-column all facilities water_quality">
                     <div class="gallery-block-one">
                         <div class="inner-box">
-                            <figure class="image-box"><img src="{{ url_for('static', filename='images/gallery/treatment-facility.jpg') }}" alt="{{ 'Water Treatment Facility'|translate(current_language) }}"></figure>
+                            <figure class="image-box"><img src="{{ url_for('static', filename='images/gallery/treatment-facility.jpg') }}" alt="{{ 'landing.gallery.item.treatment.alt'|t }}"></figure>
                             <div class="content-box">
-                                <h4>{{ 'Treatment Facility'|translate(current_language) }}</h4>
-                                <p>{{ 'State-of-the-art purification'|translate(current_language) }}</p>
+                                <h4>{{ 'landing.gallery.item.treatment.title'|t }}</h4>
+                                <p>{{ 'landing.gallery.item.treatment.description'|t }}</p>
                             </div>
                             <div class="link">
                                 <a href="{{ url_for('static', filename='images/gallery/treatment-facility.jpg') }}" class="lightbox-image" data-fancybox="gallery"><i class="fal fa-plus"></i></a>
@@ -104,10 +104,10 @@
                 <div class="col-lg-4 col-md-6 col-sm-12 masonry-item small-column all products facilities">
                     <div class="gallery-block-one">
                         <div class="inner-box">
-                            <figure class="image-box"><img src="{{ url_for('static', filename='images/gallery/cooler-installation.jpg') }}" alt="{{ 'Water Cooler Installation'|translate(current_language) }}"></figure>
+                            <figure class="image-box"><img src="{{ url_for('static', filename='images/gallery/cooler-installation.jpg') }}" alt="{{ 'landing.gallery.item.cooler.alt'|t }}"></figure>
                             <div class="content-box">
-                                <h4>{{ 'Cooler Installation'|translate(current_language) }}</h4>
-                                <p>{{ 'Professional setup service'|translate(current_language) }}</p>
+                                <h4>{{ 'landing.gallery.item.cooler.title'|t }}</h4>
+                                <p>{{ 'landing.gallery.item.cooler.description'|t }}</p>
                             </div>
                             <div class="link">
                                 <a href="{{ url_for('static', filename='images/gallery/cooler-installation.jpg') }}" class="lightbox-image" data-fancybox="gallery"><i class="fal fa-plus"></i></a>
@@ -120,10 +120,10 @@
                 <div class="col-lg-4 col-md-6 col-sm-12 masonry-item small-column all delivery">
                     <div class="gallery-block-one">
                         <div class="inner-box">
-                            <figure class="image-box"><img src="{{ url_for('static', filename='images/gallery/customer-service.jpg') }}" alt="{{ 'Customer Service'|translate(current_language) }}"></figure>
+                            <figure class="image-box"><img src="{{ url_for('static', filename='images/gallery/customer-service.jpg') }}" alt="{{ 'landing.gallery.item.customer_service.title'|t }}"></figure>
                             <div class="content-box">
-                                <h4>{{ 'Customer Service'|translate(current_language) }}</h4>
-                                <p>{{ '24/7 support available'|translate(current_language) }}</p>
+                                <h4>{{ 'landing.gallery.item.customer_service.title'|t }}</h4>
+                                <p>{{ 'landing.gallery.item.customer_service.description'|t }}</p>
                             </div>
                             <div class="link">
                                 <a href="{{ url_for('static', filename='images/gallery/customer-service.jpg') }}" class="lightbox-image" data-fancybox="gallery"><i class="fal fa-plus"></i></a>
@@ -136,10 +136,10 @@
                 <div class="col-lg-8 col-md-12 col-sm-12 masonry-item large-column all water_quality facilities">
                     <div class="gallery-block-one">
                         <div class="inner-box">
-                            <figure class="image-box"><img src="{{ url_for('static', filename='images/gallery/laboratory.jpg') }}" alt="{{ 'Quality Laboratory'|translate(current_language) }}"></figure>
+                            <figure class="image-box"><img src="{{ url_for('static', filename='images/gallery/laboratory.jpg') }}" alt="{{ 'landing.gallery.item.laboratory.title'|t }}"></figure>
                             <div class="content-box">
-                                <h4>{{ 'Quality Laboratory'|translate(current_language) }}</h4>
-                                <p>{{ 'Advanced testing equipment and certified technicians ensure the highest water quality standards'|translate(current_language) }}</p>
+                                <h4>{{ 'landing.gallery.item.laboratory.title'|t }}</h4>
+                                <p>{{ 'landing.gallery.item.laboratory.description'|t }}</p>
                             </div>
                             <div class="link">
                                 <a href="{{ url_for('static', filename='images/gallery/laboratory.jpg') }}" class="lightbox-image" data-fancybox="gallery"><i class="fal fa-plus"></i></a>
@@ -152,10 +152,10 @@
                 <div class="col-lg-4 col-md-6 col-sm-12 masonry-item small-column all facilities products">
                     <div class="gallery-block-one">
                         <div class="inner-box">
-                            <figure class="image-box"><img src="{{ url_for('static', filename='images/gallery/warehouse.jpg') }}" alt="{{ 'Warehouse Operations'|translate(current_language) }}"></figure>
+                            <figure class="image-box"><img src="{{ url_for('static', filename='images/gallery/warehouse.jpg') }}" alt="{{ 'landing.gallery.item.warehouse.alt'|t }}"></figure>
                             <div class="content-box">
-                                <h4>{{ 'Storage Facility'|translate(current_language) }}</h4>
-                                <p>{{ 'Climate-controlled storage'|translate(current_language) }}</p>
+                                <h4>{{ 'landing.gallery.item.warehouse.title'|t }}</h4>
+                                <p>{{ 'landing.gallery.item.warehouse.description'|t }}</p>
                             </div>
                             <div class="link">
                                 <a href="{{ url_for('static', filename='images/gallery/warehouse.jpg') }}" class="lightbox-image" data-fancybox="gallery"><i class="fal fa-plus"></i></a>
@@ -168,10 +168,10 @@
                 <div class="col-lg-4 col-md-6 col-sm-12 masonry-item small-column all">
                     <div class="gallery-block-one">
                         <div class="inner-box">
-                            <figure class="image-box"><img src="{{ url_for('static', filename='images/gallery/team.jpg') }}" alt="{{ 'Our Team'|translate(current_language) }}"></figure>
+                            <figure class="image-box"><img src="{{ url_for('static', filename='images/gallery/team.jpg') }}" alt="{{ 'landing.gallery.item.team.alt'|t }}"></figure>
                             <div class="content-box">
-                                <h4>{{ 'Our Professional Team'|translate(current_language) }}</h4>
-                                <p>{{ 'Dedicated water specialists'|translate(current_language) }}</p>
+                                <h4>{{ 'landing.gallery.item.team.title'|t }}</h4>
+                                <p>{{ 'landing.gallery.item.team.description'|t }}</p>
                             </div>
                             <div class="link">
                                 <a href="{{ url_for('static', filename='images/gallery/team.jpg') }}" class="lightbox-image" data-fancybox="gallery"><i class="fal fa-plus"></i></a>
@@ -184,10 +184,10 @@
                 <div class="col-lg-4 col-md-6 col-sm-12 masonry-item small-column all facilities">
                     <div class="gallery-block-one">
                         <div class="inner-box">
-                            <figure class="image-box"><img src="{{ url_for('static', filename='images/gallery/office.jpg') }}" alt="{{ 'Modern Office'|translate(current_language) }}"></figure>
+                            <figure class="image-box"><img src="{{ url_for('static', filename='images/gallery/office.jpg') }}" alt="{{ 'landing.gallery.item.office.title'|t }}"></figure>
                             <div class="content-box">
-                                <h4>{{ 'Modern Office'|translate(current_language) }}</h4>
-                                <p>{{ 'Customer service center'|translate(current_language) }}</p>
+                                <h4>{{ 'landing.gallery.item.office.title'|t }}</h4>
+                                <p>{{ 'landing.gallery.item.office.description'|t }}</p>
                             </div>
                             <div class="link">
                                 <a href="{{ url_for('static', filename='images/gallery/office.jpg') }}" class="lightbox-image" data-fancybox="gallery"><i class="fal fa-plus"></i></a>
@@ -200,10 +200,10 @@
                 <div class="col-lg-4 col-md-6 col-sm-12 masonry-item small-column all products">
                     <div class="gallery-block-one">
                         <div class="inner-box">
-                            <figure class="image-box"><img src="{{ url_for('static', filename='images/gallery/product-range.jpg') }}" alt="{{ 'Product Range'|translate(current_language) }}"></figure>
+                            <figure class="image-box"><img src="{{ url_for('static', filename='images/gallery/product-range.jpg') }}" alt="{{ 'landing.gallery.item.product_range.alt'|t }}"></figure>
                             <div class="content-box">
-                                <h4>{{ 'Complete Product Range'|translate(current_language) }}</h4>
-                                <p>{{ 'From bottles to dispensers'|translate(current_language) }}</p>
+                                <h4>{{ 'landing.gallery.item.product_range.title'|t }}</h4>
+                                <p>{{ 'landing.gallery.item.product_range.description'|t }}</p>
                             </div>
                             <div class="link">
                                 <a href="{{ url_for('static', filename='images/gallery/product-range.jpg') }}" class="lightbox-image" data-fancybox="gallery"><i class="fal fa-plus"></i></a>

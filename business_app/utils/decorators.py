@@ -315,7 +315,7 @@ def cache_result(timeout: int = 300, key_prefix: str = None):
 
 
 def cache_response(timeout: int = 300, key_prefix: str = None):
-    """Cache HTTP response"""
+    """Cache HTTP response - includes language in cache key for i18n support"""
     def decorator(f):
         @wraps(f)
         def decorated_function(*args, **kwargs):
@@ -323,10 +323,23 @@ def cache_response(timeout: int = 300, key_prefix: str = None):
             from urllib.parse import urlencode
             query_string = urlencode(sorted(request.args.items()))
             
+            # CRITICAL: Include language in cache key to prevent serving wrong language
+            # Priority: URL param > g.language > session > default
+            language = request.args.get('language') or request.args.get('lang')
+            if not language:
+                language = getattr(g, 'language', None)
+            if not language:
+                from flask import session
+                language = session.get('language')
+            if not language:
+                language = current_app.config.get('DEFAULT_LANGUAGE', 'uz')
+            
             if key_prefix:
-                cache_key = f"{key_prefix}:{request.path}:{query_string}:{hash(str(args) + str(kwargs))}"
+                cache_key = f"{key_prefix}:{language}:{request.path}:{query_string}:{hash(str(args) + str(kwargs))}"
             else:
-                cache_key = f"response:{request.path}:{query_string}:{hash(str(args) + str(kwargs))}"
+                cache_key = f"response:{language}:{request.path}:{query_string}:{hash(str(args) + str(kwargs))}"
+            
+            current_app.logger.debug(f"[CACHE-RESPONSE] cache_key={cache_key}, lang={language}")
             
             try:
                 redis_client = redis.from_url(current_app.config['REDIS_URL'])
@@ -334,10 +347,13 @@ def cache_response(timeout: int = 300, key_prefix: str = None):
                 # Try to get from cache
                 cached_response = redis_client.get(cache_key)
                 if cached_response:
+                    current_app.logger.debug(f"[CACHE-RESPONSE] HIT: {cache_key}")
                     cached_data = json.loads(cached_response)
                     response = jsonify(cached_data['data'])
                     response.status_code = cached_data['status_code']
                     return response
+                
+                current_app.logger.debug(f"[CACHE-RESPONSE] MISS: {cache_key}")
                 
                 # Execute function and cache response
                 result = f(*args, **kwargs)

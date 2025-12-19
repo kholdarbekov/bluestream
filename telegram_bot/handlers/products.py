@@ -64,7 +64,7 @@ class ProductHandlers:
             logger.info(f"Categories data: {categories}")
 
             # Show categories
-            menu_text = i18n.get('products_title', language)
+            menu_text = i18n.get('telegram.menu.products', language)
             keyboard = ProductKeyboards.product_categories(categories, language)
 
             logger.info(f"Menu text: {menu_text}")
@@ -141,7 +141,7 @@ class ProductHandlers:
 
             if not products:
                 await query.edit_message_text(
-                    text="No products found in this category.",
+                    text=i18n.get('telegram.products.category_empty', language),
                     reply_markup=MenuKeyboards.back_button(language)
                 )
                 await query.answer()
@@ -254,7 +254,7 @@ class ProductHandlers:
                 
             
             # Show quantity selector
-            quantity_text = f"🛒 {product['name']}\n\n{i18n.get('quantity', language)} 1\n{i18n.get('price', language)} {format_price(product['pricing']['base_price'])} UZS"
+            quantity_text = f"🛒 {product['name']}\n\n{i18n.get('telegram.quantity', language)}: 1\n{i18n.get('telegram.price', language)}: {format_price(product['pricing']['base_price'])} UZS"
             keyboard = ProductKeyboards.quantity_selector(product_id, 1, language)
             
             await query.edit_message_text(
@@ -285,7 +285,7 @@ class ProductHandlers:
             elif action == 'dec':
                 new_qty = max(current_qty - 1, 1)   # Min 1 item
             else:
-                await query.answer("❌ Invalid action")
+                await query.answer(i18n.get('telegram.products.invalid_action', language))
                 return
             
             # Get product for price calculation
@@ -295,9 +295,9 @@ class ProductHandlers:
                 if response.success:
                     product = response.data['data']['product']
                     total_price = product['pricing']['base_price'] * new_qty
-                    
+
                     # Update quantity display
-                    quantity_text = f"🛒 {product['name']}\n\n{i18n.get('quantity', language)} {new_qty}\n{i18n.get('total', language)} {format_price(total_price)} UZS"
+                    quantity_text = f"🛒 {product['name']}\n\n{i18n.get('telegram.quantity', language)}: {new_qty}\n{i18n.get('telegram.total', language)}: {format_price(total_price)} UZS"
                     keyboard = ProductKeyboards.quantity_selector(product_id, new_qty, language)
 
                     # Update cart via API
@@ -372,7 +372,7 @@ class ProductHandlers:
             
             if not products:
                 await update.message.reply_text(
-                    f"🔍 No products found for '{search_term}'"
+                    i18n.get('telegram.products.no_results_for_search', language, search_term=search_term)
                 )
                 return
             
@@ -390,12 +390,13 @@ class ProductHandlers:
             
         except Exception as e:
             logger.error(f"Error in product search: {e}")
-            await update.message.reply_text("❌ Search failed. Please try again.")
+            language = await i18n.get_user_language(update.effective_user.id)
+            await update.message.reply_text(i18n.get('telegram.error.product_error', language))
     
     def _format_products_list(self, products: List[Dict], language: str) -> str:
         """Format products list for display"""
         if not products:
-            return "No products available."
+            return i18n.get('telegram.products.no_products_found', language)
         
         formatted_lines = []
         for product in products:
@@ -413,13 +414,13 @@ class ProductHandlers:
         """Format single product details"""
         price_str = format_price(product['pricing']['base_price'])
         stock = product['inventory'].get('stock_quantity', 0)
-        stock_status = "✅ In Stock" if stock > 0 else "❌ Out of Stock"
+        stock_status = i18n.get('telegram.products.in_stock', language) if stock > 0 else i18n.get('telegram.products.out_of_stock', language)
         
         details = [
             f"🏷️ **{product['name']}**",
-            f"💰 {i18n.get('price', language)}: {price_str} UZS",
-            f"📦 Volume: {product['specifications'].get('volume', 'N/A')}{product['specifications'].get('volume_unit', '')}",
-            f"📊 Stock: {stock_status}",
+            f"💰 {i18n.get('telegram.price', language)}: {price_str} UZS",
+            f"📦 {i18n.get('telegram.products.volume_label', language)}: {product['specifications'].get('volume', 'N/A')}{product['specifications'].get('volume_unit', '')}",
+            f"📊 {i18n.get('telegram.products.stock_label', language)}: {stock_status}",
         ]
         
         if product.get('description'):
@@ -452,10 +453,10 @@ class ProductHandlers:
         
         cart_is_empty = None
         if not cart_items:
-            cart_text = i18n.get('cart_empty', language)
+            cart_text = i18n.get('telegram.cart_empty', language)
             cart_is_empty = True
         else:
-            lines = [i18n.get('cart_title', language) + ":\n"]
+            lines = [i18n.get('telegram.cart_title', language) + ":\n"]
             total_amount = 0
             for item in cart_items:
                 product = item['product']
@@ -463,12 +464,12 @@ class ProductHandlers:
                 price = product['current_price']
                 line_total = price * quantity
                 total_amount += line_total
-                
+
                 lines.append(
                     f"🛒 {product['name']} x {quantity} = {format_price(line_total)} UZS"
                 )
             cart_is_empty = total_amount <= 0
-            lines.append(f"\n💰 {i18n.get('cart_total', language)}: {format_price(total_amount)} UZS")
+            lines.append(f"\n💰 {i18n.get('telegram.cart_total', language)}: {format_price(total_amount)} UZS")
             cart_text = "\n".join(lines)
         keyboard = OrderKeyboards.cart_actions(language, cart_is_empty)
         
@@ -500,8 +501,8 @@ class ProductHandlers:
     
     async def _handle_auth_error(self, update: Update, language: str):
         """Handle authentication error"""
-        error_msg = "❌ Authentication failed. Please restart the bot with /start"
-        
+        error_msg = i18n.get('telegram.error.auth_failed', language)
+
         if update.callback_query:
             await update.callback_query.edit_message_text(error_msg)
             await update.callback_query.answer()
@@ -521,10 +522,10 @@ class ProductHandlers:
         """Handle general error"""
         try:
             language = await i18n.get_user_language(update.effective_user.id)
-            error_msg = i18n.get('error_occurred', language)
+            error_msg = i18n.get('telegram.error_occurred', language)
         except:
-            error_msg = "❌ An error occurred. Please try again."
-        
+            error_msg = i18n.get('telegram.error_occurred', 'en')
+
         if update.callback_query:
             await update.callback_query.answer(error_msg)
         else:

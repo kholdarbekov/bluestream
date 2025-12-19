@@ -37,6 +37,7 @@ import {
   UploadOutlined
 } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from 'react-query';
+import { useTranslation } from 'react-i18next';
 import { Editor } from '@tinymce/tinymce-react';
 import adminService from '../services/adminService';
 import moment from 'moment';
@@ -49,6 +50,7 @@ const { TabPane } = Tabs;
 const TINYMCE_API_KEY = process.env.REACT_APP_TINYMCE_API_KEY || 'no-api-key';
 
 const Blog = () => {
+  const { t } = useTranslation();
   const [searchText, setSearchText] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
@@ -65,12 +67,12 @@ const Blog = () => {
 
   // Blog categories
   const categories = [
-    { value: 'health_tips', label: 'Health Tips', color: 'green' },
-    { value: 'water_benefits', label: 'Water Benefits', color: 'blue' },
-    { value: 'company_news', label: 'Company News', color: 'purple' },
-    { value: 'quality_assurance', label: 'Quality Assurance', color: 'gold' },
-    { value: 'lifestyle', label: 'Lifestyle', color: 'cyan' },
-    { value: 'environment', label: 'Environment', color: 'lime' }
+    { value: 'health_tips', label: t('ui.blog.category_health_tips'), color: 'green' },
+    { value: 'water_benefits', label: t('ui.blog.category_water_benefits'), color: 'blue' },
+    { value: 'company_news', label: t('ui.blog.category_company_news'), color: 'purple' },
+    { value: 'quality_assurance', label: t('ui.blog.category_quality_assurance'), color: 'gold' },
+    { value: 'lifestyle', label: t('ui.blog.category_lifestyle'), color: 'cyan' },
+    { value: 'environment', label: t('ui.blog.category_environment'), color: 'lime' }
   ];
 
   // Fetch blog posts
@@ -93,14 +95,14 @@ const Blog = () => {
     (postData) => adminService.createBlogPost(postData),
     {
       onSuccess: () => {
-        message.success('Blog post created successfully');
+        message.success(t('ui.blog.created_success'));
         queryClient.invalidateQueries('blog-posts');
         setIsCreateModalVisible(false);
         createForm.resetFields();
         setFeaturedImageUrl('');
       },
       onError: (error) => {
-        message.error(error.response?.data?.error || 'Failed to create blog post');
+        message.error(error.response?.data?.error || t('ui.blog.create_failed'));
       }
     }
   );
@@ -110,13 +112,13 @@ const Blog = () => {
     ({ id, data }) => adminService.updateBlogPost(id, data),
     {
       onSuccess: () => {
-        message.success('Blog post updated successfully');
+        message.success(t('ui.blog.updated_success'));
         queryClient.invalidateQueries('blog-posts');
         setIsEditModalVisible(false);
         editForm.resetFields();
       },
       onError: (error) => {
-        message.error(error.response?.data?.error || 'Failed to update blog post');
+        message.error(error.response?.data?.error || t('ui.blog.update_failed'));
       }
     }
   );
@@ -126,11 +128,11 @@ const Blog = () => {
     (id) => adminService.deleteBlogPost(id),
     {
       onSuccess: () => {
-        message.success('Blog post deleted successfully');
+        message.success(t('ui.blog.deleted_success'));
         queryClient.invalidateQueries('blog-posts');
       },
       onError: (error) => {
-        message.error(error.response?.data?.error || 'Failed to delete blog post');
+        message.error(error.response?.data?.error || t('ui.blog.delete_failed'));
       }
     }
   );
@@ -140,11 +142,11 @@ const Blog = () => {
     (id) => adminService.publishBlogPost(id),
     {
       onSuccess: () => {
-        message.success('Blog post published successfully');
+        message.success(t('ui.blog.published_success'));
         queryClient.invalidateQueries('blog-posts');
       },
       onError: (error) => {
-        message.error(error.response?.data?.error || 'Failed to publish blog post');
+        message.error(error.response?.data?.error || t('ui.blog.publish_failed'));
       }
     }
   );
@@ -154,11 +156,11 @@ const Blog = () => {
     (id) => adminService.unpublishBlogPost(id),
     {
       onSuccess: () => {
-        message.success('Blog post unpublished successfully');
+        message.success(t('ui.blog.unpublished_success'));
         queryClient.invalidateQueries('blog-posts');
       },
       onError: (error) => {
-        message.error(error.response?.data?.error || 'Failed to unpublish blog post');
+        message.error(error.response?.data?.error || t('ui.blog.unpublish_failed'));
       }
     }
   );
@@ -195,9 +197,9 @@ const Blog = () => {
   // Handle delete post
   const handleDeletePost = (post) => {
     Modal.confirm({
-      title: 'Delete Blog Post',
-      content: `Are you sure you want to delete "${post.title}"?`,
-      okText: 'Yes, Delete',
+      title: t('ui.blog.delete_post'),
+      content: `${t('ui.blog.delete_confirm')} "${post.title}"?`,
+      okText: t('ui.blog.yes_delete'),
       okType: 'danger',
       onOk: () => deletePostMutation.mutate(post.id)
     });
@@ -249,7 +251,7 @@ const Blog = () => {
   // Table columns
   const columns = [
     {
-      title: 'Image',
+      title: t('ui.blog.image'),
       dataIndex: 'featured_image',
       key: 'featured_image',
       width: 80,
@@ -264,7 +266,7 @@ const Blog = () => {
       )
     },
     {
-      title: 'Title',
+      title: t('ui.blog.title'),
       dataIndex: 'title',
       key: 'title',
       ellipsis: true,
@@ -276,7 +278,7 @@ const Blog = () => {
       )
     },
     {
-      title: 'Category',
+      title: t('ui.blog.category'),
       dataIndex: 'category',
       key: 'category',
       width: 150,
@@ -286,15 +288,15 @@ const Blog = () => {
       }
     },
     {
-      title: 'Status',
+      title: t('ui.blog.status'),
       dataIndex: 'status',
       key: 'status',
       width: 120,
       render: (status) => {
         const config = {
-          published: { color: 'success', icon: <CheckCircleOutlined />, text: 'Published' },
-          draft: { color: 'default', icon: <ClockCircleOutlined />, text: 'Draft' },
-          archived: { color: 'warning', icon: <InboxOutlined />, text: 'Archived' }
+          published: { color: 'success', icon: <CheckCircleOutlined />, text: t('ui.blog.status_published') },
+          draft: { color: 'default', icon: <ClockCircleOutlined />, text: t('ui.blog.status_draft') },
+          archived: { color: 'warning', icon: <InboxOutlined />, text: t('ui.blog.status_archived') }
         };
         const c = config[status] || config.draft;
         return (
@@ -305,30 +307,30 @@ const Blog = () => {
       }
     },
     {
-      title: 'Featured',
+      title: t('ui.blog.featured'),
       dataIndex: 'is_featured',
       key: 'is_featured',
       width: 100,
       render: (isFeatured) => (
-        isFeatured ? <Badge status="success" text="Yes" /> : <Badge status="default" text="No" />
+        isFeatured ? <Badge status="success" text={t('ui.blog.yes')} /> : <Badge status="default" text={t('ui.blog.no')} />
       )
     },
     {
-      title: 'Views',
+      title: t('ui.blog.views'),
       dataIndex: 'view_count',
       key: 'view_count',
       width: 80,
       render: (count) => count || 0
     },
     {
-      title: 'Published',
+      title: t('ui.blog.published'),
       dataIndex: 'published_at',
       key: 'published_at',
       width: 120,
       render: (date) => date ? moment(date).format('MMM D, YYYY') : '-'
     },
     {
-      title: 'Actions',
+      title: t('ui.blog.actions'),
       key: 'actions',
       width: 100,
       render: (_, record) => (
@@ -339,20 +341,20 @@ const Blog = () => {
             icon={<EditOutlined />}
             onClick={() => openEditModal(record)}
           >
-            Edit
+            {t('ui.blog.edit')}
           </Button>
           <Dropdown
             menu={{
               items: [
                 {
                   key: 'toggle-publish',
-                  label: record.status === 'published' ? 'Unpublish' : 'Publish',
+                  label: record.status === 'published' ? t('ui.blog.unpublish') : t('ui.blog.publish'),
                   icon: record.status === 'published' ? <ClockCircleOutlined /> : <CheckCircleOutlined />,
                   onClick: () => handleTogglePublish(record)
                 },
                 {
                   key: 'delete',
-                  label: 'Delete',
+                  label: t('ui.blog.delete'),
                   icon: <DeleteOutlined />,
                   danger: true,
                   onClick: () => handleDeletePost(record)
@@ -437,24 +439,24 @@ const Blog = () => {
         <Tabs defaultActiveKey="uz">
           <TabPane tab="🇺🇿 Uzbek" key="uz">
             <Form.Item
-              label="Title (Uzbek)"
+              label={t('ui.blog.form_title_uz')}
               name="title_uz"
-              rules={[{ required: true, message: 'Please enter title in Uzbek' }]}
+              rules={[{ required: true, message: t('ui.blog.form_title_uz_required') }]}
             >
-              <Input placeholder="Enter title in Uzbek" />
+              <Input placeholder={t('ui.blog.form_title_uz_placeholder')} />
             </Form.Item>
 
             <Form.Item
-              label="Excerpt (Uzbek)"
+              label={t('ui.blog.form_excerpt_uz')}
               name="excerpt_uz"
-              rules={[{ required: true, message: 'Please enter excerpt in Uzbek' }]}
+              rules={[{ required: true, message: t('ui.blog.form_excerpt_uz_required') }]}
             >
-              <TextArea rows={3} placeholder="Short summary in Uzbek" />
+              <TextArea rows={3} placeholder={t('ui.blog.form_excerpt_uz_placeholder')} />
             </Form.Item>
 
             <Form.Item
-              label="Content (Uzbek)"
-              rules={[{ required: true, message: 'Please enter content in Uzbek' }]}
+              label={t('ui.blog.form_content_uz')}
+              rules={[{ required: true, message: t('ui.blog.form_content_uz_required') }]}
             >
               <Editor
                 apiKey={TINYMCE_API_KEY}
@@ -470,31 +472,31 @@ const Blog = () => {
               <Input type="hidden" />
             </Form.Item>
 
-            <Form.Item label="Author Name (Uzbek)" name="author_name_uz">
-              <Input placeholder="Admin" />
+            <Form.Item label={t('ui.blog.form_author_uz')} name="author_name_uz">
+              <Input placeholder={t('ui.blog.form_author_placeholder')} />
             </Form.Item>
           </TabPane>
 
           <TabPane tab="🇷🇺 Russian" key="ru">
             <Form.Item
-              label="Title (Russian)"
+              label={t('ui.blog.form_title_ru')}
               name="title_ru"
-              rules={[{ required: true, message: 'Please enter title in Russian' }]}
+              rules={[{ required: true, message: t('ui.blog.form_title_ru_required') }]}
             >
-              <Input placeholder="Enter title in Russian" />
+              <Input placeholder={t('ui.blog.form_title_ru_placeholder')} />
             </Form.Item>
 
             <Form.Item
-              label="Excerpt (Russian)"
+              label={t('ui.blog.form_excerpt_ru')}
               name="excerpt_ru"
-              rules={[{ required: true, message: 'Please enter excerpt in Russian' }]}
+              rules={[{ required: true, message: t('ui.blog.form_excerpt_ru_required') }]}
             >
-              <TextArea rows={3} placeholder="Short summary in Russian" />
+              <TextArea rows={3} placeholder={t('ui.blog.form_excerpt_ru_placeholder')} />
             </Form.Item>
 
             <Form.Item
-              label="Content (Russian)"
-              rules={[{ required: true, message: 'Please enter content in Russian' }]}
+              label={t('ui.blog.form_content_ru')}
+              rules={[{ required: true, message: t('ui.blog.form_content_ru_required') }]}
             >
               <Editor
                 apiKey={TINYMCE_API_KEY}
@@ -510,18 +512,18 @@ const Blog = () => {
             <Input type="hidden" />
           </Form.Item>
 
-          <Form.Item label="Author Name (Russian)" name="author_name_ru">
-            <Input placeholder="Admin" />
+          <Form.Item label={t('ui.blog.form_author_ru')} name="author_name_ru">
+            <Input placeholder={t('ui.blog.form_author_placeholder')} />
           </Form.Item>
         </TabPane>
 
         <TabPane tab="🇬🇧 English" key="en">
           <Form.Item
-            label="Title (English)"
+            label={t('ui.blog.form_title_en')}
             name="title_en"
-            rules={[{ required: true, message: 'Please enter title in English' }]}
+            rules={[{ required: true, message: t('ui.blog.form_title_en_required') }]}
           >
-            <Input placeholder="Enter title in English" onChange={(e) => {
+            <Input placeholder={t('ui.blog.form_title_en_placeholder')} onChange={(e) => {
               if (!form.getFieldValue('slug')) {
                 form.setFieldsValue({ slug: generateSlug(e.target.value) });
               }
@@ -529,16 +531,16 @@ const Blog = () => {
           </Form.Item>
 
           <Form.Item
-            label="Excerpt (English)"
+            label={t('ui.blog.form_excerpt_en')}
             name="excerpt_en"
-            rules={[{ required: true, message: 'Please enter excerpt in English' }]}
+            rules={[{ required: true, message: t('ui.blog.form_excerpt_en_required') }]}
           >
-            <TextArea rows={3} placeholder="Short summary in English" />
+            <TextArea rows={3} placeholder={t('ui.blog.form_excerpt_en_placeholder')} />
           </Form.Item>
 
           <Form.Item
-            label="Content (English)"
-            rules={[{ required: true, message: 'Please enter content in English' }]}
+            label={t('ui.blog.form_content_en')}
+            rules={[{ required: true, message: t('ui.blog.form_content_en_required') }]}
           >
             <Editor
               apiKey={TINYMCE_API_KEY}
@@ -554,29 +556,29 @@ const Blog = () => {
             <Input type="hidden" />
           </Form.Item>
 
-          <Form.Item label="Author Name (English)" name="author_name_en">
-            <Input placeholder="Admin" />
+          <Form.Item label={t('ui.blog.form_author_en')} name="author_name_en">
+            <Input placeholder={t('ui.blog.form_author_placeholder')} />
           </Form.Item>
         </TabPane>
 
-        <TabPane tab="⚙️ Settings" key="settings">
+        <TabPane tab={`⚙️ ${t('ui.blog.form_settings')}`} key="settings">
           <Row gutter={16}>
             <Col span={12}>
               <Form.Item
-                label="Slug"
+                label={t('ui.blog.form_slug')}
                 name="slug"
-                rules={[{ required: true, message: 'Please enter URL slug' }]}
+                rules={[{ required: true, message: t('ui.blog.form_slug_required') }]}
               >
-                <Input placeholder="blog-post-slug" />
+                <Input placeholder={t('ui.blog.form_slug_placeholder')} />
               </Form.Item>
             </Col>
             <Col span={12}>
               <Form.Item
-                label="Category"
+                label={t('ui.blog.form_category')}
                 name="category"
-                rules={[{ required: true, message: 'Please select category' }]}
+                rules={[{ required: true, message: t('ui.blog.form_category_required') }]}
               >
-                <Select placeholder="Select category">
+                <Select placeholder={t('ui.blog.form_category_placeholder')}>
                   {categories.map(cat => (
                     <Option key={cat.value} value={cat.value}>{cat.label}</Option>
                   ))}
@@ -587,24 +589,24 @@ const Blog = () => {
 
           <Row gutter={16}>
             <Col span={12}>
-              <Form.Item label="Tags" name="tags">
-                <Input placeholder="health, water, tips (comma separated)" />
+              <Form.Item label={t('ui.blog.form_tags')} name="tags">
+                <Input placeholder={t('ui.blog.form_tags_placeholder')} />
               </Form.Item>
             </Col>
             <Col span={12}>
-              <Form.Item label="Status" name="status" initialValue="draft">
+              <Form.Item label={t('ui.blog.form_status')} name="status" initialValue="draft">
                 <Select>
-                  <Option value="draft">Draft</Option>
-                  <Option value="published">Published</Option>
-                  <Option value="archived">Archived</Option>
+                  <Option value="draft">{t('ui.blog.status_draft')}</Option>
+                  <Option value="published">{t('ui.blog.status_published')}</Option>
+                  <Option value="archived">{t('ui.blog.status_archived')}</Option>
                 </Select>
               </Form.Item>
             </Col>
           </Row>
 
-          <Divider>Featured Image</Divider>
+          <Divider>{t('ui.blog.form_featured_image')}</Divider>
 
-          <Form.Item label="Upload Image">
+          <Form.Item label={t('ui.blog.form_upload_image')}>
             <Upload
               name="file"
               listType="picture-card"
@@ -619,13 +621,13 @@ const Blog = () => {
               beforeUpload={async (file) => {
                 const isImage = file.type.startsWith('image/');
                 if (!isImage) {
-                  message.error('You can only upload image files!');
+                  message.error(t('ui.blog.form_upload_error_type'));
                   return Upload.LIST_IGNORE;
                 }
 
                 try {
                   // Upload image to server
-                  message.loading({ content: 'Uploading image...', key: 'upload' });
+                  message.loading({ content: t('ui.blog.form_uploading'), key: 'upload' });
 
                   const response = await adminService.uploadImage(file, {
                     folder: 'blog',
@@ -635,7 +637,7 @@ const Blog = () => {
                     quality: 85
                   });
 
-                  message.success({ content: 'Image uploaded successfully!', key: 'upload' });
+                  message.success({ content: t('ui.blog.form_upload_success'), key: 'upload' });
 
                   // Use the returned URL
                   const imageUrl = response.data.url;
@@ -645,7 +647,7 @@ const Blog = () => {
                   form.setFieldsValue({ featured_image_url: imageUrl });
                 } catch (error) {
                   message.error({
-                    content: 'Failed to upload image: ' + (error.response?.data||error.message),
+                    content: t('ui.blog.form_upload_failed') + ': ' + (error.response?.data||error.message),
                     key: 'upload'
                   });
                 }
@@ -662,15 +664,15 @@ const Blog = () => {
               <div>
                 <PlusOutlined />
                 <div style={{ marginTop: 8 }}>
-                  {localImageUrl ? 'Change Image' : 'Upload Image'}
+                  {localImageUrl ? t('ui.blog.form_change_image') : t('ui.blog.form_upload_image')}
                 </div>
               </div>
             </Upload>
           </Form.Item>
 
-          <Form.Item label="Or Enter Image URL" name="featured_image_url">
+          <Form.Item label={t('ui.blog.form_or_enter_url')} name="featured_image_url">
             <Input
-              placeholder="https://example.com/image.jpg"
+              placeholder={t('ui.blog.form_image_url_placeholder')}
               onChange={(e) => {
                 if (onImageChange) {
                   onImageChange(e.target.value);
@@ -679,47 +681,47 @@ const Blog = () => {
             />
           </Form.Item>
 
-          <Form.Item label="Image Alt Text" name="image_alt_text">
-            <Input placeholder="Description for accessibility" />
+          <Form.Item label={t('ui.blog.form_image_alt')} name="image_alt_text">
+            <Input placeholder={t('ui.blog.form_image_alt_placeholder')} />
           </Form.Item>
 
           <Row gutter={16}>
             <Col span={12}>
-              <Form.Item label="Featured on Homepage" name="is_featured" valuePropName="checked" initialValue={false}>
+              <Form.Item label={t('ui.blog.form_featured_homepage')} name="is_featured" valuePropName="checked" initialValue={false}>
                 <Switch />
               </Form.Item>
             </Col>
             <Col span={12}>
-              <Form.Item label="Sort Order" name="sort_order" initialValue={0}>
+              <Form.Item label={t('ui.blog.form_sort_order')} name="sort_order" initialValue={0}>
                 <InputNumber min={0} style={{ width: '100%' }} />
               </Form.Item>
             </Col>
           </Row>
 
-          <Divider>SEO Settings</Divider>
+          <Divider>{t('ui.blog.form_seo_settings')}</Divider>
 
-          <Form.Item label="Meta Title (Uzbek)" name="meta_title_uz">
-            <Input placeholder="SEO title in Uzbek" />
+          <Form.Item label={t('ui.blog.form_meta_title_uz')} name="meta_title_uz">
+            <Input placeholder={t('ui.blog.form_meta_title_uz_placeholder')} />
           </Form.Item>
 
-          <Form.Item label="Meta Title (Russian)" name="meta_title_ru">
-            <Input placeholder="SEO title in Russian" />
+          <Form.Item label={t('ui.blog.form_meta_title_ru')} name="meta_title_ru">
+            <Input placeholder={t('ui.blog.form_meta_title_ru_placeholder')} />
           </Form.Item>
 
-          <Form.Item label="Meta Title (English)" name="meta_title_en">
-            <Input placeholder="SEO title in English" />
+          <Form.Item label={t('ui.blog.form_meta_title_en')} name="meta_title_en">
+            <Input placeholder={t('ui.blog.form_meta_title_en_placeholder')} />
           </Form.Item>
 
-          <Form.Item label="Meta Description (Uzbek)" name="meta_description_uz">
-            <TextArea rows={2} placeholder="SEO description in Uzbek" />
+          <Form.Item label={t('ui.blog.form_meta_description_uz')} name="meta_description_uz">
+            <TextArea rows={2} placeholder={t('ui.blog.form_meta_description_uz_placeholder')} />
           </Form.Item>
 
-          <Form.Item label="Meta Description (Russian)" name="meta_description_ru">
-            <TextArea rows={2} placeholder="SEO description in Russian" />
+          <Form.Item label={t('ui.blog.form_meta_description_ru')} name="meta_description_ru">
+            <TextArea rows={2} placeholder={t('ui.blog.form_meta_description_ru_placeholder')} />
           </Form.Item>
 
-          <Form.Item label="Meta Description (English)" name="meta_description_en">
-            <TextArea rows={2} placeholder="SEO description in English" />
+          <Form.Item label={t('ui.blog.form_meta_description_en')} name="meta_description_en">
+            <TextArea rows={2} placeholder={t('ui.blog.form_meta_description_en_placeholder')} />
           </Form.Item>
         </TabPane>
       </Tabs>
@@ -732,21 +734,21 @@ const Blog = () => {
       <Card>
         <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <h2 style={{ margin: 0 }}>
-            <FileTextOutlined /> Blog Posts
+            <FileTextOutlined /> {t('ui.blog.blog_posts')}
           </h2>
           <Button
             type="primary"
             icon={<PlusOutlined />}
             onClick={() => setIsCreateModalVisible(true)}
           >
-            Create Blog Post
+            {t('ui.blog.create_blog_post')}
           </Button>
         </div>
 
         <Space style={{ marginBottom: 16, width: '100%', justifyContent: 'space-between' }}>
           <Space>
             <Input
-              placeholder="Search posts..."
+              placeholder={t('ui.blog.search_posts')}
               prefix={<SearchOutlined />}
               value={searchText}
               onChange={(e) => setSearchText(e.target.value)}
@@ -754,7 +756,7 @@ const Blog = () => {
               allowClear
             />
             <Select
-              placeholder="Category"
+              placeholder={t('ui.blog.category')}
               style={{ width: 150 }}
               value={categoryFilter}
               onChange={setCategoryFilter}
@@ -765,15 +767,15 @@ const Blog = () => {
               ))}
             </Select>
             <Select
-              placeholder="Status"
+              placeholder={t('ui.blog.status')}
               style={{ width: 120 }}
               value={statusFilter}
               onChange={setStatusFilter}
               allowClear
             >
-              <Option value="draft">Draft</Option>
-              <Option value="published">Published</Option>
-              <Option value="archived">Archived</Option>
+              <Option value="draft">{t('ui.blog.status_draft')}</Option>
+              <Option value="published">{t('ui.blog.status_published')}</Option>
+              <Option value="archived">{t('ui.blog.status_archived')}</Option>
             </Select>
           </Space>
         </Space>
@@ -788,7 +790,7 @@ const Blog = () => {
             pageSize: pagination.per_page,
             total: data?.meta?.total || 0,
             showSizeChanger: true,
-            showTotal: (total) => `Total ${total} posts`,
+            showTotal: (total) => `${t('ui.blog.total')} ${total} ${t('ui.blog.posts')}`,
             onChange: (page, pageSize) => setPagination({ page, per_page: pageSize })
           }}
         />
@@ -796,7 +798,7 @@ const Blog = () => {
 
       {/* Create Modal */}
       <Modal
-        title="Create Blog Post"
+        title={t('ui.blog.create_blog_post')}
         open={isCreateModalVisible}
         onCancel={() => {
           setIsCreateModalVisible(false);
@@ -805,7 +807,7 @@ const Blog = () => {
         }}
         footer={[
           <Button key="cancel" onClick={() => setIsCreateModalVisible(false)}>
-            Cancel
+            {t('ui.blog.cancel')}
           </Button>,
           <Button
             key="submit"
@@ -813,7 +815,7 @@ const Blog = () => {
             loading={createPostMutation.isLoading}
             onClick={() => createForm.submit()}
           >
-            Create
+            {t('ui.blog.create')}
           </Button>
         ]}
         width={900}
@@ -828,7 +830,7 @@ const Blog = () => {
 
       {/* Edit Modal */}
       <Modal
-        title="Edit Blog Post"
+        title={t('ui.blog.edit_blog_post')}
         open={isEditModalVisible}
         onCancel={() => {
           setIsEditModalVisible(false);
@@ -837,7 +839,7 @@ const Blog = () => {
         }}
         footer={[
           <Button key="cancel" onClick={() => setIsEditModalVisible(false)}>
-            Cancel
+            {t('ui.blog.cancel')}
           </Button>,
           <Button
             key="submit"
@@ -845,7 +847,7 @@ const Blog = () => {
             loading={updatePostMutation.isLoading}
             onClick={() => editForm.submit()}
           >
-            Update
+            {t('ui.blog.update')}
           </Button>
         ]}
         width={900}

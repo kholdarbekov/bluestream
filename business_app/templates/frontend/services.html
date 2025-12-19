@@ -1,6 +1,6 @@
 {% extends "frontend/base.html" %}
 
-{% block title %}{{ 'Services'|translate(current_language) }} - {{ company_name }}{% endblock %}
+{% block title %}{{ 'landing.nav.services'|t }} - {{ company_name }}{% endblock %}
 
 {% block extra_head %}
 <style>
@@ -47,10 +47,10 @@
             <div class="shape" style="background-image: url({{ url_for('static', filename='images/shape/banner-shap.png') }});"></div>
             <div class="auto-container">
                 <div class="content-box">
-                    <h1>{{ 'Our Services'|translate(current_language) }}</h1>
+                    <h1>{{ 'landing.services.page_title'|t }}</h1>
                     <ul class="bread-crumb clearfix">
-                        <li><a href="{{ url_for('frontend.index') }}">{{ 'Home'|translate(current_language) }}</a></li>
-                        <li>{{ 'Services'|translate(current_language) }}</li>
+                        <li><a href="{{ url_for('frontend.index') }}">{{ 'landing.nav.home'|t }}</a></li>
+                        <li>{{ 'landing.nav.services'|t }}</li>
                     </ul>
                 </div>
             </div>
@@ -61,8 +61,8 @@
         <section class="service-section">
             <div class="auto-container">
                 <div class="sec-title centred">
-                    <h2>{{ 'Premium Water Delivery Services'|translate(current_language) }}</h2>
-                    <p>{{ 'We provide comprehensive water solutions for homes and businesses'|translate(current_language) }}</p>
+                    <h2>{{ 'landing.services.heading'|t }}</h2>
+                    <p>{{ 'landing.services.description'|t }}</p>
                 </div>
                 <div class="row clearfix">
                     <div class="col-lg-4 col-md-6 col-sm-12 service-block">
@@ -71,8 +71,8 @@
                                 <div class="icon-box">
                                     <i class="flaticon-delivery-truck"></i>
                                 </div>
-                                <h4>{{ 'Home Delivery'|translate(current_language) }}</h4>
-                                <p>{{ 'Fast and reliable water delivery to your doorstep with flexible scheduling options.'|translate(current_language) }}</p>
+                                <h4>{{ 'landing.services.home_delivery.title'|t }}</h4>
+                                <p>{{ 'landing.services.home_delivery.description'|t }}</p>
                             </div>
                         </div>
                     </div>
@@ -82,8 +82,8 @@
                                 <div class="icon-box">
                                     <i class="flaticon-office-building"></i>
                                 </div>
-                                <h4>{{ 'Office Solutions'|translate(current_language) }}</h4>
-                                <p>{{ 'Complete water solutions for offices including dispensers and regular delivery schedules.'|translate(current_language) }}</p>
+                                <h4>{{ 'landing.services.office_solutions.title'|t }}</h4>
+                                <p>{{ 'landing.services.office_solutions.description'|t }}</p>
                             </div>
                         </div>
                     </div>
@@ -93,8 +93,8 @@
                                 <div class="icon-box">
                                     <i class="flaticon-subscription"></i>
                                 </div>
-                                <h4>{{ 'Subscription Plans'|translate(current_language) }}</h4>
-                                <p>{{ 'Convenient subscription plans with automatic delivery and special discounts.'|translate(current_language) }}</p>
+                                <h4>{{ 'landing.services.subscription_plans.title'|t }}</h4>
+                                <p>{{ 'landing.services.subscription_plans.description'|t }}</p>
                             </div>
                         </div>
                     </div>

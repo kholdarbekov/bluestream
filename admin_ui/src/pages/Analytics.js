@@ -28,6 +28,7 @@ import {
   CalendarOutlined
 } from '@ant-design/icons';
 import { useQuery } from 'react-query';
+import { useTranslation } from 'react-i18next';
 import moment from 'moment';
 import LineChart from '../components/charts/LineChart';
 import BarChart from '../components/charts/BarChart';
@@ -38,6 +39,7 @@ const { Option } = Select;
 const { RangePicker } = DatePicker;
 
 const Analytics = () => {
+  const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState('overview');
   const [dateRange, setDateRange] = useState([
     moment().subtract(30, 'days'),
@@ -104,14 +106,14 @@ const Analytics = () => {
     labels: salesTrends?.labels || [],
     datasets: [
       {
-        label: 'Revenue',
+        label: t('ui.analytics.revenue'),
         data: salesTrends?.revenue || [],
         borderColor: '#1890ff',
         backgroundColor: 'rgba(24, 144, 255, 0.1)',
         tension: 0.4
       },
       {
-        label: 'Orders',
+        label: t('ui.analytics.orders'),
         data: salesTrends?.orders || [],
         borderColor: '#52c41a',
         backgroundColor: 'rgba(82, 196, 26, 0.1)',
@@ -124,14 +126,20 @@ const Analytics = () => {
   const productPerformanceData = {
     labels: overviewData.top_products?.map(p => p.name) || [],
     datasets: [{
-      label: 'Sales',
+      label: t('ui.analytics.sales'),
       data: overviewData.top_products?.map(p => p.sales) || [],
       backgroundColor: ['#1890ff', '#52c41a', '#faad14', '#f5222d', '#722ed1']
     }]
   };
 
   const customerSegmentData = {
-    labels: ['New', 'Active', 'Loyal', 'At Risk', 'Inactive'],
+    labels: [
+      t('ui.analytics.segment_new'),
+      t('ui.analytics.segment_active'),
+      t('ui.analytics.segment_loyal'),
+      t('ui.analytics.segment_at_risk'),
+      t('ui.analytics.segment_inactive')
+    ],
     datasets: [{
       data: [
         overviewData.customer_segments?.new || 0,
@@ -146,7 +154,7 @@ const Analytics = () => {
 
   const churnColumns = [
     {
-      title: 'Customer',
+      title: t('ui.analytics.customer'),
       dataIndex: 'customer_name',
       key: 'customer_name',
       render: (text, record) => (
@@ -157,7 +165,7 @@ const Analytics = () => {
       )
     },
     {
-      title: 'Risk Score',
+      title: t('ui.analytics.risk_score'),
       dataIndex: 'risk_score',
       key: 'risk_score',
       width: 120,
@@ -173,25 +181,25 @@ const Analytics = () => {
       )
     },
     {
-      title: 'Risk Level',
+      title: t('ui.analytics.risk_level'),
       dataIndex: 'risk_level',
       key: 'risk_level',
       width: 100,
       render: (level) => (
         <Tag color={level === 'high' ? 'red' : level === 'medium' ? 'orange' : 'green'}>
-          {level?.toUpperCase()}
+          {t(`ui.analytics.risk_${level}`).toUpperCase()}
         </Tag>
       )
     },
     {
-      title: 'Last Order',
+      title: t('ui.analytics.last_order'),
       dataIndex: 'last_order_date',
       key: 'last_order_date',
       width: 120,
-      render: (date) => (date ? moment(date).format('MMM DD, YYYY') : 'Never')
+      render: (date) => (date ? moment(date).format('MMM DD, YYYY') : t('ui.analytics.never'))
     },
     {
-      title: 'Total Spent',
+      title: t('ui.analytics.total_spent'),
       dataIndex: 'total_spent',
       key: 'total_spent',
       width: 120,
@@ -201,18 +209,18 @@ const Analytics = () => {
 
   const deliveryPerformanceColumns = [
     {
-      title: 'Region',
+      title: t('ui.analytics.region'),
       dataIndex: 'region',
       key: 'region'
     },
     {
-      title: 'Deliveries',
+      title: t('ui.analytics.deliveries'),
       dataIndex: 'total_deliveries',
       key: 'total_deliveries',
       width: 100
     },
     {
-      title: 'On Time Rate',
+      title: t('ui.analytics.on_time_rate'),
       dataIndex: 'on_time_rate',
       key: 'on_time_rate',
       width: 120,
@@ -228,20 +236,20 @@ const Analytics = () => {
       )
     },
     {
-      title: 'Avg Delivery Time',
+      title: t('ui.analytics.avg_delivery_time'),
       dataIndex: 'avg_delivery_time',
       key: 'avg_delivery_time',
       width: 140,
-      render: (time) => `${time} hours`
+      render: (time) => `${time} ${t('ui.analytics.hours')}`
     },
     {
-      title: 'Performance',
+      title: t('ui.analytics.performance'),
       dataIndex: 'performance',
       key: 'performance',
       width: 100,
       render: (performance) => (
         <Tag color={performance === 'excellent' ? 'green' : performance === 'good' ? 'blue' : performance === 'average' ? 'orange' : 'red'}>
-          {performance?.toUpperCase()}
+          {t(`ui.analytics.performance_${performance}`).toUpperCase()}
         </Tag>
       )
     }
@@ -250,7 +258,7 @@ const Analytics = () => {
   const tabItems = [
     {
       key: 'overview',
-      label: 'Overview',
+      label: t('ui.analytics.overview'),
       children: (
         <div>
           {/* Key Metrics */}
@@ -258,7 +266,7 @@ const Analytics = () => {
             <Col xs={24} sm={6}>
               <Card>
                 <Statistic
-                  title="Total Revenue"
+                  title={t('ui.analytics.total_revenue')}
                   value={overviewData.total_revenue || 0}
                   precision={2}
                   prefix={<DollarOutlined />}
@@ -269,7 +277,7 @@ const Analytics = () => {
             <Col xs={24} sm={6}>
               <Card>
                 <Statistic
-                  title="Total Orders"
+                  title={t('ui.analytics.total_orders')}
                   value={overviewData.total_orders || 0}
                   prefix={<ShoppingCartOutlined />}
                 />
@@ -278,7 +286,7 @@ const Analytics = () => {
             <Col xs={24} sm={6}>
               <Card>
                 <Statistic
-                  title="Active Customers"
+                  title={t('ui.analytics.active_customers')}
                   value={overviewData.active_customers || 0}
                   prefix={<UserOutlined />}
                 />
@@ -287,7 +295,7 @@ const Analytics = () => {
             <Col xs={24} sm={6}>
               <Card>
                 <Statistic
-                  title="Growth Rate"
+                  title={t('ui.analytics.growth_rate')}
                   value={overviewData.growth_rate || 0}
                   precision={1}
                   suffix="%"
@@ -301,12 +309,12 @@ const Analytics = () => {
           {/* Charts */}
           <Row gutter={[16, 16]}>
             <Col xs={24} lg={16}>
-              <Card title="Revenue Trend" loading={isLoading}>
+              <Card title={t('ui.analytics.revenue_trend')} loading={isLoading}>
                 <LineChart data={salesTrendChartData} height={300} />
               </Card>
             </Col>
             <Col xs={24} lg={8}>
-              <Card title="Customer Segments" loading={isLoading}>
+              <Card title={t('ui.analytics.customer_segments')} loading={isLoading}>
                 <PieChart data={customerSegmentData} height={300} />
               </Card>
             </Col>
@@ -314,12 +322,12 @@ const Analytics = () => {
 
           <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
             <Col xs={24} lg={12}>
-              <Card title="Top Products" loading={isLoading}>
+              <Card title={t('ui.analytics.top_products')} loading={isLoading}>
                 <BarChart data={productPerformanceData} height={300} />
               </Card>
             </Col>
             <Col xs={24} lg={12}>
-              <Card title="Recent Insights" loading={isLoading}>
+              <Card title={t('ui.analytics.recent_insights')} loading={isLoading}>
                 <List
                   size="small"
                   dataSource={overviewData.insights || []}
@@ -341,14 +349,14 @@ const Analytics = () => {
     },
     {
       key: 'sales',
-      label: 'Sales Trends',
+      label: t('ui.analytics.sales_trends'),
       children: (
         <div>
           <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
             <Col xs={24} sm={6}>
               <Card>
                 <Statistic
-                  title="Monthly Revenue"
+                  title={t('ui.analytics.monthly_revenue')}
                   value={salesTrends?.monthly_revenue || 0}
                   precision={2}
                   prefix="$"
@@ -359,7 +367,7 @@ const Analytics = () => {
             <Col xs={24} sm={6}>
               <Card>
                 <Statistic
-                  title="Monthly Orders"
+                  title={t('ui.analytics.monthly_orders')}
                   value={salesTrends?.monthly_orders || 0}
                   prefix={<ShoppingCartOutlined />}
                 />
@@ -368,7 +376,7 @@ const Analytics = () => {
             <Col xs={24} sm={6}>
               <Card>
                 <Statistic
-                  title="Avg Order Value"
+                  title={t('ui.analytics.avg_order_value')}
                   value={salesTrends?.avg_order_value || 0}
                   precision={2}
                   prefix="$"
@@ -378,7 +386,7 @@ const Analytics = () => {
             <Col xs={24} sm={6}>
               <Card>
                 <Statistic
-                  title="Conversion Rate"
+                  title={t('ui.analytics.conversion_rate')}
                   value={salesTrends?.conversion_rate || 0}
                   precision={1}
                   suffix="%"
@@ -388,7 +396,7 @@ const Analytics = () => {
             </Col>
           </Row>
 
-          <Card title="Sales Performance Over Time">
+          <Card title={t('ui.analytics.sales_performance_over_time')}>
             <LineChart data={salesTrendChartData} height={400} />
           </Card>
         </div>
@@ -396,14 +404,14 @@ const Analytics = () => {
     },
     {
       key: 'churn',
-      label: 'Customer Churn',
+      label: t('ui.analytics.customer_churn'),
       children: (
         <div>
           <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
             <Col xs={24} sm={8}>
               <Card>
                 <Statistic
-                  title="Churn Rate"
+                  title={t('ui.analytics.churn_rate')}
                   value={churnData?.churn_rate || 0}
                   precision={1}
                   suffix="%"
@@ -415,7 +423,7 @@ const Analytics = () => {
             <Col xs={24} sm={8}>
               <Card>
                 <Statistic
-                  title="At Risk Customers"
+                  title={t('ui.analytics.at_risk_customers')}
                   value={churnData?.at_risk_count || 0}
                   valueStyle={{ color: '#faad14' }}
                   prefix={<UserOutlined />}
@@ -425,7 +433,7 @@ const Analytics = () => {
             <Col xs={24} sm={8}>
               <Card>
                 <Statistic
-                  title="High Risk Customers"
+                  title={t('ui.analytics.high_risk_customers')}
                   value={churnData?.high_risk_count || 0}
                   valueStyle={{ color: '#f5222d' }}
                   prefix={<WarningOutlined />}
@@ -434,7 +442,7 @@ const Analytics = () => {
             </Col>
           </Row>
 
-          <Card title="Customer Churn Risk Analysis">
+          <Card title={t('ui.analytics.customer_churn_risk_analysis')}>
             <Table
               columns={churnColumns}
               dataSource={churnData?.customers || []}
@@ -447,14 +455,14 @@ const Analytics = () => {
     },
     {
       key: 'delivery',
-      label: 'Delivery Performance',
+      label: t('ui.analytics.delivery_performance'),
       children: (
         <div>
           <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
             <Col xs={24} sm={8}>
               <Card>
                 <Statistic
-                  title="Overall On-Time Rate"
+                  title={t('ui.analytics.overall_on_time_rate')}
                   value={deliveryHeatmap?.overall_on_time_rate || 0}
                   precision={1}
                   suffix="%"
@@ -466,10 +474,10 @@ const Analytics = () => {
             <Col xs={24} sm={8}>
               <Card>
                 <Statistic
-                  title="Avg Delivery Time"
+                  title={t('ui.analytics.avg_delivery_time')}
                   value={deliveryHeatmap?.avg_delivery_time || 0}
                   precision={1}
-                  suffix=" hrs"
+                  suffix={` ${t('ui.analytics.hrs')}`}
                   prefix={<CalendarOutlined />}
                 />
               </Card>
@@ -477,7 +485,7 @@ const Analytics = () => {
             <Col xs={24} sm={8}>
               <Card>
                 <Statistic
-                  title="Failed Deliveries"
+                  title={t('ui.analytics.failed_deliveries')}
                   value={deliveryHeatmap?.failed_deliveries || 0}
                   valueStyle={{ color: '#f5222d' }}
                   prefix={<WarningOutlined />}
@@ -486,7 +494,7 @@ const Analytics = () => {
             </Col>
           </Row>
 
-          <Card title="Regional Delivery Performance">
+          <Card title={t('ui.analytics.regional_delivery_performance')}>
             <Table
               columns={deliveryPerformanceColumns}
               dataSource={deliveryHeatmap?.regions || []}
@@ -499,14 +507,14 @@ const Analytics = () => {
     },
     {
       key: 'forecast',
-      label: 'Revenue Forecast',
+      label: t('ui.analytics.revenue_forecast'),
       children: (
         <div>
           <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
             <Col xs={24} sm={8}>
               <Card>
                 <Statistic
-                  title="Next Month Forecast"
+                  title={t('ui.analytics.next_month_forecast')}
                   value={revenueForecast?.next_month || 0}
                   precision={2}
                   prefix="$"
@@ -517,7 +525,7 @@ const Analytics = () => {
             <Col xs={24} sm={8}>
               <Card>
                 <Statistic
-                  title="Next Quarter Forecast"
+                  title={t('ui.analytics.next_quarter_forecast')}
                   value={revenueForecast?.next_quarter || 0}
                   precision={2}
                   prefix="$"
@@ -528,7 +536,7 @@ const Analytics = () => {
             <Col xs={24} sm={8}>
               <Card>
                 <Statistic
-                  title="Confidence Level"
+                  title={t('ui.analytics.confidence_level')}
                   value={revenueForecast?.confidence_level || 0}
                   precision={1}
                   suffix="%"
@@ -538,19 +546,19 @@ const Analytics = () => {
             </Col>
           </Row>
 
-          <Card title="Revenue Forecast Analysis">
+          <Card title={t('ui.analytics.revenue_forecast_analysis')}>
             <LineChart
               data={{
                 labels: revenueForecast?.labels || [],
                 datasets: [
                   {
-                    label: 'Historical Revenue',
+                    label: t('ui.analytics.historical_revenue'),
                     data: revenueForecast?.historical || [],
                     borderColor: '#1890ff',
                     backgroundColor: 'rgba(24, 144, 255, 0.1)'
                   },
                   {
-                    label: 'Forecasted Revenue',
+                    label: t('ui.analytics.forecasted_revenue'),
                     data: revenueForecast?.forecast || [],
                     borderColor: '#52c41a',
                     backgroundColor: 'rgba(82, 196, 26, 0.1)',
@@ -562,7 +570,7 @@ const Analytics = () => {
             />
           </Card>
 
-          <Card title="Forecast Factors" style={{ marginTop: 16 }}>
+          <Card title={t('ui.analytics.forecast_factors')} style={{ marginTop: 16 }}>
             <List
               size="small"
               dataSource={revenueForecast?.factors || []}
@@ -575,7 +583,7 @@ const Analytics = () => {
                   />
                   <div>
                     <Tag color={item.trend === 'positive' ? 'green' : item.trend === 'negative' ? 'red' : 'blue'}>
-                      {item.weight}% impact
+                      {item.weight}% {t('ui.analytics.impact')}
                     </Tag>
                   </div>
                 </List.Item>
@@ -597,12 +605,12 @@ const Analytics = () => {
               <Select
                 value={timeframe}
                 onChange={setTimeframe}
-                style={{ width: 120 }}
+                style={{ width: 150 }}
               >
-                <Option value="7d">Last 7 days</Option>
-                <Option value="30d">Last 30 days</Option>
-                <Option value="90d">Last 90 days</Option>
-                <Option value="1y">Last year</Option>
+                <Option value="7d">{t('ui.analytics.last_7_days')}</Option>
+                <Option value="30d">{t('ui.analytics.last_30_days')}</Option>
+                <Option value="90d">{t('ui.analytics.last_90_days')}</Option>
+                <Option value="1y">{t('ui.analytics.last_year')}</Option>
               </Select>
               <RangePicker
                 value={dateRange}
@@ -613,7 +621,7 @@ const Analytics = () => {
           </Col>
           <Col>
             <Button type="primary" icon={<ExportOutlined />}>
-              Export Report
+              {t('ui.analytics.export_report')}
             </Button>
           </Col>
         </Row>

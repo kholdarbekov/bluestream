@@ -38,6 +38,7 @@ import {
   CalendarOutlined
 } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from 'react-query';
+import { useTranslation } from 'react-i18next';
 import moment from 'moment';
 import adminService from '../services/adminService';
 
@@ -46,6 +47,7 @@ const { RangePicker } = DatePicker;
 const { Step } = Steps;
 
 const Delivery = () => {
+  const { t } = useTranslation();
   const [searchText, setSearchText] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [dateRange, setDateRange] = useState(null);
@@ -79,13 +81,13 @@ const Delivery = () => {
     ({ deliveryId, data }) => adminService.updateDelivery(deliveryId, data),
     {
       onSuccess: () => {
-        message.success('Delivery updated successfully');
+        message.success(t('ui.delivery.updated_success'));
         queryClient.invalidateQueries('deliveries');
         setIsUpdateModalVisible(false);
         form.resetFields();
       },
       onError: (error) => {
-        message.error('Failed to update delivery');
+        message.error(t('ui.delivery.update_failed'));
       }
     }
   );
@@ -115,7 +117,7 @@ const Delivery = () => {
 
   const columns = [
     {
-      title: 'Delivery ID',
+      title: t('ui.delivery.delivery_id'),
       dataIndex: 'delivery_id',
       key: 'delivery_id',
       width: 120,
@@ -126,7 +128,7 @@ const Delivery = () => {
       )
     },
     {
-      title: 'Order #',
+      title: t('ui.delivery.order_number'),
       dataIndex: 'order_number',
       key: 'order_number',
       width: 120,
@@ -135,7 +137,7 @@ const Delivery = () => {
       )
     },
     {
-      title: 'Customer',
+      title: t('ui.delivery.customer'),
       dataIndex: 'customer',
       key: 'customer',
       render: (_, record) => (
@@ -146,12 +148,12 @@ const Delivery = () => {
       )
     },
     {
-      title: 'Driver',
+      title: t('ui.delivery.driver'),
       dataIndex: 'driver_name',
       key: 'driver_name',
       render: (name, record) => (
         <div>
-          <div>{name || 'Not Assigned'}</div>
+          <div>{name || t('ui.delivery.not_assigned')}</div>
           {record.driver_phone && (
             <small style={{ color: '#666' }}>{record.driver_phone}</small>
           )}
@@ -159,7 +161,7 @@ const Delivery = () => {
       )
     },
     {
-      title: 'Address',
+      title: t('ui.delivery.address'),
       dataIndex: 'delivery_address',
       key: 'delivery_address',
       render: (address) => (
@@ -170,37 +172,37 @@ const Delivery = () => {
       )
     },
     {
-      title: 'Status',
+      title: t('ui.delivery.status'),
       dataIndex: 'status',
       key: 'status',
       width: 120,
       render: (status) => (
         <Tag color={deliveryStatusColors[status] || 'default'} icon={getStatusIcon(status)}>
-          {status?.toUpperCase().replace('_', ' ')}
+          {t(`ui.delivery.status_${status}`)}
         </Tag>
       )
     },
     {
-      title: 'Priority',
+      title: t('ui.delivery.priority'),
       dataIndex: 'priority',
       key: 'priority',
       width: 90,
       render: (priority) => (
         <Badge
           color={priority === 'high' ? 'red' : priority === 'medium' ? 'orange' : 'green'}
-          text={priority?.toUpperCase()}
+          text={t(`ui.delivery.priority_${priority}`)}
         />
       )
     },
     {
-      title: 'Scheduled',
+      title: t('ui.delivery.scheduled'),
       dataIndex: 'scheduled_date',
       key: 'scheduled_date',
       width: 120,
       render: (date) => moment(date).format('MMM DD, YYYY')
     },
     {
-      title: 'Actions',
+      title: t('ui.delivery.actions'),
       key: 'actions',
       width: 100,
       render: (_, record) => (
@@ -209,19 +211,19 @@ const Delivery = () => {
             items: [
               {
                 key: 'track',
-                label: 'Track Delivery',
+                label: t('ui.delivery.track_delivery'),
                 icon: <EnvironmentOutlined />,
                 onClick: () => handleTrackDelivery(record)
               },
               {
                 key: 'details',
-                label: 'View Details',
+                label: t('ui.delivery.view_details'),
                 icon: <EyeOutlined />,
                 onClick: () => handleViewDelivery(record)
               },
               {
                 key: 'update',
-                label: 'Update Status',
+                label: t('ui.delivery.update_status'),
                 icon: <EditOutlined />,
                 onClick: () => handleUpdateDelivery(record)
               }
@@ -300,32 +302,32 @@ const Delivery = () => {
 
   const getTrackingSteps = (delivery) => [
     {
-      title: 'Order Created',
-      description: 'Delivery request created',
+      title: t('ui.delivery.order_created'),
+      description: t('ui.delivery.delivery_request_created'),
       status: 'finish',
       icon: <CheckCircleOutlined />
     },
     {
-      title: 'Driver Assigned',
-      description: delivery.driver_name || 'Waiting for assignment',
+      title: t('ui.delivery.driver_assigned'),
+      description: delivery.driver_name || t('ui.delivery.waiting_for_assignment'),
       status: ['assigned', 'picked_up', 'in_transit', 'delivered'].includes(delivery.status) ? 'finish' : 'wait',
       icon: delivery.driver_name ? <CheckCircleOutlined /> : <ClockCircleOutlined />
     },
     {
-      title: 'Package Picked Up',
-      description: 'Driver collected the package',
+      title: t('ui.delivery.package_picked_up'),
+      description: t('ui.delivery.driver_collected_package'),
       status: ['picked_up', 'in_transit', 'delivered'].includes(delivery.status) ? 'finish' : 'wait',
       icon: ['picked_up', 'in_transit', 'delivered'].includes(delivery.status) ? <CheckCircleOutlined /> : <ClockCircleOutlined />
     },
     {
-      title: 'In Transit',
-      description: 'Package is on the way',
+      title: t('ui.delivery.in_transit'),
+      description: t('ui.delivery.package_on_way'),
       status: ['in_transit', 'delivered'].includes(delivery.status) ? 'finish' : delivery.status === 'failed' ? 'error' : 'wait',
       icon: delivery.status === 'in_transit' ? <TruckOutlined /> : ['delivered'].includes(delivery.status) ? <CheckCircleOutlined /> : <ClockCircleOutlined />
     },
     {
-      title: 'Delivered',
-      description: delivery.status === 'delivered' ? 'Package delivered successfully' : delivery.status === 'failed' ? 'Delivery failed' : 'Waiting for delivery',
+      title: t('ui.delivery.delivered'),
+      description: delivery.status === 'delivered' ? t('ui.delivery.package_delivered_success') : delivery.status === 'failed' ? t('ui.delivery.delivery_failed') : t('ui.delivery.waiting_for_delivery'),
       status: delivery.status === 'delivered' ? 'finish' : delivery.status === 'failed' ? 'error' : 'wait',
       icon: delivery.status === 'delivered' ? <CheckCircleOutlined /> : delivery.status === 'failed' ? <ExclamationCircleOutlined /> : <ClockCircleOutlined />
     }
@@ -338,7 +340,7 @@ const Delivery = () => {
         <Col xs={24} sm={6}>
           <Card>
             <Statistic
-              title="Total Deliveries"
+              title={t('ui.delivery.total_deliveries')}
               value={totalDeliveries}
               prefix={<TruckOutlined />}
             />
@@ -347,7 +349,7 @@ const Delivery = () => {
         <Col xs={24} sm={6}>
           <Card>
             <Statistic
-              title="Pending"
+              title={t('ui.delivery.pending')}
               value={pendingDeliveries}
               valueStyle={{ color: '#faad14' }}
               prefix={<ClockCircleOutlined />}
@@ -357,7 +359,7 @@ const Delivery = () => {
         <Col xs={24} sm={6}>
           <Card>
             <Statistic
-              title="In Transit"
+              title={t('ui.delivery.in_transit')}
               value={inTransitDeliveries}
               valueStyle={{ color: '#1890ff' }}
               prefix={<TruckOutlined />}
@@ -367,7 +369,7 @@ const Delivery = () => {
         <Col xs={24} sm={6}>
           <Card>
             <Statistic
-              title="Completion Rate"
+              title={t('ui.delivery.completion_rate')}
               value={onTimeRate}
               precision={1}
               suffix="%"
@@ -383,29 +385,29 @@ const Delivery = () => {
         <div className="table-actions">
           <Space wrap>
             <Input.Search
-              placeholder="Search deliveries..."
+              placeholder={t('ui.delivery.search_placeholder')}
               allowClear
               onSearch={handleSearch}
               style={{ width: 250 }}
             />
             <Select
-              placeholder="Filter by status"
+              placeholder={t('ui.delivery.filter_by_status')}
               allowClear
               onChange={handleStatusFilter}
               style={{ width: 150 }}
             >
-              <Option value="pending">Pending</Option>
-              <Option value="assigned">Assigned</Option>
-              <Option value="picked_up">Picked Up</Option>
-              <Option value="in_transit">In Transit</Option>
-              <Option value="delivered">Delivered</Option>
-              <Option value="failed">Failed</Option>
-              <Option value="returned">Returned</Option>
+              <Option value="pending">{t('ui.delivery.status_pending')}</Option>
+              <Option value="assigned">{t('ui.delivery.status_assigned')}</Option>
+              <Option value="picked_up">{t('ui.delivery.status_picked_up')}</Option>
+              <Option value="in_transit">{t('ui.delivery.status_in_transit')}</Option>
+              <Option value="delivered">{t('ui.delivery.status_delivered')}</Option>
+              <Option value="failed">{t('ui.delivery.status_failed')}</Option>
+              <Option value="returned">{t('ui.delivery.status_returned')}</Option>
             </Select>
             <RangePicker
               onChange={handleDateRangeChange}
               format="YYYY-MM-DD"
-              placeholder={['Start Date', 'End Date']}
+              placeholder={[t('ui.delivery.start_date'), t('ui.delivery.end_date')]}
             />
           </Space>
 
@@ -413,12 +415,12 @@ const Delivery = () => {
             <Button
               type="primary"
               icon={<PlusOutlined />}
-              onClick={() => message.info('Create delivery functionality coming soon')}
+              onClick={() => message.info(t('ui.delivery.create_delivery_coming_soon'))}
             >
-              Schedule Delivery
+              {t('ui.delivery.schedule_delivery')}
             </Button>
             <Button icon={<ExportOutlined />}>
-              Export Report
+              {t('ui.delivery.export_report')}
             </Button>
           </Space>
         </div>
@@ -436,7 +438,7 @@ const Delivery = () => {
             showSizeChanger: true,
             showQuickJumper: true,
             showTotal: (total, range) =>
-              `${range[0]}-${range[1]} of ${total} deliveries`
+              `${range[0]}-${range[1]} of ${total} ${t('ui.delivery.pagination_text')}`
           }}
           onChange={handleTableChange}
           className="admin-table"
@@ -446,7 +448,7 @@ const Delivery = () => {
 
       {/* Delivery Details Modal */}
       <Modal
-        title={`Delivery Details - ${selectedDelivery?.delivery_id}`}
+        title={`${t('ui.delivery.delivery_details')} - ${selectedDelivery?.delivery_id}`}
         open={isDetailModalVisible}
         onCancel={() => setIsDetailModalVisible(false)}
         footer={null}
@@ -455,44 +457,44 @@ const Delivery = () => {
         {selectedDelivery && (
           <div>
             <Descriptions column={2} bordered>
-              <Descriptions.Item label="Delivery ID">
+              <Descriptions.Item label={t('ui.delivery.delivery_id')}>
                 {selectedDelivery.delivery_id}
               </Descriptions.Item>
-              <Descriptions.Item label="Order Number">
+              <Descriptions.Item label={t('ui.delivery.order_number')}>
                 {selectedDelivery.order_number}
               </Descriptions.Item>
-              <Descriptions.Item label="Status">
+              <Descriptions.Item label={t('ui.delivery.status')}>
                 <Tag color={deliveryStatusColors[selectedDelivery.status]} icon={getStatusIcon(selectedDelivery.status)}>
-                  {selectedDelivery.status?.toUpperCase().replace('_', ' ')}
+                  {t(`ui.delivery.status_${selectedDelivery.status}`)}
                 </Tag>
               </Descriptions.Item>
-              <Descriptions.Item label="Priority">
+              <Descriptions.Item label={t('ui.delivery.priority')}>
                 <Badge
                   color={selectedDelivery.priority === 'high' ? 'red' : selectedDelivery.priority === 'medium' ? 'orange' : 'green'}
-                  text={selectedDelivery.priority?.toUpperCase()}
+                  text={t(`ui.delivery.priority_${selectedDelivery.priority}`)}
                 />
               </Descriptions.Item>
-              <Descriptions.Item label="Customer">
+              <Descriptions.Item label={t('ui.delivery.customer')}>
                 {selectedDelivery.customer_name}
               </Descriptions.Item>
-              <Descriptions.Item label="Customer Phone">
+              <Descriptions.Item label={t('ui.delivery.customer_phone')}>
                 {selectedDelivery.customer_phone}
               </Descriptions.Item>
-              <Descriptions.Item label="Driver">
-                {selectedDelivery.driver_name || 'Not Assigned'}
+              <Descriptions.Item label={t('ui.delivery.driver')}>
+                {selectedDelivery.driver_name || t('ui.delivery.not_assigned')}
               </Descriptions.Item>
-              <Descriptions.Item label="Driver Phone">
-                {selectedDelivery.driver_phone || 'N/A'}
+              <Descriptions.Item label={t('ui.delivery.driver_phone')}>
+                {selectedDelivery.driver_phone || t('ui.delivery.na')}
               </Descriptions.Item>
-              <Descriptions.Item label="Scheduled Date" span={2}>
+              <Descriptions.Item label={t('ui.delivery.scheduled_date')} span={2}>
                 {moment(selectedDelivery.scheduled_date).format('YYYY-MM-DD HH:mm')}
               </Descriptions.Item>
-              <Descriptions.Item label="Delivery Address" span={2}>
+              <Descriptions.Item label={t('ui.delivery.delivery_address')} span={2}>
                 {selectedDelivery.delivery_address}
               </Descriptions.Item>
             </Descriptions>
 
-            <Divider>Delivery Progress</Divider>
+            <Divider>{t('ui.delivery.delivery_progress')}</Divider>
             <Progress
               percent={getDeliveryProgress(selectedDelivery.status)}
               status={selectedDelivery.status === 'delivered' ? 'success' : selectedDelivery.status === 'failed' ? 'exception' : 'active'}
@@ -509,7 +511,7 @@ const Delivery = () => {
                     handleTrackDelivery(selectedDelivery);
                   }}
                 >
-                  Track Delivery
+                  {t('ui.delivery.track_delivery')}
                 </Button>
                 <Button
                   icon={<EditOutlined />}
@@ -518,10 +520,10 @@ const Delivery = () => {
                     handleUpdateDelivery(selectedDelivery);
                   }}
                 >
-                  Update Status
+                  {t('ui.delivery.update_status')}
                 </Button>
                 <Button onClick={() => setIsDetailModalVisible(false)}>
-                  Close
+                  {t('ui.delivery.close')}
                 </Button>
               </Space>
             </div>
@@ -531,7 +533,7 @@ const Delivery = () => {
 
       {/* Tracking Modal */}
       <Modal
-        title={`Track Delivery - ${selectedDelivery?.delivery_id}`}
+        title={`${t('ui.delivery.track_delivery_title')} - ${selectedDelivery?.delivery_id}`}
         open={isTrackingModalVisible}
         onCancel={() => setIsTrackingModalVisible(false)}
         footer={null}
@@ -540,10 +542,10 @@ const Delivery = () => {
         {selectedDelivery && (
           <div>
             <div style={{ marginBottom: 24 }}>
-              <h4>Current Status: <Tag color={deliveryStatusColors[selectedDelivery.status]}>
-                {selectedDelivery.status?.toUpperCase().replace('_', ' ')}
+              <h4>{t('ui.delivery.current_status')}: <Tag color={deliveryStatusColors[selectedDelivery.status]}>
+                {t(`ui.delivery.status_${selectedDelivery.status}`)}
               </Tag></h4>
-              <p><strong>Estimated Delivery:</strong> {moment(selectedDelivery.scheduled_date).format('YYYY-MM-DD HH:mm')}</p>
+              <p><strong>{t('ui.delivery.estimated_delivery')}:</strong> {moment(selectedDelivery.scheduled_date).format('YYYY-MM-DD HH:mm')}</p>
             </div>
 
             <Steps
@@ -564,14 +566,14 @@ const Delivery = () => {
 
             {selectedDelivery.notes && (
               <div style={{ marginTop: 24 }}>
-                <Divider>Delivery Notes</Divider>
+                <Divider>{t('ui.delivery.delivery_notes')}</Divider>
                 <p>{selectedDelivery.notes}</p>
               </div>
             )}
 
             <div style={{ marginTop: 24, textAlign: 'right' }}>
               <Button type="primary" onClick={() => setIsTrackingModalVisible(false)}>
-                Close
+                {t('ui.delivery.close')}
               </Button>
             </div>
           </div>
@@ -580,7 +582,7 @@ const Delivery = () => {
 
       {/* Update Status Modal */}
       <Modal
-        title={`Update Delivery - ${selectedDelivery?.delivery_id}`}
+        title={`${t('ui.delivery.update_delivery')} - ${selectedDelivery?.delivery_id}`}
         open={isUpdateModalVisible}
         onCancel={() => setIsUpdateModalVisible(false)}
         footer={null}
@@ -592,25 +594,25 @@ const Delivery = () => {
         >
           <Form.Item
             name="status"
-            label="Status"
-            rules={[{ required: true, message: 'Please select a status' }]}
+            label={t('ui.delivery.status')}
+            rules={[{ required: true, message: t('ui.delivery.select_status_required') }]}
           >
             <Select>
-              <Option value="pending">Pending</Option>
-              <Option value="assigned">Assigned</Option>
-              <Option value="picked_up">Picked Up</Option>
-              <Option value="in_transit">In Transit</Option>
-              <Option value="delivered">Delivered</Option>
-              <Option value="failed">Failed</Option>
-              <Option value="returned">Returned</Option>
+              <Option value="pending">{t('ui.delivery.status_pending')}</Option>
+              <Option value="assigned">{t('ui.delivery.status_assigned')}</Option>
+              <Option value="picked_up">{t('ui.delivery.status_picked_up')}</Option>
+              <Option value="in_transit">{t('ui.delivery.status_in_transit')}</Option>
+              <Option value="delivered">{t('ui.delivery.status_delivered')}</Option>
+              <Option value="failed">{t('ui.delivery.status_failed')}</Option>
+              <Option value="returned">{t('ui.delivery.status_returned')}</Option>
             </Select>
           </Form.Item>
 
           <Form.Item
             name="driver_id"
-            label="Assign Driver"
+            label={t('ui.delivery.assign_driver')}
           >
-            <Select placeholder="Select a driver" allowClear>
+            <Select placeholder={t('ui.delivery.select_driver')} allowClear>
               <Option value="1">John Doe</Option>
               <Option value="2">Jane Smith</Option>
               <Option value="3">Mike Johnson</Option>
@@ -619,25 +621,25 @@ const Delivery = () => {
 
           <Form.Item
             name="notes"
-            label="Notes"
+            label={t('ui.delivery.notes')}
           >
             <Input.TextArea
               rows={3}
-              placeholder="Add notes about this delivery..."
+              placeholder={t('ui.delivery.notes_placeholder')}
             />
           </Form.Item>
 
           <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
             <Space>
               <Button onClick={() => setIsUpdateModalVisible(false)}>
-                Cancel
+                {t('ui.delivery.cancel')}
               </Button>
               <Button
                 type="primary"
                 htmlType="submit"
                 loading={updateDeliveryMutation.isLoading}
               >
-                Update Delivery
+                {t('ui.delivery.update_delivery_button')}
               </Button>
             </Space>
           </Form.Item>

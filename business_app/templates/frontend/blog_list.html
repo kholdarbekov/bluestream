@@ -1,6 +1,6 @@
 {% extends "frontend/base.html" %}
 
-{% block title %}{{ 'Blog'|translate(current_language) }} - {{ company_name }}{% endblock %}
+{% block title %}{{ 'Blog'|t }} - {{ company_name }}{% endblock %}
 
 {% block content %}
     <!-- page-title -->
@@ -8,10 +8,10 @@
         <div class="bg-layer" style="background-image: url({{ url_for('static', filename='images/background/page-title.jpg') }});"></div>
         <div class="auto-container">
             <div class="content-box">
-                <h1>{{ 'Water Benefits & Health Tips'|translate(current_language) }}</h1>
+                <h1>{{ 'Water Benefits & Health Tips'|t }}</h1>
                 <ul class="bread-crumb clearfix">
-                    <li><a href="{{ url_for('frontend.index') }}">{{ 'Home'|translate(current_language) }}</a></li>
-                    <li>{{ 'Blog'|translate(current_language) }}</li>
+                    <li><a href="{{ url_for('frontend.index') }}">{{ 'landing.nav.home'|t }}</a></li>
+                    <li>{{ 'Blog'|t }}</li>
                 </ul>
             </div>
         </div>
@@ -59,7 +59,7 @@
                                                 </div>
                                                 <div class="btn-box">
                                                     <a href="{{ url_for('frontend.blog_detail', slug=post.slug) }}" class="theme-btn btn-two">
-                                                        {{ 'Read More'|translate(current_language) }}
+                                                        {{ 'landing.button.read_more'|t }}
                                                     </a>
                                                 </div>
                                             </div>
@@ -98,9 +98,9 @@
                         {% else %}
                             <div class="empty-state" style="text-align: center; padding: 80px 20px;">
                                 <i class="far fa-newspaper" style="font-size: 80px; color: #ddd; margin-bottom: 20px;"></i>
-                                <h3>{{ 'No posts found'|translate(current_language) }}</h3>
-                                <p>{{ 'Check back soon for new content'|translate(current_language) }}</p>
-                                <a href="{{ url_for('frontend.index') }}" class="theme-btn btn-one" style="margin-top: 20px;">{{ 'Back to Home'|translate(current_language) }}</a>
+                                <h3>{{ 'No posts found'|t }}</h3>
+                                <p>{{ 'Check back soon for new content'|t }}</p>
+                                <a href="{{ url_for('frontend.index') }}" class="theme-btn btn-one" style="margin-top: 20px;">{{ 'Back to Home'|t }}</a>
                             </div>
                         {% endif %}
                     </div>
@@ -111,30 +111,30 @@
                         <!-- Categories Widget -->
                         <div class="sidebar-widget category-widget">
                             <div class="widget-title">
-                                <h4>{{ 'Categories'|translate(current_language) }}</h4>
+                                <h4>{{ 'Categories'|t }}</h4>
                             </div>
                             <div class="widget-content">
                                 <ul class="category-list clearfix">
                                     <li class="{% if not current_category %}active{% endif %}">
-                                        <a href="{{ url_for('frontend.blog_list') }}">{{ 'All Posts'|translate(current_language) }}</a>
+                                        <a href="{{ url_for('frontend.blog_list') }}">{{ 'All Posts'|t }}</a>
                                     </li>
                                     <li class="{% if current_category == 'health_tips' %}active{% endif %}">
-                                        <a href="{{ url_for('frontend.blog_list', category='health_tips') }}">{{ 'Health Tips'|translate(current_language) }}</a>
+                                        <a href="{{ url_for('frontend.blog_list', category='health_tips') }}">{{ 'Health Tips'|t }}</a>
                                     </li>
                                     <li class="{% if current_category == 'water_benefits' %}active{% endif %}">
-                                        <a href="{{ url_for('frontend.blog_list', category='water_benefits') }}">{{ 'Water Benefits'|translate(current_language) }}</a>
+                                        <a href="{{ url_for('frontend.blog_list', category='water_benefits') }}">{{ 'Water Benefits'|t }}</a>
                                     </li>
                                     <li class="{% if current_category == 'company_news' %}active{% endif %}">
-                                        <a href="{{ url_for('frontend.blog_list', category='company_news') }}">{{ 'Company News'|translate(current_language) }}</a>
+                                        <a href="{{ url_for('frontend.blog_list', category='company_news') }}">{{ 'Company News'|t }}</a>
                                     </li>
                                     <li class="{% if current_category == 'quality_assurance' %}active{% endif %}">
-                                        <a href="{{ url_for('frontend.blog_list', category='quality_assurance') }}">{{ 'Quality Assurance'|translate(current_language) }}</a>
+                                        <a href="{{ url_for('frontend.blog_list', category='quality_assurance') }}">{{ 'Quality Assurance'|t }}</a>
                                     </li>
                                     <li class="{% if current_category == 'lifestyle' %}active{% endif %}">
-                                        <a href="{{ url_for('frontend.blog_list', category='lifestyle') }}">{{ 'Lifestyle'|translate(current_language) }}</a>
+                                        <a href="{{ url_for('frontend.blog_list', category='lifestyle') }}">{{ 'Lifestyle'|t }}</a>
                                     </li>
                                     <li class="{% if current_category == 'environment' %}active{% endif %}">
-                                        <a href="{{ url_for('frontend.blog_list', category='environment') }}">{{ 'Environment'|translate(current_language) }}</a>
+                                        <a href="{{ url_for('frontend.blog_list', category='environment') }}">{{ 'Environment'|t }}</a>
                                     </li>
                                 </ul>
                             </div>

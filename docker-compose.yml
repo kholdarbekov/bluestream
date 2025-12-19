@@ -11,7 +11,7 @@ services:
     ports:
       - "5432:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-bluestream_db}"]
+      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-bluestream_db}" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -38,7 +38,7 @@ services:
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: [ "CMD", "redis-cli", "ping" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -60,12 +60,13 @@ services:
     command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
 
   business_app:
-    build: 
+    build:
       context: .
       dockerfile: Dockerfile
       target: business_app
     environment:
       - FLASK_ENV=${FLASK_ENV:-production}
+      - FLASK_DEBUG=${FLASK_DEBUG:-0}
       - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-dummy_password}@postgres:5432/${POSTGRES_DB:-bluestream_db}
       - REDIS_URL=redis://redis:6379/0
       - SECRET_KEY=${SECRET_KEY}
@@ -211,7 +212,7 @@ services:
         condition: service_healthy
     command: celery -A business_app.tasks.celery_app worker --loglevel=info --concurrency=${CELERY_WORKER_CONCURRENCY:-4} --max-memory-per-child=${CELERY_WORKER_MAX_MEMORY_PER_CHILD:-200000}
     healthcheck:
-      test: ["CMD", "celery", "-A", "business_app.tasks.celery_app", "status"]
+      test: [ "CMD", "celery", "-A", "business_app.tasks.celery_app", "status" ]
       interval: 60s
       timeout: 30s
       retries: 3
@@ -255,7 +256,7 @@ services:
         condition: service_healthy
     command: celery -A business_app.tasks.celery_app beat --loglevel=info
     healthcheck:
-      test: ["CMD", "sh", "-c", "ps aux | grep 'celery.*beat' | grep -v grep || exit 1"]
+      test: [ "CMD", "sh", "-c", "ps aux | grep 'celery.*beat' | grep -v grep || exit 1" ]
       interval: 60s
       timeout: 10s
       retries: 3
@@ -309,7 +310,6 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
-
   # nginx:
   #   image: nginx:alpine
   #   ports:
@@ -329,6 +329,7 @@ volumes:
   postgres_data_new:
   redis_data:
   uploads_data:
+
 
 networks:
   default:

@@ -11,10 +11,12 @@ from datetime import datetime, timezone
 
 from .exceptions import (
     WaterBusinessException, ValidationError, NotFoundError, UnauthorizedError,
-    ForbiddenError, ConflictError, PaymentError, DeliveryError, 
+    ForbiddenError, ConflictError, PaymentError, DeliveryError,
     SubscriptionError, NotificationError, FileStorageError,
     ExternalServiceError, RateLimitError, ConfigurationError
 )
+from .error_messages import ErrorCode, get_error_message
+from .helpers import get_current_language
 
 logger = logging.getLogger(__name__)
 
@@ -479,13 +481,14 @@ def register_error_handlers(app):
     
     @app.errorhandler(429)
     def handle_rate_limit_error(error):
+        language = get_current_language()
         return ErrorResponse.build_error_response(
             error_type='RATE_LIMIT_EXCEEDED',
-            message='Rate limit exceeded. Please try again later.',
+            message=get_error_message(ErrorCode.RATE_LIMIT_EXCEEDED, language=language),
             details={'retry_after': getattr(error, 'retry_after', 60)},
             status_code=429
         )
-    
+
     @app.errorhandler(500)
     def handle_internal_error(error):
         from business_app import db
@@ -493,19 +496,21 @@ def register_error_handlers(app):
             db.session.rollback()
         except:
             pass
-        
+
+        language = get_current_language()
         return ErrorResponse.build_error_response(
             error_type='INTERNAL_ERROR',
-            message='An internal server error occurred',
+            message=get_error_message(ErrorCode.INTERNAL_ERROR, language=language),
             status_code=500
         )
-    
+
     @app.errorhandler(404)
     def handle_not_found(error):
         if request.path.startswith('/api/'):
+            language = get_current_language()
             return ErrorResponse.build_error_response(
                 error_type='ENDPOINT_NOT_FOUND',
-                message='The requested API endpoint was not found',
+                message=get_error_message(ErrorCode.RESOURCE_NOT_FOUND, language=language),
                 status_code=404
             )
         # Return 404 page for web routes
@@ -520,23 +525,62 @@ def create_success_response(
     meta: Optional[Dict[str, Any]] = None
 ) -> Tuple[Dict[str, Any], int]:
     """Create standardized success response"""
-    
+
     response = {
         'success': True,
         'status_code': status_code,
         'timestamp': datetime.now(timezone.utc).isoformat(),
     }
-    
+
     if message:
         response['message'] = message
-    
+
     if data is not None:
         response['data'] = data
-    
+
     if meta:
         response['meta'] = meta
-    
+
     if hasattr(g, 'trace_id'):
         response['request_id'] = g.trace_id
-    
+
     return response, status_code
+
+
+# Helper function to create error responses with translated messages
+def create_translated_error_response(
+    error_code: ErrorCode,
+    details: Optional[Dict[str, Any]] = None,
+    **params: Any
+) -> Tuple[Dict[str, Any], int]:
+    """
+    Create error response with translated message based on ErrorCode.
+
+    Args:
+        error_code: ErrorCode enum value
+        details: Additional error details
+        **params: Parameters for message formatting
+
+    Returns:
+        Tuple of (response_dict, status_code)
+
+    Example:
+        >>> from business_app.utils.error_messages import ErrorCode
+        >>> create_translated_error_response(ErrorCode.USER_NOT_FOUND)
+        ({'error': 'NOT_FOUND', 'message': 'User not found', ...}, 404)
+    """
+    from .error_messages import get_error_status_code
+
+    language = get_current_language()
+    message = get_error_message(error_code, language=language, **params)
+    status_code = get_error_status_code(error_code)
+
+    # Map error code to error type string
+    error_type = error_code.value
+
+    return ErrorResponse.build_error_response(
+        error_type=error_type,
+        message=message,
+        details=details,
+        status_code=status_code
+    )

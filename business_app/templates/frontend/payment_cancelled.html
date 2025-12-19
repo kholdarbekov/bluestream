@@ -1,6 +1,6 @@
 {% extends "frontend/base.html" %}
 
-{% block title %}{{ 'Payment Cancelled'|translate(current_language) }} - {{ company_name }}{% endblock %}
+{% block title %}{{ 'Payment Cancelled'|t }} - {{ company_name }}{% endblock %}
 
 {% block extra_head %}
 <style>
@@ -119,50 +119,50 @@
                 <i class="far fa-times-circle"></i>
             </div>
 
-            <h2>{{ 'Payment Cancelled'|translate(current_language) }}</h2>
-            <p>{{ 'Your payment was cancelled and no charges were made.'|translate(current_language) }}</p>
+            <h2>{{ 'Payment Cancelled'|t }}</h2>
+            <p>{{ 'Your payment was cancelled and no charges were made.'|t }}</p>
 
             {% if order %}
             <div class="order-info">
                 <div class="info-row">
-                    <span class="info-label">{{ 'Order Number'|translate(current_language) }}:</span>
+                    <span class="info-label">{{ 'Order Number'|t }}:</span>
                     <span class="info-value">{{ order.order_number }}</span>
                 </div>
                 <div class="info-row">
-                    <span class="info-label">{{ 'Total Amount'|translate(current_language) }}:</span>
+                    <span class="info-label">{{ 'Total Amount'|t }}:</span>
                     <span class="info-value">{{ "{:,.0f}".format(order.total_amount) }} UZS</span>
                 </div>
                 <div class="info-row">
-                    <span class="info-label">{{ 'Order Status'|translate(current_language) }}:</span>
+                    <span class="info-label">{{ 'Order Status'|t }}:</span>
                     <span class="info-value">
-                        <span class="badge badge-warning">{{ 'Pending Payment'|translate(current_language) }}</span>
+                        <span class="badge badge-warning">{{ 'Pending Payment'|t }}</span>
                     </span>
                 </div>
             </div>
 
             <div class="info-notice">
                 <i class="far fa-info-circle"></i>
-                {{ 'Your order is still pending. You can retry the payment or choose a different payment method.'|translate(current_language) }}
+                {{ 'Your order is still pending. You can retry the payment or choose a different payment method.'|t }}
             </div>
 
             <div class="action-buttons">
                 <button onclick="retryPayment()" class="theme-btn btn-one">
-                    <i class="far fa-redo"></i> {{ 'Retry Payment'|translate(current_language) }}
+                    <i class="far fa-redo"></i> {{ 'Retry Payment'|t }}
                 </button>
                 <a href="{{ url_for('frontend.my_orders') }}" class="theme-btn btn-two">
-                    <i class="far fa-list"></i> {{ 'My Orders'|translate(current_language) }}
+                    <i class="far fa-list"></i> {{ 'landing.account.orders'|t }}
                 </a>
                 <a href="{{ url_for('frontend.shop') }}" class="theme-btn btn-three" style="grid-column: span 2;">
-                    <i class="far fa-shopping-bag"></i> {{ 'Continue Shopping'|translate(current_language) }}
+                    <i class="far fa-shopping-bag"></i> {{ 'landing.button.continue_shopping'|t }}
                 </a>
             </div>
             {% else %}
             <div class="action-buttons">
                 <a href="{{ url_for('frontend.cart') }}" class="theme-btn btn-one">
-                    <i class="far fa-shopping-cart"></i> {{ 'View Cart'|translate(current_language) }}
+                    <i class="far fa-shopping-cart"></i> {{ 'View Cart'|t }}
                 </a>
                 <a href="{{ url_for('frontend.shop') }}" class="theme-btn btn-three">
-                    <i class="far fa-shopping-bag"></i> {{ 'Continue Shopping'|translate(current_language) }}
+                    <i class="far fa-shopping-bag"></i> {{ 'landing.button.continue_shopping'|t }}
                 </a>
             </div>
             {% endif %}
@@ -176,7 +176,7 @@
 function retryPayment() {
     {% if order %}
     // Show loading
-    showNotification('{{ "Preparing payment..."|translate(current_language) }}', 'info');
+    showNotification('{{ "Preparing payment..."|t }}', 'info');
 
     // Retry payment by creating a new payment link
     fetch('/api/v1/orders/{{ order.id }}/retry-payment', {
@@ -192,12 +192,12 @@ function retryPayment() {
             // Redirect to payment gateway
             window.location.href = data.data.payment_url;
         } else {
-            showNotification('{{ "Failed to retry payment. Please try again later."|translate(current_language) }}', 'error');
+            showNotification('{{ "Failed to retry payment. Please try again later."|t }}', 'error');
         }
     })
     .catch(error => {
         console.error('Error retrying payment:', error);
-        showNotification('{{ "An error occurred. Please try again."|translate(current_language) }}', 'error');
+        showNotification('{{ "An error occurred. Please try again."|t }}', 'error');
     });
     {% else %}
     window.location.href = '{{ url_for("frontend.cart") }}';

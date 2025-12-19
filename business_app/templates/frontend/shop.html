@@ -1,6 +1,6 @@
 {% extends "frontend/base.html" %}
 
-{% block title %}{{ 'Shop'|translate(current_language) }} - {{ company_name }}{% endblock %}
+{% block title %}{{ 'landing.nav.shop'|t }} - {{ company_name }}{% endblock %}
 
 {% block extra_head %}
 <style>
@@ -47,10 +47,10 @@
             <div class="shape" style="background-image: url({{ url_for('static', filename='images/shape/banner-shap.png') }});"></div>
             <div class="auto-container">
                 <div class="content-box">
-                    <h1>{{ 'Our Products'|translate(current_language) }}</h1>
+                    <h1>{{ 'landing.shop.page_title'|t }}</h1>
                     <ul class="bread-crumb clearfix">
-                        <li><a href="{{ url_for('frontend.index') }}">{{ 'Home'|translate(current_language) }}</a></li>
-                        <li>{{ 'Shop'|translate(current_language) }}</li>
+                        <li><a href="{{ url_for('frontend.index') }}">{{ 'landing.nav.home'|t }}</a></li>
+                        <li>{{ 'landing.nav.shop'|t }}</li>
                     </ul>
                 </div>
             </div>
@@ -66,12 +66,12 @@
                             <!-- Search Widget -->
                             <div class="sidebar-widget search-widget">
                                 <div class="widget-title">
-                                    <h4>{{ 'Search Products'|translate(current_language) }}</h4>
+                                    <h4>{{ 'landing.shop.search_widget_title'|t }}</h4>
                                 </div>
                                 <div class="search-form">
                                     <form method="get" action="{{ url_for('frontend.shop') }}">
                                         <div class="form-group">
-                                            <input type="search" name="search" placeholder="{{ 'Search...'|translate(current_language) }}" value="{{ search_query or '' }}">
+                                            <input type="search" name="search" placeholder="{{ 'landing.shop.search_placeholder'|t }}" value="{{ search_query or '' }}">
                                             <button type="submit"><i class="far fa-search"></i></button>
                                         </div>
                                     </form>
@@ -81,12 +81,12 @@
                             <!-- Category Widget -->
                             <div class="sidebar-widget category-widget">
                                 <div class="widget-title">
-                                    <h4>{{ 'Categories'|translate(current_language) }}</h4>
+                                    <h4>{{ 'landing.shop.categories_title'|t }}</h4>
                                 </div>
                                 <div class="widget-content">
                                     <ul class="category-list clearfix">
                                         <li class="{% if not current_category %}active{% endif %}">
-                                            <a href="{{ url_for('frontend.shop') }}">{{ 'All Products'|translate(current_language) }}</a>
+                                            <a href="{{ url_for('frontend.shop') }}">{{ 'landing.shop.all_products'|t }}</a>
                                         </li>
                                         {% for category in categories %}
                                         <li class="{% if current_category == category.id %}active{% endif %}">
@@ -100,19 +100,19 @@
                             <!-- Price Range Widget -->
                             <div class="sidebar-widget price-widget">
                                 <div class="widget-title">
-                                    <h4>{{ 'Price Range'|translate(current_language) }}</h4>
+                                    <h4>{{ 'landing.shop.price_range_title'|t }}</h4>
                                 </div>
                                 <div class="price-range-slider" id="slider-range"></div>
                                 <div class="price-inputs">
                                     <div class="input-row">
                                         <div class="input-wrapper">
-                                            <label>{{ 'Min'|translate(current_language) }}</label>
+                                            <label>{{ 'landing.shop.price_min'|t }}</label>
                                             <input type="text" id="price-min" class="price-input" placeholder="0" inputmode="numeric">
                                             <span class="currency">UZS</span>
                                         </div>
                                         <div class="input-separator">-</div>
                                         <div class="input-wrapper">
-                                            <label>{{ 'Max'|translate(current_language) }}</label>
+                                            <label>{{ 'landing.shop.price_max'|t }}</label>
                                             <input type="text" id="price-max" class="price-input" placeholder="500 000" inputmode="numeric">
                                             <span class="currency">UZS</span>
                                         </div>
@@ -126,19 +126,19 @@
                         <div class="shop-content">
                             <div class="result-bar">
                                 <div class="left-column">
-                                    <p>{{ 'Showing %d-%d of %d results'|format(
+                                    <p>{{ 'landing.shop.results_count'|t|format(
                                         (products.page - 1) * products.per_page + 1 if products.items else 0,
                                         min(products.page * products.per_page, products.total),
                                         products.total
-                                    )|translate(current_language) }}</p>
+                                    ) }}</p>
                                 </div>
                                 <div class="right-column">
                                     <div class="short-box">
                                         <select class="selectmenu" onchange="sortProducts(this.value)">
-                                            <option value="newest">{{ 'Sort by Latest'|translate(current_language) }}</option>
-                                            <option value="price_low">{{ 'Price: Low to High'|translate(current_language) }}</option>
-                                            <option value="price_high">{{ 'Price: High to Low'|translate(current_language) }}</option>
-                                            <option value="name">{{ 'Name: A to Z'|translate(current_language) }}</option>
+                                            <option value="newest">{{ 'landing.shop.sort_latest'|t }}</option>
+                                            <option value="price_low">{{ 'landing.shop.sort_price_low'|t }}</option>
+                                            <option value="price_high">{{ 'landing.shop.sort_price_high'|t }}</option>
+                                            <option value="name">{{ 'landing.shop.sort_name'|t }}</option>
                                         </select>
                                     </div>
                                 </div>
@@ -184,7 +184,7 @@
                                                 {% endif %}
                                                 <div class="btn-box">
                                                     <button onclick="addToCart({{ product.id }})" class="theme-btn btn-two">
-                                                        <i class="far fa-shopping-cart"></i> {{ 'Add to Cart'|translate(current_language) }}
+                                                        <i class="far fa-shopping-cart"></i> {{ 'landing.button.add_to_cart'|t }}
                                                     </button>
                                                 </div>
                                             </div>

@@ -74,9 +74,9 @@ class CSRFProtectionManager:
                 action="csrf_validation_failed",
                 severity=AuditSeverity.HIGH,
                 resource_type="csrf_protection",
-                description=f"CSRF validation failed: {reason}",
+                description=f"CSRF validation failed: {e.description}",
                 additional_data={
-                    'reason': str(reason),
+                    'reason': str(e.description),
                     'endpoint': request.endpoint,
                     'method': request.method,
                     'remote_addr': request.remote_addr,
@@ -283,13 +283,13 @@ def csrf_required(f):
             
             # Log security event
             audit_logger.log_event(
-                event_type=AuditEventType.SECURITY_EVENT,
+                event_type=AuditEventType.SUSPICIOUS_ACTIVITY,
                 action="csrf_token_invalid",
                 severity=AuditSeverity.HIGH,
                 resource_type="csrf_protection",
-                user_id=user_id,
                 description=f"Invalid CSRF token for endpoint {request.endpoint}",
                 additional_data={
+                    'user_id': user_id,
                     'endpoint': request.endpoint,
                     'method': request.method,
                     'remote_addr': request.remote_addr,

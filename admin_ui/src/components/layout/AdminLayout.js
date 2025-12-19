@@ -30,11 +30,14 @@ import {
 import { useAuthStore } from '../../stores/authStore';
 import { useRealTimeWithFallback } from '../../hooks/useRealTimeUpdates';
 import useResponsive from '../../hooks/useResponsive';
+import LanguageSwitcher from '../common/LanguageSwitcher';
+import { useTranslation } from 'react-i18next';
 
 const { Header, Sider, Content } = Layout;
 const { Title, Text } = Typography;
 
 const AdminLayout = ({ children }) => {
+  const { t } = useTranslation();
   const [mobileDrawerVisible, setMobileDrawerVisible] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const location = useLocation();
@@ -58,82 +61,82 @@ const AdminLayout = ({ children }) => {
     {
       key: '/dashboard',
       icon: <DashboardOutlined />,
-      label: 'Dashboard'
+      label: t('ui.nav.dashboard')
     },
     {
       key: '/users',
       icon: <UserOutlined />,
-      label: 'Users'
+      label: t('ui.nav.users')
     },
     {
       key: '/orders',
       icon: <ShoppingCartOutlined />,
-      label: 'Orders'
+      label: t('ui.nav.orders')
     },
     {
       key: '/products',
       icon: <ProductOutlined />,
-      label: 'Products'
+      label: t('ui.nav.products')
     },
     {
       key: '/product-categories',
       icon: <TagsOutlined />,
-      label: 'Categories'
+      label: t('ui.nav.categories')
     },
     {
       key: '/delivery',
       icon: <TruckOutlined />,
-      label: 'Delivery',
+      label: t('ui.nav.delivery'),
       children: [
         {
           key: '/delivery',
-          label: 'Deliveries'
+          label: t('ui.nav.deliveries')
         },
         {
           key: '/delivery-time-slots',
-          label: 'Time Slots'
+          label: t('ui.nav.time_slots')
         }
       ]
     },
     {
       key: '/loyalty',
       icon: <GiftOutlined />,
-      label: 'Loyalty',
+      label: t('ui.nav.loyalty'),
       children: [
         {
           key: '/loyalty',
-          label: 'Customers'
+          label: t('ui.nav.customers')
         },
         {
           key: '/loyalty-programs',
-          label: 'Programs'
+          label: t('ui.nav.programs')
         }
       ]
     },
     {
       key: '/notifications',
       icon: <BellOutlined />,
-      label: 'Notifications'
+      label: t('ui.nav.notifications')
     },
     {
       key: '/analytics',
       icon: <BarChartOutlined />,
-      label: 'Analytics'
+      label: t('ui.nav.analytics')
     },
     {
       key: '/blog',
       icon: <FileTextOutlined />,
-      label: 'Blog'
+      label: t('ui.nav.blog')
     },
     {
       key: '/translations',
       icon: <TranslationOutlined />,
-      label: 'Translations'
+      label: t('ui.nav.translations')
     },
     {
       key: '/settings',
       icon: <SettingOutlined />,
-      label: 'Settings'
+      label: t('ui.nav.settings')
     }
   ];
 
@@ -142,12 +145,12 @@ const AdminLayout = ({ children }) => {
     {
       key: 'profile',
       icon: <UserOutlined />,
-      label: 'Profile'
+      label: t('ui.user_menu.profile')
     },
     {
       key: 'settings',
       icon: <SettingOutlined />,
-      label: 'Settings'
+      label: t('ui.user_menu.settings')
     },
     {
       type: 'divider'
@@ -155,7 +158,7 @@ const AdminLayout = ({ children }) => {
     {
       key: 'logout',
       icon: <LogoutOutlined />,
-      label: 'Logout',
+      label: t('ui.user_menu.logout'),
       onClick: handleLogout
     }
   ];
@@ -189,8 +192,8 @@ const AdminLayout = ({ children }) => {
   // Get current page title
   const getPageTitle = useCallback(() => {
     const currentItem = menuItems.find(item => item.key === location.pathname);
-    return currentItem?.label || 'Dashboard';
-  }, [location.pathname]);
+    return currentItem?.label || t('ui.nav.dashboard');
+  }, [location.pathname, menuItems, t]);
 
   // Logo component
   const LogoComponent = ({ collapsed = false }) => (
@@ -202,15 +205,15 @@ const AdminLayout = ({ children }) => {
       borderBottom: '1px solid #e8e8e8',
       padding: '0 16px'
     }}>
-      <Title 
-        level={collapsed ? 4 : 3} 
-        style={{ 
-          margin: 0, 
+      <Title
+        level={collapsed ? 4 : 3}
+        style={{
+          margin: 0,
           color: '#1890ff',
           fontSize: collapsed ? '16px' : '20px'
         }}
       >
-        {collapsed ? 'BS' : 'Blue Stream'}
+        {collapsed ? t('ui.app_name_short') : t('ui.app_name_full')}
       </Title>
     </div>
   );
@@ -326,12 +329,18 @@ const AdminLayout = ({ children }) => {
             }}>
               {/* Connection Status - Desktop only */}
               {!responsive.isMobileDevice && (
-                <Badge 
-                  status={isConnected ? 'processing' : 'default'} 
-                  text={connectionType || 'Offline'}
+                <Badge
+                  status={isConnected ? 'processing' : 'default'}
+                  text={connectionType || t('ui.status.offline')}
                   style={{ whiteSpace: 'nowrap' }}
                 />
               )}
+
+              {/* Language Switcher */}
+              <LanguageSwitcher
+                showSyncButton={!responsive.isMobileDevice}
+                size={responsive.isMobileDevice ? 'small' : 'middle'}
+              />
 
               {/* Notifications - Hidden on very small screens */}
               {!responsive.isMobile && (
@@ -393,15 +402,15 @@ const AdminLayout = ({ children }) => {
                       >
                         {user?.first_name} {user?.last_name}
                       </Text>
-                      <Text 
-                        type="secondary" 
-                        style={{ 
+                      <Text
+                        type="secondary"
+                        style={{
                           fontSize: '12px',
                           lineHeight: '1.2',
                           whiteSpace: 'nowrap'
                         }}
                       >
-                        {user?.role === 'super_admin' ? 'Super Admin' : 'Admin'}
+                        {user?.role === 'super_admin' ? t('ui.role.super_admin') : t('ui.role.admin')}
                       </Text>
                     </div>
                   )}

@@ -30,6 +30,7 @@ from config import config
 from database import db_manager, BotUserRepository
 from i18n import i18n
 from api_client import api_client
+from webhook_server import webhook_server
 from handlers import (
     start_handler, main_menu_handler, language_handler,
     product_handlers, order_handlers, subscription_handlers,
@@ -58,13 +59,18 @@ class WaterBusinessBot:
         try:
             log_bot_startup_info()
             logger.info("Initializing Water Business Bot...")
-            
+
             # Initialize database connection
             await db_manager.connect()
-            
+
             # Load translations
             await i18n.load_translations()
-            
+
+            # Start webhook server for bot management
+            logger.info("Starting webhook server...")
+            await webhook_server.start()
+            logger.info("Webhook server started successfully")
+
             # Initialize API client
             # Note: api_client will be used as async context manager in handlers
             
@@ -719,14 +725,18 @@ class WaterBusinessBot:
         """Cleanup resources"""
         try:
             logger.info("Cleaning up bot resources...")
-            
+
+            # Stop webhook server
+            logger.info("Stopping webhook server...")
+            await webhook_server.stop()
+
             # Close database connection
             if db_manager.is_connected:
                 await db_manager.disconnect()
-            
+
             self.is_running = False
             logger.info("Bot cleanup completed")
-            
+
         except Exception as e:
             logger.error(f"Error during cleanup: {e}")
     

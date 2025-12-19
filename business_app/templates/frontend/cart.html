@@ -1,6 +1,6 @@
 {% extends "frontend/base.html" %}
 
-{% block title %}{{ 'Shopping Cart'|translate(current_language) }} - {{ company_name }}{% endblock %}
+{% block title %}{{ 'Shopping Cart'|t }} - {{ company_name }}{% endblock %}
 
 {% block extra_head %}
 <style>
@@ -438,10 +438,10 @@
             <div class="shape" style="background-image: url({{ url_for('static', filename='images/shape/banner-shap.png') }});"></div>
             <div class="auto-container">
                 <div class="content-box">
-                    <h1>{{ 'Shopping Cart'|translate(current_language) }}</h1>
+                    <h1>{{ 'Shopping Cart'|t }}</h1>
                     <ul class="bread-crumb clearfix">
-                        <li><a href="{{ url_for('frontend.index') }}">{{ 'Home'|translate(current_language) }}</a></li>
-                        <li>{{ 'Cart'|translate(current_language) }}</li>
+                        <li><a href="{{ url_for('frontend.index') }}">{{ 'landing.nav.home'|t }}</a></li>
+                        <li>{{ 'Cart'|t }}</li>
                     </ul>
                 </div>
             </div>
@@ -454,7 +454,7 @@
                 <!-- Loading State -->
         <div id="cart-loading" class="cart-loading">
             <div class="spinner"></div>
-            <p>{{ 'Loading cart...'|translate(current_language) }}</p>
+            <p>{{ 'Loading cart...'|t }}</p>
         </div>
 
         <!-- Cart Content -->
@@ -464,10 +464,10 @@
                 <div class="cart-items-section">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
                         <h3 style="margin: 0; font-size: 20px; font-weight: 700; color: #222;">
-                            {{ 'Your Items'|translate(current_language) }} (<span id="items-count">0</span>)
+                            {{ 'Your Items'|t }} (<span id="items-count">0</span>)
                         </h3>
                         <button onclick="clearCart()" class="clear-cart-btn">
-                            <i class="far fa-trash-alt"></i> {{ 'Clear Cart'|translate(current_language) }}
+                            <i class="far fa-trash-alt"></i> {{ 'Clear Cart'|t }}
                         </button>
                     </div>
 
@@ -478,31 +478,31 @@
 
                 <!-- Cart Summary -->
                 <div class="cart-summary">
-                    <h3 class="summary-title">{{ 'Cart Total'|translate(current_language) }}</h3>
+                    <h3 class="summary-title">{{ 'Cart Total'|t }}</h3>
 
                     <div class="summary-row">
-                        <span class="summary-label">{{ 'Subtotal'|translate(current_language) }}:</span>
+                        <span class="summary-label">{{ 'Subtotal'|t }}:</span>
                         <span class="summary-value" id="summary-subtotal">0 UZS</span>
                     </div>
 
                     <div class="summary-row">
-                        <span class="summary-label">{{ 'Delivery'|translate(current_language) }}:</span>
+                        <span class="summary-label">{{ 'Delivery'|t }}:</span>
                         <span class="summary-value" id="summary-delivery">15,000 UZS</span>
                     </div>
 
                     <div id="delivery-notice"></div>
 
                     <div class="summary-row summary-total">
-                        <span class="summary-label">{{ 'Total'|translate(current_language) }}:</span>
+                        <span class="summary-label">{{ 'Total'|t }}:</span>
                         <span class="summary-value" id="summary-total">0 UZS</span>
                     </div>
 
                     <div class="cart-actions">
                         <a href="{{ url_for('frontend.checkout') }}" class="theme-btn btn-one">
-                            <i class="far fa-check-circle"></i> {{ 'Proceed to Checkout'|translate(current_language) }}
+                            <i class="far fa-check-circle"></i> {{ 'Proceed to Checkout'|t }}
                         </a>
                         <a href="{{ url_for('frontend.shop') }}" class="theme-btn btn-three">
-                            <i class="far fa-shopping-bag"></i> {{ 'Continue Shopping'|translate(current_language) }}
+                            <i class="far fa-shopping-bag"></i> {{ 'landing.button.continue_shopping'|t }}
                         </a>
                     </div>
                 </div>
@@ -515,10 +515,10 @@
                         <div class="empty-cart-icon">
                             <i class="far fa-shopping-cart"></i>
                         </div>
-                        <h3>{{ 'Your cart is empty'|translate(current_language) }}</h3>
-                        <p>{{ 'Add some products to your cart to see them here'|translate(current_language) }}</p>
+                        <h3>{{ 'Your cart is empty'|t }}</h3>
+                        <p>{{ 'Add some products to your cart to see them here'|t }}</p>
                         <a href="{{ url_for('frontend.shop') }}" class="theme-btn btn-one">
-                            <i class="far fa-shopping-bag"></i> {{ 'Continue Shopping'|translate(current_language) }}
+                            <i class="far fa-shopping-bag"></i> {{ 'landing.button.continue_shopping'|t }}
                         </a>
                     </div>
                 </div>
@@ -660,18 +660,18 @@ function renderCart(products) {
         subtotal += itemTotal;
 
         // Stock status
-        let stockStatus = '{{ "In stock"|translate(current_language) }}';
+        let stockStatus = '{{ "In stock"|t }}';
         let stockClass = 'in-stock';
 
         if (product.track_inventory && product.stock_quantity !== undefined) {
             if (product.stock_quantity === 0) {
-                stockStatus = '{{ "Out of stock"|translate(current_language) }}';
+                stockStatus = '{{ "Out of stock"|t }}';
                 stockClass = 'out-of-stock';
             } else if (product.stock_quantity < cartItem.quantity) {
-                stockStatus = `{{ "Only"|translate(current_language) }} ${product.stock_quantity} {{ "available"|translate(current_language) }}`;
+                stockStatus = `{{ "Only"|t }} ${product.stock_quantity} {{ "available"|t }}`;
                 stockClass = 'low-stock';
             } else if (product.stock_quantity < 10) {
-                stockStatus = `{{ "Low stock"|translate(current_language) }} (${product.stock_quantity})`;
+                stockStatus = `{{ "Low stock"|t }} (${product.stock_quantity})`;
                 stockClass = 'low-stock';
             }
         }
@@ -701,7 +701,7 @@ function renderCart(products) {
                             <i class="far fa-plus"></i>
                         </button>
                     </div>
-                    <button class="remove-btn" onclick="removeFromCart(${product.id})" title="{{ 'Remove'|translate(current_language) }}">
+                    <button class="remove-btn" onclick="removeFromCart(${product.id})" title="{{ 'Remove'|t }}">
                         <i class="far fa-times"></i>
                     </button>
                 </div>
@@ -726,7 +726,7 @@ function updateSummary(subtotal) {
     const total = subtotal + deliveryFee;
 
     document.getElementById('summary-subtotal').textContent = formatPrice(subtotal);
-    document.getElementById('summary-delivery').textContent = deliveryFee === 0 ? '{{ "Free"|translate(current_language) }}' : formatPrice(deliveryFee);
+    document.getElementById('summary-delivery').textContent = deliveryFee === 0 ? '{{ "Free"|t }}' : formatPrice(deliveryFee);
     document.getElementById('summary-total').textContent = formatPrice(total);
 
     // Delivery notice
@@ -736,14 +736,14 @@ function updateSummary(subtotal) {
         noticeEl.innerHTML = `
             <div class="delivery-notice">
                 <i class="far fa-truck"></i>
-                {{ 'Add'|translate(current_language) }} ${formatPrice(remaining)} {{ 'more for free delivery'|translate(current_language) }}!
+                {{ 'Add'|t }} ${formatPrice(remaining)} {{ 'more for free delivery'|t }}!
             </div>
         `;
     } else if (subtotal >= FREE_DELIVERY_THRESHOLD) {
         noticeEl.innerHTML = `
             <div class="delivery-notice" style="border-color: #28a745; background: #d4edda; color: #155724;">
                 <i class="far fa-check-circle"></i>
-                {{ 'You qualify for free delivery'|translate(current_language) }}!
+                {{ 'You qualify for free delivery'|t }}!
             </div>
         `;
     } else {
@@ -779,7 +779,7 @@ async function updateQuantity(productId, newQuantity) {
 
 // Remove from cart
 async function removeFromCart(productId) {
-    if (!confirm('{{ "Are you sure you want to remove this item?"|translate(current_language) }}')) {
+    if (!confirm('{{ "Are you sure you want to remove this item?"|t }}')) {
         return;
     }
 
@@ -795,7 +795,7 @@ async function removeFromCart(productId) {
         }
     }
 
-    showNotification('{{ "Product removed from cart"|translate(current_language) }}', 'success');
+    showNotification('{{ "Product removed from cart"|t }}', 'success');
 
     if (cartItems.length === 0) {
         showEmptyCart();
@@ -808,7 +808,7 @@ async function removeFromCart(productId) {
 
 // Clear cart
 async function clearCart() {
-    if (!confirm('{{ "Are you sure you want to clear your cart?"|translate(current_language) }}')) {
+    if (!confirm('{{ "Are you sure you want to clear your cart?"|t }}')) {
         return;
     }
 
@@ -824,7 +824,7 @@ async function clearCart() {
         }
     }
 
-    showNotification('{{ "Cart cleared"|translate(current_language) }}', 'success');
+    showNotification('{{ "Cart cleared"|t }}', 'success');
     showEmptyCart();
     updateCartCount();
 }

@@ -37,12 +37,14 @@ import {
 } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from 'react-query';
 import adminService from '../services/adminService';
+import { useTranslation } from 'react-i18next';
 
 const { Option } = Select;
 const { TextArea } = Input;
 const { Dragger } = Upload;
 
 const Products = () => {
+  const { t } = useTranslation();
   const [searchText, setSearchText] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
@@ -87,13 +89,13 @@ const Products = () => {
     (productData) => adminService.createProduct(productData),
     {
       onSuccess: () => {
-        message.success('Product created successfully');
+        message.success(t('ui.products.created_success'));
         queryClient.invalidateQueries('products');
         setIsCreateModalVisible(false);
         createForm.resetFields();
       },
       onError: (error) => {
-        message.error('Failed to create product');
+        message.error(t('ui.products.create_failed'));
       }
     }
   );
@@ -103,13 +105,13 @@ const Products = () => {
     ({ productId, productData }) => adminService.updateProduct(productId, productData),
     {
       onSuccess: () => {
-        message.success('Product updated successfully');
+        message.success(t('ui.products.updated_success'));
         queryClient.invalidateQueries('products');
         setIsEditModalVisible(false);
         editForm.resetFields();
       },
       onError: (error) => {
-        message.error('Failed to update product');
+        message.error(t('ui.products.update_failed'));
       }
     }
   );
@@ -119,11 +121,11 @@ const Products = () => {
     (productId) => adminService.deleteProduct(productId),
     {
       onSuccess: () => {
-        message.success('Product deleted successfully');
+        message.success(t('ui.products.deleted_success'));
         queryClient.invalidateQueries('products');
       },
       onError: (error) => {
-        message.error('Failed to delete product');
+        message.error(t('ui.products.delete_failed'));
       }
     }
   );
@@ -137,7 +139,7 @@ const Products = () => {
 
   const columns = [
     {
-      title: 'Image',
+      title: t('ui.products.image'),
       dataIndex: 'image_url',
       key: 'image',
       width: 80,
@@ -152,18 +154,18 @@ const Products = () => {
       )
     },
     {
-      title: 'Product Name',
+      title: t('ui.products.product_name'),
       dataIndex: 'name',
       key: 'name',
       render: (text, record) => (
         <div>
           <div style={{ fontWeight: 'bold' }}>{text}</div>
-          <small style={{ color: '#666' }}>SKU: {record.sku}</small>
+          <small style={{ color: '#666' }}>{t('ui.products.sku')}: {record.sku}</small>
         </div>
       )
     },
     {
-      title: 'Category',
+      title: t('ui.products.category'),
       dataIndex: 'category_id',
       key: 'category_id',
       width: 120,
@@ -175,7 +177,7 @@ const Products = () => {
       }
     },
     {
-      title: 'Price',
+      title: t('ui.products.price'),
       dataIndex: 'price',
       key: 'price',
       width: 100,
@@ -186,7 +188,7 @@ const Products = () => {
       )
     },
     {
-      title: 'Volume',
+      title: t('ui.products.volume'),
       dataIndex: 'volume',
       key: 'volume',
       width: 100,
@@ -197,7 +199,7 @@ const Products = () => {
       )
     },
     {
-      title: 'Stock',
+      title: t('ui.products.stock'),
       dataIndex: 'stock_quantity',
       key: 'stock_quantity',
       width: 80,
@@ -211,25 +213,25 @@ const Products = () => {
       )
     },
     {
-      title: 'Status',
+      title: t('ui.products.status'),
       dataIndex: 'status',
       key: 'status',
       width: 110,
       render: (status) => (
         <Tag color={productStatusColors[status] || 'default'}>
-          {status?.toUpperCase().replace('_', ' ')}
+          {t(`ui.products.status_${status}`)}
         </Tag>
       )
     },
     {
-      title: 'Created',
+      title: t('ui.products.created'),
       dataIndex: 'created_at',
       key: 'created_at',
       width: 120,
       render: (date) => new Date(date).toLocaleDateString()
     },
     {
-      title: 'Actions',
+      title: t('ui.products.actions'),
       key: 'actions',
       width: 100,
       render: (_, record) => (
@@ -238,13 +240,13 @@ const Products = () => {
             items: [
               {
                 key: 'view',
-                label: 'View Details',
+                label: t('ui.products.view_details'),
                 icon: <EyeOutlined />,
                 onClick: () => handleViewProduct(record)
               },
               {
                 key: 'edit',
-                label: 'Edit Product',
+                label: t('ui.products.edit_product'),
                 icon: <EditOutlined />,
                 onClick: () => handleEditProduct(record)
               },
@@ -253,7 +255,7 @@ const Products = () => {
               },
               {
                 key: 'delete',
-                label: 'Delete Product',
+                label: t('ui.products.delete_product'),
                 icon: <DeleteOutlined />,
                 danger: true,
                 onClick: () => handleDeleteProduct(record)
@@ -290,10 +292,10 @@ const Products = () => {
 
   const handleDeleteProduct = (product) => {
     Modal.confirm({
-      title: 'Delete Product?',
-      content: `Are you sure you want to delete "${product.name}"?`,
+      title: t('ui.products.delete_product_title'),
+      content: `${t('ui.products.delete_product_confirm')} "${product.name}"?`,
       icon: <WarningOutlined />,
-      okText: 'Delete',
+      okText: t('ui.products.delete'),
       okType: 'danger',
       onOk: () => {
         deleteProductMutation.mutate(product.id);
@@ -347,9 +349,9 @@ const Products = () => {
     onChange(info) {
       const { status } = info.file;
       if (status === 'done') {
-        message.success(`${info.file.name} file uploaded successfully.`);
+        message.success(`${info.file.name} ${t('ui.products.upload_success')}`);
       } else if (status === 'error') {
-        message.error(`${info.file.name} file upload failed.`);
+        message.error(`${info.file.name} ${t('ui.products.upload_failed')}`);
       }
     }
   };
@@ -361,7 +363,7 @@ const Products = () => {
         <Col xs={24} sm={8}>
           <Card>
             <Statistic
-              title="Total Products"
+              title={t('ui.products.total_products')}
               value={totalProducts}
               prefix={<ShoppingOutlined />}
             />
@@ -370,7 +372,7 @@ const Products = () => {
         <Col xs={24} sm={8}>
           <Card>
             <Statistic
-              title="Low Stock Items"
+              title={t('ui.products.low_stock_items')}
               value={lowStockProducts}
               valueStyle={{ color: lowStockProducts > 0 ? '#ff4d4f' : '#52c41a' }}
               prefix={<WarningOutlined />}
@@ -380,7 +382,7 @@ const Products = () => {
         <Col xs={24} sm={8}>
           <Card>
             <Statistic
-              title="Total Inventory Value"
+              title={t('ui.products.total_inventory_value')}
               value={totalValue}
               precision={2}
               prefix={<DollarOutlined />}
@@ -395,13 +397,13 @@ const Products = () => {
         <div className="table-actions">
           <Space wrap>
             <Input.Search
-              placeholder="Search products..."
+              placeholder={t('ui.products.search_placeholder')}
               allowClear
               onSearch={handleSearch}
               style={{ width: 250 }}
             />
             <Select
-              placeholder="Filter by category"
+              placeholder={t('ui.products.filter_by_category')}
               allowClear
               onChange={handleCategoryFilter}
               style={{ width: 200 }}
@@ -414,15 +416,15 @@ const Products = () => {
               ))}
             </Select>
             <Select
-              placeholder="Filter by status"
+              placeholder={t('ui.products.filter_by_status')}
               allowClear
               onChange={handleStatusFilter}
               style={{ width: 150 }}
             >
-              <Option value="active">Active</Option>
-              <Option value="inactive">Inactive</Option>
-              <Option value="out_of_stock">Out of Stock</Option>
-              <Option value="discontinued">Discontinued</Option>
+              <Option value="active">{t('ui.products.status_active')}</Option>
+              <Option value="inactive">{t('ui.products.status_inactive')}</Option>
+              <Option value="out_of_stock">{t('ui.products.status_out_of_stock')}</Option>
+              <Option value="discontinued">{t('ui.products.status_discontinued')}</Option>
             </Select>
           </Space>
 
@@ -432,10 +434,10 @@ const Products = () => {
               icon={<PlusOutlined />}
               onClick={() => setIsCreateModalVisible(true)}
             >
-              Add Product
+              {t('ui.products.add_product')}
             </Button>
             <Button icon={<ExportOutlined />}>
-              Export Products
+              {t('ui.products.export_products')}
             </Button>
           </Space>
         </div>
@@ -453,7 +455,7 @@ const Products = () => {
             showSizeChanger: true,
             showQuickJumper: true,
             showTotal: (total, range) =>
-              `${range[0]}-${range[1]} of ${total} products`
+              `${range[0]}-${range[1]} of ${total} ${t('ui.products.pagination_text')}`
           }}
           onChange={handleTableChange}
           className="admin-table"
@@ -463,7 +465,7 @@ const Products = () => {
 
       {/* Product Details Modal */}
       <Modal
-        title={`Product Details - ${selectedProduct?.name}`}
+        title={`${t('ui.products.product_details')} - ${selectedProduct?.name}`}
         open={isDetailModalVisible}
         onCancel={() => setIsDetailModalVisible(false)}
         footer={null}
@@ -482,23 +484,23 @@ const Products = () => {
               </Col>
               <Col span={16}>
                 <h3>{selectedProduct.name}</h3>
-                <p><strong>SKU:</strong> {selectedProduct.sku}</p>
-                <p><strong>Category:</strong> {categories.find(c => c.id === selectedProduct.category_id)?.name || selectedProduct.category_id}</p>
-                <p><strong>Price:</strong> UZS{selectedProduct.price?.toFixed(2)}</p>
-                <p><strong>Volume:</strong> {selectedProduct.volume}</p>
-                <p><strong>Stock:</strong> {selectedProduct.stock_quantity} units</p>
-                <p><strong>Status:</strong>
+                <p><strong>{t('ui.products.sku')}:</strong> {selectedProduct.sku}</p>
+                <p><strong>{t('ui.products.category')}:</strong> {categories.find(c => c.id === selectedProduct.category_id)?.name || selectedProduct.category_id}</p>
+                <p><strong>{t('ui.products.price')}:</strong> UZS{selectedProduct.price?.toFixed(2)}</p>
+                <p><strong>{t('ui.products.volume')}:</strong> {selectedProduct.volume}</p>
+                <p><strong>{t('ui.products.stock')}:</strong> {selectedProduct.stock_quantity} {t('ui.products.units')}</p>
+                <p><strong>{t('ui.products.status')}:</strong>
                   <Tag color={productStatusColors[selectedProduct.status]} style={{ marginLeft: 8 }}>
-                    {selectedProduct.status?.toUpperCase().replace('_', ' ')}
+                    {t(`ui.products.status_${selectedProduct.status}`)}
                   </Tag>
                 </p>
                 {selectedProduct.is_featured && (
-                  <Tag color="gold">Featured Product</Tag>
+                  <Tag color="gold">{t('ui.products.featured_product')}</Tag>
                 )}
               </Col>
             </Row>
 
-            <Divider>Description</Divider>
+            <Divider>{t('ui.products.description')}</Divider>
             <p>{selectedProduct.description}</p>
 
             <div style={{ marginTop: 16, textAlign: 'right' }}>
@@ -510,10 +512,10 @@ const Products = () => {
                     handleEditProduct(selectedProduct);
                   }}
                 >
-                  Edit Product
+                  {t('ui.products.edit_product')}
                 </Button>
                 <Button onClick={() => setIsDetailModalVisible(false)}>
-                  Close
+                  {t('ui.products.close')}
                 </Button>
               </Space>
             </div>
@@ -523,7 +525,7 @@ const Products = () => {
 
       {/* Create Product Modal */}
       <Modal
-        title="Add New Product"
+        title={t('ui.products.add_new_product')}
         open={isCreateModalVisible}
         onCancel={() => setIsCreateModalVisible(false)}
         footer={null}
@@ -536,30 +538,30 @@ const Products = () => {
         >
           <Form.Item
             name="name"
-            label="Product Name"
-            rules={[{ required: true, message: 'Please enter product name' }]}
+            label={t('ui.products.product_name_label')}
+            rules={[{ required: true, message: t('ui.products.product_name_required') }]}
           >
-            <Input placeholder="Enter product name" />
+            <Input placeholder={t('ui.products.product_name_placeholder')} />
           </Form.Item>
 
           <Row gutter={16}>
             <Col span={12}>
               <Form.Item
               name="sku"
-              label="SKU"
-              rules={[{ required: true, message: 'Please enter SKU' }]}
+              label={t('ui.products.sku_label')}
+              rules={[{ required: true, message: t('ui.products.sku_required') }]}
             >
-              <Input placeholder="Enter SKU" />
+              <Input placeholder={t('ui.products.sku_placeholder')} />
             </Form.Item>
             </Col>
             <Col span={12}>
               <Form.Item
               name="volume"
-              label="Volume"
-              rules={[{ required: true, message: 'Please enter Volume' }]}
+              label={t('ui.products.volume_label')}
+              rules={[{ required: true, message: t('ui.products.volume_required') }]}
             >
               <InputNumber
-                  placeholder="Enter Volume"
+                  placeholder={t('ui.products.volume_placeholder')}
                   style={{ width: '100%' }}
                   min={0}
                   precision={1}
@@ -573,13 +575,13 @@ const Products = () => {
             <Col span={12}>
               <Form.Item
                 name="category_id"
-                label="Category"
-                rules={[{ required: true, message: 'Please select category' }]}
+                label={t('ui.products.category_label')}
+                rules={[{ required: true, message: t('ui.products.category_required') }]}
               >
                 <Select
-                  placeholder="Select category"
+                  placeholder={t('ui.products.category_placeholder')}
                   loading={!categoriesData}
-                  notFoundContent={categories.length === 0 ? "No categories found. Please create a category first." : "No categories"}
+                  notFoundContent={categories.length === 0 ? t('ui.products.no_categories') : "No categories"}
                 >
                   {categories.filter(c => c.is_active).map(category => (
                     <Option key={category.id} value={category.id}>
@@ -592,14 +594,14 @@ const Products = () => {
             <Col span={12}>
               <Form.Item
                 name="status"
-                label="Status"
-                rules={[{ required: true, message: 'Please select status' }]}
+                label={t('ui.products.status_label')}
+                rules={[{ required: true, message: t('ui.products.status_required') }]}
               >
-                <Select placeholder="Select status">
-                  <Option value="active">Active</Option>
-                  <Option value="inactive">Inactive</Option>
-                  <Option value="out_of_stock">Out of Stock</Option>
-                  <Option value="discontinued">Discontinued</Option>
+                <Select placeholder={t('ui.products.status_placeholder')}>
+                  <Option value="active">{t('ui.products.status_active')}</Option>
+                  <Option value="inactive">{t('ui.products.status_inactive')}</Option>
+                  <Option value="out_of_stock">{t('ui.products.status_out_of_stock')}</Option>
+                  <Option value="discontinued">{t('ui.products.status_discontinued')}</Option>
                 </Select>
               </Form.Item>
             </Col>
@@ -609,8 +611,8 @@ const Products = () => {
             <Col span={12}>
               <Form.Item
                 name="price"
-                label="Price"
-                rules={[{ required: true, message: 'Please enter price' }]}
+                label={t('ui.products.price_label')}
+                rules={[{ required: true, message: t('ui.products.price_required') }]}
               >
                 <InputNumber
                   placeholder="0.00"
@@ -624,8 +626,8 @@ const Products = () => {
             <Col span={12}>
               <Form.Item
                 name="stock_quantity"
-                label="Stock Quantity"
-                rules={[{ required: true, message: 'Please enter stock quantity' }]}
+                label={t('ui.products.stock_quantity_label')}
+                rules={[{ required: true, message: t('ui.products.stock_quantity_required') }]}
               >
                 <InputNumber
                   placeholder="0"
@@ -638,17 +640,17 @@ const Products = () => {
 
           <Form.Item
             name="description"
-            label="Description"
+            label={t('ui.products.description_label')}
           >
             <TextArea
               rows={3}
-              placeholder="Enter product description..."
+              placeholder={t('ui.products.description_placeholder')}
             />
           </Form.Item>
 
           <Form.Item
             name="is_featured"
-            label="Featured Product"
+            label={t('ui.products.featured_product_label')}
             valuePropName="checked"
           >
             <Switch />
@@ -656,28 +658,28 @@ const Products = () => {
 
           <Form.Item
             name="image"
-            label="Product Image"
+            label={t('ui.products.product_image_label')}
           >
             <Dragger {...uploadProps}>
               <p className="ant-upload-drag-icon">
                 <InboxOutlined />
               </p>
-              <p className="ant-upload-text">Click or drag image to upload</p>
-              <p className="ant-upload-hint">Support for single image upload. JPG, PNG files only.</p>
+              <p className="ant-upload-text">{t('ui.products.upload_click_drag')}</p>
+              <p className="ant-upload-hint">{t('ui.products.upload_hint')}</p>
             </Dragger>
           </Form.Item>
 
           <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
             <Space>
               <Button onClick={() => setIsCreateModalVisible(false)}>
-                Cancel
+                {t('ui.products.cancel')}
               </Button>
               <Button
                 type="primary"
                 htmlType="submit"
                 loading={createProductMutation.isLoading}
               >
-                Create Product
+                {t('ui.products.create_product')}
               </Button>
             </Space>
           </Form.Item>
@@ -686,7 +688,7 @@ const Products = () => {
 
       {/* Edit Product Modal */}
       <Modal
-        title={`Edit Product - ${selectedProduct?.name}`}
+        title={`${t('ui.products.edit_product_title')} - ${selectedProduct?.name}`}
         open={isEditModalVisible}
         onCancel={() => setIsEditModalVisible(false)}
         footer={null}
@@ -699,23 +701,23 @@ const Products = () => {
         >
           <Form.Item
             name="name"
-            label="Product Name"
-            rules={[{ required: true, message: 'Please enter product name' }]}
+            label={t('ui.products.product_name_label')}
+            rules={[{ required: true, message: t('ui.products.product_name_required') }]}
           >
-            <Input placeholder="Enter product name" />
+            <Input placeholder={t('ui.products.product_name_placeholder')} />
           </Form.Item>
 
           <Row gutter={16}>
             <Col span={12}>
               <Form.Item
                 name="category_id"
-                label="Category"
-                rules={[{ required: true, message: 'Please select category' }]}
+                label={t('ui.products.category_label')}
+                rules={[{ required: true, message: t('ui.products.category_required') }]}
               >
                 <Select
-                  placeholder="Select category"
+                  placeholder={t('ui.products.category_placeholder')}
                   loading={!categoriesData}
-                  notFoundContent={categories.length === 0 ? "No categories found. Please create a category first." : "No categories"}
+                  notFoundContent={categories.length === 0 ? t('ui.products.no_categories') : "No categories"}
                 >
                   {categories.filter(c => c.is_active).map(category => (
                     <Option key={category.id} value={category.id}>
@@ -728,14 +730,14 @@ const Products = () => {
             <Col span={12}>
               <Form.Item
                 name="status"
-                label="Status"
-                rules={[{ required: true, message: 'Please select status' }]}
+                label={t('ui.products.status_label')}
+                rules={[{ required: true, message: t('ui.products.status_required') }]}
               >
-                <Select placeholder="Select status">
-                  <Option value="active">Active</Option>
-                  <Option value="inactive">Inactive</Option>
-                  <Option value="out_of_stock">Out of Stock</Option>
-                  <Option value="discontinued">Discontinued</Option>
+                <Select placeholder={t('ui.products.status_placeholder')}>
+                  <Option value="active">{t('ui.products.status_active')}</Option>
+                  <Option value="inactive">{t('ui.products.status_inactive')}</Option>
+                  <Option value="out_of_stock">{t('ui.products.status_out_of_stock')}</Option>
+                  <Option value="discontinued">{t('ui.products.status_discontinued')}</Option>
                 </Select>
               </Form.Item>
             </Col>
@@ -745,8 +747,8 @@ const Products = () => {
             <Col span={12}>
               <Form.Item
                 name="price"
-                label="Price"
-                rules={[{ required: true, message: 'Please enter price' }]}
+                label={t('ui.products.price_label')}
+                rules={[{ required: true, message: t('ui.products.price_required') }]}
               >
                 <InputNumber
                   placeholder="0.00"
@@ -760,8 +762,8 @@ const Products = () => {
             <Col span={12}>
               <Form.Item
                 name="stock_quantity"
-                label="Stock Quantity"
-                rules={[{ required: true, message: 'Please enter stock quantity' }]}
+                label={t('ui.products.stock_quantity_label')}
+                rules={[{ required: true, message: t('ui.products.stock_quantity_required') }]}
               >
                 <InputNumber
                   placeholder="0"
@@ -774,17 +776,17 @@ const Products = () => {
 
           <Form.Item
             name="description"
-            label="Description"
+            label={t('ui.products.description_label')}
           >
             <TextArea
               rows={3}
-              placeholder="Enter product description..."
+              placeholder={t('ui.products.description_placeholder')}
             />
           </Form.Item>
 
           <Form.Item
             name="is_featured"
-            label="Featured Product"
+            label={t('ui.products.featured_product_label')}
             valuePropName="checked"
           >
             <Switch />
@@ -793,14 +795,14 @@ const Products = () => {
           <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
             <Space>
               <Button onClick={() => setIsEditModalVisible(false)}>
-                Cancel
+                {t('ui.products.cancel')}
               </Button>
               <Button
                 type="primary"
                 htmlType="submit"
                 loading={updateProductMutation.isLoading}
               >
-                Update Product
+                {t('ui.products.update_product')}
               </Button>
             </Space>
           </Form.Item>

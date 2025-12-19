@@ -1,6 +1,6 @@
 {% extends "frontend/base.html" %}
 
-{% block title %}{{ 'Home'|translate(current_language) }} - {{ company_name }}{% endblock %}
+{% block title %}{{ 'landing.nav.home'|t }} - {{ company_name }}{% endblock %}
 
 {% block content %}
         <!-- banner-section -->
@@ -11,14 +11,14 @@
                     <div class="auto-container">
                         <div class="inner-box">
                             <div class="image-box">
-                                <figure class="image"><img src="{{ url_for('static', filename='images/banner/vector-5-elon-musk.png') }}" alt="{{ 'Water Delivery'|translate(current_language) }}"></figure>
+                                <figure class="image"><img src="{{ url_for('static', filename='images/banner/vector-5-elon-musk.png') }}" alt="{{ 'landing.image.water_delivery'|t }}"></figure>
                             </div>
                             <div class="content-box">
-                                <h2>{{ 'Always Want Safe and Good Water for Healthy Life'|translate(current_language) }}</h2>
-                                <p>{{ 'Experience the convenience of premium water delivery service with our reliable, eco-friendly solutions for your home and office.'|translate(current_language) }}</p>
+                                <h2>{{ 'landing.hero.title_1'|t }}</h2>
+                                <p>{{ 'landing.hero.subtitle_1'|t }}</p>
                                 <div class="btn-box clearfix">
-                                    <a href="{{ url_for('frontend.services') }}" class="theme-btn btn-one">{{ 'Our Services'|translate(current_language) }}</a>
-                                    <a href="{{ url_for('frontend.shop') }}" class="theme-btn banner-btn">{{ 'Discover'|translate(current_language) }}</a>
+                                    <a href="{{ url_for('frontend.services') }}" class="theme-btn btn-one">{{ 'landing.hero.button_services'|t }}</a>
+                                    <a href="{{ url_for('frontend.shop') }}" class="theme-btn banner-btn">{{ 'landing.hero.button_discover'|t }}</a>
                                 </div>
                             </div>
                         </div> 
@@ -28,34 +28,34 @@
                     <div class="auto-container">
                         <div class="inner-box">
                             <div class="image-box">
-                                <figure class="image"><img src="{{ url_for('static', filename='images/banner/vector-4-elon-musk.png') }}" alt="{{ 'Premium Water'|translate(current_language) }}"></figure>
+                                <figure class="image"><img src="{{ url_for('static', filename='images/banner/vector-4-elon-musk.png') }}" alt="{{ 'landing.image.premium_water'|t }}"></figure>
                             </div>
                             <div class="content-box">
-                                <h2>{{ 'Pure Water Delivery To Your Doorstep'|translate(current_language) }}</h2>
-                                <p>{{ 'We provide our services across Uzbekistan with a network of professional delivery partners ensuring the highest quality standards.'|translate(current_language) }}</p>
+                                <h2>{{ 'landing.hero.title_2'|t }}</h2>
+                                <p>{{ 'landing.hero.subtitle_2'|t }}</p>
                                 <div class="btn-box clearfix">
-                                    <a href="{{ url_for('frontend.services') }}" class="theme-btn btn-one">{{ 'Our Services'|translate(current_language) }}</a>
-                                    <a href="{{ url_for('frontend.shop') }}" class="theme-btn banner-btn">{{ 'Shop Now'|translate(current_language) }}</a>
+                                    <a href="{{ url_for('frontend.services') }}" class="theme-btn btn-one">{{ 'landing.hero.button_services'|t }}</a>
+                                    <a href="{{ url_for('frontend.shop') }}" class="theme-btn banner-btn">{{ 'landing.hero.button_shop_now'|t }}</a>
                                 </div>
                             </div>
-                        </div> 
+                        </div>
                     </div>
                 </div>
                 <div class="slide-item">
                     <div class="auto-container">
                         <div class="inner-box">
                             <div class="image-box">
-                                <figure class="image"><img src="{{ url_for('static', filename='images/banner/vector-3.png') }}" alt="{{ 'Home Delivery'|translate(current_language) }}"></figure>
+                                <figure class="image"><img src="{{ url_for('static', filename='images/banner/vector-3.png') }}" alt="{{ 'landing.image.home_delivery'|t }}"></figure>
                             </div>
                             <div class="content-box">
-                                <h2>{{ 'Trusted Name In Bottled Water Industry'|translate(current_language) }}</h2>
-                                <p>{{ 'Blue Stream Group has been serving communities across Uzbekistan with premium water delivery services for over a decade.'|translate(current_language) }}</p>
+                                <h2>{{ 'landing.hero.title_3'|t }}</h2>
+                                <p>{{ 'landing.hero.subtitle_3'|t }}</p>
                                 <div class="btn-box clearfix">
-                                    <a href="{{ url_for('frontend.about') }}" class="theme-btn btn-one">{{ 'About Us'|translate(current_language) }}</a>
-                                    <a href="{{ url_for('frontend.subscriptions') }}" class="theme-btn banner-btn">{{ 'View Plans'|translate(current_language) }}</a>
+                                    <a href="{{ url_for('frontend.about') }}" class="theme-btn btn-one">{{ 'landing.nav.about'|t }}</a>
+                                    <a href="{{ url_for('frontend.subscriptions') }}" class="theme-btn banner-btn">{{ 'landing.hero.button_view_plans'|t }}</a>
                                 </div>
                             </div>
-                        </div> 
+                        </div>
                     </div>
                 </div>
             </div>
@@ -71,7 +71,7 @@
             <div class="auto-container">
                 <div class="inner-container wow fadeInLeft animated" data-wow-delay="00ms" data-wow-duration="1500ms">
                     <div class="title-text">
-                        <h2>{{ 'A Trusted Name In'|translate(current_language) }} <br />{{ 'Bottled Water Industry'|translate(current_language) }}</h2>
+                        <h2>{{ 'landing.features.trusted_name.title_line1'|t }} <br />{{ 'landing.features.trusted_name.title_line2'|t }}</h2>
                     </div>
                     <div class="row clearfix">
                         <div class="col-lg-3 col-md-6 col-sm-12 feature-block">
@@ -79,8 +79,8 @@
                                 <div class="inner-box">
                                     <div class="shape" style="background-image: url({{ url_for('static', filename='images/shape/shape-27.png') }});"></div>
                                     <div class="icon-box"><i class="flaticon-water-drop"></i></div>
-                                    <h4>{{ 'Maximum Purity'|translate(current_language) }}</h4>
-                                    <p>{{ 'Our water goes through rigorous filtration processes ensuring the highest quality.'|translate(current_language) }}</p>
+                                    <h4>{{ 'landing.features.purity.title'|t }}</h4>
+                                    <p>{{ 'landing.features.purity.description'|t }}</p>
                                 </div>
                             </div>
                         </div>
@@ -89,8 +89,8 @@
                                 <div class="inner-box">
                                     <div class="shape" style="background-image: url({{ url_for('static', filename='images/shape/shape-27.png') }});"></div>
                                     <div class="icon-box"><i class="flaticon-water-drop-1"></i></div>
-                                    <h4>{{ 'Chlorine Free'|translate(current_language) }}</h4>
-                                    <p>{{ 'Pure and clean water without harmful chemicals and additives.'|translate(current_language) }}</p>
+                                    <h4>{{ 'landing.features.chlorine_free.title'|t }}</h4>
+                                    <p>{{ 'landing.features.chlorine_free.description'|t }}</p>
                                 </div>
                             </div>
                         </div>
@@ -99,8 +99,8 @@
                                 <div class="inner-box">
                                     <div class="shape" style="background-image: url({{ url_for('static', filename='images/shape/shape-27.png') }});"></div>
                                     <div class="icon-box"><i class="flaticon-recycle"></i></div>
-                                    <h4>{{ '10 Steps Filtration'|translate(current_language) }}</h4>
-                                    <p>{{ 'Advanced multi-stage filtration system for optimal water quality.'|translate(current_language) }}</p>
+                                    <h4>{{ 'landing.features.filtration.title'|t }}</h4>
+                                    <p>{{ 'landing.features.filtration.description'|t }}</p>
                                 </div>
                             </div>
                         </div>
@@ -108,8 +108,8 @@
                             <div class="feature-block-one">
                                 <div class="inner-box">
                                     <div class="icon-box"><i class="flaticon-glass"></i></div>
-                                    <h4>{{ 'Healthy Water'|translate(current_language) }}</h4>
-                                    <p>{{ 'Essential minerals preserved for your health and well-being.'|translate(current_language) }}</p>
+                                    <h4>{{ 'landing.features.healthy_water.title'|t }}</h4>
+                                    <p>{{ 'landing.features.healthy_water.description'|t }}</p>
                                 </div>
                             </div>
                         </div>
@@ -126,11 +126,11 @@
                     <div class="col-lg-6 col-md-12 col-sm-12 image-column">
                         <div class="image_block_2">
                             <div class="image-box">
-                                <figure class="image image-1 clearfix"><img src="{{ url_for('static', filename='images/resource/about-2.png') }}" alt="{{ 'About Us'|translate(current_language) }}"></figure>
-                                <figure class="image image-2"><img src="{{ url_for('static', filename='images/resource/about-3.png') }}" alt="{{ 'Quality Water'|translate(current_language) }}"></figure>
+                                <figure class="image image-1 clearfix"><img src="{{ url_for('static', filename='images/resource/about-2.png') }}" alt="{{ 'landing.footer.about_us'|t }}"></figure>
+                                <figure class="image image-2"><img src="{{ url_for('static', filename='images/resource/about-3.png') }}" alt="{{ 'landing.image.quality_water'|t }}"></figure>
                                 <div class="text">
                                     <h2>100+</h2>
-                                    <h6>{{ 'Meters deep'|translate(current_language) }}</h6>
+                                    <h6>{{ 'landing.about.meters_deep'|t }}</h6>
                                 </div>
                             </div>
                         </div>
@@ -139,14 +139,14 @@
                         <div class="content_block_1">
                             <div class="content-box wow fadeInRight animated" data-wow-delay="00ms" data-wow-duration="1500ms">
                                 <div class="sec-title">
-                                    <h2>{{ 'We Always Want Safe and Healthy Water for Healthy Life'|translate(current_language) }}</h2>
+                                    <h2>{{ 'landing.about.home.title'|t }}</h2>
                                 </div>
                                 <div class="text">
-                                    <p>{{ 'Blue Stream Group is dedicated to providing the highest quality water delivery services to homes and businesses across Uzbekistan. Our commitment to excellence ensures that every drop meets the strictest safety and purity standards.'|translate(current_language) }}</p>
-                                    <p>{{ 'With state-of-the-art filtration technology and a customer-first approach, we have become the trusted choice for thousands of families and businesses seeking reliable water solutions.'|translate(current_language) }}</p>
+                                    <p>{{ 'landing.about.home.description_1'|t }}</p>
+                                    <p>{{ 'landing.about.home.description_2'|t }}</p>
                                 </div>
                                 <div class="btn-box">
-                                    <a href="{{ url_for('frontend.about') }}" class="theme-btn btn-one">{{ 'Read More'|translate(current_language) }}</a>
+                                    <a href="{{ url_for('frontend.about') }}" class="theme-btn btn-one">{{ 'landing.button.read_more'|t }}</a>
                                 </div>
                             </div>
                         </div>
@@ -161,7 +161,7 @@
             <div class="pattern-layer" style="background-image: url({{ url_for('static', filename='images/shape/shape-18.png') }});"></div>
             <div class="auto-container">
                 <div class="sec-title">
-                    <h2>{{ 'We Deliver Best Quality'|translate(current_language) }} <br />{{ 'Water Products'|translate(current_language) }}</h2>
+                    <h2>{{ 'landing.shop.home.title_line1'|t }} <br />{{ 'landing.shop.home.title_line2'|t }}</h2>
                 </div>
                 <div class="row clearfix">
                     {% for product in featured_products[:3] %}
@@ -182,7 +182,7 @@
                                     <h6>{{ product.current_price|format_price }}</h6>
                                     <p>{{ product.short_description[:60] if product.short_description }}{% if product.short_description and product.short_description|length > 60 %}...{% endif %}</p>
                                     <div class="btn-box">
-                                        <button onclick="addToCart({{ product.id }})" class="theme-btn btn-two">{{ 'Add to Cart'|translate(current_language) }}</button>
+                                        <button onclick="addToCart({{ product.id }})" class="theme-btn btn-two">{{ 'landing.button.add_to_cart'|t }}</button>
                                     </div>
                                 </div>
                             </div>
@@ -191,7 +191,7 @@
                     {% endfor %}
                 </div>
                 <div class="more-btn">
-                    <a href="{{ url_for('frontend.shop') }}" class="theme-btn btn-one">{{ 'View All Products'|translate(current_language) }}</a>
+                    <a href="{{ url_for('frontend.shop') }}" class="theme-btn btn-one">{{ 'landing.shop.view_all_products'|t }}</a>
                 </div>
             </div>
         </section>
@@ -202,8 +202,8 @@
         <section class="pricing-section">
             <div class="auto-container">
                 <div class="sec-title centred">
-                    <h2>{{ 'Choose Your Perfect'|translate(current_language) }} <br />{{ 'Subscription Plan'|translate(current_language) }}</h2>
-                    <p>{{ 'Save money and never run out of water with our flexible subscription plans.'|translate(current_language) }}</p>
+                    <h2>{{ 'landing.subscription.home.title_line1'|t }} <br />{{ 'landing.subscription.home.title_line2'|t }}</h2>
+                    <p>{{ 'landing.subscription.home.subtitle'|t }}</p>
                 </div>
                 <div class="row clearfix">
                     {% for plan in subscription_plans %}
@@ -211,7 +211,7 @@
                         <div class="pricing-block-one wow fadeInUp animated" data-wow-delay="{{ loop.index0 * 200 }}ms" data-wow-duration="1500ms">
                             <div class="pricing-table {% if plan.is_popular %}popular{% endif %}">
                                 {% if plan.is_popular %}
-                                <div class="popular-tag">{{ 'Most Popular'|translate(current_language) }}</div>
+                                <div class="popular-tag">{{ 'landing.subscription.most_popular'|t }}</div>
                                 {% endif %}
                                 <div class="table-header">
                                     <h4>{{ plan.name }}</h4>
@@ -220,18 +220,18 @@
                                 <div class="table-content">
                                     <ul class="feature-list">
                                         {% for feature in plan.features %}
-                                        <li>{{ feature|translate(current_language) }}</li>
+                                        <li>{{ feature|t }}</li>
                                         {% endfor %}
                                         {% if plan.free_delivery %}
-                                        <li>{{ 'Free Delivery'|translate(current_language) }}</li>
+                                        <li>{{ 'landing.subscription.free_delivery'|t }}</li>
                                         {% endif %}
                                         {% if plan.discount_percentage > 0 %}
-                                        <li>{{ plan.discount_percentage }}% {{ 'Discount'|translate(current_language) }}</li>
+                                        <li>{{ plan.discount_percentage }}% {{ 'landing.subscription.discount'|t }}</li>
                                         {% endif %}
                                     </ul>
                                 </div>
                                 <div class="table-footer">
-                                    <a href="{{ url_for('frontend.subscriptions') }}" class="theme-btn btn-one">{{ 'Choose Plan'|translate(current_language) }}</a>
+                                    <a href="{{ url_for('frontend.subscriptions') }}" class="theme-btn btn-one">{{ 'landing.subscription.choose_plan'|t }}</a>
                                 </div>
                             </div>
                         </div>
@@ -252,20 +252,20 @@
             </div>
             <div class="auto-container">
                 <div class="sec-title light centred">
-                    <h2>{{ 'Loyalty Rewards Program'|translate(current_language) }}</h2>
-                    <p>{{ 'Earn points with every purchase and redeem them for amazing rewards!'|translate(current_language) }}</p>
+                    <h2>{{ 'landing.loyalty.title'|t }}</h2>
+                    <p>{{ 'landing.loyalty.subtitle'|t }}</p>
                 </div>
                 {% if current_user and loyalty_data %}
                 <div class="loyalty-status text-center mb-5">
                     <div class="loyalty-card">
-                        <h4>{{ 'Your Loyalty Status'|translate(current_language) }}</h4>
+                        <h4>{{ 'landing.loyalty.your_status'|t }}</h4>
                         <div class="loyalty-info">
                             <span class="loyalty-badge">{{ loyalty_data.current_tier }}</span>
                             <div class="points-info">
-                                <strong class="points-balance">{{ loyalty_data.points_balance }} {{ 'Points'|translate(current_language) }}</strong>
+                                <strong class="points-balance">{{ loyalty_data.points_balance }} {{ 'landing.loyalty.points'|t }}</strong>
                             </div>
                         </div>
-                        <a href="{{ url_for('frontend.my_loyalty') }}" class="theme-btn btn-one btn-sm">{{ 'View Rewards'|translate(current_language) }}</a>
+                        <a href="{{ url_for('frontend.my_loyalty') }}" class="theme-btn btn-one btn-sm">{{ 'landing.loyalty.view_rewards'|t }}</a>
                     </div>
                 </div>
                 {% endif %}
@@ -280,7 +280,7 @@
                                 <h4><a href="{{ url_for('frontend.my_loyalty') }}">{{ reward.name }}</a></h4>
                                 <p>{{ reward.description[:50] }}{% if reward.description|length > 50 %}...{% endif %}</p>
                                 <div class="points-required">
-                                    <strong>{{ reward.points_cost }} {{ 'Points'|translate(current_language) }}</strong>
+                                    <strong>{{ reward.points_cost }} {{ 'landing.loyalty.points'|t }}</strong>
                                 </div>
                             </div>
                         </div>
@@ -288,7 +288,7 @@
                     {% endfor %}
                 </div>
                 <div class="more-btn text-center">
-                    <a href="{{ url_for('frontend.my_loyalty') }}" class="theme-btn btn-one">{{ 'Join Loyalty Program'|translate(current_language) }}</a>
+                    <a href="{{ url_for('frontend.my_loyalty') }}" class="theme-btn btn-one">{{ 'landing.loyalty.join_program'|t }}</a>
                 </div>
             </div>
         </section>
@@ -307,25 +307,25 @@
                 <div class="row align-items-center clearfix">
                     <div class="col-lg-6 col-md-12 col-sm-12 image-column">
                         <figure class="image-box wow slideInLeft animated" data-wow-delay="00ms" data-wow-duration="1500ms clearfix">
-                            <img src="{{ url_for('static', filename='images/resource/cta-1.png') }}" alt="{{ 'Premium Service'|translate(current_language) }}">
+                            <img src="{{ url_for('static', filename='images/resource/cta-1.png') }}" alt="{{ 'landing.image.premium_service'|t }}">
                         </figure>
                     </div>
                     <div class="col-lg-6 col-md-12 col-sm-12 content-column">
                         <div class="content_block_3">
                             <div class="content-box">
                                 <div class="sec-title light">
-                                    <h2>{{ 'Ready To Get Our Premium Water Delivery Service'|translate(current_language) }}</h2>
+                                    <h2>{{ 'landing.cta.title'|t }}</h2>
                                 </div>
                                 <div class="text">
-                                    <p>{{ 'We provide our services across Uzbekistan with a network of professional delivery partners. Experience fast, reliable delivery within 2 hours anywhere in the city.'|translate(current_language) }}</p>
+                                    <p>{{ 'landing.cta.description'|t }}</p>
                                 </div>
                                 <ul class="list clearfix">
-                                    <li>{{ 'Free Delivery'|translate(current_language) }}</li>
-                                    <li>{{ '7 Days A Week Service'|translate(current_language) }}</li>
-                                    <li>{{ 'Premium Quality Guarantee'|translate(current_language) }}</li>
+                                    <li>{{ 'landing.cta.feature.free_delivery'|t }}</li>
+                                    <li>{{ 'landing.cta.feature.seven_days'|t }}</li>
+                                    <li>{{ 'landing.cta.feature.quality_guarantee'|t }}</li>
                                 </ul>
                                 <div class="btn-box">
-                                    <a href="{{ url_for('frontend.services') }}" class="theme-btn btn-one">{{ 'Our Services'|translate(current_language) }}</a>
+                                    <a href="{{ url_for('frontend.services') }}" class="theme-btn btn-one">{{ 'landing.hero.button_services'|t }}</a>
                                 </div>
                             </div>
                         </div>
@@ -339,8 +339,8 @@
         <section class="team-section">
             <div class="auto-container">
                 <div class="sec-title centred">
-                    <h2>{{ 'Water Benefits & Health Tips'|translate(current_language) }}</h2>
-                    <p>{{ 'Discover the importance of proper hydration and learn about the health benefits of quality water.'|translate(current_language) }}</p>
+                    <h2>{{ 'landing.health.title'|t }}</h2>
+                    <p>{{ 'landing.health.subtitle'|t }}</p>
                 </div>
                 <div class="row clearfix blog-posts-equal-height">
                     {% if featured_posts and featured_posts|length > 0 %}
@@ -378,12 +378,12 @@
                             <div class="team-block-one wow fadeInUp animated" data-wow-delay="00ms" data-wow-duration="1500ms">
                                 <div class="inner-box">
                                     <div class="image-box">
-                                        <figure class="image"><img src="{{ url_for('static', filename='images/news/news-4.jpg') }}" alt="{{ 'Water Benefits'|translate(current_language) }}"></figure>
+                                        <figure class="image"><img src="{{ url_for('static', filename='images/news/news-4.jpg') }}" alt="{{ 'landing.image.water_benefits'|t }}"></figure>
                                     </div>
                                     <div class="lower-content">
-                                        <h4><a href="#">{{ 'Daily Water Intake Guide'|translate(current_language) }}</a></h4>
-                                        <span class="designation">{{ 'Health Tips'|translate(current_language) }}</span>
-                                        <p>{{ 'Learn how much water you should drink daily and the optimal timing for maximum health benefits.'|translate(current_language) }}</p>
+                                        <h4><a href="#">{{ 'landing.health.article1.title'|t }}</a></h4>
+                                        <span class="designation">{{ 'landing.health.article1.category'|t }}</span>
+                                        <p>{{ 'landing.health.article1.description'|t }}</p>
                                     </div>
                                 </div>
                             </div>
@@ -392,12 +392,12 @@
                             <div class="team-block-one wow fadeInUp animated" data-wow-delay="300ms" data-wow-duration="1500ms">
                                 <div class="inner-box">
                                     <div class="image-box">
-                                        <figure class="image"><img src="{{ url_for('static', filename='images/news/news-5.jpg') }}" alt="{{ 'Water Quality'|translate(current_language) }}"></figure>
+                                        <figure class="image"><img src="{{ url_for('static', filename='images/news/news-5.jpg') }}" alt="{{ 'landing.image.water_quality'|t }}"></figure>
                                     </div>
                                     <div class="lower-content">
-                                        <h4><a href="#">{{ 'Water Quality Standards'|translate(current_language) }}</a></h4>
-                                        <span class="designation">{{ 'Quality Assurance'|translate(current_language) }}</span>
-                                        <p>{{ 'Understanding water purity standards and what makes Blue Stream water exceptional for your health.'|translate(current_language) }}</p>
+                                        <h4><a href="#">{{ 'landing.health.article2.title'|t }}</a></h4>
+                                        <span class="designation">{{ 'landing.health.article2.category'|t }}</span>
+                                        <p>{{ 'landing.health.article2.description'|t }}</p>
                                     </div>
                                 </div>
                             </div>
@@ -406,12 +406,12 @@
                             <div class="team-block-one wow fadeInUp animated" data-wow-delay="600ms" data-wow-duration="1500ms">
                                 <div class="inner-box">
                                     <div class="image-box">
-                                        <figure class="image"><img src="{{ url_for('static', filename='images/news/news-6.jpg') }}" alt="{{ 'Hydration Benefits'|translate(current_language) }}"></figure>
+                                        <figure class="image"><img src="{{ url_for('static', filename='images/news/news-6.jpg') }}" alt="{{ 'landing.image.hydration_benefits'|t }}"></figure>
                                     </div>
                                     <div class="lower-content">
-                                        <h4><a href="#">{{ 'Hydration & Wellness'|translate(current_language) }}</a></h4>
-                                        <span class="designation">{{ 'Wellness Guide'|translate(current_language) }}</span>
-                                        <p>{{ 'Discover how proper hydration supports your immune system, skin health, and overall well-being.'|translate(current_language) }}</p>
+                                        <h4><a href="#">{{ 'landing.health.article3.title'|t }}</a></h4>
+                                        <span class="designation">{{ 'landing.health.article3.category'|t }}</span>
+                                        <p>{{ 'landing.health.article3.description'|t }}</p>
                                     </div>
                                 </div>
                             </div>
@@ -420,7 +420,7 @@
                 </div>
                 {% if featured_posts and featured_posts|length > 0 %}
                 <div class="more-btn centred" style="margin-top: 40px;">
-                    <a href="{{ url_for('frontend.blog_list') }}" class="theme-btn btn-one">{{ 'View All Posts'|translate(current_language) }}</a>
+                    <a href="{{ url_for('frontend.blog_list') }}" class="theme-btn btn-one">{{ 'landing.health.view_all_posts'|t }}</a>
                 </div>
                 {% endif %}
             </div>
@@ -432,8 +432,8 @@
             <div class="pattern-layer"></div>
             <div class="auto-container">
                 <div class="sec-title">
-                    <h2>{{ 'Build Your Custom'|translate(current_language) }} <br />{{ 'Subscription'|translate(current_language) }}</h2>
-                    <p>{{ 'Create a personalized subscription with any products, in any quantity, delivered at your preferred frequency'|translate(current_language) }}</p>
+                    <h2>{{ 'landing.custom_subscription.title_line1'|t }} <br />{{ 'landing.custom_subscription.title_line2'|t }}</h2>
+                    <p>{{ 'landing.custom_subscription.subtitle'|t }}</p>
                 </div>
 
                 <div class="constructor-container">
@@ -441,23 +441,23 @@
                     <div class="constructor-steps">
                         <div class="constructor-step" data-step="1">
                             <div class="step-number">1</div>
-                            <div class="step-label">{{ 'Products'|translate(current_language) }}</div>
+                            <div class="step-label">{{ 'landing.custom_subscription.step.products'|t }}</div>
                         </div>
                         <div class="constructor-step" data-step="2">
                             <div class="step-number">2</div>
-                            <div class="step-label">{{ 'Schedule'|translate(current_language) }}</div>
+                            <div class="step-label">{{ 'landing.custom_subscription.step.schedule'|t }}</div>
                         </div>
                         <div class="constructor-step" data-step="3">
                             <div class="step-number">3</div>
-                            <div class="step-label">{{ 'Address'|translate(current_language) }}</div>
+                            <div class="step-label">{{ 'landing.contact.info.address'|t }}</div>
                         </div>
                         <div class="constructor-step" data-step="4">
                             <div class="step-number">4</div>
-                            <div class="step-label">{{ 'Payment'|translate(current_language) }}</div>
+                            <div class="step-label">{{ 'landing.custom_subscription.step.payment'|t }}</div>
                         </div>
                         <div class="constructor-step" data-step="5">
                             <div class="step-number">5</div>
-                            <div class="step-label">{{ 'Review'|translate(current_language) }}</div>
+                            <div class="step-label">{{ 'landing.custom_subscription.step.review'|t }}</div>
                         </div>
                     </div>
 
@@ -465,7 +465,7 @@
                     <div class="constructor-content">
                         <!-- Step 1: Select Products -->
                         <div class="constructor-panel active" id="step-1">
-                            <h3 style="margin-bottom: 30px; text-align: center;">{{ 'Choose Your Products'|translate(current_language) }}</h3>
+                            <h3 style="margin-bottom: 30px; text-align: center;">{{ 'landing.custom_subscription.choose_products'|t }}</h3>
                             <div class="product-grid" id="products-grid">
                                 <!-- Products will be dynamically loaded -->
                             </div>
@@ -473,49 +473,49 @@
 
                         <!-- Step 2: Delivery Frequency & Schedule -->
                         <div class="constructor-panel" id="step-2">
-                            <h3 style="margin-bottom: 30px; text-align: center;">{{ 'Set Your Delivery Schedule'|translate(current_language) }}</h3>
+                            <h3 style="margin-bottom: 30px; text-align: center;">{{ 'landing.custom_subscription.delivery_schedule'|t }}</h3>
 
                             <!-- Frequency Selection -->
                             <div style="margin-bottom: 40px;">
-                                <h4 style="margin-bottom: 20px; color: #262626;">{{ 'Delivery Frequency'|translate(current_language) }}</h4>
+                                <h4 style="margin-bottom: 20px; color: #262626;">{{ 'landing.custom_subscription.delivery_frequency'|t }}</h4>
                                 <div class="frequency-options">
                                     <div class="frequency-option" data-frequency="weekly">
                                         <div class="frequency-icon">📅</div>
-                                        <div class="frequency-name">{{ 'Weekly'|translate(current_language) }}</div>
-                                        <div class="frequency-description">{{ 'Delivered once a week'|translate(current_language) }}</div>
+                                        <div class="frequency-name">{{ 'landing.custom_subscription.frequency.weekly'|t }}</div>
+                                        <div class="frequency-description">{{ 'landing.custom_subscription.frequency.weekly_desc'|t }}</div>
                                     </div>
                                     <div class="frequency-option" data-frequency="biweekly">
                                         <div class="frequency-icon">📆</div>
-                                        <div class="frequency-name">{{ 'Bi-Weekly'|translate(current_language) }}</div>
-                                        <div class="frequency-description">{{ 'Delivered every two weeks'|translate(current_language) }}</div>
+                                        <div class="frequency-name">{{ 'landing.custom_subscription.frequency.biweekly'|t }}</div>
+                                        <div class="frequency-description">{{ 'landing.custom_subscription.frequency.biweekly_desc'|t }}</div>
                                     </div>
                                     <div class="frequency-option" data-frequency="monthly">
                                         <div class="frequency-icon">📋</div>
-                                        <div class="frequency-name">{{ 'Monthly'|translate(current_language) }}</div>
-                                        <div class="frequency-description">{{ 'Delivered once a month'|translate(current_language) }}</div>
+                                        <div class="frequency-name">{{ 'landing.custom_subscription.frequency.monthly'|t }}</div>
+                                        <div class="frequency-description">{{ 'landing.custom_subscription.frequency.monthly_desc'|t }}</div>
                                     </div>
                                 </div>
                             </div>
 
                             <!-- Day Selection -->
                             <div class="schedule-selector" id="day-selector" style="display: none; margin-bottom: 40px;">
-                                <h4 style="margin-bottom: 20px; color: #262626;">{{ 'Delivery Day'|translate(current_language) }}</h4>
+                                <h4 style="margin-bottom: 20px; color: #262626;">{{ 'landing.custom_subscription.delivery_day'|t }}</h4>
                                 <div class="day-selector">
-                                    <button type="button" class="day-btn" data-day="1">{{ 'Monday'|translate(current_language) }}</button>
-                                    <button type="button" class="day-btn" data-day="2">{{ 'Tuesday'|translate(current_language) }}</button>
-                                    <button type="button" class="day-btn" data-day="3">{{ 'Wednesday'|translate(current_language) }}</button>
-                                    <button type="button" class="day-btn" data-day="4">{{ 'Thursday'|translate(current_language) }}</button>
-                                    <button type="button" class="day-btn" data-day="5">{{ 'Friday'|translate(current_language) }}</button>
-                                    <button type="button" class="day-btn" data-day="6">{{ 'Saturday'|translate(current_language) }}</button>
-                                    <button type="button" class="day-btn" data-day="0">{{ 'Sunday'|translate(current_language) }}</button>
+                                    <button type="button" class="day-btn" data-day="1">{{ 'landing.custom_subscription.day.monday'|t }}</button>
+                                    <button type="button" class="day-btn" data-day="2">{{ 'landing.custom_subscription.day.tuesday'|t }}</button>
+                                    <button type="button" class="day-btn" data-day="3">{{ 'landing.custom_subscription.day.wednesday'|t }}</button>
+                                    <button type="button" class="day-btn" data-day="4">{{ 'landing.custom_subscription.day.thursday'|t }}</button>
+                                    <button type="button" class="day-btn" data-day="5">{{ 'landing.custom_subscription.day.friday'|t }}</button>
+                                    <button type="button" class="day-btn" data-day="6">{{ 'landing.custom_subscription.day.saturday'|t }}</button>
+                                    <button type="button" class="day-btn" data-day="0">{{ 'landing.custom_subscription.day.sunday'|t }}</button>
                                 </div>
                             </div>
 
                             <!-- Time Slot Selection -->
                             <div>
-                                <h4 style="margin-bottom: 20px; color: #262626;">{{ 'Preferred Time Slot'|translate(current_language) }}</h4>
+                                <h4 style="margin-bottom: 20px; color: #262626;">{{ 'landing.custom_subscription.time_slot'|t }}</h4>
                                 <select id="time-slots-select" style="width: 100%; padding: 12px 16px; border: 2px solid #e5e5e5; border-radius: 8px; font-size: 16px; font-weight: 500; color: #333; background: #fff; cursor: pointer; transition: all 0.3s ease;">
-                                    <option value="">{{ 'Select a time slot'|translate(current_language) }}</option>
+                                    <option value="">{{ 'landing.custom_subscription.select_time_slot'|t }}</option>
                                     <!-- Time slots will be dynamically loaded -->
                                 </select>
                             </div>
@@ -523,7 +523,7 @@
 
                         <!-- Step 3: Delivery Address -->
                         <div class="constructor-panel" id="step-3">
-                            <h3 style="margin-bottom: 30px; text-align: center;">{{ 'Select Delivery Address'|translate(current_language) }}</h3>
+                            <h3 style="margin-bottom: 30px; text-align: center;">{{ 'landing.custom_subscription.select_address'|t }}</h3>
                             <div id="addresses-list" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px;">
                                 <!-- Addresses will be dynamically loaded -->
                             </div>
@@ -531,7 +531,7 @@
 
                         <!-- Step 4: Payment Method -->
                         <div class="constructor-panel" id="step-4">
-                            <h3 style="margin-bottom: 30px; text-align: center;">{{ 'Choose Payment Method'|translate(current_language) }}</h3>
+                            <h3 style="margin-bottom: 30px; text-align: center;">{{ 'landing.custom_subscription.choose_payment'|t }}</h3>
                             <div id="payment-methods-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; max-width: 800px; margin: 0 auto;">
                                 <!-- Payment methods will be dynamically loaded -->
                             </div>
@@ -539,7 +539,7 @@
 
                         <!-- Step 5: Review & Confirm -->
                         <div class="constructor-panel" id="step-5">
-                            <h3 style="margin-bottom: 30px; text-align: center;">{{ 'Review Your Subscription'|translate(current_language) }}</h3>
+                            <h3 style="margin-bottom: 30px; text-align: center;">{{ 'landing.custom_subscription.review'|t }}</h3>
                             <div id="review-container">
                                 <!-- Review will be dynamically rendered -->
                             </div>
@@ -549,20 +549,20 @@
                     <!-- Navigation -->
                     <div class="constructor-navigation">
                         <button type="button" class="nav-btn nav-btn-prev" style="display: none;">
-                            {{ 'Previous'|translate(current_language) }}
+                            {{ 'landing.custom_subscription.button.previous'|t }}
                         </button>
                         <button type="button" class="nav-btn nav-btn-next">
-                            {{ 'Next'|translate(current_language) }}
+                            {{ 'landing.custom_subscription.button.next'|t }}
                         </button>
                         <button type="button" class="nav-btn nav-btn-submit" style="display: none;">
-                            {{ 'Create Subscription'|translate(current_language) }}
+                            {{ 'landing.custom_subscription.button.create'|t }}
                         </button>
                     </div>
                 </div>
 
                 <!-- View All Subscriptions Button -->
                 <div class="more-btn centred" style="margin-top: 50px;">
-                    <a href="{{ url_for('frontend.subscriptions') }}" class="theme-btn btn-one">{{ 'Manage My Subscriptions'|translate(current_language) }}</a>
+                    <a href="{{ url_for('frontend.subscriptions') }}" class="theme-btn btn-one">{{ 'landing.custom_subscription.manage_subscriptions'|t }}</a>
                 </div>
             </div>
         </section>
@@ -590,7 +590,7 @@
             <div class="map-layer" style="background-image: url({{ url_for('static', filename='images/icons/map-1.png') }});"></div>
             <div class="auto-container">
                 <div class="sec-title">
-                    <h2>{{ 'What Our Customers are Saying'|translate(current_language) }} <br />{{ 'About Blue Stream'|translate(current_language) }}</h2>
+                    <h2>{{ 'landing.testimonials.title_line1'|t }} <br />{{ 'landing.testimonials.title_line2'|t }}</h2>
                 </div>
                 <div class="row clearfix">
                     <div class="col-xl-8 col-lg-12 col-md-12 offset-xl-2">
@@ -606,9 +606,9 @@
                                             <li><i class="fas fa-star"></i></li>
                                             <li><i class="fas fa-star"></i></li>
                                         </ul>
-                                        <p>{{ 'Excellent service! The water quality is outstanding and delivery is always on time. Blue Stream has become an essential part of our daily routine for healthy living.'|translate(current_language) }}</p>
+                                        <p>{{ 'landing.testimonials.customer1.text'|t }}</p>
                                         <h5>Aziza Karimova</h5>
-                                        <span class="designation">{{ 'Satisfied Customer'|translate(current_language) }}</span>
+                                        <span class="designation">{{ 'landing.testimonials.customer1.designation'|t }}</span>
                                     </div>
                                 </div>
                             </div>
@@ -623,9 +623,9 @@
                                             <li><i class="fas fa-star"></i></li>
                                             <li><i class="fas fa-star"></i></li>
                                         </ul>
-                                        <p>{{ 'Professional service and great value for money. The subscription plan saves us time and money. Highly recommended for businesses and families.'|translate(current_language) }}</p>
+                                        <p>{{ 'landing.testimonials.customer2.text'|t }}</p>
                                         <h5>Rustam Abdullaev</h5>
-                                        <span class="designation">{{ 'Business Owner'|translate(current_language) }}</span>
+                                        <span class="designation">{{ 'landing.testimonials.customer2.designation'|t }}</span>
                                     </div>
                                 </div>
                             </div>
@@ -640,9 +640,9 @@
                                             <li><i class="fas fa-star"></i></li>
                                             <li><i class="fas fa-star"></i></li>
                                         </ul>
-                                        <p>{{ 'Clean, pure water delivered right to our office. The team is professional and the quality is consistent. Very happy with their reliable service.'|translate(current_language) }}</p>
+                                        <p>{{ 'landing.testimonials.customer3.text'|t }}</p>
                                         <h5>Malika Tasheva</h5>
-                                        <span class="designation">{{ 'Office Manager'|translate(current_language) }}</span>
+                                        <span class="designation">{{ 'landing.testimonials.customer3.designation'|t }}</span>
                                     </div>
                                 </div>
                             </div>
@@ -673,26 +673,26 @@
         <section class="news-section">
             <div class="auto-container">
                 <div class="sec-title centred">
-                    <h2>{{ 'Stay Updated with Blue Stream'|translate(current_language) }}</h2>
-                    <p>{{ 'Latest news, updates, and announcements from our company'|translate(current_language) }}</p>
+                    <h2>{{ 'landing.news.title'|t }}</h2>
+                    <p>{{ 'landing.news.subtitle'|t }}</p>
                 </div>
                 <div class="row clearfix">
                     <div class="col-lg-4 col-md-6 col-sm-12 news-block">
                         <div class="news-block-one wow fadeInUp animated" data-wow-delay="00ms" data-wow-duration="1500ms">
                             <div class="inner-box">
-                                <figure class="image-box"><a href="#"><img src="{{ url_for('static', filename='images/news/news-1.jpg') }}" alt="{{ 'Water Delivery News'|translate(current_language) }}"></a></figure>
+                                <figure class="image-box"><a href="#"><img src="{{ url_for('static', filename='images/news/news-1.jpg') }}" alt="{{ 'landing.image.water_delivery_news'|t }}"></a></figure>
                                 <div class="lower-content">
-                                    <div class="category"><a href="#">{{ 'Company News'|translate(current_language) }}</a></div>
-                                    <h4><a href="#">{{ 'Blue Stream Expands Delivery Network Across Uzbekistan'|translate(current_language) }}</a></h4>
+                                    <div class="category"><a href="#">{{ 'landing.news.article1.category'|t }}</a></div>
+                                    <h4><a href="#">{{ 'landing.news.article1.title'|t }}</a></h4>
                                     <ul class="post-info clearfix">
-                                        <li><a href="#">{{ 'Admin'|translate(current_language) }}</a></li>
-                                        <li>{{ 'Jan 15, 2024'|translate(current_language) }}</li>
+                                        <li><a href="#">{{ 'landing.news.article1.author'|t }}</a></li>
+                                        <li>{{ 'landing.news.article1.date'|t }}</li>
                                     </ul>
                                     <div class="text">
-                                        <p>{{ 'We are excited to announce the expansion of our delivery network to serve more communities across Uzbekistan with premium quality water.'|translate(current_language) }}</p>
+                                        <p>{{ 'landing.news.article1.description'|t }}</p>
                                     </div>
                                     <div class="btn-box">
-                                        <a href="#" class="theme-btn btn-two">{{ 'Learn More'|translate(current_language) }}</a>
+                                        <a href="#" class="theme-btn btn-two">{{ 'landing.button.learn_more'|t }}</a>
                                     </div>
                                 </div>
                             </div>
@@ -701,19 +701,19 @@
                     <div class="col-lg-4 col-md-6 col-sm-12 news-block">
                         <div class="news-block-one wow fadeInUp animated" data-wow-delay="300ms" data-wow-duration="1500ms">
                             <div class="inner-box">
-                                <figure class="image-box"><a href="#"><img src="{{ url_for('static', filename='images/news/news-2.jpg') }}" alt="{{ 'Health Tips'|translate(current_language) }}"></a></figure>
+                                <figure class="image-box"><a href="#"><img src="{{ url_for('static', filename='images/news/news-2.jpg') }}" alt="{{ 'landing.image.health_tips_news'|t }}"></a></figure>
                                 <div class="lower-content">
-                                    <div class="category"><a href="#">{{ 'Updates'|translate(current_language) }}</a></div>
-                                    <h4><a href="#">{{ 'New Mobile App for Convenient Water Ordering'|translate(current_language) }}</a></h4>
+                                    <div class="category"><a href="#">{{ 'landing.news.article2.category'|t }}</a></div>
+                                    <h4><a href="#">{{ 'landing.news.article2.title'|t }}</a></h4>
                                     <ul class="post-info clearfix">
-                                        <li><a href="#">{{ 'Tech Team'|translate(current_language) }}</a></li>
-                                        <li>{{ 'Dec 20, 2023'|translate(current_language) }}</li>
+                                        <li><a href="#">{{ 'landing.news.article2.author'|t }}</a></li>
+                                        <li>{{ 'landing.news.article2.date'|t }}</li>
                                     </ul>
                                     <div class="text">
-                                        <p>{{ 'Download our new mobile app to order water, track deliveries, and manage your subscription all from your smartphone.'|translate(current_language) }}</p>
+                                        <p>{{ 'landing.news.article2.description'|t }}</p>
                                     </div>
                                     <div class="btn-box">
-                                        <a href="#" class="theme-btn btn-two">{{ 'Learn More'|translate(current_language) }}</a>
+                                        <a href="#" class="theme-btn btn-two">{{ 'landing.button.learn_more'|t }}</a>
                                     </div>
                                 </div>
                             </div>
@@ -722,19 +722,19 @@
                     <div class="col-lg-4 col-md-6 col-sm-12 news-block">
                         <div class="news-block-one wow fadeInUp animated" data-wow-delay="600ms" data-wow-duration="1500ms">
                             <div class="inner-box">
-                                <figure class="image-box"><a href="#"><img src="{{ url_for('static', filename='images/news/news-3.jpg') }}" alt="{{ 'Quality Standards'|translate(current_language) }}"></a></figure>
+                                <figure class="image-box"><a href="#"><img src="{{ url_for('static', filename='images/news/news-3.jpg') }}" alt="{{ 'landing.image.quality_standards_news'|t }}"></a></figure>
                                 <div class="lower-content">
-                                    <div class="category"><a href="#">{{ 'Quality Assurance'|translate(current_language) }}</a></div>
-                                    <h4><a href="#">{{ 'New Quality Standards and Certification Achieved'|translate(current_language) }}</a></h4>
+                                    <div class="category"><a href="#">{{ 'landing.news.article3.category'|t }}</a></div>
+                                    <h4><a href="#">{{ 'landing.news.article3.title'|t }}</a></h4>
                                     <ul class="post-info clearfix">
-                                        <li><a href="#">{{ 'Quality Team'|translate(current_language) }}</a></li>
-                                        <li>{{ 'Nov 10, 2023'|translate(current_language) }}</li>
+                                        <li><a href="#">{{ 'landing.news.article3.author'|t }}</a></li>
+                                        <li>{{ 'landing.news.article3.date'|t }}</li>
                                     </ul>
                                     <div class="text">
-                                        <p>{{ 'Blue Stream has achieved new international quality certifications, ensuring the highest standards in water purification and delivery.'|translate(current_language) }}</p>
+                                        <p>{{ 'landing.news.article3.description'|t }}</p>
                                     </div>
                                     <div class="btn-box">
-                                        <a href="#" class="theme-btn btn-two">{{ 'Learn More'|translate(current_language) }}</a>
+                                        <a href="#" class="theme-btn btn-two">{{ 'landing.button.learn_more'|t }}</a>
                                     </div>
                                 </div>
                             </div>

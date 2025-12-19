@@ -26,13 +26,20 @@ class LanguageHandler:
             user = await user_middleware(update)
             if not user:
                 return
-            
+
             user_id = update.effective_user.id
             current_language = await i18n.get_user_language(user_id)
-            
-            menu_text = f"{i18n.get('menu_language', current_language)}\n\nSelect your preferred language:"
+
+            # Build enhanced language selection message
+            current_flag = i18n.get_language_flag(current_language)
+            current_name = i18n.get_language_name(current_language, current_language)
+
+            menu_text = f"🌐 {i18n.get('telegram.menu.language', current_language)}\n\n"
+            menu_text += f"{i18n.get('telegram.language.current', current_language)}: {current_flag} {current_name}\n\n"
+            menu_text += f"{i18n.get('telegram.language.select_prompt', current_language)}"
+
             keyboard = LanguageKeyboards.language_selection(current_language)
-            
+
             if update.callback_query:
                 await update.callback_query.edit_message_text(
                     text=menu_text,
@@ -44,16 +51,16 @@ class LanguageHandler:
                     text=menu_text,
                     reply_markup=keyboard
                 )
-            
-            logger.info(f"Language menu displayed for user {user_id}")
-            
+
+            logger.info(f"Language menu displayed for user {user_id} (current: {current_language})")
+
         except Exception as e:
             logger.error(f"Error in language menu: {e}")
-            
+
             try:
                 language = await i18n.get_user_language(update.effective_user.id)
                 error_msg = i18n.get('error_occurred', language)
-                
+
                 if update.callback_query:
                     await update.callback_query.answer(error_msg)
                 else:
@@ -66,41 +73,58 @@ class LanguageHandler:
         try:
             query = update.callback_query
             user_id = update.effective_user.id
-            
+
             # Extract language code from callback data
             language_code = query.data.split('_')[-1]
-            
+
+            # Get current language before change
+            current_language = await i18n.get_user_language(user_id)
+
             # Validate language code
             if language_code not in config.localization.supported_languages:
-                await query.answer("❌ Invalid language selection")
+                await query.answer(i18n.get('telegram.language.invalid_selection', current_language))
                 return
-            
+
+            # Check if already using this language
+            if language_code == current_language:
+                flag = i18n.get_language_flag(language_code)
+                language_name = i18n.get_language_name(language_code, language_code)
+                already_using_msg = i18n.get('telegram.language.already_selected', language_code)
+                await query.answer(f"{flag} {already_using_msg}")
+                return
+
             # Update user language in database
             await self.user_repo.update_user_language(user_id, language_code)
-            
-            # Show success message in new language
-            success_msg = i18n.get('success', language_code)
+
+            # Build comprehensive success message with language preview
             flag = i18n.get_language_flag(language_code)
             language_name = i18n.get_language_name(language_code, language_code)
-            
-            await query.answer(f"{flag} Language changed to {language_name}")
-            
+
+            # Show popup notification
+            success_msg = i18n.get('telegram.language.changed_success', language_code)
+            await query.answer(f"{flag} {success_msg}", show_alert=False)
+
+            # Build detailed confirmation message showing language change
+            confirmation_text = f"{flag} {i18n.get('telegram.language.confirmation_title', language_code)}\n\n"
+            confirmation_text += f"✅ {i18n.get('telegram.language.now_using', language_code, language=language_name)}\n\n"
+            confirmation_text += f"{i18n.get('telegram.language.confirmation_message', language_code)}"
+
             # Return to main menu with new language
-            menu_text = i18n.get('main_menu', language_code)
             keyboard = MenuKeyboards.main_menu(language_code)
-            
+
             await query.edit_message_text(
-                text=menu_text,
+                text=confirmation_text,
                 reply_markup=keyboard
             )
-            
-            logger.info(f"User {user_id} changed language to {language_code}")
-            
+
+            logger.info(f"User {user_id} changed language from {current_language} to {language_code}")
+
         except Exception as e:
             logger.error(f"Error setting language: {e}")
-            
+
             try:
-                await update.callback_query.answer("❌ Error changing language")
+                current_language = await i18n.get_user_language(user_id)
+                await update.callback_query.answer(i18n.get('telegram.language.error_changing', current_language))
             except:
                 pass
 

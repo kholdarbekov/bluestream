@@ -1,6 +1,6 @@
 {% extends "frontend/base.html" %}
 
-{% block title %}{{ 'Track Order'|translate(current_language) }} #{{ order.order_number }} - {{ company_name }}{% endblock %}
+{% block title %}{{ 'Track Order'|t }} #{{ order.order_number }} - {{ company_name }}{% endblock %}
 
 {% block extra_head %}
 <style>
@@ -323,11 +323,11 @@
             <div class="tracking-header">
                 <h2>
                     <i class="far fa-map-marker-alt"></i>
-                    {{ 'Track Order'|translate(current_language) }} #{{ order.order_number }}
+                    {{ 'Track Order'|t }} #{{ order.order_number }}
                 </h2>
                 <div class="order-meta">
                     <span><i class="far fa-calendar"></i> {{ order.created_at.strftime('%B %d, %Y at %I:%M %p') }}</span>
-                    <span><i class="far fa-box"></i> {{ order.order_items|length }} {{ 'items'|translate(current_language) }}</span>
+                    <span><i class="far fa-box"></i> {{ order.order_items|length }} {{ 'items'|t }}</span>
                     <span><i class="far fa-money-bill"></i> {{ "{:,.0f}".format(order.total_amount) }} UZS</span>
                 </div>
             </div>
@@ -344,7 +344,7 @@
                     <div class="map-container">
                         <div class="map-placeholder">
                             <i class="far fa-map"></i>
-                            <p>{{ 'Delivery location will be shown here'|translate(current_language) }}</p>
+                            <p>{{ 'Delivery location will be shown here'|t }}</p>
                         </div>
                     </div>
                     {% endif %}
@@ -352,7 +352,7 @@
                     <!-- Status Timeline -->
                     <div class="status-timeline">
                         <h3 style="margin-bottom: 30px; font-size: 20px; color: #222;">
-                            {{ 'Order Status'|translate(current_language) }}
+                            {{ 'Order Status'|t }}
                         </h3>
 
                         <!-- Pending -->
@@ -360,9 +360,9 @@
                             <div class="timeline-icon">
                                 <i class="far fa-clock"></i>
                             </div>
-                            <div class="timeline-title">{{ 'Order Placed'|translate(current_language) }}</div>
+                            <div class="timeline-title">{{ 'Order Placed'|t }}</div>
                             <div class="timeline-time">{{ order.created_at.strftime('%B %d, %Y at %I:%M %p') }}</div>
-                            <div class="timeline-description">{{ 'Your order has been received and is being processed'|translate(current_language) }}</div>
+                            <div class="timeline-description">{{ 'Your order has been received and is being processed'|t }}</div>
                         </div>
 
                         <!-- Confirmed -->
@@ -370,12 +370,12 @@
                             <div class="timeline-icon">
                                 <i class="far fa-check-circle"></i>
                             </div>
-                            <div class="timeline-title">{{ 'Order Confirmed'|translate(current_language) }}</div>
+                            <div class="timeline-title">{{ 'Order Confirmed'|t }}</div>
                             {% if order.status.value in ['confirmed', 'preparing', 'out_for_delivery', 'delivered'] %}
                             <div class="timeline-time">{{ order.updated_at.strftime('%B %d, %Y at %I:%M %p') }}</div>
-                            <div class="timeline-description">{{ 'Payment confirmed and order is being prepared'|translate(current_language) }}</div>
+                            <div class="timeline-description">{{ 'Payment confirmed and order is being prepared'|t }}</div>
                             {% else %}
-                            <div class="timeline-description">{{ 'Waiting for confirmation'|translate(current_language) }}</div>
+                            <div class="timeline-description">{{ 'Waiting for confirmation'|t }}</div>
                             {% endif %}
                         </div>
 
@@ -384,11 +384,11 @@
                             <div class="timeline-icon">
                                 <i class="far fa-box"></i>
                             </div>
-                            <div class="timeline-title">{{ 'Order Preparing'|translate(current_language) }}</div>
+                            <div class="timeline-title">{{ 'Order Preparing'|t }}</div>
                             {% if order.status.value in ['preparing', 'out_for_delivery', 'delivered'] %}
-                            <div class="timeline-description">{{ 'Your order is being prepared for delivery'|translate(current_language) }}</div>
+                            <div class="timeline-description">{{ 'Your order is being prepared for delivery'|t }}</div>
                             {% else %}
-                            <div class="timeline-description">{{ 'Order will be prepared soon'|translate(current_language) }}</div>
+                            <div class="timeline-description">{{ 'Order will be prepared soon'|t }}</div>
                             {% endif %}
                         </div>
 
@@ -397,20 +397,20 @@
                             <div class="timeline-icon">
                                 <i class="far fa-truck"></i>
                             </div>
-                            <div class="timeline-title">{{ 'Out for Delivery'|translate(current_language) }}</div>
+                            <div class="timeline-title">{{ 'Out for Delivery'|t }}</div>
                             {% if delivery and delivery.status and delivery.status.value == 'in_transit' %}
                             <div class="timeline-time">{{ delivery.updated_at.strftime('%B %d, %Y at %I:%M %p') }}</div>
                             <div class="timeline-description">
-                                {{ 'Your order is on the way'|translate(current_language) }}
+                                {{ 'Your order is on the way'|t }}
                                 {% if delivery.driver %}
-                                <br><strong>{{ 'Driver'|translate(current_language) }}:</strong> {{ delivery.driver.name }}
-                                {% if delivery.driver.phone %}<br><strong>{{ 'Phone'|translate(current_language) }}:</strong> {{ delivery.driver.phone }}{% endif %}
+                                <br><strong>{{ 'Driver'|t }}:</strong> {{ delivery.driver.name }}
+                                {% if delivery.driver.phone %}<br><strong>{{ 'landing.contact.info.phone'|t }}:</strong> {{ delivery.driver.phone }}{% endif %}
                                 {% endif %}
                             </div>
                             {% elif order.status.value == 'delivered' %}
-                            <div class="timeline-description">{{ 'Delivery completed'|translate(current_language) }}</div>
+                            <div class="timeline-description">{{ 'Delivery completed'|t }}</div>
                             {% else %}
-                            <div class="timeline-description">{{ 'Delivery will start soon'|translate(current_language) }}</div>
+                            <div class="timeline-description">{{ 'Delivery will start soon'|t }}</div>
                             {% endif %}
                         </div>
 
@@ -419,14 +419,14 @@
                             <div class="timeline-icon">
                                 <i class="far fa-check-double"></i>
                             </div>
-                            <div class="timeline-title">{{ 'Delivered'|translate(current_language) }}</div>
+                            <div class="timeline-title">{{ 'Delivered'|t }}</div>
                             {% if order.status.value == 'delivered' %}
                             {% if delivery and delivery.delivered_at %}
                             <div class="timeline-time">{{ delivery.delivered_at.strftime('%B %d, %Y at %I:%M %p') }}</div>
                             {% endif %}
-                            <div class="timeline-description">{{ 'Your order has been delivered successfully'|translate(current_language) }}</div>
+                            <div class="timeline-description">{{ 'Your order has been delivered successfully'|t }}</div>
                             {% else %}
-                            <div class="timeline-description">{{ 'Estimated delivery'|translate(current_language) }}: {{ order.delivery_date.strftime('%B %d, %Y') if order.delivery_date else 'TBD' }}</div>
+                            <div class="timeline-description">{{ 'Estimated delivery'|t }}: {{ order.delivery_date.strftime('%B %d, %Y') if order.delivery_date else 'TBD' }}</div>
                             {% endif %}
                         </div>
                     </div>
@@ -434,7 +434,7 @@
                     {% if order.status.value in ['pending', 'confirmed', 'preparing', 'out_for_delivery'] %}
                     <div class="refresh-notice">
                         <i class="far fa-sync"></i>
-                        {{ 'This page automatically refreshes every 30 seconds to show the latest status'|translate(current_language) }}
+                        {{ 'This page automatically refreshes every 30 seconds to show the latest status'|t }}
                     </div>
                     {% endif %}
                 </div>
@@ -443,18 +443,18 @@
                 <div class="sidebar-info">
                     <!-- Order Summary -->
                     <div class="info-section">
-                        <h4>{{ 'Order Summary'|translate(current_language) }}</h4>
+                        <h4>{{ 'Order Summary'|t }}</h4>
                         <div class="info-row">
-                            <span class="info-label">{{ 'Status'|translate(current_language) }}:</span>
+                            <span class="info-label">{{ 'Status'|t }}:</span>
                             <span class="info-value">
                                 <span class="status-badge {{ order.status.value }}">{{ order.status.value|replace('_', ' ')|title }}</span>
                             </span>
                         </div>
                         <div class="info-row">
-                            <span class="info-label">{{ 'Payment'|translate(current_language) }}:</span>
+                            <span class="info-label">{{ 'Payment'|t }}:</span>
                             <span class="info-value">
                                 {% if order.payment_method == 'cash' %}
-                                    {{ 'Cash on Delivery'|translate(current_language) }}
+                                    {{ 'Cash on Delivery'|t }}
                                 {% elif order.payment_method == 'payme' %}
                                     Payme
                                 {% elif order.payment_method == 'click' %}
@@ -465,7 +465,7 @@
                             </span>
                         </div>
                         <div class="info-row">
-                            <span class="info-label">{{ 'Total'|translate(current_language) }}:</span>
+                            <span class="info-label">{{ 'Total'|t }}:</span>
                             <span class="info-value" style="color: #00d1f9; font-weight: 700;">{{ "{:,.0f}".format(order.total_amount) }} UZS</span>
                         </div>
                     </div>
@@ -473,20 +473,20 @@
                     <!-- Delivery Address -->
                     {% if delivery %}
                     <div class="info-section">
-                        <h4>{{ 'Delivery Address'|translate(current_language) }}</h4>
+                        <h4>{{ 'Delivery Address'|t }}</h4>
                         <p style="color: #666; line-height: 1.6; font-size: 14px;">
                             {% if delivery.recipient_name %}{{ delivery.recipient_name }}<br>{% endif %}
                             {{ delivery.delivery_address_line1 }}<br>
                             {% if delivery.delivery_address_line2 %}{{ delivery.delivery_address_line2 }}<br>{% endif %}
                             {{ delivery.delivery_city }}{% if delivery.delivery_postal_code %}, {{ delivery.delivery_postal_code }}{% endif %}<br>
-                            {% if delivery.recipient_phone %}<strong>{{ 'Phone'|translate(current_language) }}:</strong> {{ delivery.recipient_phone }}{% endif %}
+                            {% if delivery.recipient_phone %}<strong>{{ 'landing.contact.info.phone'|t }}:</strong> {{ delivery.recipient_phone }}{% endif %}
                         </p>
                     </div>
                     {% endif %}
 
                     <!-- Order Items -->
                     <div class="info-section">
-                        <h4>{{ 'Order Items'|translate(current_language) }} ({{ order.order_items|length }})</h4>
+                        <h4>{{ 'Order Items'|t }} ({{ order.order_items|length }})</h4>
                         <div class="order-items">
                             {% for item in order.order_items %}
                             <div class="order-item">
@@ -495,7 +495,7 @@
                                      class="item-image">
                                 <div class="item-details">
                                     <div class="item-name">{{ item.product.name }}</div>
-                                    <div class="item-qty">{{ 'Qty'|translate(current_language) }}: {{ item.quantity }}</div>
+                                    <div class="item-qty">{{ 'Qty'|t }}: {{ item.quantity }}</div>
                                 </div>
                                 <div class="item-price">{{ "{:,.0f}".format(item.total_price) }} UZS</div>
                             </div>
@@ -507,11 +507,11 @@
                     <div class="action-buttons">
                         {% if order.status.value in ['pending', 'confirmed'] and order.can_be_cancelled() %}
                         <button onclick="cancelOrder()" class="theme-btn btn-three">
-                            <i class="far fa-times"></i> {{ 'Cancel Order'|translate(current_language) }}
+                            <i class="far fa-times"></i> {{ 'Cancel Order'|t }}
                         </button>
                         {% endif %}
                         <a href="{{ url_for('frontend.my_orders') }}" class="theme-btn btn-two">
-                            <i class="far fa-list"></i> {{ 'All Orders'|translate(current_language) }}
+                            <i class="far fa-list"></i> {{ 'All Orders'|t }}
                         </a>
                     </div>
                 </div>
@@ -545,7 +545,7 @@ function initMap() {
     deliveryMarker = new google.maps.Marker({
         position: deliveryLocation,
         map: map,
-        title: '{{ "Delivery Location"|translate(current_language) }}',
+        title: '{{ "Delivery Location"|t }}',
         icon: {
             url: 'https://maps.google.com/mapfiles/ms/icons/red-dot.png'
         }
@@ -555,7 +555,7 @@ function initMap() {
     const infoWindow = new google.maps.InfoWindow({
         content: `
             <div style="padding: 10px;">
-                <h4 style="margin: 0 0 5px 0;">{{ "Delivery Location"|translate(current_language) }}</h4>
+                <h4 style="margin: 0 0 5px 0;">{{ "Delivery Location"|t }}</h4>
                 <p style="margin: 0; color: #666;">{{ delivery.delivery_address_line1 }}</p>
             </div>
         `
@@ -578,11 +578,11 @@ let refreshInterval = setInterval(function() {
 
 // Cancel order function
 function cancelOrder() {
-    if (!confirm('{{ "Are you sure you want to cancel this order?"|translate(current_language) }}')) {
+    if (!confirm('{{ "Are you sure you want to cancel this order?"|t }}')) {
         return;
     }
 
-    const reason = prompt('{{ "Please provide a reason for cancellation (optional)"|translate(current_language) }}');
+    const reason = prompt('{{ "Please provide a reason for cancellation (optional)"|t }}');
 
     fetch('/api/v1/orders/{{ order.id }}/cancel', {
         method: 'POST',
@@ -595,15 +595,15 @@ function cancelOrder() {
     .then(response => response.json())
     .then(data => {
         if (data.success) {
-            showNotification('{{ "Order cancelled successfully"|translate(current_language) }}', 'success');
+            showNotification('{{ "Order cancelled successfully"|t }}', 'success');
             setTimeout(() => location.reload(), 1500);
         } else {
-            showNotification(data.message || '{{ "Failed to cancel order"|translate(current_language) }}', 'error');
+            showNotification(data.message || '{{ "Failed to cancel order"|t }}', 'error');
         }
     })
     .catch(error => {
         console.error('Error cancelling order:', error);
-        showNotification('{{ "An error occurred. Please try again."|translate(current_language) }}', 'error');
+        showNotification('{{ "An error occurred. Please try again."|t }}', 'error');
     });
 }
 </script>

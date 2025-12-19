@@ -49,31 +49,31 @@ class LoyaltyHandlers:
                     rewards = []
             
             # Build loyalty message
-            loyalty_text = f"{i18n.get('loyalty_title', language)}\n\n"
-            loyalty_text += f"🏆 {i18n.get('loyalty_balance', language, current_points)}\n"
-            loyalty_text += f"📈 Lifetime Earned: {lifetime_points} points\n\n"
-            
+            loyalty_text = f"{i18n.get('telegram.menu.loyalty', language)}\n\n"
+            loyalty_text += f"🏆 {i18n.get('telegram.loyalty.current_balance', language)}: {current_points} points\n"
+            loyalty_text += f"📈 {i18n.get('telegram.loyalty.lifetime_earned', language)}: {lifetime_points} points\n\n"
+
             if rewards:
-                loyalty_text += f"🎁 Available Rewards ({len(rewards)}):\n"
+                loyalty_text += f"🎁 {i18n.get('telegram.loyalty.available_rewards', language)} ({len(rewards)}):\n"
                 for reward in rewards[:3]:  # Show first 3 rewards
                     loyalty_text += f"• {reward.get('name', 'Reward')} - {reward.get('points_cost', 0)} points\n"
-                
+
                 if len(rewards) > 3:
-                    loyalty_text += f"...and {len(rewards) - 3} more rewards"
+                    loyalty_text += i18n.get('telegram.loyalty.and_more', language, count=len(rewards) - 3)
             else:
-                loyalty_text += "🎁 No rewards available at the moment."
+                loyalty_text += i18n.get('telegram.loyalty.no_rewards_available', language)
             
             # Create simple keyboard
             keyboard_buttons = [
                 [
-                    {'text': '📊 Points History', 'callback_data': 'loyalty_history'},
-                    {'text': '🎁 View Rewards', 'callback_data': 'loyalty_rewards'}
+                    {'text': i18n.get('telegram.loyalty.points_history', language), 'callback_data': 'loyalty_history'},
+                    {'text': i18n.get('telegram.loyalty.view_rewards', language), 'callback_data': 'loyalty_rewards'}
                 ],
                 [
-                    {'text': '👥 Refer Friends', 'callback_data': 'loyalty_referral'},
+                    {'text': i18n.get('telegram.loyalty.refer_friends', language), 'callback_data': 'loyalty_referral'},
                 ],
                 [
-                    {'text': i18n.get('back', language), 'callback_data': 'back_to_main'}
+                    {'text': i18n.get('telegram.back', language), 'callback_data': 'back_to_main'}
                 ]
             ]
             
@@ -111,25 +111,28 @@ class LoyaltyHandlers:
                 history = response.data.get('history', [])
             
             if not history:
-                history_text = "📊 Points History\n\nNo points transactions yet."
+                history_text = i18n.get('telegram.loyalty.points_history', language) + "\n\n" + i18n.get('telegram.loyalty.no_history', language)
             else:
-                history_text = "📊 Points History\n\n"
+                history_text = i18n.get('telegram.loyalty.points_history', language) + "\n\n"
                 for transaction in history[:10]:  # Show last 10 transactions
                     date = transaction.get('created_at', '')[:10]
                     points = transaction.get('points', 0)
                     transaction_type = transaction.get('transaction_type', 'unknown')
-                    
+
                     if transaction_type == 'earned':
                         icon = "🟢"
                         sign = "+"
+                        type_label = i18n.get('telegram.loyalty.transaction_earned', language)
                     elif transaction_type == 'redeemed':
                         icon = "🔴"
                         sign = "-"
+                        type_label = i18n.get('telegram.loyalty.transaction_redeemed', language)
                     else:
                         icon = "🟡"
                         sign = ""
-                    
-                    history_text += f"{icon} {sign}{points} points - {transaction_type.title()}\n"
+                        type_label = transaction_type.title()
+
+                    history_text += f"{icon} {sign}{points} points - {type_label}\n"
                     history_text += f"   {date}\n\n"
             
             keyboard = MenuKeyboards.back_button(language)
@@ -158,9 +161,9 @@ class LoyaltyHandlers:
                 
                 response = await client.redeem_reward(user_token, reward_id)
                 if response.success:
-                    success_msg = "🎉 Reward redeemed successfully!"
+                    success_msg = i18n.get('telegram.loyalty.redeem_success', language)
                     await query.answer(success_msg)
-                    
+
                     # Return to loyalty menu
                     await self.loyalty_menu(update, context)
                 else:
@@ -172,7 +175,7 @@ class LoyaltyHandlers:
     
     async def _handle_auth_error(self, update: Update, language: str):
         """Handle authentication error"""
-        error_msg = "❌ Authentication failed. Please restart the bot with /start"
+        error_msg = i18n.get('telegram.error.auth_failed', language)
         if update.callback_query:
             await update.callback_query.edit_message_text(error_msg)
             await update.callback_query.answer()
@@ -191,10 +194,10 @@ class LoyaltyHandlers:
         """Handle general error"""
         try:
             language = await i18n.get_user_language(update.effective_user.id)
-            error_msg = i18n.get('error_occurred', language)
+            error_msg = i18n.get('telegram.error_occurred', language)
         except:
-            error_msg = "❌ An error occurred. Please try again."
-        
+            error_msg = i18n.get('telegram.error_occurred', 'en')
+
         if update.callback_query:
             await update.callback_query.answer(error_msg)
         else:

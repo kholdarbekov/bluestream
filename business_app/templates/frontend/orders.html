@@ -1,6 +1,6 @@
 {% extends "frontend/base.html" %}
 
-{% block title %}{{ 'My Orders'|translate(current_language) }} - {{ company_name }}{% endblock %}
+{% block title %}{{ 'landing.account.orders'|t }} - {{ company_name }}{% endblock %}
 
 {% block content %}
 <!-- page-title -->
@@ -8,11 +8,11 @@
     <div class="bg-layer" style="background-image: url({{ url_for('static', filename='images/background/page-title.jpg') }});"></div>
     <div class="auto-container">
         <div class="content-box">
-            <h1>{{ 'My Orders'|translate(current_language) }}</h1>
+            <h1>{{ 'landing.account.orders'|t }}</h1>
             <ul class="bread-crumb clearfix">
-                <li><a href="{{ url_for('frontend.index') }}">{{ 'Home'|translate(current_language) }}</a></li>
-                <li><a href="{{ url_for('frontend.my_account') }}">{{ 'My Account'|translate(current_language) }}</a></li>
-                <li>{{ 'Orders'|translate(current_language) }}</li>
+                <li><a href="{{ url_for('frontend.index') }}">{{ 'landing.nav.home'|t }}</a></li>
+                <li><a href="{{ url_for('frontend.my_account') }}">{{ 'landing.nav.my_account'|t }}</a></li>
+                <li>{{ 'Orders'|t }}</li>
             </ul>
         </div>
     </div>
@@ -40,42 +40,42 @@
                         <ul class="list-unstyled">
                             <li>
                                 <a href="{{ url_for('frontend.my_account') }}">
-                                    <i class="far fa-tachometer-alt"></i> {{ 'Dashboard'|translate(current_language) }}
+                                    <i class="far fa-tachometer-alt"></i> {{ 'Dashboard'|t }}
                                 </a>
                             </li>
                             <li>
                                 <a href="{{ url_for('frontend.profile_settings') }}">
-                                    <i class="far fa-user-edit"></i> {{ 'Profile Settings'|translate(current_language) }}
+                                    <i class="far fa-user-edit"></i> {{ 'Profile Settings'|t }}
                                 </a>
                             </li>
                             <li class="active">
                                 <a href="{{ url_for('frontend.my_orders') }}">
-                                    <i class="far fa-shopping-bag"></i> {{ 'My Orders'|translate(current_language) }}
+                                    <i class="far fa-shopping-bag"></i> {{ 'landing.account.orders'|t }}
                                 </a>
                             </li>
                             <li>
                                 <a href="{{ url_for('frontend.addresses') }}">
-                                    <i class="far fa-map-marker-alt"></i> {{ 'Addresses'|translate(current_language) }}
+                                    <i class="far fa-map-marker-alt"></i> {{ 'Addresses'|t }}
                                 </a>
                             </li>
                             <li>
                                 <a href="{{ url_for('frontend.my_subscriptions') }}">
-                                    <i class="far fa-sync-alt"></i> {{ 'Subscriptions'|translate(current_language) }}
+                                    <i class="far fa-sync-alt"></i> {{ 'landing.nav.subscriptions'|t }}
                                 </a>
                             </li>
                             <li>
                                 <a href="{{ url_for('frontend.my_loyalty') }}">
-                                    <i class="far fa-star"></i> {{ 'Loyalty Program'|translate(current_language) }}
+                                    <i class="far fa-star"></i> {{ 'landing.account.loyalty'|t }}
                                 </a>
                             </li>
                             <li>
                                 <a href="{{ url_for('frontend.account_security') }}">
-                                    <i class="far fa-shield-alt"></i> {{ 'Security'|translate(current_language) }}
+                                    <i class="far fa-shield-alt"></i> {{ 'Security'|t }}
                                 </a>
                             </li>
                             <li>
                                 <a href="#" onclick="logout()">
-                                    <i class="far fa-sign-out-alt"></i> {{ 'Logout'|translate(current_language) }}
+                                    <i class="far fa-sign-out-alt"></i> {{ 'landing.nav.logout'|t }}
                                 </a>
                             </li>
                         </ul>
@@ -89,9 +89,9 @@
                     <!-- Orders Header -->
                     <div class="content-header mb-4">
                         <div class="d-flex justify-content-between align-items-center">
-                            <h2><i class="far fa-shopping-bag"></i> {{ 'My Orders'|translate(current_language) }}</h2>
+                            <h2><i class="far fa-shopping-bag"></i> {{ 'landing.account.orders'|t }}</h2>
                             <a href="{{ url_for('frontend.shop') }}" class="btn btn-primary">
-                                <i class="far fa-plus"></i> {{ 'Place New Order'|translate(current_language) }}
+                                <i class="far fa-plus"></i> {{ 'Place New Order'|t }}
                             </a>
                         </div>
                     </div>
@@ -103,41 +103,41 @@
                                 <div class="row">
                                     <div class="col-md-3">
                                         <div class="form-group">
-                                            <label for="statusFilter">{{ 'Order Status'|translate(current_language) }}</label>
+                                            <label for="statusFilter">{{ 'Order Status'|t }}</label>
                                             <select class="form-control" id="statusFilter">
-                                                <option value="">{{ 'All Orders'|translate(current_language) }}</option>
-                                                <option value="pending">{{ 'Pending'|translate(current_language) }}</option>
-                                                <option value="confirmed">{{ 'Confirmed'|translate(current_language) }}</option>
-                                                <option value="processing">{{ 'Processing'|translate(current_language) }}</option>
-                                                <option value="shipped">{{ 'Shipped'|translate(current_language) }}</option>
-                                                <option value="delivered">{{ 'Delivered'|translate(current_language) }}</option>
-                                                <option value="cancelled">{{ 'Cancelled'|translate(current_language) }}</option>
+                                                <option value="">{{ 'All Orders'|t }}</option>
+                                                <option value="pending">{{ 'Pending'|t }}</option>
+                                                <option value="confirmed">{{ 'Confirmed'|t }}</option>
+                                                <option value="processing">{{ 'Processing'|t }}</option>
+                                                <option value="shipped">{{ 'Shipped'|t }}</option>
+                                                <option value="delivered">{{ 'Delivered'|t }}</option>
+                                                <option value="cancelled">{{ 'Cancelled'|t }}</option>
                                             </select>
                                         </div>
                                     </div>
                                     <div class="col-md-3">
                                         <div class="form-group">
-                                            <label for="dateFilter">{{ 'Time Period'|translate(current_language) }}</label>
+                                            <label for="dateFilter">{{ 'Time Period'|t }}</label>
                                             <select class="form-control" id="dateFilter">
-                                                <option value="">{{ 'All Time'|translate(current_language) }}</option>
-                                                <option value="7">{{ 'Last 7 Days'|translate(current_language) }}</option>
-                                                <option value="30">{{ 'Last 30 Days'|translate(current_language) }}</option>
-                                                <option value="90">{{ 'Last 3 Months'|translate(current_language) }}</option>
-                                                <option value="365">{{ 'Last Year'|translate(current_language) }}</option>
+                                                <option value="">{{ 'All Time'|t }}</option>
+                                                <option value="7">{{ 'Last 7 Days'|t }}</option>
+                                                <option value="30">{{ 'Last 30 Days'|t }}</option>
+                                                <option value="90">{{ 'Last 3 Months'|t }}</option>
+                                                <option value="365">{{ 'Last Year'|t }}</option>
                                             </select>
                                         </div>
                                     </div>
                                     <div class="col-md-4">
                                         <div class="form-group">
-                                            <label for="searchOrder">{{ 'Search Orders'|translate(current_language) }}</label>
-                                            <input type="text" class="form-control" id="searchOrder" placeholder="{{ 'Order number, product name...'|translate(current_language) }}">
+                                            <label for="searchOrder">{{ 'Search Orders'|t }}</label>
+                                            <input type="text" class="form-control" id="searchOrder" placeholder="{{ 'Order number, product name...'|t }}">
                                         </div>
                                     </div>
                                     <div class="col-md-2">
                                         <div class="form-group">
                                             <label>&nbsp;</label>
                                             <button type="button" class="btn btn-outline-primary btn-block" onclick="applyFilters()">
-                                                <i class="far fa-search"></i> {{ 'Filter'|translate(current_language) }}
+                                                <i class="far fa-search"></i> {{ 'Filter'|t }}
                                             </button>
                                         </div>
                                     </div>
@@ -150,17 +150,17 @@
                     <div class="orders-list" id="ordersList">
                         <div class="loading-container text-center py-5" id="loadingOrders">
                             <i class="far fa-spinner fa-spin fa-2x"></i>
-                            <p class="mt-2">{{ 'Loading your orders...'|translate(current_language) }}</p>
+                            <p class="mt-2">{{ 'Loading your orders...'|t }}</p>
                         </div>
                     </div>
 
                     <!-- Empty State -->
                     <div class="empty-state text-center py-5" id="emptyState" style="display: none;">
                         <i class="far fa-shopping-bag" style="font-size: 4rem; color: #ccc;"></i>
-                        <h4 class="mt-3">{{ 'No orders found'|translate(current_language) }}</h4>
-                        <p class="text-muted">{{ 'You havent placed any orders yet or no orders match your filters'|translate(current_language) }}</p>
+                        <h4 class="mt-3">{{ 'No orders found'|t }}</h4>
+                        <p class="text-muted">{{ 'You havent placed any orders yet or no orders match your filters'|t }}</p>
                         <a href="{{ url_for('frontend.shop') }}" class="btn btn-primary">
-                            <i class="far fa-shopping-cart"></i> {{ 'Start Shopping'|translate(current_language) }}
+                            <i class="far fa-shopping-cart"></i> {{ 'Start Shopping'|t }}
                         </a>
                     </div>
 
@@ -182,7 +182,7 @@
     <div class="modal-dialog modal-xl" role="document">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title" id="orderDetailModalLabel">{{ 'Order Details'|translate(current_language) }}</h5>
+                <h5 class="modal-title" id="orderDetailModalLabel">{{ 'Order Details'|t }}</h5>
                 <button type="button" class="close" data-dismiss="modal" aria-label="Close">
                     <span aria-hidden="true">&times;</span>
                 </button>
@@ -191,12 +191,12 @@
                 <!-- Order details will be loaded here -->
             </div>
             <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-dismiss="modal">{{ 'Close'|translate(current_language) }}</button>
+                <button type="button" class="btn btn-secondary" data-dismiss="modal">{{ 'Close'|t }}</button>
                 <button type="button" class="btn btn-primary" id="reorderBtn" style="display: none;">
-                    <i class="far fa-redo"></i> {{ 'Reorder Items'|translate(current_language) }}
+                    <i class="far fa-redo"></i> {{ 'Reorder Items'|t }}
                 </button>
                 <button type="button" class="btn btn-danger" id="cancelOrderBtn" style="display: none;">
-                    <i class="far fa-times"></i> {{ 'Cancel Order'|translate(current_language) }}
+                    <i class="far fa-times"></i> {{ 'Cancel Order'|t }}
                 </button>
             </div>
         </div>
@@ -473,12 +473,12 @@ async function loadOrders(page = 1) {
                 emptyStateElement.style.display = 'block';
             }
         } else {
-            showNotification(result.message || '{{ "Failed to load orders"|translate(current_language) }}', 'error');
+            showNotification(result.message || '{{ "Failed to load orders"|t }}', 'error');
             emptyStateElement.style.display = 'block';
         }
     } catch (error) {
         console.error('Failed to load orders:', error);
-        showNotification('{{ "Failed to load orders. Please try again."|translate(current_language) }}', 'error');
+        showNotification('{{ "Failed to load orders. Please try again."|t }}', 'error');
         emptyStateElement.style.display = 'block';
     } finally {
         loadingElement.style.display = 'none';
@@ -498,7 +498,7 @@ function displayOrders(orders) {
             <div class="order-header">
                 <div class="row align-items-center">
                     <div class="col-md-3">
-                        <strong>{{ 'Order'|translate(current_language) }} #${order.order_number}</strong>
+                        <strong>{{ 'Order'|t }} #${order.order_number}</strong>
                     </div>
                     <div class="col-md-3">
                         <small class="text-muted">${formatDate(order.created_at)}</small>
@@ -519,19 +519,19 @@ function displayOrders(orders) {
                                 <img src="${item.product.image_url || '/static/images/products/default.jpg'}" alt="${item.product.name}">
                                 <div class="item-details">
                                     <div class="item-name">${item.product.name}</div>
-                                    <div class="item-specs">${item.product.size || ''} - {{ 'Quantity'|translate(current_language) }}: ${item.quantity}</div>
+                                    <div class="item-specs">${item.product.size || ''} - {{ 'Quantity'|t }}: ${item.quantity}</div>
                                 </div>
                                 <div class="item-price">$${parseFloat(item.unit_price).toFixed(2)}</div>
                             </div>
                         `).join('')}
-                        ${order.items.length > 2 ? `<div class="text-muted mt-2"><small>{{ 'and'|translate(current_language) }} ${order.items.length - 2} {{ 'more items'|translate(current_language) }}</small></div>` : ''}
+                        ${order.items.length > 2 ? `<div class="text-muted mt-2"><small>{{ 'and'|t }} ${order.items.length - 2} {{ 'more items'|t }}</small></div>` : ''}
                     </div>
                     <div class="col-md-4">
                         <div class="delivery-info">
-                            <h6>{{ 'Delivery Address'|translate(current_language) }}</h6>
+                            <h6>{{ 'Delivery Address'|t }}</h6>
                             <p class="text-muted mb-1">${order.delivery_address?.street || ''}</p>
                             <p class="text-muted">${order.delivery_address?.city || ''}</p>
-                            ${order.estimated_delivery ? `<small class="text-primary">{{ 'Est. delivery'|translate(current_language) }}: ${formatDate(order.estimated_delivery)}</small>` : ''}
+                            ${order.estimated_delivery ? `<small class="text-primary">{{ 'Est. delivery'|t }}: ${formatDate(order.estimated_delivery)}</small>` : ''}
                         </div>
                     </div>
                 </div>
@@ -539,20 +539,20 @@ function displayOrders(orders) {
             <div class="order-footer">
                 <div class="row align-items-center">
                     <div class="col-md-6">
-                        ${order.tracking_number ? `<small class="text-muted">{{ 'Tracking'|translate(current_language) }}: ${order.tracking_number}</small>` : ''}
+                        ${order.tracking_number ? `<small class="text-muted">{{ 'Tracking'|t }}: ${order.tracking_number}</small>` : ''}
                     </div>
                     <div class="col-md-6 text-right">
                         <button class="btn btn-sm btn-outline-primary" onclick="event.stopPropagation(); showOrderDetail(${order.id})">
-                            {{ 'View Details'|translate(current_language) }}
+                            {{ 'View Details'|t }}
                         </button>
                         ${order.status === 'delivered' ? `
                             <button class="btn btn-sm btn-primary ml-2" onclick="event.stopPropagation(); reorderItems(${order.id})">
-                                {{ 'Reorder'|translate(current_language) }}
+                                {{ 'Reorder'|t }}
                             </button>
                         ` : ''}
                         ${['pending', 'confirmed'].includes(order.status) ? `
                             <button class="btn btn-sm btn-outline-danger ml-2" onclick="event.stopPropagation(); cancelOrder(${order.id})">
-                                {{ 'Cancel'|translate(current_language) }}
+                                {{ 'Cancel'|t }}
                             </button>
                         ` : ''}
                     </div>
@@ -592,11 +592,11 @@ async function showOrderDetail(orderId) {
             displayOrderDetail(order);
             $('#orderDetailModal').modal('show');
         } else {
-            showNotification(result.message || '{{ "Failed to load order details"|translate(current_language) }}', 'error');
+            showNotification(result.message || '{{ "Failed to load order details"|t }}', 'error');
         }
     } catch (error) {
         console.error('Failed to load order detail:', error);
-        showNotification('{{ "Failed to load order details"|translate(current_language) }}', 'error');
+        showNotification('{{ "Failed to load order details"|t }}', 'error');
     }
 }
 
@@ -617,8 +617,8 @@ function displayOrderDetail(order) {
             <!-- Order Header -->
             <div class="row mb-4">
                 <div class="col-md-6">
-                    <h4>{{ 'Order'|translate(current_language) }} #${order.order_number}</h4>
-                    <p class="text-muted">{{ 'Placed on'|translate(current_language) }} ${formatDate(order.created_at)}</p>
+                    <h4>{{ 'Order'|t }} #${order.order_number}</h4>
+                    <p class="text-muted">{{ 'Placed on'|t }} ${formatDate(order.created_at)}</p>
                 </div>
                 <div class="col-md-6 text-right">
                     <span class="order-status status-${order.status} h5">${order.status}</span>
@@ -627,7 +627,7 @@ function displayOrderDetail(order) {
             
             <!-- Order Items -->
             <div class="order-items-section mb-4">
-                <h5>{{ 'Order Items'|translate(current_language) }}</h5>
+                <h5>{{ 'Order Items'|t }}</h5>
                 <div class="card">
                     <div class="card-body">
                         ${order.items.map(item => `
@@ -636,9 +636,9 @@ function displayOrderDetail(order) {
                                 <div class="item-details">
                                     <div class="item-name">${item.product.name}</div>
                                     <div class="item-specs">${item.product.description || ''}</div>
-                                    <div class="item-specs">{{ 'Size'|translate(current_language) }}: ${item.product.size || 'N/A'}</div>
+                                    <div class="item-specs">{{ 'Size'|t }}: ${item.product.size || 'N/A'}</div>
                                 </div>
-                                <div class="item-quantity">{{ 'Qty'|translate(current_language) }}: ${item.quantity}</div>
+                                <div class="item-quantity">{{ 'Qty'|t }}: ${item.quantity}</div>
                                 <div class="item-price">$${parseFloat(item.unit_price).toFixed(2)}</div>
                             </div>
                         `).join('')}
@@ -649,7 +649,7 @@ function displayOrderDetail(order) {
             <!-- Order Summary -->
             <div class="row mb-4">
                 <div class="col-md-6">
-                    <h5>{{ 'Delivery Address'|translate(current_language) }}</h5>
+                    <h5>{{ 'Delivery Address'|t }}</h5>
                     <div class="card">
                         <div class="card-body">
                             <address>
@@ -662,24 +662,24 @@ function displayOrderDetail(order) {
                     </div>
                 </div>
                 <div class="col-md-6">
-                    <h5>{{ 'Order Summary'|translate(current_language) }}</h5>
+                    <h5>{{ 'Order Summary'|t }}</h5>
                     <div class="card">
                         <div class="card-body">
                             <div class="d-flex justify-content-between">
-                                <span>{{ 'Subtotal'|translate(current_language) }}</span>
+                                <span>{{ 'Subtotal'|t }}</span>
                                 <span>$${parseFloat(order.subtotal || order.total_amount).toFixed(2)}</span>
                             </div>
                             <div class="d-flex justify-content-between">
-                                <span>{{ 'Delivery Fee'|translate(current_language) }}</span>
+                                <span>{{ 'Delivery Fee'|t }}</span>
                                 <span>$${parseFloat(order.delivery_fee || 0).toFixed(2)}</span>
                             </div>
                             <div class="d-flex justify-content-between">
-                                <span>{{ 'Tax'|translate(current_language) }}</span>
+                                <span>{{ 'Tax'|t }}</span>
                                 <span>$${parseFloat(order.tax_amount || 0).toFixed(2)}</span>
                             </div>
                             <hr>
                             <div class="d-flex justify-content-between h5">
-                                <span>{{ 'Total'|translate(current_language) }}</span>
+                                <span>{{ 'Total'|t }}</span>
                                 <span>$${parseFloat(order.total_amount).toFixed(2)}</span>
                             </div>
                         </div>
@@ -690,33 +690,33 @@ function displayOrderDetail(order) {
             <!-- Tracking Information -->
             ${order.tracking_number ? `
                 <div class="tracking-section mb-4">
-                    <h5>{{ 'Order Tracking'|translate(current_language) }}</h5>
+                    <h5>{{ 'Order Tracking'|t }}</h5>
                     <div class="tracking-info">
                         <div class="d-flex justify-content-between align-items-center mb-3">
-                            <span><strong>{{ 'Tracking Number'|translate(current_language) }}:</strong> ${order.tracking_number}</span>
+                            <span><strong>{{ 'Tracking Number'|t }}:</strong> ${order.tracking_number}</span>
                             <button class="btn btn-sm btn-outline-primary" onclick="trackOrder('${order.tracking_number}')">
-                                <i class="far fa-external-link"></i> {{ 'Track Package'|translate(current_language) }}
+                                <i class="far fa-external-link"></i> {{ 'Track Package'|t }}
                             </button>
                         </div>
                         <div class="tracking-steps">
                             <div class="tracking-step ${order.status_timeline?.confirmed ? 'completed' : ''}">
                                 <div class="step-icon"><i class="far fa-check"></i></div>
-                                <div class="step-title">{{ 'Confirmed'|translate(current_language) }}</div>
+                                <div class="step-title">{{ 'Confirmed'|t }}</div>
                                 <div class="step-time">${order.status_timeline?.confirmed || ''}</div>
                             </div>
                             <div class="tracking-step ${order.status_timeline?.processing ? 'completed' : order.status === 'processing' ? 'active' : ''}">
                                 <div class="step-icon"><i class="far fa-cog"></i></div>
-                                <div class="step-title">{{ 'Processing'|translate(current_language) }}</div>
+                                <div class="step-title">{{ 'Processing'|t }}</div>
                                 <div class="step-time">${order.status_timeline?.processing || ''}</div>
                             </div>
                             <div class="tracking-step ${order.status_timeline?.shipped ? 'completed' : order.status === 'shipped' ? 'active' : ''}">
                                 <div class="step-icon"><i class="far fa-truck"></i></div>
-                                <div class="step-title">{{ 'Shipped'|translate(current_language) }}</div>
+                                <div class="step-title">{{ 'Shipped'|t }}</div>
                                 <div class="step-time">${order.status_timeline?.shipped || ''}</div>
                             </div>
                             <div class="tracking-step ${order.status_timeline?.delivered ? 'completed' : order.status === 'delivered' ? 'active' : ''}">
                                 <div class="step-icon"><i class="far fa-home"></i></div>
-                                <div class="step-title">{{ 'Delivered'|translate(current_language) }}</div>
+                                <div class="step-title">{{ 'Delivered'|t }}</div>
                                 <div class="step-time">${order.status_timeline?.delivered || ''}</div>
                             </div>
                         </div>
@@ -772,20 +772,20 @@ async function reorderItems(orderId) {
         const result = await response.json();
         
         if (response.ok && result.success) {
-            showNotification('{{ "Items added to cart successfully!"|translate(current_language) }}', 'success');
+            showNotification('{{ "Items added to cart successfully!"|t }}', 'success');
             updateCartCount(); // Update cart counter
             $('#orderDetailModal').modal('hide');
         } else {
-            showNotification(result.message || '{{ "Failed to reorder items"|translate(current_language) }}', 'error');
+            showNotification(result.message || '{{ "Failed to reorder items"|t }}', 'error');
         }
     } catch (error) {
         console.error('Failed to reorder items:', error);
-        showNotification('{{ "Failed to reorder items"|translate(current_language) }}', 'error');
+        showNotification('{{ "Failed to reorder items"|t }}', 'error');
     }
 }
 
 async function cancelOrder(orderId) {
-    if (!confirm('{{ "Are you sure you want to cancel this order?"|translate(current_language) }}')) {
+    if (!confirm('{{ "Are you sure you want to cancel this order?"|t }}')) {
         return;
     }
     
@@ -797,15 +797,15 @@ async function cancelOrder(orderId) {
         const result = await response.json();
         
         if (response.ok && result.success) {
-            showNotification('{{ "Order cancelled successfully"|translate(current_language) }}', 'success');
+            showNotification('{{ "Order cancelled successfully"|t }}', 'success');
             $('#orderDetailModal').modal('hide');
             loadOrders(currentPage); // Refresh orders list
         } else {
-            showNotification(result.message || '{{ "Failed to cancel order"|translate(current_language) }}', 'error');
+            showNotification(result.message || '{{ "Failed to cancel order"|t }}', 'error');
         }
     } catch (error) {
         console.error('Failed to cancel order:', error);
-        showNotification('{{ "Failed to cancel order"|translate(current_language) }}', 'error');
+        showNotification('{{ "Failed to cancel order"|t }}', 'error');
     }
 }
 

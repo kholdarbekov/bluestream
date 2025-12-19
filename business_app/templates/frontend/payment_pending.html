@@ -1,6 +1,6 @@
 {% extends "frontend/base.html" %}
 
-{% block title %}{{ 'Payment Processing'|translate(current_language) }} - {{ company_name }}{% endblock %}
+{% block title %}{{ 'Payment Processing'|t }} - {{ company_name }}{% endblock %}
 
 {% block extra_head %}
 <style>
@@ -131,21 +131,21 @@
                 <i class="far fa-hourglass-half"></i>
             </div>
 
-            <h2>{{ 'Payment Processing'|translate(current_language) }}</h2>
-            <p>{{ 'Your payment is being processed. This may take a few moments.'|translate(current_language) }}</p>
+            <h2>{{ 'Payment Processing'|t }}</h2>
+            <p>{{ 'Your payment is being processed. This may take a few moments.'|t }}</p>
 
             {% if order %}
             <div class="order-info">
                 <div class="info-row">
-                    <span class="info-label">{{ 'Order Number'|translate(current_language) }}:</span>
+                    <span class="info-label">{{ 'Order Number'|t }}:</span>
                     <span class="info-value">{{ order.order_number }}</span>
                 </div>
                 <div class="info-row">
-                    <span class="info-label">{{ 'Total Amount'|translate(current_language) }}:</span>
+                    <span class="info-label">{{ 'Total Amount'|t }}:</span>
                     <span class="info-value">{{ "{:,.0f}".format(order.total_amount) }} UZS</span>
                 </div>
                 <div class="info-row">
-                    <span class="info-label">{{ 'Payment Method'|translate(current_language) }}:</span>
+                    <span class="info-label">{{ 'Payment Method'|t }}:</span>
                     <span class="info-value">
                         {% if order.payment_method == 'payme' %}
                             Payme
@@ -161,15 +161,15 @@
 
             <div class="refresh-notice">
                 <i class="far fa-info-circle"></i>
-                {{ 'This page will automatically refresh to check your payment status. You will be redirected once the payment is confirmed.'|translate(current_language) }}
+                {{ 'This page will automatically refresh to check your payment status. You will be redirected once the payment is confirmed.'|t }}
             </div>
 
             <div class="action-buttons">
                 <button onclick="checkPaymentStatus()" class="theme-btn btn-one">
-                    <i class="far fa-sync"></i> {{ 'Check Status'|translate(current_language) }}
+                    <i class="far fa-sync"></i> {{ 'Check Status'|t }}
                 </button>
                 <a href="{{ url_for('frontend.my_orders') }}" class="theme-btn btn-three">
-                    <i class="far fa-list"></i> {{ 'My Orders'|translate(current_language) }}
+                    <i class="far fa-list"></i> {{ 'landing.account.orders'|t }}
                 </a>
             </div>
         </div>
@@ -200,7 +200,7 @@ function checkPaymentStatus() {
                 window.location.href = `/order-confirmation?order_id=${order.id}`;
             } else if (order.payment_status === 'failed') {
                 // Payment failed
-                showNotification('{{ "Payment failed. Please try again."|translate(current_language) }}', 'error');
+                showNotification('{{ "Payment failed. Please try again."|t }}', 'error');
                 setTimeout(() => {
                     window.location.href = `/payment/cancel?order_id=${order.id}`;
                 }, 2000);
@@ -211,7 +211,7 @@ function checkPaymentStatus() {
                     setTimeout(checkPaymentStatus, 6000); // Check again in 6 seconds
                 } else {
                     // Max attempts reached
-                    showNotification('{{ "Payment verification is taking longer than expected. Please check your order status."|translate(current_language) }}', 'warning');
+                    showNotification('{{ "Payment verification is taking longer than expected. Please check your order status."|t }}', 'warning');
                 }
             }
         }

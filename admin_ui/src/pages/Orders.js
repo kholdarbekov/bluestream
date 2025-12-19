@@ -31,11 +31,13 @@ import {
 import { useQuery, useMutation, useQueryClient } from 'react-query';
 import moment from 'moment';
 import adminService from '../services/adminService';
+import { useTranslation } from 'react-i18next';
 
 const { Option } = Select;
 const { RangePicker } = DatePicker;
 
 const Orders = () => {
+  const { t } = useTranslation();
   const [searchText, setSearchText] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [dateRange, setDateRange] = useState(null);
@@ -68,13 +70,13 @@ const Orders = () => {
     ({ orderId, status, notes }) => adminService.updateOrderStatus(orderId, status, notes),
     {
       onSuccess: () => {
-        message.success('Order status updated successfully');
+        message.success(t('ui.orders.status_updated_success'));
         queryClient.invalidateQueries('orders');
         setIsStatusModalVisible(false);
         form.resetFields();
       },
       onError: (error) => {
-        message.error('Failed to update order status');
+        message.error(t('ui.orders.status_update_failed'));
       }
     }
   );
@@ -91,7 +93,7 @@ const Orders = () => {
 
   const columns = [
     {
-      title: 'Order #',
+      title: t('ui.orders.order_number'),
       dataIndex: 'order_number',
       key: 'order_number',
       width: 120,
@@ -102,7 +104,7 @@ const Orders = () => {
       )
     },
     {
-      title: 'Customer',
+      title: t('ui.orders.customer'),
       dataIndex: 'customer',
       key: 'customer',
       render: (_, record) => (
@@ -113,16 +115,16 @@ const Orders = () => {
       )
     },
     {
-      title: 'Items',
+      title: t('ui.orders.items'),
       dataIndex: 'items_count',
       key: 'items_count',
       width: 80,
       render: (count) => (
-        <Tag color="blue">{count} items</Tag>
+        <Tag color="blue">{count} {t('ui.orders.items_count')}</Tag>
       )
     },
     {
-      title: 'Total Amount',
+      title: t('ui.orders.total_amount'),
       dataIndex: 'total_amount',
       key: 'total_amount',
       width: 120,
@@ -133,36 +135,36 @@ const Orders = () => {
       )
     },
     {
-      title: 'Status',
+      title: t('ui.orders.status'),
       dataIndex: 'status',
       key: 'status',
       width: 110,
       render: (status) => (
         <Tag color={orderStatusColors[status] || 'default'}>
-          {status?.toUpperCase()}
+          {t(`ui.orders.status_${status}`)}
         </Tag>
       )
     },
     {
-      title: 'Payment',
+      title: t('ui.orders.payment'),
       dataIndex: 'payment_status',
       key: 'payment_status',
       width: 100,
       render: (status) => (
         <Tag color={status === 'paid' ? 'green' : status === 'pending' ? 'orange' : 'red'}>
-          {status?.toUpperCase()}
+          {t(`ui.orders.payment_${status}`)}
         </Tag>
       )
     },
     {
-      title: 'Order Date',
+      title: t('ui.orders.order_date'),
       dataIndex: 'created_at',
       key: 'created_at',
       width: 120,
       render: (date) => moment(date).format('MMM DD, YYYY')
     },
     {
-      title: 'Actions',
+      title: t('ui.orders.actions'),
       key: 'actions',
       width: 100,
       render: (_, record) => (
@@ -171,13 +173,13 @@ const Orders = () => {
             items: [
               {
                 key: 'view',
-                label: 'View Details',
+                label: t('ui.orders.view_details'),
                 icon: <EyeOutlined />,
                 onClick: () => handleViewOrder(record)
               },
               {
                 key: 'status',
-                label: 'Update Status',
+                label: t('ui.orders.update_status'),
                 icon: <EditOutlined />,
                 onClick: () => handleUpdateStatus(record)
               },
@@ -186,7 +188,7 @@ const Orders = () => {
               },
               {
                 key: 'cancel',
-                label: 'Cancel Order',
+                label: t('ui.orders.cancel_order'),
                 danger: true,
                 disabled: ['delivered', 'cancelled'].includes(record.status),
                 onClick: () => handleCancelOrder(record)
@@ -217,13 +219,13 @@ const Orders = () => {
 
   const handleCancelOrder = (order) => {
     Modal.confirm({
-      title: 'Cancel Order?',
-      content: `Are you sure you want to cancel order ${order.order_number}?`,
+      title: t('ui.orders.cancel_order_title'),
+      content: `${t('ui.orders.cancel_order_confirm')} ${order.order_number}?`,
       onOk: () => {
         updateOrderMutation.mutate({
           orderId: order.id,
           status: 'cancelled',
-          notes: 'Cancelled by admin'
+          notes: t('ui.orders.cancelled_by_admin')
         });
       }
     });
@@ -272,7 +274,7 @@ const Orders = () => {
         <Col xs={24} sm={8}>
           <Card>
             <Statistic
-              title="Total Orders"
+              title={t('ui.orders.total_orders')}
               value={data?.meta?.total || 0}
               prefix={<ShoppingCartOutlined />}
             />
@@ -281,7 +283,7 @@ const Orders = () => {
         <Col xs={24} sm={8}>
           <Card>
             <Statistic
-              title="Total Revenue"
+              title={t('ui.orders.total_revenue')}
               value={totalRevenue}
               precision={2}
               prefix={<DollarOutlined />}
@@ -292,7 +294,7 @@ const Orders = () => {
         <Col xs={24} sm={8}>
           <Card>
             <Statistic
-              title="Pending Orders"
+              title={t('ui.orders.pending_orders')}
               value={pendingOrders}
               valueStyle={{ color: '#faad14' }}
             />
@@ -305,35 +307,35 @@ const Orders = () => {
         <div className="table-actions">
           <Space wrap>
             <Input.Search
-              placeholder="Search orders..."
+              placeholder={t('ui.orders.search_placeholder')}
               allowClear
               onSearch={handleSearch}
               style={{ width: 250 }}
             />
             <Select
-              placeholder="Filter by status"
+              placeholder={t('ui.orders.filter_by_status')}
               allowClear
               onChange={handleStatusFilter}
               style={{ width: 150 }}
             >
-              <Option value="pending">Pending</Option>
-              <Option value="confirmed">Confirmed</Option>
-              <Option value="processing">Processing</Option>
-              <Option value="shipped">Shipped</Option>
-              <Option value="delivered">Delivered</Option>
-              <Option value="cancelled">Cancelled</Option>
-              <Option value="refunded">Refunded</Option>
+              <Option value="pending">{t('ui.orders.status_pending')}</Option>
+              <Option value="confirmed">{t('ui.orders.status_confirmed')}</Option>
+              <Option value="processing">{t('ui.orders.status_processing')}</Option>
+              <Option value="shipped">{t('ui.orders.status_shipped')}</Option>
+              <Option value="delivered">{t('ui.orders.status_delivered')}</Option>
+              <Option value="cancelled">{t('ui.orders.status_cancelled')}</Option>
+              <Option value="refunded">{t('ui.orders.status_refunded')}</Option>
             </Select>
             <RangePicker
               onChange={handleDateRangeChange}
               format="YYYY-MM-DD"
-              placeholder={['Start Date', 'End Date']}
+              placeholder={[t('ui.orders.start_date'), t('ui.orders.end_date')]}
             />
           </Space>
 
           <Space>
             <Button icon={<ExportOutlined />}>
-              Export Orders
+              {t('ui.orders.export_orders')}
             </Button>
           </Space>
         </div>
@@ -351,7 +353,7 @@ const Orders = () => {
             showSizeChanger: true,
             showQuickJumper: true,
             showTotal: (total, range) =>
-              `${range[0]}-${range[1]} of ${total} orders`
+              `${range[0]}-${range[1]} of ${total} ${t('ui.orders.pagination_text')}`
           }}
           onChange={handleTableChange}
           className="admin-table"
@@ -361,7 +363,7 @@ const Orders = () => {
 
       {/* Order Details Modal */}
       <Modal
-        title={`Order Details - ${selectedOrder?.order_number}`}
+        title={`${t('ui.orders.order_details')} - ${selectedOrder?.order_number}`}
         open={isDetailModalVisible}
         onCancel={() => setIsDetailModalVisible(false)}
         footer={null}
@@ -370,43 +372,43 @@ const Orders = () => {
         {selectedOrder && (
           <div>
             <Descriptions column={2} bordered>
-              <Descriptions.Item label="Order Number">
+              <Descriptions.Item label={t('ui.orders.order_number')}>
                 {selectedOrder.order_number}
               </Descriptions.Item>
-              <Descriptions.Item label="Status">
+              <Descriptions.Item label={t('ui.orders.status')}>
                 <Tag color={orderStatusColors[selectedOrder.status]}>
-                  {selectedOrder.status?.toUpperCase()}
+                  {t(`ui.orders.status_${selectedOrder.status}`)}
                 </Tag>
               </Descriptions.Item>
-              <Descriptions.Item label="Customer">
+              <Descriptions.Item label={t('ui.orders.customer')}>
                 {selectedOrder.customer_name}
               </Descriptions.Item>
-              <Descriptions.Item label="Email">
+              <Descriptions.Item label={t('ui.orders.email')}>
                 {selectedOrder.customer_email}
               </Descriptions.Item>
-              <Descriptions.Item label="Phone">
+              <Descriptions.Item label={t('ui.orders.phone')}>
                 {selectedOrder.customer_phone}
               </Descriptions.Item>
-              <Descriptions.Item label="Total Amount">
+              <Descriptions.Item label={t('ui.orders.total_amount')}>
                 <span style={{ fontWeight: 'bold', color: '#52c41a' }}>
                   ${selectedOrder.total_amount?.toFixed(2)}
                 </span>
               </Descriptions.Item>
-              <Descriptions.Item label="Payment Status">
+              <Descriptions.Item label={t('ui.orders.payment_status')}>
                 <Tag color={selectedOrder.payment_status === 'paid' ? 'green' : 'orange'}>
-                  {selectedOrder.payment_status?.toUpperCase()}
+                  {t(`ui.orders.payment_${selectedOrder.payment_status}`)}
                 </Tag>
               </Descriptions.Item>
-              <Descriptions.Item label="Order Date">
+              <Descriptions.Item label={t('ui.orders.order_date')}>
                 {moment(selectedOrder.created_at).format('YYYY-MM-DD HH:mm')}
               </Descriptions.Item>
             </Descriptions>
 
-            <Divider>Order Items</Divider>
+            <Divider>{t('ui.orders.order_items')}</Divider>
 
             <div style={{ marginTop: 16 }}>
               {/* Order items would be displayed here */}
-              <p>Order items details would be shown here based on API response</p>
+              <p>{t('ui.orders.order_items_placeholder')}</p>
             </div>
 
             <div style={{ marginTop: 16, textAlign: 'right' }}>
@@ -418,10 +420,10 @@ const Orders = () => {
                     handleUpdateStatus(selectedOrder);
                   }}
                 >
-                  Update Status
+                  {t('ui.orders.update_status')}
                 </Button>
                 <Button onClick={() => setIsDetailModalVisible(false)}>
-                  Close
+                  {t('ui.orders.close')}
                 </Button>
               </Space>
             </div>
@@ -431,7 +433,7 @@ const Orders = () => {
 
       {/* Status Update Modal */}
       <Modal
-        title={`Update Order Status - ${selectedOrder?.order_number}`}
+        title={`${t('ui.orders.update_order_status')} - ${selectedOrder?.order_number}`}
         open={isStatusModalVisible}
         onCancel={() => setIsStatusModalVisible(false)}
         footer={null}
@@ -443,41 +445,41 @@ const Orders = () => {
         >
           <Form.Item
             name="status"
-            label="New Status"
-            rules={[{ required: true, message: 'Please select a status' }]}
+            label={t('ui.orders.new_status')}
+            rules={[{ required: true, message: t('ui.orders.select_status_required') }]}
           >
             <Select>
-              <Option value="pending">Pending</Option>
-              <Option value="confirmed">Confirmed</Option>
-              <Option value="processing">Processing</Option>
-              <Option value="shipped">Shipped</Option>
-              <Option value="delivered">Delivered</Option>
-              <Option value="cancelled">Cancelled</Option>
-              <Option value="refunded">Refunded</Option>
+              <Option value="pending">{t('ui.orders.status_pending')}</Option>
+              <Option value="confirmed">{t('ui.orders.status_confirmed')}</Option>
+              <Option value="processing">{t('ui.orders.status_processing')}</Option>
+              <Option value="shipped">{t('ui.orders.status_shipped')}</Option>
+              <Option value="delivered">{t('ui.orders.status_delivered')}</Option>
+              <Option value="cancelled">{t('ui.orders.status_cancelled')}</Option>
+              <Option value="refunded">{t('ui.orders.status_refunded')}</Option>
             </Select>
           </Form.Item>
 
           <Form.Item
             name="notes"
-            label="Notes (Optional)"
+            label={t('ui.orders.notes_optional')}
           >
             <Input.TextArea
               rows={3}
-              placeholder="Add notes about this status change..."
+              placeholder={t('ui.orders.notes_placeholder')}
             />
           </Form.Item>
 
           <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
             <Space>
               <Button onClick={() => setIsStatusModalVisible(false)}>
-                Cancel
+                {t('ui.orders.close')}
               </Button>
               <Button
                 type="primary"
                 htmlType="submit"
                 loading={updateOrderMutation.isLoading}
               >
-                Update Status
+                {t('ui.orders.update_status')}
               </Button>
             </Space>
           </Form.Item>

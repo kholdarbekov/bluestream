@@ -54,11 +54,11 @@ class ProfileHandlers:
             full_name = (f"{profile.get('first_name', '')} {profile.get('last_name', '')}" or "Not set").strip()
             
             # Format profile information
-            profile_text = f"{i18n.get('profile_title', language)}\n\n"
-            profile_text += f"{i18n.get('profile_name', language, full_name)}\n"
-            profile_text += f"{i18n.get('profile_phone', language, profile.get('phone', 'Not set'))}\n"
-            profile_text += f"{i18n.get('profile_email', language, profile.get('email', 'Not set'))}\n"
-            profile_text += f"{i18n.get('profile_language', language, language)}"
+            profile_text = f"{i18n.get('telegram.profile_title', language)}\n\n"
+            profile_text += f"{i18n.get('telegram.profile_name', language)}: {full_name}\n"
+            profile_text += f"{i18n.get('telegram.profile_phone', language)}: {profile.get('phone', 'Not set')}\n"
+            profile_text += f"{i18n.get('telegram.profile_email', language)}: {profile.get('email', 'Not set')}\n"
+            profile_text += f"{i18n.get('telegram.profile_language', language)}: {language}"
             
             keyboard = ProfileKeyboards.profile_menu(language)
             
@@ -109,34 +109,23 @@ class ProfileHandlers:
 
             # Build status message
             if not phone:
-                status_text = "📱 Phone Verification\n\n" \
-                             "Status: ❌ No phone number added\n\n" \
-                             "Please add your phone number to:\n" \
-                             "• Place orders\n" \
-                             "• Receive order updates\n" \
-                             "• Get delivery notifications"
+                status_text = i18n.get('telegram.phone.title', language) + "\n\n" + i18n.get('telegram.phone.no_phone_added', language)
                 buttons = [
-                    [{'text': '📱 Add Phone Number', 'callback_data': 'add_phone_number'}],
-                    [{'text': i18n.get('back', language), 'callback_data': 'menu_profile'}]
+                    [{'text': i18n.get('telegram.phone.add_prompt', language), 'callback_data': 'add_phone_number'}],
+                    [{'text': i18n.get('telegram.back', language), 'callback_data': 'menu_profile'}]
                 ]
             elif not phone_verified:
-                status_text = f"📱 Phone Verification\n\n" \
-                             f"Phone: {phone}\n" \
-                             f"Status: ⚠️ Not verified\n\n" \
-                             f"Please verify your phone number to access all features."
+                status_text = i18n.get('telegram.phone.title', language) + f"\n\n{i18n.get('telegram.profile_phone', language)}: {phone}\n" + i18n.get('telegram.phone.phone_not_verified', language)
                 buttons = [
-                    [{'text': '✅ Verify Phone Number', 'callback_data': 'verify_phone_number'}],
+                    [{'text': i18n.get('telegram.phone.verification_prompt', language), 'callback_data': 'verify_phone_number'}],
                     [{'text': '📝 Change Phone Number', 'callback_data': 'add_phone_number'}],
-                    [{'text': i18n.get('back', language), 'callback_data': 'menu_profile'}]
+                    [{'text': i18n.get('telegram.back', language), 'callback_data': 'menu_profile'}]
                 ]
             else:
-                status_text = f"📱 Phone Verification\n\n" \
-                             f"Phone: {phone}\n" \
-                             f"Status: ✅ Verified\n\n" \
-                             f"Your phone number is verified and active!"
+                status_text = i18n.get('telegram.phone.title', language) + f"\n\n{i18n.get('telegram.profile_phone', language)}: {phone}\n" + i18n.get('telegram.phone.phone_verified', language)
                 buttons = [
                     [{'text': '📝 Change Phone Number', 'callback_data': 'add_phone_number'}],
-                    [{'text': i18n.get('back', language), 'callback_data': 'menu_profile'}]
+                    [{'text': i18n.get('telegram.back', language), 'callback_data': 'menu_profile'}]
                 ]
 
             from keyboards import KeyboardBuilder
@@ -171,12 +160,7 @@ class ProfileHandlers:
             language = await i18n.get_user_language(user_id)
 
             # Prompt user to share phone
-            phone_prompt = (
-                "📱 *Add Phone Number*\n\n"
-                "Please share your phone number using one of these methods:\n\n"
-                "1️⃣ Click the button below to share your contact\n"
-                "2️⃣ Or type your phone number manually (e.g., +998901234567)"
-            )
+            phone_prompt = i18n.get('telegram.phone.send_code_prompt', language)
 
             # Send the prompt with reply keyboard
             keyboard = ProfileKeyboards.phone_request(language)
@@ -227,9 +211,9 @@ class ProfileHandlers:
                 phone = profile.get('phone')
 
             if not phone:
-                await update.callback_query.answer("No phone number on file!")
+                await update.callback_query.answer(i18n.get('telegram.phone.no_phone_added', language))
                 await update.callback_query.message.reply_text(
-                    "❌ No phone number found. Please add a phone number first."
+                    i18n.get('telegram.phone.no_phone_added', language)
                 )
                 return
 
@@ -446,7 +430,7 @@ class ProfileHandlers:
 
             if not await validate_phone_number(phone_text):
                 await update.message.reply_text(
-                    "❌ Invalid phone number format. Please enter a valid Uzbekistan phone number."
+                    i18n.get('telegram.phone.invalid_format', language)
                 )
                 return PHONE
 
@@ -484,7 +468,7 @@ class ProfileHandlers:
                 # Validate OTP format (6 digits)
                 if not text.isdigit() or len(text) != 6:
                     await update.message.reply_text(
-                        "❌ Invalid code format. Please enter the 6-digit verification code:"
+                        i18n.get('telegram.phone.otp_invalid', language)
                     )
                     return NAME
 
@@ -496,9 +480,7 @@ class ProfileHandlers:
                             response = await client.verify_phone_otp(user_token, text)
                             if response.success:
                                 await update.message.reply_text(
-                                    "✅ **Phone verified successfully!**\n\n"
-                                    "Your phone number has been verified. "
-                                    "You can now place orders.",
+                                    i18n.get('telegram.phone.otp_success', language),
                                     parse_mode='Markdown'
                                 )
 
@@ -509,7 +491,7 @@ class ProfileHandlers:
                                 logger.info(f"Phone verification successful for user {user_id}")
 
                                 # Now ask for name
-                                name_text = i18n.get('enter_name', language)
+                                name_text = i18n.get('telegram.enter_name', language)
                                 await update.message.reply_text(name_text)
 
                                 return NAME
@@ -586,7 +568,7 @@ class ProfileHandlers:
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
             
-            cancel_text = i18n.get('action_cancelled', language)
+            cancel_text = i18n.get('telegram.action_cancelled', language)
             keyboard = MenuKeyboards.main_menu(language)
             
             await update.message.reply_text(
@@ -644,7 +626,7 @@ class ProfileHandlers:
                 addresses = response.data.get('data', {}).get('addresses', [])
             
             if not addresses:
-                addresses_text = "📍 You have no saved addresses.\n\nWould you like to add one?"
+                addresses_text = i18n.get('telegram.address.no_addresses', language)
                 keyboard = ProfileKeyboards.empty_addresses(language)
                 logger.info(f"No addresses found, showing empty addresses keyboard")
             else:
@@ -685,7 +667,7 @@ class ProfileHandlers:
             logger.info(f"Set conversation state to: address_location")
             logger.info(f"Context user_data: {context.user_data}")
             
-            location_text = "📍 Please share your location or type your address:"
+            location_text = i18n.get('telegram.address.location_prompt', language)
             keyboard = ProfileKeyboards.location_request(language)
             
             if update.callback_query:
@@ -770,7 +752,7 @@ class ProfileHandlers:
             
             logger.info(f"Sending reply message to user...")
             await update.message.reply_text(
-                "📍 Location received! Please provide a title for this address (e.g., Home, Office):",
+                i18n.get('telegram.address.title_prompt', language),
                 reply_markup=ReplyKeyboardRemove()
             )
             logger.info(f"Reply message sent successfully")
@@ -801,7 +783,7 @@ class ProfileHandlers:
             context.user_data['temp_address'] = address_text
             
             await update.message.reply_text(
-                "📝 Address received! Please provide a title for this address:",
+                i18n.get('telegram.address.title_received', language),
                 reply_markup=ReplyKeyboardRemove()
             )
             
@@ -864,7 +846,7 @@ class ProfileHandlers:
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
             
-            cancel_text = i18n.get('action_cancelled', language)
+            cancel_text = i18n.get('telegram.action_cancelled', language)
             keyboard = MenuKeyboards.main_menu(language)
             
             await update.message.reply_text(
@@ -1176,10 +1158,7 @@ class ProfileHandlers:
                     return
             
             # Show confirmation dialog
-            confirm_text = f"🗑️ **Delete Address?**\n\n"
-            confirm_text += f"**{address.get('title', 'Untitled')}**\n"
-            confirm_text += f"{address.get('full_address', 'N/A')}\n\n"
-            confirm_text += f"⚠️ **This action cannot be undone!**"
+            confirm_text = i18n.get('telegram.address.delete_confirmation', language, title=address.get('title', 'Untitled'), address=address.get('full_address', 'N/A'))
             
             buttons = [
                 [
@@ -1509,8 +1488,8 @@ class ProfileHandlers:
     
     async def _handle_auth_error(self, update: Update, language: str):
         """Handle authentication error"""
-        error_msg = "❌ Authentication failed. Please restart the bot with /start"
-        
+        error_msg = i18n.get('telegram.error.auth_failed', language)
+
         if update.callback_query:
             await update.callback_query.edit_message_text(error_msg)
             await update.callback_query.answer()
@@ -1611,10 +1590,10 @@ class ProfileHandlers:
         """Handle general error"""
         try:
             language = await i18n.get_user_language(update.effective_user.id)
-            error_msg = i18n.get('error_occurred', language)
+            error_msg = i18n.get('telegram.error_occurred', language)
         except:
-            error_msg = "❌ An error occurred. Please try again."
-        
+            error_msg = i18n.get('telegram.error_occurred', 'en')
+
         if update.callback_query:
             await update.callback_query.answer(error_msg)
         else:

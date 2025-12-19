@@ -28,6 +28,7 @@ from business_app.serializers.notification_serializers import (
 )
 from business_app.utils.decorators import validate_json, rate_limit, cache_response
 from business_app.utils.constants import NotificationStatus, NotificationType, NotificationChannelType
+from business_app.utils.translations import get_translation
 from business_app.tasks.notification_tasks import send_bulk_notification_task
 from business_app import db
 
@@ -160,7 +161,7 @@ def mark_notification_read(notification_id):
             notification.read_at = datetime.now(UTC)
             db.session.commit()
 
-        return success_response(message='Notification marked as read')
+        return success_response(message=get_translation('api.notifications.success.marked_read'))
 
     except Exception as e:
         db.session.rollback()
@@ -215,7 +216,7 @@ def delete_notification(notification_id):
         db.session.delete(notification)
         db.session.commit()
 
-        return success_response(message='Notification deleted successfully')
+        return success_response(message=get_translation('api.notifications.success.deleted'))
 
     except Exception as e:
         db.session.rollback()
@@ -329,7 +330,7 @@ def register_push_token():
 
         db.session.commit()
 
-        return success_response(message='Push token registered successfully')
+        return success_response(message=get_translation('api.notifications.success.push_registered'))
 
     except Exception as e:
         db.session.rollback()
@@ -358,7 +359,7 @@ def unregister_push_token():
             push_token.updated_at = datetime.now(UTC)
             db.session.commit()
 
-        return success_response(message='Push token unregistered successfully')
+        return success_response(message=get_translation('api.notifications.success.push_unregistered'))
 
     except Exception as e:
         db.session.rollback()

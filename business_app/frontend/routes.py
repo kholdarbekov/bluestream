@@ -25,11 +25,20 @@ from datetime import datetime, UTC
 def index():
     """Main homepage using index-4.html template"""
     language = get_current_language()
+    request_id = getattr(g, 'request_id', 'N/A')
+    
+    # AGGRESSIVE DEBUG LOGGING
+    current_app.logger.info(f"")
+    current_app.logger.info(f"[INDEX-DEBUG] [REQ:{request_id}] ========== index() ROUTE START ==========")
+    current_app.logger.info(f"[INDEX-DEBUG] [REQ:{request_id}] get_current_language() returned: '{language}'")
+    current_app.logger.info(f"[INDEX-DEBUG] [REQ:{request_id}] g.language: '{getattr(g, 'language', None)}'")
+    current_app.logger.info(f"[INDEX-DEBUG] [REQ:{request_id}] session.get('language'): '{session.get('language')}'")
     
     # Get featured products (defensive)
     try:
         featured_products = Product.query.filter_by(is_featured=True, is_active=True).limit(8).all()
         featured_products = [p.to_dict(language=language) for p in featured_products]
+        current_app.logger.info(f"[INDEX-DEBUG] [REQ:{request_id}] Fetched {len(featured_products)} featured products with language='{language}'")
     except Exception as e:
         print(f"Error getting featured products: {e}")
         featured_products = []
@@ -38,6 +47,7 @@ def index():
     try:
         categories = ProductCategory.query.filter_by(is_active=True).order_by(ProductCategory.sort_order).all()
         categories = [c.to_dict(language=language) for c in categories]
+        current_app.logger.info(f"[INDEX-DEBUG] [REQ:{request_id}] Fetched {len(categories)} categories with language='{language}'")
     except Exception as e:
         print(f"Error getting categories: {e}")
         categories = []
@@ -90,6 +100,11 @@ def index():
                 }
     except:
         pass  # User not logged in or token invalid
+    
+    current_app.logger.info(f"[INDEX-DEBUG] [REQ:{request_id}] Rendering template with language='{language}'")
+    current_app.logger.info(f"[INDEX-DEBUG] [REQ:{request_id}] ========== index() ROUTE END ==========")
+    
+    print(f"!!!! RENDER_TEMPLATE ABOUT TO BE CALLED for {request_id} with language: {language}")
     
     return render_template('frontend/index.html',
                          featured_products=featured_products,
@@ -162,12 +177,19 @@ def cart():
 
 
 @frontend_bp.route('/checkout')
-@jwt_required()
 def checkout():
     """Checkout page"""
     from datetime import datetime
+    
+    # Check authentication
+    try:
+        verify_jwt_in_request(optional=True)
+        current_user_id = get_jwt_identity()
+        if not current_user_id:
+            return redirect(url_for('frontend.login', next=request.url))
+    except Exception:
+        return redirect(url_for('frontend.login', next=request.url))
 
-    current_user_id = get_jwt_identity()
     user = User.query.get(current_user_id)
 
     # Get user addresses
@@ -476,6 +498,18 @@ def gallery():
     return render_template('frontend/gallery.html')
 
 
+@frontend_bp.route('/terms')
+def terms():
+    """Terms and Conditions page"""
+    return render_template('frontend/terms.html')
+
+
+@frontend_bp.route('/privacy')
+def privacy():
+    """Privacy Policy page"""
+    return render_template('frontend/privacy.html')
+
+
 @frontend_bp.route('/login')
 def login():
     """Login page"""
@@ -561,26 +595,93 @@ def addresses():
 # Language switching
 @frontend_bp.route('/set-language/<language>')
 def set_language_route(language):
-    """Set user language preference via URL redirect"""
+    """Set user language preference via URL redirect
+
+    This endpoint:
+    1. Validates the language code
+    2. Stores in session (immediate effect, highest priority after URL param)
+    3. Persists to user's DB profile if logged in (for cross-session persistence)
+    4. Redirects back to the referring page
+    """
+    import os
+    current_app.logger.info(f"[LANG-DEBUG] === set_language_route START (PID: {os.getpid()}) ===")
+    current_app.logger.info(f"[LANG-DEBUG] Requested language: {language}")
+    current_app.logger.info(f"[LANG-DEBUG] Session BEFORE: {dict(session)}")
+    current_app.logger.info(f"[LANG-DEBUG] Cookies: {request.cookies}")
+    current_app.logger.info(f"[LANG-DEBUG] Referrer: {request.referrer}")
+
     # Validate language
     if language not in current_app.config['LANGUAGES']:
+        current_app.logger.warning(f"[LANG-DEBUG] Invalid language requested: {language}, using default")
         language = current_app.config['DEFAULT_LANGUAGE']
 
+    # Store in session (this is checked BEFORE DB preference in before_request)
     session['language'] = language
+    session.permanent = True  # Persist session across browser sessions
+    session.modified = True  # Ensure session is marked as modified
+    current_app.logger.info(f"[LANG-DEBUG] Session 'language' set to: {language}")
+    current_app.logger.info(f"[LANG-DEBUG] Session AFTER: {dict(session)}")
 
-    # Store in user profile if logged in
+    g.language = language  # Also set in g for immediate use in this request
+
+    # Also persist to user profile if logged in (for cross-session persistence)
     try:
         verify_jwt_in_request(optional=True)
         current_user_id = get_jwt_identity()
+        current_app.logger.info(f"[LANG-DEBUG] JWT user_id: {current_user_id}")
         if current_user_id:
             user = User.query.get(current_user_id)
             if user:
+                old_pref = user.preferred_language
                 user.preferred_language = language
                 db.session.commit()
+                current_app.logger.info(f"[LANG-DEBUG] User {current_user_id} preferred_language: {old_pref} -> {language}")
+            else:
+                current_app.logger.info(f"[LANG-DEBUG] User {current_user_id} not found in DB")
+        else:
+            current_app.logger.info(f"[LANG-DEBUG] No JWT user (not logged in)")
     except Exception as exc:
-        pass
+        # Log the error but don't fail - session language will still work
+        current_app.logger.warning(f"[LANG-DEBUG] Failed to update user preferred_language: {exc}")
+        # Ensure we don't leave a broken transaction
+        db.session.rollback()
+
+    redirect_url = request.referrer or url_for('frontend.index')
+    current_app.logger.info(f"[LANG-DEBUG] Redirecting to: {redirect_url}")
+    current_app.logger.info(f"[LANG-DEBUG] === set_language_route END ===")
+
+    resp = redirect(redirect_url)
     
-    return redirect(request.referrer or url_for('frontend.index'))
+    # Nuclear Option: Explicitly unset potential conflicting cookies
+    # If there were old cookies with different names (session vs __Secure-session)
+    # or domains, they might be causing the toggling.
+    
+    current_cookie_name = current_app.config.get('SESSION_COOKIE_NAME', 'session')
+    
+    # List of cookies to kill: defaults that might be lingering
+    cookies_to_kill = ['session', '__Secure-session', 'remembe_token']
+    
+    # Don't kill the one we are actually using!
+    if current_cookie_name in cookies_to_kill:
+        cookies_to_kill.remove(current_cookie_name)
+        
+    # Domains to attempt cleaning on
+    domains = [
+        None, # Host only
+        '.bluestream.uz',
+        'bluestream.uz',
+        '.localhost',
+        'localhost'
+    ]
+    
+    for cookie_name in cookies_to_kill:
+        for domain in domains:
+            try:
+                resp.delete_cookie(cookie_name, domain=domain, path='/')
+            except:
+                pass
+
+    return resp
 
 
 # Context processor for global template variables
@@ -588,23 +689,25 @@ def set_language_route(language):
 def inject_global_vars():
     """Inject global variables into all templates"""
     from datetime import datetime
-    
+    from flask import g
+
     class MomentJS:
         def format(self, fmt):
             if fmt == 'YYYY':
                 return datetime.now().year
             return datetime.now().strftime(fmt)
-    
-    # Get current language and set in g object for template filters
+
+    # Get current language
     from business_app.utils.helpers import get_current_language
     language = get_current_language()
-    
-    # Set language in g object so template filters can use it
-    g.language = language
-    
-    # Debug logging
-    if current_app.debug:
-        current_app.logger.debug(f"Context processor - current language: {language}")
+    request_id = getattr(g, 'request_id', 'N/A')
+
+    # DEBUG: Always log context processor language
+    current_app.logger.info(f"[CONTEXT-DEBUG] [REQ:{request_id}] inject_global_vars() called")
+    current_app.logger.info(f"[CONTEXT-DEBUG] [REQ:{request_id}] g.language: '{getattr(g, 'language', None)}'")
+    current_app.logger.info(f"[CONTEXT-DEBUG] [REQ:{request_id}] get_current_language() returned: '{language}'")
+    current_app.logger.info(f"[CONTEXT-DEBUG] [REQ:{request_id}] session.get('language'): '{session.get('language')}'")
+    current_app.logger.info(f"[CONTEXT-DEBUG] [REQ:{request_id}] Returning current_language='{language}' to template")
     
     # Get categories for navigation
     categories = ProductCategory.query.filter_by(is_active=True).order_by(ProductCategory.sort_order).all()

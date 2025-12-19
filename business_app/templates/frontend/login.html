@@ -1,6 +1,6 @@
 {% extends "frontend/base.html" %}
 
-{% block title %}{{ 'Login'|translate(current_language) }} - {{ company_name }}{% endblock %}
+{% block title %}{{ 'landing.nav.login'|t }} - {{ company_name }}{% endblock %}
 
 {% block content %}
         <!-- page-title -->
@@ -8,10 +8,10 @@
             <div class="bg-layer" style="background-image: url({{ url_for('static', filename='images/background/page-title.jpg') }});"></div>
             <div class="auto-container">
                 <div class="content-box">
-                    <h1>{{ 'Login'|translate(current_language) }}</h1>
+                    <h1>{{ 'landing.nav.login'|t }}</h1>
                     <ul class="bread-crumb clearfix">
-                        <li><a href="{{ url_for('frontend.index') }}">{{ 'Home'|translate(current_language) }}</a></li>
-                        <li>{{ 'Login'|translate(current_language) }}</li>
+                        <li><a href="{{ url_for('frontend.index') }}">{{ 'landing.nav.home'|t }}</a></li>
+                        <li>{{ 'landing.nav.login'|t }}</li>
                     </ul>
                 </div>
             </div>
@@ -25,33 +25,33 @@
                     <div class="col-lg-8 col-md-12 col-sm-12 offset-lg-2">
                         <div class="form-inner">
                             <div class="sec-title centred">
-                                <h2>{{ 'Welcome Back'|translate(current_language) }}</h2>
-                                <p>{{ 'Please login to your account to continue'|translate(current_language) }}</p>
+                                <h2>{{ 'Welcome Back'|t }}</h2>
+                                <p>{{ 'Please login to your account to continue'|t }}</p>
                             </div>
                             
                             <form id="loginForm" class="default-form">
                                 <div class="row clearfix">
                                     <div class="col-lg-12 col-md-12 col-sm-12 form-group">
-                                        <input type="text" name="identifier" placeholder="{{ 'Email or Phone Number'|translate(current_language) }}" required>
+                                        <input type="text" name="identifier" placeholder="{{ 'Email or Phone Number'|t }}" required>
                                     </div>
                                     <div class="col-lg-12 col-md-12 col-sm-12 form-group">
-                                        <input type="password" name="password" placeholder="{{ 'Password'|translate(current_language) }}" required>
+                                        <input type="password" name="password" placeholder="{{ 'Password'|t }}" required>
                                     </div>
                                     <div class="col-lg-12 col-md-12 col-sm-12 form-group">
                                         <div class="check-box">
                                             <input class="check" type="checkbox" id="remember_me" name="remember_me">
-                                            <label for="remember_me">{{ 'Remember Me'|translate(current_language) }}</label>
+                                            <label for="remember_me">{{ 'Remember Me'|t }}</label>
                                         </div>
                                     </div>
                                     <div class="col-lg-12 col-md-12 col-sm-12 form-group message-btn">
-                                        <button type="submit" class="theme-btn btn-one">{{ 'Login'|translate(current_language) }}</button>
+                                        <button type="submit" class="theme-btn btn-one">{{ 'landing.nav.login'|t }}</button>
                                     </div>
                                 </div>
                             </form>
                             
                             <div class="other-option centred">
-                                <p>{{ "Don't have an account?"|translate(current_language) }} <a href="{{ url_for('frontend.register') }}">{{ 'Register Here'|translate(current_language) }}</a></p>
-                                <p><a href="{{ url_for('frontend.forgot_password') }}">{{ 'Forgot Password?'|translate(current_language) }}</a></p>
+                                <p>{{ "Don't have an account?"|t }} <a href="{{ url_for('frontend.register') }}">{{ 'Register Here'|t }}</a></p>
+                                <p><a href="{{ url_for('frontend.forgot_password') }}">{{ 'Forgot Password?'|t }}</a></p>
                             </div>
                         </div>
                     </div>
@@ -83,13 +83,13 @@ document.getElementById('loginForm').addEventListener('submit', async function(e
         
         if (response.ok) {
             setAuthToken(result.access_token);
-            showNotification('{{ "Login successful!"|translate(current_language) }}', 'success');
+            showNotification('{{ "Login successful!"|t }}', 'success');
             window.location.href = '{{ url_for("frontend.my_account") }}';
         } else {
-            showNotification(result.message || '{{ "Login failed"|translate(current_language) }}', 'error');
+            showNotification(result.message || '{{ "Login failed"|t }}', 'error');
         }
     } catch (error) {
-        showNotification('{{ "Network error. Please try again."|translate(current_language) }}', 'error');
+        showNotification('{{ "Network error. Please try again."|t }}', 'error');
     }
 });
 </script>

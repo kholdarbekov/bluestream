@@ -111,13 +111,13 @@ class ProductionConfig(BaseConfig):
     # Session Configuration - Maximum security
     SESSION_COOKIE_SECURE = True
     SESSION_COOKIE_HTTPONLY = True
-    SESSION_COOKIE_SAMESITE = 'Strict'  # Stricter in production
+    SESSION_COOKIE_SAMESITE = 'Lax'  # Lax is safer for navigation and prevents session dropping
     SESSION_COOKIE_NAME = '__Secure-session'
     PERMANENT_SESSION_LIFETIME = timedelta(hours=4)
     
     # Payment Gateway Configuration - Live mode
     PAYME_TEST_MODE = False
-    PAYME_ENDPOINT_URL = 'https://checkout.paycom.uz'
+    PAYME_ENDPOINT_URL = 'https://checkout.paycom.uz/api'
     CLICK_TEST_MODE = False
     CLICK_ENDPOINT_URL = 'https://api.click.uz/v2/merchant'
     

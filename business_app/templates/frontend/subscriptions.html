@@ -1,6 +1,6 @@
 {% extends "frontend/base.html" %}
 
-{% block title %}{{ 'Water Subscriptions - '|translate(current_language) }}{{ super() }}{% endblock %}
+{% block title %}{{ 'Water Subscriptions - '|t }}{{ super() }}{% endblock %}
 
 {% block extra_head %}
 <style>
@@ -886,10 +886,10 @@
     <div class="shape" style="background-image: url({{ url_for('static', filename='images/shape/banner-shap.png') }});"></div>
     <div class="auto-container">
         <div class="content-box">
-            <h1>{{ 'Water Subscriptions'|translate(current_language) }}</h1>
+            <h1>{{ 'Water Subscriptions'|t }}</h1>
             <ul class="bread-crumb clearfix">
-                <li><a href="{{ url_for('frontend.index') }}">{{ 'Home'|translate(current_language) }}</a></li>
-                <li>{{ 'Subscriptions'|translate(current_language) }}</li>
+                <li><a href="{{ url_for('frontend.index') }}">{{ 'landing.nav.home'|t }}</a></li>
+                <li>{{ 'landing.nav.subscriptions'|t }}</li>
             </ul>
         </div>
     </div>
@@ -900,23 +900,23 @@
 <section class="subscription-intro centred">
     <div class="auto-container">
         <div class="intro-content">
-            <h2>{{ 'Never Run Out of Pure Water'|translate(current_language) }}</h2>
+            <h2>{{ 'Never Run Out of Pure Water'|t }}</h2>
             <p class="subtitle">
-                {{ 'Create your perfect water delivery schedule. Choose your products, set your frequency, and enjoy automatic deliveries tailored to your needs. No contracts, fully flexible, cancel anytime.'|translate(current_language) }}
+                {{ 'Create your perfect water delivery schedule. Choose your products, set your frequency, and enjoy automatic deliveries tailored to your needs. No contracts, fully flexible, cancel anytime.'|t }}
             </p>
 
             <div class="stats-row">
                 <div class="stat-box">
                     <span class="stat-number">10,000+</span>
-                    <span class="stat-label">{{ 'Active Subscriptions'|translate(current_language) }}</span>
+                    <span class="stat-label">{{ 'Active Subscriptions'|t }}</span>
                 </div>
                 <div class="stat-box">
                     <span class="stat-number">99.8%</span>
-                    <span class="stat-label">{{ 'Satisfaction Rate'|translate(current_language) }}</span>
+                    <span class="stat-label">{{ 'Satisfaction Rate'|t }}</span>
                 </div>
                 <div class="stat-box">
                     <span class="stat-number">24/7</span>
-                    <span class="stat-label">{{ 'Delivery Available'|translate(current_language) }}</span>
+                    <span class="stat-label">{{ 'Delivery Available'|t }}</span>
                 </div>
             </div>
         </div>
@@ -927,9 +927,9 @@
 <section class="how-it-works-section" id="how-it-works">
     <div class="auto-container">
         <div class="sec-title centred">
-            <span>{{ 'Simple & Flexible'|translate(current_language) }}</span>
-            <h2>{{ 'How Water Subscriptions Work'|translate(current_language) }}</h2>
-            <p class="subtitle">{{ 'Get started in three easy steps and enjoy hassle-free water delivery on your schedule'|translate(current_language) }}</p>
+            <span>{{ 'Simple & Flexible'|t }}</span>
+            <h2>{{ 'How Water Subscriptions Work'|t }}</h2>
+            <p class="subtitle">{{ 'Get started in three easy steps and enjoy hassle-free water delivery on your schedule'|t }}</p>
         </div>
 
         <div class="steps-container">
@@ -938,8 +938,8 @@
                     <i class="fal fa-shopping-cart"></i>
                     <span class="step-number">1</span>
                 </div>
-                <h3>{{ 'Choose Your Products'|translate(current_language) }}</h3>
-                <p>{{ 'Select from our range of premium water products. Pick bottle sizes, quantities, and any additional items you need for your subscription.'|translate(current_language) }}</p>
+                <h3>{{ 'Choose Your Products'|t }}</h3>
+                <p>{{ 'Select from our range of premium water products. Pick bottle sizes, quantities, and any additional items you need for your subscription.'|t }}</p>
             </div>
 
             <div class="step-item">
@@ -947,8 +947,8 @@
                     <i class="fal fa-calendar-alt"></i>
                     <span class="step-number">2</span>
                 </div>
-                <h3>{{ 'Set Your Schedule'|translate(current_language) }}</h3>
-                <p>{{ 'Choose your delivery frequency (daily, weekly, biweekly, or monthly) and preferred delivery time slots that fit your lifestyle.'|translate(current_language) }}</p>
+                <h3>{{ 'Set Your Schedule'|t }}</h3>
+                <p>{{ 'Choose your delivery frequency (daily, weekly, biweekly, or monthly) and preferred delivery time slots that fit your lifestyle.'|t }}</p>
             </div>
 
             <div class="step-item">
@@ -956,8 +956,8 @@
                     <i class="fal fa-sync-alt"></i>
                     <span class="step-number">3</span>
                 </div>
-                <h3>{{ 'Relax & Enjoy'|translate(current_language) }}</h3>
-                <p>{{ 'Sit back while we handle the rest. Manage, pause, or modify your subscription anytime through your online account.'|translate(current_language) }}</p>
+                <h3>{{ 'Relax & Enjoy'|t }}</h3>
+                <p>{{ 'Sit back while we handle the rest. Manage, pause, or modify your subscription anytime through your online account.'|t }}</p>
             </div>
         </div>
     </div>
@@ -967,7 +967,7 @@
 <section class="features-showcase">
     <div class="auto-container">
         <div class="sec-title centred">
-            <span>{{ 'Why Choose Subscriptions'|translate(current_language) }}</span>
+            <span>{{ 'Why Choose Subscriptions'|t }}</span>
             <h2>{{ 'Benefits You\'ll Love'|translate(current_language) }}</h2>
         </div>
 
@@ -976,48 +976,48 @@
                 <div class="feature-icon">
                     <i class="fal fa-badge-percent"></i>
                 </div>
-                <h4>{{ 'Save Money'|translate(current_language) }}</h4>
-                <p>{{ 'Get up to 20% discount on subscription orders compared to one-time purchases. The more you subscribe, the more you save.'|translate(current_language) }}</p>
+                <h4>{{ 'Save Money'|t }}</h4>
+                <p>{{ 'Get up to 20% discount on subscription orders compared to one-time purchases. The more you subscribe, the more you save.'|t }}</p>
             </div>
 
             <div class="feature-card">
                 <div class="feature-icon">
                     <i class="fal fa-truck"></i>
                 </div>
-                <h4>{{ 'Free Delivery'|translate(current_language) }}</h4>
-                <p>{{ 'Enjoy complimentary delivery on all subscription orders. No minimum order requirements or hidden fees.'|translate(current_language) }}</p>
+                <h4>{{ 'Free Delivery'|t }}</h4>
+                <p>{{ 'Enjoy complimentary delivery on all subscription orders. No minimum order requirements or hidden fees.'|t }}</p>
             </div>
 
             <div class="feature-card">
                 <div class="feature-icon">
                     <i class="fal fa-sliders-h"></i>
                 </div>
-                <h4>{{ 'Fully Flexible'|translate(current_language) }}</h4>
-                <p>{{ 'Pause, skip, reschedule, or cancel anytime. Change products and quantities with just a few clicks.'|translate(current_language) }}</p>
+                <h4>{{ 'Fully Flexible'|t }}</h4>
+                <p>{{ 'Pause, skip, reschedule, or cancel anytime. Change products and quantities with just a few clicks.'|t }}</p>
             </div>
 
             <div class="feature-card">
                 <div class="feature-icon">
                     <i class="fal fa-shield-check"></i>
                 </div>
-                <h4>{{ 'Quality Guaranteed'|translate(current_language) }}</h4>
-                <p>{{ 'Every bottle meets our strict quality standards. 100% satisfaction guarantee or your money back.'|translate(current_language) }}</p>
+                <h4>{{ 'Quality Guaranteed'|t }}</h4>
+                <p>{{ 'Every bottle meets our strict quality standards. 100% satisfaction guarantee or your money back.'|t }}</p>
             </div>
 
             <div class="feature-card">
                 <div class="feature-icon">
                     <i class="fal fa-star"></i>
                 </div>
-                <h4>{{ 'Loyalty Rewards'|translate(current_language) }}</h4>
-                <p>{{ 'Earn bonus loyalty points on subscription orders. Redeem for discounts, free products, and exclusive perks.'|translate(current_language) }}</p>
+                <h4>{{ 'Loyalty Rewards'|t }}</h4>
+                <p>{{ 'Earn bonus loyalty points on subscription orders. Redeem for discounts, free products, and exclusive perks.'|t }}</p>
             </div>
 
             <div class="feature-card">
                 <div class="feature-icon">
                     <i class="fal fa-headset"></i>
                 </div>
-                <h4>{{ 'Priority Support'|translate(current_language) }}</h4>
-                <p>{{ 'Get dedicated customer support 24/7. Subscription members receive priority assistance for any issues.'|translate(current_language) }}</p>
+                <h4>{{ 'Priority Support'|t }}</h4>
+                <p>{{ 'Get dedicated customer support 24/7. Subscription members receive priority assistance for any issues.'|t }}</p>
             </div>
         </div>
     </div>
@@ -1027,52 +1027,52 @@
 <section class="use-cases-section">
     <div class="auto-container">
         <div class="sec-title centred">
-            <span>{{ 'Perfect For Everyone'|translate(current_language) }}</span>
-            <h2>{{ 'Who Benefits from Subscriptions?'|translate(current_language) }}</h2>
+            <span>{{ 'Perfect For Everyone'|t }}</span>
+            <h2>{{ 'Who Benefits from Subscriptions?'|t }}</h2>
         </div>
 
         <div class="use-cases-grid">
             <div class="use-case-card">
                 <i class="fal fa-home use-case-icon"></i>
-                <h4>{{ 'Families'|translate(current_language) }}</h4>
-                <p>{{ 'Ensure your family always has access to clean, safe drinking water.'|translate(current_language) }}</p>
+                <h4>{{ 'Families'|t }}</h4>
+                <p>{{ 'Ensure your family always has access to clean, safe drinking water.'|t }}</p>
                 <ul class="use-case-list">
-                    <li>{{ 'Weekly deliveries'|translate(current_language) }}</li>
-                    <li>{{ 'Family-sized quantities'|translate(current_language) }}</li>
-                    <li>{{ 'Consistent supply'|translate(current_language) }}</li>
+                    <li>{{ 'Weekly deliveries'|t }}</li>
+                    <li>{{ 'Family-sized quantities'|t }}</li>
+                    <li>{{ 'Consistent supply'|t }}</li>
                 </ul>
             </div>
 
             <div class="use-case-card">
                 <i class="fal fa-building use-case-icon"></i>
-                <h4>{{ 'Offices'|translate(current_language) }}</h4>
-                <p>{{ 'Keep your team hydrated with reliable office water delivery.'|translate(current_language) }}</p>
+                <h4>{{ 'Offices'|t }}</h4>
+                <p>{{ 'Keep your team hydrated with reliable office water delivery.'|t }}</p>
                 <ul class="use-case-list">
-                    <li>{{ 'Bulk pricing available'|translate(current_language) }}</li>
-                    <li>{{ 'Multiple coolers'|translate(current_language) }}</li>
-                    <li>{{ 'Invoice billing'|translate(current_language) }}</li>
+                    <li>{{ 'Bulk pricing available'|t }}</li>
+                    <li>{{ 'Multiple coolers'|t }}</li>
+                    <li>{{ 'Invoice billing'|t }}</li>
                 </ul>
             </div>
 
             <div class="use-case-card">
                 <i class="fal fa-dumbbell use-case-icon"></i>
-                <h4>{{ 'Fitness Enthusiasts'|translate(current_language) }}</h4>
-                <p>{{ 'Stay optimally hydrated for peak performance and recovery.'|translate(current_language) }}</p>
+                <h4>{{ 'Fitness Enthusiasts'|t }}</h4>
+                <p>{{ 'Stay optimally hydrated for peak performance and recovery.'|t }}</p>
                 <ul class="use-case-list">
-                    <li>{{ 'Flexible quantities'|translate(current_language) }}</li>
-                    <li>{{ 'Premium water options'|translate(current_language) }}</li>
-                    <li>{{ 'On-demand adjustments'|translate(current_language) }}</li>
+                    <li>{{ 'Flexible quantities'|t }}</li>
+                    <li>{{ 'Premium water options'|t }}</li>
+                    <li>{{ 'On-demand adjustments'|t }}</li>
                 </ul>
             </div>
 
             <div class="use-case-card">
                 <i class="fal fa-glass-whiskey use-case-icon"></i>
-                <h4>{{ 'Events & Catering'|translate(current_language) }}</h4>
-                <p>{{ 'Plan ahead for events with scheduled bulk water deliveries.'|translate(current_language) }}</p>
+                <h4>{{ 'Events & Catering'|t }}</h4>
+                <p>{{ 'Plan ahead for events with scheduled bulk water deliveries.'|t }}</p>
                 <ul class="use-case-list">
-                    <li>{{ 'Custom schedules'|translate(current_language) }}</li>
-                    <li>{{ 'Large volumes'|translate(current_language) }}</li>
-                    <li>{{ 'Event-day delivery'|translate(current_language) }}</li>
+                    <li>{{ 'Custom schedules'|t }}</li>
+                    <li>{{ 'Large volumes'|t }}</li>
+                    <li>{{ 'Event-day delivery'|t }}</li>
                 </ul>
             </div>
         </div>
@@ -1083,62 +1083,62 @@
 <section class="subscription-builder" id="builder">
     <div class="auto-container">
         <div class="sec-title centred">
-            <span>{{ 'Build Your Plan'|translate(current_language) }}</span>
-            <h2>{{ 'Preview Your Subscription'|translate(current_language) }}</h2>
-            <p class="subtitle">{{ 'Choose a delivery frequency below to see estimated costs and savings'|translate(current_language) }}</p>
+            <span>{{ 'Build Your Plan'|t }}</span>
+            <h2>{{ 'Preview Your Subscription'|t }}</h2>
+            <p class="subtitle">{{ 'Choose a delivery frequency below to see estimated costs and savings'|t }}</p>
         </div>
 
         <div class="builder-container">
             <div class="builder-info-box">
-                <h3><i class="fal fa-info-circle"></i> {{ 'How to Create Your Subscription'|translate(current_language) }}</h3>
-                <p>{{ 'First, browse our shop and add products to your cart. Then select "Subscribe" at checkout to set up recurring deliveries with your preferred schedule.'|translate(current_language) }}</p>
+                <h3><i class="fal fa-info-circle"></i> {{ 'How to Create Your Subscription'|t }}</h3>
+                <p>{{ 'First, browse our shop and add products to your cart. Then select "Subscribe" at checkout to set up recurring deliveries with your preferred schedule.'|t }}</p>
             </div>
 
             <div class="builder-step">
-                <h3><i class="fal fa-calendar-check"></i> {{ 'Choose Delivery Frequency'|translate(current_language) }}</h3>
+                <h3><i class="fal fa-calendar-check"></i> {{ 'Choose Delivery Frequency'|t }}</h3>
                 <div class="frequency-options">
                     <div class="frequency-option" data-frequency="daily">
                         <i class="fal fa-calendar-day"></i>
-                        <h4>{{ 'Daily'|translate(current_language) }}</h4>
-                        <p>{{ 'Every day'|translate(current_language) }}</p>
+                        <h4>{{ 'Daily'|t }}</h4>
+                        <p>{{ 'Every day'|t }}</p>
                     </div>
                     <div class="frequency-option" data-frequency="weekly">
                         <i class="fal fa-calendar-week"></i>
-                        <h4>{{ 'Weekly'|translate(current_language) }}</h4>
-                        <p>{{ 'Once per week'|translate(current_language) }}</p>
+                        <h4>{{ 'Weekly'|t }}</h4>
+                        <p>{{ 'Once per week'|t }}</p>
                     </div>
                     <div class="frequency-option" data-frequency="biweekly">
                         <i class="fal fa-calendar-alt"></i>
-                        <h4>{{ 'Bi-weekly'|translate(current_language) }}</h4>
-                        <p>{{ 'Every 2 weeks'|translate(current_language) }}</p>
+                        <h4>{{ 'Bi-weekly'|t }}</h4>
+                        <p>{{ 'Every 2 weeks'|t }}</p>
                     </div>
                     <div class="frequency-option" data-frequency="monthly">
                         <i class="fal fa-calendar"></i>
-                        <h4>{{ 'Monthly'|translate(current_language) }}</h4>
-                        <p>{{ 'Once per month'|translate(current_language) }}</p>
+                        <h4>{{ 'Monthly'|t }}</h4>
+                        <p>{{ 'Once per month'|t }}</p>
                     </div>
                 </div>
             </div>
 
             <div class="subscription-preview">
-                <h3>{{ 'Estimated Subscription Savings'|translate(current_language) }}</h3>
+                <h3>{{ 'Estimated Subscription Savings'|t }}</h3>
                 <div class="preview-details">
                     <div class="preview-item">
-                        <div class="label">{{ 'Delivery Frequency'|translate(current_language) }}</div>
-                        <div class="value" id="preview-frequency">{{ 'Select above'|translate(current_language) }}</div>
+                        <div class="label">{{ 'Delivery Frequency'|t }}</div>
+                        <div class="value" id="preview-frequency">{{ 'Select above'|t }}</div>
                     </div>
                     <div class="preview-item">
-                        <div class="label">{{ 'Your Savings'|translate(current_language) }}</div>
+                        <div class="label">{{ 'Your Savings'|t }}</div>
                         <div class="value" id="preview-savings">0%</div>
                     </div>
                 </div>
 
                 <div class="preview-cta">
                     <a href="{{ url_for('frontend.shop') }}" class="theme-btn btn-one">
-                        {{ 'Browse Products to Subscribe'|translate(current_language) }} <i class="fal fa-arrow-right"></i>
+                        {{ 'Browse Products to Subscribe'|t }} <i class="fal fa-arrow-right"></i>
                     </a>
                     <p style="margin-top: 15px; font-size: 14px; color: #666;">
-                        {{ 'Select your products, then choose subscription at checkout'|translate(current_language) }}
+                        {{ 'Select your products, then choose subscription at checkout'|t }}
                     </p>
                 </div>
             </div>
@@ -1150,15 +1150,15 @@
 <section class="faq-section">
     <div class="auto-container">
         <div class="sec-title centred">
-            <span>{{ 'Got Questions?'|translate(current_language) }}</span>
-            <h2>{{ 'Subscription FAQ'|translate(current_language) }}</h2>
+            <span>{{ 'Got Questions?'|t }}</span>
+            <h2>{{ 'Subscription FAQ'|t }}</h2>
         </div>
 
         <ul class="accordion-box">
             <li class="accordion block">
                 <div class="acc-btn">
                     <div class="icon-outer"><i class="fal fa-plus"></i></div>
-                    <h4>{{ 'How do subscriptions work?'|translate(current_language) }}</h4>
+                    <h4>{{ 'How do subscriptions work?'|t }}</h4>
                 </div>
                 <div class="acc-content">
                     <div class="text">
@@ -1170,11 +1170,11 @@
             <li class="accordion block">
                 <div class="acc-btn">
                     <div class="icon-outer"><i class="fal fa-plus"></i></div>
-                    <h4>{{ 'Can I customize my subscription?'|translate(current_language) }}</h4>
+                    <h4>{{ 'Can I customize my subscription?'|t }}</h4>
                 </div>
                 <div class="acc-content">
                     <div class="text">
-                        <p>{{ 'Absolutely! Unlike fixed plans, our subscriptions are fully customizable. Choose any products from our catalog, set your own quantities, select your preferred delivery frequency, and even set specific delivery days. Change items, quantities, or frequency anytime through your account.'|translate(current_language) }}</p>
+                        <p>{{ 'Absolutely! Unlike fixed plans, our subscriptions are fully customizable. Choose any products from our catalog, set your own quantities, select your preferred delivery frequency, and even set specific delivery days. Change items, quantities, or frequency anytime through your account.'|t }}</p>
                     </div>
                 </div>
             </li>
@@ -1182,11 +1182,11 @@
             <li class="accordion block">
                 <div class="acc-btn">
                     <div class="icon-outer"><i class="fal fa-plus"></i></div>
-                    <h4>{{ 'What if I need to pause or skip a delivery?'|translate(current_language) }}</h4>
+                    <h4>{{ 'What if I need to pause or skip a delivery?'|t }}</h4>
                 </div>
                 <div class="acc-content">
                     <div class="text">
-                        <p>{{ 'You can pause your subscription anytime for up to 3 months, perfect for vacations or extended travel. You can also skip individual deliveries with 48 hours notice. Both options are available through your online account or by contacting our support team.'|translate(current_language) }}</p>
+                        <p>{{ 'You can pause your subscription anytime for up to 3 months, perfect for vacations or extended travel. You can also skip individual deliveries with 48 hours notice. Both options are available through your online account or by contacting our support team.'|t }}</p>
                     </div>
                 </div>
             </li>
@@ -1194,11 +1194,11 @@
             <li class="accordion block">
                 <div class="acc-btn">
                     <div class="icon-outer"><i class="fal fa-plus"></i></div>
-                    <h4>{{ 'Are there any contracts or cancellation fees?'|translate(current_language) }}</h4>
+                    <h4>{{ 'Are there any contracts or cancellation fees?'|t }}</h4>
                 </div>
                 <div class="acc-content">
                     <div class="text">
-                        <p>{{ 'No contracts, no commitments, no cancellation fees. You can cancel your subscription at any time with no penalties. We believe in earning your business through great service, not locking you into contracts.'|translate(current_language) }}</p>
+                        <p>{{ 'No contracts, no commitments, no cancellation fees. You can cancel your subscription at any time with no penalties. We believe in earning your business through great service, not locking you into contracts.'|t }}</p>
                     </div>
                 </div>
             </li>
@@ -1206,11 +1206,11 @@
             <li class="accordion block">
                 <div class="acc-btn">
                     <div class="icon-outer"><i class="fal fa-plus"></i></div>
-                    <h4>{{ 'How much can I save with a subscription?'|translate(current_language) }}</h4>
+                    <h4>{{ 'How much can I save with a subscription?'|t }}</h4>
                 </div>
                 <div class="acc-content">
                     <div class="text">
-                        <p>{{ 'Subscription members save up to 20% compared to one-time purchases. You also get free delivery, earn bonus loyalty points (up to 2x multiplier), and access exclusive subscriber-only promotions. The exact savings depend on your chosen products and frequency.'|translate(current_language) }}</p>
+                        <p>{{ 'Subscription members save up to 20% compared to one-time purchases. You also get free delivery, earn bonus loyalty points (up to 2x multiplier), and access exclusive subscriber-only promotions. The exact savings depend on your chosen products and frequency.'|t }}</p>
                     </div>
                 </div>
             </li>
@@ -1218,11 +1218,11 @@
             <li class="accordion block">
                 <div class="acc-btn">
                     <div class="icon-outer"><i class="fal fa-plus"></i></div>
-                    <h4>{{ 'What payment methods do you accept?'|translate(current_language) }}</h4>
+                    <h4>{{ 'What payment methods do you accept?'|t }}</h4>
                 </div>
                 <div class="acc-content">
                     <div class="text">
-                        <p>{{ 'We accept credit/debit cards, Payme, Click, and cash on delivery. For automatic billing, you can securely save your payment method. Business subscribers can also use invoice billing with NET 30 terms after credit approval.'|translate(current_language) }}</p>
+                        <p>{{ 'We accept credit/debit cards, Payme, Click, and cash on delivery. For automatic billing, you can securely save your payment method. Business subscribers can also use invoice billing with NET 30 terms after credit approval.'|t }}</p>
                     </div>
                 </div>
             </li>
@@ -1230,11 +1230,11 @@
             <li class="accordion block">
                 <div class="acc-btn">
                     <div class="icon-outer"><i class="fal fa-plus"></i></div>
-                    <h4>{{ 'Can I change my delivery address?'|translate(current_language) }}</h4>
+                    <h4>{{ 'Can I change my delivery address?'|t }}</h4>
                 </div>
                 <div class="acc-content">
                     <div class="text">
-                        <p>{{ 'Yes, you can update your delivery address anytime through your account. Changes made at least 48 hours before your next scheduled delivery will take effect immediately. For last-minute changes, please contact our support team.'|translate(current_language) }}</p>
+                        <p>{{ 'Yes, you can update your delivery address anytime through your account. Changes made at least 48 hours before your next scheduled delivery will take effect immediately. For last-minute changes, please contact our support team.'|t }}</p>
                     </div>
                 </div>
             </li>
@@ -1242,7 +1242,7 @@
             <li class="accordion block">
                 <div class="acc-btn">
                     <div class="icon-outer"><i class="fal fa-plus"></i></div>
-                    <h4>{{ 'What happens if a payment fails?'|translate(current_language) }}</h4>
+                    <h4>{{ 'What happens if a payment fails?'|t }}</h4>
                 </div>
                 <div class="acc-content">
                     <div class="text">
@@ -1257,14 +1257,14 @@
 <!-- CTA Section -->
 <section class="cta-section">
     <div class="auto-container">
-        <h2>{{ 'Ready to Start Your Subscription?'|translate(current_language) }}</h2>
-        <p>{{ 'Join thousands of satisfied customers enjoying convenient, reliable water delivery'|translate(current_language) }}</p>
+        <h2>{{ 'Ready to Start Your Subscription?'|t }}</h2>
+        <p>{{ 'Join thousands of satisfied customers enjoying convenient, reliable water delivery'|t }}</p>
         <div class="cta-buttons">
             <a href="{{ url_for('frontend.shop') }}" class="theme-btn btn-primary">
-                {{ 'Browse Products'|translate(current_language) }}
+                {{ 'Browse Products'|t }}
             </a>
             <a href="{{ url_for('frontend.contact') }}" class="theme-btn btn-secondary">
-                {{ 'Contact Us'|translate(current_language) }}
+                {{ 'Contact Us'|t }}
             </a>
         </div>
     </div>
@@ -1304,10 +1304,10 @@ document.addEventListener('DOMContentLoaded', function() {
 
         // Update frequency display
         const frequencyLabels = {
-            'daily': '{{ 'Daily'|translate(current_language) }}',
-            'weekly': '{{ 'Weekly'|translate(current_language) }}',
-            'biweekly': '{{ 'Bi-weekly'|translate(current_language) }}',
-            'monthly': '{{ 'Monthly'|translate(current_language) }}'
+            'daily': '{{ 'Daily'|t }}',
+            'weekly': '{{ 'Weekly'|t }}',
+            'biweekly': '{{ 'Bi-weekly'|t }}',
+            'monthly': '{{ 'Monthly'|t }}'
         };
 
         previewFrequency.textContent = frequencyLabels[selectedFrequency];

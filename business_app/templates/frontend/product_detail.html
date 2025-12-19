@@ -63,8 +63,8 @@
             <div class="content-box">
                 <h1>{{ product.name }}</h1>
                 <ul class="bread-crumb clearfix">
-                    <li><a href="{{ url_for('frontend.index') }}">{{ 'Home'|translate(current_language) }}</a></li>
-                    <li><a href="{{ url_for('frontend.shop') }}">{{ 'Shop'|translate(current_language) }}</a></li>
+                    <li><a href="{{ url_for('frontend.index') }}">{{ 'landing.nav.home'|t }}</a></li>
+                    <li><a href="{{ url_for('frontend.shop') }}">{{ 'landing.nav.shop'|t }}</a></li>
                     {% if product.category %}
                     <li><a href="{{ url_for('frontend.shop', category=product.category.id) }}">{{ product.category.name }}</a></li>
                     {% endif %}
@@ -130,7 +130,7 @@
                                 {% endfor %}
                             </div>
                             <span class="rating-num">{{ product.average_rating|round(1) }}</span>
-                            <span class="reviews-text">({{ product.review_count or 0 }} {{ 'reviews'|translate(current_language) }})</span>
+                            <span class="reviews-text">({{ product.review_count or 0 }} {{ 'reviews'|t }})</span>
                         </div>
                         {% endif %}
 
@@ -154,18 +154,18 @@
                                     {% if product.stock_quantity <= 10 %}
                                     <span class="stock-label stock-low">
                                         <i class="fas fa-exclamation-circle"></i>
-                                        {{ 'Only'|translate(current_language) }} {{ product.stock_quantity }} {{ 'left'|translate(current_language) }}
+                                        {{ 'Only'|t }} {{ product.stock_quantity }} {{ 'left'|t }}
                                     </span>
                                     {% else %}
                                     <span class="stock-label stock-available">
                                         <i class="fas fa-check-circle"></i>
-                                        {{ 'In Stock'|translate(current_language) }}
+                                        {{ 'In Stock'|t }}
                                     </span>
                                     {% endif %}
                                 {% else %}
                                 <span class="stock-label stock-out">
                                     <i class="fas fa-times-circle"></i>
-                                    {{ 'Out of Stock'|translate(current_language) }}
+                                    {{ 'Out of Stock'|t }}
                                 </span>
                                 {% endif %}
                             </div>
@@ -187,7 +187,7 @@
                                 </div>
                                 <div class="feature-info">
                                     <strong>{{ product.volume }} {{ product.volume_unit or 'L' }}</strong>
-                                    <span>{{ 'Volume'|translate(current_language) }}</span>
+                                    <span>{{ 'Volume'|t }}</span>
                                 </div>
                             </div>
                             {% endif %}
@@ -196,8 +196,8 @@
                                     <i class="fas fa-shield-alt"></i>
                                 </div>
                                 <div class="feature-info">
-                                    <strong>{{ '100% Pure'|translate(current_language) }}</strong>
-                                    <span>{{ 'Quality'|translate(current_language) }}</span>
+                                    <strong>{{ '100% Pure'|t }}</strong>
+                                    <span>{{ 'Quality'|t }}</span>
                                 </div>
                             </div>
                             <div class="feature-card">
@@ -205,8 +205,8 @@
                                     <i class="fas fa-certificate"></i>
                                 </div>
                                 <div class="feature-info">
-                                    <strong>{{ 'Certified'|translate(current_language) }}</strong>
-                                    <span>{{ 'Quality Assured'|translate(current_language) }}</span>
+                                    <strong>{{ 'Certified'|t }}</strong>
+                                    <span>{{ 'Quality Assured'|t }}</span>
                                 </div>
                             </div>
                         </div>
@@ -214,7 +214,7 @@
                         <!-- Purchase Box -->
                         <div class="purchase-box">
                             <div class="quantity-selector">
-                                <label>{{ 'Soni'|translate(current_language) }}</label>
+                                <label>{{ 'Soni'|t }}</label>
                                 <div class="qty-buttons">
                                     <button type="button" class="qty-minus" onclick="changeQty(-1)">-</button>
                                     <input type="text" id="qtyInput" value="1" readonly>
@@ -226,7 +226,7 @@
                                 Savatga qo'shish
                             </button>
                             
-                            <button class="wishlist-btn" onclick="addToWishlist({{ product.id }})" title="{{ 'Add to Wishlist'|translate(current_language) }}">
+                            <button class="wishlist-btn" onclick="addToWishlist({{ product.id }})" title="{{ 'Add to Wishlist'|t }}">
                                 <i class="far fa-heart"></i>
                             </button>
                         </div>
@@ -237,22 +237,22 @@
                                 <div class="benefit-item">
                                     <i class="fas fa-truck"></i>
                                     <div>
-                                        <strong>{{ 'Fast Delivery'|translate(current_language) }}</strong>
-                                        <p>{{ 'Same day delivery available'|translate(current_language) }}</p>
+                                        <strong>{{ 'Fast Delivery'|t }}</strong>
+                                        <p>{{ 'Same day delivery available'|t }}</p>
                                     </div>
                                 </div>
                                 <div class="benefit-item">
                                     <i class="fas fa-undo-alt"></i>
                                     <div>
-                                        <strong>{{ 'Easy Returns'|translate(current_language) }}</strong>
-                                        <p>{{ '7 days return policy'|translate(current_language) }}</p>
+                                        <strong>{{ 'Easy Returns'|t }}</strong>
+                                        <p>{{ '7 days return policy'|t }}</p>
                                     </div>
                                 </div>
                                 <div class="benefit-item">
                                     <i class="fas fa-lock"></i>
                                     <div>
-                                        <strong>{{ 'Secure Payment'|translate(current_language) }}</strong>
-                                        <p>{{ '100% secure transactions'|translate(current_language) }}</p>
+                                        <strong>{{ 'Secure Payment'|t }}</strong>
+                                        <p>{{ '100% secure transactions'|t }}</p>
                                     </div>
                                 </div>
                             </div>
@@ -266,15 +266,15 @@
             <div class="tabs-section">
                 <ul class="nav nav-tabs">
                     <li class="nav-item">
-                        <a class="nav-link active" data-toggle="tab" href="#tab-description">{{ 'Description'|translate(current_language) }}</a>
+                        <a class="nav-link active" data-toggle="tab" href="#tab-description">{{ 'Description'|t }}</a>
                     </li>
                     {% if product.specifications %}
                     <li class="nav-item">
-                        <a class="nav-link" data-toggle="tab" href="#tab-specs">{{ 'Specifications'|translate(current_language) }}</a>
+                        <a class="nav-link" data-toggle="tab" href="#tab-specs">{{ 'Specifications'|t }}</a>
                     </li>
                     {% endif %}
                     <li class="nav-item">
-                        <a class="nav-link" data-toggle="tab" href="#tab-reviews">{{ 'Reviews'|translate(current_language) }} ({{ product.review_count or 0 }})</a>
+                        <a class="nav-link" data-toggle="tab" href="#tab-reviews">{{ 'Reviews'|t }} ({{ product.review_count or 0 }})</a>
                     </li>
                 </ul>
                 <div class="tab-content">
@@ -294,7 +294,7 @@
                     </div>
                     {% endif %}
                     <div id="tab-reviews" class="tab-pane fade">
-                        <p>{{ 'Loading reviews...'|translate(current_language) }}</p>
+                        <p>{{ 'Loading reviews...'|t }}</p>
                     </div>
                 </div>
             </div>
@@ -302,7 +302,7 @@
             <!-- Related Products -->
             {% if related_products and related_products|length > 0 %}
             <div class="related-section">
-                <h3>{{ 'Related Products'|translate(current_language) }}</h3>
+                <h3>{{ 'Related Products'|t }}</h3>
                 <div class="row clearfix">
                     {% for rel_product in related_products %}
                     <div class="col-lg-3 col-md-6 col-sm-12 shop-block">
@@ -329,7 +329,7 @@
                                     </div>
                                     <div class="btn-box">
                                         <button onclick="addToCart({{ rel_product.id }})" class="theme-btn btn-two">
-                                            <i class="far fa-shopping-cart"></i> {{ 'Add to Cart'|translate(current_language) }}
+                                            <i class="far fa-shopping-cart"></i> {{ 'landing.button.add_to_cart'|t }}
                                         </button>
                                     </div>
                                 </div>
@@ -365,7 +365,7 @@ function changeImage(src, element) {
 }
 
 function addToWishlist(id) {
-    alert('{{ "Added to wishlist!"|translate(current_language) }}');
+    alert('{{ "Added to wishlist!"|t }}');
 }
 </script>
 {% endblock %}

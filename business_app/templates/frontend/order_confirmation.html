@@ -1,6 +1,6 @@
 {% extends "frontend/base.html" %}
 
-{% block title %}{{ 'Order Confirmed'|translate(current_language) }} - {{ company_name }}{% endblock %}
+{% block title %}{{ 'Order Confirmed'|t }} - {{ company_name }}{% endblock %}
 
 {% block extra_head %}
 <style>
@@ -271,11 +271,11 @@
                         <div class="success-icon">
                             <i class="far fa-check"></i>
                         </div>
-                        <h2>{{ 'Order Confirmed!'|translate(current_language) }}</h2>
-                        <p>{{ 'Thank you for your order'|translate(current_language) }}</p>
+                        <h2>{{ 'Order Confirmed!'|t }}</h2>
+                        <p>{{ 'Thank you for your order'|t }}</p>
                         {% if order %}
                         <div class="order-number">
-                            {{ 'Order'|translate(current_language) }} #{{ order.order_number }}
+                            {{ 'Order'|t }} #{{ order.order_number }}
                         </div>
                         {% endif %}
                     </div>
@@ -287,32 +287,32 @@
                         <div class="delivery-info-box">
                             <h5>
                                 <i class="far fa-truck"></i>
-                                {{ 'Delivery Information'|translate(current_language) }}
+                                {{ 'Delivery Information'|t }}
                             </h5>
-                            <p><strong>{{ 'Estimated Delivery'|translate(current_language) }}:</strong> {{ order.delivery_date.strftime('%B %d, %Y') if order.delivery_date else 'TBD' }}</p>
-                            <p><strong>{{ 'Status'|translate(current_language) }}:</strong> {{ order.status|title }}</p>
-                            <p><strong>{{ 'Tracking'|translate(current_language) }}:</strong> {{ 'We will notify you when your order is on the way'|translate(current_language) }}</p>
+                            <p><strong>{{ 'Estimated Delivery'|t }}:</strong> {{ order.delivery_date.strftime('%B %d, %Y') if order.delivery_date else 'TBD' }}</p>
+                            <p><strong>{{ 'Status'|t }}:</strong> {{ order.status|title }}</p>
+                            <p><strong>{{ 'Tracking'|t }}:</strong> {{ 'We will notify you when your order is on the way'|t }}</p>
                         </div>
 
                         <!-- Order Details -->
                         <div class="info-section">
-                            <h4>{{ 'Order Details'|translate(current_language) }}</h4>
+                            <h4>{{ 'Order Details'|t }}</h4>
 
                             <div class="info-row">
-                                <span class="info-label">{{ 'Order Number'|translate(current_language) }}:</span>
+                                <span class="info-label">{{ 'Order Number'|t }}:</span>
                                 <span class="info-value">{{ order.order_number }}</span>
                             </div>
 
                             <div class="info-row">
-                                <span class="info-label">{{ 'Order Date'|translate(current_language) }}:</span>
+                                <span class="info-label">{{ 'Order Date'|t }}:</span>
                                 <span class="info-value">{{ order.created_at.strftime('%B %d, %Y at %I:%M %p') }}</span>
                             </div>
 
                             <div class="info-row">
-                                <span class="info-label">{{ 'Payment Method'|translate(current_language) }}:</span>
+                                <span class="info-label">{{ 'Payment Method'|t }}:</span>
                                 <span class="info-value">
                                     {% if order.payment_method == 'cash' %}
-                                        {{ 'Cash on Delivery'|translate(current_language) }}
+                                        {{ 'Cash on Delivery'|t }}
                                     {% elif order.payment_method == 'payme' %}
                                         Payme
                                     {% elif order.payment_method == 'click' %}
@@ -324,7 +324,7 @@
                             </div>
 
                             <div class="info-row">
-                                <span class="info-label">{{ 'Payment Status'|translate(current_language) }}:</span>
+                                <span class="info-label">{{ 'Payment Status'|t }}:</span>
                                 <span class="info-value">
                                     <span class="payment-status {{ order.payment_status }}">
                                         {{ order.payment_status|title }}
@@ -336,20 +336,20 @@
                         <!-- Delivery Address -->
                         {% if delivery %}
                         <div class="info-section">
-                            <h4>{{ 'Delivery Address'|translate(current_language) }}</h4>
+                            <h4>{{ 'Delivery Address'|t }}</h4>
                             <p style="color: #666; line-height: 1.8;">
                                 {% if delivery.recipient_name %}{{ delivery.recipient_name }}<br>{% endif %}
                                 {{ delivery.delivery_address_line1 }}<br>
                                 {% if delivery.delivery_address_line2 %}{{ delivery.delivery_address_line2 }}<br>{% endif %}
                                 {{ delivery.delivery_city }}{% if delivery.delivery_postal_code %}, {{ delivery.delivery_postal_code }}{% endif %}<br>
-                                {% if delivery.recipient_phone %}<strong>{{ 'Phone'|translate(current_language) }}:</strong> {{ delivery.recipient_phone }}{% endif %}
+                                {% if delivery.recipient_phone %}<strong>{{ 'landing.contact.info.phone'|t }}:</strong> {{ delivery.recipient_phone }}{% endif %}
                             </p>
                         </div>
                         {% endif %}
 
                         <!-- Order Items -->
                         <div class="info-section">
-                            <h4>{{ 'Order Items'|translate(current_language) }} ({{ order.order_items|length }})</h4>
+                            <h4>{{ 'Order Items'|t }} ({{ order.order_items|length }})</h4>
 
                             <div class="order-items">
                                 {% for item in order.order_items %}
@@ -359,7 +359,7 @@
                                          class="item-image">
                                     <div class="item-details">
                                         <div class="item-name">{{ item.product.name }}</div>
-                                        <div class="item-qty">{{ 'Quantity'|translate(current_language) }}: {{ item.quantity }}</div>
+                                        <div class="item-qty">{{ 'Quantity'|t }}: {{ item.quantity }}</div>
                                     </div>
                                     <div class="item-price">{{ "{:,.0f}".format(item.total_price) }} UZS</div>
                                 </div>
@@ -370,21 +370,21 @@
                         <!-- Order Totals -->
                         <div class="totals-section">
                             <div class="total-row">
-                                <span>{{ 'Subtotal'|translate(current_language) }}:</span>
+                                <span>{{ 'Subtotal'|t }}:</span>
                                 <span class="amount">{{ "{:,.0f}".format(order.subtotal) }} UZS</span>
                             </div>
                             <div class="total-row">
-                                <span>{{ 'Delivery Fee'|translate(current_language) }}:</span>
+                                <span>{{ 'Delivery Fee'|t }}:</span>
                                 <span class="amount">
                                     {% if order.delivery_fee == 0 %}
-                                        {{ 'Free'|translate(current_language) }}
+                                        {{ 'Free'|t }}
                                     {% else %}
                                         {{ "{:,.0f}".format(order.delivery_fee) }} UZS
                                     {% endif %}
                                 </span>
                             </div>
                             <div class="total-row final">
-                                <span>{{ 'Total'|translate(current_language) }}:</span>
+                                <span>{{ 'Total'|t }}:</span>
                                 <span class="amount">{{ "{:,.0f}".format(order.total_amount) }} UZS</span>
                             </div>
                         </div>
@@ -392,23 +392,23 @@
                         <!-- Action Buttons -->
                         <div class="action-buttons">
                             <a href="{{ url_for('frontend.order_tracking', order_id=order.id) }}" class="theme-btn btn-one">
-                                <i class="far fa-map-marker-alt"></i> {{ 'Track Order'|translate(current_language) }}
+                                <i class="far fa-map-marker-alt"></i> {{ 'Track Order'|t }}
                             </a>
                             <a href="{{ url_for('frontend.my_orders') }}" class="theme-btn btn-two">
-                                <i class="far fa-list"></i> {{ 'My Orders'|translate(current_language) }}
+                                <i class="far fa-list"></i> {{ 'landing.account.orders'|t }}
                             </a>
                             <a href="{{ url_for('frontend.shop') }}" class="theme-btn btn-three">
-                                <i class="far fa-shopping-bag"></i> {{ 'Continue Shopping'|translate(current_language) }}
+                                <i class="far fa-shopping-bag"></i> {{ 'landing.button.continue_shopping'|t }}
                             </a>
                         </div>
                         {% else %}
                         <!-- No Order Found -->
                         <div style="text-align: center; padding: 40px 20px;">
                             <i class="flaticon-box" style="font-size: 60px; color: #e0e0e0; margin-bottom: 20px;"></i>
-                            <h3 style="color: #666; margin-bottom: 15px;">{{ 'Order Not Found'|translate(current_language) }}</h3>
-                            <p style="color: #999; margin-bottom: 30px;">{{ 'We could not find your order. Please check your order number.'|translate(current_language) }}</p>
+                            <h3 style="color: #666; margin-bottom: 15px;">{{ 'Order Not Found'|t }}</h3>
+                            <p style="color: #999; margin-bottom: 30px;">{{ 'We could not find your order. Please check your order number.'|t }}</p>
                             <a href="{{ url_for('frontend.shop') }}" class="theme-btn btn-one">
-                                {{ 'Continue Shopping'|translate(current_language) }}
+                                {{ 'landing.button.continue_shopping'|t }}
                             </a>
                         </div>
                         {% endif %}
@@ -428,7 +428,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Show success notification
     {% if order %}
-    showNotification('{{ "Order placed successfully!"|translate(current_language) }}', 'success');
+    showNotification('{{ "Order placed successfully!"|t }}', 'success');
     {% endif %}
 });
 </script>

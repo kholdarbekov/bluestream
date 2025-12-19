@@ -56,6 +56,7 @@ def register_blueprints(app: Flask):
     from business_app.api.analytics import analytics_bp
     from business_app.api.admin import admin_bp
     from business_app.api.session_management import session_management_bp
+    from business_app.api.translations import translations_bp
     
     # API blueprints
     api_prefix = app.config['API_PREFIX']
@@ -71,6 +72,7 @@ def register_blueprints(app: Flask):
     app.register_blueprint(analytics_bp, url_prefix=f'{api_prefix}/analytics')
     app.register_blueprint(admin_bp, url_prefix=f'{api_prefix}/admin')
     app.register_blueprint(session_management_bp, url_prefix=f'{api_prefix}/session')
+    app.register_blueprint(translations_bp, url_prefix=f'{api_prefix}/translations')
     
     # Frontend blueprint for web interface
     from business_app.frontend import frontend_bp
@@ -127,50 +129,137 @@ def setup_request_handlers(app):
     
     @app.before_request
     def before_request():
-        """Execute before each request - Check URL params, session, and user preferences"""
+        """Execute before each request - Check URL params, session, and user preferences
+
+        Language detection priority (highest to lowest):
+        1. URL parameter (?lang=uz) - for explicit language switching
+        2. Session language - most recent user preference from language switcher (PRIORITY)
+        3. User's DB preferred_language - fallback for logged-in users
+        4. Accept-Language header - browser preference
+        5. Default language (uz)
+        """
         # Set request start time for performance monitoring
         g.start_time = datetime.now(UTC)
+        
+        # Generate unique request ID for tracing
+        import uuid
+        g.request_id = str(uuid.uuid4())[:8]
 
-        # Skip logging for healthcheck endpoints
+        # Skip logging for healthcheck endpoints and static assets
         is_healthcheck = request.path in ['/health', '/healthz', '/api/health']
+        is_static = request.path.startswith('/static/')
+        should_log = not is_healthcheck and not is_static
 
-        # Get language from URL parameter first
-        lang = request.args.get('lang', None)
+        lang = None
+        lang_source = None  # Track where the language came from
 
-        # 1. Check URL parameter first
-        if lang and lang in app.config['LANGUAGES']:
-            pass  # Use URL language
-        else:
-            # 2. Check if user is logged in and has a preferred language
+        # DEBUG: Log all available language sources
+        url_lang = request.args.get('lang', None)
+        session_lang = session.get('language')
+        browser_lang = request.headers.get('Accept-Language', '')[:10] if request.headers.get('Accept-Language') else None
+
+        if should_log:
+            import os
+            # Log comprehensive request/session info
+            app.logger.info(f"")
+            app.logger.info(f"[LANG-DEBUG] ========== before_request START ==========")
+            app.logger.info(f"[LANG-DEBUG] Request ID: {g.request_id}")
+            app.logger.info(f"[LANG-DEBUG] Path: {request.path}")
+            app.logger.info(f"[LANG-DEBUG] Method: {request.method}")
+            app.logger.info(f"[LANG-DEBUG] PID: {os.getpid()}")
+            app.logger.info(f"[LANG-DEBUG] ----- Session State -----")
+            app.logger.info(f"[LANG-DEBUG] session.new: {session.new}")
+            app.logger.info(f"[LANG-DEBUG] session.modified: {session.modified}")
+            app.logger.info(f"[LANG-DEBUG] session.permanent: {session.permanent}")
+            app.logger.info(f"[LANG-DEBUG] session full dict: {dict(session)}")
+            app.logger.info(f"[LANG-DEBUG] session.get('language'): {session_lang}")
+            app.logger.info(f"[LANG-DEBUG] ----- Request Sources -----")
+            app.logger.info(f"[LANG-DEBUG] URL param 'lang': {url_lang}")
+            app.logger.info(f"[LANG-DEBUG] Accept-Language header: {browser_lang}")
+            app.logger.info(f"[LANG-DEBUG] ----- Cookies -----")
+            for cookie_name, cookie_value in request.cookies.items():
+                # Truncate cookie values for readability
+                display_value = cookie_value[:50] + '...' if len(cookie_value) > 50 else cookie_value
+                app.logger.info(f"[LANG-DEBUG]   {cookie_name}: {display_value}")
+
+        # 1. Check URL parameter first (highest priority)
+        if url_lang and url_lang in app.config['LANGUAGES']:
+            lang = url_lang
+            lang_source = "URL parameter"
+            if should_log:
+                app.logger.info(f"[LANG-DEBUG] [REQ:{g.request_id}] Step 1: MATCHED URL param -> lang='{lang}'")
+
+        # 2. Check session language (from set-language endpoint) - PRIORITY over DB
+        # This ensures explicit user language changes via UI take immediate effect
+        if not lang:
+            if should_log:
+                app.logger.info(f"[LANG-DEBUG] [REQ:{g.request_id}] Step 2: Checking session...")
+            if session_lang and session_lang in app.config['LANGUAGES']:
+                lang = session_lang
+                lang_source = "Session"
+                if should_log:
+                    app.logger.info(f"[LANG-DEBUG] [REQ:{g.request_id}] Step 2: MATCHED Session -> lang='{lang}'")
+            elif should_log:
+                app.logger.info(f"[LANG-DEBUG] [REQ:{g.request_id}] Step 2: No valid session language (session_lang='{session_lang}')")
+
+        # 3. Check if user is logged in and has a preferred language in DB
+        # This is a fallback for logged-in users who haven't set a session preference
+        if not lang:
+            if should_log:
+                app.logger.info(f"[LANG-DEBUG] [REQ:{g.request_id}] Step 3: Checking JWT/DB preference...")
             try:
                 verify_jwt_in_request(optional=True)
                 current_user_id = get_jwt_identity()
+                if should_log:
+                    app.logger.info(f"[LANG-DEBUG] [REQ:{g.request_id}] Step 3: JWT user_id: {current_user_id}")
                 if current_user_id:
                     from business_app.models.user import User
                     user = User.query.get(current_user_id)
-                    if user and user.preferred_language:
-                        lang = user.preferred_language
-            except Exception:
+                    if user:
+                        if should_log:
+                            app.logger.info(f"[LANG-DEBUG] [REQ:{g.request_id}] Step 3: User DB preferred_language: '{user.preferred_language}'")
+                        if user.preferred_language and user.preferred_language in app.config['LANGUAGES']:
+                            lang = user.preferred_language
+                            lang_source = "User DB preference"
+                            if should_log:
+                                app.logger.info(f"[LANG-DEBUG] [REQ:{g.request_id}] Step 3: MATCHED User DB preference -> lang='{lang}'")
+                    elif should_log:
+                        app.logger.info(f"[LANG-DEBUG] [REQ:{g.request_id}] Step 3: User not found in DB")
+            except Exception as e:
+                if should_log:
+                    app.logger.info(f"[LANG-DEBUG] [REQ:{g.request_id}] Step 3: JWT check exception: {e}")
                 pass  # Continue with other methods
 
-            # 3. Check session language (from set-language endpoint)
-            if not lang:
-                session_lang = session.get('language')
-                if session_lang and session_lang in app.config['LANGUAGES']:
-                    lang = session_lang
 
-            # 4. Fall back to browser Accept-Language header
-            if not lang:
-                browser_lang = request.headers.get('Accept-Language', '')
-                if browser_lang and browser_lang[:2] in app.config['LANGUAGES']:
-                    lang = browser_lang[:2]
+        # 4. Fall back to browser Accept-Language header
+        if not lang:
+            if should_log:
+                app.logger.info(f"[LANG-DEBUG] [REQ:{g.request_id}] Step 4: Checking Accept-Language header...")
+            full_browser_lang = request.headers.get('Accept-Language', '')
+            if full_browser_lang and full_browser_lang[:2] in app.config['LANGUAGES']:
+                lang = full_browser_lang[:2]
+                lang_source = "Accept-Language header"
+                if should_log:
+                    app.logger.info(f"[LANG-DEBUG] [REQ:{g.request_id}] Step 4: MATCHED Accept-Language -> lang='{lang}'")
+            elif should_log:
+                app.logger.info(f"[LANG-DEBUG] [REQ:{g.request_id}] Step 4: No valid Accept-Language (header='{full_browser_lang}')")
 
         # 5. Use default language if nothing else worked
         if not lang or lang not in app.config['LANGUAGES']:
+            if should_log:
+                app.logger.info(f"[LANG-DEBUG] [REQ:{g.request_id}] Step 5: Using default language...")
             lang = app.config['DEFAULT_LANGUAGE']
+            lang_source = "Default"
 
         # Set the language in request context
         g.language = lang
+
+        if should_log:
+            app.logger.info(f"[LANG-DEBUG] [REQ:{g.request_id}] ========== FINAL RESULT ==========")
+            app.logger.info(f"[LANG-DEBUG] [REQ:{g.request_id}] g.language set to: '{lang}'")
+            app.logger.info(f"[LANG-DEBUG] [REQ:{g.request_id}] Source: {lang_source}")
+            app.logger.info(f"[LANG-DEBUG] [REQ:{g.request_id}] ========== before_request END ==========")
+            app.logger.info(f"")
     
     @app.after_request
     def after_request(response):
@@ -182,14 +271,25 @@ def setup_request_handlers(app):
             duration = (datetime.now(UTC) - g.start_time).total_seconds() * 1000
             response.headers['X-Response-Time'] = f'{duration:.2f}ms'
         
+        # Add Cache-Control headers for dynamic content
+        # This prevents browsers from caching the page when language changes
+        if 'Cache-Control' not in response.headers:
+            response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+            response.headers['Pragma'] = 'no-cache'
+            response.headers['Expires'] = '0'
+        
+        # Ensure Vary: Cookie is set so caches know content depends on cookies
+        if 'Components' not in response.headers.get('Vary', ''):
+            response.headers['Vary'] = 'Cookie'
+            
         return response
     
     @app.teardown_appcontext
     def close_db(error):
         """Close database connections"""
-        if error:
-            db.session.rollback()
-        db.session.close()
+        # Simply remove the session - SQLAlchemy will handle cleanup
+        # Rollback is automatic when session is removed with error
+        db.session.remove()
 
 
 def setup_jwt_handlers(app):
@@ -273,6 +373,7 @@ def create_app(config_class=None):
     Create Flask application factory
     """
     app = Flask(__name__)
+    print(f"!!! CREATE_APP CALLED - app id: {id(app)}, config_class: {config_class}")
     
     # Load configuration
     if config_class:
@@ -330,7 +431,7 @@ def create_app(config_class=None):
     
     # Disable Jinja2 template caching completely for development
     if app.debug:
-        app.jinja_env.cache = {}
+        app.jinja_env.cache = None
         app.jinja_env.auto_reload = True
         app.jinja_env.cache_size = 0
         # Force template recompilation by modifying loader
@@ -452,6 +553,36 @@ def create_app(config_class=None):
         uploads_dir = os.path.join(app.root_path, upload_folder)
         return send_from_directory(uploads_dir, filename)
 
+    # Warm translation cache on app startup (within app context)
+    with app.app_context():
+        try:
+            from business_app.utils.translations import translation_service
+
+            # Warm landing page translations (highest traffic, rarely changes)
+            # These are cached for 3 days, significantly reducing DB load
+            result = translation_service.warm_cache_for_category('landing')
+            if result.get('success'):
+                app.logger.info(
+                    f"Landing cache warmed: {result.get('count')} translations "
+                    f"(TTL: {result.get('ttl_seconds')}s)"
+                )
+            else:
+                app.logger.warning(f"Landing cache warming failed: {result.get('reason')}")
+
+            # Optionally warm UI translations (admin dashboard, moderate changes)
+            # Uncomment to pre-load UI translations on startup
+            # result = translation_service.warm_cache_for_category('ui')
+            # if result.get('success'):
+            #     app.logger.info(
+            #         f"UI cache warmed: {result.get('count')} translations "
+            #         f"(TTL: {result.get('ttl_seconds')}s)"
+            #     )
+
+        except Exception as e:
+            # Don't fail app startup if cache warming fails
+            app.logger.error(f"Translation cache warming error: {e}", exc_info=True)
+
+    print(f"!!! CREATE_APP FINISHED - app id: {id(app)}, app.config['DEBUG']: {app.config.get('DEBUG')}")
     return app
 
 

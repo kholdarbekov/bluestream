@@ -202,70 +202,58 @@ def paginate_query(query, page: int = 1, per_page: int = 20, max_per_page: int =
 
 
 def get_current_language() -> str:
-    """Get current language from request context, checking user preferences, session, and g object"""
-    from flask import session
-    from flask_jwt_extended import get_jwt_identity, verify_jwt_in_request
+    """
+    Get current language from request context.
+
+    The language is already detected and set in g.language by the @app.before_request hook,
+    which follows this priority order:
+    1. URL parameter (?lang=uz)
+    2. JWT user preferred_language
+    3. Session language
+    4. Accept-Language header
+    5. Default language (uz)
+
+    This function simply returns the already-detected language from g.language.
+    """
+    # Get request ID for tracing
+    request_id = getattr(g, 'request_id', 'N/A')
     
-    # COMPREHENSIVE LOGGING - Step 1: Function Call
-    logger.info(f"🌐 GET_CURRENT_LANGUAGE CALLED")
-    
-    default_language = current_app.config.get('DEFAULT_LANGUAGE', 'en')
-    
-    # COMPREHENSIVE LOGGING - Step 2: Check user preferences if logged in
-    try:
-        verify_jwt_in_request(optional=True)
-        current_user_id = get_jwt_identity()
-        if current_user_id:
-            from business_app.models.user import User
-            user: User = User.query.get(current_user_id)
-            if user and user.preferred_language:
-                logger.info(f"🌐 RETURNING user.preferred_language: '{user.preferred_language}'")
-                return user.preferred_language
-    except Exception as e:
-        logger.debug(f"🌐 No JWT user context: {e}")
-    
-    # COMPREHENSIVE LOGGING - Step 3: Check session
-    session_language = session.get('language')
-    if session_language:
-        logger.info(f"🌐 RETURNING session['language']: '{session_language}'")
-        return session_language
-    
-    # COMPREHENSIVE LOGGING - Step 4: Check g object (fallback)
-    g_language = getattr(g, 'language', None)
-    if g_language:
-        logger.info(f"🌐 RETURNING g.language: '{g_language}'")
-        return g_language
-    
-    # COMPREHENSIVE LOGGING - Step 5: Return default
-    logger.info(f"🌐 RETURNING DEFAULT: '{default_language}'")
+    # Return the language already set by before_request hook
+    if hasattr(g, 'language') and g.language:
+        logger.info(f"[LANG-HELPER] [REQ:{request_id}] get_current_language() -> '{g.language}' (from g.language)")
+        return g.language
+
+    # Fallback: If called outside request context or before_request hasn't run yet
+    default_language = current_app.config.get('DEFAULT_LANGUAGE', 'uz')
+    logger.warning(f"[LANG-HELPER] [REQ:{request_id}] get_current_language() -> '{default_language}' (FALLBACK - g.language not set!)")
     return default_language
 
 
 def set_language(language: str):
     """Set language in request context"""
-    # COMPREHENSIVE LOGGING - Step 1: Function Call
-    logger.info(f"🌐 SET_LANGUAGE CALLED with language='{language}'")
-    
-    # COMPREHENSIVE LOGGING - Step 2: Before setting
-    old_language = getattr(g, 'language', 'NOT_SET')
-    logger.info(f"🌐 BEFORE: g.language was '{old_language}'")
-    
-    # Set the language
+    request_id = getattr(g, 'request_id', 'N/A')
+    old_language = getattr(g, 'language', None)
     g.language = language
-    
-    # COMPREHENSIVE LOGGING - Step 3: After setting
-    new_language = getattr(g, 'language', 'NOT_SET')
-    logger.info(f"🌐 AFTER: g.language is now '{new_language}'")
-    logger.info(f"🌐 SET_LANGUAGE COMPLETED successfully")
+    logger.info(f"[SET-LANG] [REQ:{request_id}] set_language() called: old='{old_language}' -> new='{language}'")
 
 
 def translate_text(key: str, language: str = None, **kwargs) -> str:
     """Translate text using key and current language"""
+    request_id = getattr(g, 'request_id', 'N/A')
     if language is None:
         language = get_current_language()
     
+    if key.startswith('landing.'):
+        logger.info(f"[TRANSLATE-TEXT] [REQ:{request_id}] translate_text() called: key='{key}', lang='{language}'")
+    
     from .translations import get_translation
-    return get_translation(key, language, **kwargs)
+    result = get_translation(key, language, **kwargs)
+    
+    if key.startswith('landing.'):
+        preview = result[:40] if len(result) > 40 else result
+        logger.info(f"[TRANSLATE-TEXT] [REQ:{request_id}] result: key='{key}', value='{preview}'")
+    
+    return result
 
 
 def format_datetime(dt: datetime, format_type: str = 'full', language: str = None) -> str:

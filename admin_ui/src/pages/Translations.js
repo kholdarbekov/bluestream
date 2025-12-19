@@ -59,9 +59,8 @@ const LANGUAGES = {
 const Translations = () => {
   // State management
   const [searchText, setSearchText] = useState('');
-  const [entityTypeFilter, setEntityTypeFilter] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('');
   const [languageFilter, setLanguageFilter] = useState('');
-  const [fieldNameFilter, setFieldNameFilter] = useState('');
   const [selectedTranslation, setSelectedTranslation] = useState(null);
   const [isEditModalVisible, setIsEditModalVisible] = useState(false);
   const [isCreateModalVisible, setIsCreateModalVisible] = useState(false);
@@ -77,36 +76,35 @@ const Translations = () => {
 
   // Fetch translations
   const { data: translationsData, isLoading: translationsLoading, refetch: refetchTranslations } = useQuery(
-    ['translations', searchText, entityTypeFilter, languageFilter, fieldNameFilter, pagination],
+    ['translations', searchText, categoryFilter, languageFilter, pagination],
     () => adminService.getTranslations({
       page: pagination.current,
       per_page: pagination.pageSize,
       search: searchText || undefined,
-      entity_type: entityTypeFilter || undefined,
-      language: languageFilter || undefined,
-      field_name: fieldNameFilter || undefined
+      category: categoryFilter || undefined,
+      language: languageFilter || undefined
     }),
     { keepPreviousData: true }
   );
 
   // Fetch completion stats
   const { data: completionData, isLoading: completionLoading } = useQuery(
-    ['translations-completion', entityTypeFilter],
-    () => adminService.getTranslationCompletion({ entity_type: entityTypeFilter || undefined }),
-    { refetchInterval: 30000 } // Refresh every 30 seconds
+    ['translations-completion', categoryFilter],
+    () => adminService.getTranslationCompletion({ category: categoryFilter || undefined }),
+    { refetchInterval: 3600000 } // Refresh every 1 hour
   );
 
   // Fetch missing translations
   const { data: missingData, isLoading: missingLoading } = useQuery(
-    ['translations-missing', entityTypeFilter, languageFilter],
+    ['translations-missing', categoryFilter, languageFilter],
     () => adminService.getMissingTranslations({
-      entity_type: entityTypeFilter || undefined,
+      category: categoryFilter || undefined,
       language: languageFilter || undefined
     })
   );
 
-  // Fetch translatable entities
-  const { data: entitiesData } = useQuery('translatable-entities', adminService.getTranslatableEntities);
+  // Available categories
+  const CATEGORIES = ['telegram', 'ui', 'email', 'sms'];
 
   // Mutations
   const createTranslationMutation = useMutation(adminService.createTranslation, {
@@ -177,22 +175,22 @@ const Translations = () => {
   // Table columns for translations
   const translationColumns = [
     {
-      title: 'Entity',
-      key: 'entity',
-      render: (_, record) => (
-        <Space direction="vertical" size={0}>
-          <Text strong>{record.entity_type}</Text>
-          <Text type="secondary">ID: {record.entity_id}</Text>
-        </Space>
-      ),
-      width: 150,
+      title: 'Category',
+      dataIndex: 'category',
+      key: 'category',
+      width: 120,
+      render: (text) => <Tag color="cyan">{text}</Tag>,
     },
     {
-      title: 'Field',
-      dataIndex: 'field_name',
-      key: 'field_name',
-      width: 120,
-      render: (text) => <Tag color="geekblue">{text}</Tag>,
+      title: 'Key',
+      dataIndex: 'key',
+      key: 'key',
+      ellipsis: { showTitle: false },
+      render: (text) => (
+        <Tooltip placement="topLeft" title={text}>
+          <Text code>{text}</Text>
+        </Tooltip>
+      ),
     },
     {
       title: 'Language',
@@ -210,13 +208,13 @@ const Translations = () => {
       },
     },
     {
-      title: 'Content',
-      dataIndex: 'content',
-      key: 'content',
+      title: 'Value',
+      dataIndex: 'value',
+      key: 'value',
       ellipsis: { showTitle: false },
-      render: (content) => (
-        <Tooltip placement="topLeft" title={content}>
-          {content && content.length > 100 ? `${content.substring(0, 100)}...` : content}
+      render: (value) => (
+        <Tooltip placement="topLeft" title={value}>
+          {value && value.length > 100 ? `${value.substring(0, 100)}...` : value}
         </Tooltip>
       ),
     },
@@ -229,13 +227,6 @@ const Translations = () => {
           {record.is_active ? 'Active' : 'Inactive'}
         </Tag>
       ),
-    },
-    {
-      title: 'Version',
-      dataIndex: 'version',
-      key: 'version',
-      width: 80,
-      render: (version) => <Tag color="purple">v{version}</Tag>,
     },
     {
       title: 'Actions',
@@ -360,8 +351,8 @@ const Translations = () => {
 
   const handleSyncSubmit = (values) => {
     syncTranslationsMutation.mutate({
-      entityType: values.entity_type,
-      data: { entity_ids: values.entity_ids || [] }
+      category: values.category,
+      data: {}
     });
   };
 
@@ -369,7 +360,7 @@ const Translations = () => {
     try {
       const blob = await adminService.exportTranslations({
         format,
-        entity_type: entityTypeFilter || undefined,
+        category: categoryFilter || undefined,
         language: languageFilter || undefined
       });
       
@@ -397,9 +388,9 @@ const Translations = () => {
 
   // Render completion statistics
   const renderCompletionStats = () => {
-    if (completionLoading || !completionData) return null;
+    if (completionLoading || !completionData || !completionData.data) return null;
 
-    const { overall_stats, completion_stats } = completionData;
+    const { overall_stats, completion_stats } = completionData.data;
 
     return (
       <div>
@@ -513,15 +504,15 @@ const Translations = () => {
                 />
                 
                 <Select
-                  placeholder="Entity Type"
-                  value={entityTypeFilter}
-                  onChange={setEntityTypeFilter}
+                  placeholder="Category"
+                  value={categoryFilter}
+                  onChange={setCategoryFilter}
                   style={{ width: 150 }}
                   allowClear
                 >
-                  {entitiesData?.entities?.map(entity => (
-                    <Option key={entity.entity_type} value={entity.entity_type}>
-                      {entity.entity_type}
+                  {CATEGORIES.map(category => (
+                    <Option key={category} value={category}>
+                      {category}
                     </Option>
                   ))}
                 </Select>
@@ -539,14 +530,6 @@ const Translations = () => {
                     </Option>
                   ))}
                 </Select>
-
-                <Input
-                  placeholder="Field name"
-                  value={fieldNameFilter}
-                  onChange={(e) => setFieldNameFilter(e.target.value)}
-                  style={{ width: 120 }}
-                  allowClear
-                />
               </Space>
 
               <div style={{ float: 'right' }}>
@@ -598,13 +581,13 @@ const Translations = () => {
 
             <Table
               columns={translationColumns}
-              dataSource={translationsData?.translations || []}
+              dataSource={translationsData?.data?.translations || []}
               loading={translationsLoading}
               rowKey="id"
               pagination={{
                 current: pagination.current,
                 pageSize: pagination.pageSize,
-                total: translationsData?.pagination?.total || 0,
+                total: translationsData?.meta?.total || 0,
                 showSizeChanger: true,
                 showQuickJumper: true,
                 showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} translations`,
@@ -622,10 +605,10 @@ const Translations = () => {
         <TabPane tab={<span><ExclamationCircleOutlined />Missing</span>} key="missing">
           <Card>
             <div style={{ marginBottom: 16 }}>
-              {missingData?.summary && (
+              {missingData?.data?.summary && (
                 <Alert
-                  message={`${missingData.summary.total_missing} missing translations found`}
-                  description={`${missingData.summary.high_priority} high priority, ${missingData.summary.medium_priority} medium priority`}
+                  message={`${missingData.data.summary.total_missing} missing translations found`}
+                  description={`${missingData.data.summary.high_priority} high priority, ${missingData.data.summary.medium_priority} medium priority`}
                   type="warning"
                   showIcon
                   style={{ marginBottom: 16 }}
@@ -635,11 +618,11 @@ const Translations = () => {
 
             <Table
               columns={missingColumns}
-              dataSource={missingData?.missing_translations || []}
+              dataSource={missingData?.data?.missing_translations || []}
               loading={missingLoading}
               rowKey={(record) => `${record.entity_type}-${record.entity_id}-${record.field_name}-${record.language}`}
               pagination={{
-                total: missingData?.pagination?.total || 0,
+                total: missingData?.meta?.total || 0,
                 showSizeChanger: true,
                 showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} missing`,
               }}
@@ -667,38 +650,17 @@ const Translations = () => {
           <Row gutter={16}>
             <Col span={12}>
               <Form.Item
-                label="Entity Type"
-                name="entity_type"
-                rules={[{ required: true, message: 'Entity type is required' }]}
+                label="Category"
+                name="category"
+                rules={[{ required: true, message: 'Category is required' }]}
               >
-                <Select placeholder="Select entity type">
-                  {entitiesData?.entities?.map(entity => (
-                    <Option key={entity.entity_type} value={entity.entity_type}>
-                      {entity.entity_type}
+                <Select placeholder="Select category">
+                  {CATEGORIES.map(category => (
+                    <Option key={category} value={category}>
+                      {category}
                     </Option>
                   ))}
                 </Select>
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item
-                label="Entity ID"
-                name="entity_id"
-                rules={[{ required: true, message: 'Entity ID is required' }]}
-              >
-                <Input type="number" placeholder="Enter entity ID" />
-              </Form.Item>
-            </Col>
-          </Row>
-
-          <Row gutter={16}>
-            <Col span={12}>
-              <Form.Item
-                label="Field Name"
-                name="field_name"
-                rules={[{ required: true, message: 'Field name is required' }]}
-              >
-                <Input placeholder="e.g., name, description" />
               </Form.Item>
             </Col>
             <Col span={12}>
@@ -719,13 +681,21 @@ const Translations = () => {
           </Row>
 
           <Form.Item
-            label="Content"
-            name="content"
-            rules={[{ required: true, message: 'Content is required' }]}
+            label="Key"
+            name="key"
+            rules={[{ required: true, message: 'Key is required' }]}
           >
-            <TextArea 
-              rows={4} 
-              placeholder="Enter translation content..." 
+            <Input placeholder="e.g., telegram.welcome_message" />
+          </Form.Item>
+
+          <Form.Item
+            label="Value"
+            name="value"
+            rules={[{ required: true, message: 'Value is required' }]}
+          >
+            <TextArea
+              rows={4}
+              placeholder="Enter translation value..."
               showCount
               maxLength={5000}
             />
@@ -778,19 +748,19 @@ const Translations = () => {
           onFinish={handleEditSubmit}
         >
           <Alert
-            message={`Editing: ${selectedTranslation?.entity_type} #${selectedTranslation?.entity_id} - ${selectedTranslation?.field_name} (${LANGUAGES[selectedTranslation?.language]?.name})`}
+            message={`Editing: ${selectedTranslation?.key} (${LANGUAGES[selectedTranslation?.language]?.name})`}
             type="info"
             style={{ marginBottom: 16 }}
           />
 
           <Form.Item
-            label="Content"
-            name="content"
-            rules={[{ required: true, message: 'Content is required' }]}
+            label="Value"
+            name="value"
+            rules={[{ required: true, message: 'Value is required' }]}
           >
-            <TextArea 
-              rows={6} 
-              placeholder="Enter translation content..." 
+            <TextArea
+              rows={6}
+              placeholder="Enter translation value..."
               showCount
               maxLength={5000}
             />
@@ -841,30 +811,23 @@ const Translations = () => {
           onFinish={handleSyncSubmit}
         >
           <Alert
-            message="Sync will create baseline translations for entities that don't have them yet."
+            message="Sync will create baseline translations for categories that don't have them yet."
             type="info"
             style={{ marginBottom: 16 }}
           />
 
           <Form.Item
-            label="Entity Type"
-            name="entity_type"
-            rules={[{ required: true, message: 'Entity type is required' }]}
+            label="Category"
+            name="category"
+            rules={[{ required: true, message: 'Category is required' }]}
           >
-            <Select placeholder="Select entity type to sync">
-              {entitiesData?.entities?.map(entity => (
-                <Option key={entity.entity_type} value={entity.entity_type}>
-                  {entity.entity_type} ({entity.entity_count} entities)
+            <Select placeholder="Select category to sync">
+              {CATEGORIES.map(category => (
+                <Option key={category} value={category}>
+                  {category}
                 </Option>
               ))}
             </Select>
-          </Form.Item>
-
-          <Form.Item
-            label="Specific Entity IDs (optional)"
-            name="entity_ids"
-          >
-            <Input placeholder="Comma-separated IDs (e.g., 1,2,3) - leave empty for all" />
           </Form.Item>
 
           <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
@@ -925,9 +888,9 @@ const Translations = () => {
             name="translations_json"
             rules={[{ required: true, message: 'JSON data is required' }]}
           >
-            <TextArea 
-              rows={10} 
-              placeholder='Paste JSON data here, e.g., [{"entity_type": "Product", "entity_id": 1, "field_name": "name", "language": "en", "content": "Product Name"}]'
+            <TextArea
+              rows={10}
+              placeholder='Paste JSON data here, e.g., [{"key": "telegram.welcome", "value": "Welcome!", "language": "en", "category": "telegram"}]'
             />
           </Form.Item>
 

@@ -293,19 +293,11 @@ def seed_languages():
     """Seed default languages"""
     languages_data = [
         {
-            'code': 'en',
-            'name': 'English',
-            'native_name': 'English',
-            'is_default': True,
-            'sort_order': 1,
-            'flag_icon': '🇺🇸'
-        },
-        {
             'code': 'uz',
             'name': 'Uzbek',
             'native_name': 'O\'zbek',
-            'is_default': False,
-            'sort_order': 2,
+            'is_default': True,
+            'sort_order': 1,
             'flag_icon': '🇺🇿'
         },
         {
@@ -313,8 +305,16 @@ def seed_languages():
             'name': 'Russian',
             'native_name': 'Русский',
             'is_default': False,
-            'sort_order': 3,
+            'sort_order': 2,
             'flag_icon': '🇷🇺'
+        },
+        {
+            'code': 'en',
+            'name': 'English',
+            'native_name': 'English',
+            'is_default': False,
+            'sort_order': 3,
+            'flag_icon': '🇺🇸'
         }
     ]
     

@@ -24,6 +24,8 @@ def register_api_blueprints(app):
     from business_app.api.admin import admin_bp
     from business_app.api.blog import blog_bp
     from business_app.api.addresses import addresses_bp
+    from business_app.api.bot import bot_bp
+    from business_app.api.translations import translations_bp
 
     # Register blueprints with URL prefixes
     api_bp.register_blueprint(auth_bp, url_prefix='/auth')
@@ -39,7 +41,9 @@ def register_api_blueprints(app):
     api_bp.register_blueprint(admin_bp, url_prefix='/admin')
     api_bp.register_blueprint(blog_bp, url_prefix='/blog')
     api_bp.register_blueprint(addresses_bp, url_prefix='/addresses')
-    
+    api_bp.register_blueprint(bot_bp, url_prefix='/bot')
+    api_bp.register_blueprint(translations_bp, url_prefix='/translations')
+
     # Register main API blueprint with app
     app.register_blueprint(api_bp)
     

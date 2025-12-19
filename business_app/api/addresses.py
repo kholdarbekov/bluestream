@@ -14,6 +14,7 @@ from business_app.utils.api_responses import (
     success_response, error_response, created_response,
     not_found_response, validation_error_response, forbidden_response
 )
+from business_app.utils.translations import get_translation
 from business_app import db
 
 addresses_bp = Blueprint('addresses', __name__)
@@ -184,7 +185,7 @@ def delete_address(address_id):
 
     current_app.logger.info(f"User {user_id} deleted address {address_id}")
 
-    return success_response(message='Address deleted successfully')
+    return success_response(message=get_translation('api.addresses.success.deleted'))
 
 
 @addresses_bp.route('/<int:address_id>/set-default', methods=['POST'])

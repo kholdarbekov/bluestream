@@ -22,8 +22,8 @@
             <div class="content-box">
                 <h1>{{ post.get_translated('title', current_language) }}</h1>
                 <ul class="bread-crumb clearfix">
-                    <li><a href="{{ url_for('frontend.index') }}">{{ 'Home'|translate(current_language) }}</a></li>
-                    <li><a href="{{ url_for('frontend.blog_list') }}">{{ 'Blog'|translate(current_language) }}</a></li>
+                    <li><a href="{{ url_for('frontend.index') }}">{{ 'landing.nav.home'|t }}</a></li>
+                    <li><a href="{{ url_for('frontend.blog_list') }}">{{ 'Blog'|t }}</a></li>
                     <li>{{ post.get_category_display(current_language) }}</li>
                 </ul>
             </div>
@@ -54,7 +54,7 @@
                                         <ul class="post-info clearfix">
                                             <li><i class="far fa-user"></i> {{ post.author_name or 'Admin' }}</li>
                                             <li><i class="far fa-calendar"></i> {{ post.published_at.strftime('%B %d, %Y') if post.published_at else '' }}</li>
-                                            <li><i class="far fa-eye"></i> {{ post.view_count }} {{ 'views'|translate(current_language) }}</li>
+                                            <li><i class="far fa-eye"></i> {{ post.view_count }} {{ 'views'|t }}</li>
                                         </ul>
                                     </div>
 
@@ -67,7 +67,7 @@
 
                                     {% if post.tags %}
                                     <div class="post-tags">
-                                        <h5>{{ 'Tags'|translate(current_language) }}:</h5>
+                                        <h5>{{ 'Tags'|t }}:</h5>
                                         {% for tag in post.tags.split(',') %}
                                         <a href="{{ url_for('frontend.blog_list', tag=tag.strip()) }}" class="tag">{{ tag.strip() }}</a>
                                         {% endfor %}
@@ -75,7 +75,7 @@
                                     {% endif %}
 
                                     <div class="post-share-option">
-                                        <h5>{{ 'Share this post'|translate(current_language) }}:</h5>
+                                        <h5>{{ 'Share this post'|t }}:</h5>
                                         <ul class="social-links clearfix">
                                             <li><a href="https://www.facebook.com/sharer/sharer.php?u={{ request.url }}" target="_blank"><i class="fab fa-facebook-f"></i></a></li>
                                             <li><a href="https://twitter.com/intent/tweet?url={{ request.url }}&text={{ post.get_translated('title', current_language) }}" target="_blank"><i class="fab fa-twitter"></i></a></li>
@@ -93,15 +93,15 @@
                         <!-- Categories Widget -->
                         <div class="sidebar-widget category-widget">
                             <div class="widget-title">
-                                <h4>{{ 'Categories'|translate(current_language) }}</h4>
+                                <h4>{{ 'Categories'|t }}</h4>
                             </div>
                             <div class="widget-content">
                                 <ul class="category-list clearfix">
-                                    <li><a href="{{ url_for('frontend.blog_list') }}">{{ 'All Posts'|translate(current_language) }}</a></li>
-                                    <li><a href="{{ url_for('frontend.blog_list', category='health_tips') }}">{{ 'Health Tips'|translate(current_language) }}</a></li>
-                                    <li><a href="{{ url_for('frontend.blog_list', category='water_benefits') }}">{{ 'Water Benefits'|translate(current_language) }}</a></li>
-                                    <li><a href="{{ url_for('frontend.blog_list', category='company_news') }}">{{ 'Company News'|translate(current_language) }}</a></li>
-                                    <li><a href="{{ url_for('frontend.blog_list', category='quality_assurance') }}">{{ 'Quality Assurance'|translate(current_language) }}</a></li>
+                                    <li><a href="{{ url_for('frontend.blog_list') }}">{{ 'All Posts'|t }}</a></li>
+                                    <li><a href="{{ url_for('frontend.blog_list', category='health_tips') }}">{{ 'Health Tips'|t }}</a></li>
+                                    <li><a href="{{ url_for('frontend.blog_list', category='water_benefits') }}">{{ 'Water Benefits'|t }}</a></li>
+                                    <li><a href="{{ url_for('frontend.blog_list', category='company_news') }}">{{ 'Company News'|t }}</a></li>
+                                    <li><a href="{{ url_for('frontend.blog_list', category='quality_assurance') }}">{{ 'Quality Assurance'|t }}</a></li>
                                 </ul>
                             </div>
                         </div>
@@ -110,7 +110,7 @@
                         {% if recent_posts %}
                         <div class="sidebar-widget recent-posts-widget">
                             <div class="widget-title">
-                                <h4>{{ 'Recent Posts'|translate(current_language) }}</h4>
+                                <h4>{{ 'Recent Posts'|t }}</h4>
                             </div>
                             <div class="widget-content">
                                 {% for recent_post in recent_posts %}

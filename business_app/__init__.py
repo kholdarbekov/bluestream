@@ -430,13 +430,13 @@ def create_app(config_class=None):
             raise RuntimeError("Environment validation failed in production")
     
     # Disable Jinja2 template caching completely for development
-    if app.debug:
-        app.jinja_env.cache = None
-        app.jinja_env.auto_reload = True
-        app.jinja_env.cache_size = 0
-        # Force template recompilation by modifying loader
-        if hasattr(app.jinja_loader, '_mapping'):
-            app.jinja_loader._mapping = {}
+    # if app.debug:
+    app.jinja_env.cache = None
+    app.jinja_env.auto_reload = True
+    app.jinja_env.cache_size = 0
+    # Force template recompilation by modifying loader
+    if hasattr(app.jinja_loader, '_mapping'):
+        app.jinja_loader._mapping = {}
     
     # Initialize extensions with app
     db.init_app(app)

@@ -202,14 +202,30 @@ class SecurityConfig:
     jwt_secret_key: str
     jwt_expiry_hours: int = 24
     jwt_refresh_expiry_days: int = 30
-    
+
     # Rate limiting
     max_login_attempts: int = 5
     login_lockout_duration: int = 300  # seconds
-    
+
     # Data encryption
     encrypt_personal_data: bool = True
     encryption_key: Optional[str] = None
+
+
+@dataclass
+class SentryConfig:
+    """Sentry error tracking configuration"""
+    dsn: Optional[str] = None
+    environment: str = "development"
+    traces_sample_rate: float = 1.0
+    profiles_sample_rate: float = 1.0
+    send_default_pii: bool = False
+    debug: bool = False
+
+    @property
+    def enabled(self) -> bool:
+        """Check if Sentry is enabled (DSN is configured)"""
+        return bool(self.dsn)
 
 
 class BotConfig:
@@ -261,7 +277,16 @@ class BotConfig:
             jwt_secret_key=os.environ.get('JWT_SECRET_KEY') or os.environ.get('SECRET_KEY'),
             encryption_key=os.environ.get('ENCRYPTION_KEY'),
         )
-        
+
+        self.sentry = SentryConfig(
+            dsn=os.environ.get('SENTRY_DSN'),
+            environment=os.environ.get('SENTRY_ENVIRONMENT', os.environ.get('FLASK_ENV', 'development')),
+            traces_sample_rate=float(os.environ.get('SENTRY_TRACES_SAMPLE_RATE', '1.0')),
+            profiles_sample_rate=float(os.environ.get('SENTRY_PROFILES_SAMPLE_RATE', '1.0')),
+            send_default_pii=os.environ.get('SENTRY_SEND_DEFAULT_PII', 'false').lower() == 'true',
+            debug=os.environ.get('SENTRY_DEBUG', 'false').lower() == 'true',
+        )
+
         # Validate required configuration
         self._validate_config()
     

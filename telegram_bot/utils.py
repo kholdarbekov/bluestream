@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from functools import wraps
 import json
 
+import sentry_sdk
 from telegram import Update
 from telegram.ext import ContextTypes
 from telegram.error import TelegramError
@@ -146,7 +147,7 @@ async def user_middleware(update: Update) -> Optional[Dict[str, Any]]:
         if not user_data:
             # User doesn't exist, redirect to start
             language = update.effective_user.language_code or 'en'
-            welcome_msg = i18n.get('registration_welcome', language)
+            welcome_msg = i18n.get('telegram.registration_welcome', language)
             
             try:
                 if update.callback_query:
@@ -198,21 +199,51 @@ def truncate_text(text: str, max_length: int = 100, suffix: str = "...") -> str:
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Global error handler for the bot"""
     logger.error("Exception while handling an update:", exc_info=context.error)
-    
+
     # Try to get user information
     user_id = None
     language = 'en'
-    
+    username = None
+
     try:
         if isinstance(update, Update) and update.effective_user:
             user_id = update.effective_user.id
+            username = update.effective_user.username
             language = await i18n.get_user_language(user_id)
     except:
         pass
-    
+
+    # Capture exception with Sentry
+    try:
+        with sentry_sdk.push_scope() as scope:
+            # Add user context
+            if user_id:
+                scope.set_user({
+                    "id": str(user_id),
+                    "username": username,
+                })
+
+            # Add extra context about the update
+            if isinstance(update, Update):
+                scope.set_extra("update_id", update.update_id)
+                if update.message:
+                    scope.set_extra("message_text", update.message.text[:100] if update.message.text else None)
+                    scope.set_extra("chat_id", update.message.chat_id)
+                if update.callback_query:
+                    scope.set_extra("callback_data", update.callback_query.data)
+
+            # Tag with error type
+            if context.error:
+                scope.set_tag("error_type", type(context.error).__name__)
+
+            # Capture the exception
+            sentry_sdk.capture_exception(context.error)
+    except Exception as sentry_error:
+        logger.error(f"Failed to capture exception with Sentry: {sentry_error}")
+
     # Prepare error message
-    error_msg = i18n.get('error_occurred', language)
-    
+    error_msg = i18n.get('telegram.error_occurred', language)
+
     # Try to send error message to user
     try:
         if isinstance(update, Update):
@@ -224,7 +255,7 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
                 await update.edited_message.reply_text(error_msg)
     except Exception as send_error:
         logger.error(f"Failed to send error message to user: {send_error}")
-    
+
     # Log error to analytics
     try:
         if user_id:
@@ -395,9 +426,9 @@ class MessageBuilder:
     def build_order_summary(order: Dict[str, Any], language: str = 'en') -> str:
         """Build order summary message"""
         lines = [
-            f"📋 {i18n.get('order_number', language, order.get('order_number', 'N/A'))}",
+            f"📋 {i18n.get('telegram.order.number', language, order.get('order_number', 'N/A'))}",
             f"📅 Date: {order.get('created_at', 'N/A')[:10]}",
-            f"💰 {i18n.get('order_total', language, format_price(order.get('total_amount', 0)))}"
+            f"💰 {i18n.get('telegram.order.total', language, format_price(order.get('total_amount', 0)))}"
         ]
         
         if order.get('status'):

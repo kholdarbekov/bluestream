@@ -46,15 +46,15 @@ class SubscriptionHandlers:
 
                 subscriptions = response.data.get("data", {}).get('items', [])
 
-            subs_text = f"{i18n.get('subscription_title', language)}\n\n"
+            subs_text = f"{i18n.get('telegram.subscription.title', language)}\n\n"
             if subscriptions:
                 active_count = len([s for s in subscriptions if s.get('status') == 'active'])
                 paused_count = len([s for s in subscriptions if s.get('status') == 'paused'])
-                subs_text += f"✅ {i18n.get('subscription_active', language)}: {active_count}\n"
+                subs_text += f"✅ {i18n.get('telegram.subscription.active', language)}: {active_count}\n"
                 if paused_count > 0:
-                    subs_text += f"⏸️ {i18n.get('subscription_paused', language)}: {paused_count}\n"
+                    subs_text += f"⏸️ {i18n.get('telegram.subscription.paused', language)}: {paused_count}\n"
             else:
-                subs_text += i18n.get('subscription_no_subscriptions', language)
+                subs_text += i18n.get('telegram.subscription.no_subscriptions', language)
 
             keyboard = SubscriptionKeyboards.subscription_list(subscriptions, language)
 
@@ -104,30 +104,30 @@ class SubscriptionHandlers:
                 'trial': '🎁'
             }.get(subscription.get('status'), '❓')
 
-            details_text = f"🔄 {i18n.get('subscription_details_title', language)}\n\n"
-            details_text += f"{status_emoji} {i18n.get('subscription_status', language)}: "
+            details_text = f"🔄 {i18n.get('telegram.subscription.details_title', language)}\n\n"
+            details_text += f"{status_emoji} {i18n.get('telegram.subscription.status', language)}: "
             details_text += f"{i18n.get(f'subscription_status_{subscription.get('status')}', language)}\n"
-            details_text += f"📅 {i18n.get('subscription_frequency', language)}: "
+            details_text += f"📅 {i18n.get('telegram.subscription.frequency', language)}: "
             details_text += f"{i18n.get(f'frequency_{subscription.get('delivery_frequency')}', language)}\n"
 
             if subscription.get('next_delivery_date'):
-                details_text += f"🚚 {i18n.get('subscription_next_delivery', language)}: "
+                details_text += f"🚚 {i18n.get('telegram.subscription.next_delivery', language)}: "
                 details_text += f"{subscription['next_delivery_date']}\n"
 
             if subscription.get('next_billing_date'):
-                details_text += f"💳 {i18n.get('subscription_next_billing', language)}: "
+                details_text += f"💳 {i18n.get('telegram.subscription.next_billing', language)}: "
                 details_text += f"{subscription['next_billing_date']}\n"
 
             if items:
-                details_text += f"\n📦 {i18n.get('subscription_items', language)}:\n"
+                details_text += f"\n📦 {i18n.get('telegram.subscription.items', language)}:\n"
                 for item in items:
                     product_name = item.get('product', {}).get('name', 'Unknown')
                     quantity = item.get('quantity', 1)
                     details_text += f"  • {product_name} x{quantity}\n"
 
             if subscription.get('billing_amount'):
-                details_text += f"\n💰 {i18n.get('subscription_amount', language)}: "
-                details_text += f"{subscription['billing_amount']} {i18n.get('currency_uzs', language)}\n"
+                details_text += f"\n💰 {i18n.get('telegram.subscription.amount', language)}: "
+                details_text += f"{subscription['billing_amount']} {i18n.get('telegram.currency.uzs', language)}\n"
 
             keyboard = SubscriptionKeyboards.subscription_actions(subscription_id, subscription['status'], language)
 
@@ -166,7 +166,7 @@ class SubscriptionHandlers:
                 templates_response = await client.get_subscription_templates(user_token)
                 if templates_response.success and templates_response.data.get('templates'):
                     # Show templates option
-                    text = i18n.get('subscription_create_template_or_custom', language)
+                    text = i18n.get('telegram.subscription.create_template_or_custom', language)
                     keyboard = SubscriptionKeyboards.subscription_creation_options(language)
                     await query.edit_message_text(text=text, reply_markup=keyboard)
                     await query.answer()
@@ -202,7 +202,7 @@ class SubscriptionHandlers:
                 products = response.data.get('data', {}).get("items", [])
 
             # Format product list for display
-            products_text = i18n.get('subscription_select_products', language) + "\n\n"
+            products_text = i18n.get('telegram.subscription.select_products', language) + "\n\n"
             for i, product in enumerate(products[:10], 1):
                 price = product.get('base_price', product.get('pricing', {}).get('base_price', 0))
                 products_text += f"{i}. {product['name']} - {price} UZS\n"
@@ -221,7 +221,7 @@ class SubscriptionHandlers:
             # Add cancel button
             buttons.append([
                 InlineKeyboardButton(
-                    i18n.get('cancel', language),
+                    i18n.get('telegram.cancel', language),
                     callback_data='cancel_subscription_creation'
                 )
             ])
@@ -261,7 +261,7 @@ class SubscriptionHandlers:
             # Store product selection
             context.user_data['current_product_id'] = product_id
 
-            text = i18n.get('subscription_select_quantity', language)
+            text = i18n.get('telegram.subscription.select_quantity', language)
             keyboard = SubscriptionKeyboards.quantity_selector(language)
 
             await query.edit_message_text(text=text, reply_markup=keyboard)
@@ -292,21 +292,21 @@ class SubscriptionHandlers:
 
             # Show confirmation and options to add more or continue
             items_count = len(context.user_data['subscription_creation']['items'])
-            text = f"✅ {i18n.get('item_added', language)}\n\n"
+            text = f"✅ {i18n.get('telegram.subscription.item_added', language)}\n\n"
             text += f"{i18n.get('total_items', language)}: {items_count}\n\n"
-            text += i18n.get('subscription_add_more_or_continue', language)
+            text += i18n.get('telegram.subscription.add_more_or_continue', language)
 
             keyboard = InlineKeyboardMarkup([
                 [InlineKeyboardButton(
-                    f"➕ {i18n.get('add_more_items', language)}",
+                    f"➕ {i18n.get('telegram.subscription.add_more_items', language)}",
                     callback_data='sub_add_more_items'
                 )],
                 [InlineKeyboardButton(
-                    f"✅ {i18n.get('continue', language)}",
+                    f"✅ {i18n.get('telegram.continue', language)}",
                     callback_data='sub_items_done'
                 )],
                 [InlineKeyboardButton(
-                    i18n.get('cancel', language),
+                    i18n.get('telegram.cancel', language),
                     callback_data='cancel_subscription_creation'
                 )]
             ])
@@ -351,16 +351,16 @@ class SubscriptionHandlers:
                 addresses = response.data.get("data", {}).get('addresses', [])
 
             if not addresses:
-                text = i18n.get('subscription_no_addresses', language)
+                text = i18n.get('telegram.subscription.no_addresses', language)
                 keyboard = [[InlineKeyboardButton(
-                    i18n.get('add_address', language),
+                    i18n.get('telegram.subscription.add_address', language),
                     callback_data='add_address'
                 )]]
                 await query.edit_message_text(text=text, reply_markup=InlineKeyboardMarkup(keyboard))
                 await query.answer()
                 return ConversationHandler.END
 
-            text = i18n.get('subscription_select_address', language)
+            text = i18n.get('telegram.subscription.select_address', language)
             keyboard = self._build_address_keyboard(addresses, language)
 
             await query.edit_message_text(text=text, reply_markup=keyboard)
@@ -384,7 +384,7 @@ class SubscriptionHandlers:
             address_id = int(query.data.split('_')[1])
             context.user_data['subscription_creation']['address_id'] = address_id
 
-            text = i18n.get('subscription_select_payment', language)
+            text = i18n.get('telegram.subscription.select_payment', language)
             keyboard = SubscriptionKeyboards.payment_methods(language)
 
             await query.edit_message_text(text=text, reply_markup=keyboard)
@@ -432,25 +432,25 @@ class SubscriptionHandlers:
                 preview = response.data.get("data", {}).get('preview', {})
 
             # Build confirmation message
-            text = f"{i18n.get('subscription_confirm_title', language)}\n\n"
-            text += f"📦 {i18n.get('subscription_items', language)}:\n"
+            text = f"{i18n.get('telegram.subscription.confirm_title', language)}\n\n"
+            text += f"📦 {i18n.get('telegram.subscription.items', language)}:\n"
             for item in preview.get('items', []):
                 text += f"  • {item.get('product_name')} x{item.get('quantity')}\n"
-            text += f"\n📅 {i18n.get('subscription_frequency', language)}: "
+            text += f"\n📅 {i18n.get('telegram.subscription.frequency', language)}: "
             text += f"{i18n.get(f'frequency_{preview.get('delivery_frequency')}', language)}\n"
-            text += f"💰 {i18n.get('subscription_total', language)}: "
-            text += f"{preview.get('total_amount')} {i18n.get('currency_uzs', language)}\n"
+            text += f"💰 {i18n.get('telegram.subscription.total', language)}: "
+            text += f"{preview.get('total_amount')} {i18n.get('telegram.currency.uzs', language)}\n"
 
             if preview.get('trial_days'):
-                text += f"\n🎁 {i18n.get('subscription_trial', language, preview['trial_days'])}\n"
+                text += f"\n🎁 {i18n.get('telegram.subscription.trial', language, preview['trial_days'])}\n"
 
             keyboard = [[
                 InlineKeyboardButton(
-                    i18n.get('confirm', language),
+                    i18n.get('telegram.confirm', language),
                     callback_data='confirm_create_subscription'
                 ),
                 InlineKeyboardButton(
-                    i18n.get('cancel', language),
+                    i18n.get('telegram.cancel', language),
                     callback_data='cancel_subscription_creation'
                 )
             ]]
@@ -511,24 +511,24 @@ class SubscriptionHandlers:
 
                 subscription = response.data.get('subscription', {})
 
-            text = f"✅ {i18n.get('subscription_created_success', language)}\n\n"
-            text += f"🆔 {i18n.get('subscription_id', language)}: {subscription.get('id')}\n"
-            text += f"🚚 {i18n.get('subscription_next_delivery', language)}: "
+            text = f"✅ {i18n.get('telegram.subscription.created_success', language)}\n\n"
+            text += f"🆔 {i18n.get('telegram.subscription.id', language)}: {subscription.get('id')}\n"
+            text += f"🚚 {i18n.get('telegram.subscription.next_delivery', language)}: "
             text += f"{subscription.get('next_delivery_date')}"
 
             keyboard = [[
                 InlineKeyboardButton(
-                    i18n.get('view_subscription', language),
+                    i18n.get('telegram.subscription.view', language),
                     callback_data=f'subscription_{subscription.get("id")}'
                 ),
                 InlineKeyboardButton(
-                    i18n.get('back_to_menu', language),
+                    i18n.get('telegram.back_to_menu', language),
                     callback_data='menu_main'
                 )
             ]]
 
             await query.edit_message_text(text=text, reply_markup=InlineKeyboardMarkup(keyboard))
-            await query.answer(i18n.get('subscription_created_success', language))
+            await query.answer(i18n.get('telegram.subscription.created_success', language))
 
             # Clear context
             if 'subscription_creation' in context.user_data:
@@ -566,11 +566,11 @@ class SubscriptionHandlers:
             # Check if at least one item was added
             items = context.user_data.get('subscription_creation', {}).get('items', [])
             if not items:
-                await query.answer(i18n.get('subscription_select_at_least_one_item', language), show_alert=True)
+                await query.answer(i18n.get('telegram.subscription.select_at_least_one_item', language), show_alert=True)
                 return SELECT_QUANTITY
 
             # Proceed to frequency selection
-            text = i18n.get('subscription_select_frequency', language)
+            text = i18n.get('telegram.subscription.select_frequency', language)
             keyboard = SubscriptionKeyboards.subscription_frequency(language)
 
             await query.edit_message_text(text=text, reply_markup=keyboard)
@@ -594,7 +594,7 @@ class SubscriptionHandlers:
             if 'subscription_creation' in context.user_data:
                 del context.user_data['subscription_creation']
 
-            text = i18n.get('subscription_creation_cancelled', language)
+            text = i18n.get('telegram.subscription.creation_cancelled', language)
             keyboard = MenuKeyboards.main_menu(language)
 
             await query.edit_message_text(text=text, reply_markup=keyboard)
@@ -628,20 +628,20 @@ class SubscriptionHandlers:
 
                 if action == 'pause':
                     response = await client.pause_subscription(user_token, sub_id)
-                    success_msg = i18n.get('subscription_paused_success', language)
+                    success_msg = i18n.get('telegram.subscription.paused_success', language)
 
                 elif action == 'resume':
                     response = await client.resume_subscription(user_token, sub_id)
-                    success_msg = i18n.get('subscription_resumed_success', language)
+                    success_msg = i18n.get('telegram.subscription.resumed_success', language)
 
                 elif action == 'cancel':
                     # Cancel immediately when user clicks cancel button
                     cancel_data = {'immediate': True}
                     response = await client.cancel_subscription(user_token, sub_id, cancel_data)
-                    success_msg = i18n.get('subscription_cancelled_success', language)
+                    success_msg = i18n.get('telegram.subscription.cancelled_success', language)
 
                 else:
-                    await query.answer(i18n.get('unknown_action', language))
+                    await query.answer(i18n.get('telegram.unknown_action', language))
                     return
 
                 if not response.success:
@@ -678,7 +678,7 @@ class SubscriptionHandlers:
                     await self._handle_api_error(update, response.error, language)
                     return
 
-            text = i18n.get('subscription_skip_success', language)
+            text = i18n.get('telegram.subscription.skip_success', language)
             await query.answer(text)
 
             # Show updated subscription details
@@ -711,19 +711,19 @@ class SubscriptionHandlers:
 
                 history = response.data.get('billing_history', [])
 
-            text = f"{i18n.get('subscription_billing_history', language)}\n\n"
+            text = f"{i18n.get('telegram.subscription.billing_history', language)}\n\n"
 
             if not history:
-                text += i18n.get('no_billing_history', language)
+                text += i18n.get('telegram.subscription.no_billing_history', language)
             else:
                 for record in history[:10]:  # Show last 10
                     status_emoji = '✅' if record.get('status') == 'completed' else '❌'
                     text += f"{status_emoji} {record.get('billing_date')} - "
-                    text += f"{record.get('amount')} {i18n.get('currency_uzs', language)}\n"
+                    text += f"{record.get('amount')} {i18n.get('telegram.currency.uzs', language)}\n"
 
             keyboard = [[
                 InlineKeyboardButton(
-                    i18n.get('back', language),
+                    i18n.get('telegram.back', language),
                     callback_data=f'subscription_{sub_id}'
                 )
             ]]
@@ -760,17 +760,17 @@ class SubscriptionHandlers:
 
                 items = response.data.get("data", {}).get('items', [])
 
-            text = f"{i18n.get('manage_subscription_items', language)}\n\n"
+            text = f"{i18n.get('telegram.subscription.manage_items', language)}\n\n"
 
             if items:
-                text += f"{i18n.get('current_items', language)}:\n"
+                text += f"{i18n.get('telegram.subscription.current_items', language)}:\n"
                 for item in items:
                     product_name = item.get('product', {}).get('name', 'Unknown')
                     quantity = item.get('quantity', 1)
                     price = item.get('unit_price', 0)
-                    text += f"  • {product_name} x{quantity} - {price * quantity} {i18n.get('currency_uzs', language)}\n"
+                    text += f"  • {product_name} x{quantity} - {price * quantity} {i18n.get('telegram.currency.uzs', language)}\n"
             else:
-                text += i18n.get('no_items_in_subscription', language)
+                text += i18n.get('telegram.subscription.no_items', language)
 
             keyboard = SubscriptionKeyboards.item_management_menu(sub_id, items, language)
 
@@ -806,7 +806,7 @@ class SubscriptionHandlers:
                 products = response.data.get("data", {}).get('items', [])
 
             # Format product list for display
-            products_text = (i18n.get('select_product_to_add', language) or "Select a product to add") + "\n\n"
+            products_text = (i18n.get('telegram.subscription.select_product_to_add', language) or "Select a product to add") + "\n\n"
             for i, product in enumerate(products[:10], 1):
                 price = product.get('base_price', product.get('pricing', {}).get('base_price', 0))
                 products_text += f"{i}. {product['name']} - {price} UZS\n"
@@ -825,7 +825,7 @@ class SubscriptionHandlers:
             # Add back button
             buttons.append([
                 InlineKeyboardButton(
-                    i18n.get('back', language),
+                    i18n.get('telegram.back', language),
                     callback_data=f'manage_items_{sub_id}'
                 )
             ])
@@ -856,7 +856,7 @@ class SubscriptionHandlers:
             product_id = int(query.data.split('_')[2])
             context.user_data['adding_product_id'] = product_id
 
-            text = i18n.get('select_quantity_for_item', language)
+            text = i18n.get('telegram.subscription.select_quantity_for_item', language)
             keyboard = SubscriptionKeyboards.quantity_selector(language)
 
             await query.edit_message_text(text=text, reply_markup=keyboard)
@@ -896,10 +896,10 @@ class SubscriptionHandlers:
                     await self._handle_api_error(update, response.error, language)
                     return ConversationHandler.END
 
-            text = f"✅ {i18n.get('item_added_successfully', language)}"
+            text = f"✅ {i18n.get('telegram.subscription.item_added_successfully', language)}"
             keyboard = [[
                 InlineKeyboardButton(
-                    i18n.get('back_to_items', language),
+                    i18n.get('telegram.subscription.back_to_items', language),
                     callback_data=f'manage_items_{sub_id}'
                 )
             ]]
@@ -935,7 +935,7 @@ class SubscriptionHandlers:
             context.user_data['editing_subscription_id'] = sub_id
             context.user_data['editing_item_id'] = item_id
 
-            text = i18n.get('select_new_quantity', language)
+            text = i18n.get('telegram.subscription.select_new_quantity', language)
             keyboard = SubscriptionKeyboards.quantity_selector(language)
 
             await query.edit_message_text(text=text, reply_markup=keyboard)
@@ -972,10 +972,10 @@ class SubscriptionHandlers:
                     await self._handle_api_error(update, response.error, language)
                     return ConversationHandler.END
 
-            text = f"✅ {i18n.get('item_updated_successfully', language)}"
+            text = f"✅ {i18n.get('telegram.subscription.item_updated_successfully', language)}"
             keyboard = [[
                 InlineKeyboardButton(
-                    i18n.get('back_to_items', language),
+                    i18n.get('telegram.subscription.back_to_items', language),
                     callback_data=f'manage_items_{sub_id}'
                 )
             ]]
@@ -1019,7 +1019,7 @@ class SubscriptionHandlers:
                     await self._handle_api_error(update, response.error, language)
                     return
 
-            text = f"✅ {i18n.get('item_removed_successfully', language)}"
+            text = f"✅ {i18n.get('telegram.subscription.item_removed_successfully', language)}"
             await query.answer(text)
 
             # Return to item management
@@ -1041,7 +1041,7 @@ class SubscriptionHandlers:
 
             sub_id = int(query.data.split('_')[2])
 
-            text = i18n.get('edit_subscription_menu', language)
+            text = i18n.get('telegram.subscription.edit_menu', language)
             keyboard = SubscriptionKeyboards.edit_subscription_menu(sub_id, language)
 
             await query.edit_message_text(text=text, reply_markup=keyboard)
@@ -1061,7 +1061,7 @@ class SubscriptionHandlers:
             sub_id = int(query.data.split('_')[2])
             context.user_data['editing_subscription_id'] = sub_id
 
-            text = i18n.get('select_new_frequency', language)
+            text = i18n.get('telegram.subscription.select_new_frequency', language)
             keyboard = SubscriptionKeyboards.subscription_frequency(language)
 
             await query.edit_message_text(text=text, reply_markup=keyboard)
@@ -1094,10 +1094,10 @@ class SubscriptionHandlers:
                     await self._handle_api_error(update, response.error, language)
                     return
 
-            text = f"✅ {i18n.get('frequency_updated_successfully', language)}"
+            text = f"✅ {i18n.get('telegram.subscription.frequency_updated_successfully', language)}"
             keyboard = [[
                 InlineKeyboardButton(
-                    i18n.get('view_subscription', language),
+                    i18n.get('telegram.subscription.view', language),
                     callback_data=f'subscription_{sub_id}'
                 )
             ]]
@@ -1123,7 +1123,7 @@ class SubscriptionHandlers:
             sub_id = int(query.data.split('_')[3])
             context.user_data['editing_subscription_id'] = sub_id
 
-            text = i18n.get('select_new_payment_method', language)
+            text = i18n.get('telegram.subscription.select_new_payment_method', language)
             keyboard = SubscriptionKeyboards.payment_methods(language)
 
             await query.edit_message_text(text=text, reply_markup=keyboard)
@@ -1156,10 +1156,10 @@ class SubscriptionHandlers:
                     await self._handle_api_error(update, response.error, language)
                     return
 
-            text = f"✅ {i18n.get('payment_method_updated_successfully', language)}"
+            text = f"✅ {i18n.get('telegram.subscription.payment_method_updated_successfully', language)}"
             keyboard = [[
                 InlineKeyboardButton(
-                    i18n.get('view_subscription', language),
+                    i18n.get('telegram.subscription.view', language),
                     callback_data=f'subscription_{sub_id}'
                 )
             ]]
@@ -1197,18 +1197,18 @@ class SubscriptionHandlers:
 
                 stats = response.data.get('statistics', {})
 
-            text = f"📊 {i18n.get('subscription_statistics', language)}\n\n"
+            text = f"📊 {i18n.get('telegram.subscription.statistics', language)}\n\n"
             text += f"📦 {i18n.get('total_deliveries', language)}: {stats.get('total_deliveries', 0)}\n"
-            text += f"💰 {i18n.get('total_spent', language)}: {stats.get('total_spent', 0)} {i18n.get('currency_uzs', language)}\n"
-            text += f"💵 {i18n.get('average_order', language)}: {stats.get('average_order_value', 0)} {i18n.get('currency_uzs', language)}\n"
-            text += f"💚 {i18n.get('total_savings', language)}: {stats.get('total_savings', 0)} {i18n.get('currency_uzs', language)}\n"
+            text += f"💰 {i18n.get('total_spent', language)}: {stats.get('total_spent', 0)} {i18n.get('telegram.currency.uzs', language)}\n"
+            text += f"💵 {i18n.get('telegram.subscription.average_order', language)}: {stats.get('average_order_value', 0)} {i18n.get('telegram.currency.uzs', language)}\n"
+            text += f"💚 {i18n.get('total_savings', language)}: {stats.get('total_savings', 0)} {i18n.get('telegram.currency.uzs', language)}\n"
 
             if stats.get('most_ordered_product'):
-                text += f"\n⭐ {i18n.get('favorite_product', language)}: {stats['most_ordered_product']}\n"
+                text += f"\n⭐ {i18n.get('telegram.subscription.favorite_product', language)}: {stats['most_ordered_product']}\n"
 
             keyboard = [[
                 InlineKeyboardButton(
-                    i18n.get('back', language),
+                    i18n.get('telegram.back', language),
                     callback_data='menu_subscriptions'
                 )
             ]]
@@ -1242,10 +1242,10 @@ class SubscriptionHandlers:
 
                 logs = response.data.get('data', {}).get('items', [])
 
-            text = f"📋 {i18n.get('subscription_activity_logs', language)}\n\n"
+            text = f"📋 {i18n.get('telegram.subscription.activity_logs', language)}\n\n"
 
             if not logs:
-                text += i18n.get('no_activity_logs', language)
+                text += i18n.get('telegram.subscription.no_activity_logs', language)
             else:
                 for log in logs[:10]:  # Show last 10
                     action_icon = {
@@ -1263,7 +1263,7 @@ class SubscriptionHandlers:
 
             keyboard = [[
                 InlineKeyboardButton(
-                    i18n.get('back', language),
+                    i18n.get('telegram.back', language),
                     callback_data=f'subscription_{sub_id}'
                 )
             ]]
@@ -1295,7 +1295,7 @@ class SubscriptionHandlers:
                     await self._handle_api_error(update, response.error, language)
                     return
 
-            text = f"✅ {i18n.get('billing_retry_initiated', language)}"
+            text = f"✅ {i18n.get('telegram.subscription.billing_retry_initiated', language)}"
             await query.answer(text, show_alert=True)
 
             # Refresh subscription details
@@ -1320,7 +1320,7 @@ class SubscriptionHandlers:
             )])
 
         keyboard.append([InlineKeyboardButton(
-            i18n.get('add_new_address', language),
+            i18n.get('telegram.subscription.add_new_address', language),
             callback_data='add_address'
         )])
 
@@ -1328,7 +1328,7 @@ class SubscriptionHandlers:
 
     async def _handle_auth_error(self, update: Update, language: str):
         """Handle authentication error"""
-        error_msg = i18n.get('auth_error', language)
+        error_msg = i18n.get('telegram.error.auth_error', language)
         if update.callback_query:
             await update.callback_query.edit_message_text(error_msg)
             await update.callback_query.answer()
@@ -1347,7 +1347,7 @@ class SubscriptionHandlers:
         """Handle general error"""
         try:
             language = await i18n.get_user_language(update.effective_user.id)
-            error_msg = i18n.get('error_occurred', language)
+            error_msg = i18n.get('telegram.error_occurred', language)
         except:
             error_msg = "❌ An error occurred. Please try again."
 

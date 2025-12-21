@@ -16,3 +16,4 @@ geopy==2.4.1
 schedule==1.2.0
 uvloop==0.21.0
 aiofiles==24.1.0
+sentry-sdk==2.19.2

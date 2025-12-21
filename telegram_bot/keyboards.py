@@ -61,24 +61,24 @@ class MenuKeyboards:
         """Main menu keyboard"""
         buttons = [
             [
-                {'text': i18n.get('menu_products', language), 'callback_data': 'menu_products'},
+                {'text': i18n.get('telegram.menu.products', language), 'callback_data': 'menu_products'},
             ],
             [
-                {'text': i18n.get('menu_orders', language), 'callback_data': 'menu_orders'}
+                {'text': i18n.get('telegram.menu.orders', language), 'callback_data': 'menu_orders'}
             ],
             [
-                {'text': i18n.get('cart_title', language), 'callback_data': 'cart_view'},
+                {'text': i18n.get('telegram.cart_title', language), 'callback_data': 'cart_view'},
             ],
             [
-                {'text': i18n.get('menu_subscriptions', language), 'callback_data': 'menu_subscriptions'},
-                {'text': i18n.get('menu_loyalty', language), 'callback_data': 'menu_loyalty'}
+                {'text': i18n.get('telegram.menu.subscriptions', language), 'callback_data': 'menu_subscriptions'},
+                {'text': i18n.get('telegram.menu.loyalty', language), 'callback_data': 'menu_loyalty'}
             ],
             [
-                {'text': i18n.get('menu_profile', language), 'callback_data': 'menu_profile'},
-                {'text': i18n.get('menu_support', language), 'callback_data': 'menu_support'}
+                {'text': i18n.get('telegram.menu.profile', language), 'callback_data': 'menu_profile'},
+                {'text': i18n.get('telegram.menu.support', language), 'callback_data': 'menu_support'}
             ],
             [
-                {'text': i18n.get('menu_language', language), 'callback_data': 'menu_language'}
+                {'text': i18n.get('telegram.menu.language', language), 'callback_data': 'menu_language'}
             ]
         ]
         
@@ -88,7 +88,7 @@ class MenuKeyboards:
     def back_button(language: str = 'en') -> InlineKeyboardMarkup:
         """Simple back button"""
         buttons = [
-            [{'text': i18n.get('back', language), 'callback_data': 'back_to_main'}]
+            [{'text': i18n.get('telegram.back', language), 'callback_data': 'back_to_main'}]
         ]
         return KeyboardBuilder.build_inline_keyboard(buttons)
     
@@ -96,7 +96,7 @@ class MenuKeyboards:
     def cancel_button(language: str = 'en') -> InlineKeyboardMarkup:
         """Simple cancel button"""
         buttons = [
-            [{'text': i18n.get('cancel', language), 'callback_data': 'cancel_action'}]
+            [{'text': i18n.get('telegram.cancel', language), 'callback_data': 'cancel_action'}]
         ]
         return KeyboardBuilder.build_inline_keyboard(buttons)
     
@@ -105,8 +105,8 @@ class MenuKeyboards:
         """Yes/No confirmation buttons"""
         buttons = [
             [
-                {'text': i18n.get('yes', language), 'callback_data': 'confirm_yes'},
-                {'text': i18n.get('no', language), 'callback_data': 'confirm_no'}
+                {'text': i18n.get('telegram.yes', language), 'callback_data': 'confirm_yes'},
+                {'text': i18n.get('telegram.no', language), 'callback_data': 'confirm_no'}
             ]
         ]
         return KeyboardBuilder.build_inline_keyboard(buttons)
@@ -162,7 +162,7 @@ class LanguageKeyboards:
 
         # Add back button on its own row
         buttons.append([{
-            'text': i18n.get('back', current_language),
+            'text': i18n.get('telegram.back', current_language),
             'callback_data': 'back_to_main'
         }])
 
@@ -195,7 +195,7 @@ class ProductKeyboards:
         
         # Add back button
         buttons.append([{
-            'text': i18n.get('back', language),
+            'text': i18n.get('telegram.back', language),
             'callback_data': 'back_to_main'
         }])
         
@@ -233,7 +233,7 @@ class ProductKeyboards:
         
         # Add back button
         buttons.append([{
-            'text': i18n.get('back', language),
+            'text': i18n.get('telegram.back', language),
             'callback_data': 'back_to_categories'
         }])
         
@@ -243,8 +243,8 @@ class ProductKeyboards:
     def product_details(product_id: int, language: str = 'en') -> InlineKeyboardMarkup:
         """Product details keyboard"""
         buttons = [
-            [{'text': i18n.get('add_to_cart', language), 'callback_data': f'add_to_cart_{product_id}'}],
-            [{'text': i18n.get('back', language), 'callback_data': 'back_to_products'}]
+            [{'text': i18n.get('telegram.product.add_to_cart', language), 'callback_data': f'add_to_cart_{product_id}'}],
+            [{'text': i18n.get('telegram.back', language), 'callback_data': 'back_to_products'}]
         ]
 
         return KeyboardBuilder.build_inline_keyboard(buttons)
@@ -270,7 +270,7 @@ class ProductKeyboards:
 
         # Add back button
         buttons.append([{
-            'text': i18n.get('back', language),
+            'text': i18n.get('telegram.back', language),
             'callback_data': 'cancel_subscription_creation'
         }])
 
@@ -286,8 +286,8 @@ class ProductKeyboards:
                 {'text': str(current_quantity), 'callback_data': 'qty_current'},
                 {'text': '➕', 'callback_data': f'qty_inc_{product_id}_{current_quantity}'}
             ],
-            [{'text': i18n.get('checkout', language), 'callback_data': f'checkout'}],
-            [{'text': i18n.get('back', language), 'callback_data': f'back_to_product_{product_id}'}]
+            [{'text': i18n.get('telegram.cart.checkout', language), 'callback_data': f'checkout'}],
+            [{'text': i18n.get('telegram.back', language), 'callback_data': f'back_to_product_{product_id}'}]
         ]
         
         return KeyboardBuilder.build_inline_keyboard(buttons)
@@ -304,16 +304,16 @@ class OrderKeyboards:
                 [
                     {'text': '🛍️ Continue Shopping', 'callback_data': 'menu_products'}
                 ],
-                [{'text': i18n.get('back', language), 'callback_data': 'back_to_main'}]
+                [{'text': i18n.get('telegram.back', language), 'callback_data': 'back_to_main'}]
             ]
         else:
             buttons = [
-                [{'text': i18n.get('checkout', language), 'callback_data': 'cart_checkout'}],
+                [{'text': i18n.get('telegram.cart.checkout', language), 'callback_data': 'cart_checkout'}],
                 [
                     {'text': '🗑️ Clear Cart', 'callback_data': 'cart_clear'},
                     {'text': '🛍️ Continue Shopping', 'callback_data': 'menu_products'}
                 ],
-                [{'text': i18n.get('back', language), 'callback_data': 'back_to_main'}]
+                [{'text': i18n.get('telegram.back', language), 'callback_data': 'back_to_main'}]
             ]
         
         return KeyboardBuilder.build_inline_keyboard(buttons)
@@ -331,7 +331,7 @@ class OrderKeyboards:
         
         buttons.extend([
             [{'text': '➕ Add New Address', 'callback_data': 'add_new_address'}],
-            [{'text': i18n.get('back', language), 'callback_data': 'back_to_cart'}]
+            [{'text': i18n.get('telegram.back', language), 'callback_data': 'back_to_cart'}]
         ])
         
         return KeyboardBuilder.build_inline_keyboard(buttons)
@@ -359,7 +359,7 @@ class OrderKeyboards:
             }])
         
         buttons.append([{
-            'text': i18n.get('back', language),
+            'text': i18n.get('telegram.back', language),
             'callback_data': 'back_to_delivery'
         }])
         
@@ -378,7 +378,7 @@ class OrderKeyboards:
                 }])
         
         buttons.append([{
-            'text': i18n.get('back', language),
+            'text': i18n.get('telegram.back', language),
             'callback_data': 'back_to_address'
         }])
         
@@ -422,12 +422,12 @@ class OrderKeyboards:
             }])
         
         buttons.append([{
-            'text': i18n.get('back', language),
+            'text': i18n.get('telegram.back', language),
             'callback_data': 'back_to_main'
         }])
-        
+
         return KeyboardBuilder.build_inline_keyboard(buttons)
-    
+
     @staticmethod
     def order_details(order_id: int, order_status: str, language: str = 'en') -> InlineKeyboardMarkup:
         """Order details action buttons"""
@@ -455,7 +455,7 @@ class OrderKeyboards:
             }])
         
         buttons.append([{
-            'text': i18n.get('back', language),
+            'text': i18n.get('telegram.back', language),
             'callback_data': 'back_to_orders'
         }])
         
@@ -470,14 +470,14 @@ class SubscriptionKeyboards:
         """Subscription frequency selection"""
         buttons = [
             [
-                {'text': i18n.get('frequency_daily', language), 'callback_data': 'subscription_freq_daily'},
-                {'text': i18n.get('frequency_weekly', language), 'callback_data': 'subscription_freq_weekly'}
+                {'text': i18n.get('telegram.subscription.frequency_daily', language), 'callback_data': 'subscription_freq_daily'},
+                {'text': i18n.get('telegram.subscription.frequency_weekly', language), 'callback_data': 'subscription_freq_weekly'}
             ],
             [
-                {'text': i18n.get('frequency_biweekly', language), 'callback_data': 'subscription_freq_biweekly'},
-                {'text': i18n.get('frequency_monthly', language), 'callback_data': 'subscription_freq_monthly'}
+                {'text': i18n.get('telegram.subscription.frequency_biweekly', language), 'callback_data': 'subscription_freq_biweekly'},
+                {'text': i18n.get('telegram.subscription.frequency_monthly', language), 'callback_data': 'subscription_freq_monthly'}
             ],
-            [{'text': i18n.get('back', language), 'callback_data': 'back_to_subscriptions'}]
+            [{'text': i18n.get('telegram.back', language), 'callback_data': 'back_to_subscriptions'}]
         ]
         
         return KeyboardBuilder.build_inline_keyboard(buttons)
@@ -505,7 +505,7 @@ class SubscriptionKeyboards:
         buttons.extend([
             [{'text': '➕ Create Subscription', 'callback_data': 'create_subscription'}],
             [{'text': '📊 My Statistics', 'callback_data': 'subscription_statistics'}],
-            [{'text': i18n.get('back', language), 'callback_data': 'back_to_main'}]
+            [{'text': i18n.get('telegram.back', language), 'callback_data': 'back_to_main'}]
         ])
 
         return KeyboardBuilder.build_inline_keyboard(buttons)
@@ -538,7 +538,7 @@ class SubscriptionKeyboards:
                 {'text': '📋 Logs', 'callback_data': f'view_logs_{subscription_id}'}
             ],
             [{'text': '❌ Cancel', 'callback_data': f'cancel_sub_{subscription_id}'}],
-            [{'text': i18n.get('back', language), 'callback_data': 'back_to_subscriptions'}]
+            [{'text': i18n.get('telegram.back', language), 'callback_data': 'back_to_subscriptions'}]
         ])
 
         return KeyboardBuilder.build_inline_keyboard(buttons)
@@ -549,7 +549,7 @@ class SubscriptionKeyboards:
         buttons = [
             [{'text': '📋 Use Template', 'callback_data': 'subscription_use_template'}],
             [{'text': '✨ Create Custom', 'callback_data': 'subscription_custom'}],
-            [{'text': i18n.get('back', language), 'callback_data': 'back_to_subscriptions'}]
+            [{'text': i18n.get('telegram.back', language), 'callback_data': 'back_to_subscriptions'}]
         ]
         return KeyboardBuilder.build_inline_keyboard(buttons)
 
@@ -567,7 +567,7 @@ class SubscriptionKeyboards:
                 {'text': '5', 'callback_data': 'sub_qty_5'},
                 {'text': '10', 'callback_data': 'sub_qty_10'}
             ],
-            [{'text': i18n.get('back', language), 'callback_data': 'back_to_product_selection'}]
+            [{'text': i18n.get('telegram.back', language), 'callback_data': 'back_to_product_selection'}]
         ]
         return KeyboardBuilder.build_inline_keyboard(buttons)
 
@@ -579,7 +579,7 @@ class SubscriptionKeyboards:
             [{'text': '💰 Cash on Delivery', 'callback_data': 'sub_payment_cash'}],
             [{'text': '📱 Payme', 'callback_data': 'sub_payment_payme'}],
             [{'text': '🔵 Click', 'callback_data': 'sub_payment_click'}],
-            [{'text': i18n.get('back', language), 'callback_data': 'back_to_address_selection'}]
+            [{'text': i18n.get('telegram.back', language), 'callback_data': 'back_to_address_selection'}]
         ]
         return KeyboardBuilder.build_inline_keyboard(buttons)
 
@@ -602,7 +602,7 @@ class SubscriptionKeyboards:
         buttons.append([{'text': '➕ Add Item', 'callback_data': f'add_item_{subscription_id}'}])
 
         # Back button
-        buttons.append([{'text': i18n.get('back', language), 'callback_data': f'subscription_{subscription_id}'}])
+        buttons.append([{'text': i18n.get('telegram.back', language), 'callback_data': f'subscription_{subscription_id}'}])
 
         return KeyboardBuilder.build_inline_keyboard(buttons)
 
@@ -614,7 +614,7 @@ class SubscriptionKeyboards:
             [{'text': '💳 Change Payment Method', 'callback_data': f'change_payment_{subscription_id}'}],
             [{'text': '✏️ Manage Items', 'callback_data': f'manage_items_{subscription_id}'}],
             [{'text': '📋 View Activity Log', 'callback_data': f'view_logs_{subscription_id}'}],
-            [{'text': i18n.get('back', language), 'callback_data': f'subscription_{subscription_id}'}]
+            [{'text': i18n.get('telegram.back', language), 'callback_data': f'subscription_{subscription_id}'}]
         ]
         return KeyboardBuilder.build_inline_keyboard(buttons)
 
@@ -637,7 +637,7 @@ class ProfileKeyboards:
             [
                 {'text': '💳 Payment Methods', 'callback_data': 'payment_methods'}
             ],
-            [{'text': i18n.get('back', language), 'callback_data': 'back_to_main'}]
+            [{'text': i18n.get('telegram.back', language), 'callback_data': 'back_to_main'}]
         ]
 
         return KeyboardBuilder.build_inline_keyboard(buttons)
@@ -691,7 +691,7 @@ class ProfileKeyboards:
                 {'text': '✏️ Edit Address', 'callback_data': 'select_edit_address'},
                 {'text': '🗑️ Delete Address', 'callback_data': 'select_delete_address'}
             ],
-            [{'text': i18n.get('back', language), 'callback_data': 'menu_profile'}]
+            [{'text': i18n.get('telegram.back', language), 'callback_data': 'menu_profile'}]
         ])
         
         return KeyboardBuilder.build_inline_keyboard(buttons)
@@ -701,7 +701,7 @@ class ProfileKeyboards:
         """Keyboard for when user has no addresses"""
         buttons = [
             [{'text': '➕ Add Your First Address', 'callback_data': 'add_new_address'}],
-            [{'text': i18n.get('back', language), 'callback_data': 'menu_profile'}]
+            [{'text': i18n.get('telegram.back', language), 'callback_data': 'menu_profile'}]
         ]
         
         return KeyboardBuilder.build_inline_keyboard(buttons)
@@ -715,14 +715,14 @@ class AdminKeyboards:
         """Admin panel main menu"""
         buttons = [
             [
-                {'text': i18n.get('admin_orders', language), 'callback_data': 'admin_orders'},
-                {'text': i18n.get('admin_analytics', language), 'callback_data': 'admin_analytics'}
+                {'text': i18n.get('telegram.admin.orders', language), 'callback_data': 'admin_orders'},
+                {'text': i18n.get('telegram.admin.analytics', language), 'callback_data': 'admin_analytics'}
             ],
             [
-                {'text': i18n.get('admin_users', language), 'callback_data': 'admin_users'},
-                {'text': i18n.get('admin_products', language), 'callback_data': 'admin_products'}
+                {'text': i18n.get('telegram.admin.users', language), 'callback_data': 'admin_users'},
+                {'text': i18n.get('telegram.admin.products', language), 'callback_data': 'admin_products'}
             ],
-            [{'text': i18n.get('back', language), 'callback_data': 'back_to_main'}]
+            [{'text': i18n.get('telegram.back', language), 'callback_data': 'back_to_main'}]
         ]
         
         return KeyboardBuilder.build_inline_keyboard(buttons)

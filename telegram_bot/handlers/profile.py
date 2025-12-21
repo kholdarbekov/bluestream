@@ -263,9 +263,9 @@ class ProfileHandlers:
             logger.info(f"existing_user {existing_user} for user_id {user_id}")
 
             if not existing_user:
-                welcome_text_en = i18n.get('registration_welcome', "en")
-                welcome_text_uz = i18n.get('registration_welcome', "uz")
-                welcome_text_ru = i18n.get('registration_welcome', "ru")
+                welcome_text_en = i18n.get('telegram.registration_welcome', "en")
+                welcome_text_uz = i18n.get('telegram.registration_welcome', "uz")
+                welcome_text_ru = i18n.get('telegram.registration_welcome', "ru")
                 welcome_text = f"{welcome_text_en}\n\n{welcome_text_uz}\n\n{welcome_text_ru}"
 
                 await update.message.reply_text(
@@ -276,7 +276,7 @@ class ProfileHandlers:
                 return SELECT_LANGUAGE
             else:
                 # Already registered, show main menu
-                complete_text = i18n.get('welcome', telegram_language_code)
+                complete_text = i18n.get('telegram.welcome', telegram_language_code)
                 keyboard = MenuKeyboards.main_menu(telegram_language_code)
 
                 await update.message.reply_text(
@@ -297,7 +297,7 @@ class ProfileHandlers:
             language = await i18n.get_user_language(user_id)
             
             # Ask for phone number
-            phone_text = i18n.get('enter_phone', language)
+            phone_text = i18n.get('telegram.registration.enter_phone', language)
             keyboard = ProfileKeyboards.phone_request(language)
             
             if update.callback_query:
@@ -371,7 +371,7 @@ class ProfileHandlers:
             
             await update.callback_query.delete_message()
             # Proceed to phone number input
-            phone_text = i18n.get('enter_phone', language_code)
+            phone_text = i18n.get('telegram.registration.enter_phone', language_code)
             keyboard = ProfileKeyboards.phone_request(language_code)
             
             await query.message.reply_text(
@@ -405,7 +405,7 @@ class ProfileHandlers:
             await self.user_repo.set_user_phone(user_id, phone)
 
             # Registration complete
-            complete_text = i18n.get('registration_complete', language)
+            complete_text = i18n.get('telegram.registration_complete', language)
             keyboard = MenuKeyboards.main_menu(language)
 
             await update.message.reply_text(
@@ -440,7 +440,7 @@ class ProfileHandlers:
             await self.user_repo.set_user_phone(user_id, phone)
 
             # Registration complete
-            complete_text = i18n.get('registration_complete', language)
+            complete_text = i18n.get('telegram.registration_complete', language)
             keyboard = MenuKeyboards.main_menu(language)
 
             await update.message.reply_text(
@@ -526,7 +526,7 @@ class ProfileHandlers:
                     await client.update_user_profile(user_token, profile_data)
 
             # Registration complete
-            complete_text = i18n.get('registration_complete', language)
+            complete_text = i18n.get('telegram.registration_complete', language)
             keyboard = MenuKeyboards.main_menu(language)
 
             await update.message.reply_text(
@@ -556,7 +556,7 @@ class ProfileHandlers:
                 return
             
             # Ask for name
-            name_text = i18n.get('enter_name', language)
+            name_text = i18n.get('telegram.registration.enter_name', language)
             await update.message.reply_text(name_text)
             
         except Exception as e:
@@ -589,7 +589,7 @@ class ProfileHandlers:
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
             
-            edit_text = f"{i18n.get('edit_profile', language)}\n\nWhat would you like to update?\n\nType the new information or use /cancel to go back."
+            edit_text = f"{i18n.get('telegram.edit_profile', language)}\n\nWhat would you like to update?\n\nType the new information or use /cancel to go back."
             
             await query.edit_message_text(
                 text=edit_text,
@@ -914,7 +914,7 @@ class ProfileHandlers:
             if not address.get('is_default'):
                 buttons.insert(0, [{'text': '🏠 Set as Default', 'callback_data': f'set_default_address_{address_id}'}])
             
-            buttons.append([{'text': i18n.get('back', language), 'callback_data': 'manage_addresses'}])
+            buttons.append([{'text': i18n.get('telegram.back', language), 'callback_data': 'manage_addresses'}])
             
             from keyboards import KeyboardBuilder
             keyboard = KeyboardBuilder.build_inline_keyboard(buttons)
@@ -975,7 +975,7 @@ class ProfileHandlers:
                     'callback_data': f"edit_address_{addr['id']}"
                 }])
             
-            buttons.append([{'text': i18n.get('back', language), 'callback_data': 'manage_addresses'}])
+            buttons.append([{'text': i18n.get('telegram.back', language), 'callback_data': 'manage_addresses'}])
             
             from keyboards import KeyboardBuilder
             keyboard = KeyboardBuilder.build_inline_keyboard(buttons)
@@ -1028,7 +1028,7 @@ class ProfileHandlers:
                     'callback_data': f"confirm_delete_address_{addr['id']}"
                 }])
             
-            buttons.append([{'text': i18n.get('back', language), 'callback_data': 'manage_addresses'}])
+            buttons.append([{'text': i18n.get('telegram.back', language), 'callback_data': 'manage_addresses'}])
             
             from keyboards import KeyboardBuilder
             keyboard = KeyboardBuilder.build_inline_keyboard(buttons)
@@ -1104,7 +1104,7 @@ class ProfileHandlers:
                 ],
                 [
                     {'text': '🗑️ Delete & Re-add', 'callback_data': f'delete_address_{address_id}'},
-                    {'text': i18n.get('back', language), 'callback_data': f'view_address_{address_id}'}
+                    {'text': i18n.get('telegram.back', language), 'callback_data': f'view_address_{address_id}'}
                 ]
             ]
             
@@ -1212,7 +1212,7 @@ class ProfileHandlers:
                     
                     # Show error and go back to address view
                     error_text = f"❌ **Error deleting address:**\n\n{response.error}\n\nPlease try again."
-                    back_button = [[{'text': i18n.get('back', language), 'callback_data': f'view_address_{address_id}'}]]
+                    back_button = [[{'text': i18n.get('telegram.back', language), 'callback_data': f'view_address_{address_id}'}]]
                     
                     from keyboards import KeyboardBuilder
                     keyboard = KeyboardBuilder.build_inline_keyboard(back_button)
@@ -1404,7 +1404,7 @@ class ProfileHandlers:
                     success_text = f"✅ **Address title updated successfully!**\n\n"
                     success_text += f"**New title:** {text.strip()}"
                     
-                    back_button = [[{'text': i18n.get('back', language), 'callback_data': f'view_address_{address_id}'}]]
+                    back_button = [[{'text': i18n.get('telegram.back', language), 'callback_data': f'view_address_{address_id}'}]]
                     from keyboards import KeyboardBuilder
                     keyboard = KeyboardBuilder.build_inline_keyboard(back_button)
                     
@@ -1463,7 +1463,7 @@ class ProfileHandlers:
                     else:
                         success_text += f"**Instructions:** None (cleared)"
                     
-                    back_button = [[{'text': i18n.get('back', language), 'callback_data': f'view_address_{address_id}'}]]
+                    back_button = [[{'text': i18n.get('telegram.back', language), 'callback_data': f'view_address_{address_id}'}]]
                     from keyboards import KeyboardBuilder
                     keyboard = KeyboardBuilder.build_inline_keyboard(back_button)
                     
@@ -1512,7 +1512,7 @@ class ProfileHandlers:
             language = await i18n.get_user_language(user_id)
             
             # Confirm logout action
-            logout_text = f"🚪 **{i18n.get('logout_confirm', language, 'Are you sure you want to logout?')}**\n\n"
+            logout_text = f"🚪 **{i18n.get('telegram.profile.logout_confirm', language, 'Are you sure you want to logout?')}**\n\n"
             logout_text += f"This will log you out from both Telegram bot and web app.\n\n"
             logout_text += f"You can always log back in by using /start"
             

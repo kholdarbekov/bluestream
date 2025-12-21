@@ -59,7 +59,7 @@ class LanguageHandler:
 
             try:
                 language = await i18n.get_user_language(update.effective_user.id)
-                error_msg = i18n.get('error_occurred', language)
+                error_msg = i18n.get('telegram.error_occurred', language)
 
                 if update.callback_query:
                     await update.callback_query.answer(error_msg)

@@ -11,6 +11,27 @@ from datetime import datetime
 from typing import Optional, Dict, Any
 import json
 
+# Initialize Sentry before any other imports to capture all errors
+import sentry_sdk
+from sentry_sdk.integrations.asyncio import AsyncioIntegration
+
+# Initialize Sentry if DSN is configured
+_sentry_dsn = os.environ.get('SENTRY_DSN')
+if _sentry_dsn:
+    sentry_sdk.init(
+        dsn=_sentry_dsn,
+        environment=os.environ.get('SENTRY_ENVIRONMENT', os.environ.get('FLASK_ENV', 'development')),
+        traces_sample_rate=float(os.environ.get('SENTRY_TRACES_SAMPLE_RATE', '1.0')),
+        profiles_sample_rate=float(os.environ.get('SENTRY_PROFILES_SAMPLE_RATE', '1.0')),
+        send_default_pii=os.environ.get('SENTRY_SEND_DEFAULT_PII', 'false').lower() == 'true',
+        debug=os.environ.get('SENTRY_DEBUG', 'false').lower() == 'true',
+        integrations=[
+            AsyncioIntegration(),
+        ],
+        # Set release version if available
+        release=os.environ.get('APP_VERSION', 'telegram-bot@1.0.0'),
+    )
+
 from telegram import Update, BotCommand, ReplyKeyboardRemove
 from telegram.ext import (
     Application, CommandHandler, MessageHandler, CallbackQueryHandler,
@@ -492,7 +513,7 @@ class WaterBusinessBot:
                 
         except Exception as e:
             logger.error(f"Error handling text message: {e}")
-            await update.message.reply_text(i18n.get('error_occurred', language))
+            await update.message.reply_text(i18n.get('telegram.error_occurred', language))
 
     async def _handle_otp_verification(self, update: Update, context: ContextTypes.DEFAULT_TYPE,
                                        text: str, language: str):
@@ -569,7 +590,7 @@ class WaterBusinessBot:
         else:
             # Unknown state, clear it
             await self.user_repository.update_user_state(user_id, {})
-            await update.message.reply_text(i18n.get('invalid_input', language))
+            await update.message.reply_text(i18n.get('telegram.error.invalid_input', language))
     
     async def _handle_general_input(self, update: Update, context: ContextTypes.DEFAULT_TYPE,
                                   text: str, language: str):
@@ -601,7 +622,7 @@ class WaterBusinessBot:
                 
                 language = await i18n.get_user_language(user_id)
                 await update.message.reply_text(
-                    i18n.get('phone_shared', language),
+                    i18n.get('telegram.registration.phone_shared', language),
                     reply_markup=None
                 )
                 

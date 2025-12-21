@@ -43,7 +43,7 @@ RUN mkdir -p /app/uploads
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD curl -f http://localhost:80/health || exit 1
 
-COPY scripts/start-gunicorn.sh scripts/migrate-db.sh /
+COPY scripts/start-gunicorn.sh scripts/migrate-db.sh scripts/gunicorn.conf.py /
 RUN chmod u+x /start-gunicorn.sh /migrate-db.sh
 
 # Start command

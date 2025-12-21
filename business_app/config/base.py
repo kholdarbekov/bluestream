@@ -74,11 +74,11 @@ class BaseConfig:
         return get_database_url()
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     SQLALCHEMY_ENGINE_OPTIONS = {
-        'pool_size': 20,
-        'pool_timeout': 20,
-        'pool_recycle': -1,
-        'max_overflow': 0,
-        'pool_pre_ping': True  # Validate connections before use
+        'pool_size': 10,  # Reduced for better connection management with threaded workers
+        'pool_timeout': 30,  # Timeout waiting for connection from pool
+        'pool_recycle': 1800,  # Recycle connections every 30 minutes to prevent stale connections
+        'max_overflow': 5,  # Allow up to 5 additional connections during peak load
+        'pool_pre_ping': True,  # Validate connections before use (critical for detecting stale connections)
     }
     
     # JWT Configuration

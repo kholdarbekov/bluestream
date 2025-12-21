@@ -4,7 +4,7 @@ import HttpBackend from 'i18next-http-backend';
 import LanguageDetector from 'i18next-browser-languagedetector';
 
 // Get API base URL from environment or use proxy
-const API_BASE_URL = process.env.REACT_APP_API_URL || '';
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'https://bluestream.uz/api/v1';
 
 i18n
   // Load translations using http backend

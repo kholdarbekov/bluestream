@@ -4,51 +4,31 @@ set -e
 
 APP_MODULE='business_app.wsgi:app'
 
-# Get CPU count and configure workers based on environment variables or defaults
-cpu_count=$(grep -c ^processor /proc/cpuinfo)
-# workers=${GUNICORN_WORKERS:-$((2 * $cpu_count))}
-workers=2
-# threads=${GUNICORN_THREADS:-4}
-threads=3
-max_requests=${GUNICORN_MAX_REQUESTS:-1000}
-max_requests_jitter=${GUNICORN_MAX_REQUESTS_JITTER:-100}
-worker_connections=${GUNICORN_WORKER_CONNECTIONS:-1000}
-timeout=${GUNICORN_TIMEOUT:-30}
-keepalive=${GUNICORN_KEEPALIVE:-5}
-
-# Limit workers to prevent resource exhaustion
-if [ "$workers" -gt 8 ]; then
-    workers=8
-fi
+# Export environment variables for gunicorn.conf.py
+export GUNICORN_WORKERS=${GUNICORN_WORKERS:-2}
+export GUNICORN_THREADS=${GUNICORN_THREADS:-3}
+export GUNICORN_MAX_REQUESTS=${GUNICORN_MAX_REQUESTS:-1000}
+export GUNICORN_MAX_REQUESTS_JITTER=${GUNICORN_MAX_REQUESTS_JITTER:-100}
+export GUNICORN_WORKER_CONNECTIONS=${GUNICORN_WORKER_CONNECTIONS:-1000}
+export GUNICORN_TIMEOUT=${GUNICORN_TIMEOUT:-30}
+export GUNICORN_KEEPALIVE=${GUNICORN_KEEPALIVE:-5}
 
 echo "***** GUNICORN Configuration *****"
-echo "Workers: $workers"
-echo "Threads: $threads"
-echo "Max requests: $max_requests"
-echo "Max requests jitter: $max_requests_jitter"
-echo "Worker connections: $worker_connections"
-echo "Timeout: $timeout"
-echo "Keepalive: $keepalive"
+echo "Workers: $GUNICORN_WORKERS"
+echo "Threads: $GUNICORN_THREADS"
+echo "Max requests: $GUNICORN_MAX_REQUESTS"
+echo "Max requests jitter: $GUNICORN_MAX_REQUESTS_JITTER"
+echo "Worker connections: $GUNICORN_WORKER_CONNECTIONS"
+echo "Timeout: $GUNICORN_TIMEOUT"
+echo "Keepalive: $GUNICORN_KEEPALIVE"
 echo "APP_MODULE: $APP_MODULE"
+echo "Config: gunicorn.conf.py (with post_fork DB connection disposal)"
 
 # Create logs directory if it doesn't exist
 mkdir -p /app/logs
 
-# Run gunicorn with comprehensive configuration
+# Run gunicorn with Python config file
+# The config file handles --preload safely by disposing DB connections after fork
 exec gunicorn \
-  --bind=0.0.0.0:80 \
-  --workers=$workers \
-  --threads=$threads \
-  --worker-class=gthread \
-  --worker-tmp-dir=/dev/shm \
-  --worker-connections=$worker_connections \
-  --max-requests=$max_requests \
-  --max-requests-jitter=$max_requests_jitter \
-  --timeout=$timeout \
-  --keep-alive=$keepalive \
-  --preload \
-  --log-level=info \
-  --error-logfile=- \
-  --capture-output \
-  --enable-stdio-inheritance \
+  --config=/gunicorn.conf.py \
   "$APP_MODULE"

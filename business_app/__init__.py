@@ -286,10 +286,15 @@ def setup_request_handlers(app):
     
     @app.teardown_appcontext
     def close_db(error):
-        """Close database connections"""
-        # Simply remove the session - SQLAlchemy will handle cleanup
-        # Rollback is automatic when session is removed with error
-        db.session.remove()
+        """Close database connections safely"""
+        try:
+            # Remove session - this returns connections to the pool
+            # SQLAlchemy handles rollback automatically if there was an error
+            db.session.remove()
+        except Exception as e:
+            # Log but don't re-raise - connection may already be corrupted/closed
+            # This prevents cascade failures during teardown
+            app.logger.warning(f"Error during session cleanup: {e}")
 
 
 def setup_jwt_handlers(app):

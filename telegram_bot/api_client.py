@@ -115,16 +115,18 @@ class BusinessAPIClient:
             # Make a simple HEAD request to test the connection
             test_response = await self._client.head(self.base_url)
             logger.info(f"SSL connection test successful. Status: {test_response.status_code}")
-        except httpx.SSLError as e:
-            logger.error(f"SSL certificate validation failed: {e}")
-            logger.error(
-                "This could indicate an invalid certificate, expired certificate, " +
-                "or man-in-the-middle attack. Check your SSL configuration."
-            )
-            raise
         except httpx.ConnectError as e:
-            logger.warning(f"Could not connect to business API for SSL test: {e}")
-            # Don't raise for connection errors during testing, as service might not be ready
+            error_str = str(e).lower()
+            if 'ssl' in error_str or 'certificate' in error_str:
+                logger.error(f"SSL certificate validation failed: {e}")
+                logger.error(
+                    "This could indicate an invalid certificate, expired certificate, " +
+                    "or man-in-the-middle attack. Check your SSL configuration."
+                )
+                raise
+            else:
+                logger.warning(f"Could not connect to business API for SSL test: {e}")
+                # Don't raise for connection errors during testing, as service might not be ready
         except Exception as e:
             logger.warning(f"SSL connection test failed with unexpected error: {e}")
             # Don't raise for other errors during testing
@@ -219,34 +221,36 @@ class BusinessAPIClient:
                         status_code=response.status_code
                     )
                     
-            except httpx.SSLError as e:
-                logger.error(f"SSL certificate error (attempt {attempt + 1}): {e}")
-                logger.error(
-                    "SSL certificate validation failed. This could indicate:\n" +
-                    "1. Invalid or expired SSL certificate\n" +
-                    "2. Self-signed certificate (set BUSINESS_API_SSL_VERIFY=false for development)\n" +
-                    "3. Certificate hostname mismatch\n" +
-                    "4. Potential man-in-the-middle attack\n" +
-                    "Please verify the server's SSL certificate."
-                )
-                # Don't retry SSL errors as they're unlikely to resolve
-                return APIResponse(
-                    success=False,
-                    error=f"SSL certificate validation failed: {str(e)}"
-                )
-            
             except httpx.ConnectError as e:
-                logger.error(f"Connection error (attempt {attempt + 1}): {e}")
-                if attempt < self.max_retries:
-                    retry_delay = self.retry_delay * (attempt + 1)
-                    logger.info(f"Retrying connection in {retry_delay} seconds...")
-                    await asyncio.sleep(retry_delay)
-                else:
-                    logger.error("=== CONNECTION FAILED - MAX RETRIES REACHED ===")
+                error_str = str(e).lower()
+                # Check if this is an SSL-related error
+                if 'ssl' in error_str or 'certificate' in error_str:
+                    logger.error(f"SSL certificate error (attempt {attempt + 1}): {e}")
+                    logger.error(
+                        "SSL certificate validation failed. This could indicate:\n" +
+                        "1. Invalid or expired SSL certificate\n" +
+                        "2. Self-signed certificate (set BUSINESS_API_SSL_VERIFY=false for development)\n" +
+                        "3. Certificate hostname mismatch\n" +
+                        "4. Potential man-in-the-middle attack\n" +
+                        "Please verify the server's SSL certificate."
+                    )
+                    # Don't retry SSL errors as they're unlikely to resolve
                     return APIResponse(
                         success=False,
-                        error=f"Connection failed after {self.max_retries} retries: {str(e)}"
+                        error=f"SSL certificate validation failed: {str(e)}"
                     )
+                else:
+                    logger.error(f"Connection error (attempt {attempt + 1}): {e}")
+                    if attempt < self.max_retries:
+                        retry_delay = self.retry_delay * (attempt + 1)
+                        logger.info(f"Retrying connection in {retry_delay} seconds...")
+                        await asyncio.sleep(retry_delay)
+                    else:
+                        logger.error("=== CONNECTION FAILED - MAX RETRIES REACHED ===")
+                        return APIResponse(
+                            success=False,
+                            error=f"Connection failed after {self.max_retries} retries: {str(e)}"
+                        )
             
             except httpx.TimeoutException as e:
                 logger.error(f"Request timeout (attempt {attempt + 1}): {e}")

@@ -354,13 +354,13 @@ class ProfileHandlers:
                         if not response.success:
                             logger.error(f"Failed to register telegram user {user_id}: {response.error}")
                             # Fall back to error message but don't crash the bot
-                            await update.message.reply_text(
+                            await query.message.reply_text(
                                 "❌ Registration failed. Please try again later or contact support."
                             )
                             return
                 except Exception as e:
                     logger.error(f"Exception during telegram user registration: {e}")
-                    await update.message.reply_text(
+                    await query.message.reply_text(
                         "❌ Registration failed. Please try again later."
                     )
                     return

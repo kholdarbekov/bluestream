@@ -26,7 +26,8 @@ def make_celery(app=None):
             'business_app.tasks.subscription_tasks',
             'business_app.tasks.order_tasks',
             'business_app.tasks.audit_tasks',
-            'business_app.tasks.session_tasks'
+            'business_app.tasks.session_tasks',
+            'business_app.tasks.loyalty_tasks'
         ]
     )
     
@@ -157,6 +158,7 @@ celery.conf.task_routes = {
     'business_app.tasks.order_tasks.*': {'queue': 'orders'},
     'business_app.tasks.audit_tasks.*': {'queue': 'maintenance'},
     'business_app.tasks.session_tasks.*': {'queue': 'maintenance'},
+    'business_app.tasks.loyalty_tasks.*': {'queue': 'loyalty'},
 }
 
 

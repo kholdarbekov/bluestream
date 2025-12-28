@@ -79,9 +79,9 @@ def get_orders():
         page=params['page'], per_page=params['per_page'], error_out=False
     )
     
-    # Build standardized pagination response
+    # Build standardized pagination response with order items included
     response_data = PaginationHelper.build_pagination_response(
-        pagination.items, pagination, serialize_order
+        pagination.items, pagination, lambda order: serialize_order(order, include_items=True)
     )
     
     return create_success_response(

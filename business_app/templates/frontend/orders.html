@@ -514,17 +514,17 @@ function displayOrders(orders) {
             <div class="order-body">
                 <div class="row">
                     <div class="col-md-8">
-                        ${order.items.slice(0, 2).map(item => `
+                        ${(order.order_items || []).slice(0, 2).map(item => `
                             <div class="order-item">
-                                <img src="${item.product.image_url || '/static/images/products/default.jpg'}" alt="${item.product.name}">
+                                <img src="${item.product_image_url || '/static/images/products/default.jpg'}" alt="${item.product_name}">
                                 <div class="item-details">
-                                    <div class="item-name">${item.product.name}</div>
-                                    <div class="item-specs">${item.product.size || ''} - {{ 'Quantity'|t }}: ${item.quantity}</div>
+                                    <div class="item-name">${item.product_name}</div>
+                                    <div class="item-specs">{{ 'Quantity'|t }}: ${item.quantity}</div>
                                 </div>
-                                <div class="item-price">$${parseFloat(item.unit_price).toFixed(2)}</div>
+                                <div class="item-price">${parseFloat(item.unit_price).toLocaleString()} {{ 'currency.uzs'|t }}</div>
                             </div>
                         `).join('')}
-                        ${order.items.length > 2 ? `<div class="text-muted mt-2"><small>{{ 'and'|t }} ${order.items.length - 2} {{ 'more items'|t }}</small></div>` : ''}
+                        ${(order.order_items || []).length > 2 ? `<div class="text-muted mt-2"><small>{{ 'and'|t }} ${order.order_items.length - 2} {{ 'more items'|t }}</small></div>` : ''}
                     </div>
                     <div class="col-md-4">
                         <div class="delivery-info">
@@ -586,9 +586,9 @@ async function showOrderDetail(orderId) {
     try {
         const response = await apiRequest(`/orders/${orderId}`);
         const result = await response.json();
-        
+
         if (response.ok && result.success) {
-            const order = result.data;
+            const order = result.data.order;
             displayOrderDetail(order);
             $('#orderDetailModal').modal('show');
         } else {
@@ -630,16 +630,15 @@ function displayOrderDetail(order) {
                 <h5>{{ 'Order Items'|t }}</h5>
                 <div class="card">
                     <div class="card-body">
-                        ${order.items.map(item => `
+                        ${(order.order_items || []).map(item => `
                             <div class="order-item">
-                                <img src="${item.product.image_url || '/static/images/products/default.jpg'}" alt="${item.product.name}">
+                                <img src="${item.product_image_url || '/static/images/products/default.jpg'}" alt="${item.product_name}">
                                 <div class="item-details">
-                                    <div class="item-name">${item.product.name}</div>
-                                    <div class="item-specs">${item.product.description || ''}</div>
-                                    <div class="item-specs">{{ 'Size'|t }}: ${item.product.size || 'N/A'}</div>
+                                    <div class="item-name">${item.product_name}</div>
+                                    <div class="item-specs">{{ 'SKU'|t }}: ${item.product_sku || 'N/A'}</div>
                                 </div>
                                 <div class="item-quantity">{{ 'Qty'|t }}: ${item.quantity}</div>
-                                <div class="item-price">$${parseFloat(item.unit_price).toFixed(2)}</div>
+                                <div class="item-price">${parseFloat(item.unit_price).toLocaleString()} {{ 'currency.uzs'|t }}</div>
                             </div>
                         `).join('')}
                     </div>

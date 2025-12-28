@@ -27,6 +27,9 @@ echo "Config: gunicorn.conf.py (with post_fork DB connection disposal)"
 # Create logs directory if it doesn't exist
 mkdir -p /app/logs
 
+# Apply DB migrations
+flask db upgrade
+
 # Run gunicorn with Python config file
 # The config file handles --preload safely by disposing DB connections after fork
 exec gunicorn \

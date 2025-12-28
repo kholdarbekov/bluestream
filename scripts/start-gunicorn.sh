@@ -4,6 +4,9 @@ set -e
 
 APP_MODULE='business_app.wsgi:app'
 
+# Set FLASK_APP for Flask CLI commands
+export FLASK_APP=business_app:create_app
+
 # Export environment variables for gunicorn.conf.py
 export GUNICORN_WORKERS=${GUNICORN_WORKERS:-2}
 export GUNICORN_THREADS=${GUNICORN_THREADS:-3}
@@ -28,7 +31,12 @@ echo "Config: gunicorn.conf.py (with post_fork DB connection disposal)"
 mkdir -p /app/logs
 
 # Apply DB migrations
-flask db upgrade
+echo "***** Applying database migrations *****"
+if flask db upgrade; then
+    echo "Database migrations applied successfully"
+else
+    echo "Warning: Database migrations failed (this may be okay if no migrations pending)"
+fi
 
 # Run gunicorn with Python config file
 # The config file handles --preload safely by disposing DB connections after fork

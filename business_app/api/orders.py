@@ -459,32 +459,21 @@ def create_order():
 
         current_app.logger.info(f"CREATE ORDER API: order_number={order.order_number}, type={type(order.order_number)}, total_amount={order.total_amount}, type={type(order.total_amount)}")
 
-        # Handle payment based on method
-        payment_url = None
-        if order.payment_method in ['payme', 'click']:
-            # Create payment record and generate payment link
+        # Create payment record for electronic payment methods (payme, click)
+        # Note: For on-site card payments (user enters card on our site), we don't need
+        # payment links - the payment is processed via cards.create -> cards.verify -> receipts.pay
+        if order.payment_method in [PaymentMethod.PAYME, PaymentMethod.CLICK]:
             from business_app.services.payment_service import PaymentService
-            from business_app.utils.constants import PaymentMethod
 
             payment_service = PaymentService()
 
-            # Map string to PaymentMethod enum
-            payment_method_map = {
-                'payme': PaymentMethod.PAYME,
-                'click': PaymentMethod.CLICK
-            }
-
             payment = payment_service.create_payment(
                 order_id=order.id,
-                payment_method=payment_method_map[order.payment_method],
+                payment_method=order.payment_method,
                 amount=int(order.total_amount)
             )
 
-            # Generate payment link
-            payment_link_data = payment_service.create_payment_link(payment.id)
-            payment_url = payment_link_data.get('payment_url')
-
-            current_app.logger.info(f"Payment link generated for order {order.id}: {payment_url}")
+            current_app.logger.info(f"Payment record created for order {order.id}: payment_id={payment.id}")
 
         # Send order confirmation
         # get_notification_service().send_notification(
@@ -500,10 +489,6 @@ def create_order():
         response_data = {
             'order': serialize_order(order, include_items=True)
         }
-
-        # Add payment URL if available
-        if payment_url:
-            response_data['payment_url'] = payment_url
 
         return created_response(
             data=response_data,

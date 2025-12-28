@@ -151,16 +151,19 @@ class DeliveryService:
         if order_total >= self.free_delivery_threshold:
             return 0
         
-        distance = calculate_distance(
-            self.store_latitude, self.store_longitude,
-            latitude, longitude
-        )
+        # distance = calculate_distance(
+        #     self.store_latitude, self.store_longitude,
+        #     latitude, longitude
+        # )
         
-        # Get zone-based fee
-        zone = self._get_delivery_zone(distance)
-        zone_info = DELIVERY_ZONES.get(zone, DELIVERY_ZONES['OUTER'])
+        # # Get zone-based fee
+        # zone = self._get_delivery_zone(distance)
+        # zone_info = DELIVERY_ZONES.get(zone, DELIVERY_ZONES['OUTER'])
         
-        return zone_info['fee']
+        # return zone_info['fee']
+
+        # We are offering free delivery for all orders for now
+        return 0
     
     def get_available_time_slots(self, date: datetime = None, delivery_type: DeliveryType = DeliveryType.STANDARD) -> List[str]:
         """Get available delivery time slots for a date"""

@@ -33,20 +33,12 @@ class CardValidator:
             r'^5[1-5][0-9]{14}$',          # 16 digits starting with 51-55
             r'^2[2-7][0-9]{14}$',          # 16 digits starting with 22-27 (new range)
         ],
-        'amex': [
-            r'^3[47][0-9]{13}$',           # 15 digits starting with 34 or 37
-        ],
         'discover': [
             r'^6(?:011|5[0-9]{2})[0-9]{12}$',  # 16 digits starting with 6011 or 65
         ],
-        'diners': [
-            r'^3[0689][0-9]{11}$',         # 14 digits starting with 30, 36, 38, or 39
-        ],
-        'jcb': [
-            r'^(?:2131|1800|35\d{3})\d{11}$',  # Various JCB patterns
-        ],
         'uzcard': [
             r'^8600[0-9]{12}$',            # 16 digits starting with 8600
+            r'^5614[0-9]{12}$',            # 16 digits starting with 5614
         ],
         'humo': [
             r'^9860[0-9]{12}$',            # 16 digits starting with 9860
@@ -188,28 +180,39 @@ class CardValidator:
     @classmethod
     def validate_complete_card(cls, card_data: Dict) -> CardValidationResult:
         """
-        Validate complete card information
+        Validate complete card information.
+        Supports both full card numbers and tokenized cards (masked numbers).
         """
         result = CardValidationResult(is_valid=True, errors=[])
-        
-        # Validate card number
-        number_result = cls.validate_card_number(card_data.get('card_number', ''))
+
+        card_number = card_data.get('card_number', '')
+        card_token = card_data.get('card_token')
+
+        # Check if this is a tokenized card (masked number like '**** **** **** 6478')
+        is_tokenized = card_token and cls._is_masked_card_number(card_number)
+
+        if is_tokenized:
+            # For tokenized cards, validate token and extract last 4 digits
+            return cls.validate_tokenized_card(card_data)
+
+        # Validate full card number
+        number_result = cls.validate_card_number(card_number)
         if not number_result.is_valid:
             result.errors.extend(number_result.errors)
             result.is_valid = False
         else:
             result.card_brand = number_result.card_brand
             result.card_type = number_result.card_type
-        
+
         # Validate expiry date
         expiry_result = cls.validate_expiry_date(
-            card_data.get('expiry_month'), 
+            card_data.get('expiry_month'),
             card_data.get('expiry_year')
         )
         if not expiry_result.is_valid:
             result.errors.extend(expiry_result.errors)
             result.is_valid = False
-        
+
         # Validate CVV if provided
         cvv = card_data.get('cvv')
         if cvv:
@@ -217,14 +220,97 @@ class CardValidator:
             if not cvv_result.is_valid:
                 result.errors.extend(cvv_result.errors)
                 result.is_valid = False
-        
+
         # Validate cardholder name
         name_result = cls.validate_cardholder_name(card_data.get('cardholder_name', ''))
         if not name_result.is_valid:
             result.errors.extend(name_result.errors)
             result.is_valid = False
-        
+
         return result
+
+    @classmethod
+    def validate_tokenized_card(cls, card_data: Dict) -> CardValidationResult:
+        """
+        Validate tokenized card data from payment gateway.
+
+        Expected card_data format:
+        {
+            'card_token': '694be....',
+            'card_number': '**** **** **** 6478',  # Masked
+            'expiry_month': 3,
+            'expiry_year': 2026,
+            'cardholder_name': 'John Doe',
+            'is_default': False
+        }
+        """
+        result = CardValidationResult(is_valid=True, errors=[])
+
+        # Validate card token is present
+        card_token = card_data.get('card_token')
+        if not card_token or not isinstance(card_token, str) or len(card_token) < 10:
+            result.add_error("Valid card token is required")
+            return result
+
+        # Extract and validate last 4 digits from masked number
+        card_number = card_data.get('card_number', '')
+        last_four = cls._extract_last_four_from_masked(card_number)
+        if not last_four or len(last_four) != 4 or not last_four.isdigit():
+            result.add_error("Invalid masked card number format")
+            return result
+
+        # Validate expiry date
+        expiry_result = cls.validate_expiry_date(
+            card_data.get('expiry_month'),
+            card_data.get('expiry_year')
+        )
+        if not expiry_result.is_valid:
+            result.errors.extend(expiry_result.errors)
+            result.is_valid = False
+
+        # Validate cardholder name
+        name_result = cls.validate_cardholder_name(card_data.get('cardholder_name', ''))
+        if not name_result.is_valid:
+            result.errors.extend(name_result.errors)
+            result.is_valid = False
+
+        # For tokenized cards, we can't detect brand from masked number
+        # Set as unknown or detect from last 4 if possible
+        result.card_brand = 'unknown'
+        result.card_type = 'unknown'
+
+        return result
+
+    @classmethod
+    def _is_masked_card_number(cls, card_number: str) -> bool:
+        """
+        Check if card number is masked (contains asterisks).
+        """
+        if not card_number:
+            return False
+        return '*' in card_number
+
+    @classmethod
+    def _extract_last_four_from_masked(cls, masked_number: str) -> str:
+        """
+        Extract last 4 digits from masked card number.
+        Handles formats like '**** **** **** 6478' or '************6478'
+        """
+        if not masked_number:
+            return ''
+        # Remove all non-digit and non-asterisk characters, then get last 4 digits
+        digits = re.sub(r'[^0-9]', '', masked_number)
+        return digits[-4:] if len(digits) >= 4 else digits
+
+    @classmethod
+    def generate_tokenized_card_fingerprint(cls, card_token: str, last_four: str,
+                                            expiry_month: int, expiry_year: int) -> str:
+        """
+        Generate unique fingerprint for tokenized card to detect duplicates.
+        Uses token hash + last 4 digits + expiry.
+        """
+        fingerprint_data = f"{card_token[:16]}{last_four}{expiry_month:02d}{expiry_year}"
+        return hashlib.sha256(fingerprint_data.encode()).hexdigest()[:32]
     
     @classmethod
     def generate_card_fingerprint(cls, card_number: str, expiry_month: int, expiry_year: int) -> str:

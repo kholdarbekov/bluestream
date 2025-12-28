@@ -445,7 +445,7 @@ def create_app(config_class=None):
     
     # Initialize extensions with app
     db.init_app(app)
-    migrate.init_app(app, db)
+    migrate.init_app(app, db, directory='business_app/migrations')
     jwt.init_app(app)
     cors.init_app(
         app, 

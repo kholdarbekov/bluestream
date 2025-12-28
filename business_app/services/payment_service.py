@@ -14,7 +14,7 @@ from flask import current_app, request
 import requests
 import redis
 
-from business_app.models.order import Order
+from business_app.models.order import Order, OrderItem
 from business_app.models.payment import Payment, PaymentTransaction, CreditCard
 from business_app.models.user import User
 from business_app.utils.exceptions import PaymentError, ValidationError, NotFoundError
@@ -49,12 +49,14 @@ class PaymentService:
         
         # Initialize Redis for nonce tracking
         try:
-            self.redis_client = redis.Redis(
-                host=current_app.config.get('REDIS_HOST', 'localhost'),
-                port=current_app.config.get('REDIS_PORT', 6379),
-                db=current_app.config.get('REDIS_WEBHOOK_DB', 3),
-                decode_responses=True
-            )
+            redis_url = current_app.config.get('REDIS_URL', 'redis://localhost:6379/0')
+            # Use a specific DB for webhook/verification tracking (db 3)
+            # Parse the URL and replace the db number
+            if '/0' in redis_url:
+                redis_url = redis_url.replace('/0', '/3')
+            elif redis_url.endswith(':6379'):
+                redis_url = redis_url + '/3'
+            self.redis_client = redis.from_url(redis_url, decode_responses=True)
         except Exception as e:
             current_app.logger.warning(f"Redis not available for webhook nonce tracking: {e}")
             self.redis_client = None
@@ -430,6 +432,823 @@ class PaymentService:
         except Exception as e:
              current_app.logger.error(f"Payme API request error ({method}): {e}")
              return {'error': {'code': -1, 'message': str(e)}}
+
+    # ============================================================================
+    # PAYME SUBSCRIBE API METHODS (cards.create, cards.verify, receipts.pay, etc.)
+    # ============================================================================
+
+    def _extract_payme_error_message(self, error: Dict) -> str:
+        """
+        Extract human-readable error message from Payme error response.
+
+        Payme errors have format:
+        {
+            "code": -31001,
+            "message": {
+                "uz": "...",
+                "ru": "...",
+                "en": "..."
+            }
+        }
+        or sometimes just a string message.
+        """
+        message = error.get('message', 'Unknown error')
+
+        if isinstance(message, dict):
+            # Return English message, fallback to Russian, then Uzbek
+            return message.get('en') or message.get('ru') or message.get('uz') or str(message)
+
+        return str(message)
+
+    def create_card_token_with_verification(self, card_number: str, expiry: str,
+                                            save: bool = True) -> Dict[str, Any]:
+        """
+        Create card token via Payme cards.create and request verification code.
+
+        This is the main entry point for tokenizing a new card. It:
+        1. Calls Payme cards.create to get a token
+        2. If card needs verification (verify: false), auto-requests SMS code
+
+        Args:
+            card_number: 16-digit card number (no spaces)
+            expiry: Expiry in MMYY format (e.g., "0325" for March 2025)
+            save: True for permanent token (recurring), False for one-time
+
+        Returns:
+            Dict containing:
+            - token: Card token from Payme
+            - masked_number: e.g., "860006******6311"
+            - expire: e.g., "03/25"
+            - recurrent: Whether card supports recurring payments
+            - needs_verification: True if SMS verification required
+            - masked_phone: Phone number for SMS (if verification needed)
+            - wait_seconds: Seconds until code expires (if verification needed)
+            - verification_sent: True if SMS was sent
+
+        Raises:
+            PaymentError: If card creation fails
+            ValidationError: If card data is invalid
+        """
+        # Validate card number format
+        clean_number = card_number.replace(' ', '').replace('-', '')
+        if not clean_number.isdigit() or len(clean_number) != 16:
+            raise ValidationError("Card number must be 16 digits")
+
+        # Validate expiry format (MMYY)
+        clean_expiry = expiry.replace('/', '')
+        if not clean_expiry.isdigit() or len(clean_expiry) != 4:
+            raise ValidationError("Expiry must be in MMYY format")
+
+        month = int(clean_expiry[:2])
+        if month < 1 or month > 12:
+            raise ValidationError("Invalid expiry month")
+
+        # Step 1: Create token via Payme
+        create_response = self._payme_request('cards.create', {
+            'card': {
+                'number': clean_number,
+                'expire': clean_expiry
+            },
+            'save': save
+        })
+
+        if 'error' in create_response:
+            error_msg = self._extract_payme_error_message(create_response['error'])
+            current_app.logger.error(f"Payme cards.create failed: {error_msg}")
+            raise PaymentError(f"Card tokenization failed: {error_msg}")
+
+        card_data = create_response.get('result', {}).get('card', {})
+        token = card_data.get('token')
+
+        if not token:
+            raise PaymentError("Payme did not return a card token")
+
+        result = {
+            'token': token,
+            'masked_number': card_data.get('number', ''),
+            'expire': card_data.get('expire', ''),
+            'recurrent': card_data.get('recurrent', False),
+            'needs_verification': not card_data.get('verify', False)
+        }
+
+        # Step 2: If verification needed, request SMS code automatically
+        # if result['needs_verification']:
+        #     try:
+        #         verify_result = self.request_card_verification_code(token)
+        #         result.update({
+        #             'masked_phone': verify_result['phone'],
+        #             'wait_seconds': verify_result['wait'] // 1000,  # Convert ms to seconds
+        #             'verification_sent': verify_result['sent']
+        #         })
+        #     except PaymentError as e:
+        #         # Log but don't fail - user can manually request code
+        #         current_app.logger.warning(f"Auto-verification request failed: {e}")
+        #         result['verification_sent'] = False
+        #         result['masked_phone'] = None
+        #         result['wait_seconds'] = 60  # Default
+
+        # Audit log
+        audit_logger.log_event(
+            event_type=AuditEventType.SENSITIVE_DATA_ACCESS,
+            action="card_tokenized",
+            severity=AuditSeverity.MEDIUM,
+            resource_type="credit_card",
+            description=f"Card tokenized via Payme: {result['masked_number']}",
+            additional_data={
+                'masked_number': result['masked_number'],
+                'needs_verification': result['needs_verification'],
+                'recurrent': result['recurrent']
+            }
+        )
+
+        return result
+
+    def request_card_verification_code(self, token: str) -> Dict[str, Any]:
+        """
+        Request SMS verification code for a card token via Payme cards.get_verify_code.
+
+        Args:
+            token: Card token from cards.create
+
+        Returns:
+            Dict containing:
+            - sent: True if SMS was sent successfully
+            - phone: Masked phone number (e.g., "99890*****31")
+            - wait: Validity period in milliseconds
+
+        Raises:
+            PaymentError: If request fails
+        """
+        if not token:
+            raise ValidationError("Card token is required")
+
+        response = self._payme_request('cards.get_verify_code', {
+            'token': token
+        })
+
+        if 'error' in response:
+            error_msg = self._extract_payme_error_message(response['error'])
+            current_app.logger.error(f"Payme cards.get_verify_code failed: {error_msg}")
+            raise PaymentError(f"Failed to send verification code: {error_msg}")
+
+        result = response.get('result', {})
+
+        if not result.get('sent'):
+            raise PaymentError("Verification code was not sent by Payme")
+
+        # Reset verification attempts when a new code is sent
+        self.reset_verification_attempts(token)
+
+        current_app.logger.info(f"Verification code sent to {result.get('phone', 'unknown')}")
+
+        return {
+            'sent': result.get('sent', False),
+            'phone': result.get('phone', ''),
+            'wait': result.get('wait', 60000)  # Default 60 seconds
+        }
+
+    # Maximum verification attempts per token before requiring a new code
+    MAX_VERIFICATION_ATTEMPTS = 3
+    # TTL for verification attempt tracking in Redis (10 minutes)
+    VERIFICATION_ATTEMPTS_TTL = 600
+
+    def _get_verification_attempts_key(self, token: str) -> str:
+        """Generate Redis key for tracking verification attempts."""
+        # Use a hash of the token to avoid storing full tokens in Redis keys
+        token_hash = hashlib.sha256(token.encode()).hexdigest()[:16]
+        return f"payme:verify_attempts:{token_hash}"
+
+    def get_verification_attempts_remaining(self, token: str) -> int:
+        """
+        Get remaining verification attempts for a token.
+
+        Args:
+            token: Card token
+
+        Returns:
+            int: Number of attempts remaining (0-3)
+        """
+        if not self.redis_client:
+            # Fallback if Redis not available - allow attempts but log warning
+            current_app.logger.warning("Redis not available for verification attempt tracking")
+            return self.MAX_VERIFICATION_ATTEMPTS
+
+        try:
+            key = self._get_verification_attempts_key(token)
+            attempts = self.redis_client.get(key)
+            if attempts is None:
+                return self.MAX_VERIFICATION_ATTEMPTS
+            return max(0, self.MAX_VERIFICATION_ATTEMPTS - int(attempts))
+        except Exception as e:
+            current_app.logger.error(f"Error getting verification attempts: {e}")
+            return self.MAX_VERIFICATION_ATTEMPTS
+
+    def increment_verification_attempts(self, token: str) -> int:
+        """
+        Increment failed verification attempts for a token.
+
+        Args:
+            token: Card token
+
+        Returns:
+            int: Number of attempts remaining after increment
+        """
+        if not self.redis_client:
+            current_app.logger.warning("Redis not available for verification attempt tracking")
+            return self.MAX_VERIFICATION_ATTEMPTS - 1
+
+        try:
+            key = self._get_verification_attempts_key(token)
+            # Increment and set TTL
+            pipe = self.redis_client.pipeline()
+            pipe.incr(key)
+            pipe.expire(key, self.VERIFICATION_ATTEMPTS_TTL)
+            results = pipe.execute()
+            attempts = results[0]  # Result of incr
+            return max(0, self.MAX_VERIFICATION_ATTEMPTS - int(attempts))
+        except Exception as e:
+            current_app.logger.error(f"Error incrementing verification attempts: {e}")
+            return self.MAX_VERIFICATION_ATTEMPTS - 1
+
+    def reset_verification_attempts(self, token: str) -> None:
+        """
+        Reset verification attempts for a token (call after successful verify or new code request).
+
+        Args:
+            token: Card token
+        """
+        if not self.redis_client:
+            return
+
+        try:
+            key = self._get_verification_attempts_key(token)
+            self.redis_client.delete(key)
+        except Exception as e:
+            current_app.logger.error(f"Error resetting verification attempts: {e}")
+
+    def verify_card(self, token: str, code: str) -> Dict[str, Any]:
+        """
+        Verify card with SMS code via Payme cards.verify.
+
+        Args:
+            token: Card token from cards.create
+            code: Verification code from SMS (4-8 alphanumeric characters)
+
+        Returns:
+            Dict containing:
+            - verified: True if verification successful
+            - card: Card data from Payme (masked_number, expire, token, recurrent)
+
+        Raises:
+            ValidationError: If code format is invalid or wrong code entered
+            PaymentError: If verification fails for other reasons
+        """
+        # Validate code format
+        if not token:
+            raise ValidationError("Card token is required")
+
+        code = str(code).strip().upper()  # Normalize - Payme codes can be alphanumeric
+        if not code or len(code) < 4 or len(code) > 8:
+            raise ValidationError("Verification code must be 4-8 characters")
+
+        if not code.isalnum():
+            raise ValidationError("Verification code must be alphanumeric")
+
+        # Check if max attempts exceeded before making API call
+        attempts_remaining = self.get_verification_attempts_remaining(token)
+        if attempts_remaining <= 0:
+            raise ValidationError("Too many failed attempts. Please request a new code.")
+
+        response = self._payme_request('cards.verify', {
+            'token': token,
+            'code': code
+        })
+
+        if 'error' in response:
+            error_code = response['error'].get('code')
+            error_msg = self._extract_payme_error_message(response['error'])
+
+            # -31103 is wrong verification code
+            if error_code == -31103:
+                # Increment attempts on wrong code
+                attempts_remaining = self.increment_verification_attempts(token)
+                current_app.logger.warning(f"Invalid verification code entered. Attempts remaining: {attempts_remaining}")
+                raise ValidationError("Invalid verification code")
+
+            # -31104 is expired code
+            if error_code == -31104:
+                current_app.logger.warning(f"Verification code expired for token")
+                raise ValidationError("Verification code has expired. Please request a new code.")
+
+            current_app.logger.error(f"Payme cards.verify failed: {error_msg}")
+            raise PaymentError(f"Card verification failed: {error_msg}")
+
+        card_result = response.get('result', {}).get('card', {})
+
+        if not card_result.get('verify'):
+            raise PaymentError("Card verification was not confirmed by Payme")
+
+        # Reset attempts on successful verification
+        self.reset_verification_attempts(token)
+
+        current_app.logger.info(f"Card verified successfully: {card_result.get('number', 'unknown')}")
+
+        # Audit log
+        audit_logger.log_event(
+            event_type=AuditEventType.PAYMENT_VERIFICATION_CODE_VERIFED,
+            action="card_verified",
+            severity=AuditSeverity.MEDIUM,
+            resource_type="credit_card",
+            description=f"Card verified via SMS: {card_result.get('number', '')}",
+            additional_data={
+                'masked_number': card_result.get('number'),
+                'recurrent': card_result.get('recurrent', False)
+            }
+        )
+
+        return {
+            'verified': True,
+            'card': {
+                'masked_number': card_result.get('number', ''),
+                'expire': card_result.get('expire', ''),
+                'token': card_result.get('token', token),
+                'recurrent': card_result.get('recurrent', False)
+            }
+        }
+
+    def create_payme_receipt(self, order: Order, description: str = None) -> Dict[str, Any]:
+        """
+        Create a Payme receipt with full fiscal details via receipts.create.
+
+        This creates an invoice that can then be paid with receipts.pay.
+
+        Args:
+            order: Order object with items
+            description: Optional payment description
+
+        Returns:
+            Dict containing:
+            - receipt_id: Payme receipt ID (_id)
+            - state: Receipt state (should be 0 = created)
+            - amount: Amount in tiyin
+            - create_time: Creation timestamp
+
+        Raises:
+            PaymentError: If receipt creation fails
+        """
+        if not order:
+            raise ValidationError("Order is required")
+
+        if not order.order_items or len(order.order_items) == 0:
+            raise ValidationError("Order must have at least one item")
+
+        # Calculate total in tiyin (1 UZS = 100 tiyin)
+        amount_tiyin = int(float(order.total_amount) * 100)
+
+        # Build items array for fiscal receipt
+        items = []
+        for item in order.order_items:
+            item_data = {
+                'title': item.product.name if item.product else f"Product #{item.product_id}",
+                'price': int(float(item.unit_price) * 100),  # Convert to tiyin
+                'count': item.quantity,
+                'code': getattr(item.product, 'ikpu_code', None) or '10204001001000000',  # Default IKPU for water
+                'vat_percent': 12,  # Standard VAT in Uzbekistan
+            }
+
+            # Add package code if available
+            if hasattr(item.product, 'package_code') and item.product.package_code:
+                item_data['package_code'] = item.product.package_code
+
+            items.append(item_data)
+
+        # Build receipt params
+        params = {
+            'amount': amount_tiyin,
+            'account': {
+                'order_id': str(order.id)
+            },
+            'description': description or f"Water delivery order #{order.order_number}"
+        }
+
+        # Add detail object for fiscal compliance
+        detail = {
+            'receipt_type': 0,  # 0 = sale
+            'items': items
+        }
+
+        # Add shipping/delivery fee if applicable
+        delivery_fee = getattr(order, 'delivery_fee', None) or getattr(order, 'shipping_fee', None)
+        if delivery_fee and float(delivery_fee) > 0:
+            detail['shipping'] = {
+                'title': 'Delivery Fee',
+                'price': int(float(delivery_fee) * 100)
+            }
+
+        params['detail'] = detail
+
+        # Create receipt via Payme
+        response = self._payme_request('receipts.create', params)
+
+        if 'error' in response:
+            error_msg = self._extract_payme_error_message(response['error'])
+            current_app.logger.error(f"Payme receipts.create failed: {error_msg}")
+            raise PaymentError(f"Failed to create receipt: {error_msg}")
+
+        receipt = response.get('result', {}).get('receipt', {})
+
+        if not receipt.get('_id'):
+            raise PaymentError("Payme did not return a receipt ID")
+
+        current_app.logger.info(f"Payme receipt created: {receipt['_id']} for order {order.id}")
+
+        return {
+            'receipt_id': receipt['_id'],
+            'state': receipt.get('state', 0),
+            'amount': receipt.get('amount', amount_tiyin),
+            'create_time': receipt.get('create_time')
+        }
+
+    def pay_payme_receipt(self, receipt_id: str, token: str,
+                          payer: Dict[str, Any] = None) -> Dict[str, Any]:
+        """
+        Execute payment on a Payme receipt via receipts.pay.
+
+        Args:
+            receipt_id: Receipt ID from receipts.create
+            token: Verified card token (must have verify=true)
+            payer: Optional payer information for fraud prevention
+
+        Returns:
+            Dict containing:
+            - success: True if payment successful
+            - receipt_id: Receipt ID
+            - state: Receipt state (4 = paid successfully)
+            - pay_time: Payment timestamp
+            - amount: Amount paid
+            - card: Card info (masked number, expire)
+
+        Raises:
+            PaymentError: If payment fails
+        """
+        if not receipt_id:
+            raise ValidationError("Receipt ID is required")
+
+        if not token:
+            raise ValidationError("Card token is required")
+
+        params = {
+            'id': receipt_id,
+            'token': token
+        }
+
+        # Add payer info for fraud prevention (optional but recommended)
+        if payer:
+            payer_info = {}
+            if payer.get('phone'):
+                payer_info['phone'] = payer['phone']
+            if payer.get('email'):
+                payer_info['email'] = payer['email']
+            if payer.get('name'):
+                payer_info['name'] = payer['name']
+            if payer.get('ip'):
+                payer_info['ip'] = payer['ip']
+
+            if payer_info:
+                params['payer'] = payer_info
+
+        # Execute payment
+        response = self._payme_request('receipts.pay', params)
+
+        if 'error' in response:
+            error_msg = self._extract_payme_error_message(response['error'])
+            current_app.logger.error(f"Payme receipts.pay failed: {error_msg}")
+            raise PaymentError(f"Payment failed: {error_msg}")
+
+        receipt = response.get('result', {}).get('receipt', {})
+        state = receipt.get('state')
+
+        # Check receipt state - must be 4 for successful payment
+        if state != 4:
+            state_messages = {
+                0: 'Receipt awaiting payment',
+                1: 'Transaction verification in progress',
+                2: 'Funds deducted, processing',
+                3: 'Transaction closing in progress',
+                5: 'Receipt archived',
+                6: 'Payment on hold - contact Payme support',
+                20: 'Payment paused for manual review',
+                21: 'Payment queued for cancellation',
+                50: 'Payment cancelled'
+            }
+            msg = state_messages.get(state, f'Unexpected receipt state: {state}')
+            current_app.logger.error(f"Payme payment not completed. State: {state} - {msg}")
+            raise PaymentError(f"Payment not completed: {msg}")
+
+        current_app.logger.info(f"Payme payment successful. Receipt: {receipt_id}, State: {state}")
+
+        return {
+            'success': True,
+            'receipt_id': receipt.get('_id', receipt_id),
+            'state': state,
+            'pay_time': receipt.get('pay_time'),
+            'amount': receipt.get('amount'),
+            'card': receipt.get('card', {})
+        }
+
+    def _detect_card_brand(self, masked_number: str) -> str:
+        """
+        Detect card brand from masked card number.
+
+        Args:
+            masked_number: Masked card number (e.g., "860006******6311")
+
+        Returns:
+            str: Card brand (uzcard, humo, visa, mastercard, unknown)
+        """
+        if not masked_number:
+            return 'unknown'
+
+        # Extract first 6 digits (BIN)
+        clean = masked_number.replace('*', '').replace(' ', '')
+        if len(clean) < 4:
+            return 'unknown'
+
+        prefix = clean[:4]
+
+        # Uzbek cards
+        if masked_number.startswith('8600'):
+            return 'uzcard'
+        if masked_number.startswith('9860'):
+            return 'humo'
+
+        # International cards (less common in Uzbekistan)
+        if prefix.startswith('4'):
+            return 'visa'
+        if prefix.startswith('5') or prefix.startswith('2'):
+            return 'mastercard'
+
+        return 'unknown'
+
+    def _save_or_update_verified_card(self, user_id: int, token: str,
+                                       card_metadata: Dict[str, Any]) -> CreditCard:
+        """
+        Save a verified card to database or update existing card's verification status.
+
+        Args:
+            user_id: User ID
+            token: Verified card token
+            card_metadata: Dict with masked_number, expire, cardholder_name, recurrent
+
+        Returns:
+            CreditCard: The saved or updated card object
+        """
+        # Check if card with this token already exists
+        existing_card = CreditCard.query.filter_by(
+            user_id=user_id,
+            card_token=token
+        ).first()
+
+        if existing_card:
+            # Update existing card
+            existing_card.is_verified = True
+            existing_card.last_used_at = datetime.now(timezone.utc)
+            existing_card.usage_count = (existing_card.usage_count or 0) + 1
+            existing_card.payme_recurrent = card_metadata.get('recurrent', False)
+            return existing_card
+
+        # Parse expiry from "MM/YY" format
+        expire = card_metadata.get('expire', '')
+        try:
+            if '/' in expire:
+                parts = expire.split('/')
+                expiry_month = int(parts[0])
+                expiry_year = int('20' + parts[1]) if len(parts[1]) == 2 else int(parts[1])
+            else:
+                # MMYY format
+                expiry_month = int(expire[:2]) if len(expire) >= 2 else 1
+                expiry_year = int('20' + expire[2:4]) if len(expire) >= 4 else 2099
+        except (ValueError, IndexError):
+            expiry_month = 1
+            expiry_year = 2099
+
+        # Extract last 4 digits from masked number
+        masked_number = card_metadata.get('masked_number', '')
+        # Remove asterisks and get last 4
+        clean_digits = masked_number.replace('*', '').replace(' ', '')
+        last_four = clean_digits[-4:] if len(clean_digits) >= 4 else '0000'
+
+        # Detect card brand
+        card_brand = self._detect_card_brand(masked_number)
+
+        # Create new card
+        card = CreditCard(
+            user_id=user_id,
+            card_token=token,
+            card_brand=card_brand,
+            last_four_digits=last_four,
+            expiry_month=expiry_month,
+            expiry_year=expiry_year,
+            cardholder_name=card_metadata.get('cardholder_name', 'Card Holder'),
+            is_verified=True,
+            is_active=True,
+            is_default=False,  # Don't auto-set as default
+            provider='payme',
+            payme_recurrent=card_metadata.get('recurrent', True),
+            last_used_at=datetime.now(timezone.utc),
+            usage_count=1
+        )
+
+        db.session.add(card)
+
+        # Audit log
+        audit_logger.log_event(
+            event_type=AuditEventType.DATA_MODIFICATION,
+            action="verified_card_saved",
+            severity=AuditSeverity.MEDIUM,
+            resource_type="credit_card",
+            user_id=user_id,
+            description=f"Verified card saved: {masked_number}",
+            additional_data={
+                'card_brand': card_brand,
+                'last_four': last_four,
+                'recurrent': card_metadata.get('recurrent', True)
+            }
+        )
+
+        return card
+
+    def process_payme_payment_full(self, order_id: int, card_token: str,
+                                   user_id: int, save_card: bool = True,
+                                   card_metadata: Dict[str, Any] = None) -> Dict[str, Any]:
+        """
+        Complete Payme payment flow: create receipt and pay.
+
+        This is the main method to call after card verification is complete.
+        It orchestrates the full payment process.
+
+        Args:
+            order_id: Order ID to pay for
+            card_token: Verified card token (must have passed cards.verify)
+            user_id: User ID for security verification
+            save_card: Whether to save card for future use
+            card_metadata: Card details for saving (masked_number, expire, cardholder_name)
+
+        Returns:
+            Dict containing:
+            - success: True if payment successful
+            - payment_id: Our payment record ID
+            - order_id: Order ID
+            - receipt_id: Payme receipt ID
+            - redirect_url: URL to redirect user after success
+
+        Raises:
+            NotFoundError: If order not found
+            ValidationError: If order/user mismatch or already paid
+            PaymentError: If payment fails
+        """
+        # Load and validate order
+        order: Order = Order.query.get(order_id)
+        if not order:
+            raise NotFoundError("Order not found")
+
+        if order.user_id != int(user_id):
+            raise ValidationError("Order does not belong to this user")
+
+        if hasattr(order, 'is_paid') and order.is_paid:
+            raise ValidationError("Order is already paid")
+
+        # Create payment record
+        payment: Payment = Payment(
+            order_id=order_id,
+            user_id=user_id,
+            amount=order.total_amount,
+            currency='UZS',
+            payment_method=PaymentMethod.PAYME,
+            status=PaymentStatus.PENDING,
+            description=f'Payment for order #{order.order_number}'
+        )
+        db.session.add(payment)
+        db.session.flush()  # Get payment ID
+
+        receipt_id = None
+
+        try:
+            # Step 1: Create receipt
+            current_app.logger.info(f"Creating Payme receipt for order {order_id}")
+            receipt_result = self.create_payme_receipt(
+                order,
+                description=f'Water delivery order #{order.order_number}'
+            )
+            receipt_id = receipt_result['receipt_id']
+
+            # Log receipt creation
+            self._create_transaction(payment, 'receipt_created', {
+                'receipt_id': receipt_id,
+                'amount': receipt_result['amount'],
+                'state': receipt_result['state']
+            })
+
+            # Step 2: Pay receipt
+            current_app.logger.info(f"Paying Payme receipt {receipt_id}")
+            user = User.query.get(user_id)
+            payer_info = {
+                'phone': user.phone if user else None,
+                'email': user.email if user else None,
+                'name': getattr(user, 'full_name', None) if user else None,
+            }
+            # Try to get IP from request context
+            try:
+                payer_info['ip'] = request.remote_addr
+            except RuntimeError:
+                pass  # No request context
+
+            pay_result = self.pay_payme_receipt(receipt_id, card_token, payer_info)
+
+            # Step 3: Update payment record
+            payment.status = PaymentStatus.COMPLETED
+            payment.paid_at = datetime.now(timezone.utc)
+            payment.provider_transaction_id = receipt_id
+            payment.provider_data = {
+                'receipt_id': receipt_id,
+                'state': pay_result['state'],
+                'pay_time': pay_result['pay_time'],
+                'card_last_four': pay_result['card'].get('number', '')[-4:] if pay_result.get('card') else None
+            }
+
+            # Log successful payment
+            self._create_transaction(payment, 'payment_completed', {
+                'receipt_id': receipt_id,
+                'pay_time': pay_result['pay_time'],
+                'state': pay_result['state']
+            })
+
+            # Step 4: Update order status
+            self._handle_successful_payment(payment)
+
+            # Step 5: Save or update card if requested
+            if save_card and card_metadata:
+                self._save_or_update_verified_card(user_id, card_token, card_metadata)
+
+            db.session.commit()
+
+            # Audit log
+            audit_logger.log_event(
+                event_type=AuditEventType.PAYMENT_PROCESSED,
+                action="payme_payment_completed",
+                severity=AuditSeverity.MEDIUM,
+                resource_type="payment",
+                resource_id=str(payment.id),
+                user_id=user_id,
+                description=f"Payme payment completed for order {order_id}",
+                additional_data={
+                    'order_id': order_id,
+                    'amount': float(order.total_amount),
+                    'receipt_id': receipt_id
+                }
+            )
+
+            return {
+                'success': True,
+                'payment_id': payment.id,
+                'order_id': order_id,
+                'receipt_id': receipt_id,
+                'amount': float(order.total_amount),
+                'redirect_url': f'/my-orders?order_id={order_id}&payment=success'
+            }
+
+        except Exception as e:
+            # Rollback payment status on failure
+            current_app.logger.error(f"Payme payment failed for order {order_id}: {e}")
+            payment.status = PaymentStatus.FAILED
+            payment.failure_reason = str(e)
+
+            if receipt_id:
+                payment.provider_transaction_id = receipt_id
+
+            db.session.commit()
+
+            # Audit log
+            audit_logger.log_event(
+                event_type=AuditEventType.SECURITY_EVENT,
+                action="payme_payment_failed",
+                severity=AuditSeverity.HIGH,
+                resource_type="payment",
+                resource_id=str(payment.id),
+                user_id=user_id,
+                description=f"Payme payment failed for order {order_id}: {str(e)}",
+                additional_data={
+                    'order_id': order_id,
+                    'error': str(e),
+                    'receipt_id': receipt_id
+                }
+            )
+
+            raise
+
+    # ============================================================================
+    # END OF PAYME SUBSCRIBE API METHODS
+    # ============================================================================
 
     def _process_click_card_payment(self, payment: Payment, card: CreditCard) -> Dict[str, Any]:
         """
@@ -1204,66 +2023,73 @@ class PaymentService:
             user = User.query.get(user_id)
             if not user:
                 raise NotFoundError(get_translation('error.not_found'))
-            
-            # Comprehensive card validation
+
+            # Card token is required for secure card storage
+            card_token = card_data.get('card_token')
+            if not card_token:
+                raise ValidationError("Secure card token is required. Please use client-side tokenization.")
+
+            card_number = card_data.get('card_number', '')
+            is_tokenized = CardValidator._is_masked_card_number(card_number)
+
+            # Comprehensive card validation (handles both full and tokenized cards)
             validation_result = CardValidator.validate_complete_card(card_data)
             if not validation_result.is_valid:
-                raise ValidationError(get_translation('error.validation.card_invalid'))
-            
-            # Additional security validations
-            card_number = card_data.get('card_number')
-            cleaned_number = CardValidator._clean_card_number(card_number)
-            
-            # Check for obviously fake or test cards
-            if not CardSecurityValidator.validate_no_sequential_numbers(cleaned_number):
+                error_details = ', '.join(validation_result.errors)
+                current_app.logger.warning(f"Card validation failed: {error_details}")
                 raise ValidationError(get_translation('error.validation.card_invalid'))
 
-            if not CardSecurityValidator.validate_not_test_card(cleaned_number):
-                raise ValidationError(get_translation('error.validation.test_card_not_allowed'))
-            
+            # Extract last 4 digits
+            if is_tokenized:
+                last_four_digits = CardValidator._extract_last_four_from_masked(card_number)
+            else:
+                cleaned_number = CardValidator._clean_card_number(card_number)
+                last_four_digits = cleaned_number[-4:] if len(cleaned_number) >= 4 else '0000'
+
+                # Additional security validations only for full card numbers
+                if not CardSecurityValidator.validate_no_sequential_numbers(cleaned_number):
+                    raise ValidationError(get_translation('error.validation.card_invalid'))
+
+                if not CardSecurityValidator.validate_not_test_card(cleaned_number):
+                    raise ValidationError(get_translation('error.validation.test_card_not_allowed'))
+
             # Generate card fingerprint to detect duplicates
-            fingerprint = CardValidator.generate_card_fingerprint(
-                cleaned_number, 
-                card_data.get('expiry_month'),
-                card_data.get('expiry_year')
-            )
-            
+            if is_tokenized:
+                fingerprint = CardValidator.generate_tokenized_card_fingerprint(
+                    card_token,
+                    last_four_digits,
+                    card_data.get('expiry_month'),
+                    card_data.get('expiry_year')
+                )
+            else:
+                fingerprint = CardValidator.generate_card_fingerprint(
+                    cleaned_number,
+                    card_data.get('expiry_month'),
+                    card_data.get('expiry_year')
+                )
+
             # Check for duplicate cards
             existing_card = CreditCard.query.filter_by(
                 user_id=user_id,
                 fingerprint=fingerprint,
                 is_active=True
             ).first()
-            
+
             if existing_card:
                 raise ValidationError(get_translation('error.validation.card_already_saved'))
-            
-            # In production, card_token should be passed from frontend (generated by Payme SDK)
-            # If card_token is provided, we use it directly
-            card_token = card_data.get('card_token')
-            if not card_token:
-                # If no token provided (legacy/unsafe flow), we strictly reject or fail
-                # For this implementation, we require 'card_token'
-                raise ValidationError("Secure card token is required. Please use client-side tokenization.")
 
-            # Optional: Verify token with Payme Subscribe API
-            # verify_result = self._payme_request('cards.check', {'token': card_token})
-            # if not verify_result.get('success'):
-            #     raise ValidationError("Invalid card token")
-            
-            # Extract card details from data (passed for display purposes only)
-            masked_number = card_data.get('card_number', '****0000')[-8:]
-            last_four_digits = masked_number[-4:] if len(masked_number) >= 4 else '0000'
-            
+            # Determine card brand (from validation or default to unknown for tokenized)
+            card_brand = validation_result.card_brand or 'unknown'
+
             # Create card record
             credit_card = CreditCard(
                 user_id=user_id,
                 card_token=card_token,
-                card_brand=validation_result.card_brand,  # Detected or passed from frontend
+                card_brand=card_brand,
                 last_four_digits=last_four_digits,
                 expiry_month=card_data.get('expiry_month'),
                 expiry_year=card_data.get('expiry_year'),
-                cardholder_name=card_data.get('cardholder_name').strip(),
+                cardholder_name=card_data.get('cardholder_name', '').strip(),
                 is_default=card_data.get('is_default', False),
                 provider='payme',  # Defaulting to Payme for tokenized cards
                 fingerprint=fingerprint,
@@ -1283,7 +2109,7 @@ class PaymentService:
             
             # Log card save event for audit
             audit_logger.log_event(
-                event_type=AuditEventType.DATA_CREATION,
+                event_type=AuditEventType.SENSITIVE_DATA_ACCESS,
                 action="credit_card_saved",
                 severity=AuditSeverity.MEDIUM,
                 resource_type="credit_card",
@@ -1291,10 +2117,11 @@ class PaymentService:
                 user_id=user_id,
                 description=f"Credit card saved for user {user_id}",
                 additional_data={
-                    'card_brand': validation_result.card_brand,
+                    'card_brand': card_brand,
                     'last_four_digits': last_four_digits,
                     'is_default': credit_card.is_default,
-                    'fingerprint': fingerprint[:8]
+                    'fingerprint': fingerprint[:8],
+                    'is_tokenized': is_tokenized
                 }
             )
             

@@ -485,16 +485,14 @@
                         <span class="summary-value" id="summary-subtotal">0 UZS</span>
                     </div>
 
-                    <div class="summary-row">
-                        <span class="summary-label">{{ 'Delivery'|t }}:</span>
-                        <span class="summary-value" id="summary-delivery">15,000 UZS</span>
-                    </div>
-
-                    <div id="delivery-notice"></div>
-
                     <div class="summary-row summary-total">
                         <span class="summary-label">{{ 'Total'|t }}:</span>
                         <span class="summary-value" id="summary-total">0 UZS</span>
+                    </div>
+
+                    <div class="delivery-notice" style="border-color: #17a2b8; background: #e7f5ff; color: #0c5460;">
+                        <i class="far fa-truck"></i>
+                        {{ 'Delivery fee will be calculated at checkout'|t }}
                     </div>
 
                     <div class="cart-actions">
@@ -532,8 +530,6 @@
 // Configuration
 const API_BASE = '/api/v1';
 const PRODUCT_DETAIL_URL_TEMPLATE = '{{ url_for("frontend.product_detail", product_id=0) }}'.replace('/0', '/{id}');
-const FREE_DELIVERY_THRESHOLD = 100000; // 100,000 UZS
-const DELIVERY_FEE = 15000; // 15,000 UZS
 
 // Cart state
 let cartItems = [];
@@ -654,32 +650,40 @@ function renderCart(products) {
         const product = products.find(p => p.id === cartItem.product_id);
         if (!product) return;
 
-        // Get price with fallback
-        const price = parseFloat(product.price || product.base_price || 0);
+        // Get price from pricing object (returned by serialize_product)
+        const pricing = product.pricing || {};
+        const price = parseFloat(pricing.current_price || pricing.base_price || product.base_price || 0);
         const itemTotal = price * cartItem.quantity;
         subtotal += itemTotal;
 
-        // Stock status
+        // Stock status - read from inventory object if available
         let stockStatus = '{{ "In stock"|t }}';
         let stockClass = 'in-stock';
+        const inventory = product.inventory || {};
+        const trackInventory = inventory.track_inventory !== undefined ? inventory.track_inventory : product.track_inventory;
+        const stockQuantity = inventory.stock_quantity !== undefined ? inventory.stock_quantity : product.stock_quantity;
 
-        if (product.track_inventory && product.stock_quantity !== undefined) {
-            if (product.stock_quantity === 0) {
+        if (trackInventory && stockQuantity !== undefined && stockQuantity !== null) {
+            if (stockQuantity === 0) {
                 stockStatus = '{{ "Out of stock"|t }}';
                 stockClass = 'out-of-stock';
-            } else if (product.stock_quantity < cartItem.quantity) {
-                stockStatus = `{{ "Only"|t }} ${product.stock_quantity} {{ "available"|t }}`;
+            } else if (stockQuantity < cartItem.quantity) {
+                stockStatus = `{{ "Only"|t }} ${stockQuantity} {{ "available"|t }}`;
                 stockClass = 'low-stock';
-            } else if (product.stock_quantity < 10) {
-                stockStatus = `{{ "Low stock"|t }} (${product.stock_quantity})`;
+            } else if (stockQuantity < 10) {
+                stockStatus = `{{ "Low stock"|t }} (${stockQuantity})`;
                 stockClass = 'low-stock';
             }
         }
 
+        // Get product image from media.images array or fallback
+        const productImages = (product.media && product.media.images) || product.images || [];
+        const productImage = productImages.length > 0 ? productImages[0] : '{{ url_for("static", filename="images/resource/shop/shop-1.jpg") }}';
+
         cartHTML += `
             <div class="cart-item-card" data-product-id="${product.id}">
                 <div class="item-image">
-                    <img src="${product.image_url || '{{ url_for("static", filename="images/resource/shop/shop-1.jpg") }}'}" alt="${product.name}">
+                    <img src="${productImage}" alt="${product.name}">
                 </div>
                 <div class="item-details">
                     <div class="item-name">
@@ -722,33 +726,8 @@ function renderCart(products) {
 
 // Update cart summary
 function updateSummary(subtotal) {
-    const deliveryFee = subtotal >= FREE_DELIVERY_THRESHOLD ? 0 : DELIVERY_FEE;
-    const total = subtotal + deliveryFee;
-
     document.getElementById('summary-subtotal').textContent = formatPrice(subtotal);
-    document.getElementById('summary-delivery').textContent = deliveryFee === 0 ? '{{ "Free"|t }}' : formatPrice(deliveryFee);
-    document.getElementById('summary-total').textContent = formatPrice(total);
-
-    // Delivery notice
-    const noticeEl = document.getElementById('delivery-notice');
-    if (subtotal > 0 && subtotal < FREE_DELIVERY_THRESHOLD) {
-        const remaining = FREE_DELIVERY_THRESHOLD - subtotal;
-        noticeEl.innerHTML = `
-            <div class="delivery-notice">
-                <i class="far fa-truck"></i>
-                {{ 'Add'|t }} ${formatPrice(remaining)} {{ 'more for free delivery'|t }}!
-            </div>
-        `;
-    } else if (subtotal >= FREE_DELIVERY_THRESHOLD) {
-        noticeEl.innerHTML = `
-            <div class="delivery-notice" style="border-color: #28a745; background: #d4edda; color: #155724;">
-                <i class="far fa-check-circle"></i>
-                {{ 'You qualify for free delivery'|t }}!
-            </div>
-        `;
-    } else {
-        noticeEl.innerHTML = '';
-    }
+    document.getElementById('summary-total').textContent = formatPrice(subtotal);
 }
 
 // Update quantity

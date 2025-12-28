@@ -397,25 +397,54 @@ def get_saved_cards():
 @validate_json(['card_number', 'expiry'])
 @rate_limit(10, 60)
 def tokenize_card():
-    """Tokenize card via Payme (Proxy)"""
+    """
+    Tokenize card via Payme and trigger SMS verification if needed.
+
+    This endpoint creates a card token and automatically requests SMS verification
+    if the card requires it (most cards do on first use).
+
+    Request body:
+        card_number: Card number (16 digits, spaces allowed)
+        expiry: Expiry date in MM/YY or MMYY format
+        save: (optional) Whether to save for recurring payments, default true
+
+    Response:
+        token: Card token for subsequent operations
+        masked_number: Masked card number (e.g., "860006******6311")
+        expire: Expiry in MM/YY format
+        needs_verification: True if SMS verification is required
+        masked_phone: Phone number where SMS was sent (if verification needed)
+        wait_seconds: Seconds until verification code expires
+        verification_sent: True if SMS was successfully sent
+    """
     try:
         data = request.get_json()
         card_number = data.get('card_number', '').replace(' ', '')
-        expiry = data.get('expiry', '').replace('/', '') # Expecting MM/YY -> MMYY
-        
+        expiry = data.get('expiry', '').replace('/', '')  # Expecting MM/YY -> MMYY
+        save = data.get('save', True)  # Default to saving card
+
         if len(expiry) != 4:
-             return error_response(message="Invalid expiry format. Use MM/YY")
-             
+            return error_response(message="Invalid expiry format. Use MM/YY")
+
         payment_service = get_payment_service()
-        token_data = payment_service.create_card_token(card_number, expiry)
-        
+        token_data = payment_service.create_card_token_with_verification(
+            card_number, expiry, save=save
+        )
+
         return success_response(data={
             'token': token_data.get('token'),
-            'number': token_data.get('number'), # Masked
+            'masked_number': token_data.get('masked_number'),
             'expire': token_data.get('expire'),
+            'needs_verification': token_data.get('needs_verification', True),
+            'masked_phone': token_data.get('masked_phone'),
+            'wait_seconds': token_data.get('wait_seconds', 60),
+            'verification_sent': token_data.get('verification_sent', False),
+            'recurrent': token_data.get('recurrent', False),
             'type': 'payme'
         })
-        
+
+    except ValidationError as e:
+        return validation_error_response(errors=str(e))
     except Exception as e:
         current_app.logger.error(f"Tokenization error: {e}")
         return internal_error_response(message=str(e))
@@ -767,3 +796,330 @@ def get_exchange_rates():
     except Exception as e:
         current_app.logger.error(f"Get exchange rates error: {e}")
         return internal_error_response(message=get_translation('api.payments.error.get_rates_failed'))
+
+
+# =============================================================================
+# PAYME SUBSCRIBE API ENDPOINTS (Card verification and payment flow)
+# =============================================================================
+
+@payments_bp.route('/cards/create-token', methods=['POST'])
+@jwt_required()
+@validate_json(['card_number', 'expiry'])
+@rate_limit(5, 60)  # 5 requests per minute
+def create_card_token():
+    """
+    Create card token via Payme and trigger SMS verification.
+
+    This is an alias for /tokenize with a more RESTful path.
+    Creates a card token and automatically requests SMS verification
+    if the card requires it.
+
+    Request body:
+        card_number: Card number (16 digits, spaces allowed)
+        expiry: Expiry date in MM/YY or MMYY format
+        cardholder_name: (optional) Cardholder name
+        save: (optional) Whether to save for recurring payments, default true
+
+    Response:
+        token: Card token for subsequent operations
+        masked_number: Masked card number
+        expire: Expiry in MM/YY format
+        needs_verification: True if SMS verification is required
+        masked_phone: Phone number where SMS was sent
+        wait_seconds: Seconds until verification code expires
+        verification_sent: True if SMS was successfully sent
+    """
+    try:
+        data = request.get_json()
+        card_number = data.get('card_number', '').replace(' ', '').replace('-', '')
+        expiry = data.get('expiry', '').replace('/', '')
+        save = data.get('save', False)
+
+        if len(expiry) != 4:
+            return error_response(message="Invalid expiry format. Use MM/YY or MMYY")
+
+        payment_service = get_payment_service()
+        token_data = payment_service.create_card_token_with_verification(
+            card_number, expiry, save=save
+        )
+
+        return success_response(data={
+            'token': token_data.get('token'),
+            'masked_number': token_data.get('masked_number'),
+            'expire': token_data.get('expire'),
+            'needs_verification': token_data.get('needs_verification', True),
+            'masked_phone': token_data.get('masked_phone'),
+            'wait_seconds': token_data.get('wait_seconds', 60),
+            'verification_sent': token_data.get('verification_sent', False),
+            'recurrent': token_data.get('recurrent', False)
+        })
+
+    except ValidationError as e:
+        return validation_error_response(errors=str(e))
+    except Exception as e:
+        current_app.logger.error(f"Create card token error: {e}")
+        return internal_error_response(message=str(e))
+
+
+@payments_bp.route('/cards/send-verification', methods=['POST'])
+@jwt_required()
+@validate_json(['token', 'order_id'])
+@rate_limit(3, 60)  # 3 requests per minute (prevent SMS spam)
+def send_verification_code():
+    """
+    Send SMS verification code for a card token after order creation.
+
+    This endpoint should be called AFTER:
+    1. cards.create (via /cards/create-token) - tokenizes the card
+    2. Order creation (via /orders/) - creates order and payment record
+
+    This triggers Payme's cards.get_verify_code to send SMS to cardholder.
+
+    Request body:
+        token: Card token from create-token endpoint
+        order_id: Order ID to associate with this verification
+
+    Response:
+        sent: True if SMS was sent successfully
+        masked_phone: Phone number where SMS was sent
+        wait_seconds: Seconds until verification code expires
+    """
+    try:
+        data = request.get_json()
+        token = data.get('token')
+        order_id = data.get('order_id')
+
+        if not token:
+            return error_response(message="Card token is required")
+
+        if not order_id:
+            return error_response(message="Order ID is required")
+
+        # Verify order exists and belongs to current user
+        current_user_id = get_jwt_identity()
+        order = Order.query.filter_by(id=order_id, user_id=current_user_id).first()
+        if not order:
+            return not_found_response(message="Order not found")
+
+        payment_service = get_payment_service()
+        result = payment_service.request_card_verification_code(token)
+
+        current_app.logger.info(f"Verification code sent for order {order_id}: {result.get('phone')}")
+
+        return success_response(data={
+            'sent': result.get('sent', False),
+            'masked_phone': result.get('phone', ''),
+            'wait_seconds': result.get('wait', 60000) // 1000  # Convert ms to seconds
+        })
+
+    except ValidationError as e:
+        return validation_error_response(errors=str(e))
+    except Exception as e:
+        current_app.logger.error(f"Send verification code error: {e}")
+        return internal_error_response(message=str(e))
+
+
+@payments_bp.route('/cards/resend-code', methods=['POST'])
+@jwt_required()
+@validate_json(['token'])
+@rate_limit(3, 60)  # 3 requests per minute (prevent SMS spam)
+def resend_verification_code():
+    """
+    Resend SMS verification code for a card token.
+
+    Use this when the original code expires or user didn't receive it.
+    Rate limited to 3 requests per minute to prevent SMS spam.
+
+    Request body:
+        token: Card token from create-token endpoint
+
+    Response:
+        sent: True if SMS was sent successfully
+        masked_phone: Phone number where SMS was sent
+        wait_seconds: Seconds until new code expires
+    """
+    try:
+        data = request.get_json()
+        token = data.get('token')
+
+        if not token:
+            return error_response(message="Card token is required")
+
+        payment_service = get_payment_service()
+        result = payment_service.request_card_verification_code(token)
+
+        return success_response(data={
+            'sent': result.get('sent', False),
+            'masked_phone': result.get('phone', ''),
+            'wait_seconds': result.get('wait', 60000) // 1000  # Convert ms to seconds
+        })
+
+    except ValidationError as e:
+        return validation_error_response(errors=str(e))
+    except Exception as e:
+        current_app.logger.error(f"Resend verification code error: {e}")
+        return internal_error_response(message=str(e))
+
+
+@payments_bp.route('/cards/verify', methods=['POST'])
+@jwt_required()
+@validate_json(['token', 'code'])
+@rate_limit(10, 60)  # 10 requests per minute
+def verify_card_code():
+    """
+    Verify card with SMS code.
+
+    After receiving the SMS code, call this endpoint to verify the card.
+    Maximum 3 attempts per token - after that, request a new code.
+
+    Request body:
+        token: Card token from create-token endpoint
+        code: Verification code from SMS (4-8 alphanumeric characters)
+
+    Response (Success):
+        verified: True
+        card: Object with masked_number, expire
+
+    Response (Wrong Code):
+        success: false
+        message: "Invalid verification code"
+        data.attempts_remaining: Number of attempts left
+
+    Response (Max Attempts):
+        success: false
+        message: "Too many failed attempts"
+        data.request_new_code: true
+    """
+    try:
+        current_user_id = get_jwt_identity()
+        data = request.get_json()
+        token = data.get('token')
+        code = data.get('code')
+
+        if not token:
+            return error_response(message="Card token is required")
+        if not code:
+            return error_response(message="Verification code is required")
+
+        payment_service = get_payment_service()
+
+        try:
+            result = payment_service.verify_card(token, code)
+
+            return success_response(data={
+                'verified': True,
+                'card': result.get('card', {})
+            })
+
+        except ValidationError as e:
+            error_msg = str(e)
+
+            # Get actual attempts remaining from service (tracked in Redis)
+            attempts_remaining = payment_service.get_verification_attempts_remaining(token)
+
+            # Check if user needs to request a new code
+            request_new_code = attempts_remaining <= 0 or "request a new code" in error_msg.lower()
+
+            return error_response(
+                message=error_msg,
+                status_code=400,
+                data={
+                    'attempts_remaining': attempts_remaining,
+                    'request_new_code': request_new_code
+                }
+            )
+
+    except Exception as e:
+        current_app.logger.error(f"Verify card error: {e}")
+        return internal_error_response(message=str(e))
+
+
+@payments_bp.route('/process-card-payment', methods=['POST'])
+@jwt_required()
+@validate_json(['order_id', 'token'])
+@rate_limit(5, 60)  # 5 payment attempts per minute
+def process_card_payment():
+    """
+    Process payment with a verified card token.
+
+    This is the final step in the payment flow. The card must be verified
+    (via /cards/verify) before calling this endpoint.
+
+    Request body:
+        order_id: Order ID to pay for
+        token: Verified card token
+        save_card: (optional) Whether to save card for future use, default true
+        card_metadata: (optional) Card details for saving
+            - masked_number: Masked card number
+            - expire: Expiry date
+            - cardholder_name: Cardholder name
+
+    Response (Success):
+        success: true
+        payment_id: Our payment record ID
+        order_id: Order ID
+        receipt_id: Payme receipt ID
+        amount: Amount paid
+        redirect_url: URL to redirect user
+
+    Response (Failure):
+        success: false
+        message: Error description
+    """
+    try:
+        current_user_id = get_jwt_identity()
+        data = request.get_json()
+
+        order_id = data.get('order_id')
+        token = data.get('token')
+        save_card = data.get('save_card', True)
+        card_metadata = data.get('card_metadata', {})
+
+        if not order_id:
+            return error_response(message="Order ID is required")
+        if not token:
+            return error_response(message="Card token is required")
+
+        payment_service = get_payment_service()
+
+        result = payment_service.process_payme_payment_full(
+            order_id=order_id,
+            card_token=token,
+            user_id=current_user_id,
+            save_card=save_card,
+            card_metadata=card_metadata
+        )
+
+        # Send notification on successful payment
+        try:
+            notification_service = get_notification_service()
+            notification_service.send_payment_confirmation(
+                user_id=current_user_id,
+                payment_id=result['payment_id'],
+                order_id=order_id
+            )
+        except Exception as notify_error:
+            current_app.logger.warning(f"Failed to send payment notification: {notify_error}")
+
+        return success_response(data={
+            'success': True,
+            'payment_id': result['payment_id'],
+            'order_id': result['order_id'],
+            'receipt_id': result['receipt_id'],
+            'amount': result.get('amount'),
+            'redirect_url': result.get('redirect_url', f'/my-orders?order_id={order_id}&payment=success')
+        })
+
+    except NotFoundError as e:
+        return not_found_response(message=str(e))
+    except ValidationError as e:
+        return validation_error_response(errors=str(e))
+    except Exception as e:
+        current_app.logger.error(f"Process card payment error: {e}")
+        return internal_error_response(
+            message=str(e),
+            data={
+                'order_id': data.get('order_id') if 'data' in dir() else None,
+                'redirect_url': f'/checkout?error=payment_failed'
+            }
+        )

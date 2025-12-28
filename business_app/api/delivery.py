@@ -255,6 +255,62 @@ def get_time_slots():
         return jsonify({'error': 'Failed to get time slots'}), 500
 
 
+@delivery_bp.route('/calculate-fee', methods=['POST'])
+@jwt_required()
+@handle_api_exception
+def calculate_delivery_fee():
+    """
+    Calculate delivery fee based on address and order total.
+    Used by checkout page to get delivery fee when user selects an address.
+    """
+    from business_app.models.user import UserAddress
+
+    current_user_id = get_jwt_identity()
+    data = request.get_json() or {}
+
+    address_id = data.get('address_id')
+    order_total = data.get('order_total', 0)
+
+    if not address_id:
+        raise ValidationError("Address ID is required")
+
+    # Get the address
+    address = UserAddress.query.filter_by(
+        id=address_id,
+        user_id=current_user_id
+    ).first()
+
+    if not address:
+        raise NotFoundError("Address not found")
+
+    # Use the delivery service to calculate fee
+    delivery_service = get_delivery_service()
+
+    # If address has coordinates, use them for calculation
+    if address.latitude and address.longitude:
+        delivery_fee = delivery_service.calculate_delivery_fee(
+            latitude=address.latitude,
+            longitude=address.longitude,
+            order_total=int(order_total)
+        )
+    else:
+        # Fallback: use default delivery fee logic from service
+        delivery_fee = delivery_service.calculate_delivery_fee(
+            latitude=0,
+            longitude=0,
+            order_total=int(order_total)
+        )
+
+    return create_success_response(
+        data={
+            'delivery_fee': delivery_fee,
+            'address_id': address_id,
+            'order_total': order_total
+        },
+        message='Delivery fee calculated successfully'
+    )
+
+
 @delivery_bp.route('/zones', methods=['GET'])
 def get_delivery_zones():
     """Get delivery zones and coverage areas"""

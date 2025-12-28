@@ -31,6 +31,7 @@ class AuditEventType(Enum):
     ORDER_DELIVERED = "order_delivered"
 
     # Payment events
+    PAYMENT_VERIFICATION_CODE_VERIFED = "payment_verification_code_verified"
     PAYMENT_PROCESSED = "payment_processed"
     PAYMENT_REFUNDED = "payment_refunded"
     PAYMENT_FAILED = "payment_failed"

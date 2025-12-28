@@ -15,7 +15,7 @@ class User(db.Model, TimestampMixin):
     first_name = Column(String(100), nullable=True)
     last_name = Column(String(100), nullable=True)
     email = Column(String(255), unique=True, nullable=True)
-    phone = Column(String(20), unique=True, nullable=False)
+    phone = Column(String(20), unique=True, nullable=True)  # Nullable for telegram registration, required before ordering
     password_hash = Column(String(255), nullable=False)
     date_of_birth = Column(DateTime, nullable=True)
     gender = Column(Enum(UserGender, name='user_gender', values_callable=lambda x: [e.value for e in x]), default=UserGender.UNKNOWN, index=True)

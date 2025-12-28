@@ -62,6 +62,10 @@ class OrderService:
         user = User.query.get(user_id)
         if not user:
             raise NotFoundError("User not found")
+
+        # Require phone number for placing orders
+        if not user.phone:
+            raise ValidationError("Phone number is required to place an order. Please update your profile.")
         
         # Validate and calculate order items
         items_data = order_data['items']
@@ -78,6 +82,20 @@ class OrderService:
         if total_amount < self.min_order_amount:
             raise ValidationError(f"Minimum order amount is {self.min_order_amount}")
         
+        # Map payment method string to enum if provided
+        payment_method = None
+        payment_method_str = order_data.get('payment_method')
+        if payment_method_str:
+            from business_app.utils.constants import PaymentMethod
+            payment_method_map = {
+                'cash': PaymentMethod.CASH,
+                'payme': PaymentMethod.PAYME,
+                'click': PaymentMethod.CLICK,
+                'card': PaymentMethod.CARD,
+                'loyalty_points': PaymentMethod.LOYALTY_POINTS,
+            }
+            payment_method = payment_method_map.get(payment_method_str)
+
         # Create order
         order = Order(
             user_id=user_id,
@@ -87,8 +105,9 @@ class OrderService:
             delivery_fee=delivery_fee,
             total_amount=total_amount,
             delivery_address_id=delivery_address['delivery_address_id'],
-            # preferred_delivery_time=order_data.get('preferred_delivery_time'),
-            delivery_notes=order_data.get('delivery_notes')
+            payment_method=payment_method,
+            delivery_notes=order_data.get('delivery_notes'),
+            order_source=order_data.get('order_source', 'web')
         )
         
         db.session.add(order)

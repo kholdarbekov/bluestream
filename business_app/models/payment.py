@@ -37,6 +37,9 @@ class Payment(db.Model, TimestampMixin):
     webhook_processed = Column(Boolean, default=False)
     webhook_attempts = Column(Integer, default=0)
     
+    # Payment completion timestamp
+    paid_at = Column(DateTime(timezone=True), nullable=True)
+
     # Metadata
     description = Column(String(255), nullable=True)
     callback_url = Column(String(500), nullable=True)
@@ -67,6 +70,7 @@ class Payment(db.Model, TimestampMixin):
             'status': self.status.value,
             'payment_link': self.payment_link,
             'created_at': self.created_at.isoformat() if self.created_at else None,
+            'paid_at': self.paid_at.isoformat() if self.paid_at else None,
             'order_id': self.order_id,
             'subscription_id': self.subscription_id
         }
@@ -137,7 +141,7 @@ class CreditCard(db.Model, TimestampMixin):
     user_id = Column(Integer, ForeignKey('users.id'), nullable=False, index=True)
     
     # Card details (encrypted/tokenized)
-    card_token = Column(String(255), unique=True, nullable=False, index=True)  # Provider token
+    card_token = Column(String(511), unique=True, nullable=False, index=True)  # Provider token
     card_brand = Column(String(20), nullable=False)  # visa, mastercard, uzcard
     last_four_digits = Column(String(4), nullable=False)
     expiry_month = Column(Integer, nullable=False)
@@ -161,7 +165,14 @@ class CreditCard(db.Model, TimestampMixin):
     # Usage tracking
     last_used_at = Column(DateTime, nullable=True)
     usage_count = Column(Integer, default=0)
-    
+
+    # Payme verification tracking (for SMS OTP flow)
+    verification_attempts = Column(Integer, default=0)
+    verification_code_sent_at = Column(DateTime(timezone=True), nullable=True)
+    verification_expires_at = Column(DateTime(timezone=True), nullable=True)
+    masked_phone = Column(String(20), nullable=True)  # e.g., "99890*****31"
+    payme_recurrent = Column(Boolean, default=False)  # From cards.create response
+
     user = relationship('User', backref='credit_cards')
     
     def is_expired(self):
@@ -169,16 +180,46 @@ class CreditCard(db.Model, TimestampMixin):
         from datetime import datetime
         current_month = datetime.now().month
         current_year = datetime.now().year
-        
+
         return (self.expiry_year < current_year) or \
                (self.expiry_year == current_year and self.expiry_month < current_month)
-    
+
+    def is_verification_expired(self) -> bool:
+        """Check if the verification code has expired"""
+        if not self.verification_expires_at:
+            return True
+        return datetime.now(UTC) > self.verification_expires_at
+
+    def can_retry_verification(self) -> bool:
+        """Check if more verification attempts are allowed (max 3)"""
+        return self.verification_attempts < 3
+
+    def increment_verification_attempts(self) -> int:
+        """Increment attempts and return remaining"""
+        self.verification_attempts += 1
+        return max(0, 3 - self.verification_attempts)
+
+    def reset_verification_state(self):
+        """Reset verification state for new code request"""
+        self.verification_attempts = 0
+        self.verification_code_sent_at = None
+        self.verification_expires_at = None
+        self.masked_phone = None
+
+    def set_verification_sent(self, masked_phone: str, wait_ms: int):
+        """Set verification sent state with expiry time"""
+        now = datetime.now(UTC)
+        self.verification_code_sent_at = now
+        self.verification_expires_at = now + timedelta(milliseconds=wait_ms)
+        self.masked_phone = masked_phone
+        self.verification_attempts = 0  # Reset attempts on new code
+
     def mask_card_number(self):
         """Return masked card number"""
         return f"****-****-****-{self.last_four_digits}"
     
-    def to_dict(self):
-        return {
+    def to_dict(self, include_verification_state: bool = False):
+        data = {
             'id': self.id,
             'card_brand': self.card_brand,
             'last_four_digits': self.last_four_digits,
@@ -194,3 +235,14 @@ class CreditCard(db.Model, TimestampMixin):
             'last_used_at': self.last_used_at.isoformat() if self.last_used_at else None,
             'created_at': self.created_at.isoformat() if self.created_at else None
         }
+
+        if include_verification_state:
+            data.update({
+                'verification_attempts': self.verification_attempts,
+                'attempts_remaining': max(0, 3 - self.verification_attempts),
+                'can_retry': self.can_retry_verification(),
+                'verification_expired': self.is_verification_expired(),
+                'masked_phone': self.masked_phone
+            })
+
+        return data

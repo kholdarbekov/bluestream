@@ -385,8 +385,8 @@ def serialize_credit_card(card) -> Dict[str, Any]:
         return {
             'id': card.id,
             'user_id': card.user_id,
-            'last_four_digits': card.card_number[-4:] if card.card_number else None,
-            'card_type': card.card_type,
+            'last_four_digits': card.last_four_digits if card.last_four_digits else None,
+            'card_type': card.card_brand,
             'expiry_month': card.expiry_month,
             'expiry_year': card.expiry_year,
             'cardholder_name': card.cardholder_name,

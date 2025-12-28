@@ -684,22 +684,36 @@ def serialize_product_admin(product: Product) -> Dict[str, Any]:
         Serialized product data for admin
     """
     try:
+        # Get images array and extract first image URL for convenience
+        images = product.images or []
+        image_url = images[0] if images else None
+
         data = {
             'id': product.id,
             'name': product.name,
+            'description': product.description,
+            'short_description': product.short_description,
             'sku': product.sku,
             'barcode': product.barcode,
             'base_price': float(product.base_price),
+            'price': float(product.base_price),  # Frontend expects 'price'
+            'discount_price': float(product.discount_price) if product.discount_price else None,
             'current_price': float(getattr(product, 'current_price', product.base_price)),
+            'category_id': product.category_id,
+            'volume': product.volume,
+            'volume_unit': product.volume_unit,
             'stock_quantity': product.stock_quantity if product.track_inventory else None,
             'min_stock_level': product.min_stock_level,
             'is_active': product.is_active,
+            'status': 'active' if product.is_active else 'inactive',  # Frontend expects 'status'
             'is_featured': product.is_featured,
             'track_inventory': product.track_inventory,
+            'images': images,
+            'image_url': image_url,  # First image for display convenience
             'created_at': product.created_at.isoformat() if product.created_at else None,
             'updated_at': product.updated_at.isoformat() if product.updated_at else None
         }
-        
+
         # Add category information
         if product.category:
             data['category_name'] = product.category.name

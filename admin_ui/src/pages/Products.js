@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import {
   Table,
   Card,
@@ -22,17 +22,14 @@ import {
   Avatar
 } from 'antd';
 import {
-  SearchOutlined,
   ShoppingOutlined,
   MoreOutlined,
   PlusOutlined,
   EditOutlined,
   DeleteOutlined,
   EyeOutlined,
-  InboxOutlined,
   DollarOutlined,
   ExportOutlined,
-  TagsOutlined,
   WarningOutlined
 } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from 'react-query';
@@ -41,7 +38,6 @@ import { useTranslation } from 'react-i18next';
 
 const { Option } = Select;
 const { TextArea } = Input;
-const { Dragger } = Upload;
 
 const Products = () => {
   const { t } = useTranslation();
@@ -55,6 +51,10 @@ const Products = () => {
   const [pagination, setPagination] = useState({ page: 1, per_page: 20 });
   const [createForm] = Form.useForm();
   const [editForm] = Form.useForm();
+  const [createFileList, setCreateFileList] = useState([]);
+  const [editFileList, setEditFileList] = useState([]);
+  const [uploadingCreate, setUploadingCreate] = useState(false);
+  const [uploadingEdit, setUploadingEdit] = useState(false);
 
   const queryClient = useQueryClient();
 
@@ -93,8 +93,9 @@ const Products = () => {
         queryClient.invalidateQueries('products');
         setIsCreateModalVisible(false);
         createForm.resetFields();
+        setCreateFileList([]);
       },
-      onError: (error) => {
+      onError: () => {
         message.error(t('ui.products.create_failed'));
       }
     }
@@ -109,8 +110,9 @@ const Products = () => {
         queryClient.invalidateQueries('products');
         setIsEditModalVisible(false);
         editForm.resetFields();
+        setEditFileList([]);
       },
-      onError: (error) => {
+      onError: () => {
         message.error(t('ui.products.update_failed'));
       }
     }
@@ -124,7 +126,7 @@ const Products = () => {
         message.success(t('ui.products.deleted_success'));
         queryClient.invalidateQueries('products');
       },
-      onError: (error) => {
+      onError: () => {
         message.error(t('ui.products.delete_failed'));
       }
     }
@@ -287,6 +289,17 @@ const Products = () => {
       status: product.status,
       is_featured: product.is_featured
     });
+    // Set existing image in file list for preview
+    if (product.image_url) {
+      setEditFileList([{
+        uid: '-1',
+        name: 'current-image',
+        status: 'done',
+        url: product.image_url,
+      }]);
+    } else {
+      setEditFileList([]);
+    }
     setIsEditModalVisible(true);
   };
 
@@ -303,15 +316,73 @@ const Products = () => {
     });
   };
 
-  const handleCreateSubmit = (values) => {
-    createProductMutation.mutate(values);
+  const handleCreateSubmit = async (values) => {
+    try {
+      let imageUrl = null;
+
+      // Upload image if one was selected
+      if (createFileList.length > 0 && createFileList[0].originFileObj) {
+        setUploadingCreate(true);
+        const uploadResponse = await adminService.uploadImage(createFileList[0].originFileObj, {
+          folder: 'products',
+          resize: true,
+          max_width: 800,
+          max_height: 800
+        });
+        if (uploadResponse.success && uploadResponse.data?.url) {
+          imageUrl = uploadResponse.data.url;
+        }
+        setUploadingCreate(false);
+      }
+
+      // Add image to product data
+      const productData = {
+        ...values,
+        images: imageUrl ? [imageUrl] : []
+      };
+
+      createProductMutation.mutate(productData);
+    } catch (error) {
+      setUploadingCreate(false);
+      message.error(t('ui.products.image_upload_failed'));
+    }
   };
 
-  const handleEditSubmit = (values) => {
-    updateProductMutation.mutate({
-      productId: selectedProduct.id,
-      productData: values
-    });
+  const handleEditSubmit = async (values) => {
+    try {
+      let images = selectedProduct.images || [];
+
+      // Upload new image if one was selected
+      if (editFileList.length > 0 && editFileList[0].originFileObj) {
+        setUploadingEdit(true);
+        const uploadResponse = await adminService.uploadImage(editFileList[0].originFileObj, {
+          folder: 'products',
+          resize: true,
+          max_width: 800,
+          max_height: 800
+        });
+        if (uploadResponse.success && uploadResponse.data?.url) {
+          images = [uploadResponse.data.url];
+        }
+        setUploadingEdit(false);
+      } else if (editFileList.length === 0) {
+        // Image was removed
+        images = [];
+      }
+
+      const productData = {
+        ...values,
+        images: images
+      };
+
+      updateProductMutation.mutate({
+        productId: selectedProduct.id,
+        productData: productData
+      });
+    } catch (error) {
+      setUploadingEdit(false);
+      message.error(t('ui.products.image_upload_failed'));
+    }
   };
 
   const handleTableChange = (paginationInfo) => {
@@ -342,17 +413,59 @@ const Products = () => {
   const lowStockProducts = products.filter(product => product.stock_quantity <= 10).length;
   const totalValue = products.reduce((sum, product) => sum + (product.base_price * product.stock_quantity), 0);
 
-  const uploadProps = {
+  const createUploadProps = {
     name: 'file',
     multiple: false,
-    beforeUpload: () => false, // Prevent automatic upload
-    onChange(info) {
-      const { status } = info.file;
-      if (status === 'done') {
-        message.success(`${info.file.name} ${t('ui.products.upload_success')}`);
-      } else if (status === 'error') {
-        message.error(`${info.file.name} ${t('ui.products.upload_failed')}`);
+    listType: 'picture-card',
+    fileList: createFileList,
+    beforeUpload: (file) => {
+      // Validate file type
+      const isImage = file.type.startsWith('image/');
+      if (!isImage) {
+        message.error(t('ui.products.only_images_allowed'));
+        return Upload.LIST_IGNORE;
       }
+      // Validate file size (max 5MB)
+      const isLt5M = file.size / 1024 / 1024 < 5;
+      if (!isLt5M) {
+        message.error(t('ui.products.image_too_large'));
+        return Upload.LIST_IGNORE;
+      }
+      return false; // Prevent automatic upload
+    },
+    onChange({ fileList }) {
+      setCreateFileList(fileList);
+    },
+    onRemove: () => {
+      setCreateFileList([]);
+    }
+  };
+
+  const editUploadProps = {
+    name: 'file',
+    multiple: false,
+    listType: 'picture-card',
+    fileList: editFileList,
+    beforeUpload: (file) => {
+      // Validate file type
+      const isImage = file.type.startsWith('image/');
+      if (!isImage) {
+        message.error(t('ui.products.only_images_allowed'));
+        return Upload.LIST_IGNORE;
+      }
+      // Validate file size (max 5MB)
+      const isLt5M = file.size / 1024 / 1024 < 5;
+      if (!isLt5M) {
+        message.error(t('ui.products.image_too_large'));
+        return Upload.LIST_IGNORE;
+      }
+      return false; // Prevent automatic upload
+    },
+    onChange({ fileList }) {
+      setEditFileList(fileList);
+    },
+    onRemove: () => {
+      setEditFileList([]);
     }
   };
 
@@ -657,27 +770,30 @@ const Products = () => {
           </Form.Item>
 
           <Form.Item
-            name="image"
             label={t('ui.products.product_image_label')}
           >
-            <Dragger {...uploadProps}>
-              <p className="ant-upload-drag-icon">
-                <InboxOutlined />
-              </p>
-              <p className="ant-upload-text">{t('ui.products.upload_click_drag')}</p>
-              <p className="ant-upload-hint">{t('ui.products.upload_hint')}</p>
-            </Dragger>
+            <Upload {...createUploadProps}>
+              {createFileList.length < 1 && (
+                <div>
+                  <PlusOutlined />
+                  <div style={{ marginTop: 8 }}>{t('ui.products.upload_image')}</div>
+                </div>
+              )}
+            </Upload>
           </Form.Item>
 
           <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
             <Space>
-              <Button onClick={() => setIsCreateModalVisible(false)}>
+              <Button onClick={() => {
+                setIsCreateModalVisible(false);
+                setCreateFileList([]);
+              }}>
                 {t('ui.products.cancel')}
               </Button>
               <Button
                 type="primary"
                 htmlType="submit"
-                loading={createProductMutation.isLoading}
+                loading={createProductMutation.isLoading || uploadingCreate}
               >
                 {t('ui.products.create_product')}
               </Button>
@@ -792,15 +908,31 @@ const Products = () => {
             <Switch />
           </Form.Item>
 
+          <Form.Item
+            label={t('ui.products.product_image_label')}
+          >
+            <Upload {...editUploadProps}>
+              {editFileList.length < 1 && (
+                <div>
+                  <PlusOutlined />
+                  <div style={{ marginTop: 8 }}>{t('ui.products.upload_image')}</div>
+                </div>
+              )}
+            </Upload>
+          </Form.Item>
+
           <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
             <Space>
-              <Button onClick={() => setIsEditModalVisible(false)}>
+              <Button onClick={() => {
+                setIsEditModalVisible(false);
+                setEditFileList([]);
+              }}>
                 {t('ui.products.cancel')}
               </Button>
               <Button
                 type="primary"
                 htmlType="submit"
-                loading={updateProductMutation.isLoading}
+                loading={updateProductMutation.isLoading || uploadingEdit}
               >
                 {t('ui.products.update_product')}
               </Button>

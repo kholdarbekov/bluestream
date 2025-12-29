@@ -49,7 +49,8 @@ const { RangePicker } = DatePicker;
 const { TextArea } = Input;
 
 const Loyalty = () => {
-  const { t } = useTranslation();
+  // Load loyalty namespace for ui.loyalty.* keys
+  const { t } = useTranslation('loyalty');
   const [activeTab, setActiveTab] = useState('programs');
   const [searchText, setSearchText] = useState('');
   const [statusFilter, setStatusFilter] = useState('');

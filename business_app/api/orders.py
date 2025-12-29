@@ -513,7 +513,7 @@ def cancel_order(order_id):
     """Cancel an order"""
     try:
         current_user_id = get_jwt_identity()
-        data = request.get_json() or {}
+        data = request.get_json(silent=True) or {}
 
         order = Order.query.filter_by(
             id=order_id,

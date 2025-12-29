@@ -812,8 +812,8 @@ class PaymentService:
                 'title': item.product.name if item.product else f"Product #{item.product_id}",
                 'price': int(float(item.unit_price) * 100),  # Convert to tiyin
                 'count': item.quantity,
-                'code': getattr(item.product, 'ikpu_code', None) or '10204001001000000',  # Default IKPU for water
-                'vat_percent': 12,  # Standard VAT in Uzbekistan
+                'code': getattr(item.product, 'ikpu_code', None) or '02201001001000000',  # Default IKPU for water
+                'vat_percent': 0,  # Standard VAT in Uzbekistan
             }
 
             # Add package code if available

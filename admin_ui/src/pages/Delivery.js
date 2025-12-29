@@ -47,7 +47,8 @@ const { RangePicker } = DatePicker;
 const { Step } = Steps;
 
 const Delivery = () => {
-  const { t } = useTranslation();
+  // Load delivery namespace for ui.delivery.* keys
+  const { t } = useTranslation('delivery');
   const [searchText, setSearchText] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [dateRange, setDateRange] = useState(null);

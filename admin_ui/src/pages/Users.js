@@ -32,7 +32,8 @@ import useResponsive from '../hooks/useResponsive';
 const { Option } = Select;
 
 const Users = () => {
-  const { t } = useTranslation();
+  // Load users namespace for ui.users.* keys
+  const { t } = useTranslation('users');
   const [searchText, setSearchText] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [selectedUser, setSelectedUser] = useState(null);

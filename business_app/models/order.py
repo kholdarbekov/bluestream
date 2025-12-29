@@ -51,7 +51,7 @@ class Order(db.Model, TimestampMixin):
     user = relationship('User', back_populates='orders')
     delivery_address = relationship('UserAddress', back_populates='orders')
     order_items = relationship('OrderItem', back_populates='order', cascade='all, delete-orphan')
-    payments = relationship('Payment', back_populates='order')
+    payment = relationship('Payment', back_populates='order', uselist=False)
     delivery = relationship('Delivery', back_populates='order', uselist=False)
     subscription = relationship('Subscription', back_populates='orders')
     

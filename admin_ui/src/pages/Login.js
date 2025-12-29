@@ -8,7 +8,8 @@ import { useTranslation } from 'react-i18next';
 const { Title, Text } = Typography;
 
 const Login = () => {
-  const { t } = useTranslation();
+  // Load login namespace for ui.login.* keys
+  const { t } = useTranslation('login');
   const [form] = Form.useForm();
   const navigate = useNavigate();
   const location = useLocation();

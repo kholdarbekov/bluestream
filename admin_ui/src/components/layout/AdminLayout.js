@@ -37,7 +37,8 @@ const { Header, Sider, Content } = Layout;
 const { Title, Text } = Typography;
 
 const AdminLayout = ({ children }) => {
-  const { t } = useTranslation();
+  // Load navigation namespace for ui.nav.* keys
+  const { t } = useTranslation('navigation');
   const [mobileDrawerVisible, setMobileDrawerVisible] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const location = useLocation();

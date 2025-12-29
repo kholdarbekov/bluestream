@@ -32,8 +32,8 @@ i18n
       withCredentials: true, // Include cookies for authentication
     },
 
-    // Namespace configuration
-    ns: ['common', 'navigation', 'dashboard', 'orders', 'products', 'users', 'settings', 'profile', 'analytics'],
+    // Namespace configuration - each namespace maps to a ui_* category in the database
+    ns: ['common', 'navigation', 'dashboard', 'orders', 'products', 'users', 'settings', 'profile', 'analytics', 'blog', 'delivery', 'loyalty', 'login'],
     defaultNS: 'common',
 
     // Interpolation

@@ -151,7 +151,7 @@ class ExportUtils {
         'Order Number': order.order_number,
         'Customer': order.customer_name,
         'Email': order.customer_email,
-        'Total Amount': `$${order.total_amount?.toFixed(2)}`,
+        'Total Amount': `${order.total_amount?.toFixed(2)} UZS`,
         'Status': order.status,
         'Payment Status': order.payment_status,
         'Order Date': new Date(order.created_at).toLocaleDateString(),
@@ -182,7 +182,7 @@ class ExportUtils {
         'SKU': product.sku,
         'Product Name': product.name,
         'Category': product.category,
-        'Price': `$${product.price?.toFixed(2)}`,
+        'Price': `${product.price?.toFixed(2)} UZS`,
         'Stock': product.stock_quantity,
         'Status': product.status,
         'Created': new Date(product.created_at).toLocaleDateString(),
@@ -247,7 +247,7 @@ class ExportUtils {
         'Points per Dollar': program.points_per_dollar,
         'Active Members': program.active_members,
         'Status': program.status,
-        'Min Purchase': `$${program.min_purchase_amount?.toFixed(2) || '0.00'}`,
+        'Min Purchase': `${program.min_purchase_amount?.toFixed(2) || '0.00'} UZS`,
         'Expiry (Months)': program.expiry_months || 'Never',
         'Created': new Date(program.created_at).toLocaleDateString()
       }));

@@ -46,7 +46,7 @@ class Payment(db.Model, TimestampMixin):
     failure_reason = Column(String(500), nullable=True)
     
     user = relationship('User', back_populates='payments')
-    order = relationship('Order', back_populates='payments')
+    order = relationship('Order', back_populates='payment')
     subscription = relationship('Subscription', back_populates='payments')
     
     def __init__(self, **kwargs):

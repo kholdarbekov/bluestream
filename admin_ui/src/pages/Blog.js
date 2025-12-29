@@ -50,7 +50,8 @@ const { TabPane } = Tabs;
 const TINYMCE_API_KEY = process.env.REACT_APP_TINYMCE_API_KEY || 'no-api-key';
 
 const Blog = () => {
-  const { t } = useTranslation();
+  // Load blog namespace for ui.blog.* keys
+  const { t } = useTranslation('blog');
   const [searchText, setSearchText] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');

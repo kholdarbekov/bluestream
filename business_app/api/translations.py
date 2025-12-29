@@ -42,7 +42,11 @@ def get_translations(language, namespace):
             'users': 'ui_users',
             'settings': 'ui_settings',
             'profile': 'ui_profile',
-            'analytics': 'ui_analytics'
+            'analytics': 'ui_analytics',
+            'blog': 'ui_blog',
+            'delivery': 'ui_delivery',
+            'loyalty': 'ui_loyalty',
+            'login': 'ui_login'
         }
 
         category = namespace_mapping.get(namespace, f'ui_{namespace}')

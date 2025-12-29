@@ -359,8 +359,8 @@ def serialize_order(order: Order, include_items=False, include_delivery=False, i
         if include_delivery and hasattr(order, 'delivery') and order.delivery:
             order_data['delivery_info'] = serialize_order_delivery(order.delivery)
         
-        if include_payment and hasattr(order, 'payments') and order.payments:
-            order_data['payment_info'] = [serialize_order_payment(payment) for payment in order.payments]
+        if include_payment and hasattr(order, 'payment') and order.payment:
+            order_data['payment_info'] = serialize_order_payment(order.payment)
         
         return order_data
         

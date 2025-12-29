@@ -39,7 +39,8 @@ const { Option } = Select;
 const { RangePicker } = DatePicker;
 
 const Analytics = () => {
-  const { t } = useTranslation();
+  // Load analytics namespace for ui.analytics.* keys
+  const { t } = useTranslation('analytics');
   const [activeTab, setActiveTab] = useState('overview');
   const [dateRange, setDateRange] = useState([
     moment().subtract(30, 'days'),
@@ -203,7 +204,7 @@ const Analytics = () => {
       dataIndex: 'total_spent',
       key: 'total_spent',
       width: 120,
-      render: (amount) => `$${amount?.toFixed(2) || '0.00'}`
+      render: (amount) => `${amount?.toFixed(2) || '0.00'} UZS`
     }
   ];
 

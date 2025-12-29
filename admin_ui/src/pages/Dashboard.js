@@ -22,7 +22,8 @@ const { RangePicker } = DatePicker;
 const { Option } = Select;
 
 const Dashboard = () => {
-  const { t } = useTranslation();
+  // Load dashboard namespace for ui.dashboard.* keys
+  const { t } = useTranslation('dashboard');
   const [dateRange, setDateRange] = useState([
     moment().subtract(30, 'days'),
     moment()
@@ -224,7 +225,7 @@ const Dashboard = () => {
             icon={<DollarOutlined />}
             color="#faad14"
             trend="up"
-            trendValue={`$${dashboard.orders?.revenue_today || 0} ${t('ui.dashboard.today')}`}
+            trendValue={`${dashboard.orders?.revenue_today || 0} UZS ${t('ui.dashboard.today')}`}
             loading={isLoading}
           />
         </Col>

@@ -97,7 +97,7 @@
                             </form>
                             
                             <div class="other-option centred">
-                                <p>{{ 'Already have an account?'|t }} <a href="{{ url_for('frontend.login') }}">{{ 'Login Here'|t }}</a></p>
+                                <p>{{ 'Already have an account?'|t }} <a href="{{ url_for('frontend.login') }}{% if request.args.get('next') %}?next={{ request.args.get('next') | urlencode }}{% endif %}">{{ 'Login Here'|t }}</a></p>
                             </div>
                         </div>
                     </div>

@@ -343,7 +343,7 @@ def get_admin_dashboard():
 
         payment_method_chart = [
             {
-                'label': method,
+                'label': method.value if hasattr(method, 'value') else str(method),
                 'count': count,
                 'total': float(total or 0)
             }

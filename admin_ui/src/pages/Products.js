@@ -40,7 +40,8 @@ const { Option } = Select;
 const { TextArea } = Input;
 
 const Products = () => {
-  const { t } = useTranslation();
+  // Load products namespace for ui.products.* keys
+  const { t } = useTranslation('products');
   const [searchText, setSearchText] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');

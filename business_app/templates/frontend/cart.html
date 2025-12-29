@@ -553,19 +553,8 @@ function checkAuthentication() {
     isAuthenticated = !!token;
 }
 
-// API request helper
-async function apiRequest(endpoint, options = {}) {
-    const token = localStorage.getItem('access_token');
-    const headers = {
-        'Content-Type': 'application/json',
-        ...(token && { 'Authorization': `Bearer ${token}` })
-    };
-
-    return fetch(`${API_BASE}${endpoint}`, {
-        ...options,
-        headers: { ...headers, ...options.headers }
-    });
-}
+// API request helper - uses cookies for auth, delegates to base apiRequest for consistency
+// Note: This page uses the base.html apiRequest which handles 401 redirects properly
 
 // Sync cart from localStorage to database
 async function syncCartToDatabase() {

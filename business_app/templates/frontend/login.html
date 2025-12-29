@@ -50,7 +50,7 @@
                             </form>
                             
                             <div class="other-option centred">
-                                <p>{{ "Don't have an account?"|t }} <a href="{{ url_for('frontend.register') }}">{{ 'Register Here'|t }}</a></p>
+                                <p>{{ "Don't have an account?"|t }} <a href="{{ url_for('frontend.register') }}{% if request.args.get('next') %}?next={{ request.args.get('next') | urlencode }}{% endif %}">{{ 'Register Here'|t }}</a></p>
                                 <p><a href="{{ url_for('frontend.forgot_password') }}">{{ 'Forgot Password?'|t }}</a></p>
                             </div>
                         </div>
@@ -65,26 +65,35 @@
 <script>
 document.getElementById('loginForm').addEventListener('submit', async function(e) {
     e.preventDefault();
-    
+
     const formData = new FormData(this);
     const data = {
         identifier: formData.get('identifier'),
         password: formData.get('password'),
         remember_me: formData.get('remember_me') === 'on'
     };
-    
+
     try {
         const response = await apiRequest('/auth/login', {
             method: 'POST',
             body: JSON.stringify(data)
         });
-        
+
         const result = await response.json();
-        
+
         if (response.ok) {
             setAuthToken(result.access_token);
             showNotification('{{ "Login successful!"|t }}', 'success');
-            window.location.href = '{{ url_for("frontend.my_account") }}';
+
+            // Check for redirect URL in query parameters
+            const urlParams = new URLSearchParams(window.location.search);
+            const nextUrl = urlParams.get('next');
+
+            if (nextUrl && isValidRedirectUrl(nextUrl)) {
+                window.location.href = nextUrl;
+            } else {
+                window.location.href = '{{ url_for("frontend.my_account") }}';
+            }
         } else {
             showNotification(result.message || '{{ "Login failed"|t }}', 'error');
         }
@@ -92,5 +101,25 @@ document.getElementById('loginForm').addEventListener('submit', async function(e
         showNotification('{{ "Network error. Please try again."|t }}', 'error');
     }
 });
+
+// Validate redirect URL to prevent open redirect vulnerabilities
+function isValidRedirectUrl(url) {
+    // Only allow relative URLs (starting with /) to prevent open redirect attacks
+    if (!url || typeof url !== 'string') {
+        return false;
+    }
+
+    // Must start with / but not // (to prevent protocol-relative URLs)
+    if (!url.startsWith('/') || url.startsWith('//')) {
+        return false;
+    }
+
+    // Don't allow URLs with protocol schemes
+    if (url.includes('://')) {
+        return false;
+    }
+
+    return true;
+}
 </script>
 {% endblock %}

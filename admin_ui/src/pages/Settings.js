@@ -6,7 +6,8 @@ import { useTranslation } from 'react-i18next';
 const { Title, Paragraph } = Typography;
 
 const Settings = () => {
-  const { t } = useTranslation();
+  // Load settings namespace for ui.settings.* keys
+  const { t } = useTranslation('settings');
 
   return (
     <Card>

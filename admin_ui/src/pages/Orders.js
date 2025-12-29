@@ -37,7 +37,8 @@ const { Option } = Select;
 const { RangePicker } = DatePicker;
 
 const Orders = () => {
-  const { t } = useTranslation();
+  // Load orders namespace for ui.orders.* keys
+  const { t } = useTranslation('orders');
   const [searchText, setSearchText] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [dateRange, setDateRange] = useState(null);

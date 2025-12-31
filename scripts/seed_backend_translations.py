@@ -407,6 +407,268 @@ BACKEND_TRANSLATIONS = {
         'uz': 'Iltimos, kuting',
         'ru': 'Пожалуйста, подождите'
     },
+
+    # ============================================================================
+    # Cart and Checkout (cart.*, checkout.*)
+    # ============================================================================
+    'Delivery fee will be calculated at checkout': {
+        'en': 'Delivery fee will be calculated at checkout',
+        'uz': 'Yetkazib berish narxi to\'lov sahifasida hisoblanadi',
+        'ru': 'Стоимость доставки будет рассчитана при оформлении заказа'
+    },
+    'Select address': {
+        'en': 'Select address',
+        'uz': 'Manzilni tanlang',
+        'ru': 'Выберите адрес'
+    },
+    'Calculating...': {
+        'en': 'Calculating...',
+        'uz': 'Hisoblanmoqda...',
+        'ru': 'Расчёт...'
+    },
+
+    # ============================================================================
+    # Payme Card Verification (checkout.payme.*)
+    # ============================================================================
+    'Card Verification': {
+        'en': 'Card Verification',
+        'uz': 'Kartani tasdiqlash',
+        'ru': 'Подтверждение карты'
+    },
+    'We sent a verification code to': {
+        'en': 'We sent a verification code to',
+        'uz': 'Tasdiqlash kodini yubordik',
+        'ru': 'Мы отправили код подтверждения на'
+    },
+    'Enter verification code': {
+        'en': 'Enter verification code',
+        'uz': 'Tasdiqlash kodini kiriting',
+        'ru': 'Введите код подтверждения'
+    },
+    'Code expires in': {
+        'en': 'Code expires in',
+        'uz': 'Kod amal qilish muddati',
+        'ru': 'Срок действия кода'
+    },
+    'Code expired.': {
+        'en': 'Code expired.',
+        'uz': 'Kod muddati tugadi.',
+        'ru': 'Срок действия кода истек.'
+    },
+    'Request new code': {
+        'en': 'Request new code',
+        'uz': 'Yangi kod so\'rash',
+        'ru': 'Запросить новый код'
+    },
+    'Resend code': {
+        'en': 'Resend code',
+        'uz': 'Kodni qayta yuborish',
+        'ru': 'Отправить код повторно'
+    },
+    'Sending...': {
+        'en': 'Sending...',
+        'uz': 'Yuborilmoqda...',
+        'ru': 'Отправка...'
+    },
+    'Verify': {
+        'en': 'Verify',
+        'uz': 'Tasdiqlash',
+        'ru': 'Подтвердить'
+    },
+    'Verifying...': {
+        'en': 'Verifying...',
+        'uz': 'Tasdiqlanmoqda...',
+        'ru': 'Проверка...'
+    },
+    'attempts remaining': {
+        'en': 'attempts remaining',
+        'uz': 'urinishlar qoldi',
+        'ru': 'попыток осталось'
+    },
+    'New code sent': {
+        'en': 'New code sent',
+        'uz': 'Yangi kod yuborildi',
+        'ru': 'Новый код отправлен'
+    },
+    'Failed to resend code': {
+        'en': 'Failed to resend code',
+        'uz': 'Kodni qayta yuborishda xatolik',
+        'ru': 'Не удалось отправить код повторно'
+    },
+    'Please enter the verification code': {
+        'en': 'Please enter the verification code',
+        'uz': 'Iltimos, tasdiqlash kodini kiriting',
+        'ru': 'Пожалуйста, введите код подтверждения'
+    },
+    'Too many failed attempts. Please request a new code.': {
+        'en': 'Too many failed attempts. Please request a new code.',
+        'uz': 'Juda ko\'p noto\'g\'ri urinishlar. Iltimos, yangi kod so\'rang.',
+        'ru': 'Слишком много неудачных попыток. Пожалуйста, запросите новый код.'
+    },
+    'Invalid verification code': {
+        'en': 'Invalid verification code',
+        'uz': 'Noto\'g\'ri tasdiqlash kodi',
+        'ru': 'Неверный код подтверждения'
+    },
+    'Verification failed. Please try again.': {
+        'en': 'Verification failed. Please try again.',
+        'uz': 'Tasdiqlash muvaffaqiyatsiz. Iltimos, qaytadan urinib ko\'ring.',
+        'ru': 'Проверка не удалась. Пожалуйста, попробуйте снова.'
+    },
+    'Processing payment...': {
+        'en': 'Processing payment...',
+        'uz': 'To\'lov amalga oshirilmoqda...',
+        'ru': 'Обработка платежа...'
+    },
+    'Please do not close this window': {
+        'en': 'Please do not close this window',
+        'uz': 'Iltimos, bu oynani yopmang',
+        'ru': 'Пожалуйста, не закрывайте это окно'
+    },
+    'Payment failed. Please try again.': {
+        'en': 'Payment failed. Please try again.',
+        'uz': 'To\'lov muvaffaqiyatsiz. Iltimos, qaytadan urinib ko\'ring.',
+        'ru': 'Платеж не удался. Пожалуйста, попробуйте снова.'
+    },
+    'Invalid card number': {
+        'en': 'Invalid card number',
+        'uz': 'Noto\'g\'ri karta raqami',
+        'ru': 'Неверный номер карты'
+    },
+    'Invalid expiry date': {
+        'en': 'Invalid expiry date',
+        'uz': 'Noto\'g\'ri amal qilish muddati',
+        'ru': 'Неверный срок действия'
+    },
+    'Cardholder name required': {
+        'en': 'Cardholder name required',
+        'uz': 'Karta egasining ismi talab qilinadi',
+        'ru': 'Требуется имя владельца карты'
+    },
+    'Failed to process card': {
+        'en': 'Failed to process card',
+        'uz': 'Kartani qayta ishlashda xatolik',
+        'ru': 'Не удалось обработать карту'
+    },
+    'Failed to create order': {
+        'en': 'Failed to create order',
+        'uz': 'Buyurtma yaratishda xatolik',
+        'ru': 'Не удалось создать заказ'
+    },
+    'Failed to place order': {
+        'en': 'Failed to place order',
+        'uz': 'Buyurtma berishda xatolik',
+        'ru': 'Не удалось оформить заказ'
+    },
+
+    # ============================================================================
+    # Telegram Address Flow (telegram.address.*)
+    # ============================================================================
+    'telegram.address.location_prompt_enhanced': {
+        'en': '📍 *Add New Address*\n\nPlease share your location for accurate delivery, or enter your address manually.\n\nSharing location is recommended for precise delivery.',
+        'uz': '📍 *Yangi manzil qo\'shish*\n\nAniq yetkazib berish uchun joylashuvingizni ulashing yoki manzilni qo\'lda kiriting.\n\nAniq yetkazib berish uchun joylashuvni ulashish tavsiya etiladi.',
+        'ru': '📍 *Добавить новый адрес*\n\nПоделитесь своим местоположением для точной доставки или введите адрес вручную.\n\nРекомендуется поделиться местоположением для точной доставки.'
+    },
+    'telegram.address.share_location_button': {
+        'en': '📍 Share Location',
+        'uz': '📍 Joylashuvni ulashish',
+        'ru': '📍 Поделиться местоположением'
+    },
+    'telegram.address.enter_manually_button': {
+        'en': '✏️ Enter Manually',
+        'uz': '✏️ Qo\'lda kiritish',
+        'ru': '✏️ Ввести вручную'
+    },
+    'telegram.address.select_region': {
+        'en': 'Please select your region:',
+        'uz': 'Iltimos, viloyatingizni tanlang:',
+        'ru': 'Пожалуйста, выберите ваш регион:'
+    },
+    'telegram.address.select_district': {
+        'en': 'Please select your district:',
+        'uz': 'Iltimos, tumaningizni tanlang:',
+        'ru': 'Пожалуйста, выберите ваш район:'
+    },
+    'telegram.address.enter_street': {
+        'en': 'Please enter your street name, or skip if you don\'t want to specify:',
+        'uz': 'Iltimos, ko\'changiz nomini kiriting yoki o\'tkazib yuboring:',
+        'ru': 'Пожалуйста, введите название улицы или пропустите:'
+    },
+    'telegram.address.enter_building': {
+        'en': 'Please enter your building/house number, or skip:',
+        'uz': 'Iltimos, bino/uy raqamini kiriting yoki o\'tkazib yuboring:',
+        'ru': 'Пожалуйста, введите номер дома или пропустите:'
+    },
+    'telegram.address.enter_apartment': {
+        'en': 'Please enter your apartment number, or skip:',
+        'uz': 'Iltimos, kvartira raqamini kiriting yoki o\'tkazib yuboring:',
+        'ru': 'Пожалуйста, введите номер квартиры или пропустите:'
+    },
+    'telegram.address.enter_floor': {
+        'en': 'Please enter your floor number, or skip:',
+        'uz': 'Iltimos, qavat raqamini kiriting yoki o\'tkazib yuboring:',
+        'ru': 'Пожалуйста, введите номер этажа или пропустите:'
+    },
+    'telegram.address.enter_entrance': {
+        'en': 'Please enter your entrance/podyezd number, or skip:',
+        'uz': 'Iltimos, kirish/podyezd raqamini kiriting yoki o\'tkazib yuboring:',
+        'ru': 'Пожалуйста, введите номер подъезда или пропустите:'
+    },
+    'telegram.address.enter_delivery_instructions': {
+        'en': 'Any special delivery instructions?\n(e.g., door code, call before arriving, preferred delivery times)\n\nOr skip if none:',
+        'uz': 'Yetkazib berish bo\'yicha maxsus ko\'rsatmalar bormi?\n(masalan, eshik kodi, kelishdan oldin qo\'ng\'iroq qiling)\n\nYoki o\'tkazib yuboring:',
+        'ru': 'Есть особые инструкции по доставке?\n(например, код домофона, позвонить перед приездом)\n\nИли пропустите:'
+    },
+    'telegram.address.skip_field': {
+        'en': '⏭️ Skip',
+        'uz': '⏭️ O\'tkazib yuborish',
+        'ru': '⏭️ Пропустить'
+    },
+    'telegram.address.skip_instructions': {
+        'en': '⏭️ Skip (No special instructions)',
+        'uz': '⏭️ O\'tkazib yuborish (maxsus ko\'rsatmalar yo\'q)',
+        'ru': '⏭️ Пропустить (без особых инструкций)'
+    },
+    'telegram.address.geocode_found': {
+        'en': '📍 *Location Found*\n\nIs this location correct?',
+        'uz': '📍 *Joylashuv topildi*\n\nBu joylashuv to\'g\'rimi?',
+        'ru': '📍 *Местоположение найдено*\n\nЭто местоположение правильное?'
+    },
+    'telegram.address.geocode_failed': {
+        'en': '⚠️ Could not find exact location. Using approximate district center.',
+        'uz': '⚠️ Aniq joylashuvni topib bo\'lmadi. Taxminiy tuman markazi ishlatilmoqda.',
+        'ru': '⚠️ Не удалось найти точное местоположение. Используется приблизительный центр района.'
+    },
+    'telegram.address.location_correct': {
+        'en': '✅ Yes, Correct',
+        'uz': '✅ Ha, to\'g\'ri',
+        'ru': '✅ Да, верно'
+    },
+    'telegram.address.location_wrong': {
+        'en': '❌ No, Re-enter',
+        'uz': '❌ Yo\'q, qayta kiriting',
+        'ru': '❌ Нет, ввести заново'
+    },
+    'telegram.address.edit_details': {
+        'en': '✏️ Edit Details',
+        'uz': '✏️ Ma\'lumotlarni tahrirlash',
+        'ru': '✏️ Редактировать данные'
+    },
+    'telegram.address.title_prompt': {
+        'en': 'Great! Now give this address a name.\n\nYou can choose from the suggestions below or type your own:',
+        'uz': 'Ajoyib! Endi bu manzilga nom bering.\n\nQuyidagi variantlardan tanlashingiz yoki o\'zingiz yozishingiz mumkin:',
+        'ru': 'Отлично! Теперь дайте этому адресу название.\n\nВы можете выбрать из предложенных вариантов или ввести свое:'
+    },
+    'telegram.address.saved_successfully': {
+        'en': '✅ Address saved successfully!',
+        'uz': '✅ Manzil muvaffaqiyatli saqlandi!',
+        'ru': '✅ Адрес успешно сохранен!'
+    },
+    'telegram.address.save_failed': {
+        'en': '❌ Failed to save address. Please try again.',
+        'uz': '❌ Manzilni saqlashda xatolik. Iltimos, qaytadan urinib ko\'ring.',
+        'ru': '❌ Не удалось сохранить адрес. Пожалуйста, попробуйте снова.'
+    },
 }
 
 

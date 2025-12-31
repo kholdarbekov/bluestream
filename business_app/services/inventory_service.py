@@ -343,10 +343,10 @@ class InventoryService:
     def confirm_reservations(self, order_id: int) -> Dict[str, Any]:
         """
         Confirm reservations by actually reducing stock quantities
-        
+
         Args:
             order_id: Order ID to confirm reservations for
-            
+
         Returns:
             Dictionary with confirmation details
         """
@@ -354,134 +354,138 @@ class InventoryService:
             order = Order.query.get(order_id)
             if not order:
                 raise NotFoundError(f"Order {order_id} not found")
-            
+
             confirmed_items = []
-            
-            # Use database-level locking to prevent race conditions
-            with db.session.begin():
-                for item in order.items:
-                    # Lock the product row for update
-                    product = db.session.query(Product).with_for_update().filter_by(id=item.product_id).first()
-                    
-                    if not product:
-                        logger.error(f"Product {item.product_id} not found during confirmation")
-                        continue
-                    
-                    old_stock = product.stock_quantity
-                    
-                    # Reduce stock
-                    if product.stock_quantity is not None:
-                        new_stock = max(0, product.stock_quantity - item.quantity)
-                        product.stock_quantity = new_stock
-                        product.updated_at = datetime.now(timezone.utc)
-                        
-                        # Update stock status
-                        if new_stock == 0:
-                            product.is_in_stock = False
-                        
-                        confirmed_items.append({
-                            'product_id': product.id,
-                            'product_name': product.name,
-                            'quantity_reduced': item.quantity,
-                            'old_stock': old_stock,
-                            'new_stock': new_stock
-                        })
-                        
-                        # Log inventory reduction
-                        audit_logger.log_event(
-                            event_type=AuditEventType.INVENTORY_UPDATED,
-                            action="inventory_confirmed_and_reduced",
-                            severity=AuditSeverity.HIGH,
-                            resource_type="product_inventory",
-                            resource_id=str(product.id),
-                            description=f"Confirmed reservation and reduced stock for order {order_id}",
-                            old_values={'stock_quantity': old_stock},
-                            new_values={'stock_quantity': new_stock},
-                            additional_data={
-                                'order_id': order_id,
-                                'quantity_reduced': item.quantity,
-                                'product_name': product.name
-                            }
-                        )
-                        
-                        # Check for low stock
-                        if product.min_stock_level and new_stock <= product.min_stock_level:
-                            self._send_low_stock_alert(product)
-            
-            # Release Redis reservations
+
+            # Process inventory updates without explicit transaction management
+            # The calling code (payment processing) manages the transaction
+            for item in order.order_items:
+                # Lock the product row for update
+                product = db.session.query(Product).with_for_update().filter_by(id=item.product_id).first()
+
+                if not product:
+                    logger.error(f"Product {item.product_id} not found during confirmation")
+                    continue
+
+                old_stock = product.stock_quantity
+
+                # Reduce stock
+                if product.stock_quantity is not None:
+                    new_stock = max(0, product.stock_quantity - item.quantity)
+                    product.stock_quantity = new_stock
+                    product.updated_at = datetime.now(timezone.utc)
+
+                    # Update stock status
+                    if new_stock == 0:
+                        product.is_in_stock = False
+
+                    confirmed_items.append({
+                        'product_id': product.id,
+                        'product_name': product.name,
+                        'quantity_reduced': item.quantity,
+                        'old_stock': old_stock,
+                        'new_stock': new_stock
+                    })
+
+                    # Check for low stock
+                    if product.min_stock_level and new_stock <= product.min_stock_level:
+                        self._send_low_stock_alert(product)
+
+            # Release Redis reservations (this doesn't affect DB transaction)
             self.release_reservations(order_id)
-            
+
             logger.info(f"Confirmed inventory for order {order_id}: {len(confirmed_items)} items")
+
+            # Log inventory confirmation after all items processed
+            # Note: audit_logger.log_event does its own commit, so we call it outside the main flow
+            for item_info in confirmed_items:
+                audit_logger.log_event(
+                    event_type=AuditEventType.INVENTORY_UPDATED,
+                    action="inventory_confirmed_and_reduced",
+                    severity=AuditSeverity.HIGH,
+                    resource_type="product_inventory",
+                    resource_id=str(item_info['product_id']),
+                    description=f"Confirmed reservation and reduced stock for order {order_id}",
+                    old_values={'stock_quantity': item_info['old_stock']},
+                    new_values={'stock_quantity': item_info['new_stock']},
+                    additional_data={
+                        'order_id': order_id,
+                        'quantity_reduced': item_info['quantity_reduced'],
+                        'product_name': item_info['product_name']
+                    }
+                )
+
             return {
                 'success': True,
                 'confirmed_items': confirmed_items
             }
-            
+
         except Exception as e:
-            db.session.rollback()
             logger.error(f"Failed to confirm inventory for order {order_id}: {e}")
             return {
                 'success': False,
                 'reason': f'Confirmation failed: {str(e)}'
             }
     
-    def adjust_inventory(self, product_id: int, quantity_change: int, 
-                        operation_type: InventoryOperationType, 
+    def adjust_inventory(self, product_id: int, quantity_change: int,
+                        operation_type: InventoryOperationType,
                         reason: str, user_id: Optional[int] = None) -> Dict[str, Any]:
         """
         Manually adjust inventory levels
-        
+
         Args:
             product_id: Product ID
             quantity_change: Change in quantity (positive for increase, negative for decrease)
             operation_type: Type of operation
             reason: Reason for adjustment
             user_id: User making the adjustment
-            
+
         Returns:
             Dictionary with adjustment details
         """
         try:
-            with db.session.begin():
-                product = db.session.query(Product).with_for_update().filter_by(id=product_id).first()
-                
-                if not product:
-                    raise NotFoundError(f"Product {product_id} not found")
-                
-                old_stock = product.stock_quantity or 0
-                new_stock = max(0, old_stock + quantity_change)
-                
-                product.stock_quantity = new_stock
-                product.updated_at = datetime.now(timezone.utc)
-                product.is_in_stock = new_stock > 0
-                
-                # Log adjustment
-                audit_logger.log_event(
-                    event_type=AuditEventType.INVENTORY_UPDATED,
-                    action=f"inventory_{operation_type.value}",
-                    severity=AuditSeverity.HIGH,
-                    resource_type="product_inventory",
-                    resource_id=str(product_id),
-                    description=f"Manual inventory adjustment: {reason}",
-                    old_values={'stock_quantity': old_stock},
-                    new_values={'stock_quantity': new_stock},
-                    additional_data={
-                        'quantity_change': quantity_change,
-                        'operation_type': operation_type.value,
-                        'reason': reason,
-                        'adjusted_by_user_id': user_id
-                    }
-                )
-                
-                logger.info(f"Adjusted inventory for product {product_id}: {old_stock} → {new_stock} ({reason})")
-                return {
-                    'success': True,
-                    'product_id': product_id,
-                    'old_stock': old_stock,
-                    'new_stock': new_stock,
-                    'quantity_change': quantity_change
+            product = db.session.query(Product).with_for_update().filter_by(id=product_id).first()
+
+            if not product:
+                raise NotFoundError(f"Product {product_id} not found")
+
+            old_stock = product.stock_quantity or 0
+            new_stock = max(0, old_stock + quantity_change)
+
+            product.stock_quantity = new_stock
+            product.updated_at = datetime.now(timezone.utc)
+            product.is_in_stock = new_stock > 0
+
+            # Commit the inventory change
+            db.session.commit()
+
+            # Log adjustment after commit (audit logger does its own commit)
+            audit_logger.log_event(
+                event_type=AuditEventType.INVENTORY_UPDATED,
+                action=f"inventory_{operation_type.value}",
+                severity=AuditSeverity.HIGH,
+                resource_type="product_inventory",
+                resource_id=str(product_id),
+                description=f"Manual inventory adjustment: {reason}",
+                old_values={'stock_quantity': old_stock},
+                new_values={'stock_quantity': new_stock},
+                additional_data={
+                    'quantity_change': quantity_change,
+                    'operation_type': operation_type.value,
+                    'reason': reason,
+                    'adjusted_by_user_id': user_id
                 }
-                
+            )
+
+            logger.info(f"Adjusted inventory for product {product_id}: {old_stock} → {new_stock} ({reason})")
+            return {
+                'success': True,
+                'product_id': product_id,
+                'old_stock': old_stock,
+                'new_stock': new_stock,
+                'quantity_change': quantity_change
+            }
+
         except Exception as e:
             db.session.rollback()
             logger.error(f"Failed to adjust inventory for product {product_id}: {e}")

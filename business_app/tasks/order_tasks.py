@@ -15,7 +15,7 @@ from business_app.models.product import Product
 from business_app.services.order_service import OrderService
 from business_app.services.notification_service import NotificationService
 from business_app.services.analytics_service import AnalyticsService
-from business_app.utils.constants import OrderStatus, UserRole
+from business_app.utils.constants import OrderStatus, PaymentStatus, UserRole
 from business_app.utils.helpers import get_current_language
 from business_app import db
 
@@ -78,7 +78,7 @@ def auto_confirm_pending_orders():
         for order in pending_orders:
             try:
                 # Check if payment is completed or cash on delivery
-                if (order.payment and order.payment.status == 'completed') or \
+                if (order.payment and order.payment.status == PaymentStatus.COMPLETED) or \
                    (order.payment and order.payment.method.value == 'cash'):
                     
                     order_service.update_order_status(
@@ -187,7 +187,7 @@ def update_inventory_after_order(self, order_id: int):
         
         inventory_updates = []
         
-        for item in order.items:
+        for item in order.order_items:
             try:
                 product = item.product
                 if product and product.stock_quantity is not None:
@@ -448,7 +448,7 @@ def send_order_followup(self, order_id: int, days_after_delivery: int = 3):
             'order_number': order.order_number,
             'delivery_date': order.delivered_at.strftime('%B %d, %Y'),
             'customer_name': order.user.first_name,
-            'total_items': len(order.items),
+            'total_items': len(order.order_items),
             'feedback_url': feedback_url,
             'reorder_url': reorder_url,
             'company_name': current_app.config['COMPANY_NAME']
@@ -613,7 +613,7 @@ def validate_order_integrity(self, order_id: int):
         fixes_applied = []
         
         # Check if order total matches sum of items
-        calculated_total = sum(item.total_price for item in order.items)
+        calculated_total = sum(item.total_price for item in order.order_items)
         if abs(calculated_total - order.subtotal) > 1:  # Allow 1 UZS difference for rounding
             issues_found.append(f"Subtotal mismatch: calculated {calculated_total}, stored {order.subtotal}")
             order.subtotal = calculated_total
@@ -627,7 +627,7 @@ def validate_order_integrity(self, order_id: int):
             fixes_applied.append("Fixed total amount calculation")
         
         # Check for orphaned order items
-        for item in order.items:
+        for item in order.order_items:
             if not item.product:
                 issues_found.append(f"Order item {item.id} references non-existent product {item.product_id}")
                 # Could mark item for removal or set a default product
@@ -708,7 +708,7 @@ def monitor_order_anomalies():
         
         # Check for orders with no items
         for order in recent_orders:
-            if len(order.items) == 0:
+            if len(order.order_items) == 0:
                 anomalies.append({
                     'type': 'empty_order',
                     'description': f"Order {order.order_number} has no items",

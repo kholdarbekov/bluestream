@@ -288,7 +288,7 @@ const Orders = () => {
               value={totalRevenue}
               precision={2}
               prefix={<DollarOutlined />}
-              suffix="USD"
+              suffix="UZS"
             />
           </Card>
         </Col>

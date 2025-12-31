@@ -59,6 +59,9 @@ COPY telegram_bot/ ./telegram_bot/
 # Set work directory to telegram_bot for module imports
 WORKDIR /app/telegram_bot
 
+# Add /app to Python path so shared module can be imported
+ENV PYTHONPATH="/app:${PYTHONPATH}"
+
 # Start command
 CMD ["python", "bot.py"]
 

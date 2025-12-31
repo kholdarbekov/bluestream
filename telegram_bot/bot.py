@@ -283,23 +283,80 @@ class WaterBusinessBot:
         )
         self.application.add_handler(registration_handler, group=-2)
         
-        # Address input conversation
+        # Address input conversation - Enhanced flow with manual entry support
         address_handler = ConversationHandler(
             entry_points=[CallbackQueryHandler(profile_handlers.add_address, pattern="^add_new_address$")],
             states={
+                # Location sharing or manual entry choice
                 profile_handlers.ADDRESS_LOCATION: [
                     MessageHandler(filters.LOCATION, profile_handlers.location_received),
-                    MessageHandler(filters.TEXT, profile_handlers.address_text_received)
+                    # Handle "Enter Manually" text button
+                    MessageHandler(
+                        filters.TEXT & filters.Regex(r"(?i).*(manual|enter manually|✏️).*"),
+                        profile_handlers.skip_location_sharing
+                    ),
                 ],
+                # Address title input
                 profile_handlers.ADDRESS_TITLE: [
+                    CallbackQueryHandler(profile_handlers.address_title_callback, pattern="^addr_title_"),
                     MessageHandler(filters.TEXT & ~filters.COMMAND, profile_handlers.address_title_received)
                 ],
+                # Manual entry flow - Region selection
+                profile_handlers.ADDRESS_REGION: [
+                    CallbackQueryHandler(profile_handlers.region_selected, pattern="^region_"),
+                    CallbackQueryHandler(profile_handlers.cancel_address, pattern="^cancel_address_creation$"),
+                ],
+                # Manual entry flow - District selection
+                profile_handlers.ADDRESS_DISTRICT: [
+                    CallbackQueryHandler(profile_handlers.district_selected, pattern="^district_"),
+                    CallbackQueryHandler(profile_handlers.cancel_address, pattern="^cancel_address_creation$"),
+                    CallbackQueryHandler(profile_handlers.region_selected, pattern="^back_to_region$"),
+                ],
+                # Manual entry flow - Street input
+                profile_handlers.ADDRESS_STREET: [
+                    CallbackQueryHandler(profile_handlers.skip_field_handler, pattern="^skip_street$"),
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, profile_handlers.street_received),
+                ],
+                # Manual entry flow - Building input
+                profile_handlers.ADDRESS_BUILDING: [
+                    CallbackQueryHandler(profile_handlers.skip_field_handler, pattern="^skip_building$"),
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, profile_handlers.building_received),
+                ],
+                # Manual entry flow - Apartment input
+                profile_handlers.ADDRESS_APARTMENT: [
+                    CallbackQueryHandler(profile_handlers.skip_field_handler, pattern="^skip_apartment$"),
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, profile_handlers.apartment_received),
+                ],
+                # Manual entry flow - Floor input
+                profile_handlers.ADDRESS_FLOOR: [
+                    CallbackQueryHandler(profile_handlers.skip_field_handler, pattern="^skip_floor$"),
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, profile_handlers.floor_received),
+                ],
+                # Manual entry flow - Entrance input
+                profile_handlers.ADDRESS_ENTRANCE: [
+                    CallbackQueryHandler(profile_handlers.skip_field_handler, pattern="^skip_entrance$"),
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, profile_handlers.entrance_received),
+                ],
+                # Delivery instructions input
+                profile_handlers.ADDRESS_DELIVERY_INSTRUCTIONS: [
+                    CallbackQueryHandler(profile_handlers.skip_field_handler, pattern="^skip_delivery_instructions$"),
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, profile_handlers.delivery_instructions_received),
+                ],
+                # Geocode confirmation
+                profile_handlers.ADDRESS_GEOCODE_CONFIRM: [
+                    CallbackQueryHandler(profile_handlers.confirm_geocode, pattern="^confirm_geocode$"),
+                    CallbackQueryHandler(profile_handlers.retry_geocode, pattern="^retry_geocode$"),
+                    CallbackQueryHandler(profile_handlers.cancel_address, pattern="^cancel_address_creation$"),
+                ],
             },
-            fallbacks=[CommandHandler("cancel", profile_handlers.cancel_address)],
+            fallbacks=[
+                CommandHandler("cancel", profile_handlers.cancel_address),
+                CallbackQueryHandler(profile_handlers.cancel_address, pattern="^cancel_address_creation$"),
+            ],
             per_chat=True,
             per_user=True,
             name="address_conversation",
-            conversation_timeout=300,  # 5 minutes timeout
+            conversation_timeout=600,  # 10 minutes timeout for manual entry
             allow_reentry=True
         )
         # Add conversation handler in higher priority group

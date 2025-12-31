@@ -89,14 +89,6 @@
                             <!-- Addresses List -->
                             <div class="addresses-list" id="addressesList">
                                 <!-- This will be populated by JavaScript -->
-                                <div class="text-center py-5" id="noAddressesMessage">
-                                    <i class="far fa-map-marker-alt" style="font-size: 4rem; color: #ccc;"></i>
-                                    <h4 class="mt-3">{{ 'No addresses saved yet'|t }}</h4>
-                                    <p class="text-muted">{{ 'Add your delivery addresses to make ordering easier'|t }}</p>
-                                    <button class="btn btn-primary" onclick="showAddAddressModal()">
-                                        <i class="far fa-plus"></i> {{ 'Add Your First Address'|t }}
-                                    </button>
-                                </div>
                             </div>
                         </div>
                     </div>
@@ -104,74 +96,206 @@
             </div>
         </section>
 
-        <!-- Add/Edit Address Modal -->
-        <div class="modal fade" id="addressModal" tabindex="-1" role="dialog">
+        <!-- Address Wizard Modal -->
+        <div class="modal fade" id="addressWizardModal" tabindex="-1" role="dialog" data-backdrop="static">
             <div class="modal-dialog modal-lg" role="document">
                 <div class="modal-content">
                     <div class="modal-header">
-                        <h5 class="modal-title" id="addressModalTitle">{{ 'Add New Address'|t }}</h5>
+                        <h5 class="modal-title">{{ 'Add New Address'|t }}</h5>
                         <button type="button" class="close" data-dismiss="modal">
                             <span>&times;</span>
                         </button>
                     </div>
                     <div class="modal-body">
-                        <form id="addressForm" class="default-form">
-                            <input type="hidden" id="addressId" name="address_id">
-                            <div class="row clearfix">
-                                <div class="col-lg-12 col-md-12 col-sm-12 form-group">
-                                    <label>{{ 'Address Title'|t }}</label>
-                                    <input type="text" name="title" placeholder="{{ 'e.g., Home, Office, etc.'|t }}" required>
+                        <!-- Step Indicators -->
+                        <div class="wizard-steps">
+                            <div class="step-indicator active">
+                                <span class="step-number">1</span>
+                                <span class="step-label">{{ 'Select Location'|t }}</span>
+                            </div>
+                            <div class="step-connector"></div>
+                            <div class="step-indicator">
+                                <span class="step-number">2</span>
+                                <span class="step-label">{{ 'Address Details'|t }}</span>
+                            </div>
+                            <div class="step-connector"></div>
+                            <div class="step-indicator">
+                                <span class="step-number">3</span>
+                                <span class="step-label">{{ 'Confirm'|t }}</span>
+                            </div>
+                        </div>
+
+                        <form id="addressWizardForm">
+                            <!-- Hidden fields for coordinates -->
+                            <input type="hidden" id="selectedLatitude" name="latitude">
+                            <input type="hidden" id="selectedLongitude" name="longitude">
+
+                            <!-- Step 1: Select Location on Map -->
+                            <div class="wizard-step active" id="wizardStep1">
+                                <h5><i class="fas fa-map-marked-alt"></i> {{ 'Select Your Location'|t }}</h5>
+
+                                <!-- Map Controls -->
+                                <div class="map-controls">
+                                    <input type="text" id="addressSearchInput" class="form-control"
+                                           placeholder="{{ 'Search for an address...'|t }}">
+                                    <button type="button" id="searchAddressBtn" class="btn btn-outline-primary">
+                                        <i class="fas fa-search"></i>
+                                    </button>
+                                    <button type="button" id="useMyLocationBtn" class="btn btn-outline-secondary">
+                                        <i class="fas fa-location-arrow"></i> {{ 'Use My Location'|t }}
+                                    </button>
                                 </div>
-                                <div class="col-lg-12 col-md-12 col-sm-12 form-group">
-                                    <label>{{ 'Full Address'|t }}</label>
-                                    <textarea name="full_address" rows="3" placeholder="{{ 'Enter complete address'|t }}" required></textarea>
+
+                                <!-- Map Container -->
+                                <div class="map-container">
+                                    <div id="addressWizardMap"></div>
                                 </div>
-                                <div class="col-lg-6 col-md-6 col-sm-12 form-group">
-                                    <label>{{ 'Street Address'|t }}</label>
-                                    <input type="text" name="street_address" placeholder="{{ 'Street address'|t }}" required>
+
+                                <!-- Hint -->
+                                <div class="map-hint">
+                                    <i class="fas fa-info-circle"></i>
+                                    <p>{{ 'Click on the map to select your delivery location. You can drag the marker to adjust the position.'|t }}</p>
                                 </div>
-                                <div class="col-lg-6 col-md-6 col-sm-12 form-group">
-                                    <label>{{ 'City'|t }}</label>
-                                    <input type="text" name="city" value="Tashkent" required>
+
+                                <!-- Location Status -->
+                                <div id="locationStatus" class="d-none">
+                                    <i class="fas fa-check-circle"></i>
+                                    <span id="locationStatusText"></span>
                                 </div>
-                                <div class="col-lg-6 col-md-6 col-sm-12 form-group">
-                                    <label>{{ 'District'|t }}</label>
-                                    <input type="text" name="district" placeholder="{{ 'District/Area'|t }}">
-                                </div>
-                                <div class="col-lg-6 col-md-6 col-sm-12 form-group">
-                                    <label>{{ 'Postal Code'|t }}</label>
-                                    <input type="text" name="postal_code" placeholder="{{ 'Postal code'|t }}">
-                                </div>
-                                <div class="col-lg-6 col-md-6 col-sm-12 form-group">
-                                    <label>{{ 'Apartment/Floor'|t }}</label>
-                                    <input type="text" name="apartment_number" placeholder="{{ 'Apt/Floor number'|t }}">
-                                </div>
-                                <div class="col-lg-6 col-md-6 col-sm-12 form-group">
-                                    <label>{{ 'Landmark'|t }}</label>
-                                    <input type="text" name="landmark" placeholder="{{ 'Nearby landmark'|t }}">
-                                </div>
-                                <div class="col-lg-12 col-md-12 col-sm-12 form-group">
-                                    <label>{{ 'Delivery Instructions'|t }}</label>
-                                    <textarea name="delivery_instructions" rows="2" placeholder="{{ 'Special delivery instructions (optional)'|t }}"></textarea>
-                                </div>
-                                <div class="col-lg-12 col-md-12 col-sm-12 form-group">
-                                    <div class="check-box">
-                                        <input class="check" type="checkbox" id="is_default" name="is_default">
-                                        <label for="is_default">{{ 'Set as default address'|t }}</label>
+                            </div>
+
+                            <!-- Step 2: Address Details -->
+                            <div class="wizard-step" id="wizardStep2">
+                                <h5><i class="fas fa-edit"></i> {{ 'Address Details'|t }}</h5>
+
+                                <!-- Quick Title Selection -->
+                                <div class="form-group">
+                                    <label>{{ 'Quick Select Title'|t }}</label>
+                                    <div class="quick-titles">
+                                        <button type="button" class="quick-title-btn" data-title="{{ 'Home'|t }}">
+                                            <i class="fas fa-home"></i> {{ 'Home'|t }}
+                                        </button>
+                                        <button type="button" class="quick-title-btn" data-title="{{ 'Work'|t }}">
+                                            <i class="fas fa-briefcase"></i> {{ 'Work'|t }}
+                                        </button>
+                                        <button type="button" class="quick-title-btn" data-title="{{ 'Other'|t }}">
+                                            <i class="fas fa-map-pin"></i> {{ 'Other'|t }}
+                                        </button>
                                     </div>
                                 </div>
-                                <div class="col-lg-12 col-md-12 col-sm-12 form-group">
-                                    <div class="check-box">
-                                        <input class="check" type="checkbox" id="is_business" name="is_business">
-                                        <label for="is_business">{{ 'This is a business address'|t }}</label>
+
+                                <div class="row">
+                                    <div class="col-md-12 form-group">
+                                        <label for="addressTitle">{{ 'Address Title'|t }} <span class="text-danger">*</span></label>
+                                        <input type="text" id="addressTitle" class="form-control"
+                                               placeholder="{{ 'e.g., Home, Office, etc.'|t }}" required>
                                     </div>
+
+                                    <div class="col-md-12 form-group">
+                                        <label for="fullAddress">{{ 'Full Address'|t }}</label>
+                                        <textarea id="fullAddress" class="form-control" rows="2"
+                                                  placeholder="{{ 'Auto-filled from map selection'|t }}"></textarea>
+                                    </div>
+
+                                    <div class="col-md-6 form-group">
+                                        <label for="districtSelect">{{ 'District'|t }}</label>
+                                        <select id="districtSelect" class="form-control">
+                                            <option value="">-- {{ 'Select District'|t }} --</option>
+                                        </select>
+                                    </div>
+
+                                    <div class="col-md-6 form-group">
+                                        <label for="streetAddress">{{ 'Street'|t }}</label>
+                                        <input type="text" id="streetAddress" class="form-control"
+                                               placeholder="{{ 'Street name'|t }}">
+                                    </div>
+
+                                    <div class="col-md-4 form-group">
+                                        <label for="buildingNumber">{{ 'Building'|t }}</label>
+                                        <input type="text" id="buildingNumber" class="form-control"
+                                               placeholder="{{ 'Building #'|t }}">
+                                    </div>
+
+                                    <div class="col-md-4 form-group">
+                                        <label for="entranceNumber">{{ 'Entrance'|t }}</label>
+                                        <input type="text" id="entranceNumber" class="form-control"
+                                               placeholder="{{ 'Entrance #'|t }}">
+                                    </div>
+
+                                    <div class="col-md-4 form-group">
+                                        <label for="floorNumber">{{ 'Floor'|t }}</label>
+                                        <input type="text" id="floorNumber" class="form-control"
+                                               placeholder="{{ 'Floor #'|t }}">
+                                    </div>
+
+                                    <div class="col-md-6 form-group">
+                                        <label for="apartmentNumber">{{ 'Apartment'|t }}</label>
+                                        <input type="text" id="apartmentNumber" class="form-control"
+                                               placeholder="{{ 'Apartment #'|t }}">
+                                    </div>
+
+                                    <div class="col-md-6 form-group">
+                                        <label for="landmark">{{ 'Landmark'|t }}</label>
+                                        <input type="text" id="landmark" class="form-control"
+                                               placeholder="{{ 'Nearby landmark'|t }}">
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Step 3: Confirmation & Options -->
+                            <div class="wizard-step" id="wizardStep3">
+                                <h5><i class="fas fa-check-circle"></i> {{ 'Confirm & Save'|t }}</h5>
+
+                                <div class="form-group">
+                                    <label for="deliveryInstructions">{{ 'Delivery Instructions'|t }}</label>
+                                    <textarea id="deliveryInstructions" class="form-control" rows="3"
+                                              placeholder="{{ 'Special instructions for delivery (e.g., ring doorbell, leave at door, etc.)'|t }}"></textarea>
+                                </div>
+
+                                <div class="row">
+                                    <div class="col-md-6 form-group">
+                                        <div class="custom-control custom-checkbox">
+                                            <input type="checkbox" class="custom-control-input" id="isDefault">
+                                            <label class="custom-control-label" for="isDefault">
+                                                {{ 'Set as default address'|t }}
+                                            </label>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6 form-group">
+                                        <div class="custom-control custom-checkbox">
+                                            <input type="checkbox" class="custom-control-input" id="isBusiness">
+                                            <label class="custom-control-label" for="isBusiness">
+                                                {{ 'This is a business address'|t }}
+                                            </label>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Summary -->
+                                <div class="confirmation-card">
+                                    <h6><i class="fas fa-info-circle"></i> {{ 'Address Summary'|t }}</h6>
+                                    <p class="text-muted small mb-0">
+                                        {{ 'Your address will be saved with the location you selected on the map. Make sure the pin was placed correctly.'|t }}
+                                    </p>
                                 </div>
                             </div>
                         </form>
                     </div>
-                    <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" data-dismiss="modal">{{ 'Cancel'|t }}</button>
-                        <button type="button" class="btn btn-primary" onclick="saveAddress()">{{ 'Save Address'|t }}</button>
+                    <div class="modal-footer wizard-navigation">
+                        <button type="button" id="wizardPrevBtn" class="btn btn-secondary" style="display: none;">
+                            <i class="fas fa-arrow-left"></i> {{ 'Back'|t }}
+                        </button>
+                        <div>
+                            <button type="button" class="btn btn-outline-secondary" data-dismiss="modal">
+                                {{ 'Cancel'|t }}
+                            </button>
+                            <button type="button" id="wizardNextBtn" class="btn btn-primary" disabled>
+                                {{ 'Next'|t }} <i class="fas fa-arrow-right"></i>
+                            </button>
+                            <button type="button" id="wizardSaveBtn" class="btn btn-success" style="display: none;">
+                                <i class="fas fa-check"></i> {{ 'Save Address'|t }}
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -179,7 +303,109 @@
         <!-- addresses-section end -->
 {% endblock %}
 
-{% block extra_css %}
+{% block extra_head %}
+<!-- Leaflet CSS for map -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+<!-- Address Wizard CSS -->
+<link rel="stylesheet" href="{{ url_for('static', filename='css/address-wizard.css') }}">
+<!-- Critical Leaflet tile fix - must override global img styles -->
+<style>
+/*
+ * Fix for Leaflet tiles not displaying properly due to global img styles.
+ *
+ * ROOT CAUSE: style.css has a global img rule with transition-property: all
+ * which includes visibility transitions. Leaflet tiles start as visibility:hidden
+ * and change to visibility:inherit when loaded. The global transition causes
+ * a 0.8s delay (0.1s delay + 0.7s duration) before tiles become visible.
+ *
+ * SOLUTION: Override ALL transition properties with high specificity selectors.
+ * Using !important and multiple selector combinations to ensure override.
+ */
+
+/* High specificity reset for ALL Leaflet tile images */
+#addressWizardMap img,
+#addressWizardMap img.leaflet-tile,
+#addressWizardMap .leaflet-tile-pane img,
+#addressWizardMap .leaflet-tile-container img,
+.leaflet-container img,
+.leaflet-container img.leaflet-tile,
+.leaflet-pane img,
+.leaflet-tile-pane img {
+    /* Override max-width from global img */
+    max-width: none !important;
+    max-height: none !important;
+    /* CRITICAL: Reset ALL transition properties individually */
+    -webkit-transition: none !important;
+    -moz-transition: none !important;
+    -o-transition: none !important;
+    transition: none !important;
+    -webkit-transition-property: none !important;
+    transition-property: none !important;
+    -webkit-transition-duration: 0s !important;
+    transition-duration: 0s !important;
+    -webkit-transition-delay: 0s !important;
+    transition-delay: 0s !important;
+    -webkit-transition-timing-function: initial !important;
+    transition-timing-function: initial !important;
+    /* Force visibility - don't rely on inherit */
+    visibility: visible !important;
+    opacity: 1 !important;
+    /* Reset display from inline-block */
+    display: block !important;
+}
+
+/* Specific tile element overrides */
+#addressWizardMap .leaflet-tile,
+.leaflet-container .leaflet-tile,
+.leaflet-tile {
+    width: 256px !important;
+    height: 256px !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    filter: none !important;
+    -webkit-transition: none !important;
+    transition: none !important;
+}
+
+/* Loaded tiles - force visible state */
+#addressWizardMap .leaflet-tile-loaded,
+.leaflet-container .leaflet-tile-loaded,
+.leaflet-tile-loaded {
+    visibility: visible !important;
+    opacity: 1 !important;
+}
+
+/* Disable Leaflet fade animation entirely */
+#addressWizardMap.leaflet-fade-anim .leaflet-tile,
+.leaflet-fade-anim .leaflet-tile,
+.leaflet-fade-anim .leaflet-map-pane .leaflet-tile {
+    -webkit-transition: none !important;
+    transition: none !important;
+    opacity: 1 !important;
+    visibility: visible !important;
+}
+
+/* Markers and shadows */
+#addressWizardMap .leaflet-marker-icon,
+#addressWizardMap .leaflet-marker-shadow,
+.leaflet-marker-icon,
+.leaflet-marker-shadow {
+    max-width: none !important;
+    max-height: none !important;
+    -webkit-transition: none !important;
+    transition: none !important;
+}
+
+/* Ensure all Leaflet panes are visible */
+#addressWizardMap .leaflet-pane,
+#addressWizardMap .leaflet-map-pane,
+#addressWizardMap .leaflet-tile-pane,
+#addressWizardMap .leaflet-tile-container {
+    visibility: visible !important;
+    opacity: 1 !important;
+}
+</style>
 <style>
 .account-sidebar {
     background: #fff;
@@ -297,6 +523,11 @@
 {% endblock %}
 
 {% block extra_js %}
+<!-- Leaflet JS for map -->
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<!-- Address Wizard -->
+<script src="{{ url_for('static', filename='js/address-wizard.js') }}"></script>
 <script>
 let addresses = [];
 let editingAddressId = null;
@@ -328,16 +559,22 @@ async function loadAddresses() {
 // Render addresses list
 function renderAddresses() {
     const addressesList = document.getElementById('addressesList');
-    const noAddressesMessage = document.getElementById('noAddressesMessage');
-    
+
     if (addresses.length === 0) {
-        noAddressesMessage.style.display = 'block';
-        addressesList.innerHTML = '';
+        // Show empty state message
+        addressesList.innerHTML = `
+            <div class="text-center py-5" id="noAddressesMessage">
+                <i class="far fa-map-marker-alt" style="font-size: 4rem; color: #ccc;"></i>
+                <h4 class="mt-3">{{ 'No addresses saved yet'|t }}</h4>
+                <p class="text-muted">{{ 'Add your delivery addresses to make ordering easier'|t }}</p>
+                <button class="btn btn-primary" onclick="showAddAddressModal()">
+                    <i class="far fa-plus"></i> {{ 'Add Your First Address'|t }}
+                </button>
+            </div>
+        `;
         return;
     }
-    
-    noAddressesMessage.style.display = 'none';
-    
+
     const addressesHTML = addresses.map(address => `
         <div class="address-card ${address.is_default ? 'default' : ''}">
             <div class="address-header">
@@ -375,90 +612,22 @@ function renderAddresses() {
     addressesList.innerHTML = addressesHTML;
 }
 
-// Show add address modal
-function showAddAddressModal() {
-    editingAddressId = null;
-    document.getElementById('addressModalTitle').textContent = '{{ "Add New Address"|t }}';
-    document.getElementById('addressForm').reset();
-    document.getElementById('addressId').value = '';
-    $('#addressModal').modal('show');
-}
+// Note: showAddAddressModal() is defined in address-wizard.js
 
-// Edit address
+// Edit address - uses the wizard
 function editAddress(addressId) {
     const address = addresses.find(a => a.id === addressId);
     if (!address) return;
-    
-    editingAddressId = addressId;
-    document.getElementById('addressModalTitle').textContent = '{{ "Edit Address"|t }}';
-    
-    // Populate form
-    const form = document.getElementById('addressForm');
-    form.title.value = address.title || '';
-    form.full_address.value = address.full_address || '';
-    form.street_address.value = address.street_address || '';
-    form.city.value = address.city || '';
-    form.district.value = address.district || '';
-    form.postal_code.value = address.postal_code || '';
-    form.apartment_number.value = address.apartment_number || '';
-    form.landmark.value = address.landmark || '';
-    form.delivery_instructions.value = address.delivery_instructions || '';
-    form.is_default.checked = address.is_default || false;
-    form.is_business.checked = address.is_business || false;
-    
-    document.getElementById('addressId').value = addressId;
-    
-    $('#addressModal').modal('show');
-}
 
-// Save address
-async function saveAddress() {
-    const form = document.getElementById('addressForm');
-    const formData = new FormData(form);
-    
-    const data = {
-        title: formData.get('title'),
-        full_address: formData.get('full_address'),
-        street_address: formData.get('street_address'),
-        city: formData.get('city'),
-        district: formData.get('district'),
-        postal_code: formData.get('postal_code'),
-        apartment_number: formData.get('apartment_number'),
-        landmark: formData.get('landmark'),
-        delivery_instructions: formData.get('delivery_instructions'),
-        is_default: formData.get('is_default') === 'on',
-        is_business: formData.get('is_business') === 'on'
-    };
-    
-    try {
-        let response;
-        if (editingAddressId) {
-            // Update existing address
-            response = await apiRequest(`/auth/addresses/${editingAddressId}`, {
-                method: 'PUT',
-                body: JSON.stringify(data)
-            });
-        } else {
-            // Add new address
-            response = await apiRequest('/auth/addresses', {
-                method: 'POST',
-                body: JSON.stringify(data)
-            });
-        }
-        
-        const result = await response.json();
-        
-        if (response.ok) {
-            $('#addressModal').modal('hide');
-            showNotification('{{ "Address saved successfully!"|t }}', 'success');
-            await loadAddresses(); // Reload addresses
-        } else {
-            showNotification(result.message || '{{ "Failed to save address"|t }}', 'error');
-        }
-    } catch (error) {
-        showNotification('{{ "Network error. Please try again."|t }}', 'error');
+    // Use the wizard for editing
+    if (typeof editAddressWizard === 'function') {
+        editAddressWizard(address);
+    } else {
+        console.error('Address wizard not loaded');
     }
 }
+
+// Note: saveAddress() is now handled by the AddressWizard in address-wizard.js
 
 // Set default address
 async function setDefaultAddress(addressId) {

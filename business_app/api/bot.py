@@ -8,7 +8,7 @@ import hashlib
 from flask import Blueprint, request, jsonify
 from functools import wraps
 
-from business_app.config.base import get_config
+from business_app.config import get_config
 from business_app.utils.decorators import require_auth, require_admin
 
 logger = logging.getLogger(__name__)
@@ -202,7 +202,7 @@ def bot_health():
 
 @bot_bp.route('/stats', methods=['GET'])
 @require_auth
-@require_admin
+@require_admin()
 def get_bot_stats():
     """
     Get bot statistics (admin only)

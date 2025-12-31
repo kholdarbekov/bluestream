@@ -684,7 +684,7 @@ def payment_webhook(provider):
         # Log security incident
         from business_app.utils.audit_logger import audit_logger, AuditEventType, AuditSeverity
         audit_logger.log_event(
-            event_type=AuditEventType.SECURITY_EVENT,
+            event_type=AuditEventType.SUSPICIOUS_ACTIVITY,
             action="webhook_processing_error",
             severity=AuditSeverity.HIGH,
             resource_type="payment_webhook",
@@ -1093,11 +1093,7 @@ def process_card_payment():
         # Send notification on successful payment
         try:
             notification_service = get_notification_service()
-            notification_service.send_payment_confirmation(
-                user_id=current_user_id,
-                payment_id=result['payment_id'],
-                order_id=order_id
-            )
+            notification_service.send_payment_notification(result['payment_id'])
         except Exception as notify_error:
             current_app.logger.warning(f"Failed to send payment notification: {notify_error}")
 
@@ -1116,8 +1112,9 @@ def process_card_payment():
         return validation_error_response(errors=str(e))
     except Exception as e:
         current_app.logger.error(f"Process card payment error: {e}")
-        return internal_error_response(
+        return error_response(
             message=str(e),
+            status_code=500,
             data={
                 'order_id': data.get('order_id') if 'data' in dir() else None,
                 'redirect_url': f'/checkout?error=payment_failed'

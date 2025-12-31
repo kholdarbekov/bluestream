@@ -11,7 +11,7 @@ from business_app.models.loyalty import LoyaltyPoints, LoyaltyTransaction, Loyal
 from business_app.models.user import User
 from business_app.models.order import Order
 from business_app.utils.exceptions import ValidationError, NotFoundError, ConflictError
-from business_app.utils.constants import LoyaltyActionType
+from business_app.utils.constants import LoyaltyActionType, LoyaltyTransactionType
 from business_app.utils.helpers import generate_referral_code, calculate_loyalty_points, calculate_discount_from_points
 from business_app import db
 
@@ -84,15 +84,23 @@ class LoyaltyService:
             expires_at = datetime.now(timezone.utc) + timedelta(days=self.points_expiry_days)
         
         # Create transaction
+        # Map transaction_type to enum value expected by model
+        transaction_type_enum = LoyaltyTransactionType.EARNED
+        if action_type == LoyaltyActionType.REFERRAL:
+            transaction_type_enum = LoyaltyTransactionType.BONUS
+        elif action_type == LoyaltyActionType.BIRTHDAY_BONUS:
+            transaction_type_enum = LoyaltyTransactionType.BONUS
+        elif action_type == LoyaltyActionType.WELCOME_BONUS:
+            transaction_type_enum = LoyaltyTransactionType.BONUS
+
         transaction = LoyaltyTransaction(
             user_id=user_id,
-            transaction_type='credit',
+            transaction_type=transaction_type_enum,
             points=points,
             description=description,
-            action_type=action_type,
-            reference_id=reference_id,
+            order_id=reference_id if action_type == LoyaltyActionType.PURCHASE else None,
             expires_at=expires_at,
-            created_at=datetime.now(timezone.utc)
+            extra_data={'action_type': action_type.value if hasattr(action_type, 'value') else action_type}
         )
         
         db.session.add(transaction)
@@ -127,11 +135,10 @@ class LoyaltyService:
         # Create transaction
         transaction = LoyaltyTransaction(
             user_id=user_id,
-            transaction_type='debit',
-            points=points,
+            transaction_type=LoyaltyTransactionType.REDEEMED,
+            points=-points,  # Negative for deductions
             description=description,
-            reference_id=reference_id,
-            created_at=datetime.now(timezone.utc)
+            order_id=reference_id
         )
         
         db.session.add(transaction)
@@ -168,12 +175,13 @@ class LoyaltyService:
         
         transactions = []
         for transaction in pagination.items:
+            extra_data = transaction.extra_data or {}
             transactions.append({
                 'id': transaction.id,
-                'type': transaction.transaction_type,
+                'type': transaction.transaction_type.value if hasattr(transaction.transaction_type, 'value') else transaction.transaction_type,
                 'points': transaction.points,
                 'description': transaction.description,
-                'action_type': transaction.action_type.value if transaction.action_type else None,
+                'action_type': extra_data.get('action_type'),
                 'created_at': transaction.created_at.isoformat(),
                 'expires_at': transaction.expires_at.isoformat() if transaction.expires_at else None,
                 'is_expired': transaction.is_expired if hasattr(transaction, 'is_expired') else False
@@ -373,9 +381,9 @@ class LoyaltyService:
         
         transactions = query.all()
         
-        # Calculate metrics
-        total_points_awarded = sum(t.points for t in transactions if t.transaction_type == 'credit')
-        total_points_redeemed = sum(t.points for t in transactions if t.transaction_type == 'debit')
+        # Calculate metrics - positive points are awarded, negative are redeemed
+        total_points_awarded = sum(t.points for t in transactions if t.points > 0)
+        total_points_redeemed = abs(sum(t.points for t in transactions if t.points < 0))
         
         # Active users
         active_accounts = LoyaltyPoints.query.count()
@@ -412,8 +420,9 @@ class LoyaltyService:
     
     def expire_points(self) -> Dict[str, int]:
         """Expire old loyalty points (called by scheduled task)"""
+        # Find earned/bonus points that have expired
         expired_transactions = LoyaltyTransaction.query.filter(
-            LoyaltyTransaction.transaction_type == 'credit',
+            LoyaltyTransaction.transaction_type.in_([LoyaltyTransactionType.EARNED, LoyaltyTransactionType.BONUS]),
             LoyaltyTransaction.expires_at < datetime.now(timezone.utc),
             LoyaltyTransaction.is_expired == False
         ).all()
@@ -428,11 +437,10 @@ class LoyaltyService:
             # Create expiry transaction
             expiry_transaction = LoyaltyTransaction(
                 user_id=transaction.user_id,
-                transaction_type='debit',
-                points=transaction.points,
+                transaction_type=LoyaltyTransactionType.EXPIRED,
+                points=-transaction.points,  # Negative for deductions
                 description=f"Points expired from transaction #{transaction.id}",
-                reference_id=transaction.id,
-                created_at=datetime.now(timezone.utc)
+                extra_data={'original_transaction_id': transaction.id}
             )
             
             db.session.add(expiry_transaction)
@@ -462,7 +470,7 @@ class LoyaltyService:
         """Remove expired points for a specific user"""
         expired_transactions = LoyaltyTransaction.query.filter(
             LoyaltyTransaction.user_id == user_id,
-            LoyaltyTransaction.transaction_type == 'credit',
+            LoyaltyTransaction.transaction_type.in_([LoyaltyTransactionType.EARNED, LoyaltyTransactionType.BONUS]),
             LoyaltyTransaction.expires_at < datetime.now(timezone.utc),
             LoyaltyTransaction.is_expired == False
         ).all()
@@ -651,7 +659,7 @@ class LoyaltyService:
         if reward.max_uses_per_user:
             user_redemptions = LoyaltyTransaction.query.filter(
                 LoyaltyTransaction.user_id == user_id,
-                LoyaltyTransaction.transaction_type == 'debit',
+                LoyaltyTransaction.transaction_type == LoyaltyTransactionType.REDEEMED,
                 LoyaltyTransaction.description.contains(f"Redeemed reward: {reward.name}")
             ).count()
             
@@ -694,11 +702,11 @@ class LoyaltyService:
             total_referrals = 0
             pending_referrals = 0
         
-        # Calculate total points earned from referrals
+        # Calculate total points earned from referrals (stored in extra_data)
         referral_points = LoyaltyTransaction.query.filter(
             LoyaltyTransaction.user_id == user_id,
-            LoyaltyTransaction.action_type == LoyaltyActionType.REFERRAL,
-            LoyaltyTransaction.transaction_type == 'credit'
+            LoyaltyTransaction.extra_data['action_type'].astext == LoyaltyActionType.REFERRAL.value,
+            LoyaltyTransaction.points > 0  # Earned points are positive
         ).with_entities(func.sum(LoyaltyTransaction.points)).scalar() or 0
         
         return {
@@ -709,13 +717,22 @@ class LoyaltyService:
     
     def get_referral_points_earned(self, referrer_id: int, referee_id: int) -> int:
         """Get points earned from specific referral"""
-        transaction = LoyaltyTransaction.query.filter(
-            LoyaltyTransaction.user_id == referrer_id,
-            LoyaltyTransaction.action_type == LoyaltyActionType.REFERRAL
-        ).join(ReferralProgram, LoyaltyTransaction.reference_id == ReferralProgram.id).filter(
+        # Find referral program for this referee
+        referral = ReferralProgram.query.filter(
+            ReferralProgram.referrer_id == referrer_id,
             ReferralProgram.referee_id == referee_id
         ).first()
-        
+
+        if not referral:
+            return 0
+
+        # Find the transaction for this referral (stored in extra_data)
+        transaction = LoyaltyTransaction.query.filter(
+            LoyaltyTransaction.user_id == referrer_id,
+            LoyaltyTransaction.extra_data['action_type'].astext == LoyaltyActionType.REFERRAL.value,
+            LoyaltyTransaction.description.contains(f"referral")
+        ).first()
+
         return transaction.points if transaction else 0
     
     def get_referrer_bonus_points(self) -> int:

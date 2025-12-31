@@ -1,6 +1,6 @@
 """
 User Addresses API endpoints
-Manages user delivery addresses
+Manages user delivery addresses with geocoding support
 """
 from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import jwt_required, get_jwt_identity
@@ -15,6 +15,8 @@ from business_app.utils.api_responses import (
     not_found_response, validation_error_response, forbidden_response
 )
 from business_app.utils.translations import get_translation
+from business_app.utils.constants import TASHKENT_DISTRICTS, get_district_name, get_all_districts
+from shared.constants import TASHKENT_BOUNDS, TASHKENT_COORDINATES, is_within_tashkent, get_geo_config
 from business_app import db
 
 addresses_bp = Blueprint('addresses', __name__)
@@ -53,17 +55,36 @@ def get_address(address_id):
 
 @addresses_bp.route('/', methods=['POST'])
 @jwt_required()
-@validate_json(['address_line1', 'city'])
 @handle_api_exception
 def create_address():
-    """Create new address"""
+    """Create new address
+
+    Required fields:
+    - full_address: Complete address string
+
+    Optional fields:
+    - title: Address label (e.g., "Home", "Work")
+    - street_address: Street name and number
+    - city: City name (default: Tashkent)
+    - district: District/region name
+    - postal_code: Postal/ZIP code
+    - country: Country (default: Uzbekistan)
+    - latitude: GPS latitude coordinate
+    - longitude: GPS longitude coordinate
+    - is_default: Set as default address
+    - is_business: Business address flag
+    - delivery_instructions: Special delivery instructions
+    - landmark: Nearby landmark
+    - floor_number: Building floor
+    - apartment_number: Apartment/unit number
+    """
     user_id = get_jwt_identity()
     data = request.get_json()
 
-    # Validate required fields
-    if not data.get('address_line1') or not data.get('city'):
+    # Validate required field - at minimum need full_address OR latitude/longitude
+    if not data.get('full_address') and not (data.get('latitude') and data.get('longitude')):
         return validation_error_response(
-            errors={'address': 'Address line 1 and city are required'}
+            errors={'address': 'Either full_address or coordinates (latitude/longitude) are required'}
         )
 
     # Check if this should be default
@@ -75,19 +96,29 @@ def create_address():
             {'is_default': False}
         )
 
-    # Create address
+    # If user has no addresses, make this the default
+    existing_count = UserAddress.query.filter_by(user_id=user_id).count()
+    if existing_count == 0:
+        is_default = True
+
+    # Create address with correct field mapping
     address = UserAddress(
         user_id=user_id,
-        label=data.get('label'),
-        address_line1=data.get('address_line1'),
-        address_line2=data.get('address_line2'),
-        city=data.get('city'),
-        state=data.get('state'),
+        title=data.get('title'),
+        full_address=data.get('full_address', ''),
+        street_address=data.get('street_address'),
+        city=data.get('city', 'Tashkent'),
+        district=data.get('district'),
         postal_code=data.get('postal_code'),
         country=data.get('country', 'Uzbekistan'),
-        phone_number=data.get('phone_number'),
+        latitude=data.get('latitude'),
+        longitude=data.get('longitude'),
         is_default=is_default,
-        delivery_instructions=data.get('delivery_instructions')
+        is_business=data.get('is_business', False),
+        delivery_instructions=data.get('delivery_instructions'),
+        landmark=data.get('landmark'),
+        floor_number=data.get('floor_number'),
+        apartment_number=data.get('apartment_number')
     )
 
     db.session.add(address)
@@ -114,25 +145,35 @@ def update_address(address_id):
     if not address:
         return not_found_response(message='Address not found')
 
-    # Update fields
-    if 'label' in data:
-        address.label = data['label']
-    if 'address_line1' in data:
-        address.address_line1 = data['address_line1']
-    if 'address_line2' in data:
-        address.address_line2 = data['address_line2']
+    # Update fields with correct mapping
+    if 'title' in data:
+        address.title = data['title']
+    if 'full_address' in data:
+        address.full_address = data['full_address']
+    if 'street_address' in data:
+        address.street_address = data['street_address']
     if 'city' in data:
         address.city = data['city']
-    if 'state' in data:
-        address.state = data['state']
+    if 'district' in data:
+        address.district = data['district']
     if 'postal_code' in data:
         address.postal_code = data['postal_code']
     if 'country' in data:
         address.country = data['country']
-    if 'phone_number' in data:
-        address.phone_number = data['phone_number']
+    if 'latitude' in data:
+        address.latitude = data['latitude']
+    if 'longitude' in data:
+        address.longitude = data['longitude']
+    if 'is_business' in data:
+        address.is_business = data['is_business']
     if 'delivery_instructions' in data:
         address.delivery_instructions = data['delivery_instructions']
+    if 'landmark' in data:
+        address.landmark = data['landmark']
+    if 'floor_number' in data:
+        address.floor_number = data['floor_number']
+    if 'apartment_number' in data:
+        address.apartment_number = data['apartment_number']
 
     # Handle default flag
     if 'is_default' in data and data['is_default']:
@@ -215,3 +256,187 @@ def set_default_address(address_id):
         data={'address': address.to_dict()},
         message='Default address updated'
     )
+
+
+# ============================================================================
+# Geocoding Endpoints
+# ============================================================================
+
+@addresses_bp.route('/geocode', methods=['POST'])
+@jwt_required()
+@handle_api_exception
+def geocode_address():
+    """Geocode an address string to coordinates
+
+    Request body:
+    - address: Address string to geocode (required)
+    - hint_lat: Optional latitude hint for better results
+    - hint_lon: Optional longitude hint for better results
+
+    Returns:
+    - latitude: Geocoded latitude
+    - longitude: Geocoded longitude
+    - formatted_address: Formatted address from geocoder
+    """
+    user_id = get_jwt_identity()
+    data = request.get_json()
+
+    address = data.get('address')
+    if not address:
+        return validation_error_response(errors={'address': 'Address string is required'})
+
+    from business_app.services.maps_service import MapsService
+    maps_service = MapsService()
+
+    try:
+        result = maps_service.geocode_address(address, city='Tashkent')
+
+        if result and result.get('latitude') and result.get('longitude'):
+            return success_response(data={
+                'latitude': result.get('latitude'),
+                'longitude': result.get('longitude'),
+                'formatted_address': result.get('formatted_address', address)
+            })
+        else:
+            return error_response(
+                message='Could not geocode the address. Please try with more specific details.',
+                status_code=404
+            )
+    except Exception as e:
+        current_app.logger.error(f"Geocoding failed for user {user_id}: {e}")
+        return error_response(
+            message='Geocoding service temporarily unavailable',
+            status_code=503
+        )
+
+
+@addresses_bp.route('/reverse-geocode', methods=['POST'])
+@jwt_required()
+@handle_api_exception
+def reverse_geocode():
+    """Reverse geocode coordinates to address
+
+    Request body:
+    - latitude: GPS latitude (required)
+    - longitude: GPS longitude (required)
+
+    Returns:
+    - formatted_address: Human-readable address
+    - district: Detected district if available
+    - city: City name
+    - country: Country name
+    """
+    user_id = get_jwt_identity()
+    data = request.get_json()
+
+    latitude = data.get('latitude')
+    longitude = data.get('longitude')
+
+    if latitude is None or longitude is None:
+        return validation_error_response(
+            errors={'coordinates': 'Both latitude and longitude are required'}
+        )
+
+    # Validate coordinates are within Tashkent bounds
+    if not is_within_tashkent(latitude, longitude):
+        return validation_error_response(
+            errors={'coordinates': 'Coordinates are outside the supported delivery area (Tashkent)'}
+        )
+
+    from business_app.services.maps_service import MapsService
+    maps_service = MapsService()
+
+    try:
+        result = maps_service.reverse_geocode(latitude, longitude)
+
+        # Try to extract district from address components
+        district = None
+        formatted_address = result.get('formatted_address', '')
+
+        if 'address_components' in result:
+            components = result['address_components']
+            # Try different component types for district
+            for component in components if isinstance(components, list) else []:
+                types = component.get('types', [])
+                if 'sublocality_level_1' in types or 'administrative_area_level_2' in types:
+                    district = component.get('long_name')
+                    break
+
+        return success_response(data={
+            'formatted_address': formatted_address,
+            'district': district,
+            'city': 'Tashkent',
+            'country': 'Uzbekistan'
+        })
+    except Exception as e:
+        current_app.logger.error(f"Reverse geocoding failed for user {user_id}: {e}")
+        return error_response(
+            message='Geocoding service temporarily unavailable',
+            status_code=503
+        )
+
+
+@addresses_bp.route('/districts', methods=['GET'])
+@jwt_required()
+@handle_api_exception
+def get_districts():
+    """Get list of supported districts with translations
+
+    Query params:
+    - lang: Language code (en, uz, ru) - default: en
+
+    Returns:
+    - districts: List of {key, name} objects
+    """
+    language = request.args.get('lang', 'en')
+
+    # Validate language
+    if language not in ['en', 'uz', 'ru']:
+        language = 'en'
+
+    districts = get_all_districts(language)
+
+    return success_response(data={
+        'districts': districts,
+        'region': 'tashkent_city',
+        'region_name': {
+            'en': 'Tashkent City',
+            'uz': 'Toshkent shahri',
+            'ru': 'Город Ташкент'
+        }.get(language, 'Tashkent City')
+    })
+
+
+@addresses_bp.route('/geo-config', methods=['GET'])
+@jwt_required()
+@handle_api_exception
+def get_geo_configuration():
+    """Get geographic configuration for map-based address selection
+
+    Query params:
+    - lang: Language code (en, uz, ru) - default: en
+
+    Returns:
+    - center: Tashkent city center coordinates {latitude, longitude}
+    - bounds: Service area boundary {min_lat, max_lat, min_lng, max_lng}
+    - districts: List of districts with keys and localized names
+    """
+    language = request.args.get('lang', 'en')
+
+    # Validate language
+    if language not in ['en', 'uz', 'ru']:
+        language = 'en'
+
+    config = get_geo_config(language)
+
+    return success_response(data={
+        'center': config['center'],
+        'bounds': config['bounds'],
+        'districts': config['districts'],
+        'region': 'tashkent_city',
+        'region_name': {
+            'en': 'Tashkent City',
+            'uz': 'Toshkent shahri',
+            'ru': 'Город Ташкент'
+        }.get(language, 'Tashkent City')
+    })

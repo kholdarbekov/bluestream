@@ -40,7 +40,7 @@ from business_app.utils.query_optimization import (
     PaginationOptimizer, AggregationOptimizer
 )
 from business_app.services.inventory_service import get_inventory_service, InventoryOperationType
-from business_app.utils.constants import UserRole, SubscriptionStatus, OrderStatus, DeliveryStatus, UserStatus, SubscriptionFrequency
+from business_app.utils.constants import UserRole, SubscriptionStatus, OrderStatus, DeliveryStatus, UserStatus, SubscriptionFrequency, PaymentStatus
 # from business_app.tasks.admin_tasks import send_bulk_email_task, generate_report_task
 from business_app import db
 from business_app.utils.helpers import get_current_language
@@ -476,7 +476,7 @@ def get_admin_dashboard():
         # Check for failed payments
         failed_payments = Payment.query.filter(
             and_(
-                Payment.status == 'failed',
+                Payment.status == PaymentStatus.FAILED,
                 Payment.created_at >= current_start
             )
         ).count()
@@ -2957,7 +2957,7 @@ def get_payment_analytics():
 
         # Total revenue
         total_revenue = db.session.query(func.sum(Payment.amount))\
-            .filter(Payment.status == 'completed')\
+            .filter(Payment.status == PaymentStatus.COMPLETED)\
             .filter(Payment.created_at.between(start_date, end_date))\
             .scalar() or 0
 
@@ -2970,10 +2970,10 @@ def get_payment_analytics():
             .scalar() or 0
 
         # Failed payments
-        failed_payments = payments_query.filter(Payment.status == 'failed').count()
+        failed_payments = payments_query.filter(Payment.status == PaymentStatus.FAILED).count()
 
         # Success rate
-        completed_payments = payments_query.filter(Payment.status == 'completed').count()
+        completed_payments = payments_query.filter(Payment.status == PaymentStatus.COMPLETED).count()
         success_rate = (completed_payments / total_payments * 100) if total_payments > 0 else 0
 
         analytics = {
@@ -4650,7 +4650,7 @@ def _generate_delivery_report(start_dt, end_dt, filters):
     on_time = Delivery.query.filter(
         Delivery.created_at >= start_dt,
         Delivery.created_at <= end_dt,
-        Delivery.status == 'delivered',
+        Delivery.status == DeliveryStatus.DELIVERED,
         Delivery.delivered_at <= Delivery.scheduled_delivery_time
     ).count()
 
@@ -4669,7 +4669,7 @@ def _generate_delivery_report(start_dt, end_dt, filters):
     ).filter(
         Delivery.created_at >= start_dt,
         Delivery.created_at <= end_dt,
-        Delivery.status == 'delivered'
+        Delivery.status == DeliveryStatus.DELIVERED
     ).group_by(
         DeliveryPerson.id, DeliveryPerson.name
     ).order_by(
@@ -4705,7 +4705,7 @@ def _generate_financial_summary_report(start_dt, end_dt, filters):
     ).filter(
         Payment.created_at >= start_dt,
         Payment.created_at <= end_dt,
-        Payment.status == 'completed'
+        Payment.status == PaymentStatus.COMPLETED
     ).scalar() or 0
 
     # Payment method breakdown
@@ -4716,7 +4716,7 @@ def _generate_financial_summary_report(start_dt, end_dt, filters):
     ).filter(
         Payment.created_at >= start_dt,
         Payment.created_at <= end_dt,
-        Payment.status == 'completed'
+        Payment.status == PaymentStatus.COMPLETED
     ).group_by(Payment.payment_method).all()
 
     method_breakdown = [
@@ -4734,7 +4734,7 @@ def _generate_financial_summary_report(start_dt, end_dt, filters):
     ).filter(
         Payment.created_at >= start_dt,
         Payment.created_at <= end_dt,
-        Payment.status == 'refunded'
+        Payment.status == PaymentStatus.REFUNDED
     ).scalar() or 0
 
     # Daily revenue
@@ -4744,7 +4744,7 @@ def _generate_financial_summary_report(start_dt, end_dt, filters):
     ).filter(
         Payment.created_at >= start_dt,
         Payment.created_at <= end_dt,
-        Payment.status == 'completed'
+        Payment.status == PaymentStatus.COMPLETED
     ).group_by('date').order_by('date').all()
 
     revenue_trend = [
@@ -5086,22 +5086,22 @@ def _bulk_action_users(action, user_ids, parameters, reason, admin_id):
                 continue
 
             if action == 'activate':
-                user.status = 'active'
+                user.status = UserStatus.ACTIVE
                 user.is_active = True
             elif action == 'deactivate':
-                user.status = 'inactive'
+                user.status = UserStatus.INACTIVE
                 user.is_active = False
             elif action == 'suspend':
-                user.status = 'suspended'
+                user.status = UserStatus.SUSPENDED
                 user.is_active = False
             elif action == 'delete':
                 # Soft delete - mark as deleted
-                user.status = 'deleted'
+                user.status = UserStatus.DELETED
                 user.is_active = False
             elif action == 'assign_role':
                 new_role = parameters.get('role')
-                if new_role in ['customer', 'admin', 'manager', 'staff']:
-                    user.role = new_role
+                if new_role in [UserRole.CUSTOMER.value, UserRole.ADMIN.value, UserRole.MANAGER.value, UserRole.OPERATOR.value]:
+                    user.role = UserRole(new_role)
                 else:
                     failed_count += 1
                     errors.append({'user_id': user_id, 'error': 'Invalid role'})
@@ -5142,8 +5142,8 @@ def _bulk_action_orders(action, order_ids, parameters, reason, admin_id):
                 continue
 
             if action == 'cancel':
-                if order.status in ['pending', 'confirmed']:
-                    order.status = 'cancelled'
+                if order.status in [OrderStatus.PENDING, OrderStatus.CONFIRMED]:
+                    order.status = OrderStatus.CANCELLED
                     order.cancelled_at = datetime.now(UTC)
                     order.cancellation_reason = reason
                 else:
@@ -5152,8 +5152,8 @@ def _bulk_action_orders(action, order_ids, parameters, reason, admin_id):
                     continue
 
             elif action == 'confirm':
-                if order.status == 'pending':
-                    order.status = 'confirmed'
+                if order.status == OrderStatus.PENDING:
+                    order.status = OrderStatus.CONFIRMED
                     order.confirmed_at = datetime.now(UTC)
                 else:
                     failed_count += 1
@@ -5161,16 +5161,16 @@ def _bulk_action_orders(action, order_ids, parameters, reason, admin_id):
                     continue
 
             elif action == 'process':
-                if order.status == 'confirmed':
-                    order.status = 'processing'
+                if order.status == OrderStatus.CONFIRMED:
+                    order.status = OrderStatus.PREPARING
                 else:
                     failed_count += 1
                     errors.append({'order_id': order_id, 'error': f'Cannot process order with status {order.status}'})
                     continue
 
             elif action == 'mark_delivered':
-                if order.status in ['processing', 'shipped', 'out_for_delivery']:
-                    order.status = 'delivered'
+                if order.status in [OrderStatus.PREPARING, OrderStatus.OUT_FOR_DELIVERY]:
+                    order.status = OrderStatus.DELIVERED
                     order.delivered_at = datetime.now(UTC)
                 else:
                     failed_count += 1
@@ -5306,8 +5306,8 @@ def _bulk_action_subscriptions(action, subscription_ids, parameters, reason, adm
                 continue
 
             if action == 'pause':
-                if subscription.status == 'active':
-                    subscription.status = 'paused'
+                if subscription.status == SubscriptionStatus.ACTIVE:
+                    subscription.status = SubscriptionStatus.PAUSED
                     subscription.paused_at = datetime.now(UTC)
                     subscription.pause_reason = reason
                 else:
@@ -5316,8 +5316,8 @@ def _bulk_action_subscriptions(action, subscription_ids, parameters, reason, adm
                     continue
 
             elif action == 'resume':
-                if subscription.status == 'paused':
-                    subscription.status = 'active'
+                if subscription.status == SubscriptionStatus.PAUSED:
+                    subscription.status = SubscriptionStatus.ACTIVE
                     subscription.paused_at = None
                     subscription.pause_reason = None
                 else:
@@ -5326,7 +5326,7 @@ def _bulk_action_subscriptions(action, subscription_ids, parameters, reason, adm
                     continue
 
             elif action == 'cancel':
-                subscription.status = 'cancelled'
+                subscription.status = SubscriptionStatus.CANCELLED
                 subscription.end_date = datetime.now(UTC)
 
             db.session.commit()
@@ -5373,14 +5373,14 @@ def _bulk_action_deliveries(action, delivery_ids, parameters, reason, admin_id):
                     continue
 
                 delivery.delivery_person_id = driver_id
-                delivery.status = 'assigned'
+                delivery.status = DeliveryStatus.ASSIGNED
 
             elif action == 'mark_in_transit':
-                delivery.status = 'in_transit'
+                delivery.status = DeliveryStatus.IN_TRANSIT
                 delivery.picked_up_at = datetime.now(UTC)
 
             elif action == 'mark_delivered':
-                delivery.status = 'delivered'
+                delivery.status = DeliveryStatus.DELIVERED
                 delivery.delivered_at = datetime.now(UTC)
 
             db.session.commit()
@@ -7523,7 +7523,7 @@ def get_order_reservations(order_id):
         # Get inventory status for each item in the order
         language = get_current_language()
         reservations = []
-        for item in order.items:
+        for item in order.order_items:
             inventory_status = get_inventory_service().get_inventory_status(item.product_id)
             product_name = item.product.get_translated('name', language) if item.product else 'Unknown'
             reservations.append({

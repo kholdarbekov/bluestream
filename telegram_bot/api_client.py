@@ -576,7 +576,56 @@ class BusinessAPIClient:
         """Set address as default"""
         return await self._make_request('PATCH', f'/api/v1/auth/addresses/{address_id}/set-default',
                                        user_token=user_token)
-    
+
+    async def geocode_address(self, user_token: str, address: str,
+                             hint_lat: float = None, hint_lon: float = None) -> APIResponse:
+        """Geocode an address string to coordinates
+
+        Args:
+            user_token: User authentication token
+            address: Address string to geocode
+            hint_lat: Optional latitude hint for better results
+            hint_lon: Optional longitude hint for better results
+
+        Returns:
+            APIResponse with latitude, longitude, and formatted_address
+        """
+        data = {'address': address}
+        if hint_lat is not None:
+            data['hint_lat'] = hint_lat
+        if hint_lon is not None:
+            data['hint_lon'] = hint_lon
+        return await self._make_request('POST', '/api/v1/addresses/geocode',
+                                       user_token=user_token, data=data)
+
+    async def reverse_geocode(self, user_token: str, latitude: float, longitude: float) -> APIResponse:
+        """Reverse geocode coordinates to address
+
+        Args:
+            user_token: User authentication token
+            latitude: GPS latitude coordinate
+            longitude: GPS longitude coordinate
+
+        Returns:
+            APIResponse with formatted_address, district, city, country
+        """
+        data = {'latitude': latitude, 'longitude': longitude}
+        return await self._make_request('POST', '/api/v1/addresses/reverse-geocode',
+                                       user_token=user_token, data=data)
+
+    async def get_districts(self, user_token: str, language: str = 'en') -> APIResponse:
+        """Get list of supported districts
+
+        Args:
+            user_token: User authentication token
+            language: Language code (en, uz, ru)
+
+        Returns:
+            APIResponse with districts list and region info
+        """
+        return await self._make_request('GET', f'/api/v1/addresses/districts?lang={language}',
+                                       user_token=user_token)
+
     # Subscription methods
     async def get_user_subscriptions(self, user_token: str) -> APIResponse:
         """Get user subscriptions"""

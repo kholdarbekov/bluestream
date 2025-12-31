@@ -553,7 +553,7 @@ def send_subscription_usage_summary(self, subscription_id: int):
         
         # Calculate usage metrics
         total_deliveries = len(subscription_orders)
-        total_items = sum(len(order.items) for order in subscription_orders)
+        total_items = sum(len(order.order_items) for order in subscription_orders)
         total_value = sum(order.total_amount for order in subscription_orders)
         
         # Calculate savings (if applicable)

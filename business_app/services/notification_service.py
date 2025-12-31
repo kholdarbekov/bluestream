@@ -198,7 +198,7 @@ class NotificationService:
             'order_number': order.order_number,
             'order_status': order.status.value,
             'order_total': order.total_amount,
-            'delivery_address': order.delivery_address_street,
+            'delivery_address': order.delivery_address.street_address if order.delivery_address else None,
             'estimated_delivery': order.estimated_delivery_time.isoformat() if hasattr(order, 'estimated_delivery_time') and order.estimated_delivery_time else None,
             'items': [
                 {
@@ -206,7 +206,7 @@ class NotificationService:
                     'quantity': item.quantity,
                     'price': item.total_price
                 }
-                for item in order.items
+                for item in order.order_items
             ]
         }
         
@@ -235,22 +235,33 @@ class NotificationService:
         )
     
     def send_payment_notification(self, payment_id: int) -> Dict[str, Any]:
-        """Send payment confirmation notification"""
+        """Send payment confirmation notification via Telegram (if user has telegram) or email"""
         payment = Payment.query.get(payment_id)
         if not payment:
             raise NotificationError(get_translation('error.not_found'))
-        
+
+        user = User.query.get(payment.user_id)
+        if not user:
+            raise NotificationError(get_translation('error.not_found'))
+
         template_data = {
-            'order_number': payment.order.order_number,
+            'order_number': payment.order.order_number if payment.order else 'N/A',
             'payment_amount': payment.amount,
-            'payment_method': payment.method.value,
-            'payment_reference': payment.payment_reference
+            'payment_method': payment.payment_method.value if payment.payment_method else 'unknown',
+            'payment_reference': payment.payment_id  # Use payment_id as reference
         }
-        
+
+        # Determine channels: use Telegram if user has telegram_id, otherwise email
+        channels = []
+        if user.telegram_id:
+            channels.append(NotificationChannel.TELEGRAM)
+        else:
+            channels.append(NotificationChannel.EMAIL)
+
         return self.send_notification(
             payment.user_id,
             NotificationType.PAYMENT_CONFIRMATION,
-            None,
+            channels,
             template_data
         )
     
@@ -477,10 +488,10 @@ class NotificationService:
         if not self.telegram_bot_token:
             raise ConfigurationError(get_translation('error.configuration.telegram_not_configured'))
 
-        # Get user's Telegram chat ID
-        telegram_chat_id = getattr(user, 'telegram_chat_id', None)
+        # Get user's Telegram ID (serves as chat ID for direct messages)
+        telegram_chat_id = getattr(user, 'telegram_id', None)
         if not telegram_chat_id:
-            return {'success': False, 'error': get_translation('error.validation.no_telegram_chat_id')}
+            return {'success': False, 'error': get_translation('error.validation.no_telegram_id')}
         
         # Get template
         template = self._get_notification_template(
@@ -627,120 +638,266 @@ class NotificationService:
 
 
 # Default notification templates
+# Structure: (notification_type, channel) -> {
+#     'name': template name,
+#     'translations': {lang: {'subject': ..., 'content': ...}}
+# }
+# The 'uz' language content is stored as default in the model fields
+# Other language translations are stored via TranslatableMixin
 DEFAULT_TEMPLATES = {
-    # Order notifications
-    ('order_confirmation', 'email', 'en'): {
-        'subject': 'Order Confirmation - {{company_name}}',
-        'content': '''
-        <h2>Order Confirmed!</h2>
-        <p>Thank you for your order #{order_number}.</p>
-        <p><strong>Order Details:</strong></p>
-        <ul>
-        {% for item in items %}
-            <li>{item.name} - Quantity: {item.quantity} - Price: {item.price} UZS</li>
-        {% endfor %}
-        </ul>
-        <p><strong>Total: {order_total} UZS</strong></p>
-        <p><strong>Delivery Address:</strong> {delivery_address}</p>
-        <p>We'll notify you when your order is being prepared and out for delivery.</p>
-        '''
+    # Order confirmation - Email
+    ('order_confirmation', 'email'): {
+        'name': 'order_confirmation_email',
+        'translations': {
+            'uz': {
+                'subject': 'Buyurtma tasdiqlandi - {{company_name}}',
+                'content': '''<h2>Buyurtma tasdiqlandi!</h2>
+<p>#{order_number} raqamli buyurtmangiz uchun rahmat.</p>
+<p><strong>Buyurtma tafsilotlari:</strong></p>
+<p><strong>Jami: {order_total} so'm</strong></p>
+<p><strong>Yetkazib berish manzili:</strong> {delivery_address}</p>
+<p>Buyurtmangiz tayyorlanayotganda va yetkazib berilayotganda sizga xabar beramiz.</p>'''
+            },
+            'en': {
+                'subject': 'Order Confirmation - {{company_name}}',
+                'content': '''<h2>Order Confirmed!</h2>
+<p>Thank you for your order #{order_number}.</p>
+<p><strong>Order Details:</strong></p>
+<p><strong>Total: {order_total} UZS</strong></p>
+<p><strong>Delivery Address:</strong> {delivery_address}</p>
+<p>We'll notify you when your order is being prepared and out for delivery.</p>'''
+            },
+            'ru': {
+                'subject': 'Подтверждение заказа - {{company_name}}',
+                'content': '''<h2>Заказ подтвержден!</h2>
+<p>Спасибо за ваш заказ #{order_number}.</p>
+<p><strong>Детали заказа:</strong></p>
+<p><strong>Итого: {order_total} сум</strong></p>
+<p><strong>Адрес доставки:</strong> {delivery_address}</p>
+<p>Мы уведомим вас, когда ваш заказ будет готовиться и доставляться.</p>'''
+            }
+        }
     },
-    
-    ('order_confirmation', 'sms', 'en'): {
-        'content': 'Order #{order_number} confirmed! Total: {order_total} UZS. We\'ll update you on delivery progress. Thank you for choosing {{company_name}}!'
+
+    # Order confirmation - SMS
+    ('order_confirmation', 'sms'): {
+        'name': 'order_confirmation_sms',
+        'translations': {
+            'uz': {
+                'content': 'Buyurtma #{order_number} tasdiqlandi! Jami: {order_total} so\'m. Yetkazib berish haqida xabar beramiz. {{company_name}}ni tanlaganingiz uchun rahmat!'
+            },
+            'en': {
+                'content': 'Order #{order_number} confirmed! Total: {order_total} UZS. We\'ll update you on delivery progress. Thank you for choosing {{company_name}}!'
+            },
+            'ru': {
+                'content': 'Заказ #{order_number} подтвержден! Сумма: {order_total} сум. Уведомим о доставке. Спасибо за выбор {{company_name}}!'
+            }
+        }
     },
-    
-    # Delivery notifications
-    ('delivery_update', 'sms', 'en'): {
-        'content': 'Delivery Update: Your order #{order_number} is {delivery_status}. Track: {tracking_code}. Questions? Call {company_phone}'
+
+    # Delivery update - SMS
+    ('delivery_update', 'sms'): {
+        'name': 'delivery_update_sms',
+        'translations': {
+            'uz': {
+                'content': 'Yetkazib berish: #{order_number} buyurtmangiz {delivery_status}. Kuzatish: {tracking_code}. Savollar? {company_phone} ga qo\'ng\'iroq qiling'
+            },
+            'en': {
+                'content': 'Delivery Update: Your order #{order_number} is {delivery_status}. Track: {tracking_code}. Questions? Call {company_phone}'
+            },
+            'ru': {
+                'content': 'Обновление доставки: Ваш заказ #{order_number} {delivery_status}. Отслеживание: {tracking_code}. Вопросы? {company_phone}'
+            }
+        }
     },
-    
-    ('delivery_update', 'telegram', 'en'): {
-        'content': '''
-        🚚 <b>Delivery Update</b>
-        
-        Order: #{order_number}
-        Status: {delivery_status}
-        Tracking: {tracking_code}
-        
-        {% if driver_name %}
-        Driver: {driver_name}
-        Phone: {driver_phone}
-        {% endif %}
-        '''
+
+    # Delivery update - Telegram
+    ('delivery_update', 'telegram'): {
+        'name': 'delivery_update_telegram',
+        'translations': {
+            'uz': {
+                'content': '''🚚 <b>Yetkazib berish yangiligi</b>
+
+Buyurtma: #{order_number}
+Holati: {delivery_status}
+Kuzatish: {tracking_code}
+
+Haydovchi: {driver_name}
+Telefon: {driver_phone}'''
+            },
+            'en': {
+                'content': '''🚚 <b>Delivery Update</b>
+
+Order: #{order_number}
+Status: {delivery_status}
+Tracking: {tracking_code}
+
+Driver: {driver_name}
+Phone: {driver_phone}'''
+            },
+            'ru': {
+                'content': '''🚚 <b>Обновление доставки</b>
+
+Заказ: #{order_number}
+Статус: {delivery_status}
+Отслеживание: {tracking_code}
+
+Водитель: {driver_name}
+Телефон: {driver_phone}'''
+            }
+        }
     },
-    
-    # Payment notifications
-    ('payment_confirmation', 'email', 'en'): {
-        'subject': 'Payment Confirmation - {{company_name}}',
-        'content': '''
-        <h2>Payment Received</h2>
-        <p>We have successfully received your payment for order #{order_number}.</p>
-        <p><strong>Payment Details:</strong></p>
-        <ul>
-            <li>Amount: {payment_amount} UZS</li>
-            <li>Method: {payment_method}</li>
-            <li>Reference: {payment_reference}</li>
-        </ul>
-        <p>Your order is now being processed.</p>
-        '''
+
+    # Payment confirmation - Email
+    ('payment_confirmation', 'email'): {
+        'name': 'payment_confirmation_email',
+        'translations': {
+            'uz': {
+                'subject': 'To\'lov tasdiqlandi - {{company_name}}',
+                'content': '''<h2>To'lov qabul qilindi</h2>
+<p>#{order_number} raqamli buyurtmangiz uchun to'lovni muvaffaqiyatli qabul qildik.</p>
+<p><strong>To'lov tafsilotlari:</strong></p>
+<ul>
+    <li>Summa: {payment_amount} so'm</li>
+    <li>Usul: {payment_method}</li>
+    <li>Havola: {payment_reference}</li>
+</ul>
+<p>Buyurtmangiz qayta ishlanmoqda.</p>'''
+            },
+            'en': {
+                'subject': 'Payment Confirmation - {{company_name}}',
+                'content': '''<h2>Payment Received</h2>
+<p>We have successfully received your payment for order #{order_number}.</p>
+<p><strong>Payment Details:</strong></p>
+<ul>
+    <li>Amount: {payment_amount} UZS</li>
+    <li>Method: {payment_method}</li>
+    <li>Reference: {payment_reference}</li>
+</ul>
+<p>Your order is now being processed.</p>'''
+            },
+            'ru': {
+                'subject': 'Подтверждение оплаты - {{company_name}}',
+                'content': '''<h2>Оплата получена</h2>
+<p>Мы успешно получили вашу оплату за заказ #{order_number}.</p>
+<p><strong>Детали оплаты:</strong></p>
+<ul>
+    <li>Сумма: {payment_amount} сум</li>
+    <li>Способ: {payment_method}</li>
+    <li>Ссылка: {payment_reference}</li>
+</ul>
+<p>Ваш заказ обрабатывается.</p>'''
+            }
+        }
     },
-    
-    # Loyalty notifications
-    ('loyalty_reward', 'email', 'en'): {
-        'subject': 'Loyalty Points Update - {{company_name}}',
-        'content': '''
-        <h2>Loyalty Points Update</h2>
-        {% if event_type == 'earned' %}
-        <p>Congratulations! You've earned {points} loyalty points.</p>
-        {% elif event_type == 'redeemed' %}
-        <p>You've successfully redeemed {points} loyalty points.</p>
-        {% elif event_type == 'tier_upgrade' %}
-        <p>Congratulations! You've been upgraded to {tier} tier!</p>
-        {% endif %}
-        <p>Visit your account to see your current balance and available rewards.</p>
-        '''
+
+    # Payment confirmation - Telegram
+    ('payment_confirmation', 'telegram'): {
+        'name': 'payment_confirmation_telegram',
+        'translations': {
+            'uz': {
+                'content': '''✅ <b>To'lov tasdiqlandi!</b>
+
+Buyurtma: #{order_number}
+Summa: {payment_amount} so'm
+Usul: {payment_method}
+
+Buyurtmangiz qayta ishlanmoqda. Yetkazib berishga tayyor bo'lganda xabar beramiz.
+
+Xaridingiz uchun rahmat!'''
+            },
+            'en': {
+                'content': '''✅ <b>Payment Confirmed!</b>
+
+Order: #{order_number}
+Amount: {payment_amount} UZS
+Method: {payment_method}
+
+Your order is now being processed. We'll notify you when it's ready for delivery.
+
+Thank you for your purchase!'''
+            },
+            'ru': {
+                'content': '''✅ <b>Оплата подтверждена!</b>
+
+Заказ: #{order_number}
+Сумма: {payment_amount} сум
+Способ: {payment_method}
+
+Ваш заказ обрабатывается. Мы уведомим вас, когда он будет готов к доставке.
+
+Спасибо за покупку!'''
+            }
+        }
     },
-    
-    # Uzbek templates
-    ('order_confirmation', 'sms', 'uz'): {
-        'content': 'Buyurtma #{order_number} tasdiqlandi! Jami: {order_total} so\'m. Yetkazib berish haqida xabar beramiz. {{company_name}}ni tanlaganingiz uchun rahmat!'
-    },
-    
-    ('delivery_update', 'sms', 'uz'): {
-        'content': 'Yetkazib berish: #{order_number} buyurtmangiz {delivery_status}. Kuzatish: {tracking_code}. Savollar? {company_phone} ga qo\'ng\'iroq qiling'
-    },
-    
-    # Russian templates
-    ('order_confirmation', 'sms', 'ru'): {
-        'content': 'Заказ #{order_number} подтвержден! Сумма: {order_total} сум. Уведомим о доставке. Спасибо за выбор {{company_name}}!'
-    },
-    
-    ('delivery_update', 'sms', 'ru'): {
-        'content': 'Обновление доставки: Ваш заказ #{order_number} {delivery_status}. Отслеживание: {tracking_code}. Вопросы? {company_phone}'
+
+    # Loyalty reward - Email
+    ('loyalty_reward', 'email'): {
+        'name': 'loyalty_reward_email',
+        'translations': {
+            'uz': {
+                'subject': 'Sodiqlik ballari yangiligi - {{company_name}}',
+                'content': '''<h2>Sodiqlik ballari yangiligi</h2>
+<p>Tabriklaymiz! Siz {points} sodiqlik ballini qo'lga kiritdingiz.</p>
+<p>Joriy balansingiz va mavjud mukofotlarni ko'rish uchun hisobingizga tashrif buyuring.</p>'''
+            },
+            'en': {
+                'subject': 'Loyalty Points Update - {{company_name}}',
+                'content': '''<h2>Loyalty Points Update</h2>
+<p>Congratulations! You've earned {points} loyalty points.</p>
+<p>Visit your account to see your current balance and available rewards.</p>'''
+            },
+            'ru': {
+                'subject': 'Обновление баллов лояльности - {{company_name}}',
+                'content': '''<h2>Обновление баллов лояльности</h2>
+<p>Поздравляем! Вы заработали {points} баллов лояльности.</p>
+<p>Посетите свой аккаунт, чтобы увидеть текущий баланс и доступные награды.</p>'''
+            }
+        }
     }
 }
 
 
 def seed_notification_templates():
-    """Seed default notification templates"""
-    for (notification_type, channel, language), template_data in DEFAULT_TEMPLATES.items():
+    """
+    Seed default notification templates with multilingual support.
+    Uses TranslatableMixin for translations storage.
+    """
+    for (notification_type, channel), template_config in DEFAULT_TEMPLATES.items():
+        # Check if template already exists
         existing = NotificationTemplate.query.filter_by(
             notification_type=notification_type,
-            channel=channel,
-            language=language
+            channel=channel
         ).first()
-        
+
+        translations = template_config.get('translations', {})
+        # Use Uzbek as the default/base language
+        uz_translation = translations.get('uz', {})
+
         if not existing:
+            # Create new template with Uzbek as default content
             template = NotificationTemplate(
-                name=f"{notification_type}_{channel}_{language}",
+                name=template_config['name'],
                 notification_type=notification_type,
                 channel=channel,
-                language=language,
-                subject=template_data.get('subject', ''),
-                content=template_data.get('content', ''),
+                subject=uz_translation.get('subject', ''),
+                content=uz_translation.get('content', ''),
                 is_active=True
             )
             db.session.add(template)
-    
+            db.session.flush()  # Get the ID for setting translations
+        else:
+            template = existing
+            # Update base content if needed
+            template.subject = uz_translation.get('subject', template.subject or '')
+            template.content = uz_translation.get('content', template.content or '')
+
+        # Set translations for all languages using TranslatableMixin
+        for lang, lang_translations in translations.items():
+            if 'subject' in lang_translations:
+                template.set_translated('subject', lang_translations['subject'], lang)
+            if 'content' in lang_translations:
+                template.set_translated('content', lang_translations['content'], lang)
+
     db.session.commit()
+    logger.info(f"Seeded {len(DEFAULT_TEMPLATES)} notification templates with translations")

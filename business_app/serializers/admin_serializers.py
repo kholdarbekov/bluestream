@@ -616,8 +616,7 @@ def serialize_order_admin(order: Order) -> Dict[str, Any]:
             'tax_amount': float(getattr(order, 'tax_amount', 0)),
             'discount_amount': float(getattr(order, 'discount_amount', 0)),
             'delivery_fee': float(getattr(order, 'delivery_fee', 0)),
-            'payment_method': getattr(order, 'payment_method', None),
-            'payment_status': getattr(order, 'payment_status', None),
+            'payment_method': order.payment_method.value if order.payment_method else None,
             'delivery_date': order.delivery_date.isoformat() if order.delivery_date else None,
             'delivery_address': order.delivery_address.to_dict() if getattr(order, 'delivery_address', None) else None,
             'special_instructions': getattr(order, 'special_instructions', None),
@@ -663,11 +662,12 @@ def serialize_order_admin(order: Order) -> Dict[str, Any]:
     except Exception as e:
         logging.error(f"Exception in serialize_order_admin: {e}")
         # Fallback to basic serialization
+        status = getattr(order, 'status', None)
         return {
             'id': order.id,
             'order_number': order.order_number,
             'user_id': order.user_id,
-            'status': getattr(order, 'status', 'pending'),
+            'status': status.value if status else 'pending',
             'total_amount': float(order.total_amount),
             'created_at': order.created_at.isoformat() if order.created_at else None
         }

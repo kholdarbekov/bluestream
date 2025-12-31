@@ -339,15 +339,15 @@ class OrderService:
                     'product_id': item.product_id,
                     'quantity': item.quantity
                 }
-                for item in original_order.items
+                for item in original_order.order_items
             ],
             'delivery_address': {
-                'street': original_order.delivery_address_street,
-                'city': original_order.delivery_address_city,
-                'latitude': original_order.delivery_address_latitude,
-                'longitude': original_order.delivery_address_longitude
+                'street': original_order.delivery_address.street_address if original_order.delivery_address else None,
+                'city': original_order.delivery_address.city if original_order.delivery_address else None,
+                'latitude': original_order.delivery_address.latitude if original_order.delivery_address else None,
+                'longitude': original_order.delivery_address.longitude if original_order.delivery_address else None
             },
-            'delivery_instructions': original_order.delivery_instructions
+            'delivery_instructions': original_order.delivery_notes
         }
         
         return self.create_order(user_id, order_data)
@@ -596,7 +596,7 @@ class OrderService:
         product_counts = {}
         
         for order in orders:
-            for item in order.items:
+            for item in order.order_items:
                 if item.product_id not in product_counts:
                     product_counts[item.product_id] = {
                         'product_id': item.product_id,
@@ -631,10 +631,10 @@ class OrderService:
             'confirmed_at': order.confirmed_at.isoformat() if order.confirmed_at else None,
             'delivered_at': order.delivered_at.isoformat() if order.delivered_at else None,
             'delivery_address': {
-                'street': order.delivery_address_street,
-                'city': order.delivery_address_city,
-                'latitude': order.delivery_address_latitude,
-                'longitude': order.delivery_address_longitude
+                'street': order.delivery_address.street_address if order.delivery_address else None,
+                'city': order.delivery_address.city if order.delivery_address else None,
+                'latitude': order.delivery_address.latitude if order.delivery_address else None,
+                'longitude': order.delivery_address.longitude if order.delivery_address else None
             },
             'items': [
                 {
@@ -645,7 +645,7 @@ class OrderService:
                     'unit_price': item.unit_price,
                     'total_price': item.total_price
                 }
-                for item in order.items
+                for item in order.order_items
             ],
             'payment': {
                 'status': order.payment.status.value if order.payment else 'pending',

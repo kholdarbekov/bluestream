@@ -494,7 +494,7 @@ def handle_payment_webhook(self, webhook_metadata: Dict[str, Any], webhook_sourc
         # Log webhook receipt for audit
         from business_app.utils.audit_logger import audit_logger, AuditEventType, AuditSeverity
         audit_logger.log_event(
-            event_type=AuditEventType.DATA_ACCESS,
+            event_type=AuditEventType.WEBHOOK_RECEIVED,
             action="webhook_processing_started",
             severity=AuditSeverity.MEDIUM,
             resource_type="payment_webhook",
@@ -517,7 +517,7 @@ def handle_payment_webhook(self, webhook_metadata: Dict[str, Any], webhook_sourc
         else:
             logger.error(f"Unsupported webhook provider: {provider}")
             audit_logger.log_event(
-                event_type=AuditEventType.SECURITY_EVENT,
+                event_type=AuditEventType.SUSPICIOUS_ACTIVITY,
                 action="unsupported_webhook_provider",
                 severity=AuditSeverity.MEDIUM,
                 resource_type="payment_webhook",
@@ -528,7 +528,7 @@ def handle_payment_webhook(self, webhook_metadata: Dict[str, Any], webhook_sourc
         
         # Log successful processing
         audit_logger.log_event(
-            event_type=AuditEventType.DATA_ACCESS,
+            event_type=AuditEventType.WEBHOOK_RECEIVED,
             action="webhook_processing_completed",
             severity=AuditSeverity.LOW,
             resource_type="payment_webhook",
@@ -548,7 +548,7 @@ def handle_payment_webhook(self, webhook_metadata: Dict[str, Any], webhook_sourc
         
         # Log webhook processing failure
         audit_logger.log_event(
-            event_type=AuditEventType.SECURITY_EVENT,
+            event_type=AuditEventType.SUSPICIOUS_ACTIVITY,
             action="webhook_processing_failed",
             severity=AuditSeverity.HIGH,
             resource_type="payment_webhook",

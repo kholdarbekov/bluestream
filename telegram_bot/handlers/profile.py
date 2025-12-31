@@ -8,7 +8,8 @@ from telegram.ext import ContextTypes, ConversationHandler
 from telegram.error import BadRequest
 
 from i18n import i18n
-from keyboards import ProfileKeyboards, MenuKeyboards, LanguageKeyboards
+from keyboards import ProfileKeyboards, MenuKeyboards, LanguageKeyboards, KeyboardBuilder
+from shared.constants import TASHKENT_DISTRICTS, get_district_name, get_district_center, get_all_districts
 from handlers.menu import main_menu_handler
 from api_client import api_client
 from database import db_manager, BotUserRepository
@@ -18,7 +19,10 @@ from config import config
 logger = logging.getLogger('handlers')
 
 # Conversation states
-SELECT_LANGUAGE, PHONE, NAME, ADDRESS_LOCATION, ADDRESS_TITLE = range(5)
+(SELECT_LANGUAGE, PHONE, NAME, ADDRESS_LOCATION, ADDRESS_TITLE,
+ ADDRESS_REGION, ADDRESS_DISTRICT, ADDRESS_STREET, ADDRESS_BUILDING,
+ ADDRESS_APARTMENT, ADDRESS_FLOOR, ADDRESS_ENTRANCE,
+ ADDRESS_DELIVERY_INSTRUCTIONS, ADDRESS_GEOCODE_CONFIRM) = range(14)
 
 
 class ProfileHandlers:
@@ -651,48 +655,53 @@ class ProfileHandlers:
             await self._handle_error(update)
     
     async def add_address(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Start address adding process"""
+        """Start address adding process - entry point for enhanced address flow"""
         try:
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
-            
+
             logger.info(f"=== ADD ADDRESS CONVERSATION ENTRY POINT ===")
             logger.info(f"User: {user_id}")
             if update.callback_query:
                 logger.info(f"Callback data: {update.callback_query.data}")
             logger.info(f"Starting add address conversation for user {user_id}")
-            
-            # Set conversation state in context
+
+            # Initialize temp address data
+            context.user_data['temp_address_data'] = {}
             context.user_data['conversation_state'] = 'address_location'
             logger.info(f"Set conversation state to: address_location")
-            logger.info(f"Context user_data: {context.user_data}")
-            
-            location_text = i18n.get('telegram.address.location_prompt', language)
-            keyboard = ProfileKeyboards.location_request(language)
-            
+
+            # Use enhanced location request with skip option
+            location_text = i18n.get('telegram.address.location_prompt_enhanced', language) or (
+                "📍 *Add New Address*\n\n"
+                "Please share your location for accurate delivery, "
+                "or enter your address manually.\n\n"
+                "Sharing location is recommended for precise delivery."
+            )
+            keyboard = ProfileKeyboards.location_request_with_skip(language)
+
             if update.callback_query:
                 logger.info(f"Editing message via callback query")
                 await update.callback_query.delete_message()
-                # await update.callback_query.edit_message_text(
-                #     text=location_text
-                # )
                 await update.callback_query.answer()
                 # Send keyboard in new message
                 await update.callback_query.message.reply_text(
                     text=location_text,
-                    reply_markup=keyboard
+                    reply_markup=keyboard,
+                    parse_mode='Markdown'
                 )
                 logger.info(f"Callback query processed and keyboard sent")
             else:
                 logger.info(f"Replying to message directly")
                 await update.message.reply_text(
                     text=location_text,
-                    reply_markup=keyboard
+                    reply_markup=keyboard,
+                    parse_mode='Markdown'
                 )
-            
+
             logger.info(f"Address conversation started, returning ADDRESS_LOCATION state ({ADDRESS_LOCATION})")
             return ADDRESS_LOCATION
-            
+
         except Exception as e:
             logger.error(f"Error starting add address: {e}")
             import traceback
@@ -700,76 +709,68 @@ class ProfileHandlers:
             return ConversationHandler.END
     
     async def location_received(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle location sharing for address"""
+        """Handle location sharing for address - primary path with reverse geocoding"""
         logger.info(f"=== LOCATION_RECEIVED METHOD CALLED ===")
-        logger.info(f"Method called with update type: {type(update)}")
-        logger.info(f"Update object: {update}")
-        logger.info(f"Context type: {type(context)}")
-        logger.info(f"Context user_data: {context.user_data}")
-        
+
         try:
-            logger.info(f"Extracting user_id from update...")
             user_id = update.effective_user.id
-            logger.info(f"User ID extracted: {user_id}")
-            
-            logger.info(f"Getting user language...")
             language = await i18n.get_user_language(user_id)
-            logger.info(f"User language: {language}")
-            
-            logger.info(f"Extracting location from message...")
-            if not update.message:
-                logger.error(f"ERROR: update.message is None!")
+
+            if not update.message or not update.message.location:
+                logger.error(f"ERROR: No location in message!")
                 return ConversationHandler.END
-                
-            logger.info(f"Message object: {update.message}")
-            
-            if not update.message.location:
-                logger.error(f"ERROR: update.message.location is None!")
-                return ConversationHandler.END
-                
+
             location = update.message.location
-            logger.info(f"Location object extracted: {location}")
-            
-            logger.info(f"=== LOCATION RECEIVED IN CONVERSATION ===")
-            logger.info(f"User: {user_id}")
-            logger.info(f"Location: lat={location.latitude}, lng={location.longitude}")
-            logger.info(f"Conversation state before: {context.user_data.get('conversation_state', 'unknown')}")
-            logger.info(f"Full context user_data keys: {list(context.user_data.keys())}")
-            logger.info(f"Full context user_data: {context.user_data}")
-            
-            logger.info(f"Creating temp_location dictionary...")
-            temp_location = {
-                'latitude': location.latitude,
-                'longitude': location.longitude
-            }
-            logger.info(f"temp_location created: {temp_location}")
-            
-            logger.info(f"Storing temp_location in context...")
-            context.user_data['temp_location'] = temp_location
-            logger.info(f"temp_location stored successfully")
-            logger.info(f"Updated context user_data: {context.user_data}")
-            logger.info(f"Verification - temp_location in context: {context.user_data.get('temp_location')}")
-            
-            logger.info(f"Sending reply message to user...")
+            logger.info(f"Location received: lat={location.latitude}, lng={location.longitude}")
+
+            # Store location in temp address data
+            if 'temp_address_data' not in context.user_data:
+                context.user_data['temp_address_data'] = {}
+
+            context.user_data['temp_address_data']['latitude'] = location.latitude
+            context.user_data['temp_address_data']['longitude'] = location.longitude
+            context.user_data['temp_address_data']['location_source'] = 'shared'
+
+            # Attempt reverse geocoding
+            reverse_geocoded_address = None
+            async with api_client as client:
+                user_token = await authenticate_telegram_user(update, client)
+                if user_token:
+                    response = await client.reverse_geocode(user_token, location.latitude, location.longitude)
+                    if response.success and response.data.get('data'):
+                        reverse_geocoded_address = response.data['data'].get('formatted_address')
+                        context.user_data['temp_address_data']['full_address'] = reverse_geocoded_address
+                        logger.info(f"Reverse geocoded address: {reverse_geocoded_address}")
+
+            # Remove reply keyboard
             await update.message.reply_text(
-                i18n.get('telegram.address.title_prompt', language),
+                "📍 Location received!",
                 reply_markup=ReplyKeyboardRemove()
             )
-            logger.info(f"Reply message sent successfully")
-            
-            logger.info(f"Conversation transitioning to ADDRESS_TITLE state")
-            logger.info(f"ADDRESS_TITLE constant value: {ADDRESS_TITLE}")
-            logger.info(f"Returning ADDRESS_TITLE state ({ADDRESS_TITLE})")
-            
+
+            # Ask for address title with suggestions
+            title_prompt = i18n.get('telegram.address.title_prompt', language) or (
+                "Great! Now give this address a name.\n\n"
+                "You can choose from the suggestions below or type your own:"
+            )
+            if reverse_geocoded_address:
+                title_prompt = f"📍 *Detected location:*\n{reverse_geocoded_address}\n\n" + title_prompt
+
+            keyboard = ProfileKeyboards.address_title_suggestions(language)
+
+            await update.message.reply_text(
+                title_prompt,
+                reply_markup=keyboard,
+                parse_mode='Markdown'
+            )
+
+            logger.info(f"Transitioning to ADDRESS_TITLE state")
             return ADDRESS_TITLE
-            
+
         except Exception as e:
             logger.error(f"CRITICAL ERROR in location_received: {e}")
-            logger.error(f"Error type: {type(e)}")
             import traceback
             logger.error(f"Full traceback: {traceback.format_exc()}")
-            logger.error(f"Update object when error occurred: {update}")
-            logger.error(f"Context when error occurred: {context.user_data}")
             return ConversationHandler.END
     
     async def address_text_received(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -794,50 +795,79 @@ class ProfileHandlers:
             return ConversationHandler.END
     
     async def address_title_received(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle address title"""
+        """Handle address title from text input"""
         try:
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
             title = update.message.text.strip()
-            
-            # Prepare address data
-            address_data = {
-                'title': title,
-                'full_address': context.user_data.get('temp_address', 'Location-based address')
-            }
-            
-            # Add coordinates if available
-            if 'temp_location' in context.user_data:
-                loc = context.user_data['temp_location']
-                address_data['latitude'] = loc['latitude']
-                address_data['longitude'] = loc['longitude']
-            
-            # Save address via API
-            async with api_client as client:
-                user_token = await authenticate_telegram_user(update, client)
-                if user_token:
-                    response = await client.add_user_address(user_token, address_data)
-                    if response.success:
-                        success_text = f"✅ Address '{title}' added successfully!"
+
+            logger.info(f"User {user_id} entered title: {title}")
+
+            # Store title in temp address data
+            if 'temp_address_data' not in context.user_data:
+                context.user_data['temp_address_data'] = {}
+            context.user_data['temp_address_data']['title'] = title
+
+            # Check if this is from location sharing flow (has coordinates already)
+            addr_data = context.user_data['temp_address_data']
+            if addr_data.get('latitude') and addr_data.get('longitude'):
+                # Location already set, ask for delivery instructions
+                instructions_prompt = i18n.get('telegram.address.enter_delivery_instructions', language) or (
+                    "Any special delivery instructions?\n"
+                    "(e.g., door code, call before arriving)\n\n"
+                    "Type your instructions or click Skip:"
+                )
+                keyboard = ProfileKeyboards.delivery_instructions_keyboard(language)
+
+                await update.message.reply_text(
+                    instructions_prompt,
+                    reply_markup=keyboard
+                )
+
+                return ADDRESS_DELIVERY_INSTRUCTIONS
+            else:
+                # Legacy flow - save directly
+                # Prepare address data
+                address_data = {
+                    'title': title,
+                    'full_address': context.user_data.get('temp_address', 'Location-based address')
+                }
+
+                # Add coordinates if available from old flow
+                if 'temp_location' in context.user_data:
+                    loc = context.user_data['temp_location']
+                    address_data['latitude'] = loc['latitude']
+                    address_data['longitude'] = loc['longitude']
+
+                # Save address via API
+                async with api_client as client:
+                    user_token = await authenticate_telegram_user(update, client)
+                    if user_token:
+                        response = await client.add_user_address(user_token, address_data)
+                        if response.success:
+                            success_text = f"✅ Address '{title}' added successfully!"
+                        else:
+                            success_text = "❌ Failed to add address. Please try again."
                     else:
-                        success_text = "❌ Failed to add address. Please try again."
-                else:
-                    success_text = "❌ Authentication failed."
-            
-            # keyboard = MenuKeyboards.main_menu(language)
-            await update.message.reply_text(
-                text=success_text,
-                # reply_markup=keyboard
-            )
-            
-            # Clear temporary data
-            context.user_data.pop('temp_location', None)
-            context.user_data.pop('temp_address', None)
-            
-            return ConversationHandler.END
-            
+                        success_text = "❌ Authentication failed."
+
+                keyboard = MenuKeyboards.main_menu(language)
+                await update.message.reply_text(
+                    text=success_text,
+                    reply_markup=keyboard
+                )
+
+                # Clear temporary data
+                context.user_data.pop('temp_location', None)
+                context.user_data.pop('temp_address', None)
+                context.user_data.pop('temp_address_data', None)
+
+                return ConversationHandler.END
+
         except Exception as e:
             logger.error(f"Error handling address title: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
             return ConversationHandler.END
     
     async def cancel_address(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -845,23 +875,703 @@ class ProfileHandlers:
         try:
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
-            
+
             cancel_text = i18n.get('telegram.action_cancelled', language)
             keyboard = MenuKeyboards.main_menu(language)
-            
-            await update.message.reply_text(
-                text=cancel_text,
-                reply_markup=keyboard
-            )
-            
-            # Clear temporary data
+
+            # Handle both message and callback query
+            if update.callback_query:
+                await update.callback_query.answer()
+                await update.callback_query.edit_message_text(
+                    text=cancel_text,
+                    reply_markup=keyboard
+                )
+            else:
+                await update.message.reply_text(
+                    text=cancel_text,
+                    reply_markup=keyboard
+                )
+
+            # Clear all temporary address data
             context.user_data.pop('temp_location', None)
             context.user_data.pop('temp_address', None)
-            
+            context.user_data.pop('temp_address_data', None)
+
             return ConversationHandler.END
-            
+
         except Exception as e:
             logger.error(f"Error canceling address: {e}")
+            return ConversationHandler.END
+
+    # ==================== MANUAL ADDRESS ENTRY HANDLERS ====================
+
+    async def skip_location_sharing(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle skip location - start manual entry flow"""
+        try:
+            user_id = update.effective_user.id
+            language = await i18n.get_user_language(user_id)
+
+            logger.info(f"User {user_id} chose manual address entry")
+
+            # Initialize temp address data if not exists
+            if 'temp_address_data' not in context.user_data:
+                context.user_data['temp_address_data'] = {}
+            context.user_data['temp_address_data']['location_source'] = 'manual'
+
+            # Remove reply keyboard
+            await update.message.reply_text(
+                "✏️ Manual address entry",
+                reply_markup=ReplyKeyboardRemove()
+            )
+
+            # Show region selection (only Tashkent for now)
+            region_prompt = i18n.get('telegram.address.select_region', language) or (
+                "Please select your region:"
+            )
+            keyboard = ProfileKeyboards.region_selection(language)
+
+            await update.message.reply_text(
+                region_prompt,
+                reply_markup=keyboard
+            )
+
+            return ADDRESS_REGION
+
+        except Exception as e:
+            logger.error(f"Error in skip_location_sharing: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            return ConversationHandler.END
+
+    async def region_selected(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle region selection"""
+        try:
+            query = update.callback_query
+            user_id = update.effective_user.id
+            language = await i18n.get_user_language(user_id)
+
+            # Extract region from callback data
+            region = query.data.replace('region_', '')
+            logger.info(f"User {user_id} selected region: {region}")
+
+            # Store region
+            if 'temp_address_data' not in context.user_data:
+                context.user_data['temp_address_data'] = {}
+            context.user_data['temp_address_data']['region'] = region
+            context.user_data['temp_address_data']['city'] = 'Tashkent'
+
+            await query.answer()
+
+            # Show district selection
+            district_prompt = i18n.get('telegram.address.select_district', language) or (
+                "Please select your district:"
+            )
+            districts = get_all_districts(language)
+            keyboard = ProfileKeyboards.district_selection(districts, language)
+
+            await query.edit_message_text(
+                district_prompt,
+                reply_markup=keyboard
+            )
+
+            return ADDRESS_DISTRICT
+
+        except Exception as e:
+            logger.error(f"Error in region_selected: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            return ConversationHandler.END
+
+    async def district_selected(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle district selection"""
+        try:
+            query = update.callback_query
+            user_id = update.effective_user.id
+            language = await i18n.get_user_language(user_id)
+
+            # Extract district from callback data
+            district_key = query.data.replace('district_', '')
+            district_name = get_district_name(district_key, language)
+            logger.info(f"User {user_id} selected district: {district_key} ({district_name})")
+
+            # Store district
+            context.user_data['temp_address_data']['district'] = district_key
+            context.user_data['temp_address_data']['district_name'] = district_name
+
+            # Get district center for geocoding hint
+            center = get_district_center(district_key)
+            context.user_data['temp_address_data']['hint_lat'] = center[0]
+            context.user_data['temp_address_data']['hint_lon'] = center[1]
+
+            await query.answer()
+
+            # Ask for street name (optional)
+            street_prompt = i18n.get('telegram.address.enter_street', language) or (
+                f"📍 District: *{district_name}*\n\n"
+                "Please enter your street name, or skip if you don't want to specify:"
+            )
+            keyboard = ProfileKeyboards.optional_field_keyboard('street', language)
+
+            await query.edit_message_text(
+                street_prompt,
+                reply_markup=keyboard,
+                parse_mode='Markdown'
+            )
+
+            return ADDRESS_STREET
+
+        except Exception as e:
+            logger.error(f"Error in district_selected: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            return ConversationHandler.END
+
+    async def street_received(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle street name input"""
+        try:
+            user_id = update.effective_user.id
+            language = await i18n.get_user_language(user_id)
+            street = update.message.text.strip()
+
+            logger.info(f"User {user_id} entered street: {street}")
+            context.user_data['temp_address_data']['street_address'] = street
+
+            # Ask for building number
+            building_prompt = i18n.get('telegram.address.enter_building', language) or (
+                "Please enter your building/house number, or skip:"
+            )
+            keyboard = ProfileKeyboards.optional_field_keyboard('building', language)
+
+            await update.message.reply_text(
+                building_prompt,
+                reply_markup=keyboard
+            )
+
+            return ADDRESS_BUILDING
+
+        except Exception as e:
+            logger.error(f"Error in street_received: {e}")
+            return ConversationHandler.END
+
+    async def building_received(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle building number input"""
+        try:
+            user_id = update.effective_user.id
+            language = await i18n.get_user_language(user_id)
+            building = update.message.text.strip()
+
+            logger.info(f"User {user_id} entered building: {building}")
+            context.user_data['temp_address_data']['building_number'] = building
+
+            # Ask for apartment number
+            apartment_prompt = i18n.get('telegram.address.enter_apartment', language) or (
+                "Please enter your apartment number, or skip:"
+            )
+            keyboard = ProfileKeyboards.optional_field_keyboard('apartment', language)
+
+            await update.message.reply_text(
+                apartment_prompt,
+                reply_markup=keyboard
+            )
+
+            return ADDRESS_APARTMENT
+
+        except Exception as e:
+            logger.error(f"Error in building_received: {e}")
+            return ConversationHandler.END
+
+    async def apartment_received(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle apartment number input"""
+        try:
+            user_id = update.effective_user.id
+            language = await i18n.get_user_language(user_id)
+            apartment = update.message.text.strip()
+
+            logger.info(f"User {user_id} entered apartment: {apartment}")
+            context.user_data['temp_address_data']['apartment_number'] = apartment
+
+            # Ask for floor number
+            floor_prompt = i18n.get('telegram.address.enter_floor', language) or (
+                "Please enter your floor number, or skip:"
+            )
+            keyboard = ProfileKeyboards.optional_field_keyboard('floor', language)
+
+            await update.message.reply_text(
+                floor_prompt,
+                reply_markup=keyboard
+            )
+
+            return ADDRESS_FLOOR
+
+        except Exception as e:
+            logger.error(f"Error in apartment_received: {e}")
+            return ConversationHandler.END
+
+    async def floor_received(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle floor number input"""
+        try:
+            user_id = update.effective_user.id
+            language = await i18n.get_user_language(user_id)
+            floor = update.message.text.strip()
+
+            logger.info(f"User {user_id} entered floor: {floor}")
+            context.user_data['temp_address_data']['floor_number'] = floor
+
+            # Ask for entrance number
+            entrance_prompt = i18n.get('telegram.address.enter_entrance', language) or (
+                "Please enter your entrance/podyezd number, or skip:"
+            )
+            keyboard = ProfileKeyboards.optional_field_keyboard('entrance', language)
+
+            await update.message.reply_text(
+                entrance_prompt,
+                reply_markup=keyboard
+            )
+
+            return ADDRESS_ENTRANCE
+
+        except Exception as e:
+            logger.error(f"Error in floor_received: {e}")
+            return ConversationHandler.END
+
+    async def entrance_received(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle entrance number input"""
+        try:
+            user_id = update.effective_user.id
+            language = await i18n.get_user_language(user_id)
+            entrance = update.message.text.strip()
+
+            logger.info(f"User {user_id} entered entrance: {entrance}")
+            context.user_data['temp_address_data']['entrance'] = entrance
+
+            # Ask for delivery instructions
+            instructions_prompt = i18n.get('telegram.address.enter_delivery_instructions', language) or (
+                "Any special delivery instructions?\n"
+                "(e.g., door code, call before arriving, preferred delivery times)\n\n"
+                "Or skip if none:"
+            )
+            keyboard = ProfileKeyboards.delivery_instructions_keyboard(language)
+
+            await update.message.reply_text(
+                instructions_prompt,
+                reply_markup=keyboard
+            )
+
+            return ADDRESS_DELIVERY_INSTRUCTIONS
+
+        except Exception as e:
+            logger.error(f"Error in entrance_received: {e}")
+            return ConversationHandler.END
+
+    async def delivery_instructions_received(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle delivery instructions input"""
+        try:
+            user_id = update.effective_user.id
+            language = await i18n.get_user_language(user_id)
+            instructions = update.message.text.strip()
+
+            logger.info(f"User {user_id} entered delivery instructions")
+            context.user_data['temp_address_data']['delivery_instructions'] = instructions
+
+            # Proceed to geocoding and confirmation
+            return await self.geocode_and_confirm(update, context)
+
+        except Exception as e:
+            logger.error(f"Error in delivery_instructions_received: {e}")
+            return ConversationHandler.END
+
+    async def skip_field_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle skip button for optional fields"""
+        try:
+            query = update.callback_query
+            user_id = update.effective_user.id
+            language = await i18n.get_user_language(user_id)
+
+            # Extract field name from callback data
+            field_name = query.data.replace('skip_', '')
+            logger.info(f"User {user_id} skipped field: {field_name}")
+
+            await query.answer()
+
+            # Determine next state based on skipped field
+            if field_name == 'street':
+                # Skip to delivery instructions
+                instructions_prompt = i18n.get('telegram.address.enter_delivery_instructions', language) or (
+                    "Any special delivery instructions?\n"
+                    "(e.g., door code, call before arriving)\n\n"
+                    "Or skip if none:"
+                )
+                keyboard = ProfileKeyboards.delivery_instructions_keyboard(language)
+                await query.edit_message_text(instructions_prompt, reply_markup=keyboard)
+                return ADDRESS_DELIVERY_INSTRUCTIONS
+
+            elif field_name == 'building':
+                # Skip to delivery instructions
+                instructions_prompt = i18n.get('telegram.address.enter_delivery_instructions', language) or (
+                    "Any special delivery instructions?\n"
+                    "(e.g., door code, call before arriving)\n\n"
+                    "Or skip if none:"
+                )
+                keyboard = ProfileKeyboards.delivery_instructions_keyboard(language)
+                await query.edit_message_text(instructions_prompt, reply_markup=keyboard)
+                return ADDRESS_DELIVERY_INSTRUCTIONS
+
+            elif field_name == 'apartment':
+                floor_prompt = i18n.get('telegram.address.enter_floor', language) or "Please enter your floor number, or skip:"
+                keyboard = ProfileKeyboards.optional_field_keyboard('floor', language)
+                await query.edit_message_text(floor_prompt, reply_markup=keyboard)
+                return ADDRESS_FLOOR
+
+            elif field_name == 'floor':
+                entrance_prompt = i18n.get('telegram.address.enter_entrance', language) or "Please enter your entrance number, or skip:"
+                keyboard = ProfileKeyboards.optional_field_keyboard('entrance', language)
+                await query.edit_message_text(entrance_prompt, reply_markup=keyboard)
+                return ADDRESS_ENTRANCE
+
+            elif field_name == 'entrance':
+                instructions_prompt = i18n.get('telegram.address.enter_delivery_instructions', language) or (
+                    "Any special delivery instructions?\n"
+                    "(e.g., door code, call before arriving)\n\n"
+                    "Or skip if none:"
+                )
+                keyboard = ProfileKeyboards.delivery_instructions_keyboard(language)
+                await query.edit_message_text(instructions_prompt, reply_markup=keyboard)
+                return ADDRESS_DELIVERY_INSTRUCTIONS
+
+            elif field_name == 'delivery_instructions':
+                # Proceed to geocoding
+                return await self.geocode_and_confirm_callback(update, context)
+
+            else:
+                logger.warning(f"Unknown field skipped: {field_name}")
+                return ConversationHandler.END
+
+        except Exception as e:
+            logger.error(f"Error in skip_field_handler: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            return ConversationHandler.END
+
+    async def geocode_and_confirm(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Geocode the manual address and show confirmation"""
+        try:
+            user_id = update.effective_user.id
+            language = await i18n.get_user_language(user_id)
+            addr_data = context.user_data.get('temp_address_data', {})
+
+            # Build address string for geocoding
+            address_parts = []
+            if addr_data.get('street_address'):
+                address_parts.append(f"{addr_data['street_address']} street")
+            if addr_data.get('building_number'):
+                address_parts.append(addr_data['building_number'])
+            if addr_data.get('district_name'):
+                address_parts.append(addr_data['district_name'])
+            address_parts.append('Tashkent, Uzbekistan')
+
+            address_string = ', '.join(address_parts)
+            logger.info(f"Geocoding address: {address_string}")
+
+            # Attempt geocoding
+            geocode_success = False
+            async with api_client as client:
+                user_token = await authenticate_telegram_user(update, client)
+                if user_token:
+                    hint_lat = addr_data.get('hint_lat')
+                    hint_lon = addr_data.get('hint_lon')
+
+                    response = await client.geocode_address(
+                        user_token, address_string, hint_lat, hint_lon
+                    )
+
+                    if response.success and response.data.get('data'):
+                        geo_data = response.data['data']
+                        addr_data['latitude'] = geo_data.get('latitude')
+                        addr_data['longitude'] = geo_data.get('longitude')
+                        addr_data['full_address'] = geo_data.get('formatted_address', address_string)
+                        geocode_success = True
+                        logger.info(f"Geocoding successful: {addr_data['latitude']}, {addr_data['longitude']}")
+
+            # If geocoding failed, use district center as fallback
+            if not geocode_success:
+                logger.warning(f"Geocoding failed, using district center as fallback")
+                district_key = addr_data.get('district', 'yunusabad')
+                center = get_district_center(district_key)
+                addr_data['latitude'] = center[0]
+                addr_data['longitude'] = center[1]
+                addr_data['full_address'] = address_string
+
+            context.user_data['temp_address_data'] = addr_data
+
+            # Send location pin for confirmation
+            await update.message.reply_location(
+                latitude=addr_data['latitude'],
+                longitude=addr_data['longitude']
+            )
+
+            # Show confirmation message
+            confirm_text = i18n.get('telegram.address.geocode_found', language) or (
+                "📍 *Location Found*\n\n"
+                f"Address: {addr_data.get('full_address', 'N/A')}\n\n"
+                "Is this location correct?"
+            )
+            if not geocode_success:
+                confirm_text += "\n\n⚠️ _Note: Exact location could not be determined. Using approximate district center._"
+
+            keyboard = ProfileKeyboards.geocode_confirmation(language)
+
+            await update.message.reply_text(
+                confirm_text,
+                reply_markup=keyboard,
+                parse_mode='Markdown'
+            )
+
+            return ADDRESS_GEOCODE_CONFIRM
+
+        except Exception as e:
+            logger.error(f"Error in geocode_and_confirm: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            return ConversationHandler.END
+
+    async def geocode_and_confirm_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Geocode and confirm from callback query (skip button)"""
+        try:
+            query = update.callback_query
+            user_id = update.effective_user.id
+            language = await i18n.get_user_language(user_id)
+            addr_data = context.user_data.get('temp_address_data', {})
+
+            await query.answer("Processing...")
+
+            # Build address string
+            address_parts = []
+            if addr_data.get('street_address'):
+                address_parts.append(f"{addr_data['street_address']} street")
+            if addr_data.get('building_number'):
+                address_parts.append(addr_data['building_number'])
+            if addr_data.get('district_name'):
+                address_parts.append(addr_data['district_name'])
+            address_parts.append('Tashkent, Uzbekistan')
+
+            address_string = ', '.join(address_parts)
+            logger.info(f"Geocoding address: {address_string}")
+
+            # Attempt geocoding
+            geocode_success = False
+            async with api_client as client:
+                user_token = await authenticate_telegram_user(update, client)
+                if user_token:
+                    hint_lat = addr_data.get('hint_lat')
+                    hint_lon = addr_data.get('hint_lon')
+
+                    response = await client.geocode_address(
+                        user_token, address_string, hint_lat, hint_lon
+                    )
+
+                    if response.success and response.data.get('data'):
+                        geo_data = response.data['data']
+                        addr_data['latitude'] = geo_data.get('latitude')
+                        addr_data['longitude'] = geo_data.get('longitude')
+                        addr_data['full_address'] = geo_data.get('formatted_address', address_string)
+                        geocode_success = True
+
+            # Fallback to district center
+            if not geocode_success:
+                district_key = addr_data.get('district', 'yunusabad')
+                center = get_district_center(district_key)
+                addr_data['latitude'] = center[0]
+                addr_data['longitude'] = center[1]
+                addr_data['full_address'] = address_string
+
+            context.user_data['temp_address_data'] = addr_data
+
+            # Delete old message and send location
+            await query.delete_message()
+
+            await query.message.reply_location(
+                latitude=addr_data['latitude'],
+                longitude=addr_data['longitude']
+            )
+
+            confirm_text = i18n.get('telegram.address.geocode_found', language) or (
+                "📍 *Location Found*\n\n"
+                f"Address: {addr_data.get('full_address', 'N/A')}\n\n"
+                "Is this location correct?"
+            )
+            if not geocode_success:
+                confirm_text += "\n\n⚠️ _Note: Using approximate district center location._"
+
+            keyboard = ProfileKeyboards.geocode_confirmation(language)
+
+            await query.message.reply_text(
+                confirm_text,
+                reply_markup=keyboard,
+                parse_mode='Markdown'
+            )
+
+            return ADDRESS_GEOCODE_CONFIRM
+
+        except Exception as e:
+            logger.error(f"Error in geocode_and_confirm_callback: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            return ConversationHandler.END
+
+    async def confirm_geocode(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """User confirms the geocoded location - proceed to title"""
+        try:
+            query = update.callback_query
+            user_id = update.effective_user.id
+            language = await i18n.get_user_language(user_id)
+
+            await query.answer("✅ Location confirmed!")
+            logger.info(f"User {user_id} confirmed geocoded location")
+
+            # Ask for address title
+            title_prompt = i18n.get('telegram.address.title_prompt', language) or (
+                "Great! Now give this address a name.\n\n"
+                "You can choose from the suggestions below or type your own:"
+            )
+            keyboard = ProfileKeyboards.address_title_suggestions(language)
+
+            await query.edit_message_text(
+                title_prompt,
+                reply_markup=keyboard
+            )
+
+            return ADDRESS_TITLE
+
+        except Exception as e:
+            logger.error(f"Error in confirm_geocode: {e}")
+            return ConversationHandler.END
+
+    async def retry_geocode(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """User wants to re-enter address - go back to region selection"""
+        try:
+            query = update.callback_query
+            user_id = update.effective_user.id
+            language = await i18n.get_user_language(user_id)
+
+            await query.answer("Let's try again!")
+            logger.info(f"User {user_id} requested to re-enter address")
+
+            # Clear previous address data but keep the flow
+            context.user_data['temp_address_data'] = {'location_source': 'manual'}
+
+            # Show region selection again
+            region_prompt = i18n.get('telegram.address.select_region', language) or "Please select your region:"
+            keyboard = ProfileKeyboards.region_selection(language)
+
+            await query.edit_message_text(
+                region_prompt,
+                reply_markup=keyboard
+            )
+
+            return ADDRESS_REGION
+
+        except Exception as e:
+            logger.error(f"Error in retry_geocode: {e}")
+            return ConversationHandler.END
+
+    async def address_title_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle address title from callback (suggestions)"""
+        try:
+            query = update.callback_query
+            user_id = update.effective_user.id
+            language = await i18n.get_user_language(user_id)
+
+            # Extract title from callback
+            title_key = query.data.replace('addr_title_', '')
+            titles = {
+                'home': {'en': 'Home', 'uz': 'Uy', 'ru': 'Дом'},
+                'work': {'en': 'Work', 'uz': 'Ish', 'ru': 'Работа'},
+                'other': {'en': 'Other', 'uz': 'Boshqa', 'ru': 'Другое'}
+            }
+            title = titles.get(title_key, {}).get(language, title_key.capitalize())
+
+            logger.info(f"User {user_id} selected title: {title}")
+            context.user_data['temp_address_data']['title'] = title
+
+            await query.answer()
+
+            # Save the address
+            return await self.save_address_final(update, context, is_callback=True)
+
+        except Exception as e:
+            logger.error(f"Error in address_title_callback: {e}")
+            return ConversationHandler.END
+
+    async def save_address_final(self, update: Update, context: ContextTypes.DEFAULT_TYPE, is_callback: bool = False):
+        """Save the address to API"""
+        try:
+            user_id = update.effective_user.id
+            language = await i18n.get_user_language(user_id)
+            addr_data = context.user_data.get('temp_address_data', {})
+
+            # Prepare address data for API
+            address_payload = {
+                'title': addr_data.get('title', 'My Address'),
+                'full_address': addr_data.get('full_address', ''),
+                'street_address': addr_data.get('street_address'),
+                'city': addr_data.get('city', 'Tashkent'),
+                'district': addr_data.get('district'),
+                'latitude': addr_data.get('latitude'),
+                'longitude': addr_data.get('longitude'),
+                'apartment_number': addr_data.get('apartment_number'),
+                'floor_number': addr_data.get('floor_number'),
+                'delivery_instructions': addr_data.get('delivery_instructions'),
+            }
+
+            # Remove None values
+            address_payload = {k: v for k, v in address_payload.items() if v is not None}
+
+            logger.info(f"Saving address for user {user_id}: {address_payload}")
+
+            # Save via API
+            success = False
+            async with api_client as client:
+                user_token = await authenticate_telegram_user(update, client)
+                if user_token:
+                    response = await client.add_user_address(user_token, address_payload)
+                    if response.success:
+                        success = True
+                        logger.info(f"Address saved successfully for user {user_id}")
+                    else:
+                        logger.error(f"Failed to save address: {response.error}")
+
+            # Clear temp data
+            context.user_data.pop('temp_address_data', None)
+            context.user_data.pop('temp_location', None)
+            context.user_data.pop('temp_address', None)
+
+            if success:
+                success_text = i18n.get('telegram.address.saved_successfully', language) or (
+                    f"✅ Address '{addr_data.get('title', 'My Address')}' saved successfully!"
+                )
+            else:
+                success_text = "❌ Failed to save address. Please try again."
+
+            keyboard = MenuKeyboards.main_menu(language)
+
+            if is_callback:
+                query = update.callback_query
+                await query.edit_message_text(
+                    text=success_text,
+                    reply_markup=keyboard
+                )
+            else:
+                await update.message.reply_text(
+                    text=success_text,
+                    reply_markup=keyboard
+                )
+
+            return ConversationHandler.END
+
+        except Exception as e:
+            logger.error(f"Error in save_address_final: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
             return ConversationHandler.END
     
     async def view_address(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1606,6 +2316,15 @@ profile_handlers = ProfileHandlers()
 # Export conversation states
 profile_handlers.SELECT_LANGUAGE = SELECT_LANGUAGE
 profile_handlers.PHONE = PHONE
-profile_handlers.NAME = NAME  
+profile_handlers.NAME = NAME
 profile_handlers.ADDRESS_LOCATION = ADDRESS_LOCATION
 profile_handlers.ADDRESS_TITLE = ADDRESS_TITLE
+profile_handlers.ADDRESS_REGION = ADDRESS_REGION
+profile_handlers.ADDRESS_DISTRICT = ADDRESS_DISTRICT
+profile_handlers.ADDRESS_STREET = ADDRESS_STREET
+profile_handlers.ADDRESS_BUILDING = ADDRESS_BUILDING
+profile_handlers.ADDRESS_APARTMENT = ADDRESS_APARTMENT
+profile_handlers.ADDRESS_FLOOR = ADDRESS_FLOOR
+profile_handlers.ADDRESS_ENTRANCE = ADDRESS_ENTRANCE
+profile_handlers.ADDRESS_DELIVERY_INSTRUCTIONS = ADDRESS_DELIVERY_INSTRUCTIONS
+profile_handlers.ADDRESS_GEOCODE_CONFIRM = ADDRESS_GEOCODE_CONFIRM

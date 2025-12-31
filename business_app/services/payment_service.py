@@ -18,7 +18,7 @@ from business_app.models.order import Order, OrderItem
 from business_app.models.payment import Payment, PaymentTransaction, CreditCard
 from business_app.models.user import User
 from business_app.utils.exceptions import PaymentError, ValidationError, NotFoundError
-from business_app.utils.constants import PaymentStatus, PaymentMethod
+from business_app.utils.constants import OrderStatus, PaymentStatus, PaymentMethod
 from business_app.utils.helpers import generate_random_string
 from business_app.utils.audit_logger import audit_logger, AuditEventType, AuditSeverity
 from business_app.utils.card_validation import CardValidator, CardSecurityValidator
@@ -292,18 +292,18 @@ class PaymentService:
 
                 # Log successful payment
                 audit_logger.log_event(
-                    event_type=AuditEventType.DATA_MODIFICATION,
+                    event_type=AuditEventType.PAYMENT_PROCESSED,
                     action="card_payment_successful",
                     severity=AuditSeverity.MEDIUM,
                     resource_type="payment",
                     resource_id=str(payment.id),
-                    user_id=user_id,
                     description=f"Card payment successful for order {order_id}",
                     additional_data={
                         'order_id': order_id,
                         'amount': amount,
                         'card_last_four': card.last_four_digits,
-                        'payment_method': payment_method.value
+                        'payment_method': payment_method.value,
+                        'user_id': user_id
                     }
                 )
             else:
@@ -314,18 +314,18 @@ class PaymentService:
 
                 # Log failed payment
                 audit_logger.log_event(
-                    event_type=AuditEventType.SECURITY_EVENT,
+                    event_type=AuditEventType.PAYMENT_FAILED,
                     action="card_payment_failed",
                     severity=AuditSeverity.MEDIUM,
                     resource_type="payment",
                     resource_id=str(payment.id),
-                    user_id=user_id,
                     description=f"Card payment failed for order {order_id}",
                     additional_data={
                         'order_id': order_id,
                         'amount': amount,
                         'card_last_four': card.last_four_digits,
-                        'error': result.get('error_message')
+                        'error': result.get('error_message'),
+                        'user_id': user_id
                     }
                 )
 
@@ -410,7 +410,7 @@ class PaymentService:
              print(f"payme_merchant_id: {self.payme_merchant_id}")
              print(f"params: {params}")
              headers = {
-                 'X-Auth': f"{self.payme_merchant_id}:{self.payme_secret_key}",
+                 'X-Auth': f"{self.payme_merchant_id}:{self.payme_secret_key}" if method.startswith('receipts.') else self.payme_merchant_id,
                  'Content-Type': 'application/json'
              }
              
@@ -1063,16 +1063,16 @@ class PaymentService:
 
         # Audit log
         audit_logger.log_event(
-            event_type=AuditEventType.DATA_MODIFICATION,
+            event_type=AuditEventType.SENSITIVE_DATA_ACCESS,
             action="verified_card_saved",
             severity=AuditSeverity.MEDIUM,
             resource_type="credit_card",
-            user_id=user_id,
             description=f"Verified card saved: {masked_number}",
             additional_data={
                 'card_brand': card_brand,
                 'last_four': last_four,
-                'recurrent': card_metadata.get('recurrent', True)
+                'recurrent': card_metadata.get('recurrent', True),
+                'user_id': user_id
             }
         )
 
@@ -1199,12 +1199,12 @@ class PaymentService:
                 severity=AuditSeverity.MEDIUM,
                 resource_type="payment",
                 resource_id=str(payment.id),
-                user_id=user_id,
                 description=f"Payme payment completed for order {order_id}",
                 additional_data={
                     'order_id': order_id,
                     'amount': float(order.total_amount),
-                    'receipt_id': receipt_id
+                    'receipt_id': receipt_id,
+                    'user_id': user_id
                 }
             )
 
@@ -1230,17 +1230,17 @@ class PaymentService:
 
             # Audit log
             audit_logger.log_event(
-                event_type=AuditEventType.SECURITY_EVENT,
+                event_type=AuditEventType.PAYMENT_FAILED,
                 action="payme_payment_failed",
                 severity=AuditSeverity.HIGH,
                 resource_type="payment",
                 resource_id=str(payment.id),
-                user_id=user_id,
                 description=f"Payme payment failed for order {order_id}: {str(e)}",
                 additional_data={
                     'order_id': order_id,
                     'error': str(e),
-                    'receipt_id': receipt_id
+                    'receipt_id': receipt_id,
+                    'user_id': user_id
                 }
             )
 
@@ -1400,7 +1400,7 @@ class PaymentService:
             
             if not signature_valid:
                 audit_logger.log_event(
-                    event_type=AuditEventType.SECURITY_EVENT,
+                    event_type=AuditEventType.SUSPICIOUS_ACTIVITY,
                     action="webhook_signature_validation_failed",
                     severity=AuditSeverity.HIGH,
                     resource_type="payment_webhook",
@@ -1417,7 +1417,7 @@ class PaymentService:
             # Step 2: Replay protection validation
             if not self._validate_webhook_replay_protection(provider, request):
                 audit_logger.log_event(
-                    event_type=AuditEventType.SECURITY_EVENT,
+                    event_type=AuditEventType.SUSPICIOUS_ACTIVITY,
                     action="webhook_replay_attack_detected",
                     severity=AuditSeverity.CRITICAL,
                     resource_type="payment_webhook",
@@ -1434,7 +1434,7 @@ class PaymentService:
             
             # Step 3: Log successful validation
             audit_logger.log_event(
-                event_type=AuditEventType.DATA_ACCESS,
+                event_type=AuditEventType.WEBHOOK_RECEIVED,
                 action="webhook_validation_successful",
                 severity=AuditSeverity.LOW,
                 resource_type="payment_webhook",
@@ -1450,7 +1450,7 @@ class PaymentService:
         except Exception as e:
             current_app.logger.error(f"Webhook validation error for {provider}: {e}")
             audit_logger.log_event(
-                event_type=AuditEventType.SECURITY_EVENT,
+                event_type=AuditEventType.SUSPICIOUS_ACTIVITY,
                 action="webhook_validation_error",
                 severity=AuditSeverity.HIGH,
                 resource_type="payment_webhook",
@@ -1720,7 +1720,7 @@ class PaymentService:
         
         # Create transaction record
         transaction = self._create_transaction(payment, 'created', {
-            'gateway_transaction_id': transaction_id,
+            'receipt_id': transaction_id,
             'amount': amount
         })
         
@@ -1737,11 +1737,11 @@ class PaymentService:
         transaction_id = params.get('id')
         
         # Check if transaction exists
-        # In this simplistic model, we look up by Payme's ID (which we stored as gateway_transaction_id)
+        # In this simplistic model, we look up by Payme's ID (which we stored as provider_transaction_id)
         # However, typically Payme expects us to use our own ID or tracking.
         # Based on Payme docs: 'id' is their transaction ID.
-        
-        transaction = PaymentTransaction.query.filter_by(gateway_transaction_id=transaction_id).first()
+
+        transaction = PaymentTransaction.query.filter_by(provider_transaction_id=transaction_id).first()
         if not transaction:
             return {'error': {'code': -31003, 'message': 'Transaction not found'}}
             
@@ -1783,12 +1783,12 @@ class PaymentService:
         transaction_id = params.get('id')
         reason = params.get('reason')
         
-        transaction = PaymentTransaction.query.filter_by(gateway_transaction_id=transaction_id).first()
+        transaction = PaymentTransaction.query.filter_by(provider_transaction_id=transaction_id).first()
         if not transaction:
             return {'error': {'code': -31003, 'message': 'Transaction not found'}}
-            
+
         payment = transaction.payment
-        
+
         if payment.status == PaymentStatus.COMPLETED:
              # Check if reversible
              if not self.process_refund(payment.id, payment.amount, f"Payme Cancel: {reason}"):
@@ -1816,7 +1816,7 @@ class PaymentService:
     def _payme_check_transaction(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """Handle Payme CheckTransaction"""
         transaction_id = params.get('id')
-        transaction = PaymentTransaction.query.filter_by(gateway_transaction_id=transaction_id).first()
+        transaction = PaymentTransaction.query.filter_by(provider_transaction_id=transaction_id).first()
         
         if not transaction:
              return {'error': {'code': -31003, 'message': 'Transaction not found'}}
@@ -1945,8 +1945,8 @@ class PaymentService:
             transaction_type=transaction_type,
             amount=data.get('amount', payment.amount),
             status='completed' if transaction_type == 'completed' else 'pending',
-            gateway_transaction_id=data.get('gateway_transaction_id'),
-            gateway_response=data
+            provider_transaction_id=data.get('receipt_id'),
+            provider_response=data
         )
         
         db.session.add(transaction)
@@ -1956,10 +1956,12 @@ class PaymentService:
         """Handle successful payment"""
         # Update order status
         order = payment.order
-        if order.status.value == 'pending':
+        # Handle both Enum and string status values
+        status_value = order.status.value if hasattr(order.status, 'value') else order.status
+        if status_value == 'pending':
             from .order_service import OrderService
             order_service = OrderService()
-            order_service.update_order_status(order.id, 'confirmed')
+            order_service.update_order_status(order.id, OrderStatus.CONFIRMED)
         
         # Send notification
         from ..tasks.notification_tasks import send_payment_confirmation_task
@@ -2114,14 +2116,14 @@ class PaymentService:
                 severity=AuditSeverity.MEDIUM,
                 resource_type="credit_card",
                 resource_id=str(credit_card.id),
-                user_id=user_id,
                 description=f"Credit card saved for user {user_id}",
                 additional_data={
                     'card_brand': card_brand,
                     'last_four_digits': last_four_digits,
                     'is_default': credit_card.is_default,
                     'fingerprint': fingerprint[:8],
-                    'is_tokenized': is_tokenized
+                    'is_tokenized': is_tokenized,
+                    'user_id': user_id
                 }
             )
             
@@ -2359,16 +2361,16 @@ class PaymentService:
 
         # Log event
         audit_logger.log_event(
-            event_type=AuditEventType.DATA_MODIFICATION,
+            event_type=AuditEventType.SENSITIVE_DATA_ACCESS,
             action="credit_card_set_as_default",
             severity=AuditSeverity.LOW,
             resource_type="credit_card",
             resource_id=str(card.id),
-            user_id=user_id,
             description=f"Card ending in {card.last_four_digits} set as default",
             additional_data={
                 'card_brand': card.card_brand,
-                'last_four_digits': card.last_four_digits
+                'last_four_digits': card.last_four_digits,
+                'user_id': user_id
             }
         )
 
@@ -2428,16 +2430,16 @@ class PaymentService:
 
         # Log card deletion for audit
         audit_logger.log_event(
-            event_type=AuditEventType.DATA_DELETION,
+            event_type=AuditEventType.SENSITIVE_DATA_ACCESS,
             action="credit_card_deleted",
             severity=AuditSeverity.MEDIUM,
             resource_type="credit_card",
             resource_id=str(card.id),
-            user_id=user_id,
             description=f"Credit card deleted for user {user_id}",
             additional_data={
                 'card_brand': card.card_brand,
-                'last_four_digits': card.last_four_digits
+                'last_four_digits': card.last_four_digits,
+                'user_id': user_id
             }
         )
 
@@ -2517,8 +2519,8 @@ class PaymentService:
                 current_app.logger.error("Payme credentials not configured for refund")
                 return False
             
-            # Get the original transaction from payment metadata
-            transaction_id = payment.provider_data.get('gateway_transaction_id')
+            # Get the original transaction from payment
+            transaction_id = payment.provider_transaction_id
             if not transaction_id:
                 current_app.logger.error(f"No Payme transaction ID found for payment {payment.id}")
                 return False

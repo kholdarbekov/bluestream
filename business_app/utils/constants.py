@@ -295,17 +295,21 @@ BUSINESS_RULES = {
     'ACCOUNT_LOCKOUT_MINUTES': 30,
 }
 
-# Geographic Constants
-TASHKENT_COORDINATES = {
-    'latitude': 41.2995,
-    'longitude': 69.2401
-}
+# Geographic Constants - imported from shared module
+from shared.constants import (
+    TASHKENT_COORDINATES,
+    TASHKENT_DISTRICTS,
+    get_district_name,
+    get_district_center,
+    get_all_districts,
+)
 
 DELIVERY_ZONES = {
     'CENTRAL': {'name': 'Central Tashkent', 'fee': 0, 'radius': 5},
     'INNER': {'name': 'Inner Districts', 'fee': 3000, 'radius': 10},
     'OUTER': {'name': 'Outer Districts', 'fee': 5000, 'radius': 20},
 }
+
 
 # Time Constants
 BUSINESS_HOURS = {

@@ -1,0 +1,559 @@
+/**
+ * Address Wizard Styles
+ * Multi-step address creation with map integration
+ */
+
+/* Wizard Modal - Higher specificity to override Bootstrap */
+#addressWizardModal.modal .modal-dialog {
+    max-width: 800px;
+    margin: 30px auto;
+}
+
+#addressWizardModal.modal .modal-content {
+    border-radius: 12px;
+    overflow: hidden !important;
+    position: relative;
+}
+
+#addressWizardModal.modal .modal-header {
+    background: linear-gradient(135deg, #1890ff 0%, #0d6efd 100%);
+    color: white;
+    border-bottom: none;
+    padding: 20px 25px;
+}
+
+#addressWizardModal.modal .modal-header .modal-title {
+    font-weight: 600;
+    font-size: 1.25rem;
+}
+
+#addressWizardModal.modal .modal-header .close {
+    color: white;
+    opacity: 0.8;
+    text-shadow: none;
+}
+
+#addressWizardModal.modal .modal-header .close:hover {
+    opacity: 1;
+}
+
+#addressWizardModal.modal .modal-body {
+    padding: 0;
+    overflow: hidden !important;
+    position: relative;
+}
+
+#addressWizardModal.modal .modal-footer {
+    border-top: 1px solid #eee;
+    padding: 15px 25px;
+    background: #fafafa;
+}
+
+/* Step Indicators - Force horizontal layout */
+#addressWizardModal .wizard-steps {
+    display: flex !important;
+    flex-direction: row !important;
+    justify-content: center !important;
+    align-items: center !important;
+    padding: 20px;
+    background: #f8f9fa;
+    border-bottom: 1px solid #eee;
+    flex-wrap: nowrap;
+}
+
+#addressWizardModal .step-indicator {
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    font-size: 14px;
+    color: #999;
+    white-space: nowrap;
+}
+
+#addressWizardModal .step-indicator .step-number {
+    width: 32px;
+    height: 32px;
+    min-width: 32px;
+    border-radius: 50%;
+    background: #e0e0e0;
+    color: #666;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    font-weight: 600;
+    margin-right: 8px;
+    transition: all 0.3s;
+    line-height: 1;
+}
+
+#addressWizardModal .step-indicator .step-label {
+    font-weight: 500;
+}
+
+#addressWizardModal .step-indicator.active .step-number {
+    background: #1890ff;
+    color: white;
+}
+
+#addressWizardModal .step-indicator.active .step-label {
+    color: #1890ff;
+}
+
+#addressWizardModal .step-indicator.completed .step-number {
+    background: #52c41a;
+    color: white;
+}
+
+#addressWizardModal .step-connector {
+    width: 40px;
+    min-width: 40px;
+    height: 2px;
+    background: #e0e0e0;
+    margin: 0 10px;
+    display: block !important;
+}
+
+#addressWizardModal .step-indicator.completed + .step-connector,
+#addressWizardModal .step-indicator.active + .step-connector {
+    background: #1890ff;
+}
+
+/* Wizard Steps Content - Critical: hide inactive steps */
+#addressWizardModal .wizard-step,
+#addressWizardModal .modal-body .wizard-step,
+#addressWizardModal form .wizard-step {
+    display: none !important;
+    padding: 25px;
+}
+
+#addressWizardModal .wizard-step.active,
+#addressWizardModal .modal-body .wizard-step.active,
+#addressWizardModal form .wizard-step.active {
+    display: block !important;
+}
+
+#addressWizardModal .wizard-step h5 {
+    font-weight: 600;
+    color: #333;
+    margin-bottom: 20px;
+}
+
+/* Map Container */
+#addressWizardModal .map-container {
+    position: relative;
+    margin-bottom: 20px;
+    border-radius: 8px;
+}
+
+#addressWizardMap {
+    width: 100%;
+    height: 350px;
+    border-radius: 8px;
+    border: 1px solid #ddd;
+    position: relative;
+    background: #f0f0f0;
+}
+
+/* Leaflet container - let Leaflet handle its own internal layout
+ * CRITICAL: Do NOT override position/overflow on any Leaflet internal elements
+ * The only thing we override is the transition on tile images (see below)
+ */
+
+/* Map Controls */
+#addressWizardModal .map-controls {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 15px;
+    flex-wrap: wrap;
+}
+
+#addressWizardModal .map-controls .form-control {
+    flex: 1;
+    min-width: 200px;
+}
+
+#addressWizardModal .map-controls .btn {
+    white-space: nowrap;
+}
+
+#addressWizardModal .map-hint {
+    background: #fff8e6;
+    border: 1px solid #ffd666;
+    border-radius: 8px;
+    padding: 12px 15px;
+    margin-top: 15px;
+    display: flex;
+    align-items: flex-start;
+}
+
+#addressWizardModal .map-hint i {
+    color: #faad14;
+    margin-right: 10px;
+    margin-top: 2px;
+}
+
+#addressWizardModal .map-hint p {
+    margin: 0;
+    color: #666;
+    font-size: 14px;
+}
+
+/* Location Status */
+#addressWizardModal #locationStatus {
+    background: #f6ffed;
+    border: 1px solid #b7eb8f;
+    border-radius: 8px;
+    padding: 12px 15px;
+    margin-top: 15px;
+    display: flex;
+    align-items: center;
+}
+
+#addressWizardModal #locationStatus i {
+    color: #52c41a;
+    margin-right: 10px;
+    font-size: 18px;
+}
+
+#addressWizardModal #locationStatusText {
+    font-size: 14px;
+    color: #333;
+}
+
+#addressWizardModal #locationStatusText.text-success {
+    color: #52c41a !important;
+    font-weight: 500;
+}
+
+/* Quick Title Buttons */
+#addressWizardModal .quick-titles {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 15px;
+    flex-wrap: wrap;
+}
+
+#addressWizardModal .quick-title-btn {
+    padding: 8px 20px;
+    border: 1px solid #d9d9d9;
+    border-radius: 20px;
+    background: white;
+    color: #666;
+    cursor: pointer;
+    transition: all 0.3s;
+    font-size: 14px;
+}
+
+#addressWizardModal .quick-title-btn:hover {
+    border-color: #1890ff;
+    color: #1890ff;
+}
+
+#addressWizardModal .quick-title-btn.active {
+    background: #1890ff;
+    border-color: #1890ff;
+    color: white;
+}
+
+#addressWizardModal .quick-title-btn i {
+    margin-right: 6px;
+}
+
+/* Form Styles */
+#addressWizardModal .wizard-step .form-group {
+    margin-bottom: 20px;
+}
+
+#addressWizardModal .wizard-step label {
+    font-weight: 500;
+    color: #333;
+    margin-bottom: 8px;
+    display: block;
+}
+
+#addressWizardModal .wizard-step .form-control {
+    border-radius: 6px;
+    border: 1px solid #d9d9d9;
+    padding: 10px 15px;
+    font-size: 14px;
+    transition: all 0.3s;
+    width: 100%;
+}
+
+#addressWizardModal .wizard-step .form-control:focus {
+    border-color: #1890ff;
+    box-shadow: 0 0 0 3px rgba(24, 144, 255, 0.1);
+    outline: none;
+}
+
+#addressWizardModal .wizard-step textarea.form-control {
+    resize: vertical;
+    min-height: 80px;
+}
+
+#addressWizardModal .wizard-step select.form-control {
+    cursor: pointer;
+}
+
+/* Checkbox Styles */
+#addressWizardModal .custom-control.custom-checkbox {
+    padding-left: 1.5rem;
+}
+
+#addressWizardModal .custom-checkbox .custom-control-label {
+    cursor: pointer;
+}
+
+#addressWizardModal .custom-checkbox .custom-control-label::before {
+    border-radius: 4px;
+    border: 1px solid #d9d9d9;
+}
+
+#addressWizardModal .custom-checkbox .custom-control-input:checked ~ .custom-control-label::before {
+    background-color: #1890ff;
+    border-color: #1890ff;
+}
+
+/* Address Confirmation Card */
+#addressWizardModal .confirmation-card {
+    background: #f8f9fa;
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 20px;
+}
+
+#addressWizardModal .confirmation-card h6 {
+    font-weight: 600;
+    color: #333;
+    margin-bottom: 15px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #eee;
+}
+
+#addressWizardModal .confirmation-item {
+    display: flex;
+    margin-bottom: 10px;
+}
+
+#addressWizardModal .confirmation-item .label {
+    width: 140px;
+    color: #666;
+    font-size: 14px;
+    flex-shrink: 0;
+}
+
+#addressWizardModal .confirmation-item .value {
+    color: #333;
+    font-weight: 500;
+    font-size: 14px;
+}
+
+/* Navigation Buttons */
+#addressWizardModal .wizard-navigation {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+#addressWizardModal .wizard-navigation .btn {
+    padding: 10px 25px;
+    border-radius: 6px;
+    font-weight: 500;
+}
+
+#addressWizardModal .wizard-navigation .btn i {
+    margin-right: 6px;
+}
+
+#addressWizardModal .wizard-navigation .btn-primary i:last-child {
+    margin-right: 0;
+    margin-left: 6px;
+}
+
+/* Responsive Styles */
+@media (max-width: 768px) {
+    #addressWizardModal.modal .modal-dialog {
+        margin: 10px;
+        max-width: calc(100% - 20px);
+    }
+
+    #addressWizardModal .wizard-steps {
+        flex-direction: column !important;
+        align-items: flex-start !important;
+        padding: 15px;
+    }
+
+    #addressWizardModal .step-indicator {
+        margin-bottom: 10px;
+    }
+
+    #addressWizardModal .step-connector {
+        display: none !important;
+    }
+
+    #addressWizardMap {
+        height: 250px;
+    }
+
+    #addressWizardModal .map-controls {
+        flex-direction: column;
+    }
+
+    #addressWizardModal .map-controls .form-control,
+    #addressWizardModal .map-controls .btn {
+        width: 100%;
+    }
+
+    #addressWizardModal .quick-titles {
+        justify-content: center;
+    }
+
+    #addressWizardModal .confirmation-item {
+        flex-direction: column;
+    }
+
+    #addressWizardModal .confirmation-item .label {
+        width: auto;
+        margin-bottom: 4px;
+    }
+
+    #addressWizardModal .wizard-navigation {
+        flex-direction: column-reverse;
+        gap: 10px;
+    }
+
+    #addressWizardModal .wizard-navigation .btn {
+        width: 100%;
+    }
+}
+
+/* Animation */
+#addressWizardModal .wizard-step {
+    animation: wizardFadeIn 0.3s ease-in-out;
+}
+
+@keyframes wizardFadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Loading States */
+#addressWizardModal .btn.loading {
+    pointer-events: none;
+    opacity: 0.7;
+}
+
+#addressWizardModal .btn.loading .fa-spinner {
+    animation: wizardSpin 1s linear infinite;
+}
+
+@keyframes wizardSpin {
+    from {
+        transform: rotate(0deg);
+    }
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+/* Leaflet Overrides */
+#addressWizardMap .leaflet-control-attribution {
+    font-size: 10px;
+}
+
+#addressWizardMap .leaflet-popup-content-wrapper {
+    border-radius: 8px;
+}
+
+/* Ensure all Leaflet panes are visible - fix for gray map issue */
+#addressWizardMap .leaflet-pane,
+#addressWizardMap .leaflet-map-pane,
+#addressWizardMap .leaflet-tile-pane,
+#addressWizardMap .leaflet-tile-container {
+    visibility: visible !important;
+    opacity: 1 !important;
+}
+
+/* Critical: Override global img styles that break Leaflet tiles */
+/*
+ * ROOT CAUSE: style.css has a global img rule with transition-property: all
+ * which includes visibility transitions. Leaflet tiles start as visibility:hidden
+ * and change to visibility:inherit when loaded. The global transition causes
+ * a 0.8s delay (0.1s delay + 0.7s duration) before tiles become visible.
+ *
+ * SOLUTION: Override ALL transition properties with high specificity selectors.
+ */
+#addressWizardMap img,
+#addressWizardMap img.leaflet-tile,
+#addressWizardMap .leaflet-tile-pane img,
+#addressWizardMap .leaflet-tile-container img,
+#addressWizardMap .leaflet-marker-icon,
+#addressWizardMap .leaflet-marker-shadow,
+#addressWizardMap .leaflet-image-layer {
+    max-width: none !important;
+    max-height: none !important;
+    /* CRITICAL: Reset ALL transition properties with vendor prefixes */
+    -webkit-transition: none !important;
+    -moz-transition: none !important;
+    -o-transition: none !important;
+    transition: none !important;
+    -webkit-transition-property: none !important;
+    transition-property: none !important;
+    -webkit-transition-duration: 0s !important;
+    transition-duration: 0s !important;
+    -webkit-transition-delay: 0s !important;
+    transition-delay: 0s !important;
+    -webkit-transition-timing-function: initial !important;
+    transition-timing-function: initial !important;
+    /* Force visibility - don't rely on inherit */
+    visibility: visible !important;
+    opacity: 1 !important;
+    /* Override display: inline-block from global img */
+    display: block !important;
+}
+
+/* Specific tile styling */
+#addressWizardMap .leaflet-tile {
+    width: 256px !important;
+    height: 256px !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    -webkit-transition: none !important;
+    transition: none !important;
+}
+
+/* Loaded tiles - force visible state */
+#addressWizardMap .leaflet-tile-loaded {
+    visibility: visible !important;
+    opacity: 1 !important;
+}
+
+/* Disable Leaflet's fade animation entirely */
+#addressWizardMap.leaflet-fade-anim .leaflet-tile,
+#addressWizardMap .leaflet-fade-anim .leaflet-tile {
+    -webkit-transition: none !important;
+    transition: none !important;
+    opacity: 1 !important;
+    visibility: visible !important;
+}
+
+/* Error State */
+#addressWizardModal .form-control.is-invalid {
+    border-color: #ff4d4f;
+}
+
+#addressWizardModal .form-control.is-invalid:focus {
+    box-shadow: 0 0 0 3px rgba(255, 77, 79, 0.1);
+}
+
+#addressWizardModal .invalid-feedback {
+    color: #ff4d4f;
+    font-size: 13px;
+    margin-top: 5px;
+}

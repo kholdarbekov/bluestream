@@ -70,7 +70,7 @@ class CSRFProtectionManager:
             
             # Log security event
             audit_logger.log_event(
-                event_type=AuditEventType.SECURITY_EVENT,
+                event_type=AuditEventType.SUSPICIOUS_ACTIVITY,
                 action="csrf_validation_failed",
                 severity=AuditSeverity.HIGH,
                 resource_type="csrf_protection",

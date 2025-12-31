@@ -57,6 +57,10 @@ def register_blueprints(app: Flask):
     from business_app.api.admin import admin_bp
     from business_app.api.session_management import session_management_bp
     from business_app.api.translations import translations_bp
+    from business_app.api.blog import blog_bp
+    from business_app.api.addresses import addresses_bp
+    from business_app.api.bot import bot_bp
+    from business_app.frontend import frontend_bp
     
     # API blueprints
     api_prefix = app.config['API_PREFIX']
@@ -72,11 +76,12 @@ def register_blueprints(app: Flask):
     app.register_blueprint(analytics_bp, url_prefix=f'{api_prefix}/analytics')
     app.register_blueprint(admin_bp, url_prefix=f'{api_prefix}/admin')
     app.register_blueprint(session_management_bp, url_prefix=f'{api_prefix}/session')
+    app.register_blueprint(blog_bp, url_prefix=f'{api_prefix}/blog')
+    app.register_blueprint(addresses_bp, url_prefix=f'{api_prefix}/addresses')
+    app.register_blueprint(bot_bp, url_prefix=f'{api_prefix}/bot')
     app.register_blueprint(translations_bp, url_prefix=f'{api_prefix}/translations')
-    
-    # Frontend blueprint for web interface
-    from business_app.frontend import frontend_bp
     app.register_blueprint(frontend_bp)
+    
 
 
 def register_error_handlers(app):

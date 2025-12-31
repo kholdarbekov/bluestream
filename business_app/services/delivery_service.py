@@ -12,7 +12,7 @@ from business_app.models.order import Order
 from business_app.models.user import User
 from business_app.models.delivery import DeliveryStatusHistory
 from business_app.utils.exceptions import ValidationError, NotFoundError, DeliveryError
-from business_app.utils.constants import DeliveryStatus, DeliveryType, TASHKENT_COORDINATES, DELIVERY_ZONES
+from business_app.utils.constants import DeliveryStatus, DeliveryType, OrderStatus, TASHKENT_COORDINATES, DELIVERY_ZONES
 from business_app.utils.helpers import calculate_distance, generate_tracking_code, estimate_delivery_time, get_time_slots
 from business_app import db
 
@@ -23,7 +23,7 @@ class DeliveryService:
     def __init__(self):
         self.default_delivery_fee = current_app.config.get('DEFAULT_DELIVERY_FEE', 5000)
         self.free_delivery_threshold = current_app.config.get('FREE_DELIVERY_THRESHOLD', 50000)
-        self.max_delivery_distance = current_app.config.get('DELIVERY_RADIUS_KM', 20)
+        self.max_delivery_distance = current_app.config.get('DELIVERY_RADIUS_KM', 50)
         self.store_latitude = TASHKENT_COORDINATES['latitude']
         self.store_longitude = TASHKENT_COORDINATES['longitude']
     
@@ -54,9 +54,12 @@ class DeliveryService:
             raise ValidationError("Delivery already exists for this order")
         
         # Calculate delivery distance
+        if not order.delivery_address:
+            raise ValidationError("Order has no delivery address")
+
         distance = calculate_distance(
             self.store_latitude, self.store_longitude,
-            order.delivery_address_latitude, order.delivery_address_longitude
+            order.delivery_address.latitude, order.delivery_address.longitude
         )
         
         # Check if within delivery range
@@ -427,7 +430,7 @@ class DeliveryService:
         if new_status == DeliveryStatus.DELIVERED:
             from .order_service import OrderService
             order_service = OrderService()
-            order_service.update_order_status(delivery.order_id, 'delivered')
+            order_service.update_order_status(delivery.order_id, OrderStatus.DELIVERED)
     
     def _schedule_delivery_assignment(self, delivery_id: int):
         """Schedule automatic delivery assignment"""

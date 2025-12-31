@@ -703,7 +703,149 @@ class ProfileKeyboards:
             [{'text': '➕ Add Your First Address', 'callback_data': 'add_new_address'}],
             [{'text': i18n.get('telegram.back', language), 'callback_data': 'menu_profile'}]
         ]
-        
+
+        return KeyboardBuilder.build_inline_keyboard(buttons)
+
+    @staticmethod
+    def location_request_with_skip(language: str = 'en') -> ReplyKeyboardMarkup:
+        """Location request keyboard with manual entry option"""
+        location_button = KeyboardButton(
+            text=i18n.get('telegram.address.share_location_button', language) or "📍 Share Location",
+            request_location=True
+        )
+        skip_button = KeyboardButton(
+            text=i18n.get('telegram.address.enter_manually_button', language) or "✏️ Enter Manually"
+        )
+
+        return ReplyKeyboardMarkup(
+            [[location_button], [skip_button]],
+            one_time_keyboard=True,
+            resize_keyboard=True
+        )
+
+    @staticmethod
+    def region_selection(language: str = 'en') -> InlineKeyboardMarkup:
+        """Region selection keyboard (only Tashkent for now)"""
+        region_names = {
+            'en': '🏙️ Tashkent City',
+            'uz': '🏙️ Toshkent shahri',
+            'ru': '🏙️ Город Ташкент'
+        }
+        buttons = [
+            [{'text': region_names.get(language, region_names['en']),
+              'callback_data': 'region_tashkent_city'}],
+            [{'text': i18n.get('telegram.cancel', language) or '❌ Cancel',
+              'callback_data': 'cancel_address_creation'}]
+        ]
+        return KeyboardBuilder.build_inline_keyboard(buttons)
+
+    @staticmethod
+    def district_selection(districts: List[Dict], language: str = 'en') -> InlineKeyboardMarkup:
+        """District selection keyboard for Tashkent
+
+        Args:
+            districts: List of {'key': str, 'name': str} dicts
+            language: Language code
+        """
+        buttons = []
+
+        # Create 2-column layout for districts
+        for i in range(0, len(districts), 2):
+            row = []
+            for j in range(2):
+                if i + j < len(districts):
+                    district = districts[i + j]
+                    row.append({
+                        'text': district['name'],
+                        'callback_data': f"district_{district['key']}"
+                    })
+            buttons.append(row)
+
+        # Add back button
+        buttons.append([
+            {'text': i18n.get('telegram.back', language) or '⬅️ Back',
+             'callback_data': 'back_to_region'}
+        ])
+
+        return KeyboardBuilder.build_inline_keyboard(buttons)
+
+    @staticmethod
+    def optional_field_keyboard(field_name: str, language: str = 'en') -> InlineKeyboardMarkup:
+        """Keyboard for optional address fields with skip option"""
+        buttons = [
+            [{'text': i18n.get('telegram.address.skip_field', language) or '⏭️ Skip',
+              'callback_data': f'skip_{field_name}'}]
+        ]
+        return KeyboardBuilder.build_inline_keyboard(buttons)
+
+    @staticmethod
+    def geocode_confirmation(language: str = 'en') -> InlineKeyboardMarkup:
+        """Confirmation keyboard after geocoding"""
+        buttons = [
+            [
+                {'text': i18n.get('telegram.address.location_correct', language) or '✅ Yes, Correct',
+                 'callback_data': 'confirm_geocode'},
+                {'text': i18n.get('telegram.address.location_wrong', language) or '❌ No, Re-enter',
+                 'callback_data': 'retry_geocode'}
+            ],
+            [{'text': i18n.get('telegram.address.edit_details', language) or '✏️ Edit Details',
+              'callback_data': 'edit_address_details'}],
+            [{'text': i18n.get('telegram.cancel', language) or '❌ Cancel',
+              'callback_data': 'cancel_address_creation'}]
+        ]
+        return KeyboardBuilder.build_inline_keyboard(buttons)
+
+    @staticmethod
+    def address_title_suggestions(language: str = 'en') -> InlineKeyboardMarkup:
+        """Quick title suggestions for address"""
+        titles = {
+            'home': {'en': '🏠 Home', 'uz': '🏠 Uy', 'ru': '🏠 Дом'},
+            'work': {'en': '🏢 Work', 'uz': '🏢 Ish', 'ru': '🏢 Работа'},
+            'other': {'en': '📍 Other', 'uz': '📍 Boshqa', 'ru': '📍 Другое'}
+        }
+        buttons = [
+            [
+                {'text': titles['home'].get(language, titles['home']['en']),
+                 'callback_data': 'addr_title_home'},
+                {'text': titles['work'].get(language, titles['work']['en']),
+                 'callback_data': 'addr_title_work'}
+            ],
+            [
+                {'text': titles['other'].get(language, titles['other']['en']),
+                 'callback_data': 'addr_title_other'}
+            ]
+        ]
+        return KeyboardBuilder.build_inline_keyboard(buttons)
+
+    @staticmethod
+    def address_view_actions(address_id: int, is_default: bool, language: str = 'en') -> InlineKeyboardMarkup:
+        """Actions for viewing a single address"""
+        buttons = []
+
+        if not is_default:
+            buttons.append([{
+                'text': '⭐ Set as Default',
+                'callback_data': f'set_default_address_{address_id}'
+            }])
+
+        buttons.extend([
+            [
+                {'text': '✏️ Edit', 'callback_data': f'edit_address_{address_id}'},
+                {'text': '🗑️ Delete', 'callback_data': f'delete_address_{address_id}'}
+            ],
+            [{'text': i18n.get('telegram.back', language) or '⬅️ Back',
+              'callback_data': 'manage_addresses'}]
+        ])
+
+        return KeyboardBuilder.build_inline_keyboard(buttons)
+
+    @staticmethod
+    def delivery_instructions_keyboard(language: str = 'en') -> InlineKeyboardMarkup:
+        """Keyboard for delivery instructions step"""
+        buttons = [
+            [{'text': i18n.get('telegram.address.skip_instructions', language) or '⏭️ Skip (No special instructions)',
+              'callback_data': 'skip_delivery_instructions'}]
+        ]
         return KeyboardBuilder.build_inline_keyboard(buttons)
 
 

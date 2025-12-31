@@ -163,8 +163,8 @@ class ProductionConfig(BaseConfig):
     # Content Security Policy - Strict
     CONTENT_SECURITY_POLICY = {
         'default-src': ["'self'"],
-        'script-src': ["'self'", "'unsafe-inline'"],  # Allow inline scripts for dynamic content
-        'style-src': ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],  # Allow inline styles
+        'script-src': ["'self'", "'unsafe-inline'", "https://unpkg.com"],  # Allow inline scripts + Leaflet
+        'style-src': ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com", "https://unpkg.com"],  # Leaflet CSS
         'font-src': ["'self'", "https://fonts.gstatic.com"],
         'img-src': ["'self'", "data:", "https://bluestream.uz", "https:"],
         'connect-src': ["'self'", "https://api.bluestream.uz", "https://bluestream.uz", "wss://bluestream.uz", "wss://api.bluestream.uz"],  # Allow API and WebSocket connections
@@ -189,8 +189,8 @@ class ProductionConfig(BaseConfig):
     # Content Security Policy - Production settings
     CSP_REPORT_ONLY = False  # Enforce CSP in production
     CSP_SOURCES = {
-        'script-src': ["'self'", "'unsafe-inline'"],  # Allow inline scripts for React
-        'style-src': ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],  # Allow Google Fonts
+        'script-src': ["'self'", "'unsafe-inline'", 'https://unpkg.com'],  # Allow inline scripts + Leaflet
+        'style-src': ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com', 'https://unpkg.com'],  # Leaflet CSS
         'img-src': ["'self'", 'data:', 'https:'],
         'connect-src': ["'self'", 'https://api.bluestream.uz', 'https://bluestream.uz', 'wss://bluestream.uz', 'wss://api.bluestream.uz'],  # Allow API connections
         'font-src': ["'self'", 'https://fonts.gstatic.com'],

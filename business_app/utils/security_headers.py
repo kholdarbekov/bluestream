@@ -85,9 +85,9 @@ class CSPBuilder:
         if self.environment == 'production':
             self.directives = {
                 'default-src': ["'self'"],
-                'script-src': ["'self'", "'unsafe-inline'"],  # Allow inline scripts for frontend
-                'style-src': ["'self'", "'unsafe-inline'", 'fonts.googleapis.com'],
-                'font-src': ["'self'", 'fonts.gstatic.com', 'data:'],
+                'script-src': ["'self'", "'unsafe-inline'", 'https://unpkg.com'],  # Allow inline scripts for frontend + Leaflet
+                'style-src': ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com', 'https://unpkg.com'],  # Leaflet CSS
+                'font-src': ["'self'", 'https://fonts.gstatic.com', 'data:'],
                 'img-src': ["'self'", 'data:', 'https:', 'blob:'],
                 'media-src': ["'self'"],
                 'object-src': ["'none'"],
@@ -103,9 +103,9 @@ class CSPBuilder:
         elif self.environment == 'staging':
             self.directives = {
                 'default-src': ["'self'"],
-                'script-src': ["'self'", "'unsafe-inline'", "'unsafe-eval'"],  # More permissive for testing
-                'style-src': ["'self'", "'unsafe-inline'", 'fonts.googleapis.com'],
-                'font-src': ["'self'", 'fonts.gstatic.com', 'data:'],
+                'script-src': ["'self'", "'unsafe-inline'", "'unsafe-eval'", 'https://unpkg.com'],  # More permissive for testing + Leaflet
+                'style-src': ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com', 'https://unpkg.com'],  # Leaflet CSS
+                'font-src': ["'self'", 'https://fonts.gstatic.com', 'data:'],
                 'img-src': ["'self'", 'data:', 'https:', 'blob:'],
                 'media-src': ["'self'"],
                 'object-src': ["'none'"],

@@ -32,6 +32,7 @@ import {
 import { useQuery, useMutation, useQueryClient } from 'react-query';
 import { useTranslation } from 'react-i18next';
 import adminService from '../services/adminService';
+import api from '../services/api';
 import useResponsive from '../hooks/useResponsive';
 import AddressMapPicker from '../components/AddressMapPicker';
 
@@ -177,12 +178,9 @@ const Users = () => {
   const fetchDistricts = async () => {
     try {
       const lang = localStorage.getItem('language') || 'en';
-      const response = await fetch(`/api/v1/addresses/districts?lang=${lang}`, {
-        credentials: 'include'
-      });
-      const result = await response.json();
-      if (result.success && result.data?.districts) {
-        setDistricts(result.data.districts);
+      const response = await api.get(`/addresses/districts?lang=${lang}`);
+      if (response.data?.success && response.data?.data?.districts) {
+        setDistricts(response.data.data.districts);
       }
     } catch (error) {
       console.error('Failed to load districts:', error);

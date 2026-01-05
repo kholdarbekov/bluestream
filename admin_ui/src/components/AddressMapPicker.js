@@ -4,6 +4,7 @@ import { Button, Input, Space, Spin, message, Typography } from 'antd';
 import { AimOutlined, SearchOutlined, EnvironmentOutlined } from '@ant-design/icons';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import api from '../services/api';
 
 // Fix Leaflet default icon issue
 delete L.Icon.Default.prototype._getIconUrl;
@@ -69,13 +70,10 @@ const AddressMapPicker = ({
     const fetchGeoConfig = async () => {
       try {
         const lang = localStorage.getItem('language') || 'en';
-        const response = await fetch(`/api/v1/addresses/geo-config?lang=${lang}`, {
-          credentials: 'include'
-        });
-        const result = await response.json();
+        const response = await api.get(`/addresses/geo-config?lang=${lang}`);
 
-        if (result.success && result.data) {
-          setGeoConfig(result.data);
+        if (response.data?.success && response.data?.data) {
+          setGeoConfig(response.data.data);
 
           // Set initial position from value or config center
           if (value?.latitude && value?.longitude) {
@@ -110,20 +108,16 @@ const AddressMapPicker = ({
 
     // Reverse geocode to get address
     try {
-      const response = await fetch('/api/v1/addresses/reverse-geocode', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ latitude: lat, longitude: lng })
+      const response = await api.post('/addresses/reverse-geocode', {
+        latitude: lat,
+        longitude: lng
       });
 
-      const result = await response.json();
-
-      if (result.success && result.data) {
+      if (response.data?.success && response.data?.data) {
         setStatusMessage('Location selected!');
         onAddressFound?.({
-          formatted_address: result.data.formatted_address,
-          district: result.data.district,
+          formatted_address: response.data.data.formatted_address,
+          district: response.data.data.district,
           latitude: lat,
           longitude: lng
         });
@@ -189,16 +183,13 @@ const AddressMapPicker = ({
     setSearchLoading(true);
 
     try {
-      const response = await fetch('/api/v1/addresses/geocode', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ address: searchAddress + ', Tashkent' })
+      const response = await api.post('/addresses/geocode', {
+        address: searchAddress + ', Tashkent'
       });
 
-      const result = await response.json();
+      const result = response.data;
 
-      if (result.success && result.data?.latitude && result.data?.longitude) {
+      if (result?.success && result?.data?.latitude && result?.data?.longitude) {
         const { latitude, longitude } = result.data;
 
         // Check bounds

@@ -377,10 +377,11 @@ def reverse_geocode():
 
 
 @addresses_bp.route('/districts', methods=['GET'])
-@jwt_required()
 @handle_api_exception
 def get_districts():
     """Get list of supported districts with translations
+
+    This is a public endpoint - districts are public reference data.
 
     Query params:
     - lang: Language code (en, uz, ru) - default: en
@@ -408,10 +409,11 @@ def get_districts():
 
 
 @addresses_bp.route('/geo-config', methods=['GET'])
-@jwt_required()
 @handle_api_exception
 def get_geo_configuration():
     """Get geographic configuration for map-based address selection
+
+    This is a public endpoint - geo configuration is public reference data.
 
     Query params:
     - lang: Language code (en, uz, ru) - default: en

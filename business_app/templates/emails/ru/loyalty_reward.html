@@ -1,0 +1,58 @@
+{% extends "emails/base.html" %}
+
+{% block title %}Баллы лояльности начислены - {{ company_name }}{% endblock %}
+
+{% block header %}
+<h1>Поздравляем!</h1>
+{% endblock %}
+
+{% block content %}
+<h2>Отличные новости, {{ user_name }}!</h2>
+
+<div class="success-box">
+    <p>Вы только что заработали <strong>{{ points }} баллов лояльности</strong>!</p>
+</div>
+
+<div class="code-display">
+    <p style="margin: 0; color: #64748b; font-size: 14px;">Ваш баланс баллов</p>
+    <span class="code">{{ total_points }}</span>
+    <p style="margin: 5px 0 0 0; color: #64748b; font-size: 12px;">баллов</p>
+</div>
+
+<h3 style="color: #1e293b; margin-top: 30px;">Как вы заработали</h3>
+
+<table class="details-table">
+    <tr>
+        <th>Активность</th>
+        <td>{{ activity_type }}</td>
+    </tr>
+    <tr>
+        <th>Начислено баллов</th>
+        <td style="color: #22c55e; font-weight: 600;">+{{ points }}</td>
+    </tr>
+    {% if order_number %}
+    <tr>
+        <th>Номер заказа</th>
+        <td>#{{ order_number }}</td>
+    </tr>
+    {% endif %}
+    <tr>
+        <th>Текущий уровень</th>
+        <td>{{ current_tier }}</td>
+    </tr>
+</table>
+
+<hr class="divider">
+
+<div class="info-box">
+    <p><strong>Знаете ли вы?</strong> Вы можете обменять баллы на скидки для будущих заказов. Посетите свой аккаунт, чтобы увидеть доступные награды!</p>
+</div>
+
+<p style="text-align: center;">
+    <a href="{{ loyalty_url }}" class="btn-primary">Посмотреть награды</a>
+</p>
+
+<p style="color: #94a3b8; font-size: 13px; text-align: center;">
+    Продолжайте заказывать, чтобы накапливать баллы и получать эксклюзивные награды!
+</p>
+{% endblock %}

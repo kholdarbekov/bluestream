@@ -1,0 +1,58 @@
+{% extends "emails/base.html" %}
+
+{% block title %}Sodiqlik ballari qo'shildi - {{ company_name }}{% endblock %}
+
+{% block header %}
+<h1>Tabriklaymiz!</h1>
+{% endblock %}
+
+{% block content %}
+<h2>Ajoyib yangilik, {{ user_name }}!</h2>
+
+<div class="success-box">
+    <p>Siz hozirgina <strong>{{ points }} sodiqlik ballini</strong> qo'lga kiritdingiz!</p>
+</div>
+
+<div class="code-display">
+    <p style="margin: 0; color: #64748b; font-size: 14px;">Sizning ball balansingiz</p>
+    <span class="code">{{ total_points }}</span>
+    <p style="margin: 5px 0 0 0; color: #64748b; font-size: 12px;">ball</p>
+</div>
+
+<h3 style="color: #1e293b; margin-top: 30px;">Qanday qo'lga kiritdingiz</h3>
+
+<table class="details-table">
+    <tr>
+        <th>Faoliyat</th>
+        <td>{{ activity_type }}</td>
+    </tr>
+    <tr>
+        <th>Qo'shilgan ballar</th>
+        <td style="color: #22c55e; font-weight: 600;">+{{ points }}</td>
+    </tr>
+    {% if order_number %}
+    <tr>
+        <th>Buyurtma raqami</th>
+        <td>#{{ order_number }}</td>
+    </tr>
+    {% endif %}
+    <tr>
+        <th>Joriy daraja</th>
+        <td>{{ current_tier }}</td>
+    </tr>
+</table>
+
+<hr class="divider">
+
+<div class="info-box">
+    <p><strong>Bilasizmi?</strong> Ballaringizni keyingi buyurtmalarda chegirma sifatida ishlatishingiz mumkin. Mavjud mukofotlarni ko'rish uchun hisobingizga tashrif buyuring!</p>
+</div>
+
+<p style="text-align: center;">
+    <a href="{{ loyalty_url }}" class="btn-primary">Mukofotlarimni ko'rish</a>
+</p>
+
+<p style="color: #94a3b8; font-size: 13px; text-align: center;">
+    Ko'proq ball to'plash va maxsus mukofotlarni ochish uchun buyurtma berishda davom eting!
+</p>
+{% endblock %}

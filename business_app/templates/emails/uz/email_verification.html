@@ -1,0 +1,40 @@
+{% extends "emails/base.html" %}
+
+{% block title %}Elektron pochtangizni tasdiqlang - {{ company_name }}{% endblock %}
+
+{% block header %}
+<h1>Elektron pochta tasdiqlash</h1>
+{% endblock %}
+
+{% block content %}
+<h2>Assalomu alaykum, {{ user_name }}!</h2>
+
+<p>{{ company_name }} platformasida ro'yxatdan o'tganingiz uchun rahmat! Hisobingizni faollashtirish va xizmatlarimizdan foydalanishni boshlash uchun elektron pochta manzilingizni tasdiqlang.</p>
+
+<p style="text-align: center;">
+    <a href="{{ verification_url }}" class="btn-primary">Elektron pochtani tasdiqlash</a>
+</p>
+
+<div class="info-box">
+    <p><strong>Yoki quyidagi tasdiqlash kodidan foydalaning:</strong></p>
+</div>
+
+<div class="code-display">
+    <span class="code">{{ verification_code }}</span>
+</div>
+
+<p>Shuningdek, quyidagi havolani brauzeringizga nusxalashingiz mumkin:</p>
+<p style="word-break: break-all; color: #2563eb; background-color: #f0f7ff; padding: 10px; border-radius: 5px; font-size: 14px;">
+    {{ verification_url }}
+</p>
+
+<hr class="divider">
+
+<div class="warning-box">
+    <p><strong>Muhim:</strong> Bu havola 24 soat ichida amal qiladi.</p>
+</div>
+
+<p style="color: #94a3b8; font-size: 13px;">
+    Agar siz bizda hisob yaratmagan bo'lsangiz, bu xabarni e'tiborsiz qoldirishingiz mumkin.
+</p>
+{% endblock %}

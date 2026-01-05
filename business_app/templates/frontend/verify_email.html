@@ -2,6 +2,10 @@
 
 {% block title %}{{ 'Verify Email Address'|t }} - {{ company_name }}{% endblock %}
 
+{% block extra_head %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/auth-forms.css') }}">
+{% endblock %}
+
 {% block content %}
         <!-- page-title -->
         <section class="page-title">
@@ -19,56 +23,80 @@
         <!-- page-title end -->
 
         <!-- email-verification-section -->
-        <section class="contact-section">
+        <section class="auth-section">
             <div class="auto-container">
-                <div class="row clearfix">
-                    <div class="col-lg-8 col-md-12 col-sm-12 offset-lg-2">
-                        <div class="form-inner">
-                            <div class="sec-title centred">
-                                <h2>{{ 'Verify Your Email Address'|t }}</h2>
-                                <p>{{ 'Please check your email and enter the verification code'|t }}</p>
-                            </div>
-                            
-                            <!-- Manual Token Entry Form -->
-                            <form id="emailVerificationForm" class="default-form">
-                                <div class="row clearfix">
-                                    <div class="col-lg-12 col-md-12 col-sm-12 form-group">
-                                        <div class="alert alert-info">
-                                            <i class="far fa-info-circle"></i>
-                                            {{ 'We sent a verification link to your email address. You can either click the link in your email or enter the verification code below.'|t }}
-                                        </div>
-                                    </div>
-                                    <div class="col-lg-12 col-md-12 col-sm-12 form-group">
-                                        <input type="text" name="token" placeholder="{{ 'Enter verification code from email'|t }}" required>
-                                        <small class="text-muted">{{ 'The verification code is in your email'|t }}</small>
-                                    </div>
-                                    <div class="col-lg-12 col-md-12 col-sm-12 form-group message-btn">
-                                        <button type="submit" class="theme-btn btn-one">{{ 'Verify Email'|t }}</button>
-                                    </div>
-                                    <div class="col-lg-12 col-md-12 col-sm-12 form-group">
-                                        <div class="other-option centred">
-                                            <p>{{ "Didn't receive the email?"|t }} <a href="#" id="resendEmail">{{ 'Resend Verification Email'|t }}</a></p>
-                                            <p><a href="{{ url_for('frontend.my_account') }}">{{ 'Back to My Account'|t }}</a></p>
-                                        </div>
-                                    </div>
-                                </div>
-                            </form>
-                            
-                            <!-- Success Message -->
-                            <div id="successMessage" class="alert alert-success" style="display: none;">
-                                <i class="far fa-check-circle"></i>
-                                {{ 'Email address verified successfully! Your account is now fully activated.'|t }}
-                                <div class="mt-3">
-                                    <a href="{{ url_for('frontend.my_account') }}" class="theme-btn btn-one btn-sm">{{ 'Go to My Account'|t }}</a>
-                                </div>
-                            </div>
-                            
-                            <!-- Error Message -->
-                            <div id="errorMessage" class="alert alert-danger" style="display: none;">
-                                <i class="far fa-times-circle"></i>
-                                <span id="errorText"></span>
-                            </div>
+                <div class="auth-card">
+                    <!-- Card Header -->
+                    <div class="auth-card-header">
+                        <div class="logo-icon">
+                            <i class="fas fa-envelope-open-text"></i>
                         </div>
+                        <h2>{{ 'Verify Your Email'|t }}</h2>
+                        <p>{{ 'Please check your email and enter the verification code'|t }}</p>
+                    </div>
+                    
+                    <!-- Info Alert -->
+                    <div class="auth-info-box">
+                        <div class="info-icon">
+                            <i class="fas fa-info-circle"></i>
+                        </div>
+                        <p>{{ 'We sent a verification link to your email address. You can either click the link in your email or enter the verification code below.'|t }}</p>
+                    </div>
+                    
+                    <!-- Verification Form -->
+                    <form id="emailVerificationForm" class="auth-form">
+                        <!-- Verification Code Input -->
+                        <div class="form-group">
+                            <div class="input-wrapper">
+                                <input type="text" name="token" class="form-control verification-code-input" placeholder="{{ 'Enter verification code'|t }}" required autocomplete="off" maxlength="32">
+                                <i class="fas fa-key input-icon"></i>
+                            </div>
+                            <small class="input-hint">{{ 'The verification code was sent to your email'|t }}</small>
+                        </div>
+                        
+                        <!-- Submit Button -->
+                        <div class="form-group">
+                            <button type="submit" class="btn-auth">
+                                <i class="fas fa-check-circle"></i> {{ 'Verify Email'|t }}
+                            </button>
+                        </div>
+                    </form>
+                    
+                    <!-- Resend Section -->
+                    <div class="auth-divider">
+                        <span>{{ 'or'|t }}</span>
+                    </div>
+                    
+                    <div class="resend-section">
+                        <p>{{ "Didn't receive the email?"|t }}</p>
+                        <button type="button" id="resendEmail" class="btn-resend">
+                            <i class="fas fa-paper-plane"></i> {{ 'Resend Verification Email'|t }}
+                        </button>
+                    </div>
+                    
+                    <!-- Success Message -->
+                    <div id="successMessage" class="auth-success-box" style="display: none;">
+                        <div class="success-icon">
+                            <i class="fas fa-check-circle"></i>
+                        </div>
+                        <h3>{{ 'Email Verified!'|t }}</h3>
+                        <p>{{ 'Your email address has been verified successfully. Your account is now fully activated.'|t }}</p>
+                        <a href="{{ url_for('frontend.my_account') }}" class="btn-auth">
+                            {{ 'Go to My Account'|t }}
+                        </a>
+                    </div>
+                    
+                    <!-- Error Message -->
+                    <div id="errorMessage" class="auth-error-box" style="display: none;">
+                        <div class="error-icon">
+                            <i class="fas fa-exclamation-circle"></i>
+                        </div>
+                        <p id="errorText"></p>
+                    </div>
+                    
+                    <!-- Footer -->
+                    <div class="auth-footer">
+                        <p><a href="{{ url_for('frontend.my_account') }}"><i class="fas fa-arrow-left"></i> {{ 'Back to My Account'|t }}</a></p>
                     </div>
                 </div>
             </div>
@@ -85,6 +113,7 @@ document.addEventListener('DOMContentLoaded', function() {
     
     if (token) {
         // Auto-verify if token is in URL
+        document.querySelector('input[name="token"]').value = token;
         verifyEmailToken(token);
     }
 });
@@ -101,11 +130,14 @@ document.getElementById('emailVerificationForm').addEventListener('submit', asyn
         return;
     }
     
-    await verifyEmailToken(token);
+    const submitBtn = this.querySelector('.btn-auth');
+    submitBtn.classList.add('loading');
+    
+    await verifyEmailToken(token, submitBtn);
 });
 
 // Email token verification function
-async function verifyEmailToken(token) {
+async function verifyEmailToken(token, submitBtn = null) {
     try {
         const response = await apiRequest('/auth/verify-email', {
             method: 'POST',
@@ -118,6 +150,9 @@ async function verifyEmailToken(token) {
             // Hide form and show success message
             document.getElementById('emailVerificationForm').style.display = 'none';
             document.getElementById('errorMessage').style.display = 'none';
+            document.querySelector('.auth-divider').style.display = 'none';
+            document.querySelector('.resend-section').style.display = 'none';
+            document.querySelector('.auth-info-box').style.display = 'none';
             document.getElementById('successMessage').style.display = 'block';
             
             showNotification('{{ "Email verified successfully!"|t }}', 'success');
@@ -127,9 +162,11 @@ async function verifyEmailToken(token) {
                 window.location.href = '{{ url_for("frontend.my_account") }}';
             }, 3000);
         } else {
+            if (submitBtn) submitBtn.classList.remove('loading');
             showError(result.message || '{{ "Invalid or expired verification code"|t }}');
         }
     } catch (error) {
+        if (submitBtn) submitBtn.classList.remove('loading');
         showError('{{ "Network error. Please try again."|t }}');
     }
 }
@@ -138,12 +175,9 @@ async function verifyEmailToken(token) {
 document.getElementById('resendEmail').addEventListener('click', async function(e) {
     e.preventDefault();
     
-    const token = getAuthToken();
-    if (!token) {
-        showError('{{ "Please log in first"|t }}');
-        window.location.href = '{{ url_for("frontend.login") }}';
-        return;
-    }
+    const button = this;
+    button.disabled = true;
+    button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> {{ "Sending..."|t }}';
     
     try {
         const response = await apiRequest('/auth/resend-email-verification', {
@@ -155,21 +189,28 @@ document.getElementById('resendEmail').addEventListener('click', async function(
         if (response.ok) {
             showNotification('{{ "Verification email sent successfully! Please check your inbox."|t }}', 'success');
             
-            // Disable resend button temporarily
-            const button = e.target;
-            button.style.pointerEvents = 'none';
-            button.style.opacity = '0.6';
-            button.textContent = '{{ "Email sent"|t }}';
+            // Disable resend button temporarily with countdown
+            let countdown = 60;
+            button.innerHTML = `<i class="fas fa-clock"></i> {{ 'Resend in'|t }} ${countdown}s`;
             
-            setTimeout(() => {
-                button.style.pointerEvents = '';
-                button.style.opacity = '';
-                button.textContent = '{{ "Resend Verification Email"|t }}';
-            }, 60000); // Re-enable after 1 minute
+            const timer = setInterval(() => {
+                countdown--;
+                button.innerHTML = `<i class="fas fa-clock"></i> {{ 'Resend in'|t }} ${countdown}s`;
+                
+                if (countdown <= 0) {
+                    clearInterval(timer);
+                    button.disabled = false;
+                    button.innerHTML = '<i class="fas fa-paper-plane"></i> {{ "Resend Verification Email"|t }}';
+                }
+            }, 1000);
         } else {
+            button.disabled = false;
+            button.innerHTML = '<i class="fas fa-paper-plane"></i> {{ "Resend Verification Email"|t }}';
             showError(result.message || '{{ "Failed to send verification email"|t }}');
         }
     } catch (error) {
+        button.disabled = false;
+        button.innerHTML = '<i class="fas fa-paper-plane"></i> {{ "Resend Verification Email"|t }}';
         showError('{{ "Network error. Please try again."|t }}');
     }
 });
@@ -177,13 +218,13 @@ document.getElementById('resendEmail').addEventListener('click', async function(
 // Helper functions
 function showError(message) {
     document.getElementById('errorText').textContent = message;
-    document.getElementById('errorMessage').style.display = 'block';
+    document.getElementById('errorMessage').style.display = 'flex';
     document.getElementById('successMessage').style.display = 'none';
 }
 
-// Auto-format token input (remove spaces and convert to uppercase)
+// Auto-format token input (remove spaces only, preserve case)
 document.querySelector('input[name="token"]').addEventListener('input', function() {
-    this.value = this.value.replace(/\s/g, '').toUpperCase();
+    this.value = this.value.replace(/\s/g, '');
 });
 </script>
 {% endblock %}

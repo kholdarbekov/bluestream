@@ -10,8 +10,6 @@ from typing import Dict, Any, List, Optional
 from flask import current_app
 import requests
 from eskiz_sms import EskizSMS
-from sendgrid import SendGridAPIClient
-from sendgrid.helpers.mail import Mail
 
 from business_app.models.notification import Notification, NotificationTemplate, NotificationPreference
 from business_app.models.user import User
@@ -22,6 +20,7 @@ from business_app.models.subscription import Subscription
 from business_app.utils.exceptions import NotificationError, ConfigurationError
 from business_app.utils.constants import NotificationType, NotificationChannel
 from business_app.utils.translations import get_translation
+from business_app.services.email_template_service import get_email_template_service
 from business_app import db
 
 # Use standard logging that works in both Flask and Celery contexts
@@ -43,9 +42,10 @@ class NotificationService:
     """Service for handling notifications across multiple channels"""
     
     def __init__(self):
-        # Email configuration
-        self.sendgrid_api_key = current_app.config.get('SENDGRID_API_KEY')
-        self.default_sender = current_app.config.get('MAIL_DEFAULT_SENDER')
+        # Email configuration (Brevo)
+        self.brevo_api_key = current_app.config.get('BREVO_API_KEY')
+        self.default_sender_email = current_app.config.get('BREVO_SENDER_EMAIL') or current_app.config.get('MAIL_DEFAULT_SENDER')
+        self.default_sender_name = current_app.config.get('BREVO_SENDER_NAME') or current_app.config.get('COMPANY_NAME', 'Bluestream')
 
         # SMS configuration (Eskiz)
         self.eskiz_email = current_app.config.get('ESKIZ_EMAIL')
@@ -65,11 +65,11 @@ class NotificationService:
     
     def _init_clients(self):
         """Initialize notification service clients"""
-        # SendGrid client
-        if self.sendgrid_api_key:
-            self.sendgrid_client = SendGridAPIClient(api_key=self.sendgrid_api_key)
+        # Brevo email - no client needed, we use requests directly
+        if self.brevo_api_key:
+            logger.info("Brevo API key configured for email sending")
         else:
-            self.sendgrid_client = None
+            logger.warning("Brevo API key not configured - email notifications will fail")
 
         # Eskiz SMS client
         logger.info(f"DEBUG: Initializing Eskiz SMS - email: {self.eskiz_email}, has_password: {bool(self.eskiz_password)}")
@@ -369,45 +369,96 @@ class NotificationService:
     # Private methods for different channels
     def _send_email_notification(self, user: User, notification_type: NotificationType,
                                 template_data: Dict[str, Any], language: str) -> Dict[str, Any]:
-        """Send email notification"""
-        if not self.sendgrid_client:
-            raise ConfigurationError(get_translation('error.configuration.sendgrid_not_configured'))
+        """Send email notification using Brevo API with file-based templates"""
+        if not self.brevo_api_key:
+            raise ConfigurationError(get_translation('error.configuration.email_not_configured'))
 
         if not user.email:
             return {'success': False, 'error': get_translation('error.validation.no_email_address')}
-        
-        # Get template
-        template = self._get_notification_template(
-            notification_type, NotificationChannel.EMAIL, language
+
+        # Get notification type string
+        notification_type_str = notification_type.value if hasattr(notification_type, 'value') else str(notification_type)
+
+        # Add user info to template data
+        user_name = f"{user.first_name} {user.last_name}".strip() or user.email
+        template_data_with_user = {
+            'user_name': user_name,
+            'user_email': user.email,
+            **template_data
+        }
+
+        # Try file-based templates first
+        email_template_service = get_email_template_service()
+        rendered = email_template_service.render_notification_email(
+            notification_type_str,
+            language,
+            template_data_with_user
         )
 
-        if not template:
-            return {'success': False, 'error': get_translation('error.template_not_found')}
+        if rendered:
+            subject = rendered['subject']
+            content = rendered['content']
+            logger.info(f"Using file-based template for {notification_type_str} in {language}")
+        else:
+            # Fallback to database templates
+            logger.info(f"File template not found, falling back to DB for {notification_type_str}")
+            template = self._get_notification_template(
+                notification_type, NotificationChannel.EMAIL, language
+            )
 
-        # Get translated content (or fallback to default)
-        template_subject = template.get_translated('subject', language) if hasattr(template, 'get_translated') else template.subject
-        template_content = template.get_translated('content', language) if hasattr(template, 'get_translated') else template.content
+            if not template:
+                return {'success': False, 'error': get_translation('error.template_not_found')}
 
-        # Render template
-        subject = self._render_template(template_subject, template_data, language)
-        content = self._render_template(template_content, template_data, language)
-        
-        # Create email
-        message = Mail(
-            from_email=self.default_sender,
-            to_emails=user.email,
-            subject=subject,
-            html_content=content
-        )
-        
+            # Get translated content (or fallback to default)
+            template_subject = template.get_translated('subject', language) if hasattr(template, 'get_translated') else template.subject
+            template_content = template.get_translated('content', language) if hasattr(template, 'get_translated') else template.content
+
+            # Render template
+            subject = self._render_template(template_subject, template_data_with_user, language)
+            content = self._render_template(template_content, template_data_with_user, language)
+
+        # Build Brevo API request
+        url = 'https://api.brevo.com/v3/smtp/email'
+        headers = {
+            'accept': 'application/json',
+            'api-key': self.brevo_api_key,
+            'content-type': 'application/json'
+        }
+        payload = {
+            'sender': {
+                'name': self.default_sender_name,
+                'email': self.default_sender_email
+            },
+            'to': [
+                {
+                    'email': user.email,
+                    'name': user_name
+                }
+            ],
+            'subject': subject,
+            'htmlContent': content
+        }
+
         try:
-            response = self.sendgrid_client.send(message)
+            response = requests.post(url, headers=headers, json=payload, timeout=30)
+            response.raise_for_status()
+
+            result = response.json()
             return {
                 'success': True,
-                'message_id': response.headers.get('X-Message-Id'),
+                'message_id': result.get('messageId'),
                 'status_code': response.status_code
             }
+        except requests.exceptions.HTTPError as e:
+            error_detail = ''
+            try:
+                error_detail = e.response.json() if e.response else str(e)
+            except:
+                error_detail = str(e)
+            logger.error(f"Brevo API error: {error_detail}")
+            return {'success': False, 'error': f"Email API error: {error_detail}"}
         except Exception as e:
+            logger.error(f"Email sending failed: {e}")
             return {'success': False, 'error': str(e)}
     
     def _send_sms_notification(self, user: User, notification_type: NotificationType,

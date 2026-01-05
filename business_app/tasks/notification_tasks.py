@@ -479,17 +479,18 @@ def send_verification_email_task(self, user_id: int, verification_token: str):
         template_data = {
             'user_name': f"{user.first_name} {user.last_name}",
             'verification_token': verification_token,
-            'verification_url': f"{current_app.config['COMPANY_WEBSITE']}/verify-email/{verification_token}",
+            'verification_code': verification_token,  # Alias for template compatibility
+            'verification_url': f"{current_app.config['COMPANY_WEBSITE']}/verify-email?token={verification_token}",
             'company_name': current_app.config['COMPANY_NAME']
         }
         
         result = notification_service.send_notification(
             user_id,
-            NotificationType.SYSTEM_ALERT,
+            NotificationType.EMAIL_VERIFICATION,
             [NotificationChannel.EMAIL],
             template_data
         )
-        
+
         logger.info(f"Email verification sent successfully for user {user_id}")
         return result
         
@@ -569,11 +570,11 @@ def send_password_reset_email_task(self, user_id: int, reset_token: str):
         
         result = notification_service.send_notification(
             user_id,
-            NotificationType.SYSTEM_ALERT,
+            NotificationType.PASSWORD_RESET,
             [NotificationChannel.EMAIL],
             template_data
         )
-        
+
         logger.info(f"Password reset email sent successfully for user {user_id}")
         return result
         

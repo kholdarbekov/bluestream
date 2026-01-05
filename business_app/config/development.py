@@ -51,7 +51,7 @@ class DevelopmentConfig(BaseConfig):
         'worker_disable_rate_limits': False,
         'task_compression': 'gzip',
         'result_compression': 'gzip',
-        'task_always_eager': False,  # Process tasks asynchronously
+        'task_always_eager': True,  # Run tasks synchronously in development
     }
     
     # CORS Configuration - Allow local development

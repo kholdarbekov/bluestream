@@ -1,0 +1,40 @@
+{% extends "emails/base.html" %}
+
+{% block title %}Подтвердите вашу почту - {{ company_name }}{% endblock %}
+
+{% block header %}
+<h1>Подтверждение Email</h1>
+{% endblock %}
+
+{% block content %}
+<h2>Здравствуйте, {{ user_name }}!</h2>
+
+<p>Спасибо за регистрацию на платформе {{ company_name }}! Пожалуйста, подтвердите ваш email адрес, чтобы активировать аккаунт и начать пользоваться нашими услугами.</p>
+
+<p style="text-align: center;">
+    <a href="{{ verification_url }}" class="btn-primary">Подтвердить Email</a>
+</p>
+
+<div class="info-box">
+    <p><strong>Или используйте этот код подтверждения:</strong></p>
+</div>
+
+<div class="code-display">
+    <span class="code">{{ verification_code }}</span>
+</div>
+
+<p>Вы также можете скопировать эту ссылку в браузер:</p>
+<p style="word-break: break-all; color: #2563eb; background-color: #f0f7ff; padding: 10px; border-radius: 5px; font-size: 14px;">
+    {{ verification_url }}
+</p>
+
+<hr class="divider">
+
+<div class="warning-box">
+    <p><strong>Важно:</strong> Эта ссылка действительна в течение 24 часов.</p>
+</div>
+
+<p style="color: #94a3b8; font-size: 13px;">
+    Если вы не создавали аккаунт, просто проигнорируйте это письмо.
+</p>
+{% endblock %}

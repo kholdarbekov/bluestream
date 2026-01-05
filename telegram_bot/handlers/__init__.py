@@ -11,6 +11,7 @@ from handlers.orders import order_handlers
 from handlers.subscriptions import subscription_handlers
 from handlers.profile import profile_handlers
 from handlers.loyalty import loyalty_handlers
+from handlers.payments import payment_handlers
 
 # Simple handlers for remaining modules
 class SimpleHandlers:
@@ -87,11 +88,11 @@ class SimpleHandlers:
 
 admin_handlers = SimpleHandlers()
 support_handlers = SimpleHandlers()
-payment_handlers = SimpleHandlers()
+# payment_handlers is now imported from handlers.payments module
 
 __all__ = [
     'start_handler',
-    'main_menu_handler', 
+    'main_menu_handler',
     'language_handler',
     'product_handlers',
     'order_handlers',

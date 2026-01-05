@@ -132,8 +132,9 @@ def register():
             gender=data.get('gender'),
             referral_code=data.get('referral_code')
         )
-        
-        return created_response(
+
+        # Create response with standardized format
+        response_data, status_code = created_response(
             data={
                 'user': {
                     'id': user.id,
@@ -149,6 +150,12 @@ def register():
             },
             message=get_translation('api.auth.registration_successful')
         )
+
+        # Set JWT cookies for frontend navigation (same as login)
+        set_access_cookies(response_data, tokens['access_token'])
+        set_refresh_cookies(response_data, tokens['refresh_token'])
+
+        return response_data, status_code
 
     except ValidationError as e:
         return error_response(

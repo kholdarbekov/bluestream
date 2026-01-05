@@ -2,6 +2,10 @@
 
 {% block title %}{{ 'landing.nav.register'|t }} - {{ company_name }}{% endblock %}
 
+{% block extra_head %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/auth-forms.css') }}">
+{% endblock %}
+
 {% block content %}
         <!-- page-title -->
         <section class="page-title">
@@ -19,87 +23,130 @@
         <!-- page-title end -->
 
         <!-- register-section -->
-        <section class="contact-section">
+        <section class="auth-section">
             <div class="auto-container">
-                <div class="row clearfix">
-                    <div class="col-lg-8 col-md-12 col-sm-12 offset-lg-2">
-                        <div class="form-inner">
-                            <div class="sec-title centred">
-                                <h2>{{ 'Create Account'|t }}</h2>
-                                <p>{{ 'Join us today and enjoy premium water delivery services'|t }}</p>
-                            </div>
-                            
-                            <form id="registerForm" class="default-form">
-                                <div class="row clearfix">
-                                    <div class="col-lg-6 col-md-6 col-sm-12 form-group">
-                                        <input type="text" name="first_name" placeholder="{{ 'First Name'|t }}" required>
-                                    </div>
-                                    <div class="col-lg-6 col-md-6 col-sm-12 form-group">
-                                        <input type="text" name="last_name" placeholder="{{ 'Last Name'|t }}" required>
-                                    </div>
-                                    <div class="col-lg-12 col-md-12 col-sm-12 form-group">
-                                        <input type="email" name="email" placeholder="{{ 'Email Address'|t }}" required>
-                                    </div>
-                                    <div class="col-lg-12 col-md-12 col-sm-12 form-group">
-                                        <input type="tel" name="phone" placeholder="{{ 'Phone Number'|t }}" required>
-                                    </div>
-                                    <div class="col-lg-6 col-md-6 col-sm-12 form-group">
-                                        <input type="password" name="password" placeholder="{{ 'Password'|t }}" required>
-                                    </div>
-                                    <div class="col-lg-6 col-md-6 col-sm-12 form-group">
-                                        <input type="password" name="confirm_password" placeholder="{{ 'Confirm Password'|t }}" required>
-                                    </div>
-                                    <div class="col-lg-12 col-md-12 col-sm-12 form-group">
-                                        <input type="text" name="referral_code" placeholder="{{ 'Referral Code (Optional)'|t }}">
-                                    </div>
-                                    
-                                    <!-- Telegram Account Linking Section -->
-                                    <div class="col-lg-12 col-md-12 col-sm-12 form-group">
-                                        <div class="telegram-section" style="border: 1px solid #e0e0e0; padding: 15px; border-radius: 5px; background-color: #f9f9f9;">
-                                            <h4 style="margin-bottom: 10px; color: #0088cc;">
-                                                <i class="fab fa-telegram-plane" style="margin-right: 8px;"></i>
-                                                {{ 'Link Telegram Account (Optional)'|t }}
-                                            </h4>
-                                            <p style="font-size: 14px; color: #666; margin-bottom: 10px;">
-                                                {{ 'Link your Telegram account to use our bot and sync your data across platforms'|t }}
-                                            </p>
-                                            <div class="check-box">
-                                                <input class="check" type="checkbox" id="link_telegram" name="link_telegram">
-                                                <label for="link_telegram">{{ 'I want to link my Telegram account'|t }}</label>
-                                            </div>
-                                            <div id="telegram_linking_info" style="display: none; margin-top: 10px; padding: 10px; background-color: #e3f2fd; border-radius: 4px;">
-                                                <p style="font-size: 13px; margin: 0; color: #1976d2;">
-                                                    <strong>{{ 'After registration:'|t }}</strong><br>
-                                                    1. {{ 'Open our Telegram bot'|t }}: <a href="https://t.me/bluestream_bot" target="_blank">@bluestream_bot</a><br>
-                                                    2. {{ 'Use the linking code that will be provided'|t }}<br>
-                                                    3. {{ 'Enjoy unified access across web and Telegram!'|t }}
-                                                </p>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    
-                                    <div class="col-lg-12 col-md-12 col-sm-12 form-group">
-                                        <div class="check-box">
-                                            <input class="check" type="checkbox" id="terms" name="terms" required>
-                                            <label for="terms">{{ 'I agree to the'|t }} <a href="#">{{ 'Terms & Conditions'|t }}</a></label>
-                                        </div>
-                                    </div>
-                                    <div class="col-lg-12 col-md-12 col-sm-12 form-group">
-                                        <div class="check-box">
-                                            <input class="check" type="checkbox" id="newsletter" name="newsletter">
-                                            <label for="newsletter">{{ 'Subscribe to our newsletter for updates and offers'|t }}</label>
-                                        </div>
-                                    </div>
-                                    <div class="col-lg-12 col-md-12 col-sm-12 form-group message-btn">
-                                        <button type="submit" class="theme-btn btn-one">{{ 'Create Account'|t }}</button>
-                                    </div>
+                <div class="auth-card register-card">
+                    <!-- Card Header -->
+                    <div class="auth-card-header">
+                        <div class="logo-icon">
+                            <i class="fas fa-user-plus"></i>
+                        </div>
+                        <h2>{{ 'Create Account'|t }}</h2>
+                        <p>{{ 'Join us today and enjoy premium water delivery services'|t }}</p>
+                    </div>
+                    
+                    <!-- Register Form -->
+                    <form id="registerForm" class="auth-form">
+                        <!-- Name Row -->
+                        <div class="form-row">
+                            <div class="form-group">
+                                <div class="input-wrapper">
+                                    <input type="text" name="first_name" class="form-control" placeholder="{{ 'First Name'|t }}" required>
+                                    <i class="fas fa-user input-icon"></i>
                                 </div>
-                            </form>
-                            
-                            <div class="other-option centred">
-                                <p>{{ 'Already have an account?'|t }} <a href="{{ url_for('frontend.login') }}{% if request.args.get('next') %}?next={{ request.args.get('next') | urlencode }}{% endif %}">{{ 'Login Here'|t }}</a></p>
+                            </div>
+                            <div class="form-group">
+                                <div class="input-wrapper">
+                                    <input type="text" name="last_name" class="form-control" placeholder="{{ 'Last Name'|t }}" required>
+                                    <i class="fas fa-user input-icon"></i>
+                                </div>
                             </div>
                         </div>
+                        
+                        <!-- Email Input -->
+                        <div class="form-group">
+                            <div class="input-wrapper">
+                                <input type="email" name="email" class="form-control" placeholder="{{ 'Email Address'|t }}" required>
+                                <i class="fas fa-envelope input-icon"></i>
+                            </div>
+                        </div>
+                        
+                        <!-- Phone Input -->
+                        <div class="form-group">
+                            <div class="input-wrapper">
+                                <input type="tel" name="phone" class="form-control" placeholder="{{ 'Phone Number'|t }}" required>
+                                <i class="fas fa-phone input-icon"></i>
+                            </div>
+                        </div>
+                        
+                        <!-- Password Row -->
+                        <div class="form-row">
+                            <div class="form-group">
+                                <div class="input-wrapper">
+                                    <input type="password" name="password" id="password" class="form-control" placeholder="{{ 'Password'|t }}" required>
+                                    <i class="fas fa-lock input-icon"></i>
+                                    <button type="button" class="password-toggle" onclick="togglePassword('password', this)">
+                                        <i class="fas fa-eye"></i>
+                                    </button>
+                                </div>
+                                <div class="password-strength" id="passwordStrength" style="display: none;">
+                                    <div class="strength-bar">
+                                        <div class="strength-fill" id="strengthFill"></div>
+                                    </div>
+                                    <span class="strength-text" id="strengthText"></span>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <div class="input-wrapper">
+                                    <input type="password" name="confirm_password" id="confirm_password" class="form-control" placeholder="{{ 'Confirm Password'|t }}" required>
+                                    <i class="fas fa-lock input-icon"></i>
+                                    <button type="button" class="password-toggle" onclick="togglePassword('confirm_password', this)">
+                                        <i class="fas fa-eye"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Referral Code -->
+                        <div class="form-group">
+                            <div class="input-wrapper">
+                                <input type="text" name="referral_code" class="form-control" placeholder="{{ 'Referral Code (Optional)'|t }}">
+                                <i class="fas fa-gift input-icon"></i>
+                            </div>
+                        </div>
+                        
+                        <!-- Telegram Section -->
+                        <div class="telegram-section">
+                            <div class="telegram-header">
+                                <i class="fab fa-telegram-plane"></i>
+                                <h4>{{ 'Link Telegram Account (Optional)'|t }}</h4>
+                            </div>
+                            <p class="telegram-desc">{{ 'Link your Telegram account to use our bot and sync your data across platforms'|t }}</p>
+                            <label class="auth-checkbox">
+                                <input type="checkbox" id="link_telegram" name="link_telegram">
+                                <span class="checkbox-label">{{ 'I want to link my Telegram account'|t }}</span>
+                            </label>
+                            <div id="telegram_linking_info" class="telegram-info" style="display: none;">
+                                <p>
+                                    <strong>{{ 'After registration:'|t }}</strong><br>
+                                    1. {{ 'Open our Telegram bot'|t }}: <a href="https://t.me/bluestream_bot" target="_blank">@bluestream_bot</a><br>
+                                    2. {{ 'Use the linking code that will be provided'|t }}<br>
+                                    3. {{ 'Enjoy unified access across web and Telegram!'|t }}
+                                </p>
+                            </div>
+                        </div>
+                        
+                        <!-- Terms & Newsletter -->
+                        <div class="checkbox-group">
+                            <label class="auth-checkbox">
+                                <input type="checkbox" name="terms" required>
+                                <span class="checkbox-label">{{ 'I agree to the'|t }} <a href="#">{{ 'Terms & Conditions'|t }}</a></span>
+                            </label>
+                            <label class="auth-checkbox">
+                                <input type="checkbox" name="newsletter">
+                                <span class="checkbox-label">{{ 'Subscribe to our newsletter for updates and offers'|t }}</span>
+                            </label>
+                        </div>
+                        
+                        <!-- Submit Button -->
+                        <div class="form-group">
+                            <button type="submit" class="btn-auth">{{ 'Create Account'|t }}</button>
+                        </div>
+                    </form>
+                    
+                    <!-- Footer -->
+                    <div class="auth-footer">
+                        <p>{{ 'Already have an account?'|t }} <a href="{{ url_for('frontend.login') }}{% if request.args.get('next') %}?next={{ request.args.get('next') | urlencode }}{% endif %}">{{ 'Login Here'|t }}</a></p>
                     </div>
                 </div>
             </div>
@@ -109,15 +156,73 @@
 
 {% block extra_js %}
 <script>
+// Toggle Password Visibility
+function togglePassword(inputId, button) {
+    const input = document.getElementById(inputId);
+    const icon = button.querySelector('i');
+    
+    if (input.type === 'password') {
+        input.type = 'text';
+        icon.classList.remove('fa-eye');
+        icon.classList.add('fa-eye-slash');
+    } else {
+        input.type = 'password';
+        icon.classList.remove('fa-eye-slash');
+        icon.classList.add('fa-eye');
+    }
+}
+
 // Show/hide telegram linking info
 document.getElementById('link_telegram').addEventListener('change', function() {
     const telegramInfo = document.getElementById('telegram_linking_info');
     telegramInfo.style.display = this.checked ? 'block' : 'none';
 });
 
+// Password strength indicator
+document.querySelector('input[name="password"]').addEventListener('input', function() {
+    const password = this.value;
+    const strengthContainer = document.getElementById('passwordStrength');
+    const strengthFill = document.getElementById('strengthFill');
+    const strengthText = document.getElementById('strengthText');
+    
+    if (password.length === 0) {
+        strengthContainer.style.display = 'none';
+        return;
+    }
+    
+    strengthContainer.style.display = 'block';
+    const strength = checkPasswordStrength(password);
+    
+    strengthFill.className = 'strength-fill';
+    if (strength <= 1) {
+        strengthFill.classList.add('weak');
+        strengthText.textContent = '{{ "Weak password"|t }}';
+    } else if (strength === 2) {
+        strengthFill.classList.add('fair');
+        strengthText.textContent = '{{ "Fair password"|t }}';
+    } else if (strength === 3) {
+        strengthFill.classList.add('good');
+        strengthText.textContent = '{{ "Good password"|t }}';
+    } else {
+        strengthFill.classList.add('strong');
+        strengthText.textContent = '{{ "Strong password"|t }}';
+    }
+});
+
+function checkPasswordStrength(password) {
+    let strength = 0;
+    if (password.length >= 8) strength++;
+    if (/[a-z]/.test(password)) strength++;
+    if (/[A-Z]/.test(password)) strength++;
+    if (/[0-9]/.test(password)) strength++;
+    if (/[^a-zA-Z0-9]/.test(password)) strength++;
+    return strength;
+}
+
 document.getElementById('registerForm').addEventListener('submit', async function(e) {
     e.preventDefault();
     
+    const submitBtn = this.querySelector('.btn-auth');
     const formData = new FormData(this);
     
     // Validate password confirmation
@@ -125,6 +230,8 @@ document.getElementById('registerForm').addEventListener('submit', async functio
         showNotification('{{ "Passwords do not match"|t }}', 'error');
         return;
     }
+    
+    submitBtn.classList.add('loading');
     
     const data = {
         first_name: formData.get('first_name'),
@@ -174,9 +281,11 @@ document.getElementById('registerForm').addEventListener('submit', async functio
             }, 5000); // Longer delay if showing telegram code
             
         } else {
+            submitBtn.classList.remove('loading');
             showNotification(result.message || '{{ "Registration failed"|t }}', 'error');
         }
     } catch (error) {
+        submitBtn.classList.remove('loading');
         showNotification('{{ "Network error. Please try again."|t }}', 'error');
     }
 });
@@ -197,35 +306,44 @@ function showTelegramLinkingCode(code, userId) {
     
     const modal = document.createElement('div');
     modal.style.cssText = `
-        background: white; padding: 30px; border-radius: 10px;
+        background: white; padding: 40px; border-radius: 20px;
         max-width: 500px; text-align: center; position: relative;
+        box-shadow: 0 24px 48px rgba(0, 0, 0, 0.2);
     `;
     
     modal.innerHTML = `
-        <h3 style="color: #0088cc; margin-bottom: 20px;">
-            <i class="fab fa-telegram-plane" style="margin-right: 10px;"></i>
+        <div style="width: 60px; height: 60px; background: linear-gradient(135deg, #0088cc, #00d1f9); 
+                    border-radius: 16px; display: flex; align-items: center; justify-content: center; 
+                    margin: 0 auto 24px; box-shadow: 0 8px 24px rgba(0, 136, 204, 0.3);">
+            <i class="fab fa-telegram-plane" style="font-size: 28px; color: white;"></i>
+        </div>
+        <h3 style="color: #061a3a; font-size: 24px; font-weight: 700; margin-bottom: 16px;">
             {{ 'Telegram Account Linking'|t }}
         </h3>
-        <p style="margin-bottom: 20px;">{{ 'Your account has been created successfully!'|t }}</p>
-        <div style="background: #f0f8ff; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
-            <p><strong>{{ 'Linking Code'|t }}:</strong></p>
-            <div style="font-size: 24px; font-weight: bold; color: #0088cc; letter-spacing: 2px; margin: 10px 0;">
+        <p style="color: #6b7280; margin-bottom: 24px;">{{ 'Your account has been created successfully!'|t }}</p>
+        <div style="background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%); padding: 24px; border-radius: 16px; margin-bottom: 24px;">
+            <p style="font-size: 14px; color: #64748b; margin-bottom: 8px;"><strong>{{ 'Linking Code'|t }}:</strong></p>
+            <div style="font-size: 32px; font-weight: 700; color: #002c8f; letter-spacing: 4px; margin: 12px 0; font-family: monospace;">
                 ${code}
             </div>
-            <button onclick="copyToClipboard('${code}')" style="padding: 5px 15px; background: #0088cc; color: white; border: none; border-radius: 4px; cursor: pointer;">
-                {{ 'Copy Code'|t }}
+            <button onclick="copyToClipboard('${code}')" style="padding: 10px 24px; background: linear-gradient(135deg, #00d1f9, #002c8f); 
+                    color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 14px;
+                    transition: all 0.3s ease;">
+                <i class="fas fa-copy" style="margin-right: 8px;"></i>{{ 'Copy Code'|t }}
             </button>
         </div>
-        <div style="text-align: left; font-size: 14px; line-height: 1.6;">
-            <p><strong>{{ 'To link your Telegram account'|t }}:</strong></p>
-            <ol>
-                <li>{{ 'Open Telegram and find our bot'|t }}: <a href="https://t.me/bluestream_bot" target="_blank">@bluestream_bot</a></li>
-                <li>{{ 'Send the command'|t }}: <code>/link ${code}</code></li>
+        <div style="text-align: left; font-size: 14px; line-height: 1.8; color: #4b5563; padding: 0 12px;">
+            <p style="font-weight: 600; color: #061a3a; margin-bottom: 12px;">{{ 'To link your Telegram account'|t }}:</p>
+            <ol style="margin: 0; padding-left: 20px;">
+                <li>{{ 'Open Telegram and find our bot'|t }}: <a href="https://t.me/bluestream_bot" target="_blank" style="color: #0088cc; font-weight: 600;">@bluestream_bot</a></li>
+                <li>{{ 'Send the command'|t }}: <code style="background: #f3f4f6; padding: 2px 8px; border-radius: 4px; font-size: 13px;">/link ${code}</code></li>
                 <li>{{ 'Follow the bot instructions'|t }}</li>
             </ol>
         </div>
         <button onclick="this.parentElement.parentElement.remove()" 
-                style="margin-top: 20px; padding: 10px 20px; background: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer;">
+                style="margin-top: 28px; padding: 14px 32px; background: linear-gradient(135deg, #10b981, #059669); 
+                       color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: 700; font-size: 15px;
+                       box-shadow: 0 4px 16px rgba(16, 185, 129, 0.3); transition: all 0.3s ease;">
             {{ 'Continue'|t }}
         </button>
     `;
@@ -238,26 +356,6 @@ function copyToClipboard(text) {
     navigator.clipboard.writeText(text).then(() => {
         showNotification('{{ "Code copied to clipboard"|t }}', 'success');
     });
-}
-
-// Real-time password strength validation
-document.querySelector('input[name="password"]').addEventListener('input', function() {
-    const password = this.value;
-    const strength = checkPasswordStrength(password);
-    
-    // You can add visual feedback here
-    console.log('Password strength:', strength);
-});
-
-function checkPasswordStrength(password) {
-    let strength = 0;
-    if (password.length >= 8) strength++;
-    if (/[a-z]/.test(password)) strength++;
-    if (/[A-Z]/.test(password)) strength++;
-    if (/[0-9]/.test(password)) strength++;
-    if (/[^a-zA-Z0-9]/.test(password)) strength++;
-    
-    return strength;
 }
 </script>
 {% endblock %}

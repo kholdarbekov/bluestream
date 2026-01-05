@@ -16,7 +16,8 @@ import {
   Statistic,
   message,
   Descriptions,
-  Divider
+  Divider,
+  Spin
 } from 'antd';
 import {
   SearchOutlined,
@@ -26,7 +27,10 @@ import {
   EyeOutlined,
   EditOutlined,
   DollarOutlined,
-  CalendarOutlined
+  CalendarOutlined,
+  PlusOutlined,
+  UserOutlined,
+  MinusCircleOutlined
 } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from 'react-query';
 import moment from 'moment';
@@ -45,8 +49,13 @@ const Orders = () => {
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [isDetailModalVisible, setIsDetailModalVisible] = useState(false);
   const [isStatusModalVisible, setIsStatusModalVisible] = useState(false);
+  const [isCreateModalVisible, setIsCreateModalVisible] = useState(false);
+  const [selectedUserId, setSelectedUserId] = useState(null);
+  const [userAddresses, setUserAddresses] = useState([]);
   const [pagination, setPagination] = useState({ page: 1, per_page: 20 });
+  const [orderDetailsLoading, setOrderDetailsLoading] = useState(false);
   const [form] = Form.useForm();
+  const [createOrderForm] = Form.useForm();
 
   const queryClient = useQueryClient();
 
@@ -66,6 +75,20 @@ const Orders = () => {
     }
   );
 
+  // Fetch users for order creation
+  const { data: usersData } = useQuery(
+    ['users-for-order'],
+    () => adminService.getUsers({ per_page: 100 }),
+    { enabled: isCreateModalVisible }
+  );
+
+  // Fetch products for order creation
+  const { data: productsData } = useQuery(
+    ['products-for-order'],
+    () => adminService.getProducts({ per_page: 100, is_active: true }),
+    { enabled: isCreateModalVisible }
+  );
+
   // Update order status mutation
   const updateOrderMutation = useMutation(
     ({ orderId, status, notes }) => adminService.updateOrderStatus(orderId, status, notes),
@@ -76,11 +99,63 @@ const Orders = () => {
         setIsStatusModalVisible(false);
         form.resetFields();
       },
-      onError: (error) => {
+      onError: () => {
         message.error(t('ui.orders.status_update_failed'));
       }
     }
   );
+
+  // Create order mutation
+  const createOrderMutation = useMutation(
+    (orderData) => adminService.createOrderForUser(orderData),
+    {
+      onSuccess: () => {
+        message.success(t('ui.orders.order_created_success', 'Order created successfully'));
+        queryClient.invalidateQueries('orders');
+        setIsCreateModalVisible(false);
+        createOrderForm.resetFields();
+        setSelectedUserId(null);
+        setUserAddresses([]);
+      },
+      onError: (error) => {
+        const errorMessage = error.response?.data?.message || t('ui.orders.order_create_failed', 'Failed to create order');
+        message.error(errorMessage);
+      }
+    }
+  );
+
+  // Handle user selection - fetch their addresses
+  const handleUserSelect = async (userId) => {
+    setSelectedUserId(userId);
+    createOrderForm.setFieldsValue({ delivery_address_id: undefined });
+
+    if (userId) {
+      try {
+        const response = await adminService.getUserAddresses(userId);
+        setUserAddresses(response.data?.addresses || []);
+      } catch (error) {
+        message.error('Failed to load user addresses');
+        setUserAddresses([]);
+      }
+    } else {
+      setUserAddresses([]);
+    }
+  };
+
+  // Handle create order submit
+  const handleCreateOrderSubmit = (values) => {
+    const orderData = {
+      user_id: values.user_id,
+      delivery_address_id: values.delivery_address_id,
+      payment_method: values.payment_method || 'cash',
+      delivery_notes: values.delivery_notes || '',
+      items: values.items.map(item => ({
+        product_id: item.product_id,
+        quantity: item.quantity
+      }))
+    };
+    createOrderMutation.mutate(orderData);
+  };
 
   const orderStatusColors = {
     pending: 'orange',
@@ -204,9 +279,22 @@ const Orders = () => {
     }
   ];
 
-  const handleViewOrder = (order) => {
-    setSelectedOrder(order);
+  const handleViewOrder = async (order) => {
+    setSelectedOrder(order); // Show basic data immediately
     setIsDetailModalVisible(true);
+    setOrderDetailsLoading(true);
+
+    try {
+      const response = await adminService.getOrderDetails(order.id);
+      if (response.success && response.data?.order) {
+        setSelectedOrder(response.data.order);
+      }
+    } catch (error) {
+      console.error('Failed to load order details:', error);
+      // Keep the basic order data if fetch fails
+    } finally {
+      setOrderDetailsLoading(false);
+    }
   };
 
   const handleUpdateStatus = (order) => {
@@ -338,6 +426,13 @@ const Orders = () => {
             <Button icon={<ExportOutlined />}>
               {t('ui.orders.export_orders')}
             </Button>
+            <Button
+              type="primary"
+              icon={<PlusOutlined />}
+              onClick={() => setIsCreateModalVisible(true)}
+            >
+              {t('ui.orders.create_order', 'Create Order')}
+            </Button>
           </Space>
         </div>
 
@@ -407,10 +502,64 @@ const Orders = () => {
 
             <Divider>{t('ui.orders.order_items')}</Divider>
 
-            <div style={{ marginTop: 16 }}>
-              {/* Order items would be displayed here */}
-              <p>{t('ui.orders.order_items_placeholder')}</p>
-            </div>
+            <Spin spinning={orderDetailsLoading}>
+              <div style={{ marginTop: 16 }}>
+                {(selectedOrder.items && selectedOrder.items.length > 0) || (selectedOrder.items_summary && selectedOrder.items_summary.length > 0) ? (
+                <Table
+                  dataSource={selectedOrder.items || selectedOrder.items_summary}
+                  rowKey={(_, index) => `item-${index}`}
+                  pagination={false}
+                  size="small"
+                  columns={[
+                    {
+                      title: t('ui.orders.product_name', 'Product'),
+                      dataIndex: 'product_name',
+                      key: 'product_name',
+                    },
+                    {
+                      title: t('ui.orders.quantity', 'Qty'),
+                      dataIndex: 'quantity',
+                      key: 'quantity',
+                      width: 80,
+                      align: 'center',
+                    },
+                    {
+                      title: t('ui.orders.unit_price', 'Unit Price'),
+                      dataIndex: 'unit_price',
+                      key: 'unit_price',
+                      width: 120,
+                      align: 'right',
+                      render: (price) => `${price?.toLocaleString()} UZS`,
+                    },
+                    {
+                      title: t('ui.orders.total_price', 'Total'),
+                      dataIndex: 'total_price',
+                      key: 'total_price',
+                      width: 120,
+                      align: 'right',
+                      render: (price) => (
+                        <span style={{ fontWeight: 'bold' }}>
+                          {price?.toLocaleString()} UZS
+                        </span>
+                      ),
+                    },
+                  ]}
+                  footer={() => (
+                    <div style={{ textAlign: 'right' }}>
+                      <strong>{t('ui.orders.order_total', 'Order Total')}: </strong>
+                      <span style={{ fontSize: 16, color: '#52c41a', fontWeight: 'bold' }}>
+                        {selectedOrder.total_amount?.toLocaleString()} UZS
+                      </span>
+                    </div>
+                  )}
+                />
+              ) : (
+                <p style={{ color: '#999', textAlign: 'center' }}>
+                  {t('ui.orders.no_items', 'No items in this order')}
+                </p>
+              )}
+              </div>
+            </Spin>
 
             <div style={{ marginTop: 16, textAlign: 'right' }}>
               <Space>
@@ -481,6 +630,199 @@ const Orders = () => {
                 loading={updateOrderMutation.isLoading}
               >
                 {t('ui.orders.update_status')}
+              </Button>
+            </Space>
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      {/* Create Order Modal */}
+      <Modal
+        title={t('ui.orders.create_order', 'Create Order')}
+        open={isCreateModalVisible}
+        onCancel={() => {
+          setIsCreateModalVisible(false);
+          createOrderForm.resetFields();
+          setSelectedUserId(null);
+          setUserAddresses([]);
+        }}
+        footer={null}
+        width={700}
+      >
+        <Form
+          form={createOrderForm}
+          layout="vertical"
+          onFinish={handleCreateOrderSubmit}
+          initialValues={{ payment_method: 'cash', items: [{}] }}
+        >
+          {/* User Selection */}
+          <Form.Item
+            name="user_id"
+            label={t('ui.orders.select_customer', 'Select Customer')}
+            rules={[{ required: true, message: t('ui.orders.customer_required', 'Please select a customer') }]}
+          >
+            <Select
+              showSearch
+              placeholder={t('ui.orders.search_customer', 'Search customer by name or phone')}
+              optionFilterProp="children"
+              onChange={handleUserSelect}
+              filterOption={(input, option) =>
+                option.children.toLowerCase().includes(input.toLowerCase())
+              }
+            >
+              {(usersData?.data?.items || []).map(user => (
+                <Option key={user.id} value={user.id}>
+                  {user.first_name} {user.last_name} - {user.phone}
+                </Option>
+              ))}
+            </Select>
+          </Form.Item>
+
+          {/* Address Selection */}
+          <Form.Item
+            name="delivery_address_id"
+            label={t('ui.orders.select_address', 'Select Delivery Address')}
+            rules={[{ required: true, message: t('ui.orders.address_required', 'Please select a delivery address') }]}
+          >
+            <Select
+              placeholder={
+                selectedUserId
+                  ? (userAddresses.length > 0
+                    ? t('ui.orders.select_address_placeholder', 'Select an address')
+                    : t('ui.orders.no_addresses', 'No addresses found for this user'))
+                  : t('ui.orders.select_customer_first', 'Select a customer first')
+              }
+              disabled={!selectedUserId || userAddresses.length === 0}
+            >
+              {userAddresses.map(addr => (
+                <Option key={addr.id} value={addr.id}>
+                  {addr.title ? `${addr.title}: ` : ''}{addr.full_address}
+                  {addr.is_default && ' (Default)'}
+                </Option>
+              ))}
+            </Select>
+          </Form.Item>
+
+          {/* Add Address Link if no addresses */}
+          {selectedUserId && userAddresses.length === 0 && (
+            <div style={{
+              background: '#fff7e6',
+              border: '1px solid #ffd591',
+              borderRadius: 6,
+              padding: 12,
+              marginBottom: 16
+            }}>
+              <UserOutlined style={{ marginRight: 8 }} />
+              {t('ui.orders.no_address_hint', 'This user has no saved addresses. Please add an address from the Users page first.')}
+            </div>
+          )}
+
+          {/* Product Items */}
+          <Divider>{t('ui.orders.order_items', 'Order Items')}</Divider>
+
+          <Form.List name="items">
+            {(fields, { add, remove }) => (
+              <>
+                {fields.map(({ key, name, ...restField }) => (
+                  <Row key={key} gutter={16} align="middle">
+                    <Col span={14}>
+                      <Form.Item
+                        {...restField}
+                        name={[name, 'product_id']}
+                        rules={[{ required: true, message: t('ui.orders.product_required', 'Select product') }]}
+                      >
+                        <Select
+                          showSearch
+                          placeholder={t('ui.orders.select_product', 'Select product')}
+                          optionFilterProp="children"
+                          filterOption={(input, option) =>
+                            option.children.toLowerCase().includes(input.toLowerCase())
+                          }
+                        >
+                          {(productsData?.data?.items || []).map(product => (
+                            <Option key={product.id} value={product.id}>
+                              {product.name} - {product.price?.toLocaleString()} UZS
+                            </Option>
+                          ))}
+                        </Select>
+                      </Form.Item>
+                    </Col>
+                    <Col span={6}>
+                      <Form.Item
+                        {...restField}
+                        name={[name, 'quantity']}
+                        rules={[{ required: true, message: t('ui.orders.quantity_required', 'Qty') }]}
+                        initialValue={1}
+                      >
+                        <Select placeholder={t('ui.orders.quantity', 'Qty')}>
+                          {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(n => (
+                            <Option key={n} value={n}>{n}</Option>
+                          ))}
+                        </Select>
+                      </Form.Item>
+                    </Col>
+                    <Col span={4}>
+                      {fields.length > 1 && (
+                        <Button
+                          type="text"
+                          danger
+                          icon={<MinusCircleOutlined />}
+                          onClick={() => remove(name)}
+                        />
+                      )}
+                    </Col>
+                  </Row>
+                ))}
+                <Form.Item>
+                  <Button type="dashed" onClick={() => add()} block icon={<PlusOutlined />}>
+                    {t('ui.orders.add_item', 'Add Item')}
+                  </Button>
+                </Form.Item>
+              </>
+            )}
+          </Form.List>
+
+          {/* Payment Method */}
+          <Form.Item
+            name="payment_method"
+            label={t('ui.orders.payment_method', 'Payment Method')}
+          >
+            <Select>
+              <Option value="cash">{t('ui.orders.payment_cash', 'Cash on Delivery')}</Option>
+              <Option value="payme">{t('ui.orders.payment_payme', 'Payme')}</Option>
+              <Option value="click">{t('ui.orders.payment_click', 'Click')}</Option>
+            </Select>
+          </Form.Item>
+
+          {/* Delivery Notes */}
+          <Form.Item
+            name="delivery_notes"
+            label={t('ui.orders.delivery_notes', 'Delivery Notes')}
+          >
+            <Input.TextArea
+              rows={2}
+              placeholder={t('ui.orders.delivery_notes_placeholder', 'Any special delivery instructions...')}
+            />
+          </Form.Item>
+
+          {/* Submit Buttons */}
+          <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
+            <Space>
+              <Button onClick={() => {
+                setIsCreateModalVisible(false);
+                createOrderForm.resetFields();
+                setSelectedUserId(null);
+                setUserAddresses([]);
+              }}>
+                {t('ui.common.cancel', 'Cancel')}
+              </Button>
+              <Button
+                type="primary"
+                htmlType="submit"
+                loading={createOrderMutation.isLoading}
+                icon={<ShoppingCartOutlined />}
+              >
+                {t('ui.orders.create_order', 'Create Order')}
               </Button>
             </Space>
           </Form.Item>

@@ -1,0 +1,74 @@
+{% extends "emails/base.html" %}
+
+{% block title %}Order Confirmation - {{ company_name }}{% endblock %}
+
+{% block header %}
+<h1>Order Confirmed!</h1>
+{% endblock %}
+
+{% block content %}
+<h2>Thank you for your order, {{ user_name }}!</h2>
+
+<div class="success-box">
+    <p>Your order <strong>#{{ order_number }}</strong> has been received and is being processed.</p>
+</div>
+
+<h3 style="color: #1e293b; margin-top: 30px;">Order Details</h3>
+
+<table class="details-table">
+    <tr>
+        <th>Order Number</th>
+        <td>#{{ order_number }}</td>
+    </tr>
+    <tr>
+        <th>Order Date</th>
+        <td>{{ order_date }}</td>
+    </tr>
+    <tr>
+        <th>Delivery Address</th>
+        <td>{{ delivery_address }}</td>
+    </tr>
+    {% if delivery_date %}
+    <tr>
+        <th>Expected Delivery</th>
+        <td>{{ delivery_date }}{% if delivery_time_slot %}, {{ delivery_time_slot }}{% endif %}</td>
+    </tr>
+    {% endif %}
+    <tr>
+        <th>Payment Method</th>
+        <td>{{ payment_method }}</td>
+    </tr>
+    <tr class="total-row">
+        <th>Total Amount</th>
+        <td>{{ order_total }} UZS</td>
+    </tr>
+</table>
+
+{% if order_items %}
+<h3 style="color: #1e293b; margin-top: 30px;">Items Ordered</h3>
+<table class="details-table">
+    <tr>
+        <th>Product</th>
+        <th>Quantity</th>
+        <th>Price</th>
+    </tr>
+    {% for item in order_items %}
+    <tr>
+        <td>{{ item.name }}</td>
+        <td>{{ item.quantity }}</td>
+        <td>{{ item.price }} UZS</td>
+    </tr>
+    {% endfor %}
+</table>
+{% endif %}
+
+<hr class="divider">
+
+<p style="text-align: center;">
+    <a href="{{ order_tracking_url }}" class="btn-primary">Track Your Order</a>
+</p>
+
+<div class="info-box">
+    <p>If you have any questions about your order, please contact us at <a href="tel:{{ company_phone }}">{{ company_phone }}</a> or reply to this email.</p>
+</div>
+{% endblock %}

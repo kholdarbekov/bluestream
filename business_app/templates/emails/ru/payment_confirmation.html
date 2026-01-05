@@ -1,0 +1,58 @@
+{% extends "emails/base.html" %}
+
+{% block title %}Оплата подтверждена - {{ company_name }}{% endblock %}
+
+{% block header %}
+<h1>Оплата получена!</h1>
+{% endblock %}
+
+{% block content %}
+<h2>Спасибо, {{ user_name }}!</h2>
+
+<div class="success-box">
+    <p>Мы успешно получили вашу оплату за заказ <strong>#{{ order_number }}</strong>.</p>
+</div>
+
+<h3 style="color: #1e293b; margin-top: 30px;">Детали оплаты</h3>
+
+<table class="details-table">
+    <tr>
+        <th>Номер заказа</th>
+        <td>#{{ order_number }}</td>
+    </tr>
+    <tr>
+        <th>Сумма оплаты</th>
+        <td>{{ payment_amount }} сум</td>
+    </tr>
+    <tr>
+        <th>Способ оплаты</th>
+        <td>{{ payment_method }}</td>
+    </tr>
+    <tr>
+        <th>Номер транзакции</th>
+        <td>{{ payment_reference }}</td>
+    </tr>
+    <tr>
+        <th>Дата оплаты</th>
+        <td>{{ payment_date }}</td>
+    </tr>
+    <tr>
+        <th>Статус</th>
+        <td style="color: #22c55e; font-weight: 600;">Подтверждено</td>
+    </tr>
+</table>
+
+<hr class="divider">
+
+<p style="text-align: center;">
+    <a href="{{ order_tracking_url }}" class="btn-primary">Посмотреть заказ</a>
+</p>
+
+<div class="info-box">
+    <p>Ваш заказ обрабатывается и скоро будет доставлен. Вы можете отслеживать статус заказа по кнопке выше.</p>
+</div>
+
+<p style="color: #94a3b8; font-size: 13px;">
+    Пожалуйста, сохраните это письмо для ваших записей. По вопросам обращайтесь по телефону <a href="tel:{{ company_phone }}">{{ company_phone }}</a>.
+</p>
+{% endblock %}

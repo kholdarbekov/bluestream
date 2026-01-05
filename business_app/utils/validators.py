@@ -78,10 +78,10 @@ class EmailValidator(Validator):
             domain = self.value.split('@')[1] if '@' in self.value else ''
             
             # Simple typo detection
-            if domain and domain not in common_domains:
-                similar_domains = [d for d in common_domains if abs(len(d) - len(domain)) <= 2]
-                if similar_domains:
-                    self.errors.append(f"Did you mean one of these domains: {', '.join(similar_domains)}?")
+            # if domain and domain not in common_domains:
+            #     similar_domains = [d for d in common_domains if abs(len(d) - len(domain)) <= 2]
+            #     if similar_domains:
+            #         self.errors.append(f"Did you mean one of these domains: {', '.join(similar_domains)}?")
         
         return self
 

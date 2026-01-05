@@ -35,7 +35,8 @@ if _sentry_dsn:
 from telegram import Update, BotCommand, ReplyKeyboardRemove
 from telegram.ext import (
     Application, CommandHandler, MessageHandler, CallbackQueryHandler,
-    ConversationHandler, filters, ContextTypes, TypeHandler
+    ConversationHandler, filters, ContextTypes, TypeHandler,
+    PreCheckoutQueryHandler
 )
 from telegram.error import TelegramError
 
@@ -131,11 +132,31 @@ class WaterBusinessBot:
             async def log_all_updates(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 logger.info(f"!!! UPDATE RECEIVED: type={type(update).__name__}")
                 if update.message:
-                    logger.info(f"!!! Message update from user {update.effective_user.id}, update.message: {update.message}")
+                    # Check for successful payment specifically
+                    if update.message.successful_payment:
+                        logger.info("=" * 70)
+                        logger.info("!!! SUCCESSFUL_PAYMENT MESSAGE RECEIVED !!!")
+                        logger.info(f"User: {update.effective_user.id}")
+                        logger.info(f"Payment: {update.message.successful_payment}")
+                        logger.info(f"Amount: {update.message.successful_payment.total_amount} {update.message.successful_payment.currency}")
+                        logger.info(f"Telegram charge ID: {update.message.successful_payment.telegram_payment_charge_id}")
+                        logger.info(f"Provider charge ID: {update.message.successful_payment.provider_payment_charge_id}")
+                        logger.info(f"Payload: {update.message.successful_payment.invoice_payload}")
+                        logger.info("=" * 70)
+                    else:
+                        logger.info(f"!!! Message update from user {update.effective_user.id}, text: {update.message.text[:100] if update.message.text else 'NO TEXT'}")
                 if update.callback_query:
                     logger.info(f"!!! CALLBACK QUERY: {update.callback_query.data} from user {update.effective_user.id}")
                 if update.edited_message:
                     logger.info(f"!!! Edited message update")
+                if update.pre_checkout_query:
+                    logger.info("=" * 70)
+                    logger.info("!!! PRE_CHECKOUT_QUERY RECEIVED !!!")
+                    logger.info(f"User: {update.effective_user.id}")
+                    logger.info(f"Query ID: {update.pre_checkout_query.id}")
+                    logger.info(f"Amount: {update.pre_checkout_query.total_amount} {update.pre_checkout_query.currency}")
+                    logger.info(f"Payload: {update.pre_checkout_query.invoice_payload}")
+                    logger.info("=" * 70)
 
             
             self.application.add_handler(TypeHandler(Update, log_all_updates), group=-10)
@@ -210,7 +231,7 @@ class WaterBusinessBot:
             # Profile callbacks
             CallbackQueryHandler(profile_handlers.profile_menu, pattern="^menu_profile$"),
             CallbackQueryHandler(profile_handlers.phone_verification_menu, pattern="^phone_verification$"),
-            CallbackQueryHandler(profile_handlers.add_phone_number, pattern="^add_phone_number$"),
+            # add_phone_number is now handled by phone_verification_handler ConversationHandler
             CallbackQueryHandler(profile_handlers.verify_phone_number, pattern="^verify_phone_number$"),
             CallbackQueryHandler(profile_handlers.edit_profile, pattern="^edit_profile$"),
             CallbackQueryHandler(profile_handlers.manage_addresses, pattern="^manage_addresses$"),
@@ -241,8 +262,27 @@ class WaterBusinessBot:
             # Admin callbacks (restricted - access control handled in handler)
             CallbackQueryHandler(admin_handlers.admin_orders, pattern="^admin_orders$"),
             CallbackQueryHandler(admin_handlers.admin_analytics, pattern="^admin_analytics$"),
+
+            # Payment callbacks
+            CallbackQueryHandler(payment_handlers.retry_payment, pattern="^payment_retry_"),
+            CallbackQueryHandler(payment_handlers.switch_payment_method, pattern="^payment_switch_"),
+            CallbackQueryHandler(payment_handlers.cancel_payment, pattern="^payment_cancel_"),
         ]
-        
+
+        # Telegram Payments handlers (Pre-checkout and Successful Payment)
+        # PreCheckoutQuery - CRITICAL: Must respond within 10 seconds
+        self.application.add_handler(
+            PreCheckoutQueryHandler(payment_handlers.handle_pre_checkout_query)
+        )
+
+        # Successful Payment message handler
+        self.application.add_handler(
+            MessageHandler(
+                filters.SUCCESSFUL_PAYMENT,
+                payment_handlers.handle_successful_payment
+            )
+        )
+
         # Add logging callback handler to catch all callbacks for debugging
         async def debug_callback_handler(update, context):
             if update.callback_query:
@@ -362,6 +402,32 @@ class WaterBusinessBot:
         # Add conversation handler in higher priority group
         self.application.add_handler(address_handler, group=-2)
         logger.info(f"Address conversation handler registered with states: {list(address_handler.states.keys())}")
+
+        # Phone verification conversation - for adding/updating phone number and name
+        phone_verification_handler = ConversationHandler(
+            entry_points=[
+                CallbackQueryHandler(profile_handlers.add_phone_number, pattern="^add_phone_number$"),
+            ],
+            states={
+                profile_handlers.PHONE_VERIFY_PHONE: [
+                    MessageHandler(filters.CONTACT, profile_handlers.phone_verify_contact_received),
+                ],
+                profile_handlers.PHONE_VERIFY_NAME: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, profile_handlers.phone_verify_name_received),
+                ],
+            },
+            fallbacks=[
+                CommandHandler("cancel", profile_handlers.cancel_phone_verification),
+                CallbackQueryHandler(profile_handlers.cancel_phone_verification, pattern="^cancel_phone_verification$"),
+            ],
+            per_chat=True,
+            per_user=True,
+            name="phone_verification",
+            conversation_timeout=300,  # 5 minutes timeout
+            allow_reentry=True
+        )
+        self.application.add_handler(phone_verification_handler, group=-2)
+        logger.info(f"Phone verification conversation handler registered")
 
         # Subscription creation conversation
         subscription_creation_handler = ConversationHandler(

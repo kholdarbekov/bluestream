@@ -131,7 +131,7 @@ class BaseConfig:
     GOOGLE_MAPS_API_KEY = get_secret('google_maps_api_key', 'GOOGLE_MAPS_API_KEY', required=False)
     YANDEX_MAPS_API_KEY = get_secret('yandex_maps_api_key', 'YANDEX_MAPS_API_KEY', required=False)
     
-    # Email Configuration
+    # Email Configuration (Legacy - SendGrid)
     SENDGRID_API_KEY = get_secret('sendgrid_api_key', 'SENDGRID_API_KEY', required=False)
     MAIL_SERVER = os.environ.get('MAIL_SERVER', 'smtp.sendgrid.net')
     MAIL_PORT = int(os.environ.get('MAIL_PORT', 587))
@@ -140,6 +140,11 @@ class BaseConfig:
     MAIL_PASSWORD = get_secret('sendgrid_api_key', 'SENDGRID_API_KEY', required=False)
     MAIL_DEFAULT_SENDER = os.environ.get('MAIL_DEFAULT_SENDER', 'noreply@bluestream.uz')
     MAIL_SUPPORT_EMAIL = os.environ.get('MAIL_SUPPORT_EMAIL', 'support@bluestream.uz')
+    
+    # Email Configuration (Brevo - Primary)
+    BREVO_API_KEY = get_secret('brevo_api_key', 'BREVO_API_KEY', required=False)
+    BREVO_SENDER_EMAIL = os.environ.get('BREVO_SENDER_EMAIL', 'noreply@bluestream.uz')
+    BREVO_SENDER_NAME = os.environ.get('BREVO_SENDER_NAME', 'BlueStream Water Delivery')
     
     # SMS Configuration - Eskiz SMS (Uzbekistan)
     ESKIZ_EMAIL = os.environ.get('ESKIZ_EMAIL')

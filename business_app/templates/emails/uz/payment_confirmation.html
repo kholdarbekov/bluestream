@@ -1,0 +1,58 @@
+{% extends "emails/base.html" %}
+
+{% block title %}To'lov tasdiqlandi - {{ company_name }}{% endblock %}
+
+{% block header %}
+<h1>To'lov qabul qilindi!</h1>
+{% endblock %}
+
+{% block content %}
+<h2>Rahmat, {{ user_name }}!</h2>
+
+<div class="success-box">
+    <p>Sizning <strong>#{{ order_number }}</strong> buyurtmangiz uchun to'lov muvaffaqiyatli qabul qilindi.</p>
+</div>
+
+<h3 style="color: #1e293b; margin-top: 30px;">To'lov tafsilotlari</h3>
+
+<table class="details-table">
+    <tr>
+        <th>Buyurtma raqami</th>
+        <td>#{{ order_number }}</td>
+    </tr>
+    <tr>
+        <th>To'lov summasi</th>
+        <td>{{ payment_amount }} so'm</td>
+    </tr>
+    <tr>
+        <th>To'lov usuli</th>
+        <td>{{ payment_method }}</td>
+    </tr>
+    <tr>
+        <th>Tranzaksiya raqami</th>
+        <td>{{ payment_reference }}</td>
+    </tr>
+    <tr>
+        <th>To'lov sanasi</th>
+        <td>{{ payment_date }}</td>
+    </tr>
+    <tr>
+        <th>Holat</th>
+        <td style="color: #22c55e; font-weight: 600;">Tasdiqlangan</td>
+    </tr>
+</table>
+
+<hr class="divider">
+
+<p style="text-align: center;">
+    <a href="{{ order_tracking_url }}" class="btn-primary">Buyurtmani ko'rish</a>
+</p>
+
+<div class="info-box">
+    <p>Buyurtmangiz hozir qayta ishlanmoqda va tez orada yetkazib beriladi. Yuqoridagi tugma orqali buyurtma holatini kuzatishingiz mumkin.</p>
+</div>
+
+<p style="color: #94a3b8; font-size: 13px;">
+    Iltimos, bu xatni yozuvlaringiz uchun saqlang. Savollaringiz bo'lsa, <a href="tel:{{ company_phone }}">{{ company_phone }}</a> raqamiga murojaat qiling.
+</p>
+{% endblock %}

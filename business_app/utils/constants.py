@@ -100,15 +100,39 @@ class UserStatus(Enum):
 
 class NotificationType(Enum):
     """Notification type enumeration"""
+    
+    # Order notification types
     ORDER_CONFIRMATION = 'order_confirmation'
     ORDER_STATUS_UPDATE = 'order_status_update'
+    ORDER_UPDATE = 'order_update'
+    
+    # Delivery notification types
     DELIVERY_UPDATE = 'delivery_update'
+    DELIVERY_REMINDER = 'delivery_reminder'
+    
+    # Payment notification types
     PAYMENT_CONFIRMATION = 'payment_confirmation'
+    
+    # Subscription notification types
     SUBSCRIPTION_REMINDER = 'subscription_reminder'
+    SUBSCRIPTION_CREATED = 'subscription_created'
+    SUBSCRIPTION_RENEWAL = 'subscription_renewal'
+    SUBSCRIPTION_CANCELLED = 'subscription_cancelled'
+    SUBSCRIPTION_CANCELLATION_SCHEDULED = 'subscription_cancellation_scheduled'
+    
+    # Promotional notification types
     PROMOTIONAL = 'promotional'
+    
+    # System notification types
+    SYSTEM = 'system'
     SYSTEM_ALERT = 'system_alert'
-    LOYALTY_REWARD = 'loyalty_reward'
 
+    # Authentication notification types
+    EMAIL_VERIFICATION = 'email_verification'
+    PASSWORD_RESET = 'password_reset'
+
+    # Loyalty notification types
+    LOYALTY_REWARD = 'loyalty_reward'
 
 class NotificationChannel(Enum):
     """Notification channel enumeration"""
@@ -197,38 +221,6 @@ class NotificationStatus(Enum):
     DELIVERED = 'delivered'
     FAILED = 'failed'
     READ = 'read'
-
-
-class NotificationType(Enum):
-    """Notification type enumeration"""
-    
-    # Loyalty notification types
-    LOYALTY_REWARD = 'loyalty_reward'
-    
-    # Subscription notification types
-    SUBSCRIPTION_CREATED = 'subscription_created'
-    SUBSCRIPTION_RENEWAL = 'subscription_renewal'
-    SUBSCRIPTION_CANCELLED = 'subscription_cancelled'
-    SUBSCRIPTION_CANCELLATION_SCHEDULED = 'subscription_cancellation_scheduled'
-    SUBSCRIPTION_REMINDER = 'subscription_reminder'
-
-    # Order notification types
-    ORDER_CONFIRMATION = 'order_confirmation'
-    ORDER_UPDATE = 'order_update'
-    ORDER_STATUS_UPDATE = 'order_status_update'
-
-    # Delivery notification types
-    DELIVERY_UPDATE = 'delivery_update'
-    DELIVERY_REMINDER = 'delivery_reminder'
-
-    # Payment notification types
-    PAYMENT_CONFIRMATION = 'payment_confirmation'
-
-    # Promotional notification types
-    PROMOTIONAL = 'promotional'
-
-    # System notification types
-    SYSTEM = 'system'
 
 
 class NotificationChannelType(Enum):

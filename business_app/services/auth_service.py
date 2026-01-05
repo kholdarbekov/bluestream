@@ -447,9 +447,114 @@ class AuthService:
         
         db.session.add(admin_user)
         db.session.commit()
-        
+
         return admin_user
-    
+
+    def create_user_by_admin(
+        self,
+        phone: str,
+        first_name: str,
+        created_by_admin_id: int,
+        last_name: str = None,
+        email: str = None,
+        notes: str = None
+    ) -> User:
+        """
+        Create a user account via admin panel (for call center operations).
+
+        Users created this way:
+        - Are marked with registration_source='admin_created'
+        - Have status=ACTIVE (can receive orders)
+        - Have is_verified=False (cannot login to cabinet)
+        - Have a random password hash (cannot login with password)
+
+        Args:
+            phone: Required - User phone number (must be unique)
+            first_name: Required - User first name
+            created_by_admin_id: ID of admin creating the user
+            last_name: Optional - User last name
+            email: Optional - User email (must be unique if provided)
+            notes: Optional - Admin notes about the user
+
+        Returns:
+            Created User object
+
+        Raises:
+            ValidationError: If validation fails
+            ConflictError: If phone or email already exists
+        """
+        # Validate phone number
+        phone_validator = PhoneValidator(phone, 'phone')
+        phone_validator.validate()
+        if not phone_validator.is_valid():
+            raise ValidationError(
+                get_translation('error.validation.invalid_phone'),
+                {'phone': phone_validator.get_errors()}
+            )
+
+        formatted_phone = format_phone_number(phone)
+
+        # Check if phone already exists
+        existing_by_phone = User.query.filter_by(phone=formatted_phone).first()
+        if existing_by_phone:
+            raise ConflictError(get_translation('error.validation.phone_already_exists'))
+
+        # Validate and check email if provided
+        formatted_email = None
+        if email:
+            email_validator = EmailValidator(email, 'email')
+            email_validator.validate()
+            if not email_validator.is_valid():
+                raise ValidationError(
+                    get_translation('error.validation.invalid_email'),
+                    {'email': email_validator.get_errors()}
+                )
+
+            formatted_email = email.lower().strip()
+            existing_by_email = User.query.filter_by(email=formatted_email).first()
+            if existing_by_email:
+                raise ConflictError(get_translation('api.auth.email_already_exists'))
+
+        # Validate first name
+        if not first_name or not first_name.strip():
+            raise ValidationError(
+                get_translation('error.validation.failed'),
+                {'first_name': ['First name is required']}
+            )
+
+        # Generate a secure random password that the user will never know
+        # This prevents login via password - admin-created users can only be managed via admin panel
+        random_password = secrets.token_urlsafe(32)
+        secure_password_hash = self._hash_password(random_password)
+
+        # Create the user
+        user = User(
+            phone=formatted_phone,
+            email=formatted_email,
+            first_name=first_name.strip(),
+            last_name=last_name.strip() if last_name else None,
+            password_hash=secure_password_hash,
+            role=UserRole.CUSTOMER.value,
+            status=UserStatus.ACTIVE.value,  # Active so orders can be placed
+            is_verified=False,  # Not verified - cannot access cabinet pages
+            registration_source='admin_created',
+            preferred_language='uz'  # Default language for Uzbekistan
+        )
+
+        db.session.add(user)
+        db.session.commit()
+
+        # Log creation with notes if provided
+        log_message = (
+            f"User created by admin: user_id={user.id}, phone={formatted_phone}, "
+            f"created_by_admin_id={created_by_admin_id}"
+        )
+        if notes:
+            log_message += f", notes={notes}"
+        logger.info(log_message)
+
+        return user
+
     def get_user_permissions(self, user_id: int) -> Dict[str, bool]:
         """Get user permissions based on role"""
         user = User.query.get(user_id)

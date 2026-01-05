@@ -45,6 +45,7 @@ from business_app.utils.constants import UserRole, SubscriptionStatus, OrderStat
 from business_app import db
 from business_app.utils.helpers import get_current_language
 from business_app.utils.translations import get_translation
+from business_app.utils.exceptions import ValidationError, ConflictError
 from business_app.utils.api_responses import (
     success_response, error_response, paginated_response, created_response,
     not_found_response, validation_error_response, internal_error_response,
@@ -804,6 +805,317 @@ def update_user_status(user_id):
         return internal_error_response('Failed to update user status')
 
 
+@admin_bp.route('/users', methods=['POST'])
+@jwt_required()
+@staff_or_higher_required
+@validate_json(['phone', 'first_name'])
+def create_user():
+    """
+    Create a new user from admin panel (for call center operations).
+
+    This endpoint allows staff to create customer accounts for people who
+    order by phone (e.g., elderly customers who don't use the app).
+
+    Users created this way:
+    - Cannot login to the web cabinet (no password access)
+    - Can have orders placed on their behalf
+    - Are marked with registration_source='admin_created'
+
+    Required fields:
+    - phone: User phone number (must be unique, international format)
+    - first_name: User first name
+
+    Optional fields:
+    - last_name: User last name
+    - email: User email (must be unique if provided)
+    - notes: Admin notes about the user (logged, not stored)
+
+    Returns:
+        Created user data with success message
+    """
+    try:
+        current_user_id = get_jwt_identity()
+        data = request.get_json()
+
+        phone = data.get('phone', '').strip()
+        first_name = data.get('first_name', '').strip()
+        last_name = data.get('last_name', '').strip() if data.get('last_name') else None
+        email = data.get('email', '').strip() if data.get('email') else None
+        notes = data.get('notes', '').strip() if data.get('notes') else None
+
+        # Validate required fields
+        if not phone:
+            return validation_error_response('Phone number is required')
+        if not first_name:
+            return validation_error_response('First name is required')
+
+        # Use AuthService to create user
+        from business_app.services.auth_service import AuthService
+        auth_service = AuthService()
+
+        user = auth_service.create_user_by_admin(
+            phone=phone,
+            first_name=first_name,
+            created_by_admin_id=current_user_id,
+            last_name=last_name,
+            email=email,
+            notes=notes
+        )
+
+        current_app.logger.info(
+            f"Admin {current_user_id} created user {user.id} with phone {user.phone}"
+        )
+
+        return created_response(
+            data={'user': serialize_user_admin(user)},
+            message='User created successfully'
+        )
+
+    except ConflictError as e:
+        return error_response(str(e), status_code=409)
+    except ValidationError as e:
+        return validation_error_response(str(e), errors=e.errors if hasattr(e, 'errors') else None)
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(f"Create user error: {e}")
+        return internal_error_response('Failed to create user')
+
+
+# ============================================================================
+# User Address Management Endpoints (Admin)
+# ============================================================================
+
+@admin_bp.route('/users/<int:user_id>/addresses', methods=['GET'])
+@jwt_required()
+@validate_admin_action(['view_users'])
+def get_user_addresses(user_id):
+    """Get all addresses for a specific user"""
+    try:
+        user = User.query.get(user_id)
+        if not user:
+            return not_found_response(resource_type='User')
+
+        addresses = UserAddress.query.filter_by(user_id=user_id).order_by(
+            UserAddress.is_default.desc(),
+            UserAddress.created_at.desc()
+        ).all()
+
+        return success_response(data={
+            'addresses': [addr.to_dict() for addr in addresses],
+            'user_id': user_id,
+            'total': len(addresses)
+        })
+
+    except Exception as e:
+        current_app.logger.error(f"Get user addresses error: {e}")
+        return internal_error_response('Failed to get user addresses')
+
+
+@admin_bp.route('/users/<int:user_id>/addresses', methods=['POST'])
+@jwt_required()
+@staff_or_higher_required
+@validate_json(['full_address'])
+def create_user_address(user_id):
+    """
+    Create address for a user (admin operation).
+
+    Required fields:
+    - full_address: Complete address string
+
+    Optional fields:
+    - title: Address label (Home, Work, etc.)
+    - street_address: Street name and number
+    - city: City name (default: Tashkent)
+    - district: District name
+    - latitude/longitude: GPS coordinates
+    - delivery_instructions: Special delivery instructions
+    - landmark: Nearby landmark
+    - floor_number: Building floor
+    - apartment_number: Apartment/unit number
+    - is_default: Set as default address
+    """
+    try:
+        current_user_id = get_jwt_identity()
+
+        user = User.query.get(user_id)
+        if not user:
+            return not_found_response(resource_type='User')
+
+        data = request.get_json()
+
+        full_address = data.get('full_address', '').strip()
+        if not full_address:
+            return validation_error_response('Full address is required')
+
+        # Check if this should be default
+        is_default = data.get('is_default', False)
+
+        # If setting as default, unset other defaults
+        if is_default:
+            UserAddress.query.filter_by(user_id=user_id, is_default=True).update(
+                {'is_default': False}
+            )
+
+        # If user has no addresses, make this the default
+        existing_count = UserAddress.query.filter_by(user_id=user_id).count()
+        if existing_count == 0:
+            is_default = True
+
+        # Create address
+        address = UserAddress(
+            user_id=user_id,
+            title=data.get('title'),
+            full_address=full_address,
+            street_address=data.get('street_address'),
+            city=data.get('city', 'Tashkent'),
+            district=data.get('district'),
+            postal_code=data.get('postal_code'),
+            country=data.get('country', 'Uzbekistan'),
+            latitude=data.get('latitude'),
+            longitude=data.get('longitude'),
+            is_default=is_default,
+            is_business=data.get('is_business', False),
+            delivery_instructions=data.get('delivery_instructions'),
+            landmark=data.get('landmark'),
+            floor_number=data.get('floor_number'),
+            apartment_number=data.get('apartment_number')
+        )
+
+        db.session.add(address)
+        db.session.commit()
+
+        current_app.logger.info(
+            f"Admin {current_user_id} created address {address.id} for user {user_id}"
+        )
+
+        return created_response(
+            data={'address': address.to_dict()},
+            message='Address created successfully'
+        )
+
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(f"Create user address error: {e}")
+        return internal_error_response('Failed to create address')
+
+
+@admin_bp.route('/users/<int:user_id>/addresses/<int:address_id>', methods=['PUT'])
+@jwt_required()
+@staff_or_higher_required
+def update_user_address(user_id, address_id):
+    """Update an existing user address (admin operation)"""
+    try:
+        current_user_id = get_jwt_identity()
+
+        user = User.query.get(user_id)
+        if not user:
+            return not_found_response(resource_type='User')
+
+        address = UserAddress.query.filter_by(id=address_id, user_id=user_id).first()
+        if not address:
+            return not_found_response(resource_type='Address')
+
+        data = request.get_json()
+
+        # Update fields if provided
+        if 'title' in data:
+            address.title = data['title']
+        if 'full_address' in data:
+            address.full_address = data['full_address']
+        if 'street_address' in data:
+            address.street_address = data['street_address']
+        if 'city' in data:
+            address.city = data['city']
+        if 'district' in data:
+            address.district = data['district']
+        if 'postal_code' in data:
+            address.postal_code = data['postal_code']
+        if 'country' in data:
+            address.country = data['country']
+        if 'latitude' in data:
+            address.latitude = data['latitude']
+        if 'longitude' in data:
+            address.longitude = data['longitude']
+        if 'is_business' in data:
+            address.is_business = data['is_business']
+        if 'delivery_instructions' in data:
+            address.delivery_instructions = data['delivery_instructions']
+        if 'landmark' in data:
+            address.landmark = data['landmark']
+        if 'floor_number' in data:
+            address.floor_number = data['floor_number']
+        if 'apartment_number' in data:
+            address.apartment_number = data['apartment_number']
+
+        # Handle default flag
+        if data.get('is_default'):
+            UserAddress.query.filter_by(user_id=user_id, is_default=True).update(
+                {'is_default': False}
+            )
+            address.is_default = True
+
+        db.session.commit()
+
+        current_app.logger.info(
+            f"Admin {current_user_id} updated address {address_id} for user {user_id}"
+        )
+
+        return success_response(
+            data={'address': address.to_dict()},
+            message='Address updated successfully'
+        )
+
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(f"Update user address error: {e}")
+        return internal_error_response('Failed to update address')
+
+
+@admin_bp.route('/users/<int:user_id>/addresses/<int:address_id>', methods=['DELETE'])
+@jwt_required()
+@manager_or_higher_required
+def delete_user_address(user_id, address_id):
+    """Delete a user address (manager+ only)"""
+    try:
+        current_user_id = get_jwt_identity()
+
+        user = User.query.get(user_id)
+        if not user:
+            return not_found_response(resource_type='User')
+
+        address = UserAddress.query.filter_by(id=address_id, user_id=user_id).first()
+        if not address:
+            return not_found_response(resource_type='Address')
+
+        # Check if this is the only address
+        address_count = UserAddress.query.filter_by(user_id=user_id).count()
+        if address_count == 1:
+            return validation_error_response('Cannot delete the only address for this user')
+
+        # If deleting default address, set another as default
+        if address.is_default:
+            other_address = UserAddress.query.filter(
+                UserAddress.user_id == user_id,
+                UserAddress.id != address_id
+            ).first()
+            if other_address:
+                other_address.is_default = True
+
+        db.session.delete(address)
+        db.session.commit()
+
+        current_app.logger.info(
+            f"Admin {current_user_id} deleted address {address_id} for user {user_id}"
+        )
+
+        return success_response(message='Address deleted successfully')
+
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(f"Delete user address error: {e}")
+        return internal_error_response('Failed to delete address')
+
+
 @admin_bp.route('/orders', methods=['GET'])
 @jwt_required()
 @validate_admin_action(['view_orders', 'manage_orders'])
@@ -907,6 +1219,87 @@ def get_orders():
         return internal_error_response('Failed to get orders')
 
 
+@admin_bp.route('/orders', methods=['POST'])
+@jwt_required()
+@staff_or_higher_required
+@validate_json(['user_id', 'items', 'delivery_address_id'])
+def create_order_for_user():
+    """
+    Create an order on behalf of a user (for call center operations).
+
+    This allows admin/operators to place orders for customers who call in.
+
+    Required fields:
+    - user_id: ID of the user placing the order
+    - items: List of {product_id, quantity}
+    - delivery_address_id: ID of delivery address
+
+    Optional fields:
+    - payment_method: cash, payme, click (default: cash)
+    - delivery_notes: Special delivery instructions
+    """
+    try:
+        current_user_id = get_jwt_identity()
+        data = request.get_json()
+
+        user_id = data.get('user_id')
+        items = data.get('items', [])
+        delivery_address_id = data.get('delivery_address_id')
+        payment_method = data.get('payment_method', 'cash')
+        delivery_notes = data.get('delivery_notes', '')
+
+        # Validate user exists
+        user = User.query.get(user_id)
+        if not user:
+            return not_found_response(resource_type='User')
+
+        # Validate user status
+        status_value = user.status.value if hasattr(user.status, 'value') else user.status
+        if status_value != UserStatus.ACTIVE.value:
+            return validation_error_response('Cannot create order for inactive user')
+
+        # Validate address exists and belongs to user
+        address = UserAddress.query.filter_by(id=delivery_address_id, user_id=user_id).first()
+        if not address:
+            return validation_error_response('Invalid delivery address for this user')
+
+        # Validate items
+        if not items or len(items) == 0:
+            return validation_error_response('At least one item is required')
+
+        # Use OrderService to create the order
+        from business_app.services.order_service import OrderService
+        order_service = OrderService()
+
+        order_data = {
+            'items': items,
+            'delivery_address': {
+                'delivery_address_id': delivery_address_id
+            },
+            'payment_method': payment_method,
+            'delivery_notes': delivery_notes,
+            'order_source': 'admin_created'
+        }
+
+        order = order_service.create_order(user_id, order_data)
+
+        current_app.logger.info(
+            f"Admin {current_user_id} created order {order.id} for user {user_id}"
+        )
+
+        return created_response(
+            data={'order': serialize_order_admin(order)},
+            message='Order created successfully'
+        )
+
+    except ValidationError as e:
+        return validation_error_response(str(e), errors=e.errors if hasattr(e, 'errors') else None)
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(f"Create order for user error: {e}")
+        return internal_error_response(f'Failed to create order: {str(e)}')
+
+
 @admin_bp.route('/orders/<int:order_id>/status', methods=['PUT'])
 @jwt_required()
 @validate_admin_action(['manage_orders', 'update_orders'])
@@ -947,6 +1340,102 @@ def update_order_status(order_id):
     except Exception as e:
         current_app.logger.error(f"Update order status error: {e}")
         return internal_error_response('Failed to update order status')
+
+
+@admin_bp.route('/orders/<int:order_id>', methods=['GET'])
+@jwt_required()
+@validate_admin_action(['view_orders', 'manage_orders'])
+def get_order_details(order_id):
+    """Get detailed information about a specific order including all items"""
+    try:
+        # Get order with all related data
+        order = Order.query.options(
+            db.joinedload(Order.user),
+            db.joinedload(Order.order_items).joinedload(OrderItem.product),
+            db.joinedload(Order.delivery_address),
+            db.joinedload(Order.delivery)
+        ).get(order_id)
+
+        if not order:
+            return not_found_response(resource_type='Order')
+
+        # Build response with full order details
+        order_data = {
+            'id': order.id,
+            'order_number': order.order_number,
+            'user_id': order.user_id,
+            'status': order.status.value if order.status else None,
+            'total_amount': float(order.total_amount),
+            'subtotal': float(getattr(order, 'subtotal', order.total_amount)),
+            'tax_amount': float(getattr(order, 'tax_amount', 0)),
+            'discount_amount': float(getattr(order, 'discount_amount', 0)),
+            'delivery_fee': float(getattr(order, 'delivery_fee', 0)),
+            'payment_method': order.payment_method.value if order.payment_method else None,
+            'payment_status': order.payment_status.value if hasattr(order, 'payment_status') and order.payment_status else 'pending',
+            'delivery_date': order.delivery_date.isoformat() if order.delivery_date else None,
+            'special_instructions': getattr(order, 'special_instructions', None),
+            'admin_notes': getattr(order, 'admin_notes', None),
+            'created_at': order.created_at.isoformat() if order.created_at else None,
+            'updated_at': order.updated_at.isoformat() if order.updated_at else None,
+        }
+
+        # Add customer information
+        if order.user:
+            order_data['customer'] = {
+                'id': order.user.id,
+                'name': f"{order.user.first_name} {order.user.last_name}".strip(),
+                'email': order.user.email,
+                'phone': order.user.phone,
+            }
+            # Backward compatibility
+            order_data['customer_name'] = order_data['customer']['name']
+            order_data['customer_email'] = order_data['customer']['email']
+            order_data['customer_phone'] = order_data['customer']['phone']
+
+        # Add delivery address
+        if order.delivery_address:
+            order_data['delivery_address'] = order.delivery_address.to_dict()
+
+        # Add ALL order items (not limited to 5)
+        order_data['items'] = []
+        order_data['items_summary'] = []  # For backward compatibility
+        if order.order_items:
+            for item in order.order_items:
+                item_data = {
+                    'id': item.id,
+                    'product_id': item.product_id,
+                    'product_name': item.product.name if item.product else 'Unknown',
+                    'product_sku': item.product.sku if item.product else None,
+                    'quantity': item.quantity,
+                    'unit_price': float(item.unit_price),
+                    'total_price': float(item.total_price),
+                }
+                order_data['items'].append(item_data)
+                order_data['items_summary'].append(item_data)
+
+        order_data['item_count'] = len(order_data['items'])
+
+        # Add delivery information
+        if order.delivery:
+            order_data['delivery'] = {
+                'id': order.delivery.id,
+                'tracking_number': order.delivery.tracking_number,
+                'status': order.delivery.status.value if order.delivery.status else None,
+                'estimated_delivery': order.delivery.estimated_delivery.isoformat() if hasattr(order.delivery, 'estimated_delivery') and order.delivery.estimated_delivery else None,
+                'actual_delivery': order.delivery.actual_delivery.isoformat() if hasattr(order.delivery, 'actual_delivery') and order.delivery.actual_delivery else None,
+            }
+            if order.delivery.delivery_person:
+                order_data['delivery']['delivery_person'] = {
+                    'id': order.delivery.delivery_person.id,
+                    'name': order.delivery.delivery_person.full_name,
+                    'phone': order.delivery.delivery_person.phone,
+                }
+
+        return success_response(data={'order': order_data})
+
+    except Exception as e:
+        current_app.logger.error(f"Get order details error: {e}")
+        return internal_error_response('Failed to get order details')
 
 
 @admin_bp.route('/products', methods=['GET'])

@@ -1120,3 +1120,221 @@ def process_card_payment():
                 'redirect_url': f'/checkout?error=payment_failed'
             }
         )
+
+
+# =============================================================================
+# TELEGRAM PAYMENTS API ENDPOINTS
+# =============================================================================
+
+@payments_bp.route('/telegram', methods=['POST'])
+@jwt_required()
+@validate_json(['order_id', 'telegram_payment_charge_id', 'provider_payment_charge_id'])
+def record_telegram_payment():
+    """
+    Record a successful Telegram payment.
+
+    This endpoint is called by the Telegram bot after receiving a SuccessfulPayment
+    message from Telegram. The payment has already been processed by Payme via
+    Telegram's payment system.
+
+    Request body:
+        order_id: Order ID that was paid for
+        amount: Payment amount in UZS
+        currency: Currency code (UZS)
+        payment_method: Payment method (payme)
+        telegram_payment_charge_id: Telegram's unique payment charge ID
+        provider_payment_charge_id: Payme's unique payment charge ID
+        status: Payment status (completed)
+
+    Response:
+        payment: Payment record with details
+        order: Updated order with payment status
+    """
+    try:
+        current_user_id = get_jwt_identity()
+        data = request.get_json()
+
+        order_id = data.get('order_id')
+        amount = data.get('amount', 0)
+        currency = data.get('currency', 'UZS')
+        payment_method = data.get('payment_method', 'payme')
+        telegram_charge_id = data.get('telegram_payment_charge_id')
+        provider_charge_id = data.get('provider_payment_charge_id')
+        status = data.get('status', 'completed')
+
+        # Validate order exists and belongs to user
+        order = Order.query.filter_by(
+            id=order_id,
+            user_id=current_user_id
+        ).first()
+
+        if not order:
+            return not_found_response(message='Order not found')
+
+        # Check for duplicate payment (idempotency)
+        existing_payment = Payment.query.filter_by(
+            provider_payment_id=telegram_charge_id
+        ).first()
+
+        if existing_payment:
+            current_app.logger.warning(
+                f"Duplicate Telegram payment attempt: {telegram_charge_id}"
+            )
+            return success_response(data={
+                'message': 'Payment already recorded',
+                'payment': serialize_payment(existing_payment),
+                'order': {
+                    'id': order.id,
+                    'order_number': order.order_number,
+                    'status': order.status.value if hasattr(order.status, 'value') else str(order.status),
+                    'is_paid': order.is_paid
+                }
+            })
+
+        # Create payment record
+        payment = Payment(
+            order_id=order_id,
+            user_id=current_user_id,
+            amount=amount,
+            currency=currency,
+            payment_method=PaymentMethodType.PAYME,
+            status=PaymentStatus.COMPLETED,
+            provider_payment_id=telegram_charge_id,
+            provider_reference=provider_charge_id,
+            description=f'Telegram payment for order #{order.order_number}',
+            metadata={
+                'telegram_payment_charge_id': telegram_charge_id,
+                'provider_payment_charge_id': provider_charge_id,
+                'payment_source': 'telegram_bot',
+                'completed_at': datetime.now(UTC).isoformat()
+            }
+        )
+        payment.paid_at = datetime.now(UTC)
+
+        db.session.add(payment)
+
+        # Update order status
+        order.is_paid = True
+        order.paid_at = datetime.now(UTC)
+        if hasattr(order, 'payment_status'):
+            order.payment_status = 'paid'
+
+        db.session.commit()
+
+        current_app.logger.info(
+            f"Telegram payment recorded successfully: order={order_id}, "
+            f"telegram_charge={telegram_charge_id}, provider_charge={provider_charge_id}"
+        )
+
+        # Send notification (async)
+        try:
+            notification_service = get_notification_service()
+            notification_service.send_payment_notification(payment.id)
+        except Exception as notify_error:
+            current_app.logger.warning(f"Failed to send payment notification: {notify_error}")
+
+        return created_response(data={
+            'message': 'Telegram payment recorded successfully',
+            'payment': serialize_payment(payment),
+            'order': {
+                'id': order.id,
+                'order_number': order.order_number,
+                'status': order.status.value if hasattr(order.status, 'value') else str(order.status),
+                'is_paid': order.is_paid
+            }
+        })
+
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(f"Record Telegram payment error: {e}")
+        return internal_error_response(
+            message=get_translation('api.payments.error.record_telegram_failed') or
+                    'Failed to record Telegram payment'
+        )
+
+
+@payments_bp.route('/telegram/validate', methods=['POST'])
+@jwt_required()
+@validate_json(['order_id', 'amount'])
+def validate_telegram_payment():
+    """
+    Validate order for Telegram pre-checkout query.
+
+    This endpoint is called by the Telegram bot during pre-checkout validation.
+    It must respond quickly (< 5 seconds) to allow the bot to respond within
+    Telegram's 10-second timeout.
+
+    Request body:
+        order_id: Order ID to validate
+        amount: Expected payment amount in smallest currency unit (tiyin)
+
+    Response:
+        valid: True if order can be paid
+        error: Error message if validation fails
+        order: Minimal order data for validation
+    """
+    try:
+        current_user_id = get_jwt_identity()
+        data = request.get_json()
+
+        order_id = data.get('order_id')
+        amount_tiyin = data.get('amount', 0)
+
+        # Fast validation - minimal DB queries
+        order = Order.query.filter_by(id=order_id).first()
+
+        if not order:
+            return success_response(data={
+                'valid': False,
+                'error': 'Order not found'
+            })
+
+        # Check order belongs to user
+        if order.user_id != current_user_id:
+            return success_response(data={
+                'valid': False,
+                'error': 'Order does not belong to you'
+            })
+
+        # Check order is not already paid
+        if order.is_paid:
+            return success_response(data={
+                'valid': False,
+                'error': 'Order already paid'
+            })
+
+        # Check order status allows payment
+        valid_statuses = ['pending', 'pending_payment', 'confirmed']
+        order_status = order.status.value if hasattr(order.status, 'value') else str(order.status)
+        if order_status not in valid_statuses:
+            return success_response(data={
+                'valid': False,
+                'error': f'Order status ({order_status}) does not allow payment'
+            })
+
+        # Validate amount (convert order amount to tiyin)
+        from decimal import Decimal
+        expected_tiyin = int(Decimal(str(order.total_amount)) * 100)
+        if expected_tiyin != amount_tiyin:
+            return success_response(data={
+                'valid': False,
+                'error': f'Amount mismatch. Expected {expected_tiyin}, got {amount_tiyin}'
+            })
+
+        # All validations passed
+        return success_response(data={
+            'valid': True,
+            'order': {
+                'id': order.id,
+                'order_number': order.order_number,
+                'total_amount': float(order.total_amount),
+                'status': order_status
+            }
+        })
+
+    except Exception as e:
+        current_app.logger.error(f"Validate Telegram payment error: {e}")
+        return success_response(data={
+            'valid': False,
+            'error': 'Validation error'
+        })

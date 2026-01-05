@@ -1,0 +1,58 @@
+{% extends "emails/base.html" %}
+
+{% block title %}Payment Confirmed - {{ company_name }}{% endblock %}
+
+{% block header %}
+<h1>Payment Received!</h1>
+{% endblock %}
+
+{% block content %}
+<h2>Thank you, {{ user_name }}!</h2>
+
+<div class="success-box">
+    <p>We have successfully received your payment for order <strong>#{{ order_number }}</strong>.</p>
+</div>
+
+<h3 style="color: #1e293b; margin-top: 30px;">Payment Details</h3>
+
+<table class="details-table">
+    <tr>
+        <th>Order Number</th>
+        <td>#{{ order_number }}</td>
+    </tr>
+    <tr>
+        <th>Payment Amount</th>
+        <td>{{ payment_amount }} UZS</td>
+    </tr>
+    <tr>
+        <th>Payment Method</th>
+        <td>{{ payment_method }}</td>
+    </tr>
+    <tr>
+        <th>Transaction Reference</th>
+        <td>{{ payment_reference }}</td>
+    </tr>
+    <tr>
+        <th>Payment Date</th>
+        <td>{{ payment_date }}</td>
+    </tr>
+    <tr>
+        <th>Status</th>
+        <td style="color: #22c55e; font-weight: 600;">Confirmed</td>
+    </tr>
+</table>
+
+<hr class="divider">
+
+<p style="text-align: center;">
+    <a href="{{ order_tracking_url }}" class="btn-primary">View Order</a>
+</p>
+
+<div class="info-box">
+    <p>Your order is now being processed and will be delivered soon. You can track your order status using the button above.</p>
+</div>
+
+<p style="color: #94a3b8; font-size: 13px;">
+    Please keep this email for your records. If you have any questions, contact us at <a href="tel:{{ company_phone }}">{{ company_phone }}</a>.
+</p>
+{% endblock %}

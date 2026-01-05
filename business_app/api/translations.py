@@ -4,6 +4,7 @@ Serves translations from database in i18next-compatible format
 """
 from flask import Blueprint, jsonify, request
 from business_app.models.translation import Translation
+from business_app.utils.rate_limiting import exempt_from_rate_limit
 import logging
 
 logger = logging.getLogger(__name__)
@@ -12,6 +13,7 @@ translations_bp = Blueprint('translations', __name__)
 
 
 @translations_bp.route('/<language>/<namespace>', methods=['GET'])
+@exempt_from_rate_limit
 def get_translations(language, namespace):
     """
     Get translations for a specific language and namespace in i18next format
@@ -83,6 +85,7 @@ def get_translations(language, namespace):
 
 
 @translations_bp.route('/reload', methods=['POST'])
+@exempt_from_rate_limit
 def reload_translations():
     """
     Trigger translation reload in admin UI
@@ -111,6 +114,7 @@ def reload_translations():
 
 
 @translations_bp.route('/namespaces', methods=['GET'])
+@exempt_from_rate_limit
 def get_namespaces():
     """
     Get list of available translation namespaces

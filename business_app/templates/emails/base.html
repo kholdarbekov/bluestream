@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="{{ language }}">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}{{ company_name }}{% endblock %}</title>
+    <style>
+        /* Reset styles */
+        body, html {
+            margin: 0;
+            padding: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            background-color: #f5f5f5;
+        }
+
+        /* Container */
+        .email-wrapper {
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+
+        .email-container {
+            background-color: #ffffff;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+        }
+
+        /* Header */
+        .email-header {
+            background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+            padding: 30px 40px;
+            text-align: center;
+        }
+
+        .email-header h1 {
+            color: #ffffff;
+            margin: 0;
+            font-size: 24px;
+            font-weight: 700;
+        }
+
+        .email-header .logo {
+            width: 60px;
+            height: 60px;
+            margin-bottom: 15px;
+        }
+
+        /* Body */
+        .email-body {
+            padding: 40px;
+        }
+
+        .email-body h2 {
+            color: #1e293b;
+            font-size: 22px;
+            margin-top: 0;
+            margin-bottom: 20px;
+        }
+
+        .email-body p {
+            color: #475569;
+            font-size: 16px;
+            margin-bottom: 15px;
+        }
+
+        .email-body a {
+            color: #2563eb;
+            text-decoration: none;
+        }
+
+        .email-body a:hover {
+            text-decoration: underline;
+        }
+
+        /* Primary Button */
+        .email-body a.btn-primary,
+        a.btn-primary {
+            display: inline-block;
+            padding: 14px 35px;
+            background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+            color: #ffffff !important;
+            text-decoration: none;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 16px;
+            text-align: center;
+            margin: 20px 0;
+        }
+
+        .email-body a.btn-primary:hover,
+        a.btn-primary:hover {
+            text-decoration: none;
+        }
+
+        /* Secondary Button */
+        .btn-secondary {
+            display: inline-block;
+            padding: 12px 30px;
+            background-color: #f1f5f9;
+            color: #475569 !important;
+            text-decoration: none;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 14px;
+        }
+
+        /* Info Box */
+        .info-box {
+            background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+            border-left: 4px solid #2563eb;
+            padding: 20px;
+            border-radius: 0 8px 8px 0;
+            margin: 20px 0;
+        }
+
+        .info-box p {
+            margin: 0;
+            color: #1e40af;
+        }
+
+        /* Success Box */
+        .success-box {
+            background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%);
+            border-left: 4px solid #22c55e;
+            padding: 20px;
+            border-radius: 0 8px 8px 0;
+            margin: 20px 0;
+        }
+
+        .success-box p {
+            margin: 0;
+            color: #166534;
+        }
+
+        /* Warning Box */
+        .warning-box {
+            background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%);
+            border-left: 4px solid #f59e0b;
+            padding: 20px;
+            border-radius: 0 8px 8px 0;
+            margin: 20px 0;
+        }
+
+        .warning-box p {
+            margin: 0;
+            color: #92400e;
+        }
+
+        /* Code/Token Display */
+        .code-display {
+            background-color: #f8fafc;
+            border: 2px dashed #cbd5e1;
+            border-radius: 8px;
+            padding: 20px;
+            text-align: center;
+            margin: 20px 0;
+        }
+
+        .code-display .code {
+            font-size: 28px;
+            font-weight: 700;
+            color: #2563eb;
+            letter-spacing: 4px;
+            font-family: 'Courier New', monospace;
+        }
+
+        /* Order Details Table */
+        .details-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+        }
+
+        .details-table th,
+        .details-table td {
+            padding: 12px 15px;
+            text-align: left;
+            border-bottom: 1px solid #e2e8f0;
+        }
+
+        .details-table th {
+            background-color: #f8fafc;
+            color: #475569;
+            font-weight: 600;
+        }
+
+        .details-table td {
+            color: #1e293b;
+        }
+
+        .details-table .total-row {
+            font-weight: 700;
+            background-color: #f0f9ff;
+        }
+
+        /* Divider */
+        .divider {
+            border: none;
+            border-top: 1px solid #e2e8f0;
+            margin: 30px 0;
+        }
+
+        /* Footer */
+        .email-footer {
+            background-color: #f8fafc;
+            padding: 30px 40px;
+            text-align: center;
+            border-top: 1px solid #e2e8f0;
+        }
+
+        .email-footer p {
+            color: #94a3b8;
+            font-size: 13px;
+            margin: 5px 0;
+        }
+
+        .email-footer a {
+            color: #64748b;
+        }
+
+        .social-links {
+            margin: 15px 0;
+        }
+
+        .social-links a {
+            display: inline-block;
+            margin: 0 8px;
+            color: #64748b;
+        }
+
+        /* Responsive */
+        @media only screen and (max-width: 600px) {
+            .email-wrapper {
+                padding: 10px;
+            }
+
+            .email-header,
+            .email-body,
+            .email-footer {
+                padding: 20px;
+            }
+
+            .email-body h2 {
+                font-size: 20px;
+            }
+
+            .btn-primary {
+                display: block;
+                text-align: center;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="email-wrapper">
+        <div class="email-container">
+            <!-- Header -->
+            <div class="email-header">
+                {% block header %}
+                <h1>{{ company_name }}</h1>
+                {% endblock %}
+            </div>
+
+            <!-- Body -->
+            <div class="email-body">
+                {% block content %}{% endblock %}
+            </div>
+
+            <!-- Footer -->
+            <div class="email-footer">
+                {% block footer %}
+                <p>&copy; {{ current_year }} {{ company_name }}</p>
+                <p>{{ company_address }}</p>
+                <p>
+                    <a href="tel:{{ company_phone }}">{{ company_phone }}</a> |
+                    <a href="mailto:{{ company_email }}">{{ company_email }}</a>
+                </p>
+                <hr class="divider">
+                <p style="font-size: 11px; color: #94a3b8;">
+                    {% if language == 'uz' %}
+                    Agar siz bu xabarni olishni xohlamasangiz, sozlamalarni o'zgartiring.
+                    {% elif language == 'ru' %}
+                    Если вы не хотите получать такие письма, измените настройки.
+                    {% else %}
+                    If you no longer wish to receive these emails, please update your preferences.
+                    {% endif %}
+                </p>
+                {% endblock %}
+            </div>
+        </div>
+    </div>
+</body>
+</html>

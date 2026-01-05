@@ -64,7 +64,7 @@ def success_response(
 
 def error_response(
     message: str,
-    errors: Union[List[str], str, None] = None,
+    errors: Union[List[str], Dict[str, Any], str, None] = None,
     status_code: int = 400,
     data: Any = None
 ):
@@ -73,7 +73,7 @@ def error_response(
 
     Args:
         message: Main error message
-        errors: Additional error details (can be string or list)
+        errors: Additional error details (can be string, list, or dict)
         status_code: HTTP status code (default: 400)
         data: Optional data to include with error
 
@@ -87,14 +87,27 @@ def error_response(
             status_code=400
         )
     """
-    # Convert single error string to list
-    if isinstance(errors, str):
-        errors = [errors]
+    # Convert errors to list format
+    error_list = None
+    if errors is not None:
+        if isinstance(errors, str):
+            error_list = [errors]
+        elif isinstance(errors, dict):
+            # Convert dict to list of "field: error" strings
+            error_list = []
+            for field, field_errors in errors.items():
+                if isinstance(field_errors, list):
+                    for err in field_errors:
+                        error_list.append(f"{field}: {err}")
+                else:
+                    error_list.append(f"{field}: {field_errors}")
+        elif isinstance(errors, list):
+            error_list = errors
 
     response = APIResponse(
         success=False,
         message=message,
-        errors=errors,
+        errors=error_list,
         data=data
     )
     return jsonify(response.model_dump(exclude_none=True)), status_code

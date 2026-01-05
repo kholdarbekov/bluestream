@@ -1,0 +1,74 @@
+{% extends "emails/base.html" %}
+
+{% block title %}Buyurtma tasdiqlandi - {{ company_name }}{% endblock %}
+
+{% block header %}
+<h1>Buyurtma tasdiqlandi!</h1>
+{% endblock %}
+
+{% block content %}
+<h2>Buyurtmangiz uchun rahmat, {{ user_name }}!</h2>
+
+<div class="success-box">
+    <p>Sizning <strong>#{{ order_number }}</strong> raqamli buyurtmangiz qabul qilindi va qayta ishlanmoqda.</p>
+</div>
+
+<h3 style="color: #1e293b; margin-top: 30px;">Buyurtma tafsilotlari</h3>
+
+<table class="details-table">
+    <tr>
+        <th>Buyurtma raqami</th>
+        <td>#{{ order_number }}</td>
+    </tr>
+    <tr>
+        <th>Buyurtma sanasi</th>
+        <td>{{ order_date }}</td>
+    </tr>
+    <tr>
+        <th>Yetkazib berish manzili</th>
+        <td>{{ delivery_address }}</td>
+    </tr>
+    {% if delivery_date %}
+    <tr>
+        <th>Kutilayotgan yetkazib berish</th>
+        <td>{{ delivery_date }}{% if delivery_time_slot %}, {{ delivery_time_slot }}{% endif %}</td>
+    </tr>
+    {% endif %}
+    <tr>
+        <th>To'lov usuli</th>
+        <td>{{ payment_method }}</td>
+    </tr>
+    <tr class="total-row">
+        <th>Jami summa</th>
+        <td>{{ order_total }} so'm</td>
+    </tr>
+</table>
+
+{% if order_items %}
+<h3 style="color: #1e293b; margin-top: 30px;">Buyurtma qilingan mahsulotlar</h3>
+<table class="details-table">
+    <tr>
+        <th>Mahsulot</th>
+        <th>Miqdor</th>
+        <th>Narx</th>
+    </tr>
+    {% for item in order_items %}
+    <tr>
+        <td>{{ item.name }}</td>
+        <td>{{ item.quantity }}</td>
+        <td>{{ item.price }} so'm</td>
+    </tr>
+    {% endfor %}
+</table>
+{% endif %}
+
+<hr class="divider">
+
+<p style="text-align: center;">
+    <a href="{{ order_tracking_url }}" class="btn-primary">Buyurtmani kuzatish</a>
+</p>
+
+<div class="info-box">
+    <p>Buyurtmangiz bo'yicha savollaringiz bo'lsa, <a href="tel:{{ company_phone }}">{{ company_phone }}</a> raqamiga qo'ng'iroq qiling yoki bu xatga javob bering.</p>
+</div>
+{% endblock %}

@@ -1,0 +1,58 @@
+{% extends "emails/base.html" %}
+
+{% block title %}Loyalty Points Earned - {{ company_name }}{% endblock %}
+
+{% block header %}
+<h1>Congratulations!</h1>
+{% endblock %}
+
+{% block content %}
+<h2>Great news, {{ user_name }}!</h2>
+
+<div class="success-box">
+    <p>You've just earned <strong>{{ points }} loyalty points</strong>!</p>
+</div>
+
+<div class="code-display">
+    <p style="margin: 0; color: #64748b; font-size: 14px;">Your Points Balance</p>
+    <span class="code">{{ total_points }}</span>
+    <p style="margin: 5px 0 0 0; color: #64748b; font-size: 12px;">points</p>
+</div>
+
+<h3 style="color: #1e293b; margin-top: 30px;">How You Earned</h3>
+
+<table class="details-table">
+    <tr>
+        <th>Activity</th>
+        <td>{{ activity_type }}</td>
+    </tr>
+    <tr>
+        <th>Points Earned</th>
+        <td style="color: #22c55e; font-weight: 600;">+{{ points }}</td>
+    </tr>
+    {% if order_number %}
+    <tr>
+        <th>Order Reference</th>
+        <td>#{{ order_number }}</td>
+    </tr>
+    {% endif %}
+    <tr>
+        <th>Current Tier</th>
+        <td>{{ current_tier }}</td>
+    </tr>
+</table>
+
+<hr class="divider">
+
+<div class="info-box">
+    <p><strong>Did you know?</strong> You can redeem your points for discounts on future orders. Visit your account to see available rewards!</p>
+</div>
+
+<p style="text-align: center;">
+    <a href="{{ loyalty_url }}" class="btn-primary">View My Rewards</a>
+</p>
+
+<p style="color: #94a3b8; font-size: 13px; text-align: center;">
+    Keep ordering to earn more points and unlock exclusive rewards!
+</p>
+{% endblock %}

@@ -849,9 +849,51 @@ class ProfileKeyboards:
         return KeyboardBuilder.build_inline_keyboard(buttons)
 
 
+class PaymentKeyboards:
+    """Payment-related keyboards for Telegram Payments integration"""
+
+    @staticmethod
+    def payment_pending(order_id: int, language: str = 'en') -> InlineKeyboardMarkup:
+        """Shown while waiting for payment completion"""
+        buttons = [
+            [{'text': i18n.get('telegram.payment.cancel', language) or 'Cancel Payment',
+              'callback_data': f'payment_cancel_{order_id}'}]
+        ]
+        return KeyboardBuilder.build_inline_keyboard(buttons)
+
+    @staticmethod
+    def payment_success(order_id: int, language: str = 'en') -> InlineKeyboardMarkup:
+        """Shown after successful payment"""
+        buttons = [
+            [{'text': i18n.get('telegram.payment.view_order', language) or 'View Order',
+              'callback_data': f'order_{order_id}'}],
+            [{'text': i18n.get('telegram.payment.back_to_menu', language) or 'Back to Menu',
+              'callback_data': 'back_to_main'}]
+        ]
+        return KeyboardBuilder.build_inline_keyboard(buttons)
+
+    @staticmethod
+    def payment_failed(order_id: int, language: str = 'en') -> InlineKeyboardMarkup:
+        """Shown on payment failure with retry and switch options"""
+        buttons = [
+            [{'text': i18n.get('telegram.payment.retry', language) or 'Retry Payment',
+              'callback_data': f'payment_retry_{order_id}'}],
+            [{'text': i18n.get('telegram.payment.switch_method', language) or 'Choose Different Method',
+              'callback_data': f'payment_switch_{order_id}'}],
+            [{'text': i18n.get('telegram.payment.cancel_order', language) or 'Cancel Order',
+              'callback_data': f'cancel_order_{order_id}'}]
+        ]
+        return KeyboardBuilder.build_inline_keyboard(buttons)
+
+    @staticmethod
+    def payment_cancelled(order_id: int, language: str = 'en') -> InlineKeyboardMarkup:
+        """Shown when user cancels payment - same as failed but different context"""
+        return PaymentKeyboards.payment_failed(order_id, language)
+
+
 class AdminKeyboards:
     """Admin panel keyboards"""
-    
+
     @staticmethod
     def admin_menu(language: str = 'en') -> InlineKeyboardMarkup:
         """Admin panel main menu"""
@@ -866,5 +908,5 @@ class AdminKeyboards:
             ],
             [{'text': i18n.get('telegram.back', language), 'callback_data': 'back_to_main'}]
         ]
-        
+
         return KeyboardBuilder.build_inline_keyboard(buttons)

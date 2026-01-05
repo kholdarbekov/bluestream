@@ -1,0 +1,74 @@
+{% extends "emails/base.html" %}
+
+{% block title %}Заказ подтвержден - {{ company_name }}{% endblock %}
+
+{% block header %}
+<h1>Заказ подтвержден!</h1>
+{% endblock %}
+
+{% block content %}
+<h2>Спасибо за ваш заказ, {{ user_name }}!</h2>
+
+<div class="success-box">
+    <p>Ваш заказ <strong>#{{ order_number }}</strong> получен и обрабатывается.</p>
+</div>
+
+<h3 style="color: #1e293b; margin-top: 30px;">Детали заказа</h3>
+
+<table class="details-table">
+    <tr>
+        <th>Номер заказа</th>
+        <td>#{{ order_number }}</td>
+    </tr>
+    <tr>
+        <th>Дата заказа</th>
+        <td>{{ order_date }}</td>
+    </tr>
+    <tr>
+        <th>Адрес доставки</th>
+        <td>{{ delivery_address }}</td>
+    </tr>
+    {% if delivery_date %}
+    <tr>
+        <th>Ожидаемая доставка</th>
+        <td>{{ delivery_date }}{% if delivery_time_slot %}, {{ delivery_time_slot }}{% endif %}</td>
+    </tr>
+    {% endif %}
+    <tr>
+        <th>Способ оплаты</th>
+        <td>{{ payment_method }}</td>
+    </tr>
+    <tr class="total-row">
+        <th>Итого</th>
+        <td>{{ order_total }} сум</td>
+    </tr>
+</table>
+
+{% if order_items %}
+<h3 style="color: #1e293b; margin-top: 30px;">Заказанные товары</h3>
+<table class="details-table">
+    <tr>
+        <th>Товар</th>
+        <th>Количество</th>
+        <th>Цена</th>
+    </tr>
+    {% for item in order_items %}
+    <tr>
+        <td>{{ item.name }}</td>
+        <td>{{ item.quantity }}</td>
+        <td>{{ item.price }} сум</td>
+    </tr>
+    {% endfor %}
+</table>
+{% endif %}
+
+<hr class="divider">
+
+<p style="text-align: center;">
+    <a href="{{ order_tracking_url }}" class="btn-primary">Отследить заказ</a>
+</p>
+
+<div class="info-box">
+    <p>Если у вас есть вопросы по заказу, свяжитесь с нами по телефону <a href="tel:{{ company_phone }}">{{ company_phone }}</a> или ответьте на это письмо.</p>
+</div>
+{% endblock %}

@@ -22,7 +22,8 @@ logger = logging.getLogger('handlers')
 (SELECT_LANGUAGE, PHONE, NAME, ADDRESS_LOCATION, ADDRESS_TITLE,
  ADDRESS_REGION, ADDRESS_DISTRICT, ADDRESS_STREET, ADDRESS_BUILDING,
  ADDRESS_APARTMENT, ADDRESS_FLOOR, ADDRESS_ENTRANCE,
- ADDRESS_DELIVERY_INSTRUCTIONS, ADDRESS_GEOCODE_CONFIRM) = range(14)
+ ADDRESS_DELIVERY_INSTRUCTIONS, ADDRESS_GEOCODE_CONFIRM,
+ PHONE_VERIFY_PHONE, PHONE_VERIFY_NAME) = range(16)
 
 
 class ProfileHandlers:
@@ -154,11 +155,11 @@ class ProfileHandlers:
             await self._handle_error(update)
 
     async def add_phone_number(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Start phone number addition/change flow"""
+        """Start phone number addition/change flow - entry point for phone verification conversation"""
         try:
             user = await user_middleware(update)
             if not user:
-                return
+                return ConversationHandler.END
 
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
@@ -183,11 +184,161 @@ class ProfileHandlers:
                     reply_markup=keyboard
                 )
 
-            logger.info(f"Phone addition flow started for user {user_id}")
+            logger.info(f"Phone addition flow started for user {user_id}, entering PHONE_VERIFY_PHONE state")
+            return PHONE_VERIFY_PHONE
 
         except Exception as e:
             logger.error(f"Error starting phone addition: {e}")
             await self._handle_error(update)
+            return ConversationHandler.END
+
+    async def phone_verify_contact_received(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle phone contact shared during phone verification flow"""
+        try:
+            user_id = update.effective_user.id
+            language = await i18n.get_user_language(user_id)
+            contact = update.message.contact
+
+            # Verify the contact belongs to the user
+            if contact.user_id != user_id:
+                await update.message.reply_text(
+                    "❌ Please share your own phone number.",
+                    reply_markup=ProfileKeyboards.phone_request(language)
+                )
+                return PHONE_VERIFY_PHONE
+
+            phone = normalize_phone_number(contact.phone_number)
+            logger.info(f"Phone contact received for user {user_id}: {phone}")
+
+            # Store phone in context for later
+            context.user_data['pending_phone'] = phone
+
+            # Update phone in database immediately
+            await self.user_repo.set_user_phone(user_id, phone)
+
+            # Also update via API
+            async with api_client as client:
+                user_token = await authenticate_telegram_user(update, client)
+                if user_token:
+                    try:
+                        await client.update_user_profile(user_token, {'phone': phone})
+                        logger.info(f"Phone updated via API for user {user_id}")
+                    except Exception as api_error:
+                        logger.warning(f"Failed to update phone via API: {api_error}")
+
+            # Remove the phone request keyboard and ask for name
+            success_text = i18n.get('telegram.phone.phone_accepted', language) or "✅ Telefon raqami qabul qilindi!"
+            await update.message.reply_text(
+                success_text,
+                reply_markup=ReplyKeyboardRemove()
+            )
+
+            # Ask for full name
+            name_prompt = i18n.get('telegram.enter_name', language) or "👤 Iltimos to'liq ismingizni kiriting:"
+            await update.message.reply_text(name_prompt)
+
+            logger.info(f"Phone accepted for user {user_id}, asking for name")
+            return PHONE_VERIFY_NAME
+
+        except Exception as e:
+            logger.error(f"Error in phone_verify_contact_received: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            return ConversationHandler.END
+
+    async def phone_verify_name_received(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle name input during phone verification flow"""
+        try:
+            user_id = update.effective_user.id
+            language = await i18n.get_user_language(user_id)
+            text = update.message.text.strip()
+
+            logger.info(f"Name received for user {user_id}: {text}")
+
+            # Validate name - must have at least 2 characters and contain letters
+            if len(text) < 2:
+                await update.message.reply_text(
+                    i18n.get('telegram.name.too_short', language) or "❌ Ism juda qisqa. Kamida 2 ta belgi kiriting."
+                )
+                return PHONE_VERIFY_NAME
+
+            # Check for valid name (letters and spaces only)
+            if not any(c.isalpha() for c in text):
+                await update.message.reply_text(
+                    i18n.get('telegram.name.invalid', language) or "❌ Noto'g'ri ma'lumot. Qaytadan urinib ko'ring."
+                )
+                return PHONE_VERIFY_NAME
+
+            # Parse first and last name
+            name_parts = text.split()
+            first_name = name_parts[0]
+            last_name = ' '.join(name_parts[1:]) if len(name_parts) > 1 else ''
+
+            # Update profile via API
+            async with api_client as client:
+                user_token = await authenticate_telegram_user(update, client)
+                if user_token:
+                    profile_data = {
+                        'first_name': first_name,
+                        'last_name': last_name
+                    }
+                    response = await client.update_user_profile(user_token, profile_data)
+                    if response.success:
+                        logger.info(f"Name updated via API for user {user_id}: {first_name} {last_name}")
+                    else:
+                        logger.warning(f"Failed to update name via API: {response.error}")
+
+            # Show success and main menu
+            success_text = i18n.get('telegram.profile_updated', language) or "✅ Profil muvaffaqiyatli yangilandi!"
+            keyboard = MenuKeyboards.main_menu(language)
+
+            await update.message.reply_text(
+                text=success_text,
+                reply_markup=keyboard
+            )
+
+            # Clear pending phone from context
+            context.user_data.pop('pending_phone', None)
+
+            logger.info(f"Phone verification flow completed for user {user_id}")
+            return ConversationHandler.END
+
+        except Exception as e:
+            logger.error(f"Error in phone_verify_name_received: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            return ConversationHandler.END
+
+    async def cancel_phone_verification(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Cancel phone verification flow"""
+        try:
+            user_id = update.effective_user.id
+            language = await i18n.get_user_language(user_id)
+
+            cancel_text = i18n.get('telegram.action_cancelled', language)
+            keyboard = MenuKeyboards.main_menu(language)
+
+            # Clear pending data
+            context.user_data.pop('pending_phone', None)
+
+            if update.callback_query:
+                await update.callback_query.answer()
+                await update.callback_query.message.reply_text(
+                    text=cancel_text,
+                    reply_markup=keyboard
+                )
+            else:
+                await update.message.reply_text(
+                    text=cancel_text,
+                    reply_markup=keyboard
+                )
+
+            logger.info(f"Phone verification cancelled for user {user_id}")
+            return ConversationHandler.END
+
+        except Exception as e:
+            logger.error(f"Error cancelling phone verification: {e}")
+            return ConversationHandler.END
 
     async def verify_phone_number(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Start phone verification flow for existing phone"""
@@ -2328,3 +2479,5 @@ profile_handlers.ADDRESS_FLOOR = ADDRESS_FLOOR
 profile_handlers.ADDRESS_ENTRANCE = ADDRESS_ENTRANCE
 profile_handlers.ADDRESS_DELIVERY_INSTRUCTIONS = ADDRESS_DELIVERY_INSTRUCTIONS
 profile_handlers.ADDRESS_GEOCODE_CONFIRM = ADDRESS_GEOCODE_CONFIRM
+profile_handlers.PHONE_VERIFY_PHONE = PHONE_VERIFY_PHONE
+profile_handlers.PHONE_VERIFY_NAME = PHONE_VERIFY_NAME

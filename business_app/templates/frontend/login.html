@@ -2,6 +2,10 @@
 
 {% block title %}{{ 'landing.nav.login'|t }} - {{ company_name }}{% endblock %}
 
+{% block extra_head %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/auth-forms.css') }}">
+{% endblock %}
+
 {% block content %}
         <!-- page-title -->
         <section class="page-title">
@@ -19,41 +23,57 @@
         <!-- page-title end -->
 
         <!-- login-section -->
-        <section class="contact-section">
+        <section class="auth-section">
             <div class="auto-container">
-                <div class="row clearfix">
-                    <div class="col-lg-8 col-md-12 col-sm-12 offset-lg-2">
-                        <div class="form-inner">
-                            <div class="sec-title centred">
-                                <h2>{{ 'Welcome Back'|t }}</h2>
-                                <p>{{ 'Please login to your account to continue'|t }}</p>
-                            </div>
-                            
-                            <form id="loginForm" class="default-form">
-                                <div class="row clearfix">
-                                    <div class="col-lg-12 col-md-12 col-sm-12 form-group">
-                                        <input type="text" name="identifier" placeholder="{{ 'Email or Phone Number'|t }}" required>
-                                    </div>
-                                    <div class="col-lg-12 col-md-12 col-sm-12 form-group">
-                                        <input type="password" name="password" placeholder="{{ 'Password'|t }}" required>
-                                    </div>
-                                    <div class="col-lg-12 col-md-12 col-sm-12 form-group">
-                                        <div class="check-box">
-                                            <input class="check" type="checkbox" id="remember_me" name="remember_me">
-                                            <label for="remember_me">{{ 'Remember Me'|t }}</label>
-                                        </div>
-                                    </div>
-                                    <div class="col-lg-12 col-md-12 col-sm-12 form-group message-btn">
-                                        <button type="submit" class="theme-btn btn-one">{{ 'landing.nav.login'|t }}</button>
-                                    </div>
-                                </div>
-                            </form>
-                            
-                            <div class="other-option centred">
-                                <p>{{ "Don't have an account?"|t }} <a href="{{ url_for('frontend.register') }}{% if request.args.get('next') %}?next={{ request.args.get('next') | urlencode }}{% endif %}">{{ 'Register Here'|t }}</a></p>
-                                <p><a href="{{ url_for('frontend.forgot_password') }}">{{ 'Forgot Password?'|t }}</a></p>
+                <div class="auth-card">
+                    <!-- Card Header -->
+                    <div class="auth-card-header">
+                        <div class="logo-icon">
+                            <i class="fas fa-user"></i>
+                        </div>
+                        <h2>{{ 'Welcome Back'|t }}</h2>
+                        <p>{{ 'Please login to your account to continue'|t }}</p>
+                    </div>
+                    
+                    <!-- Login Form -->
+                    <form id="loginForm" class="auth-form">
+                        <!-- Email/Phone Input -->
+                        <div class="form-group">
+                            <div class="input-wrapper">
+                                <input type="text" name="identifier" class="form-control" placeholder="{{ 'Email or Phone Number'|t }}" required>
+                                <i class="fas fa-envelope input-icon"></i>
                             </div>
                         </div>
+                        
+                        <!-- Password Input -->
+                        <div class="form-group">
+                            <div class="input-wrapper">
+                                <input type="password" name="password" id="password" class="form-control" placeholder="{{ 'Password'|t }}" required>
+                                <i class="fas fa-lock input-icon"></i>
+                                <button type="button" class="password-toggle" onclick="togglePassword('password', this)">
+                                    <i class="fas fa-eye"></i>
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <!-- Remember Me & Forgot Password -->
+                        <div class="form-options">
+                            <label class="auth-checkbox">
+                                <input type="checkbox" name="remember_me">
+                                <span class="checkbox-label">{{ 'Remember Me'|t }}</span>
+                            </label>
+                            <a href="{{ url_for('frontend.forgot_password') }}" class="forgot-link">{{ 'Forgot Password?'|t }}</a>
+                        </div>
+                        
+                        <!-- Submit Button -->
+                        <div class="form-group">
+                            <button type="submit" class="btn-auth">{{ 'landing.nav.login'|t }}</button>
+                        </div>
+                    </form>
+                    
+                    <!-- Footer -->
+                    <div class="auth-footer">
+                        <p>{{ "Don't have an account?"|t }} <a href="{{ url_for('frontend.register') }}{% if request.args.get('next') %}?next={{ request.args.get('next') | urlencode }}{% endif %}">{{ 'Register Here'|t }}</a></p>
                     </div>
                 </div>
             </div>
@@ -63,8 +83,27 @@
 
 {% block extra_js %}
 <script>
+// Toggle Password Visibility
+function togglePassword(inputId, button) {
+    const input = document.getElementById(inputId);
+    const icon = button.querySelector('i');
+    
+    if (input.type === 'password') {
+        input.type = 'text';
+        icon.classList.remove('fa-eye');
+        icon.classList.add('fa-eye-slash');
+    } else {
+        input.type = 'password';
+        icon.classList.remove('fa-eye-slash');
+        icon.classList.add('fa-eye');
+    }
+}
+
 document.getElementById('loginForm').addEventListener('submit', async function(e) {
     e.preventDefault();
+    
+    const submitBtn = this.querySelector('.btn-auth');
+    submitBtn.classList.add('loading');
 
     const formData = new FormData(this);
     const data = {
@@ -95,9 +134,11 @@ document.getElementById('loginForm').addEventListener('submit', async function(e
                 window.location.href = '{{ url_for("frontend.my_account") }}';
             }
         } else {
+            submitBtn.classList.remove('loading');
             showNotification(result.message || '{{ "Login failed"|t }}', 'error');
         }
     } catch (error) {
+        submitBtn.classList.remove('loading');
         showNotification('{{ "Network error. Please try again."|t }}', 'error');
     }
 });

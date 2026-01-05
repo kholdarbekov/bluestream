@@ -7,7 +7,7 @@ from telegram import Update
 from telegram.ext import ContextTypes
 
 from i18n import i18n
-from keyboards import OrderKeyboards, MenuKeyboards, ProfileKeyboards
+from keyboards import OrderKeyboards, MenuKeyboards, ProfileKeyboards, PaymentKeyboards
 from api_client import api_client
 from database import db_manager, BotUserRepository
 from utils import user_middleware, format_price, MessageBuilder, authenticate_telegram_user
@@ -277,22 +277,22 @@ class OrderHandlers:
             query = update.callback_query
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
-            
+
             # Get stored order data
             address_id = context.user_data.get('selected_address_id')
             payment_method = context.user_data.get('selected_payment_method')
-            
+
             if not address_id or not payment_method:
                 await query.answer(i18n.get('telegram.orders.missing_info', language))
                 return
-            
+
             # Create order
             async with api_client as client:
                 user_token = await authenticate_telegram_user(update, client)
                 if not user_token:
                     await self._handle_auth_error(update, language)
                     return
-                
+
                 # Get cart items from API
                 response = await client.get_cart(user_token)
                 if not response.success:
@@ -303,7 +303,7 @@ class OrderHandlers:
                 if not cart or not cart.get('cart_items'):
                     await self._handle_api_error(update, i18n.get('telegram.orders.cart_empty', language), language)
                     return
-                
+
                 order_data = {
                     'delivery_address_id': address_id,
                     'payment_method': payment_method,
@@ -314,24 +314,74 @@ class OrderHandlers:
                         } for item in cart['cart_items']
                     ]
                 }
-                
+
                 response = await client.create_order(user_token, order_data)
                 if not response.success:
                     await self._handle_api_error(update, response.error, language)
                     return
-                
+
                 order = response.data['data']['order']
 
-                # Clear user's cart
-                response = await client.clear_cart(user_token)
-                if not response.success:
-                    await self._handle_api_error(update, response.error, language)
-                    return
+            # Handle different payment methods
+            if payment_method == 'payme':
+                # Payme payment - send invoice via Telegram Payments API
+                # Don't clear cart yet - wait for successful payment
+                from handlers.payments import payment_handlers
 
-            
+                # Store order data for payment flow
+                context.user_data['pending_order_id'] = order['id']
+                context.user_data['pending_order_amount'] = order['total_amount']
+
+                # Build order data with items for invoice
+                order_for_payment = {
+                    'id': order['id'],
+                    'order_number': order.get('order_number', str(order['id'])),
+                    'total_amount': order['total_amount'],
+                    'order_items': order.get('order_items', [])
+                }
+
+                # Send Payme invoice
+                invoice_sent = await payment_handlers.send_payme_invoice(
+                    update, context, order_for_payment
+                )
+
+                if not invoice_sent:
+                    # Invoice failed - show error with options
+                    error_text = i18n.get('telegram.payment.failed_message', language) or \
+                        "Failed to create payment. Please try again or choose a different method."
+
+                    keyboard = PaymentKeyboards.payment_failed(order['id'], language)
+
+                    await query.edit_message_text(
+                        text=f"❌ {error_text}",
+                        reply_markup=keyboard
+                    )
+
+                # Don't clear context data - needed for payment flow
+                logger.info(f"Payme invoice sent for order {order['id']} to user {user_id}")
+                return
+
+            elif payment_method == 'click':
+                # Click payment - similar flow (to be implemented)
+                # For now, treat like cash
+                pass
+
+            # Cash or other payment methods - process immediately
+            async with api_client as client:
+                user_token = await authenticate_telegram_user(update, client)
+                if user_token:
+                    # Clear user's cart
+                    await client.clear_cart(user_token)
+
             # Show success message
             success_text = i18n.get('telegram.orders.placed_success', language) + "\n\n"
             success_text += MessageBuilder.build_order_summary(order, language)
+
+            if payment_method == 'cash':
+                success_text += "\n\n" + (
+                    i18n.get('telegram.orders.cash_note', language) or
+                    "Please have the exact amount ready for the driver."
+                )
 
             keyboard = MenuKeyboards.main_menu(language)
 
@@ -340,12 +390,12 @@ class OrderHandlers:
                 reply_markup=keyboard
             )
             await query.answer(i18n.get('telegram.orders.placed_success', language))
-            
+
             # Clear order data
             context.user_data.clear()
-            
-            logger.info(f"Order created successfully for user {user_id}")
-            
+
+            logger.info(f"Order created successfully for user {user_id} with payment method: {payment_method}")
+
         except Exception as e:
             logger.error(f"Error confirming order: {e}")
             await self._handle_error(update)

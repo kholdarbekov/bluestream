@@ -28,9 +28,47 @@ class AdminService {
     return response.data;
   }
 
+  // Create new user (for call center operations)
+  async createUser(userData) {
+    const response = await api.post('/admin/users', userData);
+    return response.data;
+  }
+
+  // User address management
+  async getUserAddresses(userId) {
+    const response = await api.get(`/admin/users/${userId}/addresses`);
+    return response.data;
+  }
+
+  async createUserAddress(userId, addressData) {
+    const response = await api.post(`/admin/users/${userId}/addresses`, addressData);
+    return response.data;
+  }
+
+  async updateUserAddress(userId, addressId, addressData) {
+    const response = await api.put(`/admin/users/${userId}/addresses/${addressId}`, addressData);
+    return response.data;
+  }
+
+  async deleteUserAddress(userId, addressId) {
+    const response = await api.delete(`/admin/users/${userId}/addresses/${addressId}`);
+    return response.data;
+  }
+
+  // Create order for user (call center operations)
+  async createOrderForUser(orderData) {
+    const response = await api.post('/admin/orders', orderData);
+    return response.data;
+  }
+
   // Order management
   async getOrders(params = {}) {
     const response = await api.get('/admin/orders', { params });
+    return response.data;
+  }
+
+  async getOrderDetails(orderId) {
+    const response = await api.get(`/admin/orders/${orderId}`);
     return response.data;
   }
 

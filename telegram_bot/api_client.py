@@ -779,7 +779,66 @@ class BusinessAPIClient:
     
     async def revoke_session(self, user_token: str, session_id: str) -> APIResponse:
         """Revoke a specific session"""
-        return await self._make_request('DELETE', f'/api/v1/auth/sessions/{session_id}', 
+        return await self._make_request('DELETE', f'/api/v1/auth/sessions/{session_id}',
+                                       user_token=user_token)
+
+    # Telegram Payment methods
+    async def record_telegram_payment(self, user_token: str, payment_data: Dict) -> APIResponse:
+        """
+        Record successful Telegram payment in backend.
+
+        Args:
+            user_token: User authentication token
+            payment_data: Payment details including:
+                - order_id: Order ID
+                - amount: Payment amount in UZS
+                - currency: Currency code (UZS)
+                - payment_method: 'payme'
+                - telegram_payment_charge_id: Telegram's payment ID
+                - provider_payment_charge_id: Payme's payment ID
+                - status: 'completed'
+
+        Returns:
+            APIResponse with payment record
+        """
+        return await self._make_request('POST', '/api/v1/payments/telegram',
+                                       user_token=user_token, data=payment_data)
+
+    async def update_order_payment_status(self, user_token: str, order_id: int,
+                                          status: str, payment_data: Dict = None) -> APIResponse:
+        """
+        Update order payment status.
+
+        Args:
+            user_token: User authentication token
+            order_id: Order ID to update
+            status: New payment status ('pending', 'paid', 'failed')
+            payment_data: Optional additional payment data
+
+        Returns:
+            APIResponse with updated order
+        """
+        data = {'payment_status': status}
+        if payment_data:
+            data['payment_data'] = payment_data
+        return await self._make_request('PATCH', f'/api/v1/orders/{order_id}/payment-status',
+                                       user_token=user_token, data=data)
+
+    async def get_order_for_validation(self, user_token: str, order_id: int) -> APIResponse:
+        """
+        Get minimal order data for pre-checkout validation.
+
+        This endpoint should be optimized for fast response (< 2 seconds)
+        as pre-checkout queries must be answered within 10 seconds.
+
+        Args:
+            user_token: User authentication token
+            order_id: Order ID to validate
+
+        Returns:
+            APIResponse with order validation data (id, status, total_amount, user_id)
+        """
+        return await self._make_request('GET', f'/api/v1/orders/{order_id}/validate',
                                        user_token=user_token)
 
 

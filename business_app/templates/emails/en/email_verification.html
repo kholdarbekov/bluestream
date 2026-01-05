@@ -1,0 +1,40 @@
+{% extends "emails/base.html" %}
+
+{% block title %}Verify Your Email - {{ company_name }}{% endblock %}
+
+{% block header %}
+<h1>Email Verification</h1>
+{% endblock %}
+
+{% block content %}
+<h2>Hello, {{ user_name }}!</h2>
+
+<p>Thank you for registering with {{ company_name }}! Please verify your email address to activate your account and start enjoying our services.</p>
+
+<p style="text-align: center;">
+    <a href="{{ verification_url }}" class="btn-primary">Verify Email Address</a>
+</p>
+
+<div class="info-box">
+    <p><strong>Or use this verification code:</strong></p>
+</div>
+
+<div class="code-display">
+    <span class="code">{{ verification_code }}</span>
+</div>
+
+<p>You can also copy and paste this link into your browser:</p>
+<p style="word-break: break-all; color: #2563eb; background-color: #f0f7ff; padding: 10px; border-radius: 5px; font-size: 14px;">
+    {{ verification_url }}
+</p>
+
+<hr class="divider">
+
+<div class="warning-box">
+    <p><strong>Important:</strong> This link will expire in 24 hours.</p>
+</div>
+
+<p style="color: #94a3b8; font-size: 13px;">
+    If you didn't create an account with us, you can safely ignore this email.
+</p>
+{% endblock %}

@@ -1,14 +1,15 @@
-from datetime import datetime, timedelta
+import logging
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, Text, ForeignKey, Enum, JSON, Index, Numeric
+from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, Text, ForeignKey, Enum, JSON, Index, Numeric, text
 from sqlalchemy.orm import relationship, backref
-from sqlalchemy.ext.hybrid import hybrid_property
-from werkzeug.security import generate_password_hash, check_password_hash
-from flask_sqlalchemy import SQLAlchemy
-import uuid
 from business_app import db
-from business_app.utils.constants import OrderStatus, PaymentMethod, PaymentStatus, DeliveryStatus
+from business_app.utils.constants import OrderStatus, PaymentMethod, PaymentStatus, DeliveryStatus, ORDER_SOURCE_PREFIXES
 from business_app.models import TimestampMixin
+from business_app.models.order_sequence import OrderSequence
+from business_app.utils.helpers import generate_random_string
+
+logger = logging.getLogger(__name__)
 
 
 class Order(db.Model, TimestampMixin):
@@ -58,13 +59,53 @@ class Order(db.Model, TimestampMixin):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         if not self.order_number:
-            self.generate_order_number()
-    
-    def generate_order_number(self):
-        """Generate unique order number"""
-        timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
-        random_suffix = str(uuid.uuid4().hex[:4]).upper()
-        self.order_number = f"WB{timestamp}{random_suffix}"
+            self._generate_order_number()
+
+    def _generate_order_number(self) -> str:
+        """
+        Generate a unique order number with format: {PREFIX}_{SEQUENCE}_{YY}
+
+        Args:
+            order_source: The source of the order (telegram, web, phone, admin, api, mobile)
+
+        Returns:
+            Order number string, e.g., "TG_000042_26"
+
+        The sequence resets annually on January 1st for each source prefix.
+        """
+
+        # Get prefix for source (default to 'WB' for unknown sources)
+        prefix = ORDER_SOURCE_PREFIXES.get(self.order_source, 'WB')
+
+        # Get current year
+        current_year = datetime.now(timezone.utc).year
+        year_suffix = str(current_year)[-2:]  # Last 2 digits
+
+        # Get next sequence number atomically using PostgreSQL UPSERT
+        try:
+            result = db.session.execute(
+                text("""
+                    INSERT INTO order_sequences (source_prefix, year, current_sequence, created_at, updated_at)
+                    VALUES (:prefix, :year, 1, NOW(), NOW())
+                    ON CONFLICT (source_prefix, year)
+                    DO UPDATE SET
+                        current_sequence = order_sequences.current_sequence + 1,
+                        updated_at = NOW()
+                    RETURNING current_sequence
+                """),
+                {'prefix': prefix, 'year': current_year}
+            )
+            sequence = result.scalar()
+
+            # Format: PREFIX + _ + 6-digit sequence + _ + 2-digit year
+            return f"{prefix}_{sequence:06d}_{year_suffix}"
+
+        except Exception as e:
+            # Fallback to legacy format if sequence generation fails
+            logger.error(f"Failed to generate sequential order number: {e}")
+            timestamp = datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')
+            random_suffix = generate_random_string(4).upper()
+            return f"WB{timestamp}{random_suffix}"
     
     def calculate_total(self):
         """Calculate order total including discounts and delivery fee"""

@@ -63,7 +63,9 @@ class AuditLogger:
             # Get additional context from Flask g if available
             if hasattr(g, 'current_user'):
                 context['user_id'] = g.current_user.id
-                context['user_role'] = g.current_user.role
+                # Convert enum to string value for database storage
+                role = g.current_user.role
+                context['user_role'] = role.value if hasattr(role, 'value') else str(role)
             
         except Exception as e:
             current_app.logger.debug(f"Could not extract user context: {e}")

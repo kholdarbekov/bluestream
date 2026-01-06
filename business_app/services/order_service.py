@@ -20,7 +20,7 @@ from business_app.models.delivery import Delivery
 from business_app.utils.exceptions import ValidationError, NotFoundError, ConflictError
 from business_app.utils.constants import OrderStatus, PaymentStatus, DeliveryStatus
 from business_app.models.order import OrderStatusHistory
-from business_app.utils.helpers import generate_order_number, calculate_delivery_fee, calculate_loyalty_points
+from business_app.utils.helpers import calculate_delivery_fee, calculate_loyalty_points
 # Note: inventory_service imported lazily to avoid circular imports
 from business_app.utils.audit_logger import audit_logger, AuditEventType, AuditSeverity
 from business_app import db
@@ -97,9 +97,9 @@ class OrderService:
             payment_method = payment_method_map.get(payment_method_str)
 
         # Create order
+        order_source = order_data.get('order_source', 'web')
         order = Order(
             user_id=user_id,
-            order_number=generate_order_number(),
             status=OrderStatus.PENDING,
             subtotal=subtotal,
             delivery_fee=delivery_fee,
@@ -107,7 +107,7 @@ class OrderService:
             delivery_address_id=delivery_address['delivery_address_id'],
             payment_method=payment_method,
             delivery_notes=order_data.get('delivery_notes'),
-            order_source=order_data.get('order_source', 'web')
+            order_source=order_source
         )
         
         db.session.add(order)

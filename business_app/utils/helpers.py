@@ -22,13 +22,6 @@ def generate_random_string(length: int = 32) -> str:
     return ''.join(secrets.choice(alphabet) for _ in range(length))
 
 
-def generate_order_number() -> str:
-    """Generate a unique order number"""
-    timestamp = datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')
-    random_suffix = generate_random_string(4).upper()
-    return f"WB{timestamp}{random_suffix}"
-
-
 def generate_tracking_code() -> str:
     """Generate a unique tracking code for deliveries"""
     random_code = generate_random_string(8).upper()

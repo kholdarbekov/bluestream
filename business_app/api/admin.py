@@ -1259,7 +1259,7 @@ def create_order_for_user():
             return validation_error_response('Cannot create order for inactive user')
 
         # Validate address exists and belongs to user
-        address = UserAddress.query.filter_by(id=delivery_address_id, user_id=user_id).first()
+        address: UserAddress = UserAddress.query.filter_by(id=delivery_address_id, user_id=user_id).first()
         if not address:
             return validation_error_response('Invalid delivery address for this user')
 
@@ -1274,11 +1274,14 @@ def create_order_for_user():
         order_data = {
             'items': items,
             'delivery_address': {
-                'delivery_address_id': delivery_address_id
+                'delivery_address_id': delivery_address_id,
+                'street': address.street_address,
+                'latitude': address.latitude,
+                'longitude': address.longitude
             },
             'payment_method': payment_method,
             'delivery_notes': delivery_notes,
-            'order_source': 'admin_created'
+            'order_source': 'admin'
         }
 
         order = order_service.create_order(user_id, order_data)

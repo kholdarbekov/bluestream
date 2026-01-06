@@ -356,12 +356,22 @@ RATE_LIMITS = {
     'FILE_UPLOAD': '10/hour',
 }
 
+# Format: {PREFIX}_{SEQUENCE}_{YY} e.g., TG_000042_26
+ORDER_SOURCE_PREFIXES = {
+    'telegram': 'TG',  # Telegram bot orders
+    'web': 'WB',       # Web application orders
+    'phone': 'CC',     # Contact center / phone orders
+    'admin': 'AD',     # Admin-created orders
+    'api': 'AP',       # Direct API orders
+    'mobile': 'MB',    # Mobile app orders (future)
+}
+
 # Regex Patterns
 PATTERNS = {
     'PHONE_UZ': r'^\+998[0-9]{9}$',
     'EMAIL': r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$',
     'PASSWORD': r'^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)[a-zA-Z\d@$!%*?&]{8,}$',
-    'ORDER_NUMBER': r'^WB\d{14}[A-Z]{4}$',
+    'ORDER_NUMBER': r'^(TG|WB|CC|AD|AP|MB)_\d{6}_\d{2}$',  # e.g., TG_000042_26
     'TRACKING_CODE': r'^TR[A-Z0-9]{8}$',
 }
 

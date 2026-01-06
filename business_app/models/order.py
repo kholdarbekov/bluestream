@@ -59,7 +59,7 @@ class Order(db.Model, TimestampMixin):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         if not self.order_number:
-            self._generate_order_number()
+            self.order_number = self._generate_order_number()
 
     def _generate_order_number(self) -> str:
         """

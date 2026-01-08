@@ -77,6 +77,45 @@ BACKEND_TRANSLATIONS = {
         'uz': 'Telefon raqami muvaffaqiyatli tasdiqlandi',
         'ru': 'Номер телефона успешно подтвержден'
     },
+    'api.auth.otp_sent': {
+        'en': 'Verification code sent',
+        'uz': 'Tasdiqlash kodi yuborildi',
+        'ru': 'Код подтверждения отправлен'
+    },
+    'api.auth.otp_resent': {
+        'en': 'Verification code resent',
+        'uz': 'Tasdiqlash kodi qayta yuborildi',
+        'ru': 'Код подтверждения отправлен повторно'
+    },
+    'api.auth.otp_invalid': {
+        'en': 'Invalid verification code',
+        'uz': 'Noto\'g\'ri tasdiqlash kodi',
+        'ru': 'Неверный код подтверждения'
+    },
+    'api.auth.otp_expired': {
+        'en': 'Verification code has expired. Please request a new one.',
+        'uz': 'Tasdiqlash kodi muddati tugagan. Iltimos, yangisini so\'rang.',
+        'ru': 'Срок действия кода подтверждения истёк. Пожалуйста, запросите новый.'
+    },
+
+    # ============================================================================
+    # SMS Templates (sms.*)
+    # ============================================================================
+    'sms.registration.otp': {
+        'en': 'Bluestream: Your registration code: {otp_code}. Valid for 3 minutes.',
+        'uz': 'Bluestream: Ro\'yxatdan o\'tish kodi: {otp_code}. Kod 3 daqiqa amal qiladi.',
+        'ru': 'Bluestream: Код регистрации: {otp_code}. Код действителен 3 минуты.'
+    },
+    'sms.welcome': {
+        'en': 'Welcome to Bluestream, {first_name}! Use our app to place orders.',
+        'uz': 'Bluestream\'ga xush kelibsiz, {first_name}! Buyurtma berish uchun ilovamizdan foydalaning.',
+        'ru': 'Добро пожаловать в Bluestream, {first_name}! Используйте наше приложение для заказов.'
+    },
+    'sms.verification.otp': {
+        'en': 'Bluestream: Your verification code: {otp_code}. Valid for 5 minutes.',
+        'uz': 'Bluestream: Tasdiqlash kodi: {otp_code}. Kod 5 daqiqa amal qiladi.',
+        'ru': 'Bluestream: Код подтверждения: {otp_code}. Код действителен 5 минут.'
+    },
 
     # ============================================================================
     # API - Orders (api.orders.*)

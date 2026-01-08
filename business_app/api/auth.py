@@ -45,15 +45,18 @@ logger = logging.getLogger(__name__)
 
 @auth_bp.route('/register', methods=['POST'])
 @rate_limit(10, 3600)  # 10 registrations per hour
-@validate_json(['email', 'password', 'phone', 'first_name', 'last_name'])
+@validate_json(['password', 'first_name'])  # Only password and first_name always required
 @handle_exceptions
 @log_request
 def register():
     """
-    User Registration
+    User Registration (Email-based)
     ---
     tags:
       - Authentication
+    description: |
+      Register a new user with email and password.
+      Note: For phone-based registration, use /phone/register/init and /phone/register/verify endpoints.
     parameters:
       - in: body
         name: body
@@ -63,13 +66,12 @@ def register():
           required:
             - email
             - password
-            - phone
             - first_name
-            - last_name
           properties:
             email:
               type: string
               format: email
+              description: User email (required for email registration)
               example: user@example.com
             password:
               type: string
@@ -77,6 +79,7 @@ def register():
               example: SecurePass123
             phone:
               type: string
+              description: Phone number (optional, can be added later)
               example: +998901234567
             first_name:
               type: string
@@ -120,17 +123,28 @@ def register():
         description: User already exists
     """
     data = request.get_json()
-    
+
+    # Validate: email is required for this endpoint (email-based registration)
+    if not data.get('email'):
+        return validation_error_response(
+            errors={'email': ['Email is required for email-based registration. Use /phone/register/init for phone registration.']}
+        )
+
+    # Last name is optional but recommended
+    if not data.get('last_name'):
+        data['last_name'] = ''
+
     try:
         user, tokens = get_auth_service().register_user(
             email=data['email'],
             password=data['password'],
-            phone=data['phone'],
+            phone=data.get('phone'),  # Phone is optional for email registration
             first_name=data['first_name'],
             last_name=data['last_name'],
             date_of_birth=data.get('date_of_birth'),
             gender=data.get('gender'),
-            referral_code=data.get('referral_code')
+            referral_code=data.get('referral_code'),
+            registration_method='email'  # Mark as email registration
         )
 
         # Create response with standardized format
@@ -271,6 +285,366 @@ def login():
             errors=e.details,
             status_code=423
         )
+
+
+# =============================================================================
+# Phone Registration Endpoints (Uzbekistan +998 only)
+# =============================================================================
+
+@auth_bp.route('/phone/register/init', methods=['POST'])
+@rate_limit(3, 600)  # 3 requests per 10 minutes per IP
+@validate_json(['phone'])
+@handle_exceptions
+@log_request
+def phone_register_init():
+    """
+    Initiate Phone Registration - Step 1: Request OTP
+    ---
+    tags:
+      - Phone Registration
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - phone
+          properties:
+            phone:
+              type: string
+              description: Uzbekistan phone number (+998 XX XXX XX XX)
+              example: +998901234567
+            preferred_language:
+              type: string
+              enum: [uz, ru, en]
+              default: uz
+              example: uz
+    responses:
+      200:
+        description: OTP sent successfully
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+              example: true
+            message:
+              type: string
+              example: Verification code sent
+            data:
+              type: object
+              properties:
+                phone_masked:
+                  type: string
+                  example: +998***4567
+                expires_in:
+                  type: integer
+                  example: 180
+                resend_available_in:
+                  type: integer
+                  example: 60
+      400:
+        description: Validation error (invalid phone format)
+      409:
+        description: Phone already registered
+      429:
+        description: Rate limit exceeded or resend cooldown
+    """
+    from pydantic import ValidationError as PydanticValidationError
+    from business_app.serializers.auth_serializers import PhoneRegistrationInitRequest
+
+    data = request.get_json()
+
+    try:
+        # Validate with Pydantic
+        req = PhoneRegistrationInitRequest(**data)
+    except PydanticValidationError as e:
+        errors = {}
+        for error in e.errors():
+            field = error['loc'][0] if error['loc'] else 'general'
+            if field not in errors:
+                errors[field] = []
+            errors[field].append(error['msg'])
+        return validation_error_response(errors=errors)
+
+    try:
+        result = get_auth_service().initiate_phone_registration(
+            phone=req.phone,
+            language=req.preferred_language
+        )
+
+        return success_response(
+            data=result,
+            message=get_translation('api.auth.otp_sent', default='Verification code sent')
+        )
+
+    except ValidationError as e:
+        error_code = getattr(e, 'error_code', None)
+        status_code = 429 if error_code in ['RESEND_COOLDOWN', 'OTP_MAX_ATTEMPTS'] else 400
+        return error_response(
+            message=e.message,
+            errors=e.details,
+            status_code=status_code
+        )
+    except ConflictError as e:
+        return conflict_response(message=e.message)
+
+
+@auth_bp.route('/phone/register/verify', methods=['POST'])
+@rate_limit(10, 600)  # 10 requests per 10 minutes per IP
+@validate_json(['phone', 'otp_code', 'first_name', 'password'])
+@handle_exceptions
+@log_request
+def phone_register_verify():
+    """
+    Complete Phone Registration - Step 2: Verify OTP and Create Account
+    ---
+    tags:
+      - Phone Registration
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - phone
+            - otp_code
+            - first_name
+            - password
+          properties:
+            phone:
+              type: string
+              description: Uzbekistan phone number (+998 XX XXX XX XX)
+              example: +998901234567
+            otp_code:
+              type: string
+              description: 6-digit OTP code
+              example: "123456"
+            first_name:
+              type: string
+              example: John
+            last_name:
+              type: string
+              example: Doe
+            password:
+              type: string
+              minLength: 8
+              example: SecurePass123!
+            referral_code:
+              type: string
+              example: ABC123
+    responses:
+      201:
+        description: Registration successful
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+              example: true
+            message:
+              type: string
+              example: Registration successful
+            data:
+              type: object
+              properties:
+                user:
+                  type: object
+                  properties:
+                    id:
+                      type: integer
+                    phone:
+                      type: string
+                    email:
+                      type: string
+                      nullable: true
+                    first_name:
+                      type: string
+                    last_name:
+                      type: string
+                    is_verified:
+                      type: boolean
+                    registration_method:
+                      type: string
+                tokens:
+                  type: object
+                  properties:
+                    access_token:
+                      type: string
+                    refresh_token:
+                      type: string
+                    expires_in:
+                      type: integer
+      400:
+        description: Validation error or invalid OTP
+      409:
+        description: Phone already registered
+      429:
+        description: Too many OTP attempts
+    """
+    from pydantic import ValidationError as PydanticValidationError
+    from business_app.serializers.auth_serializers import PhoneRegistrationVerifyRequest
+
+    data = request.get_json()
+
+    try:
+        # Validate with Pydantic
+        req = PhoneRegistrationVerifyRequest(**data)
+    except PydanticValidationError as e:
+        errors = {}
+        for error in e.errors():
+            field = error['loc'][0] if error['loc'] else 'general'
+            if field not in errors:
+                errors[field] = []
+            errors[field].append(error['msg'])
+        return validation_error_response(errors=errors)
+
+    try:
+        user, tokens = get_auth_service().complete_phone_registration(
+            phone=req.phone,
+            otp_code=req.otp_code,
+            first_name=req.first_name,
+            last_name=req.last_name,
+            password=req.password,
+            referral_code=req.referral_code
+        )
+
+        # Create response
+        response_data, status_code = created_response(
+            data={
+                'user': {
+                    'id': user.id,
+                    'phone': user.phone,
+                    'email': user.email,
+                    'first_name': user.first_name,
+                    'last_name': user.last_name,
+                    'is_verified': user.is_verified,
+                    'registration_method': user.registration_method
+                },
+                'tokens': tokens
+            },
+            message=get_translation('api.auth.registration_successful')
+        )
+
+        # Set JWT cookies
+        set_access_cookies(response_data, tokens['access_token'])
+        set_refresh_cookies(response_data, tokens['refresh_token'])
+
+        return response_data, status_code
+
+    except ValidationError as e:
+        error_code = getattr(e, 'error_code', None)
+        if error_code == 'OTP_EXPIRED':
+            status_code = 400
+        elif error_code in ['INVALID_OTP', 'OTP_MAX_ATTEMPTS']:
+            status_code = 429 if error_code == 'OTP_MAX_ATTEMPTS' else 400
+        else:
+            status_code = 400
+        return error_response(
+            message=e.message,
+            errors=e.details,
+            status_code=status_code
+        )
+    except ConflictError as e:
+        return conflict_response(message=e.message)
+
+
+@auth_bp.route('/phone/resend-otp', methods=['POST'])
+@rate_limit(3, 300)  # 3 requests per 5 minutes per IP
+@validate_json(['phone'])
+@handle_exceptions
+@log_request
+def phone_resend_otp():
+    """
+    Resend OTP for Phone Registration
+    ---
+    tags:
+      - Phone Registration
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - phone
+          properties:
+            phone:
+              type: string
+              description: Uzbekistan phone number (+998 XX XXX XX XX)
+              example: +998901234567
+    responses:
+      200:
+        description: OTP resent successfully
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+              example: true
+            message:
+              type: string
+              example: Verification code resent
+            data:
+              type: object
+              properties:
+                phone_masked:
+                  type: string
+                  example: +998***4567
+                expires_in:
+                  type: integer
+                  example: 180
+                resend_available_in:
+                  type: integer
+                  example: 60
+      400:
+        description: Invalid phone format
+      409:
+        description: Phone already registered
+      429:
+        description: Cooldown not expired
+    """
+    from pydantic import ValidationError as PydanticValidationError
+    from business_app.serializers.auth_serializers import PhoneResendOtpRequest
+
+    data = request.get_json()
+
+    try:
+        req = PhoneResendOtpRequest(**data)
+    except PydanticValidationError as e:
+        errors = {}
+        for error in e.errors():
+            field = error['loc'][0] if error['loc'] else 'general'
+            if field not in errors:
+                errors[field] = []
+            errors[field].append(error['msg'])
+        return validation_error_response(errors=errors)
+
+    try:
+        result = get_auth_service().resend_phone_registration_otp(phone=req.phone)
+
+        return success_response(
+            data=result,
+            message=get_translation('api.auth.otp_resent', default='Verification code resent')
+        )
+
+    except ValidationError as e:
+        error_code = getattr(e, 'error_code', None)
+        status_code = 429 if error_code in ['RESEND_COOLDOWN', 'OTP_MAX_ATTEMPTS'] else 400
+        return error_response(
+            message=e.message,
+            errors=e.details,
+            status_code=status_code
+        )
+    except ConflictError as e:
+        return conflict_response(message=e.message)
+
+
+# =============================================================================
+# End Phone Registration Endpoints
+# =============================================================================
 
 
 @auth_bp.route('/send-otp', methods=['POST'])

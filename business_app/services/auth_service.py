@@ -40,44 +40,54 @@ class AuthService:
         self.max_login_attempts = current_app.config.get('MAX_LOGIN_ATTEMPTS', 5)
         self.lockout_duration = current_app.config.get('LOCKOUT_DURATION', 1800)  # 30 minutes
     
-    def register_user(self, email: str, password: str, phone: str, 
-                     first_name: str, last_name: str, **kwargs) -> Tuple[User, Dict[str, str]]:
+    def register_user(self, email: str, password: str, phone: str = None,
+                     first_name: str = None, last_name: str = None, **kwargs) -> Tuple[User, Dict[str, str]]:
         """
-        Register a new user
-        
+        Register a new user (email-based registration)
+
         Args:
-            email: User email
-            password: User password
-            phone: User phone number
-            first_name: User first name
-            last_name: User last name
-            **kwargs: Additional user data
-        
+            email: User email (required)
+            password: User password (required)
+            phone: User phone number (optional, can be added later)
+            first_name: User first name (required)
+            last_name: User last name (optional)
+            **kwargs: Additional user data including:
+                - registration_method: 'email' or 'phone' (default: 'email')
+
         Returns:
             Tuple of (User object, tokens dict)
-        
+
         Raises:
             ValidationError: If validation fails
             ConflictError: If user already exists
         """
-        # Validate input data
+        # Get registration method from kwargs
+        registration_method = kwargs.pop('registration_method', 'email')
+
+        # Validate input data (phone is now optional)
         self._validate_registration_data(email, password, phone, first_name, last_name)
-        
-        # Check if user already exists
-        existing_user = User.query.filter(
-            (User.email == email.lower()) | (User.phone == phone)
-        ).first()
-        
-        if existing_user:
-            if existing_user.email == email.lower():
-                raise ConflictError(get_translation('api.auth.email_already_exists'))
-            else:
-                raise ConflictError(get_translation('error.validation.phone_already_exists'))
-        
+
+        # Build query to check for existing users
+        conditions = []
+        if email:
+            conditions.append(User.email == email.lower())
+        if phone:
+            conditions.append(User.phone == phone)
+
+        if conditions:
+            from sqlalchemy import or_
+            existing_user = User.query.filter(or_(*conditions)).first()
+
+            if existing_user:
+                if email and existing_user.email == email.lower():
+                    raise ConflictError(get_translation('api.auth.email_already_exists'))
+                elif phone and existing_user.phone == phone:
+                    raise ConflictError(get_translation('error.validation.phone_already_exists'))
+
         # Create new user
         # Filter out invalid User model fields from kwargs
         valid_user_fields = {
-            'date_of_birth', 'gender', 'role', 'status', 'is_verified', 
+            'date_of_birth', 'gender', 'role', 'status', 'is_verified',
             'is_premium', 'preferred_language', 'preferred_currency', 'timezone',
             'email_notifications', 'sms_notifications', 'push_notifications',
             'company_name', 'tax_id', 'business_type', 'email_verification_token',
@@ -85,30 +95,34 @@ class AuthService:
             'telegram_username', 'is_bot_active', 'bot_state', 'last_bot_interaction'
         }
         filtered_kwargs = {k: v for k, v in kwargs.items() if k in valid_user_fields}
-        
+
+        # Format phone if provided
+        formatted_phone = format_phone_number(phone) if phone else None
+
         user = User(
-            email=email.lower().strip(),
-            phone=format_phone_number(phone),
-            first_name=first_name.strip(),
-            last_name=last_name.strip(),
+            email=email.lower().strip() if email else None,
+            phone=formatted_phone,
+            first_name=first_name.strip() if first_name else '',
+            last_name=last_name.strip() if last_name else '',
             password_hash=self._hash_password(password),
             role=UserRole.CUSTOMER.value,
             status=UserStatus.PENDING_VERIFICATION.value,
+            registration_method=registration_method,
             **filtered_kwargs
         )
-        
+
         db.session.add(user)
         db.session.commit()
-        
+
         # Generate tokens
         tokens = self._generate_tokens(user)
-        
+
         # Send verification emails/SMS
         self._send_verification_notifications(user)
-        
+
         # Log user session
         self._create_user_session(user.id, tokens['access_token'])
-        
+
         return user, tokens
     
     def login_user(self, identifier: str, password: str) -> Tuple[User, Dict[str, str]]:
@@ -424,8 +438,403 @@ class AuthService:
         db.session.commit()
         
         return True
-    
-    def create_admin_user(self, phone: str, email: str, password: str, first_name: str = "Admin", 
+
+    # =============================================================================
+    # Phone Registration Methods (Uzbekistan +998 only)
+    # =============================================================================
+
+    # OTP expiry time in seconds (3 minutes as per plan)
+    PHONE_OTP_EXPIRY = 180
+    # Cooldown between OTP resends in seconds
+    PHONE_OTP_RESEND_COOLDOWN = 60
+    # Max OTP verification attempts
+    PHONE_OTP_MAX_ATTEMPTS = 5
+    # Lockout duration after max attempts (10 minutes)
+    PHONE_OTP_LOCKOUT_DURATION = 600
+
+    def initiate_phone_registration(self, phone: str, language: str = 'uz') -> Dict[str, Any]:
+        """
+        Step 1: Send OTP to phone for registration
+
+        Flow:
+        1. Validate phone format (Uzbekistan +998 only)
+        2. Check if phone already registered
+        3. Check rate limiting (cooldown)
+        4. Generate 6-digit OTP
+        5. Store OTP in Redis with phone as key (3 min expiry)
+        6. Send SMS via Eskiz
+        7. Return success with masked phone
+
+        Args:
+            phone: Normalized Uzbekistan phone number (+998XXXXXXXXX)
+            language: Preferred language for SMS
+
+        Returns:
+            Dict with phone_masked, expires_in, resend_available_in
+
+        Raises:
+            ValidationError: If validation fails
+            ConflictError: If phone already registered
+        """
+        import hashlib
+        from business_app.utils.validators import (
+            validate_uzbekistan_phone,
+            mask_phone_number
+        )
+
+        # Validate phone (should already be normalized by serializer)
+        is_valid, error_msg, normalized_phone = validate_uzbekistan_phone(phone)
+        if not is_valid:
+            raise ValidationError(error_msg, {'phone': [error_msg]})
+
+        phone = normalized_phone
+
+        # Check if phone already registered
+        existing_user = User.query.filter_by(phone=phone).first()
+        if existing_user:
+            raise ConflictError(
+                get_translation('error.validation.phone_already_exists'),
+                error_code='PHONE_ALREADY_REGISTERED'
+            )
+
+        # Create phone hash for Redis keys (privacy)
+        phone_hash = hashlib.sha256(phone.encode()).hexdigest()[:16]
+
+        # Check cooldown (prevent spam)
+        cooldown_key = f"phone_otp_cooldown:{phone_hash}"
+        cooldown_ttl = self.redis_client.ttl(cooldown_key)
+        if cooldown_ttl > 0:
+            raise ValidationError(
+                f"Please wait {cooldown_ttl} seconds before requesting a new code.",
+                {'phone': [f'Resend available in {cooldown_ttl} seconds']},
+                error_code='RESEND_COOLDOWN'
+            )
+
+        # Check if locked out due to too many attempts
+        lockout_key = f"phone_otp_lockout:{phone_hash}"
+        if self.redis_client.exists(lockout_key):
+            lockout_ttl = self.redis_client.ttl(lockout_key)
+            raise ValidationError(
+                f"Too many attempts. Please try again in {lockout_ttl} seconds.",
+                {'phone': ['Account temporarily locked']},
+                error_code='OTP_MAX_ATTEMPTS'
+            )
+
+        # Generate 6-digit OTP
+        otp_code = generate_otp(length=6)
+
+        # Store OTP in Redis (3 min expiry)
+        otp_key = f"phone_reg_otp:{phone_hash}"
+        self.redis_client.setex(otp_key, self.PHONE_OTP_EXPIRY, otp_code)
+
+        # Store phone-to-hash mapping for verification step
+        phone_mapping_key = f"phone_reg_mapping:{phone_hash}"
+        self.redis_client.setex(phone_mapping_key, self.PHONE_OTP_EXPIRY, phone)
+
+        # Store language preference
+        lang_key = f"phone_reg_lang:{phone_hash}"
+        self.redis_client.setex(lang_key, self.PHONE_OTP_EXPIRY, language)
+
+        # Set cooldown to prevent immediate resend
+        self.redis_client.setex(cooldown_key, self.PHONE_OTP_RESEND_COOLDOWN, '1')
+
+        # Send SMS via Celery task
+        try:
+            from business_app.tasks.notification_tasks import send_registration_otp_task
+            send_registration_otp_task.delay(phone, otp_code, language)
+            logger.info(f"Registration OTP sent to {mask_phone_number(phone)}")
+        except Exception as e:
+            logger.error(f"Failed to send registration OTP: {e}")
+            # Still return success - OTP is stored, SMS might be delayed
+            # In production, you might want to handle this differently
+
+        return {
+            'phone_masked': mask_phone_number(phone),
+            'expires_in': self.PHONE_OTP_EXPIRY,
+            'resend_available_in': self.PHONE_OTP_RESEND_COOLDOWN
+        }
+
+    def complete_phone_registration(
+        self,
+        phone: str,
+        otp_code: str,
+        first_name: str,
+        last_name: str,
+        password: str,
+        referral_code: str = None
+    ) -> Tuple[User, Dict[str, str]]:
+        """
+        Step 2: Verify OTP and create account
+
+        Flow:
+        1. Verify OTP from Redis
+        2. Create user with:
+           - phone (verified)
+           - password
+           - first_name, last_name
+           - email = None (optional, can add later)
+           - status = ACTIVE (already verified)
+           - phone_verified_at = now
+           - registration_method = 'phone'
+           - registration_source = 'web'
+        3. Process referral code if provided
+        4. Generate JWT tokens
+        5. Send welcome SMS
+        6. Return user + tokens
+
+        Args:
+            phone: Normalized Uzbekistan phone number
+            otp_code: 6-digit OTP code
+            first_name: User first name
+            last_name: User last name (optional)
+            password: User password
+            referral_code: Optional referral code
+
+        Returns:
+            Tuple of (User object, tokens dict)
+
+        Raises:
+            ValidationError: If OTP is invalid/expired or validation fails
+            ConflictError: If phone already registered
+        """
+        import hashlib
+        from business_app.utils.validators import validate_uzbekistan_phone
+
+        # Validate phone
+        is_valid, error_msg, normalized_phone = validate_uzbekistan_phone(phone)
+        if not is_valid:
+            raise ValidationError(error_msg, {'phone': [error_msg]})
+
+        phone = normalized_phone
+
+        # Create phone hash
+        phone_hash = hashlib.sha256(phone.encode()).hexdigest()[:16]
+
+        # Check lockout
+        lockout_key = f"phone_otp_lockout:{phone_hash}"
+        if self.redis_client.exists(lockout_key):
+            lockout_ttl = self.redis_client.ttl(lockout_key)
+            raise ValidationError(
+                f"Too many attempts. Please try again in {lockout_ttl} seconds.",
+                {'otp_code': ['Account temporarily locked']},
+                error_code='OTP_MAX_ATTEMPTS'
+            )
+
+        # Verify OTP
+        otp_key = f"phone_reg_otp:{phone_hash}"
+        stored_otp = self.redis_client.get(otp_key)
+
+        if not stored_otp:
+            raise ValidationError(
+                "Verification code has expired. Please request a new one.",
+                {'otp_code': ['OTP expired']},
+                error_code='OTP_EXPIRED'
+            )
+
+        # Track attempts
+        attempts_key = f"phone_otp_attempts:{phone_hash}"
+
+        if stored_otp.decode() != otp_code:
+            # Increment failed attempts
+            attempts = self.redis_client.incr(attempts_key)
+            self.redis_client.expire(attempts_key, self.PHONE_OTP_LOCKOUT_DURATION)
+
+            if attempts >= self.PHONE_OTP_MAX_ATTEMPTS:
+                # Lock out
+                self.redis_client.setex(lockout_key, self.PHONE_OTP_LOCKOUT_DURATION, '1')
+                # Clear OTP
+                self.redis_client.delete(otp_key)
+                raise ValidationError(
+                    "Too many incorrect attempts. Please request a new code.",
+                    {'otp_code': ['Max attempts exceeded']},
+                    error_code='OTP_MAX_ATTEMPTS'
+                )
+
+            remaining = self.PHONE_OTP_MAX_ATTEMPTS - attempts
+            raise ValidationError(
+                f"Invalid verification code. {remaining} attempts remaining.",
+                {'otp_code': ['Invalid OTP']},
+                error_code='INVALID_OTP'
+            )
+
+        # OTP is valid - clear it and attempts
+        self.redis_client.delete(otp_key, attempts_key)
+
+        # Check if phone already registered (race condition check)
+        existing_user = User.query.filter_by(phone=phone).first()
+        if existing_user:
+            raise ConflictError(
+                get_translation('error.validation.phone_already_exists'),
+                error_code='PHONE_ALREADY_REGISTERED'
+            )
+
+        # Validate password
+        password_validator = PasswordValidator(password, 'password')
+        password_validator.validate()
+        if not password_validator.is_valid():
+            raise ValidationError(
+                get_translation('error.validation.invalid_password'),
+                {'password': password_validator.get_errors()}
+            )
+
+        # Get stored language preference
+        lang_key = f"phone_reg_lang:{phone_hash}"
+        language = self.redis_client.get(lang_key)
+        language = language.decode() if language else 'uz'
+
+        # Create user
+        user = User(
+            phone=phone,
+            email=None,  # Email is optional for phone registration
+            first_name=first_name.strip(),
+            last_name=last_name.strip() if last_name else None,
+            password_hash=self._hash_password(password),
+            role=UserRole.CUSTOMER.value,
+            status=UserStatus.ACTIVE.value,  # Active immediately - phone already verified
+            is_verified=True,
+            phone_verified_at=datetime.now(timezone.utc),
+            registration_source='web',
+            registration_method='phone',
+            preferred_language=language
+        )
+
+        db.session.add(user)
+        db.session.commit()
+
+        # Process referral code if provided
+        if referral_code:
+            try:
+                self._process_referral_code(user.id, referral_code)
+            except Exception as e:
+                logger.warning(f"Failed to process referral code {referral_code}: {e}")
+
+        # Generate tokens
+        tokens = self._generate_tokens(user)
+
+        # Create user session
+        self._create_user_session(user.id, tokens['access_token'])
+
+        # Send welcome SMS
+        try:
+            from business_app.tasks.notification_tasks import send_welcome_sms_task
+            send_welcome_sms_task.delay(user.id)
+        except Exception as e:
+            logger.warning(f"Failed to send welcome SMS: {e}")
+
+        # Clean up Redis keys
+        self.redis_client.delete(
+            f"phone_reg_mapping:{phone_hash}",
+            f"phone_reg_lang:{phone_hash}",
+            f"phone_otp_cooldown:{phone_hash}"
+        )
+
+        logger.info(f"Phone registration completed for user {user.id}")
+
+        return user, tokens
+
+    def resend_phone_registration_otp(self, phone: str) -> Dict[str, Any]:
+        """
+        Resend OTP for phone registration
+
+        Args:
+            phone: Normalized Uzbekistan phone number
+
+        Returns:
+            Dict with expires_in, resend_available_in
+
+        Raises:
+            ValidationError: If cooldown not expired or phone invalid
+        """
+        import hashlib
+        from business_app.utils.validators import validate_uzbekistan_phone, mask_phone_number
+
+        # Validate phone
+        is_valid, error_msg, normalized_phone = validate_uzbekistan_phone(phone)
+        if not is_valid:
+            raise ValidationError(error_msg, {'phone': [error_msg]})
+
+        phone = normalized_phone
+        phone_hash = hashlib.sha256(phone.encode()).hexdigest()[:16]
+
+        # Check if phone already registered
+        existing_user = User.query.filter_by(phone=phone).first()
+        if existing_user:
+            raise ConflictError(
+                get_translation('error.validation.phone_already_exists'),
+                error_code='PHONE_ALREADY_REGISTERED'
+            )
+
+        # Check cooldown
+        cooldown_key = f"phone_otp_cooldown:{phone_hash}"
+        cooldown_ttl = self.redis_client.ttl(cooldown_key)
+        if cooldown_ttl > 0:
+            raise ValidationError(
+                f"Please wait {cooldown_ttl} seconds before requesting a new code.",
+                {'phone': [f'Resend available in {cooldown_ttl} seconds']},
+                error_code='RESEND_COOLDOWN'
+            )
+
+        # Check lockout
+        lockout_key = f"phone_otp_lockout:{phone_hash}"
+        if self.redis_client.exists(lockout_key):
+            lockout_ttl = self.redis_client.ttl(lockout_key)
+            raise ValidationError(
+                f"Too many attempts. Please try again in {lockout_ttl} seconds.",
+                {'phone': ['Account temporarily locked']},
+                error_code='OTP_MAX_ATTEMPTS'
+            )
+
+        # Get stored language or default
+        lang_key = f"phone_reg_lang:{phone_hash}"
+        language = self.redis_client.get(lang_key)
+        language = language.decode() if language else 'uz'
+
+        # Generate new OTP
+        otp_code = generate_otp(length=6)
+
+        # Store OTP
+        otp_key = f"phone_reg_otp:{phone_hash}"
+        self.redis_client.setex(otp_key, self.PHONE_OTP_EXPIRY, otp_code)
+
+        # Update phone mapping expiry
+        phone_mapping_key = f"phone_reg_mapping:{phone_hash}"
+        self.redis_client.setex(phone_mapping_key, self.PHONE_OTP_EXPIRY, phone)
+
+        # Update language expiry
+        self.redis_client.setex(lang_key, self.PHONE_OTP_EXPIRY, language)
+
+        # Set cooldown
+        self.redis_client.setex(cooldown_key, self.PHONE_OTP_RESEND_COOLDOWN, '1')
+
+        # Clear previous attempts on resend
+        attempts_key = f"phone_otp_attempts:{phone_hash}"
+        self.redis_client.delete(attempts_key)
+
+        # Send SMS
+        try:
+            from business_app.tasks.notification_tasks import send_registration_otp_task
+            send_registration_otp_task.delay(phone, otp_code, language)
+            logger.info(f"Registration OTP resent to {mask_phone_number(phone)}")
+        except Exception as e:
+            logger.error(f"Failed to resend registration OTP: {e}")
+
+        return {
+            'phone_masked': mask_phone_number(phone),
+            'expires_in': self.PHONE_OTP_EXPIRY,
+            'resend_available_in': self.PHONE_OTP_RESEND_COOLDOWN
+        }
+
+    def _process_referral_code(self, user_id: int, referral_code: str):
+        """Process referral code for new user (placeholder - implement based on your referral system)"""
+        # TODO: Implement referral code processing if you have a referral system
+        logger.info(f"Processing referral code {referral_code} for user {user_id}")
+        pass
+
+    # =============================================================================
+    # End Phone Registration Methods
+    # =============================================================================
+
+    def create_admin_user(self, phone: str, email: str, password: str, first_name: str = "Admin",
                          last_name: str = "User") -> User:
         """Create admin user"""
         # Check if admin already exists
@@ -606,36 +1015,48 @@ class AuthService:
         return permissions
     
     # Private methods
-    def _validate_registration_data(self, email: str, password: str, phone: str, 
-                                  first_name: str, last_name: str):
-        """Validate registration data"""
+    def _validate_registration_data(self, email: Optional[str], password: str,
+                                  phone: Optional[str], first_name: str,
+                                  last_name: Optional[str]):
+        """
+        Validate registration data.
+
+        At least one of email or phone must be provided.
+        Last name is optional.
+        """
         errors = {}
-        
-        # Validate email
-        email_validator = EmailValidator(email, 'email')
-        email_validator.validate()
-        if not email_validator.is_valid():
-            errors['email'] = email_validator.get_errors()
-        
-        # Validate password
+
+        # At least email or phone must be provided
+        if not email and not phone:
+            errors['email'] = ['Either email or phone number is required']
+            errors['phone'] = ['Either email or phone number is required']
+
+        # Validate email if provided
+        if email:
+            email_validator = EmailValidator(email, 'email')
+            email_validator.validate()
+            if not email_validator.is_valid():
+                errors['email'] = email_validator.get_errors()
+
+        # Validate password (always required)
         password_validator = PasswordValidator(password, 'password')
         password_validator.validate()
         if not password_validator.is_valid():
             errors['password'] = password_validator.get_errors()
-        
-        # Validate phone
-        phone_validator = PhoneValidator(phone, 'phone')
-        phone_validator.validate()
-        if not phone_validator.is_valid():
-            errors['phone'] = phone_validator.get_errors()
-        
-        # Validate names
+
+        # Validate phone if provided
+        if phone:
+            phone_validator = PhoneValidator(phone, 'phone')
+            phone_validator.validate()
+            if not phone_validator.is_valid():
+                errors['phone'] = phone_validator.get_errors()
+
+        # Validate first name (required)
         if not first_name or not first_name.strip():
             errors['first_name'] = ['First name is required']
-        
-        if not last_name or not last_name.strip():
-            errors['last_name'] = ['Last name is required']
-        
+
+        # Last name is optional - no validation needed
+
         if errors:
             raise ValidationError(get_translation('error.validation.failed'), errors)
     

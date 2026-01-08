@@ -532,7 +532,115 @@ class NotificationService:
         except Exception as e:
             logger.error(f"Eskiz SMS error: {e}", exc_info=True)
             return {'success': False, 'error': str(e)}
-    
+
+    def send_sms_to_phone(
+        self,
+        phone: str,
+        notification_type: NotificationType,
+        template_key: str,
+        template_data: Dict[str, Any],
+        language: str = 'uz'
+    ) -> Dict[str, Any]:
+        """
+        Send SMS to a phone number without requiring a User object.
+
+        Used for sending OTPs during registration when user doesn't exist yet.
+
+        Args:
+            phone: Phone number in normalized format (+998XXXXXXXXX)
+            notification_type: Type of notification for template lookup
+            template_key: Specific template key (e.g., 'sms.registration.otp')
+            template_data: Data to render in template
+            language: Language code for template
+
+        Returns:
+            Dict with success status and message_id or error
+        """
+        logger.info(f"send_sms_to_phone started: phone={phone[:4]}***{phone[-4:]}, template_key={template_key}")
+
+        if not self.eskiz_client:
+            logger.error("send_sms_to_phone error: Eskiz SMS not configured")
+            return {'success': False, 'error': 'SMS service not configured'}
+
+        if not phone:
+            logger.error("send_sms_to_phone error: No phone number provided")
+            return {'success': False, 'error': 'No phone number provided'}
+
+        # Get template by key from translation system
+        from business_app.utils.translations import get_translation
+
+        # Try to get SMS content from translation system with the specific key
+        content = get_translation(template_key, language=language, default=None)
+
+        if not content:
+            # Fallback templates for phone registration
+            fallback_templates = {
+                'sms.registration.otp': {
+                    'uz': "Bluestream: Ro'yxatdan o'tish kodi: {otp_code}. Kod 3 daqiqa amal qiladi.",
+                    'ru': "Bluestream: Код регистрации: {otp_code}. Код действителен 3 минуты.",
+                    'en': "Bluestream: Your registration code: {otp_code}. Valid for 3 minutes."
+                },
+                'sms.welcome': {
+                    'uz': "Bluestream'ga xush kelibsiz, {first_name}! Buyurtma berish uchun ilovamizdan foydalaning.",
+                    'ru': "Добро пожаловать в Bluestream, {first_name}! Используйте наше приложение для заказов.",
+                    'en': "Welcome to Bluestream, {first_name}! Use our app to place orders."
+                }
+            }
+
+            if template_key in fallback_templates:
+                content = fallback_templates[template_key].get(language, fallback_templates[template_key].get('en'))
+            else:
+                logger.error(f"send_sms_to_phone error: No template found for key {template_key}")
+                return {'success': False, 'error': f'SMS template not found: {template_key}'}
+
+        # Render template with data
+        try:
+            rendered_content = self._render_template(content, template_data, language)
+        except Exception as e:
+            logger.error(f"Template rendering failed: {e}")
+            rendered_content = content  # Use unrendered template as fallback
+
+        logger.info(f"send_sms_to_phone rendered content: {rendered_content[:50]}...")
+
+        try:
+            # Clean phone number (Eskiz expects format like 998901234567)
+            clean_phone = phone.replace('+', '').replace(' ', '').replace('-', '')
+
+            # Send SMS via Eskiz
+            response = self.eskiz_client.send_sms(
+                mobile_phone=clean_phone,
+                message=rendered_content,
+                from_whom=self.eskiz_from
+            )
+
+            # Check if SMS was sent successfully
+            if response and hasattr(response, 'status'):
+                if response.status == 'success':
+                    logger.info(f"SMS sent successfully to {clean_phone[:3]}***{clean_phone[-4:]}. Message ID: {getattr(response, 'id', 'N/A')}")
+                    return {
+                        'success': True,
+                        'message_id': getattr(response, 'id', None),
+                        'phone': clean_phone
+                    }
+                else:
+                    error_msg = getattr(response, 'message', 'Unknown error from SMS provider')
+                    logger.error(f"Eskiz SMS failed: status={response.status}, message={error_msg}")
+                    return {
+                        'success': False,
+                        'error': f"SMS provider returned status: {response.status}",
+                        'details': error_msg
+                    }
+            else:
+                logger.warning(f"Eskiz SMS returned unexpected response format: {response}")
+                return {
+                    'success': False,
+                    'error': 'Unexpected response from SMS provider'
+                }
+
+        except Exception as e:
+            logger.error(f"Eskiz SMS error: {e}", exc_info=True)
+            return {'success': False, 'error': str(e)}
+
     def _send_telegram_notification(self, user: User, notification_type: NotificationType,
                                    template_data: Dict[str, Any], language: str) -> Dict[str, Any]:
         """Send Telegram notification"""

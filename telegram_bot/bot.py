@@ -154,8 +154,11 @@ class WaterBusinessBot:
                     logger.info("!!! PRE_CHECKOUT_QUERY RECEIVED !!!")
                     logger.info(f"User: {update.effective_user.id}")
                     logger.info(f"Query ID: {update.pre_checkout_query.id}")
+                    logger.info(f"From: {update.pre_checkout_query.from_user}")
                     logger.info(f"Amount: {update.pre_checkout_query.total_amount} {update.pre_checkout_query.currency}")
                     logger.info(f"Payload: {update.pre_checkout_query.invoice_payload}")
+                    logger.info(f"Shipping option: {update.pre_checkout_query.shipping_option_id}")
+                    logger.info(f"Order info: {update.pre_checkout_query.order_info}")
                     logger.info("=" * 70)
 
             

@@ -307,7 +307,7 @@ class OrderHandlers:
                 order_data = {
                     'delivery_address_id': address_id,
                     'payment_method': payment_method,
-                    'order_source': 'telegram',
+                    'source': 'telegram',
                     'items': [
                         {
                             'product_id': item['product']['id'],

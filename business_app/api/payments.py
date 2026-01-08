@@ -1163,7 +1163,7 @@ def record_telegram_payment():
         status = data.get('status', 'completed')
 
         # Validate order exists and belongs to user
-        order = Order.query.filter_by(
+        order: Order = Order.query.filter_by(
             id=order_id,
             user_id=current_user_id
         ).first()
@@ -1173,7 +1173,7 @@ def record_telegram_payment():
 
         # Check for duplicate payment (idempotency)
         existing_payment = Payment.query.filter_by(
-            provider_payment_id=telegram_charge_id
+            provider_transaction_id=telegram_charge_id
         ).first()
 
         if existing_payment:
@@ -1197,12 +1197,11 @@ def record_telegram_payment():
             user_id=current_user_id,
             amount=amount,
             currency=currency,
-            payment_method=PaymentMethodType.PAYME,
+            payment_method=PaymentMethod.PAYME if payment_method.lower() == 'payme' else PaymentMethod.CASH,
             status=PaymentStatus.COMPLETED,
-            provider_payment_id=telegram_charge_id,
-            provider_reference=provider_charge_id,
+            provider_transaction_id=telegram_charge_id,
             description=f'Telegram payment for order #{order.order_number}',
-            metadata={
+            provider_data={
                 'telegram_payment_charge_id': telegram_charge_id,
                 'provider_payment_charge_id': provider_charge_id,
                 'payment_source': 'telegram_bot',

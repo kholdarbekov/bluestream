@@ -206,7 +206,7 @@ const Orders = () => {
       width: 120,
       render: (amount) => (
         <span style={{ fontWeight: 'bold', color: '#52c41a' }}>
-          ${amount?.toFixed(2)}
+          {amount?.toFixed(0)} UZS
         </span>
       )
     },

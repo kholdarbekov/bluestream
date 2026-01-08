@@ -48,7 +48,8 @@ class User(db.Model, TimestampMixin):
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     registration_source = Column(String(50), default='web', index=True)
-    
+    registration_method = Column(String(20), default='email', index=True)  # 'email', 'phone', 'telegram'
+
     # Telegram/Bot-specific fields
     telegram_id = Column(String(50), unique=True, nullable=True, index=True)
     telegram_username = Column(String(255), nullable=True)
@@ -243,6 +244,7 @@ class User(db.Model, TimestampMixin):
             'preferred_language': self.preferred_language,
             'telegram_id': self.telegram_id,
             'registration_source': self.registration_source,
+            'registration_method': self.registration_method,
             'telegram_username': self.telegram_username,
             'is_bot_active': self.is_bot_active,
             'bot_state': self.bot_state,

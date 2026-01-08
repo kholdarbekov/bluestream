@@ -729,6 +729,17 @@ def inject_global_vars():
     except:
         pass
     
+    # Determine base URLs for cross-domain navigation
+    # When on cabinet subdomain, nav links should go to main site
+    host = request.host.lower() if request.host else ''
+    is_cabinet_subdomain = host.startswith('cabinet.')
+    is_admin_subdomain = host.startswith('admin.')
+    
+    # Use HTTPS for production, check scheme from X-Forwarded-Proto
+    scheme = request.headers.get('X-Forwarded-Proto', 'https')
+    main_site_url = f"{scheme}://bluestream.uz"
+    cabinet_site_url = f"{scheme}://cabinet.bluestream.uz"
+    
     return {
         'current_language': language,
         'nav_categories': categories,
@@ -738,7 +749,12 @@ def inject_global_vars():
         'company_email': 'info@bluestream.uz',
         'moment': lambda: MomentJS(),
         'min': min,
-        'max': max
+        'max': max,
+        # Cross-domain navigation
+        'main_site_url': main_site_url,
+        'cabinet_site_url': cabinet_site_url,
+        'is_cabinet_subdomain': is_cabinet_subdomain,
+        'is_admin_subdomain': is_admin_subdomain
     }
 
 

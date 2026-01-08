@@ -708,6 +708,35 @@ BACKEND_TRANSLATIONS = {
         'uz': '❌ Manzilni saqlashda xatolik. Iltimos, qaytadan urinib ko\'ring.',
         'ru': '❌ Не удалось сохранить адрес. Пожалуйста, попробуйте снова.'
     },
+
+    # ============================================================================
+    # Admin UI - Users Page (ui.users.*)
+    # ============================================================================
+    'ui.users.reg_method_phone': {
+        'en': 'Phone',
+        'uz': 'Telefon',
+        'ru': 'Телефон'
+    },
+    'ui.users.reg_method_email': {
+        'en': 'Email',
+        'uz': 'Email',
+        'ru': 'Email'
+    },
+    'ui.users.reg_method_telegram': {
+        'en': 'Telegram',
+        'uz': 'Telegram',
+        'ru': 'Telegram'
+    },
+    'ui.users.filter_by_registration': {
+        'en': 'Registration',
+        'uz': 'Ro\'yxatdan o\'tish',
+        'ru': 'Регистрация'
+    },
+    'ui.users.registration_method': {
+        'en': 'Registration Method',
+        'uz': 'Ro\'yxatdan o\'tish usuli',
+        'ru': 'Способ регистрации'
+    },
 }
 
 

@@ -205,199 +205,13 @@ class PaymentService:
 
         return payment
 
-    def process_card_payment(self, order_id: int, card_id: int, user_id: int,
-                            amount: Optional[int] = None) -> Payment:
-        """
-        Process payment using a stored credit card
-
-        Args:
-            order_id: Order ID to pay for
-            card_id: Saved card ID
-            user_id: User ID (for security verification)
-            amount: Payment amount (optional, defaults to order total)
-
-        Returns:
-            Payment object
-
-        Raises:
-            NotFoundError: If order or card not found
-            ValidationError: If card is invalid or payment fails
-            PaymentError: If payment processing fails
-        """
-        # Validate order exists
-        order = Order.query.get(order_id)
-        if not order:
-            raise NotFoundError(get_translation('error.not_found'))
-
-        # Verify order belongs to user
-        if order.user_id != user_id:
-            raise ValidationError(get_translation('error.forbidden'))
-
-        # Use order total if amount not specified
-        if amount is None:
-            amount = order.total_amount
-
-        # Validate card
-        is_valid, error_message = self.validate_card_for_payment(card_id, user_id, amount)
-        if not is_valid:
-            raise ValidationError(error_message)
-
-        # Get card details
-        card = self.get_card_by_id(card_id, user_id)
-
-        # Determine payment provider based on card brand
-        if card.provider == 'payme':
-            payment_method = PaymentMethod.PAYME
-        elif card.provider == 'click':
-            payment_method = PaymentMethod.CLICK
-        else:
-            # Default to Payme for international cards
-            payment_method = PaymentMethod.PAYME
-
-        # Create payment record
-        payment = self.create_payment(
-            order_id=order_id,
-            payment_method=payment_method,
-            amount=amount,
-            card_id=card_id,
-            card_token=card.card_token,
-            card_brand=card.card_brand,
-            last_four_digits=card.last_four_digits
-        )
-
-        try:
-            # Process payment through gateway
-            if payment_method == PaymentMethod.PAYME:
-                result = self._process_payme_card_payment(payment, card)
-            elif payment_method == PaymentMethod.CLICK:
-                result = self._process_click_card_payment(payment, card)
-            else:
-                raise PaymentError(get_translation('error.payment.unsupported_method'))
-
-            # Update payment status based on gateway response
-            if result.get('success'):
-                payment.status = PaymentStatus.COMPLETED
-                payment.paid_at = datetime.now(timezone.utc)
-                payment.gateway_reference = result.get('transaction_id')
-                payment.gateway_response = result
-
-                # Mark card as verified on first successful payment
-                if not card.is_verified:
-                    card.is_verified = True
-
-                self._create_transaction(payment, 'payment_completed', result)
-                db.session.commit()
-
-                self._handle_successful_payment(payment)
-
-                # Log successful payment
-                audit_logger.log_event(
-                    event_type=AuditEventType.PAYMENT_PROCESSED,
-                    action="card_payment_successful",
-                    severity=AuditSeverity.MEDIUM,
-                    resource_type="payment",
-                    resource_id=str(payment.id),
-                    description=f"Card payment successful for order {order_id}",
-                    additional_data={
-                        'order_id': order_id,
-                        'amount': amount,
-                        'card_last_four': card.last_four_digits,
-                        'payment_method': payment_method.value,
-                        'user_id': user_id
-                    }
-                )
-            else:
-                payment.status = PaymentStatus.FAILED
-                payment.gateway_response = result
-                self._create_transaction(payment, 'payment_failed', result)
-                db.session.commit()
-
-                # Log failed payment
-                audit_logger.log_event(
-                    event_type=AuditEventType.PAYMENT_FAILED,
-                    action="card_payment_failed",
-                    severity=AuditSeverity.MEDIUM,
-                    resource_type="payment",
-                    resource_id=str(payment.id),
-                    description=f"Card payment failed for order {order_id}",
-                    additional_data={
-                        'order_id': order_id,
-                        'amount': amount,
-                        'card_last_four': card.last_four_digits,
-                        'error': result.get('error_message'),
-                        'user_id': user_id
-                    }
-                )
-
-                raise PaymentError(result.get('error_message', get_translation('api.payments.failed')))
-
-            return payment
-
-        except Exception as e:
-            current_app.logger.error(f"Card payment processing error for order {order_id}: {e}")
-            payment.status = PaymentStatus.FAILED
-            db.session.commit()
-            raise PaymentError(get_translation('api.payments.failed'))
-
-    def _process_payme_card_payment(self, payment: Payment, card: CreditCard) -> Dict[str, Any]:
-        """
-        Process card payment through Payme gateway
-        (Simplified implementation - integrate with actual Payme card API)
-
-        Args:
-            payment: Payment object
-            card: CreditCard object
-
-        Returns:
-            Dict with success status and transaction details
-        """
-        try:
-            # Payme Subscribe API: Charge saved card
-            # Step 1: Create receipt (invoice)
-            amount_tiyin = int(payment.amount * 100)
-            create_receipt = self._payme_request('receipts.create', {
-                'amount': amount_tiyin,
-                'account': {
-                    'order_id': str(payment.order_id)
-                }
-            })
-            
-            if 'error' in create_receipt:
-                 raise PaymentError(f"Failed to create Payme receipt: {create_receipt['error'].get('message')}")
-                 
-            receipt_id = create_receipt['result']['receipt']['_id']
-            
-            # Step 2: Pay receipt with card token (Verify)
-            pay_receipt = self._payme_request('receipts.pay', {
-                'id': receipt_id,
-                'token': card.card_token
-            })
-            
-            if 'error' in pay_receipt:
-                raise PaymentError(f"Failed to process card payment: {pay_receipt['error'].get('message')}")
-
-            # Return success
-            return {
-                'success': True,
-                'transaction_id': receipt_id,
-                'amount': payment.amount,
-                'timestamp': datetime.now(timezone.utc).isoformat(),
-                'provider_response': pay_receipt['result']
-            }
-
-        except Exception as e:
-            current_app.logger.error(f"Payme card payment error: {e}")
-            return {
-                'success': False,
-                'error_message': str(e)
-            }
 
     def _payme_request(self, method: str, params: Dict[str, Any]) -> Dict[str, Any]:
         """
         Send request to Payme Subscribe API
         
         Args:
-            method: JSON-RPC method name (e.g., 'receipts.create')
+            method: JSON-RPC method name
             params: Parameters for the method
             
         Returns:
@@ -405,9 +219,7 @@ class PaymentService:
         """
         try:
              # Subscribe API uses X-Auth headers
-             print(f"Payme: method: {method}, url: {self.payme_endpoint}, {self.payme_merchant_id}:{self.payme_secret_key}")
-             print(f"payme_secret_key: {self.payme_secret_key}")
-             print(f"payme_merchant_id: {self.payme_merchant_id}")
+             print(f"Payme: method: {method}, url: {self.payme_endpoint}")
              print(f"params: {params}")
              headers = {
                  'X-Auth': f"{self.payme_merchant_id}:{self.payme_secret_key}" if method.startswith('receipts.') else self.payme_merchant_id,
@@ -826,7 +638,7 @@ class PaymentService:
         params = {
             'amount': amount_tiyin,
             'account': {
-                'order_id': str(order.id)
+                'charge_id': str(order.id)
             },
             'description': description or f"Water delivery order #{order.order_number}"
         }
@@ -2215,104 +2027,6 @@ class PaymentService:
             ).order_by(CreditCard.created_at.desc()).first()
 
         return card
-
-    def get_card_by_id(self, card_id: int, user_id: int) -> Optional[CreditCard]:
-        """
-        Get specific card by ID with user ownership verification
-
-        Args:
-            card_id: Card ID
-            user_id: User ID (for ownership verification)
-
-        Returns:
-            CreditCard object or None if not found
-
-        Raises:
-            NotFoundError: If card not found or doesn't belong to user
-        """
-        card = CreditCard.query.filter_by(
-            id=card_id,
-            user_id=user_id,
-            is_active=True
-        ).first()
-
-        if not card:
-            raise NotFoundError(get_translation('error.not_found'))
-
-        return card
-
-    def validate_card_for_payment(self, card_id: int, user_id: int, amount: int) -> tuple[bool, Optional[str]]:
-        """
-        Validate that a card can be used for payment
-
-        Args:
-            card_id: Card ID
-            user_id: User ID
-            amount: Payment amount in smallest currency unit
-
-        Returns:
-            Tuple of (is_valid, error_message)
-            - (True, None) if valid
-            - (False, "error message") if invalid
-        """
-        try:
-            # Check card exists and belongs to user
-            card = CreditCard.query.filter_by(
-                id=card_id,
-                user_id=user_id,
-                is_active=True
-            ).first()
-
-            if not card:
-                return False, get_translation('error.not_found')
-
-            # Check if card is expired
-            current_date = datetime.now(timezone.utc)
-            is_expired = (
-                card.expiry_year < current_date.year or
-                (card.expiry_year == current_date.year and card.expiry_month < current_date.month)
-            )
-
-            if is_expired:
-                return False, get_translation('error.validation.card_expired')
-
-            # Check if card is verified (has been used successfully at least once)
-            if not card.is_verified and current_app.config.get('REQUIRE_CARD_VERIFICATION', False):
-                return False, get_translation('error.validation.card_not_verified')
-
-            # Validate amount is positive
-            if amount <= 0:
-                return False, get_translation('error.validation.invalid_amount')
-
-            # Check if provider is available for this card brand
-            if not self._is_provider_available(card.provider):
-                return False, get_translation('error.payment.provider_unavailable')
-
-            return True, None
-
-        except Exception as e:
-            current_app.logger.error(f"Card validation error: {e}")
-            return False, get_translation('error.validation.card_invalid')
-
-    def _is_provider_available(self, provider: str) -> bool:
-        """
-        Check if payment provider is available
-
-        Args:
-            provider: Provider name (payme, click, uzcard, humo)
-
-        Returns:
-            bool: True if provider is configured and available
-        """
-        if provider == 'payme':
-            return bool(self.payme_merchant_id and self.payme_secret_key)
-        elif provider == 'click':
-            return bool(self.click_merchant_id and self.click_secret_key)
-        elif provider in ['uzcard', 'humo']:
-            # These typically go through Payme or Click
-            return bool(self.payme_merchant_id or self.click_merchant_id)
-        else:
-            return False
     
     def set_default_card(self, card_id: int, user_id: int) -> CreditCard:
         """

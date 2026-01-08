@@ -3,8 +3,8 @@
  * Water Delivery Business Platform
  */
 
-$(document).ready(function() {
-    
+$(document).ready(function () {
+
     // Initialize banner carousel
     if ($('.banner-carousel').length) {
         $('.banner-carousel').owlCarousel({
@@ -22,7 +22,7 @@ $(document).ready(function() {
             }
         });
     }
-    
+
     // Initialize testimonials carousel
     if ($('.three-item-carousel').length) {
         $('.three-item-carousel').owlCarousel({
@@ -39,7 +39,7 @@ $(document).ready(function() {
             }
         });
     }
-    
+
     // Initialize single-item testimonial carousel
     if ($('.single-item-carousel').length) {
         $('.single-item-carousel').owlCarousel({
@@ -52,13 +52,13 @@ $(document).ready(function() {
             items: 1
         });
     }
-    
+
     // Cart functionality
-    window.addToCart = function(productId) {
+    window.addToCart = function (productId) {
         let cartItems = JSON.parse(localStorage.getItem('cart') || '[]');
-        
+
         const existingItem = cartItems.find(item => item.product_id === productId);
-        
+
         if (existingItem) {
             existingItem.quantity += 1;
         } else {
@@ -68,37 +68,39 @@ $(document).ready(function() {
                 added_at: new Date().toISOString()
             });
         }
-        
+
         localStorage.setItem('cart', JSON.stringify(cartItems));
         updateCartCounter();
-        
-        // Simple alert instead of custom notification
-        alert('Product added to cart successfully!');
+
+        // Show modern toast notification
+        if (typeof showNotification === 'function') {
+            showNotification('Product added to cart successfully!', 'success');
+        }
     };
-    
+
     // Update cart counter in header
     function updateCartCounter() {
         const cartItems = JSON.parse(localStorage.getItem('cart') || '[]');
         const totalItems = cartItems.reduce((sum, item) => sum + item.quantity, 0);
-        
+
         const cartCounters = document.querySelectorAll('#cart-count, #cart-count-sticky, .cart-box span');
         cartCounters.forEach(counter => {
             counter.textContent = totalItems;
             counter.style.display = totalItems > 0 ? 'inline' : 'none';
         });
     }
-    
+
     // Initialize cart counter on page load
     updateCartCounter();
-    
+
     // Pricing tabs functionality
-    $('.tab-btn').on('click', function() {
+    $('.tab-btn').on('click', function () {
         const tabId = $(this).attr('data-tab');
-        
+
         // Remove active class from all tabs and buttons
         $('.tab-btn').removeClass('active-btn');
         $('.pr-tab').removeClass('active-tab');
-        
+
         // Add active class to clicked button and corresponding tab
         $(this).addClass('active-btn');
         $(tabId).addClass('active-tab');

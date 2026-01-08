@@ -27,7 +27,9 @@ import {
   CheckCircleOutlined,
   EnvironmentOutlined,
   EditOutlined,
-  DeleteOutlined
+  DeleteOutlined,
+  PhoneOutlined,
+  MailOutlined
 } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from 'react-query';
 import { useTranslation } from 'react-i18next';
@@ -43,6 +45,7 @@ const Users = () => {
   const { t } = useTranslation('users');
   const [searchText, setSearchText] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+  const [registrationMethodFilter, setRegistrationMethodFilter] = useState('');
   const [selectedUser, setSelectedUser] = useState(null);
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [isCreateModalVisible, setIsCreateModalVisible] = useState(false);
@@ -61,12 +64,13 @@ const Users = () => {
 
   // Fetch users
   const { data, isLoading } = useQuery(
-    ['users', pagination, searchText, statusFilter],
+    ['users', pagination, searchText, statusFilter, registrationMethodFilter],
     () => adminService.getUsers({
       page: pagination.page,
       per_page: pagination.per_page,
       search: searchText,
-      status: statusFilter
+      status: statusFilter,
+      registration_method: registrationMethodFilter
     }),
     {
       keepPreviousData: true
@@ -350,22 +354,33 @@ const Users = () => {
       title: t('ui.users.contact'),
       key: 'contact',
       width: responsive.isMobileDevice ? 150 : 200,
-      render: (text, record) => (
-        <Space direction="vertical" size={4}>
-          {record.phone && (
-            <div style={{ fontSize: '14px' }}>{record.phone}</div>
-          )}
-          <div>
-            <Tag
-              color={record.registration_source === 'telegram' ? 'blue' : 'green'}
-              size="small"
-              icon={record.registration_source === 'telegram' ? <MessageOutlined /> : <GlobalOutlined />}
-            >
-              {record.registration_source === 'telegram' ? 'Telegram' : 'Web'}
-            </Tag>
-          </div>
-        </Space>
-      )
+      render: (text, record) => {
+        // Registration method icon and color
+        const methodConfig = {
+          phone: { icon: <PhoneOutlined />, color: 'green', label: t('ui.users.reg_method_phone', 'Phone') },
+          email: { icon: <MailOutlined />, color: 'purple', label: t('ui.users.reg_method_email', 'Email') },
+          telegram: { icon: <MessageOutlined />, color: 'blue', label: t('ui.users.reg_method_telegram', 'Telegram') }
+        };
+        const method = record.registration_method || 'email';
+        const config = methodConfig[method] || methodConfig.email;
+
+        return (
+          <Space direction="vertical" size={4}>
+            {record.phone && (
+              <div style={{ fontSize: '14px' }}>{record.phone}</div>
+            )}
+            <div>
+              <Tag
+                color={config.color}
+                size="small"
+                icon={config.icon}
+              >
+                {config.label}
+              </Tag>
+            </div>
+          </Space>
+        );
+      }
     },
     {
       title: t('ui.users.role'),
@@ -509,6 +524,11 @@ const Users = () => {
     setPagination({ ...pagination, page: 1 });
   };
 
+  const handleRegistrationMethodFilter = (value) => {
+    setRegistrationMethodFilter(value);
+    setPagination({ ...pagination, page: 1 });
+  };
+
   return (
     <div>
       <Card>
@@ -549,6 +569,25 @@ const Users = () => {
                 <Option value="inactive">{t('ui.users.status_inactive')}</Option>
                 <Option value="suspended">{t('ui.users.status_suspended')}</Option>
                 <Option value="banned">{t('ui.users.status_banned')}</Option>
+              </Select>
+              <Select
+                placeholder={t('ui.users.filter_by_registration', 'Registration')}
+                allowClear
+                onChange={handleRegistrationMethodFilter}
+                style={{
+                  width: '150px',
+                  minHeight: responsive.isTouchDevice ? '40px' : '32px'
+                }}
+              >
+                <Option value="email">
+                  <Space><MailOutlined />{t('ui.users.reg_method_email', 'Email')}</Space>
+                </Option>
+                <Option value="phone">
+                  <Space><PhoneOutlined />{t('ui.users.reg_method_phone', 'Phone')}</Space>
+                </Option>
+                <Option value="telegram">
+                  <Space><MessageOutlined />{t('ui.users.reg_method_telegram', 'Telegram')}</Space>
+                </Option>
               </Select>
             </Space>
           </Col>
@@ -689,6 +728,25 @@ const Users = () => {
                       size="small"
                     >
                       {selectedUser.registration_source === 'telegram' ? 'Telegram' : 'Web'}
+                    </Tag>
+                  </div>
+                  <div style={{ marginBottom: 8 }}>
+                    <strong>{t('ui.users.registration_method', 'Registration Method')}:</strong>
+                    <Tag
+                      color={
+                        selectedUser.registration_method === 'phone' ? 'green' :
+                        selectedUser.registration_method === 'telegram' ? 'blue' : 'purple'
+                      }
+                      style={{ marginLeft: 8 }}
+                      icon={
+                        selectedUser.registration_method === 'phone' ? <PhoneOutlined /> :
+                        selectedUser.registration_method === 'telegram' ? <MessageOutlined /> : <MailOutlined />
+                      }
+                      size="small"
+                    >
+                      {selectedUser.registration_method === 'phone' ? t('ui.users.reg_method_phone', 'Phone') :
+                       selectedUser.registration_method === 'telegram' ? t('ui.users.reg_method_telegram', 'Telegram') :
+                       t('ui.users.reg_method_email', 'Email')}
                     </Tag>
                   </div>
                   <div style={{ marginBottom: 8 }}>

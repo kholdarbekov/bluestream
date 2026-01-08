@@ -789,3 +789,141 @@
 .btn-resend i {
     font-size: 14px;
 }
+
+/* ============================================
+   OTP VERIFICATION SECTION
+   ============================================ */
+
+.otp-header {
+    text-align: center;
+    margin-bottom: 32px;
+}
+
+.otp-header .otp-icon {
+    width: 70px;
+    height: 70px;
+    background: linear-gradient(135deg, #00d1f9, #002c8f);
+    border-radius: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto 20px;
+    box-shadow: 0 8px 24px rgba(0, 209, 249, 0.3);
+}
+
+.otp-header .otp-icon i {
+    font-size: 32px;
+    color: #ffffff;
+}
+
+.otp-header h3 {
+    font-size: 24px;
+    font-weight: 700;
+    color: #061a3a;
+    margin-bottom: 10px;
+}
+
+.otp-header p {
+    font-size: 15px;
+    color: #6b7280;
+}
+
+.otp-header p strong {
+    color: #002c8f;
+    font-weight: 600;
+}
+
+/* OTP Input Boxes */
+.otp-inputs {
+    display: flex;
+    justify-content: center;
+    gap: 12px;
+    margin: 24px 0;
+}
+
+.otp-digit {
+    width: 52px;
+    height: 60px;
+    border: 2px solid #e5e7eb;
+    border-radius: 12px;
+    text-align: center;
+    font-size: 24px;
+    font-weight: 700;
+    color: #061a3a;
+    background: #ffffff;
+    transition: all 0.3s ease;
+}
+
+.otp-digit:focus {
+    border-color: #00d1f9;
+    outline: none;
+    box-shadow: 0 0 0 4px rgba(0, 209, 249, 0.15);
+}
+
+.otp-digit:not(:placeholder-shown) {
+    border-color: #00d1f9;
+    background: linear-gradient(180deg, #f0fcff 0%, #ffffff 100%);
+}
+
+/* Timer Section */
+.otp-timer-section {
+    text-align: center;
+    margin: 20px 0;
+}
+
+.otp-timer-section p {
+    font-size: 14px;
+    color: #6b7280;
+}
+
+.otp-timer-section #otpTimer {
+    font-weight: 700;
+    color: #002c8f;
+    font-size: 16px;
+}
+
+.btn-link {
+    background: none;
+    border: none;
+    color: #00d1f9;
+    font-weight: 600;
+    cursor: pointer;
+    font-size: 14px;
+    padding: 8px 16px;
+    transition: all 0.3s ease;
+}
+
+.btn-link:hover {
+    color: #002c8f;
+    text-decoration: underline;
+}
+
+.btn-link:disabled {
+    color: #9ca3af;
+    cursor: not-allowed;
+}
+
+/* Back Button */
+.otp-back {
+    text-align: center;
+    margin-top: 20px;
+    padding-top: 20px;
+    border-top: 1px solid #f3f4f6;
+}
+
+.otp-back .btn-link i {
+    margin-right: 6px;
+}
+
+/* Responsive OTP Inputs */
+@media (max-width: 480px) {
+    .otp-inputs {
+        gap: 8px;
+    }
+
+    .otp-digit {
+        width: 44px;
+        height: 52px;
+        font-size: 20px;
+    }
+}

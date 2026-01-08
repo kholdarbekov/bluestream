@@ -390,7 +390,7 @@ class SubscriptionConstructor {
         let subtotal = 0;
         const productsList = [];
 
-        this.selectedProducts.forEach(({product, quantity}) => {
+        this.selectedProducts.forEach(({ product, quantity }) => {
             const price = product.pricing?.base_price || product.base_price || 0;
             const productTotal = price * quantity;
             subtotal += productTotal;
@@ -745,7 +745,9 @@ class SubscriptionConstructor {
 
     showAddressForm() {
         // TODO: Implement address form modal
-        alert('Address form will be implemented. For now, please add addresses from your profile page.');
+        if (typeof showNotification === 'function') {
+            showNotification('Address form will be implemented. For now, please add addresses from your profile page.', 'info');
+        }
     }
 
     // ============================================
@@ -761,11 +763,11 @@ class SubscriptionConstructor {
         // Check authentication for steps that require it
         // If user is on Step 2 (Schedule) and trying to go to Step 3 (Address)
         if (this.currentStep === 2 && !this.isAuthenticated) {
-            
+
             // A. Fast-forward state to Step 3
             // This ensures when they return, 'restoreState' puts them on the Address step
             this.currentStep = 3;
-            
+
             // B. Save the data (Products, Schedule, and the new Step 3 position)
             this.saveState();
 
@@ -973,7 +975,7 @@ class SubscriptionConstructor {
                 auto_payment: this.selectedPaymentMethod !== 'cash',
                 auto_renew: true,
                 discount_percentage: 0,
-                items: Array.from(this.selectedProducts.values()).map(({product, quantity}) => ({
+                items: Array.from(this.selectedProducts.values()).map(({ product, quantity }) => ({
                     product_id: product.id,
                     quantity: quantity
                 }))
@@ -1024,7 +1026,7 @@ class SubscriptionConstructor {
         // Add products summary
         if (this.selectedProducts.size > 0) {
             const productNames = [];
-            this.selectedProducts.forEach(({product, quantity}) => {
+            this.selectedProducts.forEach(({ product, quantity }) => {
                 if (quantity > 1) {
                     productNames.push(`${quantity}x ${product.name}`);
                 } else {
@@ -1103,12 +1105,16 @@ class SubscriptionConstructor {
     }
 
     showError(message) {
-        // Simple implementation - can be enhanced with better notifications
-        alert('Error: ' + message);
+        // Use modern toast notification
+        if (typeof showNotification === 'function') {
+            showNotification(message, 'error');
+        }
     }
 
     showSuccess(message) {
-        alert('Success: ' + message);
+        if (typeof showNotification === 'function') {
+            showNotification(message, 'success');
+        }
     }
 }
 
@@ -1116,7 +1122,7 @@ class SubscriptionConstructor {
 let subscriptionConstructor;
 
 // Initialize when DOM is ready
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', function () {
     if (document.getElementById('subscription-constructor')) {
         subscriptionConstructor = new SubscriptionConstructor();
     }

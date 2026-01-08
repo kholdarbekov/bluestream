@@ -623,7 +623,16 @@ def get_users():
                 query = query.filter_by(status=user_status.value)
             except ValueError:
                 return validation_error_response('Invalid status value')
-        
+
+        # Apply registration_method filter
+        registration_method = request.args.get('registration_method')
+        if registration_method:
+            valid_methods = ['email', 'phone', 'telegram']
+            if registration_method in valid_methods:
+                query = query.filter(User.registration_method == registration_method)
+            else:
+                return validation_error_response('Invalid registration_method value')
+
         # Apply sorting
         if sort_by == 'name':
             order_field = User.first_name

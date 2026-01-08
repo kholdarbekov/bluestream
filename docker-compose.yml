@@ -313,7 +313,7 @@ services:
   nginx:
     image: nginx:1.29-alpine
     ports:
-      - "80:80"
+      - "81:80"
     volumes:
       # Main nginx config
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro

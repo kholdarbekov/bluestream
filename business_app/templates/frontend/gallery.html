@@ -222,34 +222,10 @@
 {% block extra_js %}
 <script src="{{ url_for('static', filename='js/isotope.js') }}"></script>
 <script>
-document.addEventListener('DOMContentLoaded', function() {
-    // Initialize isotope for gallery filtering
-    if (typeof Isotope !== 'undefined') {
-        const grid = document.querySelector('.items-container');
-        const iso = new Isotope(grid, {
-            itemSelector: '.masonry-item',
-            layoutMode: 'fitRows'
-        });
-        
-        // Filter functionality
-        const filterButtons = document.querySelectorAll('.filter');
-        filterButtons.forEach(button => {
-            button.addEventListener('click', function() {
-                // Remove active class from all buttons
-                filterButtons.forEach(btn => btn.classList.remove('active'));
-                // Add active class to clicked button
-                this.classList.add('active');
-                
-                // Get filter value
-                const filterValue = this.getAttribute('data-filter');
-                
-                // Filter isotope
-                iso.arrange({
-                    filter: filterValue === '.all' ? '*' : filterValue
-                });
-            });
-        });
-    }
-});
+// Initialize masonry after isotope is loaded
+// The enableMasonry function is defined in script.js
+if (typeof enableMasonry === 'function') {
+    enableMasonry();
+}
 </script>
 {% endblock %}

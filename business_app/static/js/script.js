@@ -409,12 +409,17 @@
 	//Sortable Masonary with Filters
 	function enableMasonry() {
 		if($('.sortable-masonry').length){
-	
+			// Check if isotope is available (loaded via extra_js on gallery pages)
+			var $container=$('.sortable-masonry .items-container');
+			if (typeof $.fn.isotope === 'undefined') {
+				// Isotope not loaded, skip masonry initialization
+				return;
+			}
+
 			var winDow = $(window);
 			// Needed variables
-			var $container=$('.sortable-masonry .items-container');
 			var $filter=$('.filter-btns');
-	
+
 			$container.isotope({
 				filter:'*',
 				 masonry: {

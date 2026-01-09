@@ -734,11 +734,21 @@ def inject_global_vars():
     host = request.host.lower() if request.host else ''
     is_cabinet_subdomain = host.startswith('cabinet.')
     is_admin_subdomain = host.startswith('admin.')
-    
+
+    # Check if we're in local development (localhost or 127.0.0.1)
+    is_local_dev = 'localhost' in host or '127.0.0.1' in host
+
     # Use HTTPS for production, check scheme from X-Forwarded-Proto
     scheme = request.headers.get('X-Forwarded-Proto', 'https')
-    main_site_url = f"{scheme}://bluestream.uz"
-    cabinet_site_url = f"{scheme}://cabinet.bluestream.uz"
+
+    if is_local_dev:
+        # In local development, use relative URLs (empty string)
+        main_site_url = ''
+        cabinet_site_url = ''
+    else:
+        # In production, use absolute URLs for cross-subdomain navigation
+        main_site_url = f"{scheme}://bluestream.uz"
+        cabinet_site_url = f"{scheme}://cabinet.bluestream.uz"
     
     return {
         'current_language': language,

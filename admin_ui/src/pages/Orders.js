@@ -192,12 +192,26 @@ const Orders = () => {
     },
     {
       title: t('ui.orders.items'),
-      dataIndex: 'items_count',
-      key: 'items_count',
-      width: 80,
-      render: (count) => (
-        <Tag color="blue">{count} {t('ui.orders.items_count')}</Tag>
-      )
+      dataIndex: 'items_summary',
+      key: 'items_summary',
+      width: 200,
+      render: (items, record) => {
+        if (!items || items.length === 0) {
+          return <Tag color="blue">{record.items_count || 0} {t('ui.orders.items_count')}</Tag>;
+        }
+        return (
+          <div style={{ fontSize: 12 }}>
+            {items.slice(0, 2).map((item, idx) => (
+              <div key={idx} style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {item.quantity}x {item.product_name}
+              </div>
+            ))}
+            {items.length > 2 && (
+              <span style={{ color: '#999' }}>+{items.length - 2} {t('ui.orders.more_items', 'more')}</span>
+            )}
+          </div>
+        );
+      }
     },
     {
       title: t('ui.orders.total_amount'),
@@ -352,7 +366,9 @@ const Orders = () => {
 
   // Calculate summary statistics
   const orders = data?.data?.items || [];
-  const totalRevenue = orders.reduce((sum, order) => sum + (order.total_amount || 0), 0);
+  const totalRevenue = orders
+    .filter(order => !['cancelled', 'refunded'].includes(order.status))
+    .reduce((sum, order) => sum + (order.total_amount || 0), 0);
   const pendingOrders = orders.filter(order => order.status === 'pending').length;
   const completedOrders = orders.filter(order => order.status === 'delivered').length;
 

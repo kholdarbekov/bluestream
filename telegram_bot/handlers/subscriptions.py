@@ -8,7 +8,7 @@ from telegram.ext import ContextTypes, ConversationHandler
 from i18n import i18n
 from keyboards import SubscriptionKeyboards, MenuKeyboards, ProductKeyboards
 from api_client import api_client
-from utils import user_middleware, authenticate_telegram_user
+from utils import user_middleware, get_auth_token
 
 logger = logging.getLogger('handlers')
 
@@ -34,7 +34,7 @@ class SubscriptionHandlers:
             language = await i18n.get_user_language(user_id)
 
             async with api_client as client:
-                user_token = await authenticate_telegram_user(update, client)
+                user_token = await get_auth_token(update, context, client)
                 if not user_token:
                     await self._handle_auth_error(update, language)
                     return
@@ -78,7 +78,7 @@ class SubscriptionHandlers:
             subscription_id = int(query.data.split('_')[1])
 
             async with api_client as client:
-                user_token = await authenticate_telegram_user(update, client)
+                user_token = await get_auth_token(update, context, client)
                 if not user_token:
                     await self._handle_auth_error(update, language)
                     return
@@ -158,7 +158,7 @@ class SubscriptionHandlers:
 
             # Check for templates
             async with api_client as client:
-                user_token = await authenticate_telegram_user(update, client)
+                user_token = await get_auth_token(update, context, client)
                 if not user_token:
                     await self._handle_auth_error(update, language)
                     return ConversationHandler.END
@@ -188,7 +188,7 @@ class SubscriptionHandlers:
             language = await i18n.get_user_language(user_id)
 
             async with api_client as client:
-                user_token = await authenticate_telegram_user(update, client)
+                user_token = await get_auth_token(update, context, client)
                 if not user_token:
                     await self._handle_auth_error(update, language)
                     return ConversationHandler.END
@@ -338,7 +338,7 @@ class SubscriptionHandlers:
 
             # Get user addresses
             async with api_client as client:
-                user_token = await authenticate_telegram_user(update, client)
+                user_token = await get_auth_token(update, context, client)
                 if not user_token:
                     await self._handle_auth_error(update, language)
                     return ConversationHandler.END
@@ -410,7 +410,7 @@ class SubscriptionHandlers:
 
             # Get preview from API
             async with api_client as client:
-                user_token = await authenticate_telegram_user(update, client)
+                user_token = await get_auth_token(update, context, client)
                 if not user_token:
                     await self._handle_auth_error(update, language)
                     return ConversationHandler.END
@@ -473,7 +473,7 @@ class SubscriptionHandlers:
             language = await i18n.get_user_language(user_id)
 
             async with api_client as client:
-                user_token = await authenticate_telegram_user(update, client)
+                user_token = await get_auth_token(update, context, client)
                 if not user_token:
                     await self._handle_auth_error(update, language)
                     return ConversationHandler.END
@@ -621,7 +621,7 @@ class SubscriptionHandlers:
             sub_id = int(action_data[2])
 
             async with api_client as client:
-                user_token = await authenticate_telegram_user(update, client)
+                user_token = await get_auth_token(update, context, client)
                 if not user_token:
                     await self._handle_auth_error(update, language)
                     return
@@ -667,7 +667,7 @@ class SubscriptionHandlers:
             sub_id = int(query.data.split('_')[2])
 
             async with api_client as client:
-                user_token = await authenticate_telegram_user(update, client)
+                user_token = await get_auth_token(update, context, client)
                 if not user_token:
                     await self._handle_auth_error(update, language)
                     return
@@ -698,7 +698,7 @@ class SubscriptionHandlers:
             sub_id = int(query.data.split('_')[3])
 
             async with api_client as client:
-                user_token = await authenticate_telegram_user(update, client)
+                user_token = await get_auth_token(update, context, client)
                 if not user_token:
                     await self._handle_auth_error(update, language)
                     return
@@ -747,7 +747,7 @@ class SubscriptionHandlers:
             sub_id = int(query.data.split('_')[2])
 
             async with api_client as client:
-                user_token = await authenticate_telegram_user(update, client)
+                user_token = await get_auth_token(update, context, client)
                 if not user_token:
                     await self._handle_auth_error(update, language)
                     return
@@ -793,7 +793,7 @@ class SubscriptionHandlers:
 
             # Get products
             async with api_client as client:
-                user_token = await authenticate_telegram_user(update, client)
+                user_token = await get_auth_token(update, context, client)
                 if not user_token:
                     await self._handle_auth_error(update, language)
                     return ConversationHandler.END
@@ -881,7 +881,7 @@ class SubscriptionHandlers:
             product_id = context.user_data.get('adding_product_id')
 
             async with api_client as client:
-                user_token = await authenticate_telegram_user(update, client)
+                user_token = await get_auth_token(update, context, client)
                 if not user_token:
                     await self._handle_auth_error(update, language)
                     return ConversationHandler.END
@@ -960,7 +960,7 @@ class SubscriptionHandlers:
             item_id = context.user_data.get('editing_item_id')
 
             async with api_client as client:
-                user_token = await authenticate_telegram_user(update, client)
+                user_token = await get_auth_token(update, context, client)
                 if not user_token:
                     await self._handle_auth_error(update, language)
                     return ConversationHandler.END
@@ -1009,7 +1009,7 @@ class SubscriptionHandlers:
             item_id = int(parts[3])
 
             async with api_client as client:
-                user_token = await authenticate_telegram_user(update, client)
+                user_token = await get_auth_token(update, context, client)
                 if not user_token:
                     await self._handle_auth_error(update, language)
                     return
@@ -1082,7 +1082,7 @@ class SubscriptionHandlers:
             sub_id = context.user_data.get('editing_subscription_id')
 
             async with api_client as client:
-                user_token = await authenticate_telegram_user(update, client)
+                user_token = await get_auth_token(update, context, client)
                 if not user_token:
                     await self._handle_auth_error(update, language)
                     return
@@ -1144,7 +1144,7 @@ class SubscriptionHandlers:
             sub_id = context.user_data.get('editing_subscription_id')
 
             async with api_client as client:
-                user_token = await authenticate_telegram_user(update, client)
+                user_token = await get_auth_token(update, context, client)
                 if not user_token:
                     await self._handle_auth_error(update, language)
                     return
@@ -1185,7 +1185,7 @@ class SubscriptionHandlers:
             language = await i18n.get_user_language(user_id)
 
             async with api_client as client:
-                user_token = await authenticate_telegram_user(update, client)
+                user_token = await get_auth_token(update, context, client)
                 if not user_token:
                     await self._handle_auth_error(update, language)
                     return
@@ -1230,7 +1230,7 @@ class SubscriptionHandlers:
             sub_id = int(query.data.split('_')[2])
 
             async with api_client as client:
-                user_token = await authenticate_telegram_user(update, client)
+                user_token = await get_auth_token(update, context, client)
                 if not user_token:
                     await self._handle_auth_error(update, language)
                     return
@@ -1285,7 +1285,7 @@ class SubscriptionHandlers:
             sub_id = int(query.data.split('_')[3])
 
             async with api_client as client:
-                user_token = await authenticate_telegram_user(update, client)
+                user_token = await get_auth_token(update, context, client)
                 if not user_token:
                     await self._handle_auth_error(update, language)
                     return

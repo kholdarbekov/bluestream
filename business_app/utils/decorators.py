@@ -281,8 +281,78 @@ def rate_limit(max_requests: int, window_seconds: int, per: str = 'ip'):
     return decorator
 
 
+def rate_limit_by_telegram_id(max_requests: int, window_seconds: int):
+    """
+    Rate limiting decorator for telegram-login endpoint.
+    
+    Rate limits by telegram_id from request body instead of IP address,
+    giving each Telegram user their own rate limit bucket.
+    
+    Args:
+        max_requests: Maximum requests allowed per user
+        window_seconds: Time window in seconds
+    """
+    def decorator(f):
+        @wraps(f)
+        def decorated_function(*args, **kwargs):
+            # Extract telegram_id from request body
+            data = request.get_json(silent=True) or {}
+            telegram_id = data.get('telegram_id')
+            
+            if telegram_id:
+                # Use telegram_id as identifier for per-user rate limiting
+                identifier = f"telegram:{telegram_id}"
+            else:
+                # Fall back to IP if no telegram_id provided
+                identifier = f"ip:{request.remote_addr}"
+            
+            # Create Redis key
+            key = f"rate_limit:{f.__name__}:{identifier}"
+            
+            try:
+                redis_client = redis.from_url(current_app.config['REDIS_URL'])
+                
+                # Get current count
+                current_count = redis_client.get(key)
+                
+                if current_count is None:
+                    # First request in window
+                    redis_client.setex(key, window_seconds, 1)
+                    return f(*args, **kwargs)
+                else:
+                    current_count = int(current_count)
+                    if current_count >= max_requests:
+                        # Rate limit exceeded
+                        ttl = redis_client.ttl(key)
+                        current_app.logger.warning(
+                            f"Rate limit exceeded for {identifier}: "
+                            f"{current_count}/{max_requests} requests in {window_seconds}s window"
+                        )
+                        raise RateLimitError(
+                            f"Rate limit exceeded. Try again in {ttl} seconds.",
+                            details={
+                                'retry_after': ttl, 
+                                'limit': max_requests,
+                                'identifier_type': 'telegram_id' if telegram_id else 'ip'
+                            }
+                        )
+                    else:
+                        # Increment counter
+                        redis_client.incr(key)
+                        return f(*args, **kwargs)
+            
+            except redis.RedisError as e:
+                # If Redis is down, allow the request but log warning
+                current_app.logger.warning(f"Redis unavailable for rate limiting: {e}")
+                return f(*args, **kwargs)
+        
+        return decorated_function
+    return decorator
+
+
 def cache_result(timeout: int = 300, key_prefix: str = None):
     """Cache function result"""
+
     def decorator(f):
         @wraps(f)
         def decorated_function(*args, **kwargs):

@@ -10,7 +10,7 @@ from i18n import i18n
 from keyboards import OrderKeyboards, MenuKeyboards, ProfileKeyboards, PaymentKeyboards
 from api_client import api_client
 from database import db_manager, BotUserRepository
-from utils import user_middleware, format_price, MessageBuilder, authenticate_telegram_user
+from utils import user_middleware, format_price, MessageBuilder, get_auth_token
 
 logger = logging.getLogger('handlers')
 
@@ -33,7 +33,7 @@ class OrderHandlers:
             
             # Get user token
             async with api_client as client:
-                user_token = await authenticate_telegram_user(update, client)
+                user_token = await get_auth_token(update, context, client)
                 if not user_token:
                     await self._handle_auth_error(update, language)
                     return
@@ -111,7 +111,7 @@ class OrderHandlers:
             
             # Get order details
             async with api_client as client:
-                user_token = await authenticate_telegram_user(update, client)
+                user_token = await get_auth_token(update, context, client)
                 if not user_token:
                     await self._handle_auth_error(update, language)
                     return
@@ -165,7 +165,7 @@ class OrderHandlers:
             
             # Get user's addresses
             async with api_client as client:
-                user_token = await authenticate_telegram_user(update, client)
+                user_token = await get_auth_token(update, context, client)
                 if not user_token:
                     await self._handle_auth_error(update, language)
                     return
@@ -288,7 +288,7 @@ class OrderHandlers:
 
             # Create order
             async with api_client as client:
-                user_token = await authenticate_telegram_user(update, client)
+                user_token = await get_auth_token(update, context, client)
                 if not user_token:
                     await self._handle_auth_error(update, language)
                     return
@@ -369,7 +369,7 @@ class OrderHandlers:
 
             # Cash or other payment methods - process immediately
             async with api_client as client:
-                user_token = await authenticate_telegram_user(update, client)
+                user_token = await get_auth_token(update, context, client)
                 if user_token:
                     # Clear user's cart
                     await client.clear_cart(user_token)
@@ -412,7 +412,7 @@ class OrderHandlers:
         # Get cart items from API by api_client.get_cart and show them
         cart_total_amount = 0
         async with api_client as client:
-            user_token = await authenticate_telegram_user(update, client)
+            user_token = await get_auth_token(update, context, client)
             if not user_token:
                 await self._handle_auth_error(update, language)
                 return

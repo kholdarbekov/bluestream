@@ -13,7 +13,7 @@ from shared.constants import TASHKENT_DISTRICTS, get_district_name, get_district
 from handlers.menu import main_menu_handler
 from api_client import api_client
 from database import db_manager, BotUserRepository
-from utils import user_middleware, validate_phone_number, normalize_phone_number, authenticate_telegram_user
+from utils import user_middleware, validate_phone_number, normalize_phone_number, get_auth_token
 from config import config
 
 logger = logging.getLogger('handlers')
@@ -44,7 +44,7 @@ class ProfileHandlers:
             
             # Get user profile from API
             async with api_client as client:
-                user_token = await authenticate_telegram_user(update, client)
+                user_token = await get_auth_token(update, context, client)
                 if not user_token:
                     await self._handle_auth_error(update, language)
                     return
@@ -97,7 +97,7 @@ class ProfileHandlers:
 
             # Get user profile from API to check phone status
             async with api_client as client:
-                user_token = await authenticate_telegram_user(update, client)
+                user_token = await get_auth_token(update, context, client)
                 if not user_token:
                     await self._handle_auth_error(update, language)
                     return
@@ -218,7 +218,7 @@ class ProfileHandlers:
 
             # Also update via API
             async with api_client as client:
-                user_token = await authenticate_telegram_user(update, client)
+                user_token = await get_auth_token(update, context, client)
                 if user_token:
                     try:
                         await client.update_user_profile(user_token, {'phone': phone})
@@ -276,7 +276,7 @@ class ProfileHandlers:
 
             # Update profile via API
             async with api_client as client:
-                user_token = await authenticate_telegram_user(update, client)
+                user_token = await get_auth_token(update, context, client)
                 if user_token:
                     profile_data = {
                         'first_name': first_name,
@@ -352,7 +352,7 @@ class ProfileHandlers:
 
             # Get user's phone from profile
             async with api_client as client:
-                user_token = await authenticate_telegram_user(update, client)
+                user_token = await get_auth_token(update, context, client)
                 if not user_token:
                     await self._handle_auth_error(update, language)
                     return
@@ -374,7 +374,7 @@ class ProfileHandlers:
 
             # Send verification code
             async with api_client as client:
-                user_token = await authenticate_telegram_user(update, client)
+                user_token = await get_auth_token(update, context, client)
                 if user_token:
                     response = await client.send_phone_verification(user_token, phone)
                     if response.success:
@@ -630,7 +630,7 @@ class ProfileHandlers:
                 # Verify OTP via API
                 try:
                     async with api_client as client:
-                        user_token = await authenticate_telegram_user(update, client)
+                        user_token = await get_auth_token(update, context, client)
                         if user_token:
                             response = await client.verify_phone_otp(user_token, text)
                             if response.success:
@@ -672,7 +672,7 @@ class ProfileHandlers:
 
             # Update user profile
             async with api_client as client:
-                user_token = await authenticate_telegram_user(update, client)
+                user_token = await get_auth_token(update, context, client)
                 if user_token:
                     profile_data = {
                         'first_name': name.split()[0] if name.split() else name,
@@ -768,7 +768,7 @@ class ProfileHandlers:
             
             # Get user addresses
             async with api_client as client:
-                user_token = await authenticate_telegram_user(update, client)
+                user_token = await get_auth_token(update, context, client)
                 if not user_token:
                     await self._handle_auth_error(update, language)
                     return
@@ -885,7 +885,7 @@ class ProfileHandlers:
             # Attempt reverse geocoding
             reverse_geocoded_address = None
             async with api_client as client:
-                user_token = await authenticate_telegram_user(update, client)
+                user_token = await get_auth_token(update, context, client)
                 if user_token:
                     response = await client.reverse_geocode(user_token, location.latitude, location.longitude)
                     if response.success and response.data.get('data'):
@@ -992,7 +992,7 @@ class ProfileHandlers:
 
                 # Save address via API
                 async with api_client as client:
-                    user_token = await authenticate_telegram_user(update, client)
+                    user_token = await get_auth_token(update, context, client)
                     if user_token:
                         response = await client.add_user_address(user_token, address_data)
                         if response.success:
@@ -1426,7 +1426,7 @@ class ProfileHandlers:
             # Attempt geocoding
             geocode_success = False
             async with api_client as client:
-                user_token = await authenticate_telegram_user(update, client)
+                user_token = await get_auth_token(update, context, client)
                 if user_token:
                     hint_lat = addr_data.get('hint_lat')
                     hint_lon = addr_data.get('hint_lon')
@@ -1511,7 +1511,7 @@ class ProfileHandlers:
             # Attempt geocoding
             geocode_success = False
             async with api_client as client:
-                user_token = await authenticate_telegram_user(update, client)
+                user_token = await get_auth_token(update, context, client)
                 if user_token:
                     hint_lat = addr_data.get('hint_lat')
                     hint_lon = addr_data.get('hint_lon')
@@ -1682,7 +1682,7 @@ class ProfileHandlers:
             # Save via API
             success = False
             async with api_client as client:
-                user_token = await authenticate_telegram_user(update, client)
+                user_token = await get_auth_token(update, context, client)
                 if user_token:
                     response = await client.add_user_address(user_token, address_payload)
                     if response.success:
@@ -1737,7 +1737,7 @@ class ProfileHandlers:
             
             # Get address details from API
             async with api_client as client:
-                user_token = await authenticate_telegram_user(update, client)
+                user_token = await get_auth_token(update, context, client)
                 if not user_token:
                     await self._handle_auth_error(update, language)
                     return
@@ -1808,7 +1808,7 @@ class ProfileHandlers:
             
             # Get user addresses
             async with api_client as client:
-                user_token = await authenticate_telegram_user(update, client)
+                user_token = await get_auth_token(update, context, client)
                 if not user_token:
                     await self._handle_auth_error(update, language)
                     return
@@ -1861,7 +1861,7 @@ class ProfileHandlers:
             
             # Get user addresses
             async with api_client as client:
-                user_token = await authenticate_telegram_user(update, client)
+                user_token = await get_auth_token(update, context, client)
                 if not user_token:
                     await self._handle_auth_error(update, language)
                     return
@@ -1917,7 +1917,7 @@ class ProfileHandlers:
             
             # Set address as default via API
             async with api_client as client:
-                user_token = await authenticate_telegram_user(update, client)
+                user_token = await get_auth_token(update, context, client)
                 if not user_token:
                     await self._handle_auth_error(update, language)
                     return
@@ -2001,7 +2001,7 @@ class ProfileHandlers:
             
             # Get address details for confirmation
             async with api_client as client:
-                user_token = await authenticate_telegram_user(update, client)
+                user_token = await get_auth_token(update, context, client)
                 if not user_token:
                     await self._handle_auth_error(update, language)
                     return
@@ -2054,7 +2054,7 @@ class ProfileHandlers:
             
             # Delete address via API
             async with api_client as client:
-                user_token = await authenticate_telegram_user(update, client)
+                user_token = await get_auth_token(update, context, client)
                 if not user_token:
                     await self._handle_auth_error(update, language)
                     return
@@ -2108,7 +2108,7 @@ class ProfileHandlers:
             
             # Get current address details
             async with api_client as client:
-                user_token = await authenticate_telegram_user(update, client)
+                user_token = await get_auth_token(update, context, client)
                 if not user_token:
                     await self._handle_auth_error(update, language)
                     return
@@ -2187,7 +2187,7 @@ class ProfileHandlers:
             
             # Get current address details
             async with api_client as client:
-                user_token = await authenticate_telegram_user(update, client)
+                user_token = await get_auth_token(update, context, client)
                 if not user_token:
                     await self._handle_auth_error(update, language)
                     return
@@ -2252,7 +2252,7 @@ class ProfileHandlers:
             
             # Update address via API
             async with api_client as client:
-                user_token = await authenticate_telegram_user(update, client)
+                user_token = await get_auth_token(update, context, client)
                 if not user_token:
                     await self._handle_auth_error(update, language)
                     return
@@ -2308,7 +2308,7 @@ class ProfileHandlers:
             
             # Update address via API
             async with api_client as client:
-                user_token = await authenticate_telegram_user(update, client)
+                user_token = await get_auth_token(update, context, client)
                 if not user_token:
                     await self._handle_auth_error(update, language)
                     return
@@ -2416,7 +2416,7 @@ class ProfileHandlers:
             
             # Call logout API to invalidate tokens
             async with api_client as client:
-                user_token = await authenticate_telegram_user(update, client)
+                user_token = await get_auth_token(update, context, client)
                 if user_token:
                     try:
                         # Call logout-all endpoint to invalidate all sessions

@@ -12,7 +12,7 @@ from pydantic import ValidationError as PydanticValidationError
 from business_app.utils.service_factory import get_auth_service
 from business_app.utils.decorators import (
     require_auth, validate_json, handle_exceptions,
-    rate_limit, log_request
+    rate_limit, rate_limit_by_telegram_id, log_request
 )
 from business_app.middleware import jwt_required_with_refresh
 from business_app.utils.validators import phone_validator, email_validator
@@ -1950,7 +1950,7 @@ def cancel_phone_change():
 
 
 @auth_bp.route('/telegram-login', methods=['POST'])
-@rate_limit(50, 3600)  # 50 telegram logins per hour
+@rate_limit_by_telegram_id(100, 3600)  # 100 per hour PER TELEGRAM USER (not shared IP)
 @validate_json(['telegram_id'])
 @handle_exceptions
 @log_request

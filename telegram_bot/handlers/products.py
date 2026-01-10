@@ -11,7 +11,7 @@ from i18n import i18n
 from keyboards import ProductKeyboards, MenuKeyboards, OrderKeyboards
 from api_client import api_client
 from database import db_manager, BotUserRepository
-from utils import user_middleware, format_price, authenticate_telegram_user
+from utils import user_middleware, format_price, get_auth_token
 
 logger = logging.getLogger('handlers')
 
@@ -35,9 +35,9 @@ class ProductHandlers:
             logger.info(f"Products menu requested by user {user_id}")
             language = await i18n.get_user_language(user_id)
             
-            # Get user token for API calls
+            # Get user token for API calls (uses TokenManager for caching)
             async with api_client as client:
-                user_token = await authenticate_telegram_user(update, client)
+                user_token = await get_auth_token(update, context, client)
                 if not user_token:
                     await self._handle_auth_error(update, language)
                     return
@@ -110,7 +110,7 @@ class ProductHandlers:
             
             # Get user token
             async with api_client as client:
-                user_token = await authenticate_telegram_user(update, client)
+                user_token = await get_auth_token(update, context, client)
                 if not user_token:
                     await self._handle_auth_error(update, language)
                     return
@@ -177,7 +177,7 @@ class ProductHandlers:
             
             # Get user token
             async with api_client as client:
-                user_token = await authenticate_telegram_user(update, client)
+                user_token = await get_auth_token(update, context, client)
                 if not user_token:
                     await self._handle_auth_error(update, language)
                     return
@@ -230,7 +230,7 @@ class ProductHandlers:
             
             # Get product details for quantity selector
             async with api_client as client:
-                user_token = await authenticate_telegram_user(update, client)
+                user_token = await get_auth_token(update, context, client)
                 if not user_token:
                     await self._handle_auth_error(update, language)
                     return
@@ -290,7 +290,7 @@ class ProductHandlers:
             
             # Get product for price calculation
             async with api_client as client:
-                user_token = await authenticate_telegram_user(update, client)
+                user_token = await get_auth_token(update, context, client)
                 response = await client.get_product(user_token, product_id)
                 if response.success:
                     product = response.data['data']['product']
@@ -351,7 +351,7 @@ class ProductHandlers:
             
             # Get user token
             async with api_client as client:
-                user_token = await authenticate_telegram_user(update, client)
+                user_token = await get_auth_token(update, context, client)
                 if not user_token:
                     await self._handle_auth_error(update, language)
                     return
@@ -437,7 +437,7 @@ class ProductHandlers:
         user_id = update.effective_user.id
         language = await i18n.get_user_language(user_id)
         async with api_client as client:
-            user_token = await authenticate_telegram_user(update, client)
+            user_token = await get_auth_token(update, context, client)
             if not user_token:
                 await self._handle_auth_error(update, language)
                 return
@@ -486,7 +486,7 @@ class ProductHandlers:
         
         # Clear cart
         async with api_client as client:
-            user_token = await authenticate_telegram_user(update, client)
+            user_token = await get_auth_token(update, context, client)
             if not user_token:
                 await self._handle_auth_error(update, language)
                 return

@@ -53,13 +53,14 @@ from database import db_manager, BotUserRepository
 from i18n import i18n
 from api_client import api_client
 from webhook_server import webhook_server
+from token_manager import TokenManager
 from handlers import (
     start_handler, main_menu_handler, language_handler,
     product_handlers, order_handlers, subscription_handlers,
     profile_handlers, loyalty_handlers, admin_handlers,
     support_handlers, payment_handlers
 )
-from utils import error_handler, rate_limiter, user_middleware, authenticate_telegram_user
+from utils import error_handler, rate_limiter, user_middleware, get_auth_token
 from keyboards import MenuKeyboards
 
 logger = logging.getLogger('bot')
@@ -72,6 +73,7 @@ class WaterBusinessBot:
         self.application: Optional[Application] = None
         self.is_running = False
         self.user_repository = BotUserRepository(db_manager)
+        self.token_manager: Optional[TokenManager] = None
         
         # User session storage
         self.user_sessions: Dict[int, Dict[str, Any]] = {}
@@ -96,6 +98,14 @@ class WaterBusinessBot:
             # Initialize API client
             # Note: api_client will be used as async context manager in handlers
             
+            # Initialize TokenManager for JWT token caching
+            logger.info("Initializing TokenManager...")
+            self.token_manager = TokenManager(config.redis.url)
+            if await self.token_manager.connect():
+                logger.info("TokenManager connected to Redis successfully")
+            else:
+                logger.warning("TokenManager running without Redis - tokens will not be cached")
+            
             # Build Telegram application
             logger.info("Creating Telegram Application...")
             self.application = (
@@ -113,6 +123,9 @@ class WaterBusinessBot:
             except Exception as bot_error:
                 logger.error(f"Failed to connect to Telegram: {bot_error}")
                 raise
+            
+            # Store token_manager in bot_data for handler access
+            self.application.bot_data['token_manager'] = self.token_manager
             
             # Set up handlers
             logger.info("Setting up handlers...")
@@ -656,7 +669,7 @@ class WaterBusinessBot:
 
             # Verify OTP via API
             async with api_client as client:
-                user_token = await authenticate_telegram_user(update, client)
+                user_token = await get_auth_token(update, context, client)
                 if not user_token:
                     await update.message.reply_text(
                         "❌ Authentication error. Please try again later."
@@ -876,6 +889,11 @@ class WaterBusinessBot:
             # Stop webhook server
             logger.info("Stopping webhook server...")
             await webhook_server.stop()
+
+            # Close TokenManager Redis connection
+            if self.token_manager:
+                logger.info("Closing TokenManager...")
+                await self.token_manager.close()
 
             # Close database connection
             if db_manager.is_connected:

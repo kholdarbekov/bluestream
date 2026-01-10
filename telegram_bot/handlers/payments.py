@@ -19,7 +19,7 @@ from config import config
 from i18n import i18n
 from api_client import api_client
 from database import db_manager, BotUserRepository
-from utils import authenticate_telegram_user, format_price
+from utils import get_auth_token, format_price
 from keyboards import MenuKeyboards, PaymentKeyboards
 
 logger = logging.getLogger('handlers.payments')
@@ -338,7 +338,7 @@ class PaymentHandlers:
             }
 
             async with api_client as client:
-                user_token = await authenticate_telegram_user(update, client)
+                user_token = await get_auth_token(update, context, client)
 
                 if user_token:
                     # Record the payment
@@ -423,7 +423,7 @@ class PaymentHandlers:
 
             # Fetch order details
             async with api_client as client:
-                user_token = await authenticate_telegram_user(update, client)
+                user_token = await get_auth_token(update, context, client)
                 if not user_token:
                     await query.edit_message_text(
                         i18n.get('telegram.error.auth_failed', language) or

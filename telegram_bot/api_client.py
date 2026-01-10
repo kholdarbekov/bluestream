@@ -316,9 +316,16 @@ class BusinessAPIClient:
                 # The response has nested data structure: response.data['data']['access_token']
                 data = response.data.get('data', {})
                 token = data.get('access_token')
+                refresh_token = data.get('refresh_token')
+                expires_in = data.get('expires_in', 3600)
                 if token:
                     logger.info(f"Access token received: {token[:20]}...")
-                    return token
+                    # Return both tokens for caching
+                    return {
+                        'access_token': token,
+                        'refresh_token': refresh_token,
+                        'expires_in': expires_in
+                    }
                 else:
                     logger.error("No access_token in successful response")
                     logger.error(f"Response data: {response.data}")
@@ -340,6 +347,7 @@ class BusinessAPIClient:
                     failure_reason=f"api_error_{response.status_code}",
                     error_message=response.error,
                     status_code=response.status_code
+
                 )
                 return None
                 
@@ -357,6 +365,41 @@ class BusinessAPIClient:
             return None
         finally:
             logger.info(f"=== API CLIENT AUTH DEBUG END for user {telegram_id} ===")
+    
+    async def refresh_token(self, refresh_token: str) -> Optional[Dict[str, Any]]:
+        """
+        Refresh access token using refresh token.
+        
+        Args:
+            refresh_token: Valid refresh token
+            
+        Returns:
+            Dict with new access_token and expires_in, or None if failed
+        """
+        try:
+            logger.info("Attempting to refresh access token")
+            response = await self._make_request(
+                'POST',
+                '/api/v1/auth/refresh',
+                data={'refresh_token': refresh_token}
+            )
+            
+            if response.success:
+                data = response.data.get('data', {})
+                token = data.get('access_token')
+                if token:
+                    logger.info("Access token refreshed successfully")
+                    return {
+                        'access_token': token,
+                        'expires_in': data.get('expires_in', 3600)
+                    }
+            
+            logger.warning(f"Token refresh failed: {response.error}")
+            return None
+            
+        except Exception as e:
+            logger.error(f"Token refresh error: {e}")
+            return None
     
     async def _log_authentication_failure(self, telegram_id: str, failure_reason: str, 
                                         error_message: str = None, status_code: int = None,

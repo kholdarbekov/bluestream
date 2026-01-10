@@ -9,7 +9,7 @@ from database import db_manager, BotUserRepository
 from i18n import i18n
 from keyboards import MenuKeyboards, LanguageKeyboards
 from api_client import api_client
-from utils import user_middleware, authenticate_telegram_user
+from utils import user_middleware, get_auth_token
 
 logger = logging.getLogger('handlers')
 

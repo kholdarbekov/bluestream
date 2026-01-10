@@ -87,17 +87,35 @@ rate_limiter = RateLimiter()
 user_cache = UserCache()
 
 
-async def authenticate_telegram_user(update: Update, api_client_instance) -> Optional[str]:
-    """Authenticate telegram user with business API and return token"""
-    try:
-        logger.info("=== AUTHENTICATION DEBUG START ===")
+async def authenticate_telegram_user(update: Update, api_client_instance, token_manager=None) -> Optional[str]:
+    """
+    Authenticate telegram user with business API and return token.
+    
+    Uses TokenManager for caching to avoid repeated auth calls.
+    
+    Args:
+        update: Telegram Update object
+        api_client_instance: Business API client
+        token_manager: Optional TokenManager for token caching
         
+    Returns:
+        Access token string or None if authentication failed
+    """
+    try:
         if not update.effective_user:
             logger.error("No effective_user found in update")
             return None
         
         user_id = update.effective_user.id
-        logger.info(f"Authenticating user ID: {user_id}")
+        
+        # Try to get cached token from TokenManager
+        if token_manager:
+            cached_token = await token_manager.get_valid_token(user_id, api_client_instance)
+            if cached_token:
+                logger.debug(f"Using cached token for user {user_id}")
+                return cached_token
+        
+        logger.info(f"Authenticating user {user_id} with backend API")
         
         # Prepare user data from Telegram
         user_data = {
@@ -105,26 +123,53 @@ async def authenticate_telegram_user(update: Update, api_client_instance) -> Opt
             'first_name': update.effective_user.first_name,
             'last_name': update.effective_user.last_name
         }
-        logger.info(f"User data prepared: {user_data}")
         
         # Authenticate with business API
-        logger.info("Calling api_client_instance.authenticate_user...")
-        user_token = await api_client_instance.authenticate_user(user_id, user_data)
+        auth_result = await api_client_instance.authenticate_user(user_id, user_data)
         
-        if user_token:
-            logger.info(f"Authentication successful, token received: {user_token[:20]}...")
-        else:
-            logger.error("Authentication failed - no token returned")
+        if auth_result:
+            # auth_result is now a dict with access_token, refresh_token, expires_in
+            access_token = auth_result.get('access_token')
+            refresh_token = auth_result.get('refresh_token')
+            expires_in = auth_result.get('expires_in', 3600)
+            
+            if access_token:
+                # Cache tokens for future requests
+                if token_manager and refresh_token:
+                    await token_manager.store_tokens(
+                        user_id, access_token, refresh_token, expires_in
+                    )
+                
+                logger.info(f"Authentication successful for user {user_id}")
+                return access_token
         
-        logger.info("=== AUTHENTICATION DEBUG END ===")
-        return user_token
+        logger.error(f"Authentication failed for user {user_id}")
+        return None
         
     except Exception as e:
         logger.error(f"Error in authenticate_telegram_user: {e}")
-        logger.error(f"Exception type: {type(e)}")
         import traceback
         logger.error(f"Traceback: {traceback.format_exc()}")
         return None
+
+
+async def get_auth_token(update: Update, context, api_client_instance) -> Optional[str]:
+    """
+    Get authentication token with TokenManager integration.
+    
+    This is a convenience wrapper around authenticate_telegram_user that
+    automatically retrieves the TokenManager from context.bot_data.
+    
+    Args:
+        update: Telegram Update object
+        context: Telegram context with bot_data containing token_manager
+        api_client_instance: Business API client
+        
+    Returns:
+        Access token string or None if authentication failed
+    """
+    token_manager = context.bot_data.get('token_manager') if context.bot_data else None
+    return await authenticate_telegram_user(update, api_client_instance, token_manager)
 
 
 async def user_middleware(update: Update) -> Optional[Dict[str, Any]]:

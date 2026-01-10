@@ -8,7 +8,7 @@ from telegram.ext import ContextTypes
 from i18n import i18n
 from keyboards import MenuKeyboards
 from api_client import api_client
-from utils import user_middleware, format_price, authenticate_telegram_user
+from utils import user_middleware, format_price, get_auth_token
 
 logger = logging.getLogger('handlers')
 
@@ -27,7 +27,7 @@ class LoyaltyHandlers:
             language = await i18n.get_user_language(user_id)
             
             async with api_client as client:
-                user_token = await authenticate_telegram_user(update, client)
+                user_token = await get_auth_token(update, context, client)
                 if not user_token:
                     await self._handle_auth_error(update, language)
                     return
@@ -98,7 +98,7 @@ class LoyaltyHandlers:
             language = await i18n.get_user_language(user_id)
             
             async with api_client as client:
-                user_token = await authenticate_telegram_user(update, client)
+                user_token = await get_auth_token(update, context, client)
                 if not user_token:
                     await self._handle_auth_error(update, language)
                     return
@@ -154,7 +154,7 @@ class LoyaltyHandlers:
             reward_id = int(query.data.split('_')[1])
             
             async with api_client as client:
-                user_token = await authenticate_telegram_user(update, client)
+                user_token = await get_auth_token(update, context, client)
                 if not user_token:
                     await self._handle_auth_error(update, language)
                     return

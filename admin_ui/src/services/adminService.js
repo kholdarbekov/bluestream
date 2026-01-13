@@ -34,6 +34,12 @@ class AdminService {
     return response.data;
   }
 
+  // Unlock a locked user account
+  async unlockUserAccount(userId) {
+    const response = await api.post(`/admin/users/${userId}/unlock`);
+    return response.data;
+  }
+
   // User address management
   async getUserAddresses(userId) {
     const response = await api.get(`/admin/users/${userId}/addresses`);
@@ -378,7 +384,7 @@ class AdminService {
   }
 
   async exportTranslations(params = {}) {
-    const response = await api.get('/admin/translations/export', { 
+    const response = await api.get('/admin/translations/export', {
       params,
       responseType: 'blob'
     });

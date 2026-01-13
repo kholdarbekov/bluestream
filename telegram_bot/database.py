@@ -135,7 +135,7 @@ class BotUserRepository:
     
     async def clear_user_session(self, telegram_id: int):
         """Clear user session data and bot state"""
-        # Clear bot state
+        # Clear bot state in users table
         state_query = """
         UPDATE users 
         SET bot_state = '{}', updated_at = CURRENT_TIMESTAMP
@@ -143,62 +143,7 @@ class BotUserRepository:
         """
         await self.db.execute(state_query, str(telegram_id))
         
-        # Clear any bot sessions
-        session_query = """
-        DELETE FROM bot_sessions WHERE telegram_id = $1
-        """
-        await self.db.execute(session_query, telegram_id)
-        
         logger.info(f"Cleared session data for telegram user {telegram_id}")
-
-
-class BotSessionRepository:
-    """Repository for bot session management"""
-    
-    def __init__(self, db: DatabaseManager):
-        self.db = db
-    
-    async def create_session(self, telegram_id: int, session_data: Dict[str, Any]) -> str:
-        """Create new bot session"""
-        query = """
-        INSERT INTO bot_sessions (telegram_id, session_data, expires_at)
-        VALUES ($1, $2, $3)
-        RETURNING session_id
-        """
-        expires_at = datetime.now(timezone.utc).replace(hour=23, minute=59, second=59, microsecond=999999)
-        return await self.db.fetchval(query, telegram_id, json.dumps(session_data), expires_at)
-    
-    async def get_session(self, session_id: str) -> Optional[Dict[str, Any]]:
-        """Get session by ID"""
-        query = """
-        SELECT * FROM bot_sessions 
-        WHERE session_id = $1 AND expires_at > CURRENT_TIMESTAMP
-        """
-        row = await self.db.fetchone(query, session_id)
-        if row:
-            data = dict(row)
-            data['session_data'] = json.loads(data['session_data'])
-            return data
-        return None
-    
-    async def update_session(self, session_id: str, session_data: Dict[str, Any]):
-        """Update session data"""
-        query = """
-        UPDATE bot_sessions 
-        SET session_data = $1, updated_at = CURRENT_TIMESTAMP
-        WHERE session_id = $2
-        """
-        await self.db.execute(query, json.dumps(session_data), session_id)
-    
-    async def delete_session(self, session_id: str):
-        """Delete session"""
-        query = "DELETE FROM bot_sessions WHERE session_id = $1"
-        await self.db.execute(query, session_id)
-    
-    async def cleanup_expired_sessions(self):
-        """Clean up expired sessions"""
-        query = "DELETE FROM bot_sessions WHERE expires_at < CURRENT_TIMESTAMP"
-        await self.db.execute(query)
 
 
 # Global database manager instance

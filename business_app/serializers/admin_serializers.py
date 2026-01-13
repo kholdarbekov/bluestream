@@ -561,13 +561,21 @@ def serialize_user_admin(user, include_statistics: bool = False) -> Dict[str, An
             'email_verified': user.email_verified_at is not None,
             'phone_verified': user.phone_verified_at is not None,
             'created_at': user.created_at.isoformat() if user.created_at else None,
+            'updated_at': user.updated_at.isoformat() if user.updated_at else None,
             'last_login': user.last_login.isoformat() if user.last_login else None,
             'last_activity_at': getattr(user, 'last_activity_at', None),
-            'login_attempts': getattr(user, 'login_attempts', 0),
-            'is_locked': getattr(user, 'is_locked', False),
-            'locked_until': getattr(user, 'locked_until', None),
+            'login_attempts': getattr(user, 'failed_login_attempts', 0),
+            'account_locked_until': user.account_locked_until.isoformat() if user.account_locked_until else None,
             'two_factor_enabled': getattr(user, 'two_factor_enabled', False),
-            'registration_source': user.registration_source
+            'registration_source': user.registration_source,
+            'registration_method': getattr(user, 'registration_method', None),
+            'preferred_language': getattr(user, 'preferred_language', None),
+            'is_verified': getattr(user, 'is_verified', False),
+            # Telegram fields
+            'telegram_id': user.telegram_id,
+            'telegram_username': getattr(user, 'telegram_username', None),
+            'is_bot_active': getattr(user, 'is_bot_active', False),
+            'last_bot_interaction': user.last_bot_interaction.isoformat() if getattr(user, 'last_bot_interaction', None) else None
         }
         
         if include_statistics:

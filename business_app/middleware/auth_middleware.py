@@ -319,7 +319,8 @@ def rate_limit_by_user(max_requests=60, window_seconds=3600):
 
 def check_token_blacklist():
     """
-    Middleware to check if JWT token is blacklisted
+    Middleware to check if JWT token is blacklisted.
+    Returns 401 if token is blacklisted.
     """
     def decorator(f):
         @wraps(f)
@@ -330,13 +331,17 @@ def check_token_blacklist():
                 jti = claims.get('jti')
                 
                 if jti:
-                    # Check if token is blacklisted in Redis
-                    from business_app.services.auth_service import AuthService
-                    auth_service = AuthService()
+                    # Check if token is blacklisted using TokenService
+                    from business_app.services.token_service import TokenService
+                    token_service = TokenService()
                     
-                    # Check blacklist (implementation depends on your blacklist storage)
-                    # For now, assume token is valid
-                    pass
+                    if token_service.is_token_blacklisted(jti):
+                        logger.warning(f"Blacklisted token used: {jti[:8]}...")
+                        return jsonify({
+                            'success': False,
+                            'message': 'Token has been revoked',
+                            'error_code': 'TOKEN_REVOKED'
+                        }), 401
                 
                 return f(*args, **kwargs)
                 

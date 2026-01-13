@@ -74,9 +74,6 @@ class WaterBusinessBot:
         self.is_running = False
         self.user_repository = BotUserRepository(db_manager)
         self.token_manager: Optional[TokenManager] = None
-        
-        # User session storage
-        self.user_sessions: Dict[int, Dict[str, Any]] = {}
     
     async def initialize(self):
         """Initialize bot and all dependencies"""

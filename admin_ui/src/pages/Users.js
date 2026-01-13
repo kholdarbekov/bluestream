@@ -29,7 +29,9 @@ import {
   EditOutlined,
   DeleteOutlined,
   PhoneOutlined,
-  MailOutlined
+  MailOutlined,
+  LockOutlined,
+  UnlockOutlined
 } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from 'react-query';
 import { useTranslation } from 'react-i18next';
@@ -163,6 +165,34 @@ const Users = () => {
       }
     }
   );
+
+  // Unlock user account mutation
+  const unlockUserMutation = useMutation(
+    (userId) => adminService.unlockUserAccount(userId),
+    {
+      onSuccess: () => {
+        message.success(t('ui.users.account_unlocked', 'Account unlocked successfully'));
+        queryClient.invalidateQueries('users');
+      },
+      onError: (error) => {
+        const errorMessage = error.response?.data?.message || t('ui.users.unlock_failed', 'Failed to unlock account');
+        message.error(errorMessage);
+      }
+    }
+  );
+
+  // Handle unlock user
+  const handleUnlockUser = (userId) => {
+    Modal.confirm({
+      title: t('ui.users.unlock_account_title', 'Unlock User Account?'),
+      content: t('ui.users.unlock_account_confirm', 'This will clear the account lockout and allow the user to login again.'),
+      okText: t('ui.users.unlock', 'Unlock'),
+      cancelText: t('ui.common.cancel', 'Cancel'),
+      onOk: () => {
+        unlockUserMutation.mutate(userId);
+      }
+    });
+  };
 
   // Fetch user addresses
   const fetchUserAddresses = async (userId) => {
@@ -405,11 +435,17 @@ const Users = () => {
           suspended: 'orange',
           banned: 'red'
         };
+        const isLocked = record.account_locked_until && new Date(record.account_locked_until) > new Date();
         return (
           <Space direction="vertical" size={2}>
             <Tag color={colors[status]} size="small">
               {t(`ui.users.status_${status}`)}
             </Tag>
+            {isLocked && (
+              <Tag color="error" size="small" icon={<LockOutlined />}>
+                {t('ui.users.locked', 'Locked')}
+              </Tag>
+            )}
             {record.is_bot_active && record.telegram_id && (
               <Tag color="processing" size="small">
                 {t('ui.users.bot')}
@@ -471,7 +507,16 @@ const Users = () => {
                 danger: true,
                 disabled: record.status === 'banned',
                 onClick: () => handleStatusChange(record.id, 'banned')
-              }
+              },
+              // Show unlock option if account is locked
+              ...(record.account_locked_until && new Date(record.account_locked_until) > new Date() ? [{
+                type: 'divider'
+              }, {
+                key: 'unlock',
+                label: t('ui.users.unlock_account', 'Unlock Account'),
+                icon: <UnlockOutlined />,
+                onClick: () => handleUnlockUser(record.id)
+              }] : [])
             ]
           }}
           trigger={['click']}
@@ -533,17 +578,17 @@ const Users = () => {
     <div>
       <Card>
         {/* Header - Universal Responsive Layout */}
-        <Row 
-          gutter={[16, 16]} 
+        <Row
+          gutter={[16, 16]}
           align="middle"
           justify="space-between"
           style={{ marginBottom: 20 }}
         >
           {/* Search and Filters */}
           <Col xs={24} sm={24} md={14} lg={14} xl={16}>
-            <Space 
+            <Space
               wrap
-              size="middle" 
+              size="middle"
               style={{ width: '100%' }}
             >
               <Input.Search
@@ -594,10 +639,10 @@ const Users = () => {
 
           {/* Action Buttons */}
           <Col xs={24} sm={24} md={10} lg={10} xl={8}>
-            <Space 
+            <Space
               wrap
-              size="middle" 
-              style={{ 
+              size="middle"
+              style={{
                 width: '100%',
                 justifyContent: responsive.isMobileDevice ? 'center' : 'flex-end'
               }}
@@ -644,7 +689,7 @@ const Users = () => {
           }}
           onChange={handleTableChange}
           className="admin-table"
-          scroll={{ 
+          scroll={{
             x: responsive.isMobileDevice ? 800 : 'auto',
             y: responsive.isMobileDevice ? 400 : undefined
           }}
@@ -735,18 +780,18 @@ const Users = () => {
                     <Tag
                       color={
                         selectedUser.registration_method === 'phone' ? 'green' :
-                        selectedUser.registration_method === 'telegram' ? 'blue' : 'purple'
+                          selectedUser.registration_method === 'telegram' ? 'blue' : 'purple'
                       }
                       style={{ marginLeft: 8 }}
                       icon={
                         selectedUser.registration_method === 'phone' ? <PhoneOutlined /> :
-                        selectedUser.registration_method === 'telegram' ? <MessageOutlined /> : <MailOutlined />
+                          selectedUser.registration_method === 'telegram' ? <MessageOutlined /> : <MailOutlined />
                       }
                       size="small"
                     >
                       {selectedUser.registration_method === 'phone' ? t('ui.users.reg_method_phone', 'Phone') :
-                       selectedUser.registration_method === 'telegram' ? t('ui.users.reg_method_telegram', 'Telegram') :
-                       t('ui.users.reg_method_email', 'Email')}
+                        selectedUser.registration_method === 'telegram' ? t('ui.users.reg_method_telegram', 'Telegram') :
+                          t('ui.users.reg_method_email', 'Email')}
                     </Tag>
                   </div>
                   <div style={{ marginBottom: 8 }}>

@@ -814,6 +814,48 @@ def update_user_status(user_id):
         return internal_error_response('Failed to update user status')
 
 
+@admin_bp.route('/users/<int:user_id>/unlock', methods=['POST'])
+@jwt_required()
+@manager_or_higher_required
+def unlock_user_account(user_id):
+    """
+    Unlock a locked user account.
+    
+    This endpoint clears both the Redis lockout keys and the database
+    account_locked_until field. The action is logged to the audit trail.
+    
+    Only managers and admins can perform this action.
+    
+    Returns:
+        Success message with updated user data
+    """
+    try:
+        current_user_id = get_jwt_identity()
+        
+        # Prevent self-unlock (though this shouldn't normally happen)
+        if current_user_id == user_id:
+            return validation_error_response('Cannot unlock your own account')
+        
+        from business_app.services.auth_service import AuthService
+        auth_service = AuthService()
+        
+        auth_service.unlock_user_account(user_id, current_user_id)
+        
+        # Get updated user data
+        user = User.query.get(user_id)
+        
+        return success_response(
+            data={'user': serialize_user_admin(user)},
+            message='User account unlocked successfully'
+        )
+
+    except NotFoundError as e:
+        return not_found_response(resource_type='User')
+    except Exception as e:
+        current_app.logger.error(f"Unlock user account error: {e}")
+        return internal_error_response('Failed to unlock user account')
+
+
 @admin_bp.route('/users', methods=['POST'])
 @jwt_required()
 @staff_or_higher_required
@@ -5602,7 +5644,18 @@ def _bulk_action_users(action, user_ids, parameters, reason, admin_id):
             elif action == 'assign_role':
                 new_role = parameters.get('role')
                 if new_role in [UserRole.CUSTOMER.value, UserRole.ADMIN.value, UserRole.MANAGER.value, UserRole.OPERATOR.value]:
+                    old_role = user.role
                     user.role = UserRole(new_role)
+                    
+                    # Invalidate all user tokens when role changes
+                    # Forces re-authentication with new permissions
+                    try:
+                        from business_app.services.token_service import TokenService
+                        token_service = TokenService()
+                        token_service.revoke_user_tokens(user_id)
+                        current_app.logger.info(f"Invalidated tokens for user {user_id} after role change: {old_role} -> {new_role}")
+                    except Exception as token_err:
+                        current_app.logger.warning(f"Failed to invalidate tokens for user {user_id}: {token_err}")
                 else:
                     failed_count += 1
                     errors.append({'user_id': user_id, 'error': 'Invalid role'})

@@ -372,7 +372,12 @@ class AuthService:
         return False
     
     def request_password_reset(self, identifier: str) -> bool:
-        """Request password reset"""
+        """
+        Request password reset. 
+        
+        For telegram users with placeholder emails, sends SMS if phone is verified.
+        Returns True even if user not found (prevents enumeration).
+        """
         user = User.query.filter(
             (User.email == identifier.lower()) |
             (User.phone == identifier)
@@ -382,17 +387,55 @@ class AuthService:
             # Return True to prevent email enumeration
             return True
         
-        # Generate reset token
+        # Check if user is a telegram-only user with placeholder email
+        is_telegram_placeholder = self._is_telegram_only_user(user)
+        
+        if is_telegram_placeholder:
+            # Telegram users with placeholder emails can't receive email resets
+            if user.phone and user.phone_verified_at:
+                # Send OTP via SMS for phone-based password reset
+                try:
+                    self._send_phone_password_reset(user)
+                    logger.info(f"Password reset OTP sent via SMS for telegram user {user.id}")
+                    return True
+                except Exception as e:
+                    logger.error(f"Failed to send SMS password reset: {e}")
+                    return True  # Still return True to prevent enumeration
+            else:
+                # Telegram user without verified phone - they need to verify phone first
+                logger.warning(f"Telegram user {user.id} requested password reset but has no verified phone")
+                return True  # Still return True to prevent enumeration
+        
+        # Standard email-based password reset
         token = self._generate_verification_token(user.id, 'password_reset')
         
-        # Send reset email
         from ..tasks.notification_tasks import send_password_reset_email_task
         send_password_reset_email_task.delay(user.id, token)
         
         return True
     
+    def _send_phone_password_reset(self, user: User):
+        """Send password reset OTP via SMS for phone-verified users"""
+        import hashlib
+        
+        phone_hash = hashlib.sha256(user.phone.encode()).hexdigest()[:16]
+        
+        # Generate 6-digit OTP
+        from business_app.utils.security import generate_otp
+        otp_code = generate_otp(length=6)
+        
+        # Store OTP with 10 minute expiry
+        otp_key = f"password_reset_otp:{phone_hash}"
+        user_key = f"password_reset_user:{phone_hash}"
+        self.redis_client.setex(otp_key, 600, otp_code)
+        self.redis_client.setex(user_key, 600, user.id)
+        
+        # Send SMS
+        from ..tasks.notification_tasks import send_password_reset_sms_task
+        send_password_reset_sms_task.delay(user.id, otp_code)
+    
     def reset_password(self, token: str, new_password: str) -> bool:
-        """Reset password with token"""
+        """Reset password with token and notify user via Telegram if connected"""
         # Validate new password
         validator = PasswordValidator(new_password, 'password')
         validator.validate()
@@ -412,12 +455,15 @@ class AuthService:
             # Invalidate all user sessions
             self._invalidate_all_user_sessions(user.id)
             
+            # Send telegram notification if user has telegram_id
+            self._send_password_change_telegram_notification(user, event_type='reset')
+            
             return True
         
         return False
     
     def change_password(self, user_id: int, current_password: str, new_password: str) -> bool:
-        """Change password for authenticated user"""
+        """Change password for authenticated user and notify via Telegram"""
         user = User.query.get(user_id)
         if not user:
             return False
@@ -436,6 +482,9 @@ class AuthService:
         user.password_hash = self._hash_password(new_password)
         user.password_changed_at = datetime.now(timezone.utc)
         db.session.commit()
+        
+        # Send telegram notification if user has telegram_id
+        self._send_password_change_telegram_notification(user, event_type='change')
         
         return True
 
@@ -1133,6 +1182,65 @@ class AuthService:
         except Exception as e:
             logger.warning(f"Failed to send SMS verification for user {user.id}: {e}")
     
+    def _send_password_change_telegram_notification(self, user: User, event_type: str = 'change'):
+        """
+        Send telegram notification when password is changed or reset.
+        
+        Args:
+            user: User whose password was changed
+            event_type: 'change' or 'reset'
+        """
+        if not user.telegram_id:
+            return
+        
+        try:
+            from ..tasks.notification_tasks import send_telegram_security_alert_task
+            
+            event_messages = {
+                'change': 'Your password was changed',
+                'reset': 'Your password was reset'
+            }
+            
+            message = event_messages.get(event_type, 'Your password was updated')
+            
+            send_telegram_security_alert_task.delay(
+                user_id=user.id,
+                alert_type='password_change',
+                message=message
+            )
+            
+            logger.info(f"Telegram password {event_type} notification queued for user {user.id}")
+            
+        except Exception as e:
+            logger.warning(f"Failed to send telegram password notification for user {user.id}: {e}")
+    
+    def _send_account_locked_notification(self, user: User, lockout_until: datetime):
+        """
+        Send notification when account is locked due to failed login attempts.
+        
+        Alerts user via SMS and Telegram about potential unauthorized access.
+        
+        Args:
+            user: User whose account was locked
+            lockout_until: When the lockout expires
+        """
+        try:
+            from ..tasks.notification_tasks import send_account_locked_notification_task
+            
+            # Calculate lockout duration in minutes
+            lockout_minutes = self.lockout_duration // 60
+            
+            send_account_locked_notification_task.delay(
+                user_id=user.id,
+                lockout_until=lockout_until.isoformat(),
+                lockout_minutes=lockout_minutes
+            )
+            
+            logger.info(f"Account locked notification queued for user {user.id}")
+            
+        except Exception as e:
+            logger.warning(f"Failed to queue account locked notification for user {user.id}: {e}")
+    
     def _create_user_session(self, user_id: int, access_token: str):
         """Create user session record"""
         session = UserSession(
@@ -1191,7 +1299,8 @@ class AuthService:
     # Removed _blacklist_token method - now using TokenService.blacklist_token_by_string()
     
     def _check_account_lockout(self, identifier: str):
-        """Check if account is locked due to failed attempts"""
+        """Check if account is locked due to failed attempts (checks both Redis and DB)"""
+        # Check Redis first (primary lockout mechanism)
         key = f"login_attempts:{identifier}"
         attempts = self.redis_client.get(key)
         
@@ -1199,23 +1308,137 @@ class AuthService:
             lockout_key = f"account_lockout:{identifier}"
             if self.redis_client.exists(lockout_key):
                 raise ValidationError(get_translation('api.auth.account_locked'))
+        
+        # Also check database as fallback (in case Redis was restarted)
+        try:
+            user = User.query.filter(
+                (User.email == identifier) | (User.phone == identifier)
+            ).first()
+            
+            if user and user.account_locked_until:
+                if user.account_locked_until > datetime.now(timezone.utc):
+                    raise ValidationError(get_translation('api.auth.account_locked'))
+                else:
+                    # Lockout has expired, clear it
+                    user.account_locked_until = None
+                    user.failed_login_attempts = 0
+                    db.session.commit()
+        except ValidationError:
+            raise
+        except Exception as e:
+            logger.error(f"Error checking DB lockout: {e}")
     
     def _increment_failed_attempts(self, identifier: str):
-        """Increment failed login attempts"""
+        """Increment failed login attempts and lock account in DB if max reached"""
         key = f"login_attempts:{identifier}"
         attempts = self.redis_client.incr(key)
         self.redis_client.expire(key, self.lockout_duration)
         
         if attempts >= self.max_login_attempts:
+            # Set Redis lockout key
             lockout_key = f"account_lockout:{identifier}"
             self.redis_client.setex(lockout_key, self.lockout_duration, '1')
+            
+            # Also update account_locked_until in database for persistence
+            # This allows admin to see/unlock accounts and survives Redis restarts
+            try:
+                lockout_until = datetime.now(timezone.utc) + timedelta(seconds=self.lockout_duration)
+                
+                # Look up user by email or phone
+                user = User.query.filter(
+                    (User.email == identifier) | (User.phone == identifier)
+                ).first()
+                
+                if user:
+                    user.account_locked_until = lockout_until
+                    user.failed_login_attempts = attempts
+                    db.session.commit()
+                    logger.warning(f"Account locked for user {user.id} until {lockout_until}")
+                    
+                    # Send notification about account lockout
+                    self._send_account_locked_notification(user, lockout_until)
+            except Exception as e:
+                logger.error(f"Failed to update account_locked_until in DB: {e}")
+                # Don't fail the overall operation - Redis lockout still works
     
     def _reset_failed_attempts(self, identifier: str):
-        """Reset failed login attempts"""
+        """Reset failed login attempts and clear account lockout"""
         key = f"login_attempts:{identifier}"
         lockout_key = f"account_lockout:{identifier}"
 
         self.redis_client.delete(key, lockout_key)
+        
+        # Also clear account_locked_until in database
+        try:
+            user = User.query.filter(
+                (User.email == identifier) | (User.phone == identifier)
+            ).first()
+            
+            if user and (user.account_locked_until or user.failed_login_attempts > 0):
+                user.account_locked_until = None
+                user.failed_login_attempts = 0
+                db.session.commit()
+                logger.info(f"Account lockout cleared for user {user.id}")
+        except Exception as e:
+            logger.error(f"Failed to clear account_locked_until in DB: {e}")
+
+    def unlock_user_account(self, user_id: int, admin_user_id: int) -> bool:
+        """
+        Unlock a locked user account (admin action).
+        
+        Clears both Redis lockout keys and DB account_locked_until field.
+        Logs the action to audit trail.
+        
+        Args:
+            user_id: ID of user to unlock
+            admin_user_id: ID of admin performing the unlock
+            
+        Returns:
+            True if unlock was successful
+            
+        Raises:
+            NotFoundError: If user doesn't exist
+        """
+        user = User.query.get(user_id)
+        if not user:
+            from business_app.utils.exceptions import NotFoundError
+            raise NotFoundError(f"User {user_id} not found")
+        
+        # Determine identifier for Redis keys (email or phone)
+        identifier = user.email or user.phone
+        
+        if identifier:
+            # Clear Redis lockout keys
+            key = f"login_attempts:{identifier}"
+            lockout_key = f"account_lockout:{identifier}"
+            self.redis_client.delete(key, lockout_key)
+        
+        # Clear DB fields
+        was_locked = user.account_locked_until is not None
+        user.account_locked_until = None
+        user.failed_login_attempts = 0
+        db.session.commit()
+        
+        # Log to audit trail
+        try:
+            from business_app.models.audit import AuditLog, AuditEventType
+            audit_log = AuditLog(
+                user_id=admin_user_id,
+                event_type=AuditEventType.ADMIN_ACTION.value,
+                event_details={
+                    'action': 'unlock_account',
+                    'target_user_id': user_id,
+                    'was_locked': was_locked
+                },
+                ip_address=request.remote_addr if request else None
+            )
+            db.session.add(audit_log)
+            db.session.commit()
+        except Exception as e:
+            logger.warning(f"Failed to create audit log for account unlock: {e}")
+        
+        logger.info(f"Admin {admin_user_id} unlocked account for user {user_id}")
+        return True
 
     def _is_telegram_only_user(self, user: User) -> bool:
         """

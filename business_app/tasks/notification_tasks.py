@@ -21,6 +21,136 @@ from business_app import db
 logger = get_task_logger(__name__)
 
 
+@shared_task(bind=True, max_retries=3, default_retry_delay=30)
+def send_telegram_security_alert_task(self, user_id: int, alert_type: str, message: str):
+    """
+    Send security alert notification via Telegram.
+    
+    Used for password changes, new logins from unknown devices, etc.
+    
+    Args:
+        user_id: User ID
+        alert_type: Type of alert (password_change, new_login, suspicious_activity)
+        message: Alert message
+    """
+    try:
+        logger.info(f"Sending telegram security alert for user {user_id}: {alert_type}")
+        
+        user = User.query.get(user_id)
+        if not user:
+            logger.error(f"User {user_id} not found")
+            return {'success': False, 'error': 'User not found'}
+        
+        if not user.telegram_id:
+            logger.info(f"User {user_id} has no telegram_id, skipping")
+            return {'success': False, 'error': 'No telegram ID'}
+        
+        notification_service = NotificationService()
+        
+        # Format security alert message with timestamp
+        from datetime import datetime, timezone
+        timestamp = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
+        
+        template_data = {
+            'user_name': user.first_name or 'User',
+            'alert_type': alert_type,
+            'message': message,
+            'timestamp': timestamp,
+            'company_name': current_app.config.get('COMPANY_NAME', 'Bluestream')
+        }
+        
+        result = notification_service.send_notification(
+            user_id,
+            NotificationType.SECURITY,
+            [NotificationChannel.TELEGRAM],
+            template_data
+        )
+        
+        if any(r.get('success') for r in result.values() if isinstance(r, dict)):
+            logger.info(f"Telegram security alert sent successfully to user {user_id}")
+        else:
+            logger.warning(f"Telegram security alert send returned: {result}")
+        
+        return result
+        
+    except Exception as exc:
+        logger.error(f"Failed to send telegram security alert for user {user_id}: {exc}")
+        raise self.retry(exc=exc)
+
+
+@shared_task(bind=True, max_retries=3, default_retry_delay=30)
+def send_account_locked_notification_task(self, user_id: int, lockout_until: str, lockout_minutes: int):
+    """
+    Send notification when user account is locked due to failed login attempts.
+    
+    Sends alerts via SMS and Telegram to warn user of potential unauthorized access.
+    
+    Args:
+        user_id: User ID
+        lockout_until: ISO format datetime when lockout expires
+        lockout_minutes: Lockout duration in minutes
+    """
+    try:
+        logger.info(f"Sending account locked notification for user {user_id}")
+        
+        user = User.query.get(user_id)
+        if not user:
+            logger.error(f"User {user_id} not found")
+            return {'success': False, 'error': 'User not found'}
+        
+        notification_service = NotificationService()
+        
+        template_data = {
+            'user_name': user.first_name or 'User',
+            'lockout_until': lockout_until,
+            'lockout_minutes': lockout_minutes,
+            'company_name': current_app.config.get('COMPANY_NAME', 'Bluestream'),
+            'support_contact': current_app.config.get('SUPPORT_PHONE', '')
+        }
+        
+        results = {}
+        
+        # Send SMS if user has phone
+        if user.phone:
+            try:
+                sms_result = notification_service.send_sms_to_phone(
+                    phone=user.phone,
+                    notification_type=NotificationType.SECURITY,
+                    template_key='sms.account_locked',
+                    template_data=template_data,
+                    language=user.preferred_language or 'uz'
+                )
+                results['sms'] = sms_result
+            except Exception as e:
+                logger.warning(f"Failed to send account locked SMS: {e}")
+                results['sms'] = {'success': False, 'error': str(e)}
+        
+        # Send Telegram if user has telegram_id
+        if user.telegram_id:
+            try:
+                tg_result = notification_service.send_notification(
+                    user_id,
+                    NotificationType.SECURITY,
+                    [NotificationChannel.TELEGRAM],
+                    {
+                        **template_data,
+                        'alert_type': 'account_locked',
+                        'message': f'Your account has been locked for {lockout_minutes} minutes due to too many failed login attempts.'
+                    }
+                )
+                results['telegram'] = tg_result
+            except Exception as e:
+                logger.warning(f"Failed to send account locked Telegram notification: {e}")
+                results['telegram'] = {'success': False, 'error': str(e)}
+        
+        logger.info(f"Account locked notifications sent for user {user_id}: {results}")
+        return results
+        
+    except Exception as exc:
+        logger.error(f"Failed to send account locked notification for user {user_id}: {exc}")
+        raise self.retry(exc=exc)
+
+
 @shared_task(bind=True, max_retries=3, default_retry_delay=60)
 def send_loyalty_notification_task(self, user_id: int, event_type: str, data: Dict[str, Any]):
     """Send loyalty program notification"""
@@ -580,6 +710,56 @@ def send_password_reset_email_task(self, user_id: int, reset_token: str):
         
     except Exception as exc:
         logger.error(f"Failed to send password reset email: {exc}")
+        raise self.retry(exc=exc)
+
+
+@shared_task(bind=True, max_retries=3, default_retry_delay=30)
+def send_password_reset_sms_task(self, user_id: int, otp_code: str):
+    """
+    Send password reset OTP via SMS.
+    
+    Used for telegram users with placeholder emails who have a verified phone number.
+    """
+    try:
+        logger.info(f"Sending password reset SMS for user {user_id}")
+        
+        user = User.query.get(user_id)
+        if not user:
+            logger.error(f"User {user_id} not found")
+            return {'success': False, 'error': 'User not found'}
+        
+        if not user.phone:
+            logger.error(f"User {user_id} has no phone number")
+            return {'success': False, 'error': 'No phone number'}
+        
+        notification_service = NotificationService()
+        
+        template_data = {
+            'user_name': user.first_name or 'User',
+            'otp_code': otp_code,
+            'phone_number': user.phone,
+            'company_name': current_app.config.get('COMPANY_NAME', 'Bluestream'),
+            'expiry_minutes': 10
+        }
+        
+        # Send password reset OTP via SMS
+        result = notification_service.send_sms_to_phone(
+            phone=user.phone,
+            notification_type=NotificationType.PASSWORD_RESET,
+            template_key='sms.password_reset.otp',
+            template_data=template_data,
+            language=user.preferred_language or 'uz'
+        )
+        
+        if result.get('success'):
+            logger.info(f"Password reset SMS sent successfully to user {user_id}")
+        else:
+            logger.warning(f"Password reset SMS send returned: {result}")
+        
+        return result
+        
+    except Exception as exc:
+        logger.error(f"Failed to send password reset SMS for user {user_id}: {exc}")
         raise self.retry(exc=exc)
 
 

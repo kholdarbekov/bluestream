@@ -131,6 +131,9 @@ class NotificationType(Enum):
     EMAIL_VERIFICATION = 'email_verification'
     PASSWORD_RESET = 'password_reset'
 
+    # Security notification types
+    SECURITY = 'security'  # Security alerts (password changes, suspicious activity)
+
     # Loyalty notification types
     LOYALTY_REWARD = 'loyalty_reward'
 

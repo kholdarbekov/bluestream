@@ -594,8 +594,11 @@ class ProfileHandlers:
                     
                     elif response.success and not response.data.get('available'):
                         # Phone exists - check if linking is possible
+                        available = response.data.get('available', False)
                         can_link = response.data.get('can_link', False)
                         existing_user = response.data.get('existing_user_masked', {})
+                        
+                        logger.info(f"Phone check for user {user_id}: available={available}, can_link={can_link}, existing_user={existing_user}")
                         
                         if can_link:
                             # Store phone for linking

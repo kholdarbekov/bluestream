@@ -581,10 +581,8 @@ class WaterBusinessBot:
             MessageHandler(filters.TEXT & ~filters.COMMAND, self._handle_text_message)
         )
         
-        # Handle contact sharing
-        self.application.add_handler(
-            MessageHandler(filters.CONTACT, self._handle_contact)
-        )
+        # Contact messages are handled by ConversationHandlers in higher priority groups
+        # (registration_handler and phone_verification_handler)
         
         # Location messages are handled by conversation handlers in higher priority groups
         

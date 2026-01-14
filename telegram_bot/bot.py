@@ -60,6 +60,13 @@ from handlers import (
     profile_handlers, loyalty_handlers, admin_handlers,
     support_handlers, payment_handlers
 )
+# Import conversation states directly (they are module-level constants)
+from handlers.profile import (
+    SELECT_LANGUAGE, PHONE, LINK_ACCOUNT_CONFIRM, LINK_ACCOUNT_OTP,
+    ADDRESS_LOCATION, ADDRESS_TITLE, ADDRESS_REGION, ADDRESS_DISTRICT,
+    ADDRESS_STREET, ADDRESS_BUILDING, ADDRESS_APARTMENT, ADDRESS_FLOOR,
+    ADDRESS_ENTRANCE, ADDRESS_DELIVERY_INSTRUCTIONS, ADDRESS_GEOCODE_CONFIRM
+)
 from utils import error_handler, rate_limiter, user_middleware, get_auth_token
 from keyboards import MenuKeyboards
 
@@ -321,18 +328,18 @@ class WaterBusinessBot:
                 # CallbackQueryHandler(profile_handlers.start_registration_new, pattern="^/start$")
             ],
             states={
-                profile_handlers.SELECT_LANGUAGE: [
+                SELECT_LANGUAGE: [
                     CallbackQueryHandler(profile_handlers.language_selection, pattern="^set_language_")
                 ],
-                profile_handlers.PHONE: [
+                PHONE: [
                     MessageHandler(filters.CONTACT, profile_handlers.phone_received),
                     MessageHandler(filters.TEXT, profile_handlers.phone_text_received)
                 ],
                 # Account linking states
-                profile_handlers.LINK_ACCOUNT_CONFIRM: [
+                LINK_ACCOUNT_CONFIRM: [
                     CallbackQueryHandler(profile_handlers.link_account_confirm, pattern="^link_")
                 ],
-                profile_handlers.LINK_ACCOUNT_OTP: [
+                LINK_ACCOUNT_OTP: [
                     MessageHandler(filters.TEXT & ~filters.COMMAND, profile_handlers.link_account_otp)
                 ],
                 # profile_handlers.NAME: [
@@ -348,7 +355,7 @@ class WaterBusinessBot:
             entry_points=[CallbackQueryHandler(profile_handlers.add_address, pattern="^add_new_address$")],
             states={
                 # Location sharing or manual entry choice
-                profile_handlers.ADDRESS_LOCATION: [
+                ADDRESS_LOCATION: [
                     MessageHandler(filters.LOCATION, profile_handlers.location_received),
                     # Handle "Enter Manually" text button
                     MessageHandler(
@@ -357,53 +364,53 @@ class WaterBusinessBot:
                     ),
                 ],
                 # Address title input
-                profile_handlers.ADDRESS_TITLE: [
+                ADDRESS_TITLE: [
                     CallbackQueryHandler(profile_handlers.address_title_callback, pattern="^addr_title_"),
                     MessageHandler(filters.TEXT & ~filters.COMMAND, profile_handlers.address_title_received)
                 ],
                 # Manual entry flow - Region selection
-                profile_handlers.ADDRESS_REGION: [
+                ADDRESS_REGION: [
                     CallbackQueryHandler(profile_handlers.region_selected, pattern="^region_"),
                     CallbackQueryHandler(profile_handlers.cancel_address, pattern="^cancel_address_creation$"),
                 ],
                 # Manual entry flow - District selection
-                profile_handlers.ADDRESS_DISTRICT: [
+                ADDRESS_DISTRICT: [
                     CallbackQueryHandler(profile_handlers.district_selected, pattern="^district_"),
                     CallbackQueryHandler(profile_handlers.cancel_address, pattern="^cancel_address_creation$"),
                     CallbackQueryHandler(profile_handlers.region_selected, pattern="^back_to_region$"),
                 ],
                 # Manual entry flow - Street input
-                profile_handlers.ADDRESS_STREET: [
+                ADDRESS_STREET: [
                     CallbackQueryHandler(profile_handlers.skip_field_handler, pattern="^skip_street$"),
                     MessageHandler(filters.TEXT & ~filters.COMMAND, profile_handlers.street_received),
                 ],
                 # Manual entry flow - Building input
-                profile_handlers.ADDRESS_BUILDING: [
+                ADDRESS_BUILDING: [
                     CallbackQueryHandler(profile_handlers.skip_field_handler, pattern="^skip_building$"),
                     MessageHandler(filters.TEXT & ~filters.COMMAND, profile_handlers.building_received),
                 ],
                 # Manual entry flow - Apartment input
-                profile_handlers.ADDRESS_APARTMENT: [
+                ADDRESS_APARTMENT: [
                     CallbackQueryHandler(profile_handlers.skip_field_handler, pattern="^skip_apartment$"),
                     MessageHandler(filters.TEXT & ~filters.COMMAND, profile_handlers.apartment_received),
                 ],
                 # Manual entry flow - Floor input
-                profile_handlers.ADDRESS_FLOOR: [
+                ADDRESS_FLOOR: [
                     CallbackQueryHandler(profile_handlers.skip_field_handler, pattern="^skip_floor$"),
                     MessageHandler(filters.TEXT & ~filters.COMMAND, profile_handlers.floor_received),
                 ],
                 # Manual entry flow - Entrance input
-                profile_handlers.ADDRESS_ENTRANCE: [
+                ADDRESS_ENTRANCE: [
                     CallbackQueryHandler(profile_handlers.skip_field_handler, pattern="^skip_entrance$"),
                     MessageHandler(filters.TEXT & ~filters.COMMAND, profile_handlers.entrance_received),
                 ],
                 # Delivery instructions input
-                profile_handlers.ADDRESS_DELIVERY_INSTRUCTIONS: [
+                ADDRESS_DELIVERY_INSTRUCTIONS: [
                     CallbackQueryHandler(profile_handlers.skip_field_handler, pattern="^skip_delivery_instructions$"),
                     MessageHandler(filters.TEXT & ~filters.COMMAND, profile_handlers.delivery_instructions_received),
                 ],
                 # Geocode confirmation
-                profile_handlers.ADDRESS_GEOCODE_CONFIRM: [
+                ADDRESS_GEOCODE_CONFIRM: [
                     CallbackQueryHandler(profile_handlers.confirm_geocode, pattern="^confirm_geocode$"),
                     CallbackQueryHandler(profile_handlers.retry_geocode, pattern="^retry_geocode$"),
                     CallbackQueryHandler(profile_handlers.cancel_address, pattern="^cancel_address_creation$"),

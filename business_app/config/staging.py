@@ -190,7 +190,7 @@ class StagingConfig(BaseConfig):
             from flask_talisman import Talisman
             Talisman(
                 app,
-                force_https=True,
+                force_https=False,  # Disabled - nginx handles SSL termination
                 strict_transport_security=True,
                 content_security_policy=cls.CONTENT_SECURITY_POLICY
             )

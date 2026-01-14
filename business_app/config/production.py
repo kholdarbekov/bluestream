@@ -307,7 +307,7 @@ class ProductionConfig(BaseConfig):
             from flask_talisman import Talisman
             Talisman(
                 app,
-                force_https=True,
+                force_https=False,  # Disabled - nginx handles SSL termination for external traffic
                 strict_transport_security=True,
                 strict_transport_security_max_age=63072000,
                 strict_transport_security_include_subdomains=True,

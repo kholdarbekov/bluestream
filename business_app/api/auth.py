@@ -2502,9 +2502,12 @@ def check_phone_availability():
     
     # Phone exists - check if it can be linked
     # Cannot link if: user already has telegram_id, or user is inactive/merged
+    # Note: status can be enum or string depending on how SQLAlchemy returns it
+    from business_app.utils.constants import UserStatus
+    user_status = existing_user.status.value if isinstance(existing_user.status, UserStatus) else existing_user.status
     can_link = (
         existing_user.telegram_id is None and 
-        existing_user.status == 'active' and
+        user_status == 'active' and
         existing_user.registration_source in ['web', 'email', 'phone']
     )
     
@@ -2588,7 +2591,10 @@ def link_phone_send_otp():
             status_code=409
         )
     
-    if web_user.status != 'active':
+    # Check status (handle enum or string)
+    from business_app.utils.constants import UserStatus
+    web_user_status = web_user.status.value if isinstance(web_user.status, UserStatus) else web_user.status
+    if web_user_status != 'active':
         return error_response(
             message='The account with this phone is not active',
             status_code=409

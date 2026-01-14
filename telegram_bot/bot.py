@@ -589,22 +589,9 @@ class WaterBusinessBot:
             BotCommand("language", "Change language settings"),
         ]
         
-        # Add admin commands for admin users
-        admin_commands = commands + [
-            BotCommand("admin", "Admin panel (admin only)"),
-        ]
-        
         try:
-            # Set default commands
+            # Set default commands for all users
             await self.application.bot.set_my_commands(commands)
-            
-            # Set admin commands for admin users
-            for admin_id in config.telegram.admin_chat_ids:
-                await self.application.bot.set_my_commands(
-                    admin_commands,
-                    scope={"type": "chat", "chat_id": admin_id}
-                )
-            
             logger.info("Bot commands set successfully")
             
         except Exception as e:

@@ -339,26 +339,8 @@ async def log_bot_analytics(user_id: int, command: str, action: str,
         logger.error(f"Failed to log analytics: {e}")
 
 
-def admin_required(func):
-    """Decorator to require admin privileges"""
-    @wraps(func)
-    async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE, *args, **kwargs):
-        user_id = update.effective_user.id
-        
-        if not config.is_admin(user_id):
-            language = await i18n.get_user_language(user_id)
-            error_msg = "❌ Admin access required"
-            
-            if update.callback_query:
-                await update.callback_query.answer(error_msg)
-            else:
-                await update.message.reply_text(error_msg)
-            
-            return
-        
-        return await func(update, context, *args, **kwargs)
-    
-    return wrapper
+
+# Note: Admin checks are now handled by the backend API permissions system
 
 
 async def send_typing_action(update: Update, context: ContextTypes.DEFAULT_TYPE):

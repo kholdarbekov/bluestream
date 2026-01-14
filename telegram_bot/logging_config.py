@@ -141,7 +141,6 @@ def log_bot_startup_info():
     logger.info(f"Webhook URL: {config.telegram.webhook_url or 'POLLING MODE'}")
     logger.info(f"Business API URL: {config.business_api.base_url}")
     logger.info(f"Database URL: {config.database.url.split('@')[0] if config.database.url else 'NOT SET'}@...")
-    logger.info(f"Admin Chat IDs: {config.telegram.admin_chat_ids}")
     logger.info(f"Default Language: {config.localization.default_language}")
     logger.info(f"Supported Languages: {config.localization.supported_languages}")
     

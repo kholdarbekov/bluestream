@@ -22,7 +22,7 @@ class DatabaseManager:
     
     async def connect(self):
         """Establish database connection pool"""
-        logger.info(f"DB connect: {config.database}")
+        logger.info(f"DB connect: {config.database.url[-10:]}, {config.database.pool_size}, {config.database.pool_timeout}")
         try:
             self.pool = await asyncpg.create_pool(
                 config.database.url,

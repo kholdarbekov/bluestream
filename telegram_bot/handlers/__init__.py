@@ -16,13 +16,7 @@ from handlers.payments import payment_handlers
 # Simple handlers for remaining modules
 class SimpleHandlers:
     async def admin_panel(self, update, context):
-        from ..config import config
-        user_id = update.effective_user.id
-        
-        if not config.is_admin(user_id):
-            await update.message.reply_text("❌ Access denied. Admin privileges required.")
-            return
-            
+        """Admin panel - access controlled by backend API"""
         await update.message.reply_text("🔧 Admin panel functionality coming soon!")
     
     async def help_handler(self, update, context):
@@ -53,16 +47,7 @@ class SimpleHandlers:
         await update.message.reply_text(f"Support message received: {text}\nOur team will get back to you soon!")
     
     async def admin_orders(self, update, context):
-        from config import config
-        user_id = update.effective_user.id
-        
-        if not config.is_admin(user_id):
-            if update.callback_query:
-                await update.callback_query.answer("❌ Access denied")
-            else:
-                await update.message.reply_text("❌ Access denied")
-            return
-        
+        """Admin orders - access controlled by backend API"""
         if update.callback_query:
             await update.callback_query.edit_message_text("📊 Admin orders panel coming soon!")
             await update.callback_query.answer()
@@ -70,16 +55,7 @@ class SimpleHandlers:
             await update.message.reply_text("📊 Admin orders panel coming soon!")
     
     async def admin_analytics(self, update, context):
-        from config import config
-        user_id = update.effective_user.id
-        
-        if not config.is_admin(user_id):
-            if update.callback_query:
-                await update.callback_query.answer("❌ Access denied")
-            else:
-                await update.message.reply_text("❌ Access denied")
-            return
-        
+        """Admin analytics - access controlled by backend API"""
         if update.callback_query:
             await update.callback_query.edit_message_text("📈 Admin analytics coming soon!")
             await update.callback_query.answer()

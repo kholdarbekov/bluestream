@@ -2086,7 +2086,7 @@ def telegram_login():
 
 
 @auth_bp.route('/telegram-register', methods=['POST'])
-@rate_limit(30, 3600)  # 30 telegram registrations per hour
+@rate_limit_by_telegram_id(30, 3600)  # 30 per hour PER TELEGRAM USER (not shared container IP)
 @validate_json(['telegram_id'])
 @handle_exceptions
 @log_request

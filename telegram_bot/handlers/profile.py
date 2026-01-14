@@ -489,7 +489,7 @@ class ProfileHandlers:
             # Validate language code
             if language_code not in config.localization.supported_languages:
                 await query.answer("❌ Invalid language selection")
-                return
+                return SELECT_LANGUAGE  # Stay in language selection state
             
             user_repo = BotUserRepository(db_manager)
 
@@ -508,36 +508,50 @@ class ProfileHandlers:
                         response = await client.register_telegram_user(user_id, registration_data)
                         if not response.success:
                             logger.error(f"Failed to register telegram user {user_id}: {response.error}")
-                            # Fall back to error message but don't crash the bot
-                            await query.message.reply_text(
-                                "❌ Registration failed. Please try again later or contact support."
+                            await query.answer("❌ Registration failed")
+                            await context.bot.send_message(
+                                chat_id=update.effective_chat.id,
+                                text="❌ Registration failed. Please try again with /start or contact support."
                             )
-                            return
+                            return ConversationHandler.END
                 except Exception as e:
                     logger.error(f"Exception during telegram user registration: {e}")
-                    await query.message.reply_text(
-                        "❌ Registration failed. Please try again later."
+                    import traceback
+                    logger.error(f"Traceback: {traceback.format_exc()}")
+                    await query.answer("❌ Registration failed")
+                    await context.bot.send_message(
+                        chat_id=update.effective_chat.id,
+                        text="❌ Registration failed. Please try again with /start."
                     )
-                    return
+                    return ConversationHandler.END
             else:
                 # Update user's preferred language
                 await self.user_repo.update_user_language(user_id, language_code)
                 await query.answer("✅ Language updated")
             
-            await update.callback_query.delete_message()
             # Proceed to phone number input
             phone_text = i18n.get('telegram.registration.enter_phone', language_code)
             keyboard = ProfileKeyboards.phone_request(language_code)
             
-            await query.message.reply_text(
+            # Send the phone request message first
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
                 text=phone_text,
                 reply_markup=keyboard
             )
+            
+            # Then try to delete the old language selection message
+            try:
+                await query.delete_message()
+            except Exception as del_error:
+                logger.warning(f"Could not delete language selection message: {del_error}")
             
             return PHONE
             
         except Exception as e:
             logger.error(f"Error in language selection: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
             return ConversationHandler.END
     
     async def phone_received(self, update: Update, context: ContextTypes.DEFAULT_TYPE):

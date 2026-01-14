@@ -72,14 +72,8 @@ class TelegramConfig:
     rate_limit_requests: int = 30
     rate_limit_window: int = 60  # seconds
     
-    # Admin settings
-    admin_chat_ids: List[int] = None
+    # Support settings
     support_chat_id: Optional[int] = None
-    
-    def __post_init__(self):
-        if self.admin_chat_ids is None:
-            admin_ids = os.getenv('ADMIN_CHAT_IDS', '')
-            self.admin_chat_ids = [int(id_) for id_ in admin_ids.split(',') if id_.strip().isdigit()]
 
 
 @dataclass
@@ -304,9 +298,7 @@ class BotConfig:
         if missing_fields:
             raise ValueError(f"Missing required configuration: {', '.join(missing_fields)}")
     
-    def is_admin(self, user_id: int) -> bool:
-        """Check if user is admin"""
-        return user_id in self.telegram.admin_chat_ids
+    # Admin checks are now handled by backend API permissions
     
     def get_api_url(self, endpoint: str) -> str:
         """Get full API URL for endpoint"""

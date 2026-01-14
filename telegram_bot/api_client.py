@@ -883,6 +883,59 @@ class BusinessAPIClient:
         """
         return await self._make_request('GET', f'/api/v1/orders/{order_id}/validate',
                                        user_token=user_token)
+    
+    # ==================== Account Linking ====================
+    
+    async def check_phone_availability(self, telegram_id: int, phone: str) -> APIResponse:
+        """
+        Check if a phone number is available for registration or needs linking.
+        
+        Args:
+            telegram_id: Telegram user ID
+            phone: Phone number to check
+            
+        Returns:
+            APIResponse with available, can_link, and existing_user_masked
+        """
+        return await self._make_request(
+            'POST',
+            '/api/v1/auth/check-phone-availability',
+            data={'telegram_id': telegram_id, 'phone': phone}
+        )
+    
+    async def link_phone_send_otp(self, telegram_id: int, phone: str) -> APIResponse:
+        """
+        Send OTP to phone for account linking.
+        
+        Args:
+            telegram_id: Telegram user ID
+            phone: Phone number to send OTP to
+            
+        Returns:
+            APIResponse with phone_masked on success
+        """
+        return await self._make_request(
+            'POST',
+            '/api/v1/auth/link-phone-account/send-otp',
+            data={'telegram_id': telegram_id, 'phone': phone}
+        )
+    
+    async def link_phone_verify(self, telegram_id: int, otp: str) -> APIResponse:
+        """
+        Verify OTP and link accounts.
+        
+        Args:
+            telegram_id: Telegram user ID
+            otp: 6-digit OTP code
+            
+        Returns:
+            APIResponse with user data and tokens on success
+        """
+        return await self._make_request(
+            'POST',
+            '/api/v1/auth/link-phone-account/verify',
+            data={'telegram_id': telegram_id, 'otp': otp}
+        )
 
 
 # Global API client instance

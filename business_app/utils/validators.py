@@ -585,3 +585,7 @@ def mask_phone_number(phone: str) -> str:
         return f"{phone[:3]}***{phone[-4:]}"
 
     return "***"
+
+
+# Alias for convenience
+normalize_phone_number = normalize_uzbekistan_phone

@@ -328,6 +328,13 @@ class WaterBusinessBot:
                     MessageHandler(filters.CONTACT, profile_handlers.phone_received),
                     MessageHandler(filters.TEXT, profile_handlers.phone_text_received)
                 ],
+                # Account linking states
+                profile_handlers.LINK_ACCOUNT_CONFIRM: [
+                    CallbackQueryHandler(profile_handlers.link_account_confirm, pattern="^link_")
+                ],
+                profile_handlers.LINK_ACCOUNT_OTP: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, profile_handlers.link_account_otp)
+                ],
                 # profile_handlers.NAME: [
                 #     MessageHandler(filters.TEXT & ~filters.COMMAND, profile_handlers.name_received)
                 # ],

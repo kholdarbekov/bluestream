@@ -2439,6 +2439,289 @@ def link_web_account():
     )
 
 
+@auth_bp.route('/check-phone-availability', methods=['POST'])
+@rate_limit_by_telegram_id(30, 3600)  # 30 per hour per telegram user
+@validate_json(['phone', 'telegram_id'])
+@handle_exceptions
+@log_request
+def check_phone_availability():
+    """
+    Check Phone Number Availability for Telegram Registration
+    ---
+    tags:
+      - Authentication
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - phone
+            - telegram_id
+          properties:
+            phone:
+              type: string
+              example: +998901234567
+            telegram_id:
+              type: integer
+              example: 123456789
+    responses:
+      200:
+        description: Phone availability status
+        schema:
+          type: object
+          properties:
+            available:
+              type: boolean
+            can_link:
+              type: boolean
+            existing_user_masked:
+              type: string
+    """
+    data = request.get_json()
+    phone = data['phone']
+    telegram_id = str(data['telegram_id'])
+    
+    # Normalize phone number
+    from business_app.utils.validators import normalize_phone_number
+    phone = normalize_phone_number(phone)
+    
+    # Check if phone exists
+    existing_user = User.query.filter_by(phone=phone).first()
+    
+    if not existing_user:
+        return success_response(
+            data={
+                'available': True,
+                'can_link': False,
+                'existing_user_masked': None
+            },
+            message='Phone number is available'
+        )
+    
+    # Phone exists - check if it can be linked
+    # Cannot link if: user already has telegram_id, or user is inactive/merged
+    can_link = (
+        existing_user.telegram_id is None and 
+        existing_user.status == 'active' and
+        existing_user.registration_source in ['web', 'email', 'phone']
+    )
+    
+    # Mask the user info for privacy
+    masked_name = existing_user.first_name[:1] + '***' if existing_user.first_name else '***'
+    masked_email = None
+    if existing_user.email and not existing_user.email.endswith('@bluestream.local'):
+        parts = existing_user.email.split('@')
+        if len(parts) == 2:
+            masked_email = parts[0][:2] + '***@' + parts[1]
+    
+    return success_response(
+        data={
+            'available': False,
+            'can_link': can_link,
+            'existing_user_masked': {
+                'name': masked_name,
+                'email': masked_email,
+                'registration_source': existing_user.registration_source
+            }
+        },
+        message='Phone number already registered'
+    )
+
+
+@auth_bp.route('/link-phone-account/send-otp', methods=['POST'])
+@rate_limit_by_telegram_id(5, 3600)  # 5 OTP requests per hour per telegram user
+@validate_json(['phone', 'telegram_id'])
+@handle_exceptions
+@log_request
+def link_phone_send_otp():
+    """
+    Send OTP to Phone for Account Linking
+    ---
+    tags:
+      - Authentication
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - phone
+            - telegram_id
+          properties:
+            phone:
+              type: string
+              example: +998901234567
+            telegram_id:
+              type: integer
+              example: 123456789
+    responses:
+      200:
+        description: OTP sent successfully
+      400:
+        description: Cannot link - phone not found or already linked
+    """
+    data = request.get_json()
+    phone = data['phone']
+    telegram_id = str(data['telegram_id'])
+    
+    # Normalize phone number
+    from business_app.utils.validators import normalize_phone_number
+    phone = normalize_phone_number(phone)
+    
+    # Verify telegram user exists
+    telegram_user = User.query.filter_by(telegram_id=telegram_id).first()
+    if not telegram_user:
+        return not_found_response(message='Telegram user not found')
+    
+    # Verify web user exists with this phone
+    web_user = User.query.filter_by(phone=phone).first()
+    if not web_user:
+        return not_found_response(message='No account found with this phone')
+    
+    # Verify account can be linked
+    if web_user.telegram_id:
+        return error_response(
+            message='This phone is already linked to another Telegram account',
+            status_code=409
+        )
+    
+    if web_user.status != 'active':
+        return error_response(
+            message='The account with this phone is not active',
+            status_code=409
+        )
+    
+    # Store linking intent in Redis
+    auth_service = get_auth_service()
+    link_key = f"phone_link:{telegram_id}"
+    link_data = {
+        'phone': phone,
+        'web_user_id': web_user.id,
+        'telegram_user_id': telegram_user.id
+    }
+    import json
+    auth_service.redis_client.setex(link_key, 600, json.dumps(link_data))  # 10 minutes expiry
+    
+    # Send OTP to the phone
+    success = auth_service.send_verification_sms(telegram_user.id, phone)
+    
+    if success:
+        logger.info(f"OTP sent for account linking: telegram_user={telegram_id}, phone={phone}")
+        return success_response(
+            data={
+                'phone_masked': phone[:7] + '****' + phone[-2:] if len(phone) > 9 else '***'
+            },
+            message='OTP sent successfully'
+        )
+    else:
+        return internal_error_response(message='Failed to send OTP')
+
+
+@auth_bp.route('/link-phone-account/verify', methods=['POST'])
+@rate_limit_by_telegram_id(10, 3600)  # 10 verification attempts per hour
+@validate_json(['telegram_id', 'otp'])
+@handle_exceptions
+@log_request
+def link_phone_verify():
+    """
+    Verify OTP and Link Accounts
+    ---
+    tags:
+      - Authentication
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - telegram_id
+            - otp
+          properties:
+            telegram_id:
+              type: integer
+              example: 123456789
+            otp:
+              type: string
+              example: "123456"
+    responses:
+      200:
+        description: Accounts linked successfully
+      400:
+        description: Invalid OTP or no pending link request
+    """
+    data = request.get_json()
+    telegram_id = str(data['telegram_id'])
+    otp = data['otp']
+    
+    auth_service = get_auth_service()
+    
+    # Get stored linking intent
+    link_key = f"phone_link:{telegram_id}"
+    link_data_raw = auth_service.redis_client.get(link_key)
+    
+    if not link_data_raw:
+        return not_found_response(message='No pending link request found. Please start again.')
+    
+    import json
+    link_data = json.loads(link_data_raw.decode('utf-8'))
+    phone = link_data['phone']
+    web_user_id = link_data['web_user_id']
+    telegram_user_id = link_data['telegram_user_id']
+    
+    # Verify OTP
+    telegram_user = User.query.get(telegram_user_id)
+    if not telegram_user:
+        return not_found_response(message='Telegram user not found')
+    
+    success = auth_service.verify_phone(telegram_user_id, otp)
+    
+    if not success:
+        return error_response(
+            message='Invalid OTP. Please try again.',
+            status_code=400
+        )
+    
+    # OTP verified - now merge accounts
+    web_user = User.query.get(web_user_id)
+    if not web_user:
+        return not_found_response(message='Web account not found')
+    
+    # Use cross-platform sync service to link accounts
+    from business_app.services.cross_platform_sync_service import cross_platform_sync_service
+    
+    result = cross_platform_sync_service.auto_link_accounts(
+        primary_user=web_user,  # Keep web account as primary (has real email/phone)
+        secondary_user=telegram_user,
+        link_type='merge'
+    )
+    
+    if not result.get('success'):
+        return internal_error_response(message=result.get('error', 'Failed to link accounts'))
+    
+    # Clean up Redis
+    auth_service.redis_client.delete(link_key)
+    
+    # Generate new tokens for the merged account
+    from business_app.services.token_service import TokenService
+    token_service = TokenService()
+    tokens = token_service.generate_tokens(web_user)
+    
+    logger.info(f"Successfully linked accounts: telegram_id={telegram_id} -> web_user_id={web_user_id}")
+    
+    return success_response(
+        data={
+            'user': web_user.to_dict(),
+            'tokens': tokens,
+            'linked': True
+        },
+        message='Accounts linked successfully!'
+    )
+
+
 @auth_bp.route('/sync-profile', methods=['POST'])
 @jwt_required()
 @handle_exceptions

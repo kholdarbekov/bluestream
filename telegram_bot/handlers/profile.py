@@ -23,7 +23,8 @@ logger = logging.getLogger('handlers')
  ADDRESS_REGION, ADDRESS_DISTRICT, ADDRESS_STREET, ADDRESS_BUILDING,
  ADDRESS_APARTMENT, ADDRESS_FLOOR, ADDRESS_ENTRANCE,
  ADDRESS_DELIVERY_INSTRUCTIONS, ADDRESS_GEOCODE_CONFIRM,
- PHONE_VERIFY_PHONE, PHONE_VERIFY_NAME) = range(16)
+ PHONE_VERIFY_PHONE, PHONE_VERIFY_NAME,
+ LINK_ACCOUNT_CONFIRM, LINK_ACCOUNT_OTP) = range(18)
 
 
 class ProfileHandlers:
@@ -555,7 +556,7 @@ class ProfileHandlers:
             return ConversationHandler.END
     
     async def phone_received(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle phone number from contact"""
+        """Handle phone number from contact - checks for duplicates and offers linking"""
         try:
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
@@ -569,25 +570,105 @@ class ProfileHandlers:
                 return PHONE
 
             phone = normalize_phone_number(contact.phone_number)
-
-            # Store phone number and trigger SMS verification
-            await self.user_repo.set_user_phone(user_id, phone)
-
-            # Registration complete
-            complete_text = i18n.get('telegram.registration_complete', language)
-            keyboard = MenuKeyboards.main_menu(language)
-
-            await update.message.reply_text(
-                text=complete_text,
-                reply_markup=keyboard
-            )
-
-            logger.info(f"Registration completed for user {user_id}")
-
-            return ConversationHandler.END
+            
+            # Check if phone is available via API
+            try:
+                async with api_client as client:
+                    response = await client.check_phone_availability(user_id, phone)
+                    
+                    if response.success and response.data.get('available'):
+                        # Phone is available - save it normally
+                        await self.user_repo.set_user_phone(user_id, phone)
+                        
+                        # Registration complete
+                        complete_text = i18n.get('telegram.registration_complete', language)
+                        keyboard = MenuKeyboards.main_menu(language)
+                        
+                        await update.message.reply_text(
+                            text=complete_text,
+                            reply_markup=keyboard
+                        )
+                        
+                        logger.info(f"Registration completed for user {user_id}")
+                        return ConversationHandler.END
+                    
+                    elif response.success and not response.data.get('available'):
+                        # Phone exists - check if linking is possible
+                        can_link = response.data.get('can_link', False)
+                        existing_user = response.data.get('existing_user_masked', {})
+                        
+                        if can_link:
+                            # Store phone for linking
+                            context.user_data['pending_link_phone'] = phone
+                            
+                            # Show linking option
+                            masked_name = existing_user.get('name', '***') if existing_user else '***'
+                            
+                            link_text = (
+                                f"📱 This phone number is already registered to an account ({masked_name}).\n\n"
+                                f"Would you like to link your Telegram to this existing account?\n"
+                                f"This will merge your accounts."
+                            )
+                            
+                            keyboard = KeyboardBuilder.build_inline_keyboard([
+                                [{'text': "✅ Yes, link accounts", 'callback_data': "link_yes"}],
+                                [{'text': "❌ No, use different phone", 'callback_data': "link_no"}]
+                            ])
+                            
+                            await update.message.reply_text(
+                                text=link_text,
+                                reply_markup=keyboard
+                            )
+                            
+                            return LINK_ACCOUNT_CONFIRM
+                        else:
+                            # Cannot link - phone belongs to another telegram user
+                            await update.message.reply_text(
+                                "❌ This phone number is already linked to another Telegram account.\n"
+                                "Please use a different phone number.",
+                                reply_markup=ProfileKeyboards.phone_request(language)
+                            )
+                            return PHONE
+                    else:
+                        # API error
+                        logger.error(f"Failed to check phone availability: {response.error}")
+                        await update.message.reply_text(
+                            "❌ Unable to verify phone. Please try again.",
+                            reply_markup=ProfileKeyboards.phone_request(language)
+                        )
+                        return PHONE
+                        
+            except Exception as api_error:
+                logger.error(f"API error checking phone: {api_error}")
+                # Fall back to direct save (will fail if duplicate, which is caught below)
+                await self.user_repo.set_user_phone(user_id, phone)
+                
+                complete_text = i18n.get('telegram.registration_complete', language)
+                keyboard = MenuKeyboards.main_menu(language)
+                
+                await update.message.reply_text(
+                    text=complete_text,
+                    reply_markup=keyboard
+                )
+                
+                logger.info(f"Registration completed for user {user_id}")
+                return ConversationHandler.END
 
         except Exception as e:
             logger.error(f"Error handling phone: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            
+            # Check if it's a duplicate key error
+            if 'duplicate key' in str(e).lower() or 'unique constraint' in str(e).lower():
+                language = await i18n.get_user_language(update.effective_user.id)
+                await update.message.reply_text(
+                    "❌ This phone number is already registered.\n"
+                    "Please use a different phone number or contact support.",
+                    reply_markup=ProfileKeyboards.phone_request(language)
+                )
+                return PHONE
+            
             return ConversationHandler.END
     
     async def phone_text_received(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -623,6 +704,151 @@ class ProfileHandlers:
 
         except Exception as e:
             logger.error(f"Error handling phone text: {e}")
+            return ConversationHandler.END
+    
+    async def link_account_confirm(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle user's choice to link or cancel account linking"""
+        try:
+            query = update.callback_query
+            await query.answer()
+            
+            user_id = update.effective_user.id
+            language = await i18n.get_user_language(user_id)
+            callback_data = query.data
+            
+            if callback_data == "link_yes":
+                # User wants to link - send OTP
+                phone = context.user_data.get('pending_link_phone')
+                
+                if not phone:
+                    await query.edit_message_text(
+                        "❌ Session expired. Please share your phone number again.",
+                        reply_markup=None
+                    )
+                    return PHONE
+                
+                # Call API to send OTP
+                try:
+                    async with api_client as client:
+                        response = await client.link_phone_send_otp(user_id, phone)
+                        
+                        if response.success:
+                            phone_masked = response.data.get('phone_masked', phone)
+                            await query.edit_message_text(
+                                f"📱 A verification code has been sent to {phone_masked}.\n\n"
+                                f"Please enter the 6-digit code:",
+                                reply_markup=None
+                            )
+                            return LINK_ACCOUNT_OTP
+                        else:
+                            error_msg = response.error or "Failed to send verification code"
+                            await query.edit_message_text(
+                                f"❌ {error_msg}\n\nPlease try again or use a different phone.",
+                                reply_markup=ProfileKeyboards.phone_request(language)
+                            )
+                            return PHONE
+                            
+                except Exception as api_error:
+                    logger.error(f"API error sending OTP: {api_error}")
+                    await query.edit_message_text(
+                        "❌ Failed to send verification code. Please try again.",
+                        reply_markup=None
+                    )
+                    return PHONE
+                    
+            elif callback_data == "link_no":
+                # User wants to use different phone
+                context.user_data.pop('pending_link_phone', None)
+                
+                await query.edit_message_text(
+                    "📱 Please share a different phone number:",
+                    reply_markup=None
+                )
+                
+                # Send keyboard for phone sharing
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text="Share your phone number using the button below:",
+                    reply_markup=ProfileKeyboards.phone_request(language)
+                )
+                
+                return PHONE
+            
+            return ConversationHandler.END
+            
+        except Exception as e:
+            logger.error(f"Error in link_account_confirm: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            return ConversationHandler.END
+    
+    async def link_account_otp(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle OTP verification for account linking"""
+        try:
+            user_id = update.effective_user.id
+            language = await i18n.get_user_language(user_id)
+            otp = update.message.text.strip()
+            
+            # Validate OTP format
+            if not otp.isdigit() or len(otp) != 6:
+                await update.message.reply_text(
+                    "❌ Please enter a valid 6-digit code."
+                )
+                return LINK_ACCOUNT_OTP
+            
+            phone = context.user_data.get('pending_link_phone')
+            if not phone:
+                await update.message.reply_text(
+                    "❌ Session expired. Please start again with /start"
+                )
+                return ConversationHandler.END
+            
+            # Call API to verify OTP and link accounts
+            try:
+                async with api_client as client:
+                    response = await client.link_phone_verify(user_id, otp)
+                    
+                    if response.success:
+                        # Account linked successfully!
+                        context.user_data.pop('pending_link_phone', None)
+                        
+                        user_data = response.data.get('user', {})
+                        name = user_data.get('first_name', 'User')
+                        
+                        await update.message.reply_text(
+                            f"✅ Accounts linked successfully!\n\n"
+                            f"Welcome back, {name}! Your Telegram is now connected to your existing account.",
+                            reply_markup=MenuKeyboards.main_menu(language)
+                        )
+                        
+                        logger.info(f"Account linking completed for user {user_id}")
+                        return ConversationHandler.END
+                    else:
+                        error_msg = response.error or "Invalid verification code"
+                        
+                        # Check if it's an expired/invalid OTP
+                        if 'expired' in error_msg.lower() or 'not found' in error_msg.lower():
+                            await update.message.reply_text(
+                                "❌ Verification code expired. Please start again with /start"
+                            )
+                            return ConversationHandler.END
+                        else:
+                            await update.message.reply_text(
+                                f"❌ {error_msg}\n\nPlease try again:"
+                            )
+                            return LINK_ACCOUNT_OTP
+                        
+            except Exception as api_error:
+                logger.error(f"API error verifying OTP: {api_error}")
+                await update.message.reply_text(
+                    "❌ Verification failed. Please try again:"
+                )
+                return LINK_ACCOUNT_OTP
+            
+        except Exception as e:
+            logger.error(f"Error in link_account_otp: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
             return ConversationHandler.END
     
     async def name_received(self, update: Update, context: ContextTypes.DEFAULT_TYPE):

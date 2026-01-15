@@ -256,6 +256,8 @@ class OrderService:
     @log_business_event(event_type='cancelled', entity_type='order')
     def cancel_order(self, order_id: int, user_id: int = None, reason: str = None) -> Order:
         """Cancel an order"""
+        from business_app.utils.constants import PaymentMethod
+        
         order = self.get_order(order_id, user_id)
         
         # Check if order can be cancelled
@@ -265,15 +267,27 @@ class OrderService:
         if order.status == OrderStatus.OUT_FOR_DELIVERY:
             raise ConflictError("Order is out for delivery and cannot be cancelled")
         
-        # Release inventory reservations
-        try:
-            release_result = self._get_inventory_service().release_reservations(order_id)
-            if release_result['success']:
-                logger.info(f"Released inventory reservations for cancelled order {order_id}")
-            else:
-                logger.warning(f"Failed to release inventory reservations for order {order_id}: {release_result.get('reason')}")
-        except Exception as e:
-            logger.error(f"Error releasing inventory reservations for order {order_id}: {e}")
+        # Determine if stock was already deducted from the database
+        # For non-cash orders: stock is deducted on CONFIRMED
+        # For cash orders: stock is deducted on DELIVERED (which can't be cancelled anyway)
+        is_cash_order = order.payment_method == PaymentMethod.CASH if order.payment_method else False
+        stock_was_deducted = not is_cash_order and order.status in [
+            OrderStatus.CONFIRMED, OrderStatus.PREPARING, OrderStatus.OUT_FOR_DELIVERY
+        ]
+        
+        if stock_was_deducted:
+            # Restore stock quantities for confirmed orders
+            self._restore_stock_for_order(order, reason)
+        else:
+            # Just release Redis reservations for pending orders
+            try:
+                release_result = self._get_inventory_service().release_reservations(order_id)
+                if release_result['success']:
+                    logger.info(f"Released inventory reservations for cancelled order {order_id}")
+                else:
+                    logger.warning(f"Failed to release inventory reservations for order {order_id}: {release_result.get('reason')}")
+            except Exception as e:
+                logger.error(f"Error releasing inventory reservations for order {order_id}: {e}")
         
         # Cancel order
         order = self.update_order_status(order_id, OrderStatus.CANCELLED, user_id, reason)
@@ -291,6 +305,40 @@ class OrderService:
             delivery_service.cancel_delivery(order.delivery.id, reason)
         
         return order
+    
+    def _restore_stock_for_order(self, order: Order, reason: str = None):
+        """Restore stock quantities for a cancelled order that had stock deducted"""
+        from business_app.services.inventory_service import InventoryOperationType
+        
+        inventory_service = self._get_inventory_service()
+        cancellation_reason = reason or "Order cancelled"
+        
+        for item in order.order_items:
+            try:
+                result = inventory_service.adjust_inventory(
+                    product_id=item.product_id,
+                    quantity_change=item.quantity,  # Positive to restore stock
+                    operation_type=InventoryOperationType.RETURN_RESTOCK,
+                    reason=f"Stock restored for cancelled order {order.order_number}: {cancellation_reason}",
+                    user_id=order.user_id
+                )
+                
+                if result['success']:
+                    logger.info(
+                        f"Restored stock for product {item.product_id}: "
+                        f"+{item.quantity} units (order {order.order_number})"
+                    )
+                else:
+                    logger.error(
+                        f"Failed to restore stock for product {item.product_id}: "
+                        f"{result.get('reason')}"
+                    )
+            except Exception as e:
+                logger.error(
+                    f"Error restoring stock for product {item.product_id} "
+                    f"(order {order.order_number}): {e}"
+                )
+
     
     def get_order_summary(self, user_id: int = None, 
                          start_date: datetime = None, 
@@ -543,46 +591,30 @@ class OrderService:
     
     def _handle_status_change_actions(self, order: Order, new_status: OrderStatus):
         """Handle actions when order status changes"""
+        from business_app.utils.constants import PaymentMethod
+        
         if new_status == OrderStatus.CONFIRMED:
-            # Confirm inventory reservations - reduce actual stock
-            try:
-                confirmation_result = self._get_inventory_service().confirm_reservations(order.id)
-                if confirmation_result['success']:
-                    logger.info(f"Confirmed inventory reservations for order {order.id}")
-                    
-                    # Log inventory confirmation
-                    audit_logger.log_event(
-                        event_type=AuditEventType.ORDER_UPDATED,
-                        action="inventory_confirmed_for_order",
-                        severity=AuditSeverity.HIGH,
-                        resource_type="order",
-                        resource_id=str(order.id),
-                        description=f"Inventory confirmed and stock reduced for order {order.order_number}",
-                        additional_data={
-                            'order_id': order.id,
-                            'order_number': order.order_number,
-                            'confirmed_items': confirmation_result.get('confirmed_items', [])
-                        }
-                    )
-                else:
-                    logger.error(f"Failed to confirm inventory for order {order.id}: {confirmation_result.get('reason')}")
-                    raise ValidationError(f"Inventory confirmation failed: {confirmation_result.get('reason')}")
-                    
-            except Exception as e:
-                logger.error(f"Error confirming inventory for order {order.id}: {e}")
-                raise ValidationError(f"Failed to confirm inventory: {str(e)}")
+            # For non-cash orders, confirm inventory reservations - reduce actual stock
+            # Cash on delivery orders will have stock deducted on DELIVERED status
+            is_cash_order = order.payment_method == PaymentMethod.CASH if order.payment_method else False
+            
+            if not is_cash_order:
+                self._confirm_inventory_for_order(order)
+            else:
+                logger.info(f"Skipping inventory confirmation for cash order {order.id} - will deduct on delivery")
             
             # Create delivery record
             from .delivery_service import DeliveryService
             delivery_service = DeliveryService()
             delivery_service.create_delivery(order.id)
             
-            # Award loyalty points
-            points = calculate_loyalty_points(order.total_amount)
-            if points > 0:
-                from .loyalty_service import LoyaltyService
-                loyalty_service = LoyaltyService()
-                loyalty_service.award_points(order.user_id, points, f"Order #{order.order_number}")
+            # Award loyalty points only for non-cash orders (cash orders get points on delivery)
+            if not is_cash_order:
+                points = calculate_loyalty_points(order.total_amount)
+                if points > 0:
+                    from .loyalty_service import LoyaltyService
+                    loyalty_service = LoyaltyService()
+                    loyalty_service.award_points(order.user_id, points, f"Order #{order.order_number}")
         
         elif new_status == OrderStatus.DELIVERED:
             # Mark delivery as completed
@@ -590,6 +622,48 @@ class OrderService:
                 from .delivery_service import DeliveryService
                 delivery_service = DeliveryService()
                 delivery_service.complete_delivery(order.delivery.id)
+            
+            # For cash orders, confirm inventory and award loyalty points on delivery
+            is_cash_order = order.payment_method == PaymentMethod.CASH if order.payment_method else False
+            if is_cash_order:
+                self._confirm_inventory_for_order(order)
+                
+                # Award loyalty points for cash orders
+                points = calculate_loyalty_points(order.total_amount)
+                if points > 0:
+                    from .loyalty_service import LoyaltyService
+                    loyalty_service = LoyaltyService()
+                    loyalty_service.award_points(order.user_id, points, f"Order #{order.order_number}")
+    
+    def _confirm_inventory_for_order(self, order: Order):
+        """Confirm inventory reservations and reduce stock for an order"""
+        try:
+            confirmation_result = self._get_inventory_service().confirm_reservations(order.id)
+            if confirmation_result['success']:
+                logger.info(f"Confirmed inventory reservations for order {order.id}")
+                
+                # Log inventory confirmation
+                audit_logger.log_event(
+                    event_type=AuditEventType.ORDER_UPDATED,
+                    action="inventory_confirmed_for_order",
+                    severity=AuditSeverity.HIGH,
+                    resource_type="order",
+                    resource_id=str(order.id),
+                    description=f"Inventory confirmed and stock reduced for order {order.order_number}",
+                    additional_data={
+                        'order_id': order.id,
+                        'order_number': order.order_number,
+                        'confirmed_items': confirmation_result.get('confirmed_items', [])
+                    }
+                )
+            else:
+                logger.error(f"Failed to confirm inventory for order {order.id}: {confirmation_result.get('reason')}")
+                raise ValidationError(f"Inventory confirmation failed: {confirmation_result.get('reason')}")
+                
+        except Exception as e:
+            logger.error(f"Error confirming inventory for order {order.id}: {e}")
+            raise ValidationError(f"Failed to confirm inventory: {str(e)}")
+
     
     def _get_most_ordered_products(self, orders: List[Order]) -> List[Dict[str, Any]]:
         """Get most ordered products from order list"""

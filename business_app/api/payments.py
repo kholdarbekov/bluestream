@@ -1220,6 +1220,22 @@ def record_telegram_payment():
 
         db.session.commit()
 
+        # Update order status to CONFIRMED to trigger inventory confirmation
+        order_status_value = order.status.value if hasattr(order.status, 'value') else order.status
+        if order_status_value == 'pending':
+            try:
+                from business_app.services.order_service import OrderService
+                from business_app.utils.constants import OrderStatus
+                order_service = OrderService()
+                order_service.update_order_status(order.id, OrderStatus.CONFIRMED)
+                current_app.logger.info(
+                    f"Order {order_id} status updated to CONFIRMED after Telegram payment"
+                )
+            except Exception as status_error:
+                current_app.logger.error(
+                    f"Failed to update order status after Telegram payment: {status_error}"
+                )
+
         current_app.logger.info(
             f"Telegram payment recorded successfully: order={order_id}, "
             f"telegram_charge={telegram_charge_id}, provider_charge={provider_charge_id}"
@@ -1231,6 +1247,7 @@ def record_telegram_payment():
             notification_service.send_payment_notification(payment.id)
         except Exception as notify_error:
             current_app.logger.warning(f"Failed to send payment notification: {notify_error}")
+
 
         return created_response(data={
             'message': 'Telegram payment recorded successfully',

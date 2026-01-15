@@ -1376,24 +1376,30 @@ def update_order_status(order_id):
         except ValueError:
             return validation_error_response('Invalid status value')
         
-        # Placeholder implementation until admin_service is implemented
-        old_status = order.status
-        order.status = order_status.value
-        order.updated_at = datetime.now(UTC)
-        db.session.commit()
-        success = True
-
-        if success:
+        # Use OrderService to properly handle status transitions and inventory
+        from business_app.services.order_service import OrderService
+        order_service = OrderService()
+        
+        try:
+            order = order_service.update_order_status(
+                order_id=order_id,
+                new_status=order_status,
+                updated_by=current_user_id,
+                notes=notes
+            )
+            
             return success_response(
                 data={'order': serialize_order_admin(order)},
                 message='Order status updated successfully'
             )
-        else:
-            return internal_error_response('Failed to update order status')
+        except Exception as e:
+            current_app.logger.error(f"Failed to update order status: {e}")
+            return validation_error_response(str(e))
 
     except Exception as e:
         current_app.logger.error(f"Update order status error: {e}")
         return internal_error_response('Failed to update order status')
+
 
 
 @admin_bp.route('/orders/<int:order_id>', methods=['GET'])

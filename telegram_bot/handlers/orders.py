@@ -153,6 +153,139 @@ class OrderHandlers:
             logger.error(f"Error in order details: {e}")
             await self._handle_error(update)
     
+    async def track_order(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Show order tracking information with visual timeline"""
+        try:
+            query = update.callback_query
+            user_id = update.effective_user.id
+            language = await i18n.get_user_language(user_id)
+            
+            # Extract order ID from callback data (format: track_order_123)
+            order_id = int(query.data.split('_')[2])
+            
+            # Get order tracking details from API
+            async with api_client as client:
+                user_token = await get_auth_token(update, context, client)
+                if not user_token:
+                    await self._handle_auth_error(update, language)
+                    return
+                
+                response = await client.track_order(user_token, order_id)
+                if not response.success:
+                    await self._handle_api_error(update, response.error, language)
+                    return
+                
+                tracking_data = response.data.get('data', {})
+                order = tracking_data.get('order', {})
+                delivery = tracking_data.get('delivery', {})
+                timeline = tracking_data.get('timeline', [])
+                time_remaining = tracking_data.get('estimated_time_remaining', {})
+            
+            # Status icons mapping
+            status_icons = {
+                'created': '📝',
+                'pending': '🕐',
+                'confirmed': '✅',
+                'preparing': '👨‍🍳',
+                'out_for_delivery': '🚚',
+                'delivered': '📦',
+                'cancelled': '❌',
+                'returned': '↩️'
+            }
+            
+            # Status labels mapping
+            status_labels = {
+                'created': i18n.get('telegram.orders.status_created', language) or 'Order Placed',
+                'pending': i18n.get('telegram.orders.status_pending', language) or 'Pending Confirmation',
+                'confirmed': i18n.get('telegram.orders.status_confirmed', language) or 'Order Confirmed',
+                'preparing': i18n.get('telegram.orders.status_preparing', language) or 'Being Prepared',
+                'out_for_delivery': i18n.get('telegram.orders.status_out_for_delivery', language) or 'Out for Delivery',
+                'delivered': i18n.get('telegram.orders.status_delivered', language) or 'Delivered',
+                'cancelled': i18n.get('telegram.orders.status_cancelled', language) or 'Cancelled',
+                'returned': i18n.get('telegram.orders.status_returned', language) or 'Returned'
+            }
+            
+            # Build tracking message header
+            tracking_text = f"📍 *{i18n.get('telegram.orders.tracking_title', language) or 'Order Tracking'}*\n\n"
+            tracking_text += f"🔢 Order #{order.get('order_number', order_id)}\n\n"
+            
+            # Build visual timeline
+            tracking_text += f"━━━ {i18n.get('telegram.orders.timeline', language) or 'Timeline'} ━━━\n"
+            
+            if timeline:
+                for entry in timeline:
+                    status = entry.get('status', 'unknown')
+                    timestamp = entry.get('timestamp', '')
+                    is_current = entry.get('is_current', False)
+                    notes = entry.get('notes', '')
+                    
+                    # Format timestamp for display
+                    formatted_time = ''
+                    if timestamp:
+                        try:
+                            from datetime import datetime
+                            dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+                            formatted_time = dt.strftime('%d %b %H:%M')
+                        except:
+                            formatted_time = timestamp[:16] if len(timestamp) > 16 else timestamp
+                    
+                    icon = status_icons.get(status, '📋')
+                    label = status_labels.get(status, status.replace('_', ' ').title())
+                    
+                    # Mark current status
+                    if is_current:
+                        tracking_text += f"🔵 {formatted_time} - {label} ← Current\n"
+                    else:
+                        tracking_text += f"✅ {formatted_time} - {label}\n"
+                    
+                    # Add notes if present (escape markdown special chars)
+                    if notes:
+                        # Escape markdown special characters
+                        safe_notes = str(notes).replace('*', '').replace('_', '').replace('`', '')
+                        tracking_text += f"   ({safe_notes})\n"
+            else:
+                # Fallback if no timeline data
+                current_status = order.get('status', 'pending')
+                icon = status_icons.get(current_status, '📋')
+                label = status_labels.get(current_status, current_status)
+                tracking_text += f"{icon} {label}\n"
+            
+            tracking_text += "\n"
+            
+            # Add estimated time remaining
+            if time_remaining and time_remaining.get('total_minutes'):
+                mins = time_remaining.get('total_minutes', 0)
+                hours = time_remaining.get('hours', 0)
+                if hours > 0:
+                    tracking_text += f"⏰ {i18n.get('telegram.orders.estimated_remaining', language) or 'Estimated'}: {hours}h {mins % 60}m\n"
+                else:
+                    tracking_text += f"⏰ {i18n.get('telegram.orders.estimated_remaining', language) or 'Estimated'}: {mins} min\n"
+            
+            # Add delivery info if available
+            if delivery:
+                if delivery.get('driver_name'):
+                    tracking_text += f"\n🚗 {i18n.get('telegram.orders.driver', language) or 'Driver'}: {delivery['driver_name']}\n"
+                if delivery.get('driver_phone'):
+                    tracking_text += f"📞 {delivery['driver_phone']}\n"
+            
+            # Create back button (use order_tracking keyboard for tracking view)
+            keyboard = OrderKeyboards.order_tracking(order_id, language)
+            
+            await query.edit_message_text(
+                text=tracking_text,
+                reply_markup=keyboard,
+                parse_mode='Markdown'
+            )
+            await query.answer()
+            
+            logger.info(f"Order {order_id} tracking with timeline shown to user {user_id}")
+            
+        except Exception as e:
+            logger.error(f"Error in track_order: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            await self._handle_error(update)
+    
     async def checkout_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle checkout process"""
         try:

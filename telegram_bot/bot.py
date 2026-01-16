@@ -225,6 +225,8 @@ class WaterBusinessBot:
             CallbackQueryHandler(order_handlers.address_handler, pattern="^address_"),
             CallbackQueryHandler(order_handlers.payment_handler, pattern="^payment_"),
             CallbackQueryHandler(order_handlers.confirm_order, pattern="^confirm_order"),
+            CallbackQueryHandler(order_handlers.track_order, pattern="^track_order_"),
+            CallbackQueryHandler(order_handlers.orders_menu, pattern="^back_to_orders$"),
             
             # Subscription callbacks
             CallbackQueryHandler(subscription_handlers.subscriptions_menu, pattern="^menu_subscriptions$"),

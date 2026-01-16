@@ -745,7 +745,7 @@ def track_order(order_id):
                 'order': {
                     'id': order.id,
                     'order_number': order.order_number,
-                    'status': order.status,
+                    'status': order.status.value,
                     'total_amount': order.total_amount,
                     'created_at': order.created_at.isoformat()
                 },

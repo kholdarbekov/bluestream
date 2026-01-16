@@ -189,8 +189,44 @@ class OrderService:
         return order
     
     # implement order timeline retrieval
-    def get_order_timeline(self, order_id):
-        return []
+    def get_order_timeline(self, order_id: int) -> List[Dict[str, Any]]:
+        """
+        Get order status history as a timeline.
+        
+        Returns a list of timeline entries in chronological order,
+        starting with order creation and including all status changes.
+        """
+        # First, get the order itself for the creation timestamp
+        order = Order.query.get(order_id)
+        if not order:
+            return []
+        
+        timeline = []
+        
+        # Add order creation as the first entry
+        timeline.append({
+            'status': 'created',
+            'timestamp': order.created_at.isoformat() if order.created_at else None,
+            'notes': None,
+            'reason': None,
+            'is_current': order.status == OrderStatus.PENDING
+        })
+        
+        # Get status history from database
+        history = OrderStatusHistory.query.filter_by(order_id=order_id)\
+            .order_by(OrderStatusHistory.changed_at.asc()).all()
+        
+        for i, entry in enumerate(history):
+            is_last = (i == len(history) - 1)
+            timeline.append({
+                'status': entry.new_status.value,
+                'timestamp': entry.changed_at.isoformat() if entry.changed_at else None,
+                'notes': entry.notes,
+                'reason': entry.reason,
+                'is_current': is_last  # Mark the last entry as current
+            })
+        
+        return timeline
 
 
     def get_user_orders(self, user_id: int, status: OrderStatus = None, 

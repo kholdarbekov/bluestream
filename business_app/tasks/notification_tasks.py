@@ -662,12 +662,24 @@ def send_verification_sms_task(self, user_id: int, otp_code: str, phone_number: 
             'company_name': current_app.config['COMPANY_NAME']
         }
         
-        result = notification_service.send_notification(
-            user_id,
-            NotificationType.SYSTEM,
-            [NotificationChannel.SMS],
-            template_data
-        )
+        # If explicit phone provided (like for account linking), use send_sms_to_phone
+        # since user.phone may be None or different
+        if phone_number:
+            result = notification_service.send_sms_to_phone(
+                phone=target_phone,
+                notification_type=NotificationType.SYSTEM,
+                template_key='sms.verification.otp',
+                template_data=template_data,
+                language=getattr(user, 'preferred_language', 'en')
+            )
+        else:
+            # Use standard send_notification when using user's own phone
+            result = notification_service.send_notification(
+                user_id,
+                NotificationType.SYSTEM,
+                [NotificationChannel.SMS],
+                template_data
+            )
         
         logger.info(f"SMS verification sent successfully for user {user_id} to {target_phone}")
         return result

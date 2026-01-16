@@ -461,6 +461,22 @@ class OrderKeyboards:
         
         return KeyboardBuilder.build_inline_keyboard(buttons)
 
+    @staticmethod
+    def order_tracking(order_id: int, language: str = 'en') -> InlineKeyboardMarkup:
+        """Order tracking view buttons - just a back button to return to order details"""
+        buttons = [
+            [{
+                'text': f"⬅️ {i18n.get('telegram.back_to_order', language) or 'Back to Order'}",
+                'callback_data': f'order_{order_id}'
+            }],
+            [{
+                'text': i18n.get('telegram.back', language),
+                'callback_data': 'menu_orders'
+            }]
+        ]
+        
+        return KeyboardBuilder.build_inline_keyboard(buttons)
+
 
 class SubscriptionKeyboards:
     """Subscription-related keyboards"""

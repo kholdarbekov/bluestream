@@ -448,7 +448,7 @@ class ProductHandlers:
                 return
             
             cart_data = response.data
-            cart = cart_data.get('data', {}).get('cart', {})
+            cart = cart_data.get('data', {}).get('cart') or {}
             cart_items = cart.get('cart_items', [])
         
         cart_is_empty = None

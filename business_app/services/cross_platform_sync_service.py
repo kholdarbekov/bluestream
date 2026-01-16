@@ -138,7 +138,9 @@ class CrossPlatformSyncService:
             if primary_user.id == secondary_user.id:
                 raise ValueError("Cannot link user to themselves")
             
-            if primary_user.status != UserStatus.ACTIVE.value:
+            # Check status - handle both enum and string values
+            primary_status = primary_user.status.value if hasattr(primary_user.status, 'value') else primary_user.status
+            if primary_status != UserStatus.ACTIVE.value:
                 raise ValueError("Primary user account is not active")
             
             # Perform the linking based on registration sources
@@ -162,83 +164,277 @@ class CrossPlatformSyncService:
     
     def _link_web_primary_telegram_secondary(self, web_user: User, telegram_user: User, 
                                            link_type: str) -> Dict[str, Any]:
-        """Link web account (primary) with telegram account (secondary)"""
+        """
+        Fully merge telegram account into web account.
+        Transfers all related data and deletes the telegram user entirely.
+        """
+        secondary_id = telegram_user.id
+        primary_id = web_user.id
         
-        # Transfer telegram-specific data to web user
-        web_user.telegram_id = telegram_user.telegram_id
-        web_user.telegram_username = telegram_user.telegram_username
-        web_user.is_bot_active = telegram_user.is_bot_active
-        web_user.bot_state = telegram_user.bot_state
-        web_user.last_bot_interaction = telegram_user.last_bot_interaction
+        logger.info(f"Starting full merge: telegram user {secondary_id} -> web user {primary_id}")
+        
+        # Save telegram data to transfer
+        telegram_id = telegram_user.telegram_id
+        telegram_username = telegram_user.telegram_username
+        is_bot_active = telegram_user.is_bot_active
+        bot_state = telegram_user.bot_state
+        last_bot_interaction = telegram_user.last_bot_interaction
+        tg_first_name = telegram_user.first_name
+        tg_last_name = telegram_user.last_name
+        
+        # Step 1: Handle unique constraints FIRST
+        self._merge_carts(primary_id, secondary_id)
+        self._merge_loyalty_membership(primary_id, secondary_id)
+        
+        # Step 2: Transfer all foreign key references
+        self._transfer_user_references(primary_id, secondary_id)
+        
+        # Step 3: Clear telegram_id from secondary to avoid constraint violation
+        telegram_user.telegram_id = None
+        db.session.flush()
+        
+        # Step 4: Transfer telegram-specific data to web user
+        web_user.telegram_id = telegram_id
+        web_user.telegram_username = telegram_username
+        web_user.is_bot_active = is_bot_active
+        web_user.bot_state = bot_state
+        web_user.last_bot_interaction = last_bot_interaction
         
         # Update name if web user has incomplete info
-        if not web_user.first_name and telegram_user.first_name:
-            web_user.first_name = telegram_user.first_name
-        if not web_user.last_name and telegram_user.last_name:
-            web_user.last_name = telegram_user.last_name
+        if not web_user.first_name and tg_first_name:
+            web_user.first_name = tg_first_name
+        if not web_user.last_name and tg_last_name:
+            web_user.last_name = tg_last_name
         
-        # Mark telegram user as merged
-        telegram_user.status = UserStatus.MERGED.value
-        telegram_user.telegram_id = None  # Remove to avoid conflicts
-        
+        # Step 5: Delete the secondary user entirely
+        db.session.delete(telegram_user)
         db.session.commit()
         
-        logger.info(f"Successfully linked web user {web_user.id} with telegram user {telegram_user.id}")
+        logger.info(f"Successfully merged and deleted telegram user {secondary_id} into web user {primary_id}")
         
         return {
             'success': True,
-            'primary_user_id': web_user.id,
-            'secondary_user_id': telegram_user.id,
-            'link_type': 'web_primary',
-            'message': 'Web and Telegram accounts successfully linked'
+            'primary_user_id': primary_id,
+            'deleted_user_id': secondary_id,
+            'link_type': 'full_merge',
+            'message': 'Accounts fully merged. Telegram user has been deleted.'
         }
+    
+    def _merge_carts(self, primary_id: int, secondary_id: int):
+        """Merge cart items from secondary user to primary user, then delete secondary cart."""
+        from business_app.models.cart import Cart, CartItem
+        
+        secondary_cart = Cart.query.filter_by(user_id=secondary_id).first()
+        if not secondary_cart:
+            return  # No cart to merge
+        
+        primary_cart = Cart.query.filter_by(user_id=primary_id).first()
+        
+        if primary_cart:
+            # Transfer cart items to primary cart
+            CartItem.query.filter_by(cart_id=secondary_cart.id).update(
+                {'cart_id': primary_cart.id}
+            )
+            # Delete secondary cart
+            db.session.delete(secondary_cart)
+        else:
+            # Just reassign the cart to primary user
+            secondary_cart.user_id = primary_id
+        
+        db.session.flush()
+        logger.info(f"Merged cart from user {secondary_id} to user {primary_id}")
+    
+    def _merge_loyalty_membership(self, primary_id: int, secondary_id: int):
+        """Merge loyalty points from secondary to primary."""
+        from business_app.models.loyalty import LoyaltyPoints, LoyaltyTransaction
+        
+        secondary_points = LoyaltyPoints.query.filter_by(user_id=secondary_id).first()
+        if not secondary_points:
+            return  # No loyalty points to merge
+        
+        primary_points = LoyaltyPoints.query.filter_by(user_id=primary_id).first()
+        
+        if primary_points:
+            # Add secondary's points to primary
+            primary_points.current_points += secondary_points.current_points
+            primary_points.lifetime_points += secondary_points.lifetime_points
+            primary_points.total_orders += secondary_points.total_orders
+            primary_points.total_spent += secondary_points.total_spent
+            
+            # Transfer loyalty transactions to primary
+            LoyaltyTransaction.query.filter_by(user_id=secondary_id).update(
+                {'user_id': primary_id}
+            )
+            
+            # Delete secondary points record
+            db.session.delete(secondary_points)
+        else:
+            # Just reassign the points record to primary user
+            secondary_points.user_id = primary_id
+        
+        db.session.flush()
+        logger.info(f"Merged loyalty points from user {secondary_id} to user {primary_id}")
+    
+    def _transfer_user_references(self, primary_id: int, secondary_id: int):
+        """Transfer all foreign key references from secondary user to primary user."""
+        # Import all models with user_id references
+        from business_app.models.order import Order, OrderStatusHistory
+        from business_app.models.payment import Payment, PaymentTransaction, CreditCard
+        from business_app.models.subscription import Subscription, SubscriptionLog
+        from business_app.models.notification import Notification, NotificationPreference, PushNotificationToken
+        from business_app.models.review import Review
+        from business_app.models.user import UserAddress, UserSession
+        from business_app.models.delivery import Delivery, DeliveryStatusHistory, DeliveryPerson
+        from business_app.models.loyalty import ReferralProgram
+        from business_app.models.analytics import UserBehavior, UserEvent, ProductView
+        from business_app.models.audit import AuditLog
+        
+        # Orders
+        Order.query.filter_by(user_id=secondary_id).update({'user_id': primary_id})
+        OrderStatusHistory.query.filter_by(changed_by=secondary_id).update({'changed_by': primary_id})
+        
+        # Payments
+        Payment.query.filter_by(user_id=secondary_id).update({'user_id': primary_id})
+        PaymentTransaction.query.filter_by(initiated_by=secondary_id).update({'initiated_by': primary_id})
+        CreditCard.query.filter_by(user_id=secondary_id).update({'user_id': primary_id})
+        
+        # Subscriptions
+        Subscription.query.filter_by(user_id=secondary_id).update({'user_id': primary_id})
+        SubscriptionLog.query.filter_by(user_id=secondary_id).update({'user_id': primary_id})
+        
+        # Notifications
+        Notification.query.filter_by(user_id=secondary_id).update({'user_id': primary_id})
+        NotificationPreference.query.filter_by(user_id=secondary_id).update({'user_id': primary_id})
+        PushNotificationToken.query.filter_by(user_id=secondary_id).update({'user_id': primary_id})
+        
+        # Reviews
+        Review.query.filter_by(user_id=secondary_id).update({'user_id': primary_id})
+        
+        # User data
+        UserAddress.query.filter_by(user_id=secondary_id).update({'user_id': primary_id})
+        UserSession.query.filter_by(user_id=secondary_id).update({'user_id': primary_id})
+        
+        # Delivery
+        Delivery.query.filter_by(delivery_person_id=secondary_id).update({'delivery_person_id': primary_id})
+        DeliveryStatusHistory.query.filter_by(changed_by=secondary_id).update({'changed_by': primary_id})
+        
+        # Handle DeliveryPerson (unique constraint)
+        secondary_profile = DeliveryPerson.query.filter_by(user_id=secondary_id).first()
+        if secondary_profile:
+            primary_profile = DeliveryPerson.query.filter_by(user_id=primary_id).first()
+            if primary_profile:
+                # Primary already has profile, delete secondary's
+                db.session.delete(secondary_profile)
+            else:
+                # Transfer to primary
+                secondary_profile.user_id = primary_id
+        
+        # Referrals
+        ReferralProgram.query.filter_by(referrer_id=secondary_id).update({'referrer_id': primary_id})
+        ReferralProgram.query.filter_by(referee_id=secondary_id).update({'referee_id': primary_id})
+        
+        # Analytics (nullable user_id)
+        UserBehavior.query.filter_by(user_id=secondary_id).update({'user_id': primary_id})
+        UserEvent.query.filter_by(user_id=secondary_id).update({'user_id': primary_id})
+        ProductView.query.filter_by(user_id=secondary_id).update({'user_id': primary_id})
+        
+        # Audit logs
+        AuditLog.query.filter_by(user_id=secondary_id).update({'user_id': primary_id})
+        
+        db.session.flush()
+        logger.info(f"Transferred all user references from {secondary_id} to {primary_id}")
     
     def _link_telegram_primary_web_secondary(self, telegram_user: User, web_user: User,
                                            link_type: str) -> Dict[str, Any]:
-        """Link telegram account (primary) with web account (secondary)"""
+        """
+        Fully merge web account into telegram account.
+        Transfers all related data and deletes the web user entirely.
+        """
+        secondary_id = web_user.id
+        primary_id = telegram_user.id
         
-        # Transfer web-specific data to telegram user
-        telegram_user.email = web_user.email
-        telegram_user.password_hash = web_user.password_hash
-        telegram_user.phone = web_user.phone or telegram_user.phone
+        logger.info(f"Starting full merge: web user {secondary_id} -> telegram user {primary_id}")
+        
+        # Save web data to transfer
+        web_email = web_user.email
+        web_password_hash = web_user.password_hash
+        web_phone = web_user.phone
+        web_first_name = web_user.first_name
+        web_last_name = web_user.last_name
+        web_preferred_language = web_user.preferred_language
+        web_preferred_currency = web_user.preferred_currency
+        web_email_notifications = web_user.email_notifications
+        web_sms_notifications = web_user.sms_notifications
+        web_email_verified_at = web_user.email_verified_at
+        web_phone_verified_at = web_user.phone_verified_at
+        web_is_verified = web_user.is_verified
+        
+        # Step 1: Handle unique constraints FIRST
+        self._merge_carts(primary_id, secondary_id)
+        self._merge_loyalty_membership(primary_id, secondary_id)
+        
+        # Step 2: Transfer all foreign key references
+        self._transfer_user_references(primary_id, secondary_id)
+        
+        # Step 3: Clear email from secondary to avoid constraint violation (email is unique)
+        web_user.email = f"deleted_{secondary_id}@bluestream.local"
+        web_user.phone = None
+        db.session.flush()
+        
+        # Step 4: Transfer web-specific data to telegram user
+        telegram_user.email = web_email
+        telegram_user.password_hash = web_password_hash
+        telegram_user.phone = web_phone or telegram_user.phone
         
         # Update names with more complete web info
-        if web_user.first_name:
-            telegram_user.first_name = web_user.first_name
-        if web_user.last_name:
-            telegram_user.last_name = web_user.last_name
+        if web_first_name:
+            telegram_user.first_name = web_first_name
+        if web_last_name:
+            telegram_user.last_name = web_last_name
         
         # Transfer preferences
-        telegram_user.preferred_language = web_user.preferred_language
-        telegram_user.preferred_currency = web_user.preferred_currency
-        telegram_user.email_notifications = web_user.email_notifications
-        telegram_user.sms_notifications = web_user.sms_notifications
+        telegram_user.preferred_language = web_preferred_language
+        telegram_user.preferred_currency = web_preferred_currency
+        telegram_user.email_notifications = web_email_notifications
+        telegram_user.sms_notifications = web_sms_notifications
         
         # Update verification status
-        telegram_user.email_verified_at = web_user.email_verified_at
-        telegram_user.phone_verified_at = web_user.phone_verified_at
-        telegram_user.is_verified = web_user.is_verified
+        telegram_user.email_verified_at = web_email_verified_at
+        telegram_user.phone_verified_at = web_phone_verified_at
+        telegram_user.is_verified = web_is_verified
         
-        # Mark web user as merged
-        web_user.status = UserStatus.MERGED.value
-        web_user.email = f"merged_{web_user.id}_{web_user.email}"  # Avoid email conflicts
-        
+        # Step 5: Delete the secondary user entirely
+        db.session.delete(web_user)
         db.session.commit()
         
-        logger.info(f"Successfully linked telegram user {telegram_user.id} with web user {web_user.id}")
+        logger.info(f"Successfully merged and deleted web user {secondary_id} into telegram user {primary_id}")
         
         return {
             'success': True,
-            'primary_user_id': telegram_user.id,
-            'secondary_user_id': web_user.id, 
-            'link_type': 'telegram_primary',
-            'message': 'Telegram and Web accounts successfully linked'
+            'primary_user_id': primary_id,
+            'deleted_user_id': secondary_id,
+            'link_type': 'full_merge',
+            'message': 'Accounts fully merged. Web user has been deleted.'
         }
     
     def _merge_same_platform_accounts(self, primary_user: User, secondary_user: User) -> Dict[str, Any]:
-        """Merge two accounts from the same platform (keep the older one)"""
+        """
+        Merge two accounts from the same platform (keep the older one).
+        Fully deletes the secondary user after transferring all data.
+        """
+        primary_id = primary_user.id
+        secondary_id = secondary_user.id
         
-        # Transfer any missing data from secondary to primary
+        logger.info(f"Starting same-platform merge: user {secondary_id} -> user {primary_id}")
+        
+        # Step 1: Handle unique constraints FIRST
+        self._merge_carts(primary_id, secondary_id)
+        self._merge_loyalty_membership(primary_id, secondary_id)
+        
+        # Step 2: Transfer all foreign key references
+        self._transfer_user_references(primary_id, secondary_id)
+        
+        # Step 3: Transfer any missing data from secondary to primary
         if not primary_user.phone and secondary_user.phone:
             primary_user.phone = secondary_user.phone
             primary_user.phone_verified_at = secondary_user.phone_verified_at
@@ -247,27 +443,39 @@ class CrossPlatformSyncService:
             primary_user.email_verified_at = secondary_user.email_verified_at
             primary_user.is_verified = True
         
-        # Transfer preferences if primary doesn't have them set
         if not primary_user.preferred_language:
             primary_user.preferred_language = secondary_user.preferred_language
         
-        # Mark secondary as merged
-        secondary_user.status = UserStatus.MERGED.value
-        if secondary_user.email:
-            secondary_user.email = f"merged_{secondary_user.id}_{secondary_user.email}"
-        if secondary_user.telegram_id:
-            secondary_user.telegram_id = None
+        # Transfer telegram data if primary doesn't have it
+        if secondary_user.telegram_id and not primary_user.telegram_id:
+            secondary_telegram_id = secondary_user.telegram_id
+            secondary_user.telegram_id = None  # Clear to avoid unique constraint
+            db.session.flush()
+            primary_user.telegram_id = secondary_telegram_id
+            primary_user.telegram_username = secondary_user.telegram_username
+            primary_user.is_bot_active = secondary_user.is_bot_active
+            primary_user.bot_state = secondary_user.bot_state
+            primary_user.last_bot_interaction = secondary_user.last_bot_interaction
         
+        # Step 4: Clear unique constraints on secondary before delete
+        if secondary_user.email:
+            secondary_user.email = f"deleted_{secondary_id}@bluestream.local"
+        if secondary_user.phone:
+            secondary_user.phone = None
+        db.session.flush()
+        
+        # Step 5: Delete the secondary user entirely
+        db.session.delete(secondary_user)
         db.session.commit()
         
-        logger.info(f"Successfully merged same-platform accounts: kept {primary_user.id}, merged {secondary_user.id}")
+        logger.info(f"Successfully merged and deleted user {secondary_id} into user {primary_id}")
         
         return {
             'success': True,
-            'primary_user_id': primary_user.id,
-            'secondary_user_id': secondary_user.id,
-            'link_type': 'same_platform_merge',
-            'message': 'Duplicate accounts successfully merged'
+            'primary_user_id': primary_id,
+            'deleted_user_id': secondary_id,
+            'link_type': 'full_merge',
+            'message': 'Accounts fully merged and secondary user deleted'
         }
     
     def get_user_platform_status(self, user: User) -> Dict[str, Any]:

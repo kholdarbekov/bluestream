@@ -2611,8 +2611,8 @@ def link_phone_send_otp():
     import json
     auth_service.redis_client.setex(link_key, 600, json.dumps(link_data))  # 10 minutes expiry
     
-    # Send OTP to the phone
-    success = auth_service.send_verification_sms(telegram_user.id, phone)
+    # Send OTP to the phone (don't update telegram user's phone - it belongs to web user)
+    success = auth_service.send_verification_sms(telegram_user.id, phone, update_phone=False)
     
     if success:
         logger.info(f"OTP sent for account linking: telegram_user={telegram_id}, phone={phone}")

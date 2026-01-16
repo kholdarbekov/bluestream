@@ -580,6 +580,11 @@ class NotificationService:
                     'ru': "Bluestream: Код регистрации: {otp_code}. Код действителен 3 минуты.",
                     'en': "Bluestream: Your registration code: {otp_code}. Valid for 3 minutes."
                 },
+                'sms.verification.otp': {
+                    'uz': "Bluestream: Tasdiqlash kodi: {otp_code}. Kod 5 daqiqa amal qiladi.",
+                    'ru': "Bluestream: Код подтверждения: {otp_code}. Код действителен 5 минут.",
+                    'en': "Bluestream: Your verification code: {otp_code}. Valid for 5 minutes."
+                },
                 'sms.welcome': {
                     'uz': "Bluestream'ga xush kelibsiz, {first_name}! Buyurtma berish uchun ilovamizdan foydalaning.",
                     'ru': "Добро пожаловать в Bluestream, {first_name}! Используйте наше приложение для заказов.",

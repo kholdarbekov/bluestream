@@ -576,7 +576,10 @@ class ProfileHandlers:
                 async with api_client as client:
                     response = await client.check_phone_availability(user_id, phone)
                     
-                    if response.success and response.data.get('available'):
+                    # Extract nested data - API returns {'data': {...}, 'success': True}
+                    response_data = response.data.get('data', {}) if response.data else {}
+                    
+                    if response.success and response_data.get('available'):
                         # Phone is available - save it normally
                         await self.user_repo.set_user_phone(user_id, phone)
                         
@@ -592,11 +595,11 @@ class ProfileHandlers:
                         logger.info(f"Registration completed for user {user_id}")
                         return ConversationHandler.END
                     
-                    elif response.success and not response.data.get('available'):
+                    elif response.success and not response_data.get('available'):
                         # Phone exists - check if linking is possible
-                        available = response.data.get('available', False)
-                        can_link = response.data.get('can_link', False)
-                        existing_user = response.data.get('existing_user_masked', {})
+                        available = response_data.get('available', False)
+                        can_link = response_data.get('can_link', False)
+                        existing_user = response_data.get('existing_user_masked', {})
                         
                         logger.info(f"Phone check for user {user_id}: available={available}, can_link={can_link}, existing_user={existing_user}")
                         

@@ -261,13 +261,15 @@ class AuthService:
         
         return True
     
-    def send_verification_sms(self, user_id: int, phone: str = None) -> bool:
+    def send_verification_sms(self, user_id: int, phone: str = None, update_phone: bool = True) -> bool:
         """
         Send SMS verification
         
         Args:
             user_id: User ID
             phone: Phone number to send OTP to (optional, uses user's phone if not provided)
+            update_phone: If True, update the user's phone number in DB. Set to False for
+                         account linking where the phone belongs to another user.
         
         Returns:
             Success status
@@ -292,8 +294,8 @@ class AuthService:
         # Format phone number
         formatted_phone = format_phone_number(target_phone)
         
-        # Update user's phone if a new phone was provided
-        if phone and phone != user.phone:
+        # Update user's phone if a new phone was provided (and update is allowed)
+        if update_phone and phone and phone != user.phone:
             logger.info(f"Updating user {user_id} phone from {user.phone} to {formatted_phone}")
             user.phone = formatted_phone
             db.session.commit()

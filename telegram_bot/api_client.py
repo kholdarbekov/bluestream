@@ -547,6 +547,11 @@ class BusinessAPIClient:
         return await self._make_request('PUT', f'/api/v1/orders/{order_id}/cancel', 
                                        user_token=user_token)
     
+    async def track_order(self, user_token: str, order_id: int) -> APIResponse:
+        """Get order tracking information with status timeline"""
+        return await self._make_request('GET', f'/api/v1/orders/{order_id}/track', 
+                                       user_token=user_token)
+    
     # Payment methods
     async def get_payment_methods(self, user_token: str) -> APIResponse:
         """Get user's payment methods"""

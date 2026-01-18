@@ -1,0 +1,58 @@
+{% extends "emails/base.html" %}
+
+{% block title %}Mukofot olindi - {{ company_name }}{% endblock %}
+
+{% block header %}
+<h1>Mukofot olindi!</h1>
+{% endblock %}
+
+{% block content %}
+<h2>Tabriklaymiz, {{ user_name }}!</h2>
+
+<div class="success-box">
+    <p>Siz mukofotingizni muvaffaqiyatli oldingiz: <strong>{{ reward_name }}</strong></p>
+</div>
+
+<div class="code-display">
+    <p style="margin: 0; color: #64748b; font-size: 14px;">Mukofot kodi</p>
+    <span class="code">{{ redemption_code }}</span>
+    <p style="margin: 5px 0 0 0; color: #64748b; font-size: 12px;">Ushbu kodni saqlang</p>
+</div>
+
+<h3 style="color: #1e293b; margin-top: 30px;">Mukofot tafsilotlari</h3>
+
+<table class="details-table">
+    <tr>
+        <th>Mukofot</th>
+        <td>{{ reward_name }}</td>
+    </tr>
+    <tr>
+        <th>Sarflangan ballar</th>
+        <td style="color: #ef4444; font-weight: 600;">-{{ points_spent }}</td>
+    </tr>
+    <tr>
+        <th>Qolgan ballar</th>
+        <td style="color: #22c55e; font-weight: 600;">{{ remaining_points }}</td>
+    </tr>
+    {% if expires_at %}
+    <tr>
+        <th>Amal qilish muddati</th>
+        <td>{{ expires_at }}</td>
+    </tr>
+    {% endif %}
+</table>
+
+<hr class="divider">
+
+<div class="info-box">
+    <p><strong>Mukofotdan qanday foydalanish:</strong> Keyingi buyurtmangizda ushbu kodni promo kod maydoniga kiriting yoki to'lovda ko'rsating.</p>
+</div>
+
+<p style="text-align: center;">
+    <a href="{{ loyalty_url }}" class="btn-primary">Mukofotlarimni ko'rish</a>
+</p>
+
+<p style="color: #94a3b8; font-size: 13px; text-align: center;">
+    Blue Stream mijozi bo'lganingiz uchun rahmat!
+</p>
+{% endblock %}

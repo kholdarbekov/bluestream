@@ -152,13 +152,30 @@ def send_account_locked_notification_task(self, user_id: int, lockout_until: str
 
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=60)
-def send_loyalty_notification_task(self, user_id: int, event_type: str, data: Dict[str, Any]):
-    """Send loyalty program notification"""
+def send_loyalty_notification_task(self, user_id: int, event_type: str, data: Dict[str, Any], 
+                                   notification_type_str: str = None):
+    """Send loyalty program notification
+    
+    Args:
+        user_id: User to notify
+        event_type: Type of loyalty event (earned, redeemed, etc.)
+        data: Template data
+        notification_type_str: String value of NotificationType enum (e.g., 'loyalty_reward', 'reward_redeemed')
+    """
     try:
-        logger.info(f"Sending loyalty notification for user {user_id}, event: {event_type}")
+        logger.info(f"Sending loyalty notification for user {user_id}, event: {event_type}, type: {notification_type_str}")
         
         notification_service = NotificationService()
-        result = notification_service.send_loyalty_notification(user_id, event_type, data)
+        
+        # Convert string to NotificationType enum if provided
+        notification_type = None
+        if notification_type_str:
+            try:
+                notification_type = NotificationType(notification_type_str)
+            except ValueError:
+                logger.warning(f"Invalid notification type: {notification_type_str}, using default")
+        
+        result = notification_service.send_loyalty_notification(user_id, event_type, data, notification_type)
         
         logger.info(f"Loyalty notification sent successfully for user {user_id}")
         return result

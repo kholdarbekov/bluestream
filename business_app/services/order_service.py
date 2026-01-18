@@ -575,7 +575,7 @@ class OrderService:
         """Check if status transition is valid"""
         valid_transitions = {
             OrderStatus.PENDING: [OrderStatus.CONFIRMED, OrderStatus.CANCELLED],
-            OrderStatus.CONFIRMED: [OrderStatus.PREPARING, OrderStatus.CANCELLED],
+            OrderStatus.CONFIRMED: [OrderStatus.PREPARING, OrderStatus.DELIVERED, OrderStatus.CANCELLED],
             OrderStatus.PREPARING: [OrderStatus.OUT_FOR_DELIVERY, OrderStatus.CANCELLED],
             OrderStatus.OUT_FOR_DELIVERY: [OrderStatus.DELIVERED, OrderStatus.RETURNED],
             OrderStatus.DELIVERED: [],
@@ -646,11 +646,7 @@ class OrderService:
             
             # Award loyalty points only for non-cash orders (cash orders get points on delivery)
             if not is_cash_order:
-                points = calculate_loyalty_points(order.total_amount)
-                if points > 0:
-                    from .loyalty_service import LoyaltyService
-                    loyalty_service = LoyaltyService()
-                    loyalty_service.award_points(order.user_id, points, f"Order #{order.order_number}")
+                self._process_loyalty_points_for_order(order)
         
         elif new_status == OrderStatus.DELIVERED:
             # Mark delivery as completed
@@ -663,13 +659,68 @@ class OrderService:
             is_cash_order = order.payment_method == PaymentMethod.CASH if order.payment_method else False
             if is_cash_order:
                 self._confirm_inventory_for_order(order)
-                
-                # Award loyalty points for cash orders
-                points = calculate_loyalty_points(order.total_amount)
-                if points > 0:
-                    from .loyalty_service import LoyaltyService
-                    loyalty_service = LoyaltyService()
-                    loyalty_service.award_points(order.user_id, points, f"Order #{order.order_number}")
+                # Process loyalty points for cash orders
+                self._process_loyalty_points_for_order(order)
+    
+    def _process_loyalty_points_for_order(self, order: Order):
+        """
+        Process loyalty points for an order:
+        1. Award points based on order amount
+        2. Auto-apply Free Delivery reward (deduct 200 points to cover delivery)
+        
+        This ensures delivery is always free while maintaining a sustainable points economy.
+        The minimum order (2 qty) earns ~360 points, so users always have enough for the 200 point
+        free delivery deduction.
+        """
+        from .loyalty_service import LoyaltyService
+        from business_app.utils.constants import LoyaltyActionType
+        
+        FREE_DELIVERY_POINTS_COST = 200  # Points required for free delivery
+        
+        try:
+            loyalty_service = LoyaltyService()
+            
+            # Step 1: Award points for the purchase
+            points_earned = calculate_loyalty_points(order.total_amount)
+            if points_earned > 0:
+                loyalty_service.award_points(
+                    order.user_id, 
+                    points_earned, 
+                    f"Order #{order.order_number}",
+                    LoyaltyActionType.PURCHASE,
+                    order.id
+                )
+                logger.info(f"Awarded {points_earned} points for order {order.order_number}")
+            
+            # Step 2: Auto-apply Free Delivery reward (deduct points for delivery)
+            # This makes delivery effectively "free" - the cost is covered by loyalty points
+            if order.delivery_fee > 0:
+                try:
+                    # Check if user has enough points for free delivery
+                    current_points = loyalty_service.get_available_points(order.user_id)
+                    
+                    if current_points >= FREE_DELIVERY_POINTS_COST:
+                        # Deduct points for free delivery
+                        loyalty_service.deduct_points(
+                            order.user_id,
+                            FREE_DELIVERY_POINTS_COST,
+                            f"Free Delivery reward - Order #{order.order_number}",
+                            order.id
+                        )
+                        logger.info(f"Applied Free Delivery reward ({FREE_DELIVERY_POINTS_COST} points) for order {order.order_number}")
+                    else:
+                        # User doesn't have enough points - log but don't fail the order
+                        logger.warning(
+                            f"User {order.user_id} doesn't have enough points for Free Delivery. "
+                            f"Required: {FREE_DELIVERY_POINTS_COST}, Available: {current_points}"
+                        )
+                except Exception as e:
+                    # Don't fail the order if free delivery deduction fails
+                    logger.error(f"Failed to apply Free Delivery reward for order {order.order_number}: {e}")
+                    
+        except Exception as e:
+            # Don't fail the order if loyalty processing fails
+            logger.error(f"Failed to process loyalty points for order {order.order_number}: {e}")
     
     def _confirm_inventory_for_order(self, order: Order):
         """Confirm inventory reservations and reduce stock for an order"""

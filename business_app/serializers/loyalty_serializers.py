@@ -430,23 +430,27 @@ def serialize_loyalty_reward(reward, user=None) -> Dict[str, Any]:
         Serialized reward data
     """
     try:
+        # Get points_cost from the model (the actual field name)
+        points_cost = getattr(reward, 'points_cost', None) or getattr(reward, 'points_required', 0) or 0
+        
         data = {
             'id': reward.id,
             'name': reward.name,
             'description': reward.description,
-            'reward_type': reward.reward_type.value if reward.reward_type else None,
-            'points_required': reward.points_required or 0,
+            'reward_type': reward.reward_type if isinstance(reward.reward_type, str) else (reward.reward_type.value if reward.reward_type else None),
+            'points_cost': points_cost,  # Primary field used by model
+            'points_required': points_cost,  # Alias for backwards compatibility
             'is_active': reward.is_active,
-            'is_featured': reward.is_featured,
-            'tier_requirement': reward.tier_requirement.value if reward.tier_requirement else None,
-            'usage_limit_per_user': reward.usage_limit_per_user,
-            'total_usage_limit': reward.total_usage_limit,
-            'current_usage_count': reward.current_usage_count or 0,
+            'is_featured': getattr(reward, 'is_featured', False),
+            'tier_requirement': reward.tier_requirement.value if hasattr(reward, 'tier_requirement') and reward.tier_requirement else None,
+            'usage_limit_per_user': getattr(reward, 'usage_limit_per_user', None) or getattr(reward, 'max_uses_per_user', None),
+            'total_usage_limit': getattr(reward, 'total_usage_limit', None) or getattr(reward, 'max_redemptions', None),
+            'current_usage_count': getattr(reward, 'current_usage_count', 0) or getattr(reward, 'redemptions_used', 0) or 0,
             'valid_from': reward.valid_from.isoformat() if reward.valid_from else None,
             'valid_until': reward.valid_until.isoformat() if reward.valid_until else None,
             'terms_conditions': reward.terms_conditions,
             'image_url': reward.image_url,
-            'category': reward.category
+            'category': getattr(reward, 'category', reward.reward_type)
         }
         
         # Add type-specific information
@@ -489,11 +493,13 @@ def serialize_loyalty_reward(reward, user=None) -> Dict[str, Any]:
         
     except Exception:
         # Fallback to basic serialization
+        points_cost = getattr(reward, 'points_cost', None) or getattr(reward, 'points_required', 0) or 0
         return {
             'id': reward.id,
             'name': reward.name,
             'description': reward.description,
-            'points_required': getattr(reward, 'points_required', 0),
+            'points_cost': points_cost,
+            'points_required': points_cost,
             'is_active': getattr(reward, 'is_active', True),
             'reward_type': getattr(reward, 'reward_type', 'discount')
         }
@@ -734,24 +740,42 @@ def can_user_join_challenge(user, challenge) -> bool:
 def serialize_loyalty_transaction(transaction) -> Dict[str, Any]:
     """Serialize loyalty transaction data"""
     try:
+        # Safely get transaction_type as string
+        transaction_type = None
+        if hasattr(transaction, 'transaction_type') and transaction.transaction_type is not None:
+            if hasattr(transaction.transaction_type, 'value'):
+                transaction_type = transaction.transaction_type.value
+            else:
+                transaction_type = str(transaction.transaction_type)
+        
         return {
             'id': transaction.id,
             'user_id': transaction.user_id,
             'points': transaction.points,
-            'transaction_type': transaction.transaction_type.value if transaction.transaction_type else None,
+            'transaction_type': transaction_type,
             'description': transaction.description,
-            'reference_type': transaction.reference_type,
-            'reference_id': transaction.reference_id,
+            'order_id': getattr(transaction, 'order_id', None),
+            'subscription_id': getattr(transaction, 'subscription_id', None),
+            'is_expired': getattr(transaction, 'is_expired', False),
             'created_at': transaction.created_at.isoformat() if transaction.created_at else None,
             'expires_at': transaction.expires_at.isoformat() if hasattr(transaction, 'expires_at') and transaction.expires_at else None
         }
-    except Exception:
+    except Exception as e:
+        # Fallback to basic serialization - ensure enum is converted
+        transaction_type = 'earned'
+        if hasattr(transaction, 'transaction_type'):
+            tt = transaction.transaction_type
+            if hasattr(tt, 'value'):
+                transaction_type = tt.value
+            elif tt is not None:
+                transaction_type = str(tt)
+        
         return {
-            'id': transaction.id,
+            'id': getattr(transaction, 'id', 0),
             'points': getattr(transaction, 'points', 0),
-            'transaction_type': getattr(transaction, 'transaction_type', 'earned'),
+            'transaction_type': transaction_type,
             'description': getattr(transaction, 'description', ''),
-            'created_at': transaction.created_at.isoformat() if transaction.created_at else None
+            'created_at': transaction.created_at.isoformat() if hasattr(transaction, 'created_at') and transaction.created_at else None
         }
 
 

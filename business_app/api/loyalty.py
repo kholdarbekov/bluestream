@@ -19,7 +19,7 @@ from business_app.serializers.loyalty_serializers import (
     GiftPointsRequest, JoinChallengeRequest, LoyaltyResponseSchema
 )
 from business_app.utils.decorators import validate_json, cache_response
-from business_app.utils.constants import LoyaltyTransactionType, RewardStatus
+from business_app.utils.constants import LoyaltyTransactionType, RewardStatus, NotificationType
 from business_app.utils.api_responses import (
     success_response, error_response, paginated_response, created_response,
     not_found_response, validation_error_response, internal_error_response
@@ -53,6 +53,83 @@ def get_loyalty_points():
     except Exception as e:
         current_app.logger.error(f"Get loyalty points error: {e}")
         return internal_error_response('Failed to get loyalty points')
+
+
+@loyalty_bp.route('/account', methods=['GET'])
+@jwt_required()
+def get_loyalty_account():
+    """Get complete loyalty account data for frontend dashboard"""
+    try:
+        current_user_id = get_jwt_identity()
+
+        # Get or create loyalty points record
+        loyalty_points = LoyaltyPoints.query.filter_by(user_id=current_user_id).first()
+        if not loyalty_points:
+            loyalty_points = get_loyalty_service().create_loyalty_account(current_user_id)
+
+        # Calculate points earned this month
+        from datetime import datetime
+        now = datetime.now(UTC)
+        month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        
+        points_this_month = db.session.query(func.sum(LoyaltyTransaction.points)).filter(
+            LoyaltyTransaction.user_id == current_user_id,
+            LoyaltyTransaction.points > 0,
+            LoyaltyTransaction.created_at >= month_start
+        ).scalar() or 0
+
+        # Calculate tier progress
+        tier_thresholds = {
+            'Bronze': 0,
+            'Silver': 5000,
+            'Gold': 20000,
+            'Platinum': 45000
+        }
+        
+        current_tier = loyalty_points.current_tier or 'Bronze'
+        current_balance = loyalty_points.current_balance or 0
+        
+        # Find next tier threshold
+        tiers = ['Bronze', 'Silver', 'Gold', 'Platinum']
+        current_tier_index = tiers.index(current_tier) if current_tier in tiers else 0
+        
+        if current_tier_index < len(tiers) - 1:
+            next_tier = tiers[current_tier_index + 1]
+            next_tier_points = tier_thresholds[next_tier]
+            current_tier_points = tier_thresholds[current_tier]
+            points_needed = max(0, next_tier_points - current_balance)
+        else:
+            next_tier_points = tier_thresholds['Platinum']
+            current_tier_points = tier_thresholds['Platinum']
+            points_needed = 0
+
+        tier_progress = {
+            'current': current_balance - current_tier_points if current_tier_index < len(tiers) - 1 else current_balance,
+            'next_tier_points': next_tier_points - current_tier_points if current_tier_index < len(tiers) - 1 else 0,
+            'points_needed': points_needed
+        }
+
+        # Count available rewards user can redeem
+        available_rewards_count = LoyaltyReward.query.filter(
+            LoyaltyReward.is_active == True,
+            LoyaltyReward.points_cost <= current_balance
+        ).count()
+
+        return success_response(
+            data={
+                'current_balance': current_balance,
+                'current_tier': current_tier,
+                'points_this_month': points_this_month,
+                'tier_progress': tier_progress,
+                'available_rewards_count': available_rewards_count,
+                'total_earned': loyalty_points.total_earned or 0,
+                'total_redeemed': loyalty_points.total_redeemed or 0
+            }
+        )
+
+    except Exception as e:
+        current_app.logger.error(f"Get loyalty account error: {e}")
+        return internal_error_response('Failed to get loyalty account')
 
 
 @loyalty_bp.route('/history', methods=['GET'])
@@ -253,6 +330,54 @@ def get_available_rewards():
         return internal_error_response('Failed to get rewards')
 
 
+@loyalty_bp.route('/rewards/<int:reward_id>', methods=['GET'])
+@jwt_required()
+def get_reward_details(reward_id):
+    """Get single reward details by ID"""
+    try:
+        current_user_id = get_jwt_identity()
+
+        reward = LoyaltyReward.query.filter_by(
+            id=reward_id,
+            is_active=True
+        ).first()
+
+        if not reward:
+            return not_found_response('Reward not found')
+
+        # Get user's points balance
+        loyalty_points = LoyaltyPoints.query.filter_by(user_id=current_user_id).first()
+        user_points = loyalty_points.current_balance if loyalty_points else 0
+
+        # Get language for translations
+        language = get_current_language()
+
+        return success_response(
+            data={
+                'id': reward.id,
+                'name': reward.get_translated('name', language),
+                'description': reward.get_translated('description', language),
+                'reward_type': reward.reward_type,
+                'points_cost': reward.points_cost,
+                'points_required': reward.points_cost,  # Alias for compatibility
+                'min_order_value': float(reward.min_order_value) if reward.min_order_value else None,
+                'discount_type': reward.discount_type,
+                'discount_value': float(reward.discount_value) if reward.discount_value else None,
+                'image_url': reward.image_url,
+                'terms_conditions': reward.terms_conditions,
+                'valid_from': reward.valid_from.isoformat() if reward.valid_from else None,
+                'valid_until': reward.valid_until.isoformat() if reward.valid_until else None,
+                'can_redeem': user_points >= reward.points_cost,
+                'points_needed': max(0, reward.points_cost - user_points),
+                'user_points_balance': user_points
+            }
+        )
+
+    except Exception as e:
+        current_app.logger.error(f"Get reward details error: {e}")
+        return internal_error_response('Failed to get reward details')
+
+
 @loyalty_bp.route('/rewards/<int:reward_id>/redeem', methods=['POST'])
 @jwt_required()
 def redeem_reward(reward_id):
@@ -273,8 +398,8 @@ def redeem_reward(reward_id):
         if not reward:
             return not_found_response('Reward not found')
 
-        # Check if reward is available
-        if reward.quantity_limit and reward.redeemed_count >= reward.quantity_limit:
+        # Check if reward is available (use correct model field names)
+        if reward.max_redemptions and reward.redemptions_used >= reward.max_redemptions:
             return error_response('Reward is no longer available')
 
         # Check user's points balance
@@ -298,23 +423,26 @@ def redeem_reward(reward_id):
         language = get_current_language()
         get_notification_service().send_notification(
             current_user_id,
-            'reward_redeemed',
+            NotificationType.REWARD_REDEEMED,
             template_data={
                 'reward_name': reward.get_translated('name', language),
                 'points_spent': reward.points_cost,
-                'remaining_points': loyalty_points.current_balance - reward.points_cost
+                'remaining_points': loyalty_points.current_balance,
+                'redemption_code': redemption['redemption_code'],
+                'expires_at': redemption['expires_at'],
+                'loyalty_url': f"{current_app.config.get('FRONTEND_URL', '')}/cabinet/loyalty"
             }
         )
 
         return created_response(
             data={
                 'redemption': {
-                    'id': redemption.id,
+                    'id': redemption['id'],
                     'reward_name': reward.get_translated('name', language),
-                    'points_spent': reward.points_cost,
-                    'status': redemption.status.value,
-                    'redemption_code': redemption.redemption_code,
-                    'expires_at': redemption.expires_at.isoformat() if redemption.expires_at else None
+                    'points_spent': redemption['points_spent'],
+                    'status': redemption['status'],
+                    'redemption_code': redemption['redemption_code'],
+                    'expires_at': redemption['expires_at']
                 }
             },
             message='Reward redeemed successfully'
@@ -465,28 +593,45 @@ def get_referral_info():
         # Get or create referral code
         referral_code = get_loyalty_service().get_user_referral_code(current_user_id)
 
-        # Get referral statistics
-        referral_stats = get_loyalty_service().get_referral_statistics(current_user_id)
+        # Get referral statistics with error handling
+        try:
+            referral_stats = get_loyalty_service().get_referral_statistics(current_user_id)
+        except Exception as stats_error:
+            current_app.logger.warning(f"Failed to get referral stats: {stats_error}")
+            referral_stats = {
+                'total_referrals': 0,
+                'pending_referrals': 0,
+                'points_earned_from_referrals': 0
+            }
 
-        # Get recent referrals
-        recent_referrals = db.session.query(User).filter(
-            User.referred_by_user_id == current_user_id
-        ).order_by(User.created_at.desc()).limit(10).all()
+        # Get recent referrals from ReferralProgram model (not User model)
+        recent_referrals_data = []
+        try:
+            from business_app.models.loyalty import ReferralProgram
+            recent_referrals = ReferralProgram.query.filter_by(
+                referrer_id=current_user_id,
+                status='completed'
+            ).order_by(ReferralProgram.completed_at.desc()).limit(10).all()
+            
+            for ref in recent_referrals:
+                referee = User.query.get(ref.referee_id) if ref.referee_id else None
+                if referee:
+                    recent_referrals_data.append({
+                        'id': ref.id,
+                        'name': f"{referee.first_name or ''} {referee.last_name or ''}".strip() or 'Anonymous',
+                        'joined_at': ref.completed_at.isoformat() if ref.completed_at else ref.created_at.isoformat(),
+                        'points_earned': ref.referrer_bonus_points or 0
+                    })
+        except Exception as ref_error:
+            current_app.logger.warning(f"Failed to get recent referrals: {ref_error}")
+            db.session.rollback()
 
         return success_response(
             data={
                 'referral_code': referral_code,
                 'referral_link': f"{request.host_url}register?ref={referral_code}",
                 'statistics': referral_stats,
-                'recent_referrals': [
-                    {
-                        'id': ref.id,
-                        'name': f"{ref.first_name} {ref.last_name}",
-                        'joined_at': ref.created_at.isoformat(),
-                        'points_earned': get_loyalty_service().get_referral_points_earned(current_user_id, ref.id)
-                    }
-                    for ref in recent_referrals
-                ],
+                'recent_referrals': recent_referrals_data,
                 'rewards': {
                     'referrer_points': get_loyalty_service().get_referrer_bonus_points(),
                     'referee_points': get_loyalty_service().get_referee_bonus_points()

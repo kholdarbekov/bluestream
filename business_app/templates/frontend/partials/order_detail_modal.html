@@ -1,0 +1,556 @@
+{# 
+  Order Detail Modal Partial
+  Shared component used by both my_account.html and orders.html
+  
+  Include this in your template with:
+  {% include 'frontend/partials/order_detail_modal.html' %}
+#}
+
+<!-- Order Detail Modal CSS -->
+<style>
+/* Order Detail Modal Styles */
+.order-detail-content {
+    padding: 10px 0;
+}
+
+/* Order Status Badge */
+.order-status {
+    display: inline-block;
+    padding: 8px 20px;
+    font-size: 14px;
+    font-weight: 600;
+    border-radius: 25px;
+    text-transform: capitalize;
+}
+
+.order-status.status-pending { background: #fff3cd; color: #856404; }
+.order-status.status-confirmed { background: #cce5ff; color: #004085; }
+.order-status.status-preparing { background: #d1ecf1; color: #0c5460; }
+.order-status.status-out_for_delivery { background: #d4edda; color: #155724; }
+.order-status.status-delivered { background: #28a745; color: #fff; }
+.order-status.status-cancelled { background: #f8d7da; color: #721c24; }
+
+/* Modal Order Items Styling */
+.modal-order-items {
+    width: 100%;
+}
+
+.modal-order-item {
+    display: flex;
+    align-items: center;
+    padding: 16px 0;
+    border-bottom: 1px solid #f0f0f0;
+}
+
+.modal-order-item:last-child {
+    border-bottom: none;
+}
+
+.modal-order-item .item-image {
+    width: 72px;
+    height: 72px;
+    object-fit: cover;
+    border-radius: 10px;
+    margin-right: 16px;
+    background: #f8f9fa;
+    flex-shrink: 0;
+    border: 1px solid #eee;
+}
+
+.modal-order-item .item-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.modal-order-item .item-name {
+    font-weight: 600;
+    font-size: 15px;
+    color: #333;
+    margin-bottom: 4px;
+}
+
+.modal-order-item .item-sku {
+    font-size: 12px;
+    color: #888;
+}
+
+/* Improved Quantity Styling */
+.modal-order-item .item-qty {
+    text-align: center;
+    padding: 0 24px;
+    min-width: 100px;
+    flex-shrink: 0;
+}
+
+.modal-order-item .item-qty .qty-label {
+    font-size: 10px;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    display: block;
+    margin-bottom: 6px;
+}
+
+.modal-order-item .item-qty .qty-value {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    background: linear-gradient(135deg, #f0f4ff 0%, #e8ecf8 100%);
+    border-radius: 10px;
+    font-weight: 700;
+    font-size: 18px;
+    color: #1890ff;
+    border: 2px solid #d0d9f0;
+    box-shadow: 0 2px 4px rgba(24, 144, 255, 0.1);
+}
+
+.modal-order-item .item-total {
+    text-align: right;
+    min-width: 130px;
+    flex-shrink: 0;
+}
+
+.modal-order-item .item-total .total-label {
+    font-size: 10px;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    display: block;
+    margin-bottom: 4px;
+}
+
+.modal-order-item .item-total .total-value {
+    font-weight: 700;
+    font-size: 17px;
+    color: #1890ff;
+}
+
+/* Address Card Styling */
+.address-card-content {
+    padding: 8px 0;
+}
+
+.address-card-content .address-label {
+    font-weight: 600;
+    color: #333;
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    font-size: 14px;
+}
+
+.address-card-content .address-label i {
+    margin-right: 10px;
+    color: #1890ff;
+    font-size: 13px;
+}
+
+.address-card-content .address-text {
+    margin-bottom: 12px;
+}
+
+.address-card-content .address-line {
+    color: #555;
+    margin-bottom: 3px;
+    font-size: 14px;
+    line-height: 1.6;
+}
+
+.address-card-content .address-line:last-of-type {
+    margin-bottom: 0;
+}
+
+.address-card-content .no-address {
+    color: #999;
+    font-style: italic;
+    padding: 10px 0;
+}
+
+/* Delivery Map Styling */
+#orderDeliveryMap {
+    height: 180px;
+    width: 100%;
+    border-radius: 10px;
+    margin-top: 12px;
+    border: 1px solid #e0e0e0;
+}
+
+/* Leaflet tile fixes for modal */
+#orderDeliveryMap .leaflet-tile-pane img,
+#orderDeliveryMap img.leaflet-tile {
+    max-width: none !important;
+    max-height: none !important;
+    width: 256px !important;
+    height: 256px !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    border: none !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    opacity: 1 !important;
+}
+
+#orderDeliveryMap .leaflet-marker-shadow {
+    display: none !important;
+}
+
+#orderDeliveryMap .leaflet-marker-icon {
+    width: 25px !important;
+    height: 41px !important;
+    margin-left: -12px !important;
+    margin-top: -41px !important;
+}
+
+/* Order Summary Styling */
+.order-summary-row {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 10px;
+}
+
+.order-summary-row .label {
+    color: #666;
+}
+
+.order-summary-row .value {
+    font-weight: 500;
+    color: #333;
+}
+
+.order-summary-total {
+    display: flex;
+    justify-content: space-between;
+    padding-top: 12px;
+    border-top: 2px solid #f0f0f0;
+    margin-top: 12px;
+}
+
+.order-summary-total .label {
+    font-weight: 700;
+    font-size: 16px;
+    color: #333;
+}
+
+.order-summary-total .value {
+    font-weight: 700;
+    font-size: 18px;
+    color: #1890ff;
+}
+
+/* Tracking Section */
+.tracking-section {
+    background: #f8f9fa;
+    border-radius: 10px;
+    padding: 16px;
+    margin-top: 16px;
+}
+
+.tracking-section h5 {
+    margin-bottom: 12px;
+}
+
+@media (max-width: 768px) {
+    .modal-order-item {
+        flex-wrap: wrap;
+        gap: 12px;
+    }
+    
+    .modal-order-item .item-qty,
+    .modal-order-item .item-total {
+        min-width: auto;
+        padding: 8px 0;
+    }
+    
+    .modal-order-item .item-qty {
+        padding: 0 16px;
+    }
+}
+</style>
+
+<!-- Order Detail Modal HTML -->
+<div class="modal fade" id="orderDetailModal" tabindex="-1" role="dialog" aria-labelledby="orderDetailModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-xl" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="orderDetailModalLabel">{{ 'Order Details'|t }}</h5>
+                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                    <span aria-hidden="true">&times;</span>
+                </button>
+            </div>
+            <div class="modal-body" id="orderDetailContent">
+                <!-- Order details will be loaded dynamically -->
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-dismiss="modal">{{ 'Close'|t }}</button>
+                <button type="button" class="btn btn-primary" id="reorderBtn" style="display: none;">
+                    <i class="far fa-redo"></i> {{ 'Reorder Items'|t }}
+                </button>
+                <button type="button" class="btn btn-danger" id="cancelOrderBtn" style="display: none;">
+                    <i class="far fa-times"></i> {{ 'Cancel Order'|t }}
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Leaflet CSS for map -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+      crossorigin=""/>
+
+<!-- Order Detail Modal JavaScript -->
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+        crossorigin=""></script>
+<script>
+let orderDeliveryMap = null;
+
+// Show order detail in modal
+async function showOrderDetail(orderId) {
+    try {
+        const response = await apiRequest(`/orders/${orderId}`);
+        const result = await response.json();
+
+        if (response.ok && result.success) {
+            const order = result.data.order;
+            displayOrderDetail(order);
+            $('#orderDetailModal').modal('show');
+        } else {
+            showNotification(result.message || '{{ "Failed to load order details"|t }}', 'error');
+        }
+    } catch (error) {
+        console.error('Failed to load order detail:', error);
+        showNotification('{{ "Failed to load order details"|t }}', 'error');
+    }
+}
+
+// Render order detail content
+function displayOrderDetail(order) {
+    const modalContent = document.getElementById('orderDetailContent');
+    const reorderBtn = document.getElementById('reorderBtn');
+    const cancelBtn = document.getElementById('cancelOrderBtn');
+    
+    // Show/hide action buttons based on order status
+    reorderBtn.style.display = order.status === 'delivered' ? 'inline-block' : 'none';
+    cancelBtn.style.display = ['pending', 'confirmed'].includes(order.status) ? 'inline-block' : 'none';
+    
+    reorderBtn.onclick = () => reorderItems(order.id);
+    cancelBtn.onclick = () => cancelOrder(order.id);
+    
+    modalContent.innerHTML = `
+        <div class="order-detail-content">
+            <!-- Order Header -->
+            <div class="row mb-4 align-items-center">
+                <div class="col-md-8">
+                    <h4 class="mb-2">{{ 'Order'|t }} #${order.order_number}</h4>
+                    <p class="text-muted mb-0"><i class="far fa-calendar-alt mr-1"></i>{{ 'Placed on'|t }} ${formatOrderDate(order.created_at)}</p>
+                </div>
+                <div class="col-md-4 text-right">
+                    <span class="order-status status-${order.status}">${capitalizeStatus(order.status)}</span>
+                </div>
+            </div>
+            
+            <!-- Order Items -->
+            <div class="order-items-section mb-4">
+                <h5 class="mb-3"><i class="far fa-box mr-2"></i>{{ 'Order Items'|t }}</h5>
+                <div class="card">
+                    <div class="card-body">
+                        <div class="modal-order-items">
+                            ${(order.order_items || []).map(item => `
+                                <div class="modal-order-item">
+                                    <img class="item-image" src="${item.product_image_url || item.product?.image_url || '/static/images/products/default.jpg'}" alt="${item.product_name || item.product?.name || 'Product'}">
+                                    <div class="item-info">
+                                        <div class="item-name">${item.product_name || item.product?.name || 'Product'}</div>
+                                        <div class="item-sku">{{ 'SKU'|t }}: ${item.product_sku || item.product?.sku || 'N/A'}</div>
+                                    </div>
+                                    <div class="item-qty">
+                                        <span class="qty-label">{{ 'Quantity'|t }}</span>
+                                        <span class="qty-value">${item.quantity}</span>
+                                    </div>
+                                    <div class="item-total">
+                                        <span class="total-label">{{ 'Price'|t }}</span>
+                                        <span class="total-value">${formatOrderAmount(item.total_price || item.unit_price * item.quantity)}</span>
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Delivery Address & Order Summary -->
+            <div class="row mb-4 align-items-start">
+                <div class="col-md-6">
+                    <h5 class="mb-3"><i class="far fa-map-marker-alt mr-2"></i>{{ 'Delivery Address'|t }}</h5>
+                    <div class="card h-100">
+                        <div class="card-body">
+                            ${order.delivery_address ? `
+                                <div class="address-card-content">
+                                    ${order.delivery_address.title || order.delivery_address.label ? `<div class="address-label"><i class="far fa-tag"></i>${order.delivery_address.title || order.delivery_address.label}</div>` : ''}
+                                    <div class="address-text">
+                                        <div class="address-line">${order.delivery_address.street_address || order.delivery_address.full_address || ''}</div>
+                                        ${order.delivery_address.district ? `<div class="address-line">${order.delivery_address.district}</div>` : ''}
+                                    </div>
+                                    ${order.delivery_address.delivery_instructions || order.delivery_address.delivery_notes ? `<div class="text-muted mb-2" style="font-size: 13px;"><i class="far fa-sticky-note mr-1"></i>${order.delivery_address.delivery_instructions || order.delivery_address.delivery_notes}</div>` : ''}
+                                    ${(order.delivery_address.latitude && order.delivery_address.longitude) ? `<div id="orderDeliveryMap"></div>` : ''}
+                                </div>
+                            ` : `
+                                <div class="address-card-content">
+                                    <p class="no-address">{{ 'No delivery address provided'|t }}</p>
+                                </div>
+                            `}
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <h5 class="mb-3"><i class="far fa-receipt mr-2"></i>{{ 'Order Summary'|t }}</h5>
+                    <div class="card h-100">
+                        <div class="card-body">
+                            <div class="order-summary-row">
+                                <span class="label">{{ 'Subtotal'|t }}</span>
+                                <span class="value">${formatOrderAmount(order.subtotal || order.total_amount)}</span>
+                            </div>
+                            <div class="order-summary-row">
+                                <span class="label">{{ 'Delivery Fee'|t }}</span>
+                                <span class="value">${formatOrderAmount(order.delivery_fee || 0)}</span>
+                            </div>
+                            <div class="order-summary-row">
+                                <span class="label">{{ 'Tax'|t }}</span>
+                                <span class="value">${formatOrderAmount(order.tax_amount || 0)}</span>
+                            </div>
+                            <div class="order-summary-total">
+                                <span class="label">{{ 'Total'|t }}</span>
+                                <span class="value">${formatOrderAmount(order.total_amount)}</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Tracking Information -->
+            ${order.tracking_number ? `
+                <div class="tracking-section">
+                    <h5><i class="far fa-truck mr-2"></i>{{ 'Order Tracking'|t }}</h5>
+                    <div class="d-flex justify-content-between align-items-center">
+                        <span><strong>{{ 'Tracking Number'|t }}:</strong> ${order.tracking_number}</span>
+                        <button class="btn btn-sm btn-outline-primary" onclick="trackOrderPackage('${order.tracking_number}')">
+                            <i class="far fa-external-link"></i> {{ 'Track Package'|t }}
+                        </button>
+                    </div>
+                </div>
+            ` : ''}
+        </div>
+    `;
+    
+    // Initialize map if coordinates are available
+    if (order.delivery_address && order.delivery_address.latitude && order.delivery_address.longitude) {
+        setTimeout(() => {
+            initOrderDeliveryMap(
+                order.delivery_address.latitude,
+                order.delivery_address.longitude,
+                order.delivery_address.title || order.delivery_address.label || order.delivery_address.street_address || '{{ "Delivery Location"|t }}'
+            );
+        }, 300);
+    }
+}
+
+// Initialize delivery map
+function initOrderDeliveryMap(lat, lng, label) {
+    // Clean up existing map instance
+    if (orderDeliveryMap) {
+        orderDeliveryMap.remove();
+        orderDeliveryMap = null;
+    }
+    
+    const mapContainer = document.getElementById('orderDeliveryMap');
+    if (!mapContainer) return;
+    
+    // Initialize map
+    orderDeliveryMap = L.map('orderDeliveryMap', {
+        zoomControl: true,
+        scrollWheelZoom: false,
+        dragging: true
+    }).setView([lat, lng], 16);
+    
+    // Add OpenStreetMap tiles
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+        maxZoom: 19
+    }).addTo(orderDeliveryMap);
+    
+    // Add marker with popup
+    const marker = L.marker([lat, lng]).addTo(orderDeliveryMap);
+    marker.bindPopup(`<strong>${label}</strong>`).openPopup();
+    
+    // Invalidate size after modal is fully visible
+    setTimeout(() => {
+        orderDeliveryMap.invalidateSize();
+    }, 100);
+}
+
+// Clean up map when modal is hidden
+$('#orderDetailModal').on('hidden.bs.modal', function () {
+    if (orderDeliveryMap) {
+        orderDeliveryMap.remove();
+        orderDeliveryMap = null;
+    }
+});
+
+// Helper functions for order modal
+function formatOrderAmount(amount) {
+    if (!amount) return '0 UZS';
+    return Math.round(amount).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ') + ' UZS';
+}
+
+function formatOrderDate(dateString) {
+    if (!dateString) return '';
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-GB', { year: 'numeric', month: 'short', day: 'numeric' });
+}
+
+function capitalizeStatus(str) {
+    if (!str) return '';
+    return str.charAt(0).toUpperCase() + str.slice(1).replace(/_/g, ' ');
+}
+
+// Order actions
+async function cancelOrder(orderId) {
+    if (!confirm('{{ "Are you sure you want to cancel this order?"|t }}')) return;
+    try {
+        const response = await apiRequest(`/orders/${orderId}/cancel`, { method: 'POST' });
+        if (response.ok) {
+            showNotification('{{ "Order cancelled successfully"|t }}', 'success');
+            $('#orderDetailModal').modal('hide');
+            setTimeout(() => window.location.reload(), 1000);
+        } else {
+            const result = await response.json();
+            showNotification(result.message || '{{ "Failed to cancel order"|t }}', 'error');
+        }
+    } catch (error) {
+        showNotification('{{ "Failed to cancel order"|t }}', 'error');
+    }
+}
+
+async function reorderItems(orderId) {
+    try {
+        showNotification('{{ "Adding items to cart..."|t }}', 'info');
+        const response = await apiRequest(`/orders/${orderId}/reorder`, { method: 'POST' });
+        if (response.ok) {
+            showNotification('{{ "Items added to cart!"|t }}', 'success');
+            setTimeout(() => window.location.href = '{{ url_for("frontend.cart") }}', 1000);
+        } else {
+            const result = await response.json();
+            showNotification(result.message || '{{ "Failed to add items to cart"|t }}', 'error');
+        }
+    } catch (error) {
+        showNotification('{{ "Failed to add items to cart"|t }}', 'error');
+    }
+}
+
+function trackOrderPackage(trackingNumber) {
+    // Open tracking in new window - can be customized per tracking provider
+    window.open(`https://track.example.com/${trackingNumber}`, '_blank');
+}
+</script>

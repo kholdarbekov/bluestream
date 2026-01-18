@@ -38,6 +38,7 @@ class EmailTemplateService:
         'subscription_reminder': 'subscription_reminder',
         'subscription_renewal': 'subscription_renewal',
         'subscription_cancelled': 'subscription_cancelled',
+        'reward_redeemed': 'reward_redeemed',
     }
 
     # Email subjects by template and language
@@ -91,6 +92,11 @@ class EmailTemplateService:
             'uz': 'Obuna bekor qilindi - {company_name}',
             'en': 'Subscription Cancelled - {company_name}',
             'ru': 'Подписка отменена - {company_name}',
+        },
+        'reward_redeemed': {
+            'uz': 'Mukofot olindi - {company_name}',
+            'en': 'Reward Redeemed - {company_name}',
+            'ru': 'Награда получена - {company_name}',
         },
     }
 

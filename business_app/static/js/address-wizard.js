@@ -23,13 +23,13 @@ const AddressWizard = {
     configLoaded: false,
 
     // Initialize the wizard
-    init: function() {
+    init: function () {
         this.bindEvents();
         this.loadGeoConfig();
     },
 
     // Bind event handlers
-    bindEvents: function() {
+    bindEvents: function () {
         // Step navigation
         document.getElementById('wizardNextBtn')?.addEventListener('click', () => this.nextStep());
         document.getElementById('wizardPrevBtn')?.addEventListener('click', () => this.prevStep());
@@ -100,7 +100,7 @@ const AddressWizard = {
     },
 
     // Load geographic configuration from API
-    loadGeoConfig: async function() {
+    loadGeoConfig: async function () {
         try {
             const lang = document.documentElement.lang || 'en';
             const response = await apiRequest(`/addresses/geo-config?lang=${lang}`);
@@ -118,7 +118,7 @@ const AddressWizard = {
     },
 
     // Populate district dropdown
-    populateDistrictDropdown: function() {
+    populateDistrictDropdown: function () {
         const select = document.getElementById('districtSelect');
         if (!select || !this.geoConfig.districts) return;
 
@@ -132,18 +132,19 @@ const AddressWizard = {
     },
 
     // Open wizard for new address
-    openForNew: function() {
+    openForNew: function () {
         this.editingAddressId = null;
         this.selectedLocation = null;
         this.pendingMarkerLocation = null;
         this.resetForm();
         this.goToStep(1);
+        this.updateModalTitle(false);
         this.showModal();
         // Map will be initialized by the shown.bs.modal event handler
     },
 
     // Open wizard for editing existing address
-    openForEdit: function(address) {
+    openForEdit: function (address) {
         this.editingAddressId = address.id;
         this.selectedLocation = (address.latitude && address.longitude) ? {
             lat: address.latitude,
@@ -163,12 +164,23 @@ const AddressWizard = {
             this.goToStep(1);
         }
 
+        this.updateModalTitle(true);
         this.showModal();
         // Map will be initialized by the shown.bs.modal event handler
     },
 
+    // Update modal title based on mode (new/edit)
+    updateModalTitle: function (isEditing) {
+        const titleEl = document.getElementById('addressWizardModalTitle');
+        if (titleEl) {
+            titleEl.textContent = isEditing
+                ? this.getTranslation('edit_address')
+                : this.getTranslation('add_new_address');
+        }
+    },
+
     // Initialize Leaflet map
-    initMap: function() {
+    initMap: function () {
         const mapContainer = document.getElementById('addressWizardMap');
         if (!mapContainer) {
             console.error('AddressWizard: Map container not found');
@@ -390,7 +402,7 @@ const AddressWizard = {
     },
 
     // Handle map click
-    onMapClick: function(e) {
+    onMapClick: function (e) {
         const { lat, lng } = e.latlng;
 
         // Validate within Tashkent bounds
@@ -403,16 +415,16 @@ const AddressWizard = {
     },
 
     // Check if coordinates are within service area
-    isWithinBounds: function(lat, lng) {
+    isWithinBounds: function (lat, lng) {
         const bounds = this.geoConfig.bounds;
         return lat >= bounds.min_lat &&
-               lat <= bounds.max_lat &&
-               lng >= bounds.min_lng &&
-               lng <= bounds.max_lng;
+            lat <= bounds.max_lat &&
+            lng >= bounds.min_lng &&
+            lng <= bounds.max_lng;
     },
 
     // Set marker position and reverse geocode
-    setMarkerPosition: function(lat, lng) {
+    setMarkerPosition: function (lat, lng) {
         if (this.marker) {
             this.marker.setLatLng([lat, lng]);
         } else {
@@ -450,7 +462,7 @@ const AddressWizard = {
     },
 
     // Update selected location and reverse geocode
-    updateSelectedLocation: async function(lat, lng) {
+    updateSelectedLocation: async function (lat, lng) {
         this.selectedLocation = { lat, lng };
 
         // Show loading indicator
@@ -510,7 +522,7 @@ const AddressWizard = {
     },
 
     // Find district key from name
-    findDistrictKey: function(districtName) {
+    findDistrictKey: function (districtName) {
         if (!districtName || !this.geoConfig.districts) return null;
 
         const normalized = districtName.toLowerCase();
@@ -524,7 +536,7 @@ const AddressWizard = {
     },
 
     // Use browser geolocation
-    useMyLocation: function() {
+    useMyLocation: function () {
         if (!navigator.geolocation) {
             this.showError(this.getTranslation('geolocation_not_supported'));
             return;
@@ -566,7 +578,7 @@ const AddressWizard = {
     },
 
     // Reset location button state
-    resetLocationButton: function() {
+    resetLocationButton: function () {
         const btn = document.getElementById('useMyLocationBtn');
         if (btn) {
             btn.disabled = false;
@@ -575,7 +587,7 @@ const AddressWizard = {
     },
 
     // Search address and place marker
-    searchAddress: async function() {
+    searchAddress: async function () {
         const input = document.getElementById('addressSearchInput');
         const address = input?.value?.trim();
 
@@ -623,7 +635,7 @@ const AddressWizard = {
     },
 
     // Navigation methods
-    goToStep: function(step) {
+    goToStep: function (step) {
         if (step < 1 || step > this.totalSteps) return;
 
         // Hide all steps
@@ -656,7 +668,7 @@ const AddressWizard = {
         }
     },
 
-    nextStep: function() {
+    nextStep: function () {
         // Validate current step before proceeding
         if (!this.validateStep(this.currentStep)) {
             return;
@@ -667,15 +679,15 @@ const AddressWizard = {
         }
     },
 
-    prevStep: function() {
+    prevStep: function () {
         if (this.currentStep > 1) {
             this.goToStep(this.currentStep - 1);
         }
     },
 
     // Validate step data
-    validateStep: function(step) {
-        switch(step) {
+    validateStep: function (step) {
+        switch (step) {
             case 1:
                 // Must have selected location
                 if (!this.selectedLocation || !this.selectedLocation.lat || !this.selectedLocation.lng) {
@@ -702,7 +714,7 @@ const AddressWizard = {
     },
 
     // Update navigation buttons state
-    updateNavigationButtons: function() {
+    updateNavigationButtons: function () {
         const prevBtn = document.getElementById('wizardPrevBtn');
         const nextBtn = document.getElementById('wizardNextBtn');
         const saveBtn = document.getElementById('wizardSaveBtn');
@@ -730,7 +742,7 @@ const AddressWizard = {
     },
 
     // Fill form with address data (for editing)
-    fillForm: function(address) {
+    fillForm: function (address) {
         const setVal = (id, val) => {
             const el = document.getElementById(id);
             if (el) el.value = val || '';
@@ -757,7 +769,7 @@ const AddressWizard = {
     },
 
     // Reset form
-    resetForm: function() {
+    resetForm: function () {
         document.getElementById('addressWizardForm')?.reset();
 
         const setVal = (id, val) => {
@@ -782,7 +794,7 @@ const AddressWizard = {
     },
 
     // Save address to API
-    saveAddress: async function() {
+    saveAddress: async function () {
         // Final validation
         if (!this.selectedLocation || !this.selectedLocation.lat || !this.selectedLocation.lng) {
             this.showError(this.getTranslation('location_required'));
@@ -859,16 +871,16 @@ const AddressWizard = {
     },
 
     // Modal methods
-    showModal: function() {
+    showModal: function () {
         $('#addressWizardModal').modal('show');
     },
 
-    hideModal: function() {
+    hideModal: function () {
         $('#addressWizardModal').modal('hide');
     },
 
     // Show error message
-    showError: function(message) {
+    showError: function (message) {
         if (typeof showNotification === 'function') {
             showNotification(message, 'error');
         } else {
@@ -877,7 +889,7 @@ const AddressWizard = {
     },
 
     // Get translation (with fallback)
-    getTranslation: function(key) {
+    getTranslation: function (key) {
         const translations = {
             'en': {
                 'select_district': 'Select District',
@@ -901,7 +913,9 @@ const AddressWizard = {
                 'address_saved': 'Address saved successfully!',
                 'save_failed': 'Failed to save address',
                 'network_error': 'Network error. Please try again.',
-                'save_address': 'Save Address'
+                'save_address': 'Save Address',
+                'add_new_address': 'Add New Address',
+                'edit_address': 'Edit Address'
             },
             'ru': {
                 'select_district': 'Выберите район',
@@ -925,7 +939,9 @@ const AddressWizard = {
                 'address_saved': 'Адрес успешно сохранен!',
                 'save_failed': 'Не удалось сохранить адрес',
                 'network_error': 'Ошибка сети. Попробуйте снова.',
-                'save_address': 'Сохранить адрес'
+                'save_address': 'Сохранить адрес',
+                'add_new_address': 'Добавить адрес',
+                'edit_address': 'Редактировать адрес'
             },
             'uz': {
                 'select_district': 'Tumanni tanlang',
@@ -949,7 +965,9 @@ const AddressWizard = {
                 'address_saved': 'Manzil muvaffaqiyatli saqlandi!',
                 'save_failed': 'Manzilni saqlashda xatolik',
                 'network_error': 'Tarmoq xatosi. Qaytadan urinib koʻring.',
-                'save_address': 'Manzilni saqlash'
+                'save_address': 'Manzilni saqlash',
+                'add_new_address': 'Yangi manzil qo\'shish',
+                'edit_address': 'Manzilni tahrirlash'
             }
         };
 
@@ -959,7 +977,7 @@ const AddressWizard = {
     },
 
     // Setup MutationObserver to fix styles on dynamically added tiles
-    setupTileObserver: function(mapContainer) {
+    setupTileObserver: function (mapContainer) {
         if (this.tileObserver) {
             this.tileObserver.disconnect();
         }
@@ -987,7 +1005,7 @@ const AddressWizard = {
     },
 
     // Fix styles on a single tile
-    fixTileStyle: function(tile) {
+    fixTileStyle: function (tile) {
         tile.style.setProperty('visibility', 'visible', 'important');
         tile.style.setProperty('opacity', '1', 'important');
         tile.style.setProperty('transition', 'none', 'important');
@@ -999,7 +1017,7 @@ const AddressWizard = {
     },
 
     // Force refresh tile styles to override any CSS transition issues
-    forceRefreshTileStyles: function() {
+    forceRefreshTileStyles: function () {
         if (!this.map) return;
 
         const mapContainer = document.getElementById('addressWizardMap');
@@ -1026,7 +1044,7 @@ const AddressWizard = {
 };
 
 // Initialize on DOM ready
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', function () {
     AddressWizard.init();
 });
 

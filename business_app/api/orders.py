@@ -985,3 +985,26 @@ def schedule_order():
         db.session.rollback()
         current_app.logger.error(f"Schedule order error: {e}")
         return internal_error_response(message=get_translation('error.server_error'))
+
+
+@orders_bp.route('/statuses', methods=['GET'])
+def get_order_statuses():
+    """
+    Get all available order statuses.
+    
+    This endpoint provides the single source of truth for order statuses,
+    ensuring UI and backend remain synchronized.
+    """
+    statuses = []
+    for status in OrderStatus:
+        # Convert enum value to human-readable label
+        label = status.value.replace('_', ' ').title()
+        statuses.append({
+            'value': status.value,
+            'label': label
+        })
+    
+    return success_response(
+        data={'statuses': statuses},
+        message='Order statuses retrieved successfully'
+    )

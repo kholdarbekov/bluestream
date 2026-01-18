@@ -1,0 +1,346 @@
+{% extends "frontend/base.html" %}
+
+{# 
+  Cabinet Base Template
+  
+  This template provides consistent layout for all user account/cabinet pages.
+  Child templates should:
+  1. Set {% set active_menu = 'dashboard'|'profile'|'orders'|'addresses'|'subscriptions'|'loyalty'|'security' %}
+  2. Override cabinet_title block for page title
+  3. Override cabinet_breadcrumb_items block for breadcrumb
+  4. Override cabinet_content block for main content
+  5. Optionally override cabinet_extra_css and cabinet_extra_js for page-specific assets
+#}
+
+{% block title %}{% block cabinet_title %}{{ 'landing.nav.my_account'|t }}{% endblock %} - {{ company_name }}{% endblock %}
+
+{% block content %}
+<!-- page-title -->
+<section class="page-title">
+    <div class="bg-layer" style="background-image: url({{ url_for('static', filename='images/background/page-title.jpg') }});"></div>
+    <div class="auto-container">
+        <div class="content-box">
+            <h1>{% block cabinet_page_heading %}{{ self.cabinet_title() }}{% endblock %}</h1>
+            <ul class="bread-crumb clearfix">
+                <li><a href="{{ url_for('frontend.index') }}">{{ 'landing.nav.home'|t }}</a></li>
+                <li><a href="{{ url_for('frontend.my_account') }}">{{ 'landing.nav.my_account'|t }}</a></li>
+                {% block cabinet_breadcrumb_items %}{% endblock %}
+            </ul>
+        </div>
+    </div>
+</section>
+<!-- page-title end -->
+
+<!-- cabinet-section -->
+<section class="cabinet-section account-section">
+    <div class="auto-container">
+        <div class="row clearfix">
+            <!-- Account Sidebar -->
+            <div class="col-lg-3 col-md-4 col-sm-12">
+                <div class="account-sidebar">
+                    <div class="profile-box">
+                        <div class="profile-info text-center">
+                            <div class="profile-avatar">
+                                <i class="far fa-user-circle" style="font-size: 60px; color: #1890ff;"></i>
+                            </div>
+                            <h4>{{ user.first_name }} {{ user.last_name }}</h4>
+                            <p class="text-muted">{{ user.email }}</p>
+                        </div>
+                    </div>
+                    
+                    <div class="account-menu">
+                        <ul class="list-unstyled">
+                            <li{% if active_menu == 'dashboard' %} class="active"{% endif %}>
+                                <a href="{{ url_for('frontend.my_account') }}">
+                                    <i class="far fa-tachometer-alt"></i> {{ 'Dashboard'|t }}
+                                </a>
+                            </li>
+                            <li{% if active_menu == 'profile' %} class="active"{% endif %}>
+                                <a href="{{ url_for('frontend.profile_settings') }}">
+                                    <i class="far fa-user-edit"></i> {{ 'Profile Settings'|t }}
+                                </a>
+                            </li>
+                            <li{% if active_menu == 'orders' %} class="active"{% endif %}>
+                                <a href="{{ url_for('frontend.my_orders') }}">
+                                    <i class="far fa-shopping-bag"></i> {{ 'landing.account.orders'|t }}
+                                </a>
+                            </li>
+                            <li{% if active_menu == 'addresses' %} class="active"{% endif %}>
+                                <a href="{{ url_for('frontend.addresses') }}">
+                                    <i class="far fa-map-marker-alt"></i> {{ 'Addresses'|t }}
+                                </a>
+                            </li>
+                            <li{% if active_menu == 'subscriptions' %} class="active"{% endif %}>
+                                <a href="{{ url_for('frontend.my_subscriptions') }}">
+                                    <i class="far fa-sync-alt"></i> {{ 'landing.nav.subscriptions'|t }}
+                                </a>
+                            </li>
+                            <li{% if active_menu == 'loyalty' %} class="active"{% endif %}>
+                                <a href="{{ url_for('frontend.my_loyalty') }}">
+                                    <i class="far fa-star"></i> {{ 'landing.account.loyalty'|t }}
+                                </a>
+                            </li>
+                            <li{% if active_menu == 'security' %} class="active"{% endif %}>
+                                <a href="{{ url_for('frontend.account_security') }}">
+                                    <i class="far fa-shield-alt"></i> {{ 'Security'|t }}
+                                </a>
+                            </li>
+                            <li>
+                                <a href="#" onclick="logout()">
+                                    <i class="far fa-sign-out-alt"></i> {{ 'landing.nav.logout'|t }}
+                                </a>
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Cabinet Content -->
+            <div class="col-lg-9 col-md-8 col-sm-12">
+                <div class="cabinet-content account-content">
+                    {% block cabinet_content %}{% endblock %}
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+<!-- cabinet-section end -->
+{% endblock %}
+
+{% block extra_head %}
+<style>
+/* Cabinet Sidebar Container */
+.cabinet-section .account-sidebar {
+    background: #ffffff;
+    border-radius: 12px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+    padding: 25px;
+    margin-bottom: 30px;
+    border: 1px solid #e8e8e8;
+}
+
+/* Profile Box */
+.cabinet-section .profile-box {
+    margin-bottom: 25px;
+    padding-bottom: 25px;
+    border-bottom: 2px solid #f0f0f0;
+}
+
+.cabinet-section .profile-info {
+    text-align: center;
+}
+
+.cabinet-section .profile-avatar {
+    margin-bottom: 15px;
+}
+
+.cabinet-section .profile-avatar i {
+    font-size: 70px !important;
+    color: #1890ff !important;
+    display: block;
+}
+
+.cabinet-section .profile-info h4 {
+    font-size: 18px;
+    font-weight: 600;
+    color: #1a1a2e;
+    margin-bottom: 5px;
+    margin-top: 10px;
+}
+
+.cabinet-section .profile-info p {
+    font-size: 13px;
+    color: #666;
+    margin-bottom: 0;
+}
+
+/* Account Menu */
+.cabinet-section .account-menu {
+    padding: 0;
+}
+
+.cabinet-section .account-menu ul {
+    list-style: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+}
+
+.cabinet-section .account-menu ul li {
+    margin-bottom: 8px;
+    list-style: none !important;
+}
+
+.cabinet-section .account-menu ul li:last-child {
+    margin-bottom: 0;
+}
+
+.cabinet-section .account-menu ul li a {
+    display: flex !important;
+    align-items: center;
+    padding: 14px 18px;
+    color: #4a4a4a;
+    text-decoration: none !important;
+    border-radius: 8px;
+    transition: all 0.3s ease;
+    font-size: 14px;
+    font-weight: 500;
+    background: #f8f9fa;
+    border: 1px solid transparent;
+}
+
+.cabinet-section .account-menu ul li a:hover {
+    background: #e6f4ff;
+    color: #1890ff;
+    border-color: #1890ff;
+    text-decoration: none !important;
+    transform: translateX(5px);
+}
+
+.cabinet-section .account-menu ul li.active a {
+    background: linear-gradient(135deg, #1890ff 0%, #0050b3 100%);
+    color: #ffffff !important;
+    border-color: #1890ff;
+    box-shadow: 0 4px 12px rgba(24, 144, 255, 0.35);
+}
+
+.cabinet-section .account-menu ul li.active a:hover {
+    background: linear-gradient(135deg, #40a9ff 0%, #1890ff 100%);
+    transform: translateX(0);
+}
+
+.cabinet-section .account-menu ul li a i {
+    width: 22px;
+    margin-right: 12px;
+    font-size: 16px;
+    text-align: center;
+}
+
+.cabinet-section .account-menu ul li.active a i {
+    color: #ffffff;
+}
+
+/* Logout link special styling */
+.cabinet-section .account-menu ul li:last-child a {
+    background: transparent;
+    color: #ff4d4f;
+    border: 1px dashed #ffccc7;
+}
+
+.cabinet-section .account-menu ul li:last-child a:hover {
+    background: #fff2f0;
+    color: #ff4d4f;
+    border-color: #ff4d4f;
+}
+
+/* Cabinet Content Styles */
+.cabinet-content .card {
+    border: none;
+    border-radius: 12px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+    margin-bottom: 25px;
+}
+
+.cabinet-content .card-header {
+    background: #f8f9fa;
+    border-bottom: 1px solid #eee;
+    border-radius: 12px 12px 0 0 !important;
+    padding: 18px 25px;
+}
+
+.cabinet-content .card-header h5 {
+    margin: 0;
+    color: #1a1a2e;
+    font-weight: 600;
+}
+
+.cabinet-content .card-header i {
+    margin-right: 10px;
+    color: #1890ff;
+}
+
+.cabinet-content .card-body {
+    padding: 25px;
+}
+
+/* Responsive Design */
+@media (max-width: 991px) {
+    .cabinet-section .account-sidebar {
+        margin-bottom: 30px;
+    }
+}
+
+@media (max-width: 768px) {
+    .cabinet-section .account-sidebar {
+        padding: 20px;
+    }
+    
+    .cabinet-section .account-menu ul li a {
+        padding: 12px 15px;
+        font-size: 13px;
+    }
+}
+</style>
+{% block cabinet_extra_head %}{% endblock %}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+/**
+ * Cabinet Token Refresh Handler
+ * 
+ * Official Flask-JWT-Extended approach for handling expired tokens:
+ * https://flask-jwt-extended.readthedocs.io/en/stable/refreshing_tokens.html
+ * 
+ * "Make an API request... if the result is an error saying your token is expired,
+ * use the refresh token to generate a new access token and redo the request"
+ * 
+ * For page loads (not AJAX), we detect if the page rendered an error JSON and
+ * attempt to refresh the token and reload.
+ */
+(function() {
+    // Check if page content is a JSON error response
+    // This happens when cabinet page loads with expired token
+    try {
+        const body = document.body;
+        const text = body ? body.textContent.trim() : '';
+        
+        // Check if page shows token expired JSON error
+        if (text.startsWith('{') && text.includes('"error"') && text.includes('Token Expired')) {
+            console.log('[JWT] Token expired on page load, attempting refresh...');
+            
+            // Attempt silent token refresh using the refresh token cookie
+            fetch('{{ url_for("auth.refresh_with_cookie") }}', {
+                method: 'POST',
+                credentials: 'include',  // Send cookies
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            })
+            .then(response => {
+                if (response.ok) {
+                    console.log('[JWT] Token refreshed successfully, reloading page...');
+                    // Reload page - now with fresh access token
+                    window.location.reload();
+                } else {
+                    console.warn('[JWT] Token refresh failed, redirecting to login...');
+                    // Refresh failed (refresh token also expired), redirect to login
+                    window.location.href = '{{ url_for("frontend.login") }}?next=' + encodeURIComponent(window.location.pathname);
+                }
+            })
+            .catch(error => {
+                console.error('[JWT] Token refresh error:', error);
+                // Network error, redirect to login
+                window.location.href = '{{ url_for("frontend.login") }}?next=' + encodeURIComponent(window.location.pathname);
+            });
+            
+            // Prevent any other page scripts from running
+            return;
+        }
+    } catch (e) {
+        // Page content is not JSON, this is a normal page load
+        console.log('[JWT] Normal page load');
+    }
+})();
+</script>
+{% block cabinet_extra_js %}{% endblock %}
+{% endblock %}

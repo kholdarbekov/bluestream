@@ -286,6 +286,33 @@ def setup_request_handlers(app):
         # Ensure Vary: Cookie is set so caches know content depends on cookies
         if 'Components' not in response.headers.get('Vary', ''):
             response.headers['Vary'] = 'Cookie'
+        
+        # ===================================================================
+        # JWT Implicit Token Refresh (Flask-JWT-Extended recommended approach)
+        # https://flask-jwt-extended.readthedocs.io/en/stable/refreshing_tokens.html
+        # ===================================================================
+        # Auto-refresh tokens that are within 30 minutes of expiring.
+        # This prevents users from being logged out during active sessions.
+        try:
+            from flask_jwt_extended import get_jwt, get_jwt_identity, create_access_token, set_access_cookies
+            from datetime import timedelta, timezone
+            
+            exp_timestamp = get_jwt()["exp"]
+            now = datetime.now(timezone.utc)
+            target_timestamp = datetime.timestamp(now + timedelta(minutes=30))
+            
+            if target_timestamp > exp_timestamp:
+                # Token is within 30 minutes of expiring - refresh it
+                access_token = create_access_token(identity=get_jwt_identity())
+                set_access_cookies(response, access_token)
+                app.logger.info(f"JWT auto-refreshed for user {get_jwt_identity()}")
+        except (RuntimeError, KeyError):
+            # No valid JWT in request (anonymous user, API call, etc.)
+            # Just return the original response
+            pass
+        except Exception as e:
+            # Log unexpected errors but don't break the response
+            app.logger.warning(f"JWT auto-refresh error: {e}")
             
         return response
     

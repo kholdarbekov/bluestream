@@ -802,6 +802,49 @@ def refresh():
         return unauthorized_response(message=get_translation('api.auth.token_invalid'))
 
 
+@auth_bp.route('/refresh-cookie', methods=['POST'])
+@jwt_required(refresh=True)  # This reads refresh token from cookie
+@handle_exceptions
+def refresh_with_cookie():
+    """
+    Refresh Access Token using HttpOnly Cookie
+    
+    This is the Flask-JWT-Extended recommended approach for cookie-based auth.
+    The refresh token is read from the httpOnly cookie automatically.
+    ---
+    tags:
+      - Authentication
+    responses:
+      200:
+        description: Token refreshed successfully, new access token set in cookie
+      401:
+        description: Invalid or expired refresh token
+    """
+    from flask_jwt_extended import get_jwt_identity, create_access_token, set_access_cookies
+    
+    # Get current user from refresh token
+    current_user_id = get_jwt_identity()
+    
+    # Create new access token
+    new_access_token = create_access_token(identity=current_user_id)
+    
+    # Create response and set new access token cookie
+    response_data = success_response(
+        data={'refreshed': True},
+        message='Token refreshed successfully'
+    )
+    
+    # Handle tuple response
+    if isinstance(response_data, tuple):
+        response_obj, status_code = response_data
+    else:
+        response_obj = response_data
+        status_code = 200
+    
+    set_access_cookies(response_obj, new_access_token)
+    
+    logger.info(f"Token refreshed via cookie for user {current_user_id}")
+    return response_obj, status_code
 
 
 @auth_bp.route('/verify-email', methods=['POST'])
@@ -1732,11 +1775,15 @@ def update_profile():
         # Skip phone update - must be done through verification process
         logger.warning(f"User {user_id} attempted to update phone directly through profile endpoint")
     if 'date_of_birth' in data:
-        try:
-            from datetime import datetime
-            user.date_of_birth = datetime.fromisoformat(data['date_of_birth'])
-        except ValueError:
-            pass
+        date_value = data['date_of_birth']
+        if date_value:  # Only update if not None or empty string
+            try:
+                from datetime import datetime
+                user.date_of_birth = datetime.fromisoformat(date_value)
+            except (ValueError, TypeError):
+                pass  # Invalid date format, skip update
+        else:
+            user.date_of_birth = None  # Clear the date if empty string is sent
     if 'gender' in data:
         user.gender = data['gender']
     if 'preferred_language' in data:
@@ -1754,7 +1801,7 @@ def update_profile():
         'last_name': user.last_name,
         'full_name': user.full_name,
         'date_of_birth': user.date_of_birth.isoformat() if user.date_of_birth else None,
-        'gender': user.gender,
+        'gender': user.gender.value if hasattr(user.gender, 'value') else user.gender,
         'role': user.role.value if hasattr(user.role, 'value') else user.role,
         'status': user.status.value if hasattr(user.status, 'value') else user.status,
         'preferred_language': user.preferred_language,

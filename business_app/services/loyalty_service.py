@@ -120,8 +120,18 @@ class LoyaltyService:
         return transaction
     
     def deduct_points(self, user_id: int, points: int, description: str,
-                     reference_id: int = None) -> LoyaltyTransaction:
-        """Deduct loyalty points from user"""
+                     reference_id: int = None, skip_notification: bool = True,
+                     notification_type_str: str = None) -> LoyaltyTransaction:
+        """Deduct loyalty points from user
+        
+        Args:
+            user_id: User to deduct points from
+            points: Number of points to deduct (positive number)
+            description: Description of the deduction
+            reference_id: Optional reference ID (e.g., order_id)
+            skip_notification: If True, don't send points notification (default: True since callers usually handle their own)
+            notification_type_str: String value of NotificationType enum to use for notification
+        """
         if points <= 0:
             raise ValidationError("Points must be positive")
         
@@ -149,8 +159,9 @@ class LoyaltyService:
         
         db.session.commit()
         
-        # Send notification
-        self._send_points_notification(user_id, points, 'redeemed')
+        # Send notification only if explicitly requested
+        if not skip_notification:
+            self._send_points_notification(user_id, points, 'redeemed', notification_type_str)
         
         return transaction
     
@@ -286,36 +297,49 @@ class LoyaltyService:
         
         return reward
     
-    def redeem_reward(self, user_id: int, reward_id: int) -> Dict[str, Any]:
+    def redeem_reward(self, user_id: int, reward_id: int, delivery_address_id: int = None, notes: str = None) -> Dict[str, Any]:
         """Redeem a loyalty reward"""
         reward = LoyaltyReward.query.get(reward_id)
         if not reward or not reward.is_active:
             raise NotFoundError("Reward not found or inactive")
         
-        if reward.expires_at and reward.expires_at < datetime.now(timezone.utc):
+        # Check expiry - use valid_until (the actual model field)
+        if reward.valid_until and reward.valid_until < datetime.now(timezone.utc):
             raise ValidationError("Reward has expired")
+        
+        # Get points cost (actual model field name)
+        points_cost = reward.points_cost or 0
         
         # Check if user has enough points
         available_points = self.get_available_points(user_id)
-        if available_points < reward.points_required:
-            raise ValidationError(f"Insufficient points. Required: {reward.points_required}, Available: {available_points}")
+        if available_points < points_cost:
+            raise ValidationError(f"Insufficient points. Required: {points_cost}, Available: {available_points}")
         
-        # Deduct points
+        # Deduct points (skip notification - the API sends reward_redeemed notification separately)
         transaction = self.deduct_points(
             user_id,
-            reward.points_required,
+            points_cost,
             f"Redeemed reward: {reward.name}",
-            reward.id
+            reward.id,
+            skip_notification=True  # API handles the proper reward_redeemed notification
         )
+        
+        # Increment redemption count
+        reward.redemptions_used = (reward.redemptions_used or 0) + 1
+        db.session.commit()
         
         # Generate reward code/voucher
         reward_code = self._generate_reward_code(reward, user_id)
         
+        # Return redemption data as a dictionary
         return {
-            'reward_code': reward_code,
+            'id': transaction.id,
+            'reward_id': reward.id,
             'reward_name': reward.name,
-            'reward_value': reward.reward_value,
-            'points_deducted': reward.points_required,
+            'points_spent': points_cost,
+            'status': 'pending',
+            'redemption_code': reward_code,
+            'expires_at': reward.valid_until.isoformat() if reward.valid_until else None,
             'transaction_id': transaction.id
         }
     
@@ -593,10 +617,18 @@ class LoyaltyService:
         hash_object = hashlib.md5(data.encode())
         return f"RWD{hash_object.hexdigest()[:8].upper()}"
     
-    def _send_points_notification(self, user_id: int, points: int, action: str):
-        """Send points notification"""
+    def _send_points_notification(self, user_id: int, points: int, action: str, 
+                                   notification_type_str: str = None):
+        """Send points notification
+        
+        Args:
+            user_id: User to notify
+            points: Number of points
+            action: Action type (earned, redeemed, etc.)
+            notification_type_str: String value of NotificationType enum to use
+        """
         from ..tasks.notification_tasks import send_loyalty_notification_task
-        send_loyalty_notification_task.delay(user_id, action, {'points': points})
+        send_loyalty_notification_task.delay(user_id, action, {'points': points}, notification_type_str)
     
     def _send_tier_upgrade_notification(self, user_id: int, new_tier: str):
         """Send tier upgrade notification"""
@@ -688,6 +720,10 @@ class LoyaltyService:
     
     def get_referral_statistics(self, user_id: int) -> Dict[str, Any]:
         """Get referral statistics for user"""
+        total_referrals = 0
+        pending_referrals = 0
+        referral_points = 0
+        
         try:
             total_referrals = ReferralProgram.query.filter_by(
                 referrer_id=user_id, status='completed'
@@ -699,20 +735,25 @@ class LoyaltyService:
         except Exception:
             # Database schema mismatch or table doesn't exist
             db.session.rollback()
-            total_referrals = 0
-            pending_referrals = 0
         
-        # Calculate total points earned from referrals (stored in extra_data)
-        referral_points = LoyaltyTransaction.query.filter(
-            LoyaltyTransaction.user_id == user_id,
-            LoyaltyTransaction.extra_data['action_type'].astext == LoyaltyActionType.REFERRAL.value,
-            LoyaltyTransaction.points > 0  # Earned points are positive
-        ).with_entities(func.sum(LoyaltyTransaction.points)).scalar() or 0
+        # Calculate total points earned from referrals
+        # Use a simpler query that doesn't rely on JSON path operators
+        try:
+            transactions = LoyaltyTransaction.query.filter(
+                LoyaltyTransaction.user_id == user_id,
+                LoyaltyTransaction.transaction_type == LoyaltyTransactionType.BONUS,
+                LoyaltyTransaction.description.ilike('%referral%'),
+                LoyaltyTransaction.points > 0
+            ).all()
+            
+            referral_points = sum(t.points for t in transactions)
+        except Exception:
+            db.session.rollback()
         
         return {
             'total_referrals': total_referrals,
             'pending_referrals': pending_referrals,
-            'points_earned_from_referrals': referral_points
+            'total_points_earned': referral_points
         }
     
     def get_referral_points_earned(self, referrer_id: int, referee_id: int) -> int:

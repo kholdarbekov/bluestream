@@ -1,337 +1,988 @@
-{% extends "frontend/base.html" %}
+{% extends "frontend/cabinet_base.html" %}
+{% set active_menu = 'loyalty' %}
 
-{% block title %}{{ 'landing.account.loyalty'|t }} - {{ company_name }}{% endblock %}
+{% block cabinet_title %}{{ 'landing.account.loyalty'|t }}{% endblock %}
 
-{% block content %}
-<!-- page-title -->
-<section class="page-title">
-    <div class="bg-layer" style="background-image: url({{ url_for('static', filename='images/background/page-title.jpg') }});"></div>
-    <div class="auto-container">
-        <div class="content-box">
-            <h1>{{ 'landing.account.loyalty'|t }}</h1>
-            <ul class="bread-crumb clearfix">
-                <li><a href="{{ url_for('frontend.index') }}">{{ 'landing.nav.home'|t }}</a></li>
-                <li><a href="{{ url_for('frontend.my_account') }}">{{ 'landing.nav.my_account'|t }}</a></li>
-                <li>{{ 'landing.account.loyalty'|t }}</li>
-            </ul>
-        </div>
-    </div>
-</section>
-<!-- page-title end -->
+{% block cabinet_breadcrumb_items %}
+<li>{{ 'landing.account.loyalty'|t }}</li>
+{% endblock %}
 
-<!-- account-section -->
-<section class="account-section">
-    <div class="auto-container">
-        <div class="row clearfix">
-            <!-- Account Sidebar -->
-            <div class="col-lg-3 col-md-4 col-sm-12">
-                <div class="account-sidebar">
-                    <div class="profile-box">
-                        <div class="profile-info text-center">
-                            <div class="profile-avatar">
-                                <i class="far fa-user-circle" style="font-size: 60px; color: #1890ff;"></i>
-                            </div>
-                            <h4>{{ user.first_name }} {{ user.last_name }}</h4>
-                            <p class="text-muted">{{ user.email }}</p>
-                        </div>
+{% block cabinet_extra_head %}
+<style>
+/* ============================================
+   LOYALTY PAGE - ENHANCED DESIGN SYSTEM
+   ============================================ */
+
+/* Section Spacing & Visual Hierarchy */
+.loyalty-overview,
+.membership-tiers,
+.points-history,
+.available-rewards,
+.earn-points-section {
+    margin-bottom: 2.5rem;
+}
+
+/* Card Base Styles - Consistent Shadows */
+.loyalty-card,
+.tier-card,
+.reward-card,
+.card {
+    border: none;
+    border-radius: 16px;
+    background: #ffffff;
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+/* ============================================
+   LOYALTY OVERVIEW CARDS (Stats)
+   ============================================ */
+.loyalty-card {
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+    border-radius: 20px;
+    overflow: hidden;
+    background: linear-gradient(135deg, #ffffff 0%, #f8faff 100%);
+}
+
+.loyalty-card:hover {
+    transform: translateY(-8px);
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15);
+}
+
+.loyalty-card .card-body {
+    padding: 2rem 1.5rem;
+}
+
+.loyalty-icon {
+    margin-bottom: 1.25rem;
+    height: 80px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.loyalty-icon i {
+    font-size: 3.5rem !important;
+    filter: drop-shadow(0 4px 8px rgba(0,0,0,0.1));
+}
+
+.loyalty-card h3 {
+    font-size: 2.5rem;
+    font-weight: 700;
+    background: linear-gradient(135deg, #1a73e8 0%, #0d47a1 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+.loyalty-card .text-muted {
+    font-size: 0.95rem;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+/* ============================================
+   MEMBERSHIP TIERS - Enhanced Design
+   ============================================ */
+.membership-tiers .card {
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+}
+
+.membership-tiers .card-header {
+    background: linear-gradient(135deg, #f0f4ff 0%, #e8ecff 100%);
+    border-bottom: none;
+    padding: 1.25rem 1.5rem;
+    border-radius: 16px 16px 0 0 !important;
+}
+
+.membership-tiers .card-header h5 {
+    margin: 0;
+    font-weight: 600;
+    color: #1a1a2e;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.membership-tiers .card-header h5 i {
+    color: #ffd700;
+    font-size: 1.4rem;
+}
+
+.membership-tiers .card-body {
+    padding: 1.5rem;
+}
+
+/* Tier Cards - Enhanced Styling */
+.tier-card {
+    background: #ffffff;
+    border-radius: 16px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+    padding: 1.75rem 1.25rem;
+    margin-bottom: 0;
+    border-left: 5px solid;
+    transition: all 0.3s ease;
+    position: relative;
+    overflow: hidden;
+    height: 100%;
+}
+
+.tier-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 80px;
+    height: 80px;
+    border-radius: 50%;
+    opacity: 0.1;
+    transform: translate(30%, -30%);
+}
+
+.tier-card:hover {
+    transform: translateY(-6px);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.15);
+}
+
+/* Current Tier Highlight */
+.tier-card.current-tier {
+    border-width: 3px;
+    box-shadow: 0 8px 32px rgba(24, 144, 255, 0.25);
+    background: linear-gradient(135deg, #f0f9ff 0%, #e6f7ff 100%);
+}
+
+.tier-card.current-tier::after {
+    content: '✓ Your Tier';
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    background: linear-gradient(135deg, #52c41a 0%, #389e0d 100%);
+    color: white;
+    font-size: 0.7rem;
+    font-weight: 600;
+    padding: 4px 10px;
+    border-radius: 20px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+/* Tier-specific styling */
+.tier-card.bronze { 
+    border-left-color: #cd7f32; 
+}
+.tier-card.bronze::before { background: #cd7f32; }
+.tier-card.bronze .tier-header i { color: #cd7f32; }
+
+.tier-card.silver { 
+    border-left-color: #a0a0a0; 
+}
+.tier-card.silver::before { background: #a0a0a0; }
+.tier-card.silver .tier-header i { color: #a0a0a0; }
+
+.tier-card.gold { 
+    border-left-color: #ffd700; 
+}
+.tier-card.gold::before { background: #ffd700; }
+.tier-card.gold .tier-header i { color: #ffd700; }
+
+.tier-card.platinum { 
+    border-left-color: #7c3aed; 
+}
+.tier-card.platinum::before { background: #7c3aed; }
+.tier-card.platinum .tier-header i { color: #7c3aed; }
+
+.tier-header {
+    text-align: center;
+    margin-bottom: 1.25rem;
+}
+
+.tier-header i {
+    font-size: 3rem !important;
+    margin-bottom: 0.75rem;
+    display: block;
+    filter: drop-shadow(0 2px 4px rgba(0,0,0,0.15));
+}
+
+.tier-header h6 {
+    font-size: 1.25rem;
+    font-weight: 700;
+    margin-bottom: 0.25rem;
+    color: #1a1a2e;
+}
+
+.tier-header p {
+    font-size: 0.85rem;
+    color: #666;
+    margin: 0;
+    font-weight: 500;
+}
+
+.tier-benefits ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.tier-benefits li {
+    padding: 0.5rem 0;
+    font-size: 0.875rem;
+    color: #555;
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+}
+
+.tier-benefits li::before {
+    content: "✓";
+    color: #52c41a;
+    font-weight: bold;
+    flex-shrink: 0;
+    margin-top: 1px;
+}
+
+/* ============================================
+   POINTS HISTORY - Enhanced Styling
+   ============================================ */
+.points-history .card {
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+}
+
+.points-history .card-header {
+    background: linear-gradient(135deg, #fff9f0 0%, #fff5e6 100%);
+    border-bottom: none;
+    padding: 1.25rem 1.5rem;
+}
+
+.points-history .card-header h5 {
+    margin: 0;
+    font-weight: 600;
+    color: #1a1a2e;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.points-history .card-header h5 i {
+    color: #fa8c16;
+    font-size: 1.4rem;
+}
+
+.points-history-item {
+    display: flex;
+    align-items: center;
+    padding: 1.25rem 0;
+    border-bottom: 1px solid #f5f5f5;
+    transition: background-color 0.2s ease;
+}
+
+.points-history-item:hover {
+    background-color: #fafafa;
+    margin: 0 -1rem;
+    padding-left: 1rem;
+    padding-right: 1rem;
+}
+
+.points-history-item:last-child {
+    border-bottom: none;
+}
+
+.points-icon {
+    width: 52px;
+    height: 52px;
+    border-radius: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-right: 1.25rem;
+    color: white;
+    font-size: 1.25rem;
+    flex-shrink: 0;
+}
+
+.points-icon.earned { 
+    background: linear-gradient(135deg, #52c41a 0%, #389e0d 100%); 
+}
+.points-icon.redeemed { 
+    background: linear-gradient(135deg, #1890ff 0%, #0050b3 100%); 
+}
+.points-icon.expired { 
+    background: linear-gradient(135deg, #ff4d4f 0%, #cf1322 100%); 
+}
+.points-icon.bonus {
+    background: linear-gradient(135deg, #722ed1 0%, #531dab 100%);
+}
+
+.points-details {
+    flex: 1;
+    min-width: 0;
+}
+
+.points-details .description {
+    font-weight: 600;
+    color: #1a1a2e;
+    margin-bottom: 0.25rem;
+    font-size: 0.95rem;
+}
+
+.points-details .date {
+    color: #888;
+    font-size: 0.85rem;
+}
+
+.points-amount {
+    font-weight: 700;
+    font-size: 1.1rem;
+    margin-left: auto;
+    padding-left: 1rem;
+}
+
+.points-amount.positive { color: #52c41a; }
+.points-amount.negative { color: #ff4d4f; }
+
+/* ============================================
+   REWARDS GRID - Premium Card Design
+   ============================================ */
+.available-rewards .card {
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+}
+
+.available-rewards .card-header {
+    background: linear-gradient(135deg, #f0fff4 0%, #e6ffed 100%);
+    border-bottom: none;
+    padding: 1.25rem 1.5rem;
+}
+
+.available-rewards .card-header h5 {
+    margin: 0;
+    font-weight: 600;
+    color: #1a1a2e;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.available-rewards .card-header h5 i {
+    color: #52c41a;
+    font-size: 1.4rem;
+}
+
+.rewards-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 1.5rem;
+}
+
+.reward-card {
+    background: #ffffff;
+    border-radius: 16px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+    padding: 0;
+    overflow: hidden;
+    transition: all 0.3s ease;
+    display: flex;
+    flex-direction: column;
+    position: relative;
+}
+
+.reward-card:hover {
+    transform: translateY(-6px);
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.15);
+}
+
+/* Reward Type Badge */
+.reward-type-badge {
+    position: absolute;
+    top: 12px;
+    left: 12px;
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    z-index: 2;
+}
+
+.reward-type-badge.discount {
+    background: linear-gradient(135deg, #ff6b6b 0%, #ee5a5a 100%);
+    color: white;
+}
+
+.reward-type-badge.free_delivery {
+    background: linear-gradient(135deg, #1890ff 0%, #0050b3 100%);
+    color: white;
+}
+
+.reward-type-badge.free_product {
+    background: linear-gradient(135deg, #52c41a 0%, #389e0d 100%);
+    color: white;
+}
+
+.reward-type-badge.gift_card {
+    background: linear-gradient(135deg, #722ed1 0%, #531dab 100%);
+    color: white;
+}
+
+.reward-image {
+    width: 100%;
+    height: 140px;
+    object-fit: cover;
+    background: linear-gradient(135deg, #f0f4ff 0%, #e8ecff 100%);
+}
+
+.reward-content {
+    padding: 1.25rem;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+}
+
+.reward-content h5 {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: #1a1a2e;
+    margin-bottom: 0.5rem;
+}
+
+.reward-content p {
+    color: #666;
+    font-size: 0.9rem;
+    margin-bottom: 1rem;
+    flex: 1;
+    line-height: 1.5;
+}
+
+/* Points Cost - Prominent Display */
+.reward-points-cost {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: auto;
+    padding-top: 1rem;
+    border-top: 1px solid #f0f0f0;
+}
+
+.points-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 8px 16px;
+    border-radius: 25px;
+    font-weight: 700;
+    font-size: 1rem;
+}
+
+.points-badge i {
+    font-size: 1rem;
+}
+
+.redeem-btn {
+    padding: 8px 20px;
+    border-radius: 25px;
+    font-weight: 600;
+    font-size: 0.9rem;
+    transition: all 0.3s ease;
+}
+
+.redeem-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.redeem-btn.can-redeem {
+    background: linear-gradient(135deg, #52c41a 0%, #389e0d 100%);
+    border: none;
+    color: white;
+}
+
+.redeem-btn.can-redeem:hover {
+    transform: scale(1.05);
+    box-shadow: 0 4px 12px rgba(82, 196, 26, 0.4);
+}
+
+.redeem-btn.cannot-redeem {
+    background: #f5f5f5;
+    border: 1px solid #d9d9d9;
+    color: #999;
+}
+
+/* ============================================
+   WAYS TO EARN POINTS - Enhanced Design
+   ============================================ */
+.earn-points-section .card {
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+}
+
+.earn-points-section .card-header {
+    background: linear-gradient(135deg, #fffbe6 0%, #fff7cc 100%);
+    border-bottom: none;
+    padding: 1.25rem 1.5rem;
+}
+
+.earn-points-section .card-header h5 {
+    margin: 0;
+    font-weight: 600;
+    color: #1a1a2e;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.earn-points-section .card-header h5 i {
+    color: #faad14;
+    font-size: 1.4rem;
+}
+
+.earn-points-section .card-body {
+    padding: 1.5rem;
+}
+
+.earn-method {
+    display: flex;
+    align-items: flex-start;
+    padding: 1.25rem;
+    background: linear-gradient(135deg, #fafbff 0%, #f5f7ff 100%);
+    border-radius: 16px;
+    margin-bottom: 1rem;
+    transition: all 0.3s ease;
+    border: 1px solid #f0f0f0;
+}
+
+.earn-method:hover {
+    background: linear-gradient(135deg, #f0f4ff 0%, #e8ecff 100%);
+    transform: translateX(4px);
+    border-color: #d0d8ff;
+}
+
+.earn-icon {
+    width: 60px;
+    height: 60px;
+    border-radius: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-right: 1.25rem;
+    flex-shrink: 0;
+    background: white;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+.earn-icon i {
+    font-size: 1.75rem !important;
+}
+
+.earn-details {
+    flex: 1;
+}
+
+.earn-details h6 {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: #1a1a2e;
+    margin-bottom: 0.25rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.earn-details p {
+    color: #666;
+    font-size: 0.9rem;
+    margin: 0;
+    line-height: 1.5;
+}
+
+/* Points Value Badge - Visible in Earn Methods */
+.earn-points-value {
+    background: linear-gradient(135deg, #52c41a 0%, #389e0d 100%);
+    color: white;
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+/* Referral Code Button */
+.earn-points-section .btn-primary {
+    background: linear-gradient(135deg, #1890ff 0%, #0050b3 100%);
+    border: none;
+    padding: 12px 32px;
+    border-radius: 30px;
+    font-weight: 600;
+    font-size: 1rem;
+    transition: all 0.3s ease;
+}
+
+.earn-points-section .btn-primary:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 8px 24px rgba(24, 144, 255, 0.4);
+}
+
+/* Referral Code Display */
+.referral-code-display {
+    background: linear-gradient(135deg, #f0f9ff 0%, #e6f7ff 100%);
+    padding: 2rem;
+    border-radius: 16px;
+    margin: 1.5rem 0;
+    border: 2px dashed #91d5ff;
+}
+
+.referral-code-display h4 {
+    font-size: 2rem;
+    font-weight: 700;
+    color: #1890ff;
+    letter-spacing: 3px;
+    margin-bottom: 1rem;
+}
+
+/* ============================================
+   TIER PROGRESS BAR
+   ============================================ */
+.tier-progress {
+    margin-top: 1rem;
+}
+
+.tier-progress .progress {
+    height: 10px;
+    border-radius: 10px;
+    background: #f0f0f0;
+    overflow: hidden;
+}
+
+.tier-progress .progress-bar {
+    background: linear-gradient(135deg, #1890ff 0%, #722ed1 100%);
+    border-radius: 10px;
+    transition: width 0.6s ease;
+}
+
+/* ============================================
+   MOBILE RESPONSIVE ADJUSTMENTS
+   ============================================ */
+@media (max-width: 992px) {
+    .membership-tiers .row {
+        display: flex;
+        overflow-x: auto;
+        flex-wrap: nowrap;
+        gap: 1rem;
+        padding-bottom: 1rem;
+        margin: 0 -0.5rem;
+        scroll-snap-type: x mandatory;
+    }
+    
+    .membership-tiers .col-md-3 {
+        flex: 0 0 280px;
+        max-width: 280px;
+        scroll-snap-align: start;
+        padding: 0 0.5rem;
+    }
+    
+    /* Hide scrollbar but keep functionality */
+    .membership-tiers .row::-webkit-scrollbar {
+        height: 6px;
+    }
+    
+    .membership-tiers .row::-webkit-scrollbar-track {
+        background: #f0f0f0;
+        border-radius: 10px;
+    }
+    
+    .membership-tiers .row::-webkit-scrollbar-thumb {
+        background: #1890ff;
+        border-radius: 10px;
+    }
+}
+
+@media (max-width: 768px) {
+    .loyalty-overview .col-md-4 {
+        margin-bottom: 1rem;
+    }
+    
+    .loyalty-card .card-body {
+        padding: 1.5rem 1rem;
+    }
+    
+    .loyalty-card h3 {
+        font-size: 2rem;
+    }
+    
+    .rewards-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    .earn-method {
+        flex-direction: column;
+        text-align: center;
+    }
+    
+    .earn-icon {
+        margin: 0 auto 1rem;
+    }
+    
+    .earn-details h6 {
+        flex-direction: column;
+        gap: 0.5rem;
+    }
+}
+</style>
+{% endblock %}
+
+{% block cabinet_content %}
+<!-- Loyalty Header -->
+<div class="content-header mb-4">
+    <h2><i class="far fa-star"></i> {{ 'Blue Stream Loyalty Program'|t }}</h2>
+    <p class="text-muted">{{ 'Earn points with every purchase and unlock exclusive rewards'|t }}</p>
+</div>
+
+<!-- Loyalty Overview -->
+<div class="loyalty-overview mb-4">
+    <div class="row">
+        <div class="col-md-4">
+            <div class="card loyalty-card">
+                <div class="card-body text-center">
+                    <div class="loyalty-icon">
+                        <i class="far fa-star fa-3x text-warning"></i>
                     </div>
-                    
-                    <div class="account-menu">
-                        <ul class="list-unstyled">
-                            <li>
-                                <a href="{{ url_for('frontend.my_account') }}">
-                                    <i class="far fa-tachometer-alt"></i> {{ 'Dashboard'|t }}
-                                </a>
-                            </li>
-                            <li>
-                                <a href="{{ url_for('frontend.profile_settings') }}">
-                                    <i class="far fa-user-edit"></i> {{ 'Profile Settings'|t }}
-                                </a>
-                            </li>
-                            <li>
-                                <a href="{{ url_for('frontend.my_orders') }}">
-                                    <i class="far fa-shopping-bag"></i> {{ 'landing.account.orders'|t }}
-                                </a>
-                            </li>
-                            <li>
-                                <a href="{{ url_for('frontend.addresses') }}">
-                                    <i class="far fa-map-marker-alt"></i> {{ 'Addresses'|t }}
-                                </a>
-                            </li>
-                            <li>
-                                <a href="{{ url_for('frontend.my_subscriptions') }}">
-                                    <i class="far fa-sync-alt"></i> {{ 'landing.nav.subscriptions'|t }}
-                                </a>
-                            </li>
-                            <li class="active">
-                                <a href="{{ url_for('frontend.my_loyalty') }}">
-                                    <i class="far fa-star"></i> {{ 'landing.account.loyalty'|t }}
-                                </a>
-                            </li>
-                            <li>
-                                <a href="{{ url_for('frontend.account_security') }}">
-                                    <i class="far fa-shield-alt"></i> {{ 'Security'|t }}
-                                </a>
-                            </li>
-                            <li>
-                                <a href="#" onclick="logout()">
-                                    <i class="far fa-sign-out-alt"></i> {{ 'landing.nav.logout'|t }}
-                                </a>
-                            </li>
-                        </ul>
+                    <h3 class="text-primary" id="currentPoints">0</h3>
+                    <p class="text-muted">{{ 'Current Points'|t }}</p>
+                    <small class="text-success" id="pointsThisMonth">+0 {{ 'this month'|t }}</small>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card loyalty-card">
+                <div class="card-body text-center">
+                    <div class="loyalty-icon">
+                        <i class="far fa-trophy fa-3x text-success"></i>
+                    </div>
+                    <h3 class="text-primary" id="currentTier">Bronze</h3>
+                    <p class="text-muted">{{ 'Current Tier'|t }}</p>
+                    <div class="tier-progress">
+                        <div class="progress" style="height: 8px;">
+                            <div class="progress-bar" role="progressbar" style="width: 0%" id="tierProgress"></div>
+                        </div>
+                        <small class="text-muted" id="tierProgressText">0 {{ 'points to next tier'|t }}</small>
                     </div>
                 </div>
             </div>
-            
-            <!-- Loyalty Content -->
-            <div class="col-lg-9 col-md-8 col-sm-12">
-                <div class="account-content">
-                    <!-- Loyalty Header -->
-                    <div class="content-header mb-4">
-                        <h2><i class="far fa-star"></i> {{ 'Blue Stream Loyalty Program'|t }}</h2>
-                        <p class="text-muted">{{ 'Earn points with every purchase and unlock exclusive rewards'|t }}</p>
+        </div>
+        <div class="col-md-4">
+            <div class="card loyalty-card">
+                <div class="card-body text-center">
+                    <div class="loyalty-icon">
+                        <i class="far fa-gift fa-3x text-info"></i>
                     </div>
+                    <h3 class="text-primary" id="availableRewards">0</h3>
+                    <p class="text-muted">{{ 'Available Rewards'|t }}</p>
+                    <button class="btn btn-sm btn-primary" onclick="showRewards()">
+                        {{ 'View Rewards'|t }}
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
 
-                    <!-- Loyalty Overview -->
-                    <div class="loyalty-overview mb-4">
-                        <div class="row">
-                            <div class="col-md-4">
-                                <div class="card loyalty-card">
-                                    <div class="card-body text-center">
-                                        <div class="loyalty-icon">
-                                            <i class="far fa-star fa-3x text-warning"></i>
-                                        </div>
-                                        <h3 class="text-primary" id="currentPoints">0</h3>
-                                        <p class="text-muted">{{ 'Current Points'|t }}</p>
-                                        <small class="text-success" id="pointsThisMonth">+0 {{ 'this month'|t }}</small>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="col-md-4">
-                                <div class="card loyalty-card">
-                                    <div class="card-body text-center">
-                                        <div class="loyalty-icon">
-                                            <i class="far fa-trophy fa-3x text-success"></i>
-                                        </div>
-                                        <h3 class="text-primary" id="currentTier">Bronze</h3>
-                                        <p class="text-muted">{{ 'Current Tier'|t }}</p>
-                                        <div class="tier-progress">
-                                            <div class="progress" style="height: 8px;">
-                                                <div class="progress-bar" role="progressbar" style="width: 0%" id="tierProgress"></div>
-                                            </div>
-                                            <small class="text-muted" id="tierProgressText">0 {{ 'points to next tier'|t }}</small>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="col-md-4">
-                                <div class="card loyalty-card">
-                                    <div class="card-body text-center">
-                                        <div class="loyalty-icon">
-                                            <i class="far fa-gift fa-3x text-info"></i>
-                                        </div>
-                                        <h3 class="text-primary" id="availableRewards">0</h3>
-                                        <p class="text-muted">{{ 'Available Rewards'|t }}</p>
-                                        <button class="btn btn-sm btn-primary" onclick="showRewards()">
-                                            {{ 'View Rewards'|t }}
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
+<!-- Membership Tiers -->
+<div class="membership-tiers mb-4">
+    <div class="card">
+        <div class="card-header">
+            <h5><i class="far fa-crown"></i> {{ 'Membership Tiers'|t }}</h5>
+        </div>
+        <div class="card-body">
+            <div class="row">
+                <div class="col-md-3">
+                    <div class="tier-card bronze">
+                        <div class="tier-header">
+                            <i class="far fa-medal"></i>
+                            <h6>{{ 'Bronze'|t }}</h6>
+                            <p>0 - 4,999 {{ 'points'|t }}</p>
+                        </div>
+                        <div class="tier-benefits">
+                            <ul>
+                                <li>{{ '1 point per 100 UZS spent'|t }}</li>
+                                <li>{{ 'Standard shipping'|t }}</li>
+                                <li>{{ 'Basic customer support'|t }}</li>
+                            </ul>
                         </div>
                     </div>
-
-                    <!-- Membership Tiers -->
-                    <div class="membership-tiers mb-4">
-                        <div class="card">
-                            <div class="card-header">
-                                <h5><i class="far fa-crown"></i> {{ 'Membership Tiers'|t }}</h5>
-                            </div>
-                            <div class="card-body">
-                                <div class="row">
-                                    <div class="col-md-3">
-                                        <div class="tier-card bronze">
-                                            <div class="tier-header">
-                                                <i class="far fa-medal"></i>
-                                                <h6>{{ 'Bronze'|t }}</h6>
-                                                <p>0 - 999 {{ 'points'|t }}</p>
-                                            </div>
-                                            <div class="tier-benefits">
-                                                <ul>
-                                                    <li>{{ '1 point per $1 spent'|t }}</li>
-                                                    <li>{{ 'Standard shipping'|t }}</li>
-                                                    <li>{{ 'Basic customer support'|t }}</li>
-                                                </ul>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div class="col-md-3">
-                                        <div class="tier-card silver">
-                                            <div class="tier-header">
-                                                <i class="far fa-medal"></i>
-                                                <h6>{{ 'Silver'|t }}</h6>
-                                                <p>1,000 - 2,499 {{ 'points'|t }}</p>
-                                            </div>
-                                            <div class="tier-benefits">
-                                                <ul>
-                                                    <li>{{ '1.25 points per $1 spent'|t }}</li>
-                                                    <li>{{ 'Free standard shipping'|t }}</li>
-                                                    <li>{{ 'Priority customer support'|t }}</li>
-                                                    <li>{{ 'Exclusive monthly offers'|t }}</li>
-                                                </ul>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div class="col-md-3">
-                                        <div class="tier-card gold">
-                                            <div class="tier-header">
-                                                <i class="far fa-medal"></i>
-                                                <h6>{{ 'Gold'|t }}</h6>
-                                                <p>2,500 - 4,999 {{ 'points'|t }}</p>
-                                            </div>
-                                            <div class="tier-benefits">
-                                                <ul>
-                                                    <li>{{ '1.5 points per $1 spent'|t }}</li>
-                                                    <li>{{ 'Free expedited shipping'|t }}</li>
-                                                    <li>{{ 'VIP customer support'|t }}</li>
-                                                    <li>{{ 'Early access to new products'|t }}</li>
-                                                    <li>{{ '10% birthday discount'|t }}</li>
-                                                </ul>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div class="col-md-3">
-                                        <div class="tier-card platinum">
-                                            <div class="tier-header">
-                                                <i class="far fa-crown"></i>
-                                                <h6>{{ 'Platinum'|t }}</h6>
-                                                <p>5,000+ {{ 'points'|t }}</p>
-                                            </div>
-                                            <div class="tier-benefits">
-                                                <ul>
-                                                    <li>{{ '2 points per $1 spent'|t }}</li>
-                                                    <li>{{ 'Free same-day delivery'|t }}</li>
-                                                    <li>{{ 'Dedicated account manager'|t }}</li>
-                                                    <li>{{ 'Exclusive platinum rewards'|t }}</li>
-                                                    <li>{{ '15% birthday discount'|t }}</li>
-                                                    <li>{{ 'VIP events access'|t }}</li>
-                                                </ul>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="tier-card silver">
+                        <div class="tier-header">
+                            <i class="far fa-medal"></i>
+                            <h6>{{ 'Silver'|t }}</h6>
+                            <p>5,000 - 19,999 {{ 'points'|t }}</p>
+                        </div>
+                        <div class="tier-benefits">
+                            <ul>
+                                <li>{{ '1.25 points per 100 UZS spent'|t }}</li>
+                                <li>{{ 'Free standard shipping'|t }}</li>
+                                <li>{{ 'Priority customer support'|t }}</li>
+                                <li>{{ 'Exclusive monthly offers'|t }}</li>
+                            </ul>
                         </div>
                     </div>
-
-                    <!-- Points History -->
-                    <div class="points-history mb-4">
-                        <div class="card">
-                            <div class="card-header d-flex justify-content-between align-items-center">
-                                <h5><i class="far fa-history"></i> {{ 'Points History'|t }}</h5>
-                                <div class="filter-options">
-                                    <select class="form-control form-control-sm" id="historyFilter" onchange="loadPointsHistory()">
-                                        <option value="">{{ 'All Activity'|t }}</option>
-                                        <option value="earned">{{ 'Points Earned'|t }}</option>
-                                        <option value="redeemed">{{ 'Points Redeemed'|t }}</option>
-                                        <option value="expired">{{ 'Points Expired'|t }}</option>
-                                    </select>
-                                </div>
-                            </div>
-                            <div class="card-body">
-                                <div class="points-history-list" id="pointsHistoryList">
-                                    <div class="text-center py-4">
-                                        <i class="far fa-spinner fa-spin fa-2x"></i>
-                                        <p class="mt-2">{{ 'Loading points history...'|t }}</p>
-                                    </div>
-                                </div>
-                            </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="tier-card gold">
+                        <div class="tier-header">
+                            <i class="far fa-medal"></i>
+                            <h6>{{ 'Gold'|t }}</h6>
+                            <p>20,000 - 44,999 {{ 'points'|t }}</p>
+                        </div>
+                        <div class="tier-benefits">
+                            <ul>
+                                <li>{{ '1.5 points per 100 UZS spent'|t }}</li>
+                                <li>{{ 'Free expedited shipping'|t }}</li>
+                                <li>{{ 'VIP customer support'|t }}</li>
+                                <li>{{ 'Early access to new products'|t }}</li>
+                                <li>{{ '10% birthday discount'|t }}</li>
+                            </ul>
                         </div>
                     </div>
-
-                    <!-- Available Rewards -->
-                    <div class="available-rewards mb-4">
-                        <div class="card">
-                            <div class="card-header">
-                                <h5><i class="far fa-gift"></i> {{ 'Available Rewards'|t }}</h5>
-                            </div>
-                            <div class="card-body">
-                                <div class="rewards-grid" id="rewardsGrid">
-                                    <div class="text-center py-4">
-                                        <i class="far fa-spinner fa-spin fa-2x"></i>
-                                        <p class="mt-2">{{ 'Loading rewards...'|t }}</p>
-                                    </div>
-                                </div>
-                            </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="tier-card platinum">
+                        <div class="tier-header">
+                            <i class="far fa-crown"></i>
+                            <h6>{{ 'Platinum'|t }}</h6>
+                            <p>45,000+ {{ 'points'|t }}</p>
                         </div>
-                    </div>
-
-                    <!-- Ways to Earn Points -->
-                    <div class="earn-points-section">
-                        <div class="card">
-                            <div class="card-header">
-                                <h5><i class="far fa-lightbulb"></i> {{ 'Ways to Earn Points'|t }}</h5>
-                            </div>
-                            <div class="card-body">
-                                <div class="row">
-                                    <div class="col-md-6">
-                                        <div class="earn-method">
-                                            <div class="earn-icon">
-                                                <i class="far fa-shopping-cart text-primary"></i>
-                                            </div>
-                                            <div class="earn-details">
-                                                <h6>{{ 'Make Purchases'|t }}</h6>
-                                                <p>{{ 'Earn 1-2 points for every dollar spent (based on your tier)'|t }}</p>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div class="col-md-6">
-                                        <div class="earn-method">
-                                            <div class="earn-icon">
-                                                <i class="far fa-user-plus text-success"></i>
-                                            </div>
-                                            <div class="earn-details">
-                                                <h6>{{ 'Refer Friends'|t }}</h6>
-                                                <p>{{ 'Get 500 points for each friend who makes their first order'|t }}</p>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div class="col-md-6">
-                                        <div class="earn-method">
-                                            <div class="earn-icon">
-                                                <i class="far fa-star text-warning"></i>
-                                            </div>
-                                            <div class="earn-details">
-                                                <h6>{{ 'Write Reviews'|t }}</h6>
-                                                <p>{{ 'Earn 50 points for each product review you write'|t }}</p>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div class="col-md-6">
-                                        <div class="earn-method">
-                                            <div class="earn-icon">
-                                                <i class="far fa-birthday-cake text-info"></i>
-                                            </div>
-                                            <div class="earn-details">
-                                                <h6>{{ 'Birthday Bonus'|t }}</h6>
-                                                <p>{{ 'Get 200 bonus points on your birthday every year'|t }}</p>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div class="text-center mt-4">
-                                    <button class="btn btn-primary" onclick="generateReferralCode()">
-                                        <i class="far fa-share"></i> {{ 'Get My Referral Code'|t }}
-                                    </button>
-                                </div>
-                            </div>
+                        <div class="tier-benefits">
+                            <ul>
+                                <li>{{ '2 points per 100 UZS spent'|t }}</li>
+                                <li>{{ 'Free same-day delivery'|t }}</li>
+                                <li>{{ 'Dedicated account manager'|t }}</li>
+                                <li>{{ 'Exclusive platinum rewards'|t }}</li>
+                                <li>{{ '15% birthday discount'|t }}</li>
+                                <li>{{ 'VIP events access'|t }}</li>
+                            </ul>
                         </div>
                     </div>
                 </div>
             </div>
         </div>
     </div>
-</section>
+</div>
+
+<!-- Points History -->
+<div class="points-history mb-4">
+    <div class="card">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <h5><i class="far fa-history"></i> {{ 'Points History'|t }}</h5>
+            <div class="filter-options">
+                <select class="form-control form-control-sm" id="historyFilter" onchange="loadPointsHistory()">
+                    <option value="">{{ 'All Activity'|t }}</option>
+                    <option value="earned">{{ 'Points Earned'|t }}</option>
+                    <option value="redeemed">{{ 'Points Redeemed'|t }}</option>
+                    <option value="expired">{{ 'Points Expired'|t }}</option>
+                </select>
+            </div>
+        </div>
+        <div class="card-body">
+            <div class="points-history-list" id="pointsHistoryList">
+                <div class="text-center py-4">
+                    <i class="far fa-spinner fa-spin fa-2x"></i>
+                    <p class="mt-2">{{ 'Loading points history...'|t }}</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Available Rewards -->
+<div class="available-rewards mb-4">
+    <div class="card">
+        <div class="card-header">
+            <h5><i class="far fa-gift"></i> {{ 'Available Rewards'|t }}</h5>
+        </div>
+        <div class="card-body">
+            <div class="rewards-grid" id="rewardsGrid">
+                <div class="text-center py-4">
+                    <i class="far fa-spinner fa-spin fa-2x"></i>
+                    <p class="mt-2">{{ 'Loading rewards...'|t }}</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Ways to Earn Points -->
+<div class="earn-points-section">
+    <div class="card">
+        <div class="card-header">
+            <h5><i class="far fa-lightbulb"></i> {{ 'Ways to Earn Points'|t }}</h5>
+        </div>
+        <div class="card-body">
+            <div class="row">
+                <div class="col-md-6">
+                    <div class="earn-method">
+                        <div class="earn-icon">
+                            <i class="far fa-shopping-cart text-primary"></i>
+                        </div>
+                        <div class="earn-details">
+                            <h6>
+                                {{ 'Make Purchases'|t }}
+                                <span class="earn-points-value">1-2 pts / 100 UZS</span>
+                            </h6>
+                            <p>{{ 'Earn points for every 100 UZS spent. Higher tiers earn more points per purchase!'|t }}</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <div class="earn-method">
+                        <div class="earn-icon">
+                            <i class="far fa-user-plus text-success"></i>
+                        </div>
+                        <div class="earn-details">
+                            <h6>
+                                {{ 'Refer Friends'|t }}
+                                <span class="earn-points-value">+500 pts</span>
+                            </h6>
+                            <p>{{ 'Invite friends with your referral code. Earn 500 points when they place their first order!'|t }}</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <div class="earn-method">
+                        <div class="earn-icon">
+                            <i class="far fa-star text-warning"></i>
+                        </div>
+                        <div class="earn-details">
+                            <h6>
+                                {{ 'Write Reviews'|t }}
+                                <span class="earn-points-value">+50 pts</span>
+                            </h6>
+                            <p>{{ 'Share your experience by reviewing products. Get 50 points for each review!'|t }}</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <div class="earn-method">
+                        <div class="earn-icon">
+                            <i class="far fa-birthday-cake text-info"></i>
+                        </div>
+                        <div class="earn-details">
+                            <h6>
+                                {{ 'Birthday Bonus'|t }}
+                                <span class="earn-points-value">+200 pts</span>
+                            </h6>
+                            <p>{{ 'Celebrate with us! Receive 200 bonus points automatically on your birthday.'|t }}</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="text-center mt-4">
+                <button class="btn btn-primary" onclick="generateReferralCode()">
+                    <i class="far fa-share"></i> {{ 'Get My Referral Code'|t }}
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
 
 <!-- Reward Redemption Modal -->
 <div class="modal fade" id="rewardModal" tabindex="-1" role="dialog" aria-labelledby="rewardModalLabel" aria-hidden="true">
@@ -400,259 +1051,17 @@
         </div>
     </div>
 </div>
-
-<!-- account-section end -->
 {% endblock %}
 
-{% block extra_css %}
-<style>
-.account-sidebar {
-    background: #fff;
-    border-radius: 8px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-    padding: 20px;
-    margin-bottom: 20px;
-}
-
-.profile-box {
-    margin-bottom: 30px;
-    padding-bottom: 20px;
-    border-bottom: 1px solid #eee;
-}
-
-.account-menu ul li {
-    margin-bottom: 10px;
-}
-
-.account-menu ul li a {
-    display: block;
-    padding: 12px 15px;
-    color: #666;
-    text-decoration: none;
-    border-radius: 6px;
-    transition: all 0.3s;
-}
-
-.account-menu ul li a:hover,
-.account-menu ul li.active a {
-    background: #1890ff;
-    color: #fff;
-    text-decoration: none;
-}
-
-.account-menu ul li a i {
-    width: 20px;
-    margin-right: 10px;
-}
-
-.loyalty-card {
-    border: none;
-    border-radius: 12px;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-    transition: transform 0.3s;
-    margin-bottom: 20px;
-}
-
-.loyalty-card:hover {
-    transform: translateY(-5px);
-}
-
-.loyalty-icon {
-    margin-bottom: 15px;
-}
-
-.tier-progress {
-    margin-top: 10px;
-}
-
-.tier-card {
-    background: #fff;
-    border-radius: 8px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-    padding: 20px;
-    margin-bottom: 20px;
-    border-left: 4px solid;
-    transition: transform 0.3s;
-}
-
-.tier-card:hover {
-    transform: translateY(-2px);
-}
-
-.tier-card.bronze {
-    border-left-color: #cd7f32;
-}
-
-.tier-card.silver {
-    border-left-color: #c0c0c0;
-}
-
-.tier-card.gold {
-    border-left-color: #ffd700;
-}
-
-.tier-card.platinum {
-    border-left-color: #e5e4e2;
-}
-
-.tier-header {
-    text-align: center;
-    margin-bottom: 15px;
-}
-
-.tier-header i {
-    font-size: 2rem;
-    margin-bottom: 10px;
-}
-
-.tier-benefits ul {
-    list-style: none;
-    padding: 0;
-}
-
-.tier-benefits li {
-    padding: 5px 0;
-    font-size: 14px;
-    color: #666;
-}
-
-.tier-benefits li::before {
-    content: "✓";
-    color: #52c41a;
-    margin-right: 10px;
-    font-weight: bold;
-}
-
-.points-history-item {
-    display: flex;
-    align-items: center;
-    padding: 15px 0;
-    border-bottom: 1px solid #f0f0f0;
-}
-
-.points-history-item:last-child {
-    border-bottom: none;
-}
-
-.points-icon {
-    width: 40px;
-    height: 40px;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    margin-right: 15px;
-    color: white;
-}
-
-.points-icon.earned {
-    background: #52c41a;
-}
-
-.points-icon.redeemed {
-    background: #1890ff;
-}
-
-.points-icon.expired {
-    background: #ff4d4f;
-}
-
-.points-details {
-    flex: 1;
-}
-
-.points-amount {
-    font-weight: bold;
-    margin-left: auto;
-}
-
-.points-amount.positive {
-    color: #52c41a;
-}
-
-.points-amount.negative {
-    color: #ff4d4f;
-}
-
-.reward-card {
-    background: #fff;
-    border-radius: 8px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-    padding: 20px;
-    margin-bottom: 20px;
-    transition: transform 0.3s;
-}
-
-.reward-card:hover {
-    transform: translateY(-2px);
-}
-
-.reward-image {
-    width: 100%;
-    height: 120px;
-    object-fit: cover;
-    border-radius: 6px;
-    margin-bottom: 15px;
-}
-
-.reward-points {
-    display: inline-block;
-    background: #1890ff;
-    color: white;
-    padding: 4px 12px;
-    border-radius: 20px;
-    font-size: 12px;
-    font-weight: bold;
-}
-
-.earn-method {
-    display: flex;
-    align-items: center;
-    margin-bottom: 20px;
-}
-
-.earn-icon {
-    width: 50px;
-    margin-right: 15px;
-}
-
-.earn-icon i {
-    font-size: 2rem;
-}
-
-.referral-code-display {
-    background: #f8f9fa;
-    padding: 20px;
-    border-radius: 8px;
-    margin: 20px 0;
-}
-
-.stat-item {
-    text-align: center;
-}
-
-@media (max-width: 768px) {
-    .loyalty-overview .col-md-4 {
-        margin-bottom: 20px;
-    }
-    
-    .membership-tiers .col-md-3 {
-        margin-bottom: 20px;
-    }
-    
-    .earn-points-section .col-md-6 {
-        margin-bottom: 20px;
-    }
-}
-</style>
-{% endblock %}
-
-{% block extra_js %}
+{% block cabinet_extra_js %}
 <script>
-document.addEventListener('DOMContentLoaded', function() {
-    loadLoyaltyData();
-    loadPointsHistory();
+document.addEventListener('DOMContentLoaded', async function() {
+    // Load loyalty data FIRST so currentPoints is set before rewards check it
+    await loadLoyaltyData();
+    // Now load rewards (they check currentPoints to determine can_redeem)
     loadAvailableRewards();
+    // Points history can load in parallel
+    loadPointsHistory();
 });
 
 let currentUserReferralCode = '';
@@ -667,7 +1076,6 @@ async function loadLoyaltyData() {
             updateLoyaltyOverview(loyalty);
         } else {
             console.error('Failed to load loyalty data:', result.message);
-            // Set default values
             updateLoyaltyOverview({
                 current_balance: 0,
                 current_tier: 'Bronze',
@@ -687,12 +1095,20 @@ function updateLoyaltyOverview(loyalty) {
     document.getElementById('currentTier').textContent = loyalty.current_tier || 'Bronze';
     document.getElementById('availableRewards').textContent = loyalty.available_rewards_count || 0;
     
-    // Update tier progress
     if (loyalty.tier_progress) {
         const progressPercent = (loyalty.tier_progress.current / loyalty.tier_progress.next_tier_points) * 100;
         document.getElementById('tierProgress').style.width = `${Math.min(progressPercent, 100)}%`;
         document.getElementById('tierProgressText').textContent = `${loyalty.tier_progress.points_needed || loyalty.tier_progress.next_tier_points} {{ 'points to next tier'|t }}`;
     }
+    
+    // Highlight current tier card
+    const currentTier = (loyalty.current_tier || 'Bronze').toLowerCase();
+    document.querySelectorAll('.tier-card').forEach(card => {
+        card.classList.remove('current-tier');
+        if (card.classList.contains(currentTier)) {
+            card.classList.add('current-tier');
+        }
+    });
 }
 
 async function loadPointsHistory() {
@@ -704,7 +1120,7 @@ async function loadPointsHistory() {
         const result = await response.json();
         
         if (response.ok && result.success) {
-            displayPointsHistory(result.data.transactions);
+            displayPointsHistory(result.data.items);
         } else {
             historyList.innerHTML = '<div class="text-center py-4"><p class="text-muted">{{ "No points history found"|t }}</p></div>';
         }
@@ -724,8 +1140,8 @@ function displayPointsHistory(transactions) {
     
     const historyHtml = transactions.map(transaction => `
         <div class="points-history-item">
-            <div class="points-icon ${transaction.type}">
-                <i class="far fa-${getTransactionIcon(transaction.type)}"></i>
+            <div class="points-icon ${transaction.transaction_type || 'earned'}">
+                <i class="far fa-${getTransactionIcon(transaction.transaction_type)}"></i>
             </div>
             <div class="points-details">
                 <h6>${transaction.description}</h6>
@@ -744,6 +1160,7 @@ function displayPointsHistory(transactions) {
 function getTransactionIcon(type) {
     switch (type) {
         case 'earned': return 'plus';
+        case 'bonus': return 'gift';
         case 'redeemed': return 'minus';
         case 'expired': return 'clock';
         default: return 'circle';
@@ -776,25 +1193,46 @@ function displayRewards(rewards) {
         return;
     }
     
-    const rewardsHtml = `
-        <div class="row">
-            ${rewards.map(reward => `
-                <div class="col-md-6 col-lg-4">
-                    <div class="reward-card">
-                        <img src="${reward.image_url || '/static/images/rewards/default.jpg'}" alt="${reward.name}" class="reward-image">
-                        <h6>${reward.name}</h6>
-                        <p class="text-muted">${reward.description}</p>
-                        <div class="d-flex justify-content-between align-items-center">
-                            <span class="reward-points">${reward.points_required} {{ 'pts'|t }}</span>
-                            <button class="btn btn-sm btn-primary" onclick="redeemReward(${reward.id})" ${reward.points_required > parseInt(document.getElementById('currentPoints').textContent) ? 'disabled' : ''}>
-                                {{ 'Redeem'|t }}
-                            </button>
-                        </div>
+    const currentPoints = parseInt(document.getElementById('currentPoints').textContent) || 0;
+    
+    const rewardsHtml = rewards.map(reward => {
+        const pointsCost = reward.points_cost || reward.points_required || 0;
+        const canRedeem = currentPoints >= pointsCost;
+        const rewardType = reward.reward_type || 'discount';
+        const typeLabel = {
+            'discount': '{{ "Discount"|t }}',
+            'free_delivery': '{{ "Free Delivery"|t }}',
+            'free_product': '{{ "Free Product"|t }}',
+            'gift_card': '{{ "Gift Card"|t }}'
+        }[rewardType] || rewardType;
+        
+        return `
+            <div class="reward-card">
+                <span class="reward-type-badge ${rewardType}">${typeLabel}</span>
+                <div class="reward-image" style="${reward.image_url ? '' : 'display: flex; align-items: center; justify-content: center;'}">
+                    ${reward.image_url ? 
+                        `<img src="${reward.image_url}" alt="${reward.name}" style="width:100%; height:100%; object-fit:cover;" onerror="this.style.display='none'">` : 
+                        `<i class="far fa-gift" style="font-size: 3rem; color: #1890ff;"></i>`
+                    }
+                </div>
+                <div class="reward-content">
+                    <h5>${reward.name}</h5>
+                    <p>${reward.description || ''}</p>
+                    <div class="reward-points-cost">
+                        <span class="points-badge">
+                            <i class="far fa-star"></i>
+                            ${pointsCost.toLocaleString()} {{ 'pts'|t }}
+                        </span>
+                        <button class="btn redeem-btn ${canRedeem ? 'can-redeem' : 'cannot-redeem'}" 
+                                onclick="redeemReward(${reward.id})" 
+                                ${!canRedeem ? 'disabled' : ''}>
+                            ${canRedeem ? '{{ "Redeem"|t }}' : '{{ "Need more points"|t }}'}
+                        </button>
                     </div>
                 </div>
-            `).join('')}
-        </div>
-    `;
+            </div>
+        `;
+    }).join('');
     
     rewardsGrid.innerHTML = rewardsHtml;
 }
@@ -851,7 +1289,11 @@ function showRewardModal(reward) {
 async function confirmRedeemReward(rewardId) {
     try {
         const response = await apiRequest(`/loyalty/rewards/${rewardId}/redeem`, {
-            method: 'POST'
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({})
         });
         
         const result = await response.json();
@@ -859,9 +1301,9 @@ async function confirmRedeemReward(rewardId) {
         if (response.ok && result.success) {
             showNotification('{{ "Reward redeemed successfully!"|t }}', 'success');
             $('#rewardModal').modal('hide');
-            loadLoyaltyData(); // Refresh loyalty data
-            loadPointsHistory(); // Refresh history
-            loadAvailableRewards(); // Refresh rewards
+            loadLoyaltyData();
+            loadPointsHistory();
+            loadAvailableRewards();
         } else {
             showNotification(result.message || '{{ "Failed to redeem reward"|t }}', 'error');
         }
@@ -873,14 +1315,14 @@ async function confirmRedeemReward(rewardId) {
 
 async function generateReferralCode() {
     try {
-        const response = await apiRequest('/loyalty/referral-code');
+        const response = await apiRequest('/loyalty/referral');
         const result = await response.json();
         
         if (response.ok && result.success) {
-            currentUserReferralCode = result.data.code;
-            document.getElementById('referralCodeText').textContent = result.data.code;
-            document.getElementById('referralCount').textContent = result.data.referral_count || 0;
-            document.getElementById('referralPoints').textContent = result.data.referral_points || 0;
+            currentUserReferralCode = result.data.referral_code;
+            document.getElementById('referralCodeText').textContent = result.data.referral_code;
+            document.getElementById('referralCount').textContent = result.data.statistics?.total_referrals || 0;
+            document.getElementById('referralPoints').textContent = result.data.statistics?.total_points_earned || 0;
             $('#referralModal').modal('show');
         } else {
             showNotification(result.message || '{{ "Failed to generate referral code"|t }}', 'error');

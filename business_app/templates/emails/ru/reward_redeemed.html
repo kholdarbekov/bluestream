@@ -1,0 +1,58 @@
+{% extends "emails/base.html" %}
+
+{% block title %}Награда получена - {{ company_name }}{% endblock %}
+
+{% block header %}
+<h1>Награда получена!</h1>
+{% endblock %}
+
+{% block content %}
+<h2>Поздравляем, {{ user_name }}!</h2>
+
+<div class="success-box">
+    <p>Вы успешно получили награду: <strong>{{ reward_name }}</strong></p>
+</div>
+
+<div class="code-display">
+    <p style="margin: 0; color: #64748b; font-size: 14px;">Код награды</p>
+    <span class="code">{{ redemption_code }}</span>
+    <p style="margin: 5px 0 0 0; color: #64748b; font-size: 12px;">Сохраните этот код</p>
+</div>
+
+<h3 style="color: #1e293b; margin-top: 30px;">Детали награды</h3>
+
+<table class="details-table">
+    <tr>
+        <th>Награда</th>
+        <td>{{ reward_name }}</td>
+    </tr>
+    <tr>
+        <th>Потрачено баллов</th>
+        <td style="color: #ef4444; font-weight: 600;">-{{ points_spent }}</td>
+    </tr>
+    <tr>
+        <th>Остаток баллов</th>
+        <td style="color: #22c55e; font-weight: 600;">{{ remaining_points }}</td>
+    </tr>
+    {% if expires_at %}
+    <tr>
+        <th>Срок действия</th>
+        <td>{{ expires_at }}</td>
+    </tr>
+    {% endif %}
+</table>
+
+<hr class="divider">
+
+<div class="info-box">
+    <p><strong>Как использовать награду:</strong> Введите этот код в поле промокода при оформлении следующего заказа или предъявите его при оплате.</p>
+</div>
+
+<p style="text-align: center;">
+    <a href="{{ loyalty_url }}" class="btn-primary">Посмотреть мои награды</a>
+</p>
+
+<p style="color: #94a3b8; font-size: 13px; text-align: center;">
+    Спасибо, что вы клиент Blue Stream!
+</p>
+{% endblock %}

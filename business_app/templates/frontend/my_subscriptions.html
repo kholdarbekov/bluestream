@@ -1,189 +1,201 @@
-{% extends "frontend/base.html" %}
+{% extends "frontend/cabinet_base.html" %}
+{% set active_menu = 'subscriptions' %}
 
-{% block title %}{{ 'My Subscriptions'|t }} - {{ company_name }}{% endblock %}
+{% block cabinet_title %}{{ 'My Subscriptions'|t }}{% endblock %}
 
-{% block content %}
-<!-- page-title -->
-<section class="page-title">
-    <div class="bg-layer" style="background-image: url({{ url_for('static', filename='images/background/page-title.jpg') }});"></div>
-    <div class="auto-container">
-        <div class="content-box">
-            <h1>{{ 'My Subscriptions'|t }}</h1>
-            <ul class="bread-crumb clearfix">
-                <li><a href="{{ url_for('frontend.index') }}">{{ 'landing.nav.home'|t }}</a></li>
-                <li><a href="{{ url_for('frontend.my_account') }}">{{ 'landing.nav.my_account'|t }}</a></li>
-                <li>{{ 'landing.nav.subscriptions'|t }}</li>
-            </ul>
-        </div>
+{% block cabinet_breadcrumb_items %}
+<li>{{ 'landing.nav.subscriptions'|t }}</li>
+{% endblock %}
+
+{% block cabinet_extra_head %}
+<style>
+.stat-card {
+    border: none;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    transition: transform 0.3s;
+}
+
+.stat-card:hover {
+    transform: translateY(-2px);
+}
+
+.subscription-card {
+    background: #fff;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    margin-bottom: 20px;
+    overflow: hidden;
+    transition: transform 0.3s;
+    cursor: pointer;
+}
+
+.subscription-card:hover {
+    transform: translateY(-2px);
+}
+
+.subscription-header {
+    background: #f8f9fa;
+    padding: 20px;
+    border-bottom: 1px solid #eee;
+}
+
+.subscription-body {
+    padding: 20px;
+}
+
+.subscription-footer {
+    background: #f8f9fa;
+    padding: 15px 20px;
+    border-top: 1px solid #eee;
+}
+
+.subscription-status {
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 500;
+    text-transform: uppercase;
+}
+
+.status-active { background: #f6ffed; color: #52c41a; }
+.status-paused { background: #fff7e6; color: #fa8c16; }
+.status-cancelled { background: #fff2f0; color: #ff4d4f; }
+
+.delivery-item {
+    background: #f8f9fa;
+    border-radius: 6px;
+    padding: 15px;
+    margin-bottom: 15px;
+    border-left: 4px solid #1890ff;
+}
+
+.delivery-item.urgent { border-left-color: #ff4d4f; }
+.delivery-item.upcoming { border-left-color: #52c41a; }
+
+.delivery-details {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.delivery-date {
+    font-weight: bold;
+    color: #1890ff;
+}
+
+@media (max-width: 768px) {
+    .subscription-overview .col-md-4 {
+        margin-bottom: 20px;
+    }
+    
+    .delivery-details {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+    
+    .delivery-details .btn {
+        margin-top: 10px;
+        width: 100%;
+    }
+}
+</style>
+{% endblock %}
+
+{% block cabinet_content %}
+<!-- Subscriptions Header -->
+<div class="content-header mb-4">
+    <div class="d-flex justify-content-between align-items-center">
+        <h2><i class="far fa-sync-alt"></i> {{ 'My Subscriptions'|t }}</h2>
+        <a href="{{ url_for('frontend.subscriptions') }}" class="btn btn-primary">
+            <i class="far fa-plus"></i> {{ 'Browse Plans'|t }}
+        </a>
     </div>
-</section>
-<!-- page-title end -->
+</div>
 
-<!-- account-section -->
-<section class="account-section">
-    <div class="auto-container">
-        <div class="row clearfix">
-            <!-- Account Sidebar -->
-            <div class="col-lg-3 col-md-4 col-sm-12">
-                <div class="account-sidebar">
-                    <div class="profile-box">
-                        <div class="profile-info text-center">
-                            <div class="profile-avatar">
-                                <i class="far fa-user-circle" style="font-size: 60px; color: #1890ff;"></i>
-                            </div>
-                            <h4>{{ user.first_name }} {{ user.last_name }}</h4>
-                            <p class="text-muted">{{ user.email }}</p>
-                        </div>
-                    </div>
-                    
-                    <div class="account-menu">
-                        <ul class="list-unstyled">
-                            <li>
-                                <a href="{{ url_for('frontend.my_account') }}">
-                                    <i class="far fa-tachometer-alt"></i> {{ 'Dashboard'|t }}
-                                </a>
-                            </li>
-                            <li>
-                                <a href="{{ url_for('frontend.profile_settings') }}">
-                                    <i class="far fa-user-edit"></i> {{ 'Profile Settings'|t }}
-                                </a>
-                            </li>
-                            <li>
-                                <a href="{{ url_for('frontend.my_orders') }}">
-                                    <i class="far fa-shopping-bag"></i> {{ 'landing.account.orders'|t }}
-                                </a>
-                            </li>
-                            <li>
-                                <a href="{{ url_for('frontend.addresses') }}">
-                                    <i class="far fa-map-marker-alt"></i> {{ 'Addresses'|t }}
-                                </a>
-                            </li>
-                            <li class="active">
-                                <a href="{{ url_for('frontend.my_subscriptions') }}">
-                                    <i class="far fa-sync-alt"></i> {{ 'landing.nav.subscriptions'|t }}
-                                </a>
-                            </li>
-                            <li>
-                                <a href="{{ url_for('frontend.my_loyalty') }}">
-                                    <i class="far fa-star"></i> {{ 'landing.account.loyalty'|t }}
-                                </a>
-                            </li>
-                            <li>
-                                <a href="{{ url_for('frontend.account_security') }}">
-                                    <i class="far fa-shield-alt"></i> {{ 'Security'|t }}
-                                </a>
-                            </li>
-                            <li>
-                                <a href="#" onclick="logout()">
-                                    <i class="far fa-sign-out-alt"></i> {{ 'landing.nav.logout'|t }}
-                                </a>
-                            </li>
-                        </ul>
-                    </div>
+<!-- Subscription Overview -->
+<div class="subscription-overview mb-4">
+    <div class="row">
+        <div class="col-md-4">
+            <div class="card stat-card">
+                <div class="card-body text-center">
+                    <i class="far fa-sync-alt fa-2x text-primary mb-3"></i>
+                    <h3 class="text-primary" id="activeSubscriptionsCount">0</h3>
+                    <p class="text-muted">{{ 'Active Subscriptions'|t }}</p>
                 </div>
             </div>
-            
-            <!-- Subscriptions Content -->
-            <div class="col-lg-9 col-md-8 col-sm-12">
-                <div class="account-content">
-                    <!-- Subscriptions Header -->
-                    <div class="content-header mb-4">
-                        <div class="d-flex justify-content-between align-items-center">
-                            <h2><i class="far fa-sync-alt"></i> {{ 'My Subscriptions'|t }}</h2>
-                            <a href="{{ url_for('frontend.subscriptions') }}" class="btn btn-primary">
-                                <i class="far fa-plus"></i> {{ 'Browse Plans'|t }}
-                            </a>
-                        </div>
-                    </div>
-
-                    <!-- Subscription Overview -->
-                    <div class="subscription-overview mb-4">
-                        <div class="row">
-                            <div class="col-md-4">
-                                <div class="card stat-card">
-                                    <div class="card-body text-center">
-                                        <i class="far fa-sync-alt fa-2x text-primary mb-3"></i>
-                                        <h3 class="text-primary" id="activeSubscriptionsCount">0</h3>
-                                        <p class="text-muted">{{ 'Active Subscriptions'|t }}</p>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="col-md-4">
-                                <div class="card stat-card">
-                                    <div class="card-body text-center">
-                                        <i class="far fa-calendar-alt fa-2x text-success mb-3"></i>
-                                        <h3 class="text-success" id="nextDeliveryCount">0</h3>
-                                        <p class="text-muted">{{ 'Deliveries This Month'|t }}</p>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="col-md-4">
-                                <div class="card stat-card">
-                                    <div class="card-body text-center">
-                                        <i class="far fa-money-bill fa-2x text-warning mb-3"></i>
-                                        <h3 class="text-warning"><span id="monthlySavings">0</span></h3>
-                                        <p class="text-muted">{{ 'Monthly Savings'|t }}</p>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Active Subscriptions -->
-                    <div class="active-subscriptions mb-4">
-                        <div class="card">
-                            <div class="card-header">
-                                <h5><i class="far fa-check-circle"></i> {{ 'Active Subscriptions'|t }}</h5>
-                            </div>
-                            <div class="card-body">
-                                <div class="subscriptions-list" id="activeSubscriptionsList">
-                                    <div class="text-center py-4">
-                                        <i class="far fa-spinner fa-spin fa-2x"></i>
-                                        <p class="mt-2">{{ 'Loading your subscriptions...'|t }}</p>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Upcoming Deliveries -->
-                    <div class="upcoming-deliveries mb-4">
-                        <div class="card">
-                            <div class="card-header">
-                                <h5><i class="far fa-truck"></i> {{ 'Upcoming Deliveries'|t }}</h5>
-                            </div>
-                            <div class="card-body">
-                                <div class="deliveries-list" id="upcomingDeliveriesList">
-                                    <div class="text-center py-4">
-                                        <i class="far fa-spinner fa-spin fa-2x"></i>
-                                        <p class="mt-2">{{ 'Loading upcoming deliveries...'|t }}</p>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Paused/Cancelled Subscriptions -->
-                    <div class="inactive-subscriptions">
-                        <div class="card">
-                            <div class="card-header">
-                                <h5><i class="far fa-pause-circle"></i> {{ 'Paused & Cancelled Subscriptions'|t }}</h5>
-                            </div>
-                            <div class="card-body">
-                                <div class="inactive-subscriptions-list" id="inactiveSubscriptionsList">
-                                    <div class="text-center py-4">
-                                        <i class="far fa-spinner fa-spin fa-2x"></i>
-                                        <p class="mt-2">{{ 'Loading inactive subscriptions...'|t }}</p>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card stat-card">
+                <div class="card-body text-center">
+                    <i class="far fa-calendar-alt fa-2x text-success mb-3"></i>
+                    <h3 class="text-success" id="nextDeliveryCount">0</h3>
+                    <p class="text-muted">{{ 'Deliveries This Month'|t }}</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card stat-card">
+                <div class="card-body text-center">
+                    <i class="far fa-money-bill fa-2x text-warning mb-3"></i>
+                    <h3 class="text-warning"><span id="monthlySavings">0</span></h3>
+                    <p class="text-muted">{{ 'Monthly Savings'|t }}</p>
                 </div>
             </div>
         </div>
     </div>
-</section>
+</div>
+
+<!-- Active Subscriptions -->
+<div class="active-subscriptions mb-4">
+    <div class="card">
+        <div class="card-header">
+            <h5><i class="far fa-check-circle"></i> {{ 'Active Subscriptions'|t }}</h5>
+        </div>
+        <div class="card-body">
+            <div class="subscriptions-list" id="activeSubscriptionsList">
+                <div class="text-center py-4">
+                    <i class="far fa-spinner fa-spin fa-2x"></i>
+                    <p class="mt-2">{{ 'Loading your subscriptions...'|t }}</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Upcoming Deliveries -->
+<div class="upcoming-deliveries mb-4">
+    <div class="card">
+        <div class="card-header">
+            <h5><i class="far fa-truck"></i> {{ 'Upcoming Deliveries'|t }}</h5>
+        </div>
+        <div class="card-body">
+            <div class="deliveries-list" id="upcomingDeliveriesList">
+                <div class="text-center py-4">
+                    <i class="far fa-spinner fa-spin fa-2x"></i>
+                    <p class="mt-2">{{ 'Loading upcoming deliveries...'|t }}</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Paused/Cancelled Subscriptions -->
+<div class="inactive-subscriptions">
+    <div class="card">
+        <div class="card-header">
+            <h5><i class="far fa-pause-circle"></i> {{ 'Paused & Cancelled Subscriptions'|t }}</h5>
+        </div>
+        <div class="card-body">
+            <div class="inactive-subscriptions-list" id="inactiveSubscriptionsList">
+                <div class="text-center py-4">
+                    <i class="far fa-spinner fa-spin fa-2x"></i>
+                    <p class="mt-2">{{ 'Loading inactive subscriptions...'|t }}</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
 
 <!-- Subscription Management Modal -->
 <div class="modal fade" id="subscriptionModal" tabindex="-1" role="dialog" aria-labelledby="subscriptionModalLabel" aria-hidden="true">
@@ -265,192 +277,9 @@
         </div>
     </div>
 </div>
-
-<!-- account-section end -->
 {% endblock %}
 
-{% block extra_css %}
-<style>
-.account-sidebar {
-    background: #fff;
-    border-radius: 8px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-    padding: 20px;
-    margin-bottom: 20px;
-}
-
-.profile-box {
-    margin-bottom: 30px;
-    padding-bottom: 20px;
-    border-bottom: 1px solid #eee;
-}
-
-.account-menu ul li {
-    margin-bottom: 10px;
-}
-
-.account-menu ul li a {
-    display: block;
-    padding: 12px 15px;
-    color: #666;
-    text-decoration: none;
-    border-radius: 6px;
-    transition: all 0.3s;
-}
-
-.account-menu ul li a:hover,
-.account-menu ul li.active a {
-    background: #1890ff;
-    color: #fff;
-    text-decoration: none;
-}
-
-.account-menu ul li a i {
-    width: 20px;
-    margin-right: 10px;
-}
-
-.stat-card {
-    border: none;
-    border-radius: 8px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-    transition: transform 0.3s;
-}
-
-.stat-card:hover {
-    transform: translateY(-2px);
-}
-
-.subscription-card {
-    background: #fff;
-    border-radius: 8px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-    margin-bottom: 20px;
-    overflow: hidden;
-    transition: transform 0.3s;
-}
-
-.subscription-card:hover {
-    transform: translateY(-2px);
-}
-
-.subscription-header {
-    background: #f8f9fa;
-    padding: 20px;
-    border-bottom: 1px solid #eee;
-}
-
-.subscription-body {
-    padding: 20px;
-}
-
-.subscription-footer {
-    background: #f8f9fa;
-    padding: 15px 20px;
-    border-top: 1px solid #eee;
-}
-
-.subscription-status {
-    padding: 4px 12px;
-    border-radius: 20px;
-    font-size: 12px;
-    font-weight: 500;
-    text-transform: uppercase;
-}
-
-.status-active {
-    background: #f6ffed;
-    color: #52c41a;
-}
-
-.status-paused {
-    background: #fff7e6;
-    color: #fa8c16;
-}
-
-.status-cancelled {
-    background: #fff2f0;
-    color: #ff4d4f;
-}
-
-.delivery-item {
-    background: #f8f9fa;
-    border-radius: 6px;
-    padding: 15px;
-    margin-bottom: 15px;
-    border-left: 4px solid #1890ff;
-}
-
-.delivery-item.urgent {
-    border-left-color: #ff4d4f;
-}
-
-.delivery-item.upcoming {
-    border-left-color: #52c41a;
-}
-
-.delivery-details {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}
-
-.delivery-date {
-    font-weight: bold;
-    color: #1890ff;
-}
-
-.delivery-status {
-    padding: 2px 8px;
-    border-radius: 12px;
-    font-size: 11px;
-    font-weight: 500;
-}
-
-.subscription-benefits {
-    background: #f0f9ff;
-    padding: 15px;
-    border-radius: 6px;
-    margin: 15px 0;
-}
-
-.subscription-benefits ul {
-    list-style: none;
-    padding: 0;
-    margin: 0;
-}
-
-.subscription-benefits li {
-    padding: 5px 0;
-    color: #666;
-}
-
-.subscription-benefits li::before {
-    content: "✓";
-    color: #52c41a;
-    margin-right: 10px;
-    font-weight: bold;
-}
-
-@media (max-width: 768px) {
-    .subscription-overview .col-md-4 {
-        margin-bottom: 20px;
-    }
-    
-    .delivery-details {
-        flex-direction: column;
-        align-items: flex-start;
-    }
-    
-    .delivery-details .btn {
-        margin-top: 10px;
-        width: 100%;
-    }
-}
-</style>
-{% endblock %}
-
-{% block extra_js %}
+{% block cabinet_extra_js %}
 <script>
 document.addEventListener('DOMContentLoaded', function() {
     loadSubscriptionOverview();
@@ -463,17 +292,13 @@ let currentSubscription = null;
 
 async function loadSubscriptionOverview() {
     try {
-        // Get all subscriptions to calculate overview
         const response = await apiRequest('/subscriptions?status=active');
         const result = await response.json();
 
         if (response.ok && result.success) {
             const subscriptions = result.data.items || result.data.subscriptions || [];
-
-            // Calculate active subscriptions count
             const activeCount = subscriptions.length;
 
-            // Calculate deliveries this month (subscriptions with next_delivery_date in current month)
             const now = new Date();
             const currentMonth = now.getMonth();
             const currentYear = now.getFullYear();
@@ -484,11 +309,6 @@ async function loadSubscriptionOverview() {
                 return deliveryDate.getMonth() === currentMonth && deliveryDate.getFullYear() === currentYear;
             }).length;
 
-            // Calculate approximate monthly savings (10% of total billing amount)
-            const totalMonthlyBilling = subscriptions.reduce((sum, sub) => {
-                return sum + (sub.billing_amount || 0);
-            }, 0);
-            // const monthlySavings = Math.round(totalMonthlyBilling * 0.1);
             const monthlySavings = 0;
 
             document.getElementById('activeSubscriptionsCount').textContent = activeCount;
@@ -497,7 +317,6 @@ async function loadSubscriptionOverview() {
         }
     } catch (error) {
         console.error('Failed to load subscription overview:', error);
-        // Set defaults on error
         document.getElementById('activeSubscriptionsCount').textContent = '0';
         document.getElementById('nextDeliveryCount').textContent = '0';
         document.getElementById('monthlySavings').textContent = '0 UZS';
@@ -582,16 +401,13 @@ async function loadInactiveSubscriptions() {
 }
 
 async function displaySubscriptions(subscriptions, container) {
-    // First, render subscriptions with loading state for products
     const subscriptionsHtml = await Promise.all(subscriptions.map(async subscription => {
-        // Fetch subscription items if not included
         let productsDisplay = '';
         if (subscription.subscription_items && subscription.subscription_items.length > 0) {
             productsDisplay = subscription.subscription_items.map(item =>
                 `<li>${item.quantity}x ${item.product_name || 'Product'} (${formatPrice(item.unit_price)} each)</li>`
             ).join('');
         } else {
-            // Fetch items from API
             try {
                 const response = await apiRequest(`/subscriptions/${subscription.id}`);
                 const result = await response.json();
@@ -603,7 +419,6 @@ async function displaySubscriptions(subscriptions, container) {
                     productsDisplay = '<li class="text-muted">{{ "No products"|t }}</li>';
                 }
             } catch (error) {
-                console.error('Error loading subscription items:', error);
                 productsDisplay = '<li class="text-muted">{{ "Failed to load products"|t }}</li>';
             }
         }
@@ -637,18 +452,10 @@ async function displaySubscriptions(subscriptions, container) {
                         <div class="subscription-details">
                             <div class="row">
                                 <div class="col-6">
-                                    <small class="text-muted">{{ 'Delivery frequency'|t }}</small>
-                                    <div><strong>${subscription.delivery_frequency}</strong></div>
-                                </div>
-                                <div class="col-6">
-                                    <small class="text-muted">{{ 'Time Slot'|t }}</small>
-                                    <div><strong>${subscription.delivery_time_slot || 'N/A'}</strong></div>
-                                </div>
-                                <div class="col-6 mt-2">
                                     <small class="text-muted">{{ 'Next delivery'|t }}</small>
                                     <div><strong>${subscription.next_delivery_date ? formatDate(subscription.next_delivery_date) : 'N/A'}</strong></div>
                                 </div>
-                                <div class="col-6 mt-2">
+                                <div class="col-6">
                                     <small class="text-muted">{{ 'Next billing'|t }}</small>
                                     <div><strong>${subscription.next_billing_date ? formatDate(subscription.next_billing_date) : 'N/A'}</strong></div>
                                 </div>
@@ -680,7 +487,7 @@ async function displaySubscriptions(subscriptions, container) {
                             {{ 'Manage'|t }}
                         </button>
                         ${subscription.status === 'active' ? `
-                            <button class="btn btn-sm btn-outline-warning ml-2" onclick="event.stopPropagation(); quickPauseSubscription(${subscription.id})">
+                            <button class="btn btn-sm btn-outline-warning ml-2" onclick="event.stopPropagation(); pauseSubscription(${subscription.id})">
                                 {{ 'Pause'|t }}
                             </button>
                         ` : subscription.status === 'paused' ? `
@@ -727,7 +534,6 @@ async function manageSubscription(subscriptionId) {
         const result = await response.json();
 
         if (response.ok && result.success) {
-            // API returns data.subscription, data.recent_orders, data.billing_info
             currentSubscription = result.data.subscription;
             showSubscriptionModal(result.data);
         } else {
@@ -750,19 +556,16 @@ function showSubscriptionModal(data) {
     const modifyBtn = document.getElementById('modifySubscriptionBtn');
     const cancelBtn = document.getElementById('cancelSubscriptionBtn');
 
-    // Show/hide buttons based on subscription status
     pauseBtn.style.display = subscription.status === 'active' ? 'inline-block' : 'none';
     resumeBtn.style.display = subscription.status === 'paused' ? 'inline-block' : 'none';
     modifyBtn.style.display = ['active', 'paused'].includes(subscription.status) ? 'inline-block' : 'none';
     cancelBtn.style.display = ['active', 'paused'].includes(subscription.status) ? 'inline-block' : 'none';
 
-    // Set button handlers
     pauseBtn.onclick = () => pauseSubscription(subscription.id);
     resumeBtn.onclick = () => resumeSubscription(subscription.id);
     modifyBtn.onclick = () => showModifyModal(subscription);
     cancelBtn.onclick = () => cancelSubscription(subscription.id);
 
-    // Build products list
     let productsHtml = '';
     if (subscription.subscription_items && subscription.subscription_items.length > 0) {
         productsHtml = subscription.subscription_items.map(item =>
@@ -774,7 +577,6 @@ function showSubscriptionModal(data) {
 
     modalContent.innerHTML = `
         <div class="subscription-details">
-            <!-- Subscription Overview -->
             <div class="row mb-4">
                 <div class="col-md-6">
                     <h4>${subscription.name || 'Subscription'}</h4>
@@ -800,13 +602,11 @@ function showSubscriptionModal(data) {
                             <ul style="padding-left: 20px; margin-top: 5px;">${productsHtml}</ul>
                             <div>{{ 'Delivery frequency'|t }}: <strong>${subscription.delivery_frequency}</strong></div>
                             <div>{{ 'Next billing'|t }}: <strong>${subscription.next_billing_date ? formatDate(subscription.next_billing_date) : 'N/A'}</strong></div>
-                            ${billingInfo.days_until_billing !== undefined ? `<div class="text-muted"><small>${billingInfo.days_until_billing} days until next billing</small></div>` : ''}
                         </div>
                     </div>
                 </div>
             </div>
 
-            <!-- Delivery Information -->
             <div class="delivery-info mb-4">
                 <h5>{{ 'Delivery Information'|t }}</h5>
                 <div class="row">
@@ -838,27 +638,6 @@ function showSubscriptionModal(data) {
                     </div>
                 </div>
             </div>
-            
-            <!-- Billing Information -->
-            ${billingInfo && Object.keys(billingInfo).length > 0 ? `
-                <div class="billing-info-section mb-4">
-                    <h5>{{ 'Billing Information'|t }}</h5>
-                    <div class="row">
-                        <div class="col-md-6">
-                            <div class="info-group">
-                                <strong>{{ 'Current Period'|t }}:</strong>
-                                <div>${billingInfo.current_period || 'N/A'}</div>
-                            </div>
-                        </div>
-                        <div class="col-md-6">
-                            <div class="info-group">
-                                <strong>{{ 'Total Paid'|t }}:</strong>
-                                <div>${billingInfo.total_paid ? formatPrice(billingInfo.total_paid) : 'N/A'}</div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            ` : ''}
         </div>
     `;
     
@@ -867,11 +646,7 @@ function showSubscriptionModal(data) {
 
 function showModifyModal(subscription) {
     document.getElementById('subscriptionIdToModify').value = subscription.id;
-    // Note: Subscription modifications may need to be handled differently
-    // as the API structure doesn't include plan.slug, quantity, frequency fields
-    // This modal may need redesign based on actual subscription modification API
     
-    // Set minimum date to tomorrow
     const tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
     document.getElementById('effectiveDate').min = tomorrow.toISOString().split('T')[0];
@@ -992,17 +767,11 @@ async function cancelSubscription(subscriptionId) {
     }
 }
 
-async function quickPauseSubscription(subscriptionId) {
-    pauseSubscription(subscriptionId);
-}
-
 function rescheduleDelivery(deliveryId) {
     showNotification('{{ "Delivery rescheduling feature coming soon!"|t }}', 'info');
-    // This would open a modal to reschedule the delivery
 }
 
 function formatPrice(amount) {
-    // Format price with thousands separator
     const numAmount = parseFloat(amount) || 0;
     return new Intl.NumberFormat('en-US', {
         minimumFractionDigits: 0,

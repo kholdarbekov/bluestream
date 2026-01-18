@@ -1,274 +1,37 @@
-{% extends "frontend/base.html" %}
+{% extends "frontend/cabinet_base.html" %}
+{% set active_menu = 'orders' %}
 
-{% block title %}{{ 'landing.account.orders'|t }} - {{ company_name }}{% endblock %}
+{% block cabinet_title %}{{ 'landing.account.orders'|t }}{% endblock %}
 
-{% block content %}
-<!-- page-title -->
-<section class="page-title">
-    <div class="bg-layer" style="background-image: url({{ url_for('static', filename='images/background/page-title.jpg') }});"></div>
-    <div class="auto-container">
-        <div class="content-box">
-            <h1>{{ 'landing.account.orders'|t }}</h1>
-            <ul class="bread-crumb clearfix">
-                <li><a href="{{ url_for('frontend.index') }}">{{ 'landing.nav.home'|t }}</a></li>
-                <li><a href="{{ url_for('frontend.my_account') }}">{{ 'landing.nav.my_account'|t }}</a></li>
-                <li>{{ 'Orders'|t }}</li>
-            </ul>
-        </div>
-    </div>
-</section>
-<!-- page-title end -->
-
-<!-- account-section -->
-<section class="account-section">
-    <div class="auto-container">
-        <div class="row clearfix">
-            <!-- Account Sidebar -->
-            <div class="col-lg-3 col-md-4 col-sm-12">
-                <div class="account-sidebar">
-                    <div class="profile-box">
-                        <div class="profile-info text-center">
-                            <div class="profile-avatar">
-                                <i class="far fa-user-circle" style="font-size: 60px; color: #1890ff;"></i>
-                            </div>
-                            <h4>{{ user.first_name }} {{ user.last_name }}</h4>
-                            <p class="text-muted">{{ user.email }}</p>
-                        </div>
-                    </div>
-                    
-                    <div class="account-menu">
-                        <ul class="list-unstyled">
-                            <li>
-                                <a href="{{ url_for('frontend.my_account') }}">
-                                    <i class="far fa-tachometer-alt"></i> {{ 'Dashboard'|t }}
-                                </a>
-                            </li>
-                            <li>
-                                <a href="{{ url_for('frontend.profile_settings') }}">
-                                    <i class="far fa-user-edit"></i> {{ 'Profile Settings'|t }}
-                                </a>
-                            </li>
-                            <li class="active">
-                                <a href="{{ url_for('frontend.my_orders') }}">
-                                    <i class="far fa-shopping-bag"></i> {{ 'landing.account.orders'|t }}
-                                </a>
-                            </li>
-                            <li>
-                                <a href="{{ url_for('frontend.addresses') }}">
-                                    <i class="far fa-map-marker-alt"></i> {{ 'Addresses'|t }}
-                                </a>
-                            </li>
-                            <li>
-                                <a href="{{ url_for('frontend.my_subscriptions') }}">
-                                    <i class="far fa-sync-alt"></i> {{ 'landing.nav.subscriptions'|t }}
-                                </a>
-                            </li>
-                            <li>
-                                <a href="{{ url_for('frontend.my_loyalty') }}">
-                                    <i class="far fa-star"></i> {{ 'landing.account.loyalty'|t }}
-                                </a>
-                            </li>
-                            <li>
-                                <a href="{{ url_for('frontend.account_security') }}">
-                                    <i class="far fa-shield-alt"></i> {{ 'Security'|t }}
-                                </a>
-                            </li>
-                            <li>
-                                <a href="#" onclick="logout()">
-                                    <i class="far fa-sign-out-alt"></i> {{ 'landing.nav.logout'|t }}
-                                </a>
-                            </li>
-                        </ul>
-                    </div>
-                </div>
-            </div>
-            
-            <!-- Orders Content -->
-            <div class="col-lg-9 col-md-8 col-sm-12">
-                <div class="account-content">
-                    <!-- Orders Header -->
-                    <div class="content-header mb-4">
-                        <div class="d-flex justify-content-between align-items-center">
-                            <h2><i class="far fa-shopping-bag"></i> {{ 'landing.account.orders'|t }}</h2>
-                            <a href="{{ url_for('frontend.shop') }}" class="btn btn-primary">
-                                <i class="far fa-plus"></i> {{ 'Place New Order'|t }}
-                            </a>
-                        </div>
-                    </div>
-
-                    <!-- Order Filters -->
-                    <div class="filters-section mb-4">
-                        <div class="card">
-                            <div class="card-body">
-                                <div class="row">
-                                    <div class="col-md-3">
-                                        <div class="form-group">
-                                            <label for="statusFilter">{{ 'Order Status'|t }}</label>
-                                            <select class="form-control" id="statusFilter">
-                                                <option value="">{{ 'All Orders'|t }}</option>
-                                                <option value="pending">{{ 'Pending'|t }}</option>
-                                                <option value="confirmed">{{ 'Confirmed'|t }}</option>
-                                                <option value="processing">{{ 'Processing'|t }}</option>
-                                                <option value="shipped">{{ 'Shipped'|t }}</option>
-                                                <option value="delivered">{{ 'Delivered'|t }}</option>
-                                                <option value="cancelled">{{ 'Cancelled'|t }}</option>
-                                            </select>
-                                        </div>
-                                    </div>
-                                    <div class="col-md-3">
-                                        <div class="form-group">
-                                            <label for="dateFilter">{{ 'Time Period'|t }}</label>
-                                            <select class="form-control" id="dateFilter">
-                                                <option value="">{{ 'All Time'|t }}</option>
-                                                <option value="7">{{ 'Last 7 Days'|t }}</option>
-                                                <option value="30">{{ 'Last 30 Days'|t }}</option>
-                                                <option value="90">{{ 'Last 3 Months'|t }}</option>
-                                                <option value="365">{{ 'Last Year'|t }}</option>
-                                            </select>
-                                        </div>
-                                    </div>
-                                    <div class="col-md-4">
-                                        <div class="form-group">
-                                            <label for="searchOrder">{{ 'Search Orders'|t }}</label>
-                                            <input type="text" class="form-control" id="searchOrder" placeholder="{{ 'Order number, product name...'|t }}">
-                                        </div>
-                                    </div>
-                                    <div class="col-md-2">
-                                        <div class="form-group">
-                                            <label>&nbsp;</label>
-                                            <button type="button" class="btn btn-outline-primary btn-block" onclick="applyFilters()">
-                                                <i class="far fa-search"></i> {{ 'Filter'|t }}
-                                            </button>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Orders List -->
-                    <div class="orders-list" id="ordersList">
-                        <div class="loading-container text-center py-5" id="loadingOrders">
-                            <i class="far fa-spinner fa-spin fa-2x"></i>
-                            <p class="mt-2">{{ 'Loading your orders...'|t }}</p>
-                        </div>
-                    </div>
-
-                    <!-- Empty State -->
-                    <div class="empty-state text-center py-5" id="emptyState" style="display: none;">
-                        <i class="far fa-shopping-bag" style="font-size: 4rem; color: #ccc;"></i>
-                        <h4 class="mt-3">{{ 'No orders found'|t }}</h4>
-                        <p class="text-muted">{{ 'You havent placed any orders yet or no orders match your filters'|t }}</p>
-                        <a href="{{ url_for('frontend.shop') }}" class="btn btn-primary">
-                            <i class="far fa-shopping-cart"></i> {{ 'Start Shopping'|t }}
-                        </a>
-                    </div>
-
-                    <!-- Pagination -->
-                    <div class="pagination-section" id="paginationSection" style="display: none;">
-                        <nav aria-label="Orders pagination">
-                            <ul class="pagination justify-content-center" id="ordersPagination">
-                            </ul>
-                        </nav>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-</section>
-
-<!-- Order Detail Modal -->
-<div class="modal fade" id="orderDetailModal" tabindex="-1" role="dialog" aria-labelledby="orderDetailModalLabel" aria-hidden="true">
-    <div class="modal-dialog modal-xl" role="document">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title" id="orderDetailModalLabel">{{ 'Order Details'|t }}</h5>
-                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
-                    <span aria-hidden="true">&times;</span>
-                </button>
-            </div>
-            <div class="modal-body" id="orderDetailContent">
-                <!-- Order details will be loaded here -->
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-dismiss="modal">{{ 'Close'|t }}</button>
-                <button type="button" class="btn btn-primary" id="reorderBtn" style="display: none;">
-                    <i class="far fa-redo"></i> {{ 'Reorder Items'|t }}
-                </button>
-                <button type="button" class="btn btn-danger" id="cancelOrderBtn" style="display: none;">
-                    <i class="far fa-times"></i> {{ 'Cancel Order'|t }}
-                </button>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- account-section end -->
+{% block cabinet_breadcrumb_items %}
+<li>{{ 'Orders'|t }}</li>
 {% endblock %}
 
-{% block extra_css %}
+{% block cabinet_extra_head %}
+<!-- Leaflet CSS for map -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+      crossorigin=""/>
 <style>
-.account-sidebar {
-    background: #fff;
-    border-radius: 8px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-    padding: 20px;
-    margin-bottom: 20px;
-}
-
-.profile-box {
-    margin-bottom: 30px;
-    padding-bottom: 20px;
-    border-bottom: 1px solid #eee;
-}
-
-.account-menu ul li {
-    margin-bottom: 10px;
-}
-
-.account-menu ul li a {
-    display: block;
-    padding: 12px 15px;
-    color: #666;
-    text-decoration: none;
-    border-radius: 6px;
-    transition: all 0.3s;
-}
-
-.account-menu ul li a:hover,
-.account-menu ul li.active a {
-    background: #1890ff;
-    color: #fff;
-    text-decoration: none;
-}
-
-.account-menu ul li a i {
-    width: 20px;
-    margin-right: 10px;
-}
-
-.content-header h2 {
-    color: #1890ff;
-    margin: 0;
-}
-
 .order-card {
     background: #fff;
+    border: 1px solid #eee;
     border-radius: 8px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
     margin-bottom: 20px;
-    overflow: hidden;
-    transition: transform 0.3s;
+    transition: all 0.3s;
+    cursor: pointer;
 }
 
 .order-card:hover {
-    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    border-color: #1890ff;
 }
 
 .order-header {
     background: #f8f9fa;
     padding: 15px 20px;
     border-bottom: 1px solid #eee;
+    border-radius: 8px 8px 0 0;
 }
 
 .order-body {
@@ -279,62 +42,44 @@
     background: #f8f9fa;
     padding: 15px 20px;
     border-top: 1px solid #eee;
+    border-radius: 0 0 8px 8px;
 }
 
 .order-status {
-    padding: 4px 12px;
-    border-radius: 20px;
-    font-size: 12px;
-    font-weight: 500;
-    text-transform: uppercase;
+    padding: 8px 18px;
+    border-radius: 25px;
+    font-size: 14px;
+    font-weight: 600;
+    text-transform: capitalize;
+    letter-spacing: 0.3px;
+    display: inline-block;
 }
 
-.status-pending {
-    background: #fff7e6;
-    color: #fa8c16;
+.order-status.status-large {
+    padding: 10px 24px;
+    font-size: 16px;
+    border-radius: 30px;
 }
 
-.status-confirmed {
-    background: #e6f7ff;
-    color: #1890ff;
-}
-
-.status-processing {
-    background: #f6ffed;
-    color: #52c41a;
-}
-
-.status-shipped {
-    background: #f9f0ff;
-    color: #722ed1;
-}
-
-.status-delivered {
-    background: #f6ffed;
-    color: #52c41a;
-}
-
-.status-cancelled {
-    background: #fff2f0;
-    color: #ff4d4f;
-}
+.status-pending { background: #fff3cd; color: #856404; border: 1px solid #ffc107; }
+.status-confirmed { background: #cce5ff; color: #004085; border: 1px solid #007bff; }
+.status-preparing { background: #d1ecf1; color: #0c5460; border: 1px solid #17a2b8; }
+.status-out_for_delivery { background: #d4edda; color: #155724; border: 1px solid #28a745; }
+.status-delivered { background: #28a745; color: #fff; border: 1px solid #1e7e34; }
+.status-cancelled { background: #f8d7da; color: #721c24; border: 1px solid #dc3545; }
+.status-returned { background: #e2e3e5; color: #383d41; border: 1px solid #6c757d; }
 
 .order-item {
     display: flex;
     align-items: center;
-    padding: 10px 0;
-    border-bottom: 1px solid #f0f0f0;
-}
-
-.order-item:last-child {
-    border-bottom: none;
+    margin-bottom: 15px;
 }
 
 .order-item img {
-    width: 50px;
-    height: 50px;
+    width: 60px;
+    height: 60px;
     object-fit: cover;
-    border-radius: 4px;
+    border-radius: 6px;
     margin-right: 15px;
 }
 
@@ -343,8 +88,7 @@
 }
 
 .item-name {
-    font-weight: 500;
-    margin-bottom: 5px;
+    font-weight: 600;
 }
 
 .item-specs {
@@ -352,9 +96,167 @@
     color: #666;
 }
 
-.item-quantity {
-    font-weight: 500;
-    margin: 0 15px;
+.item-price {
+    font-weight: 600;
+    color: #1890ff;
+}
+
+/* Modal Order Items Table Styling */
+.modal-order-items {
+    width: 100%;
+}
+
+.modal-order-item {
+    display: flex;
+    align-items: center;
+    padding: 15px 0;
+    border-bottom: 1px solid #f0f0f0;
+}
+
+.modal-order-item:last-child {
+    border-bottom: none;
+}
+
+.modal-order-item .item-image {
+    width: 70px;
+    height: 70px;
+    object-fit: cover;
+    border-radius: 8px;
+    margin-right: 15px;
+    background: #f8f9fa;
+    flex-shrink: 0;
+}
+
+.modal-order-item .item-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.modal-order-item .item-name {
+    font-weight: 600;
+    font-size: 15px;
+    color: #333;
+    margin-bottom: 4px;
+}
+
+.modal-order-item .item-sku {
+    font-size: 12px;
+    color: #888;
+}
+
+.modal-order-item .item-qty {
+    text-align: center;
+    padding: 0 20px;
+    min-width: 80px;
+    flex-shrink: 0;
+}
+
+.modal-order-item .item-qty .qty-label {
+    font-size: 11px;
+    color: #888;
+    text-transform: uppercase;
+    display: block;
+}
+
+.modal-order-item .item-qty .qty-value {
+    font-weight: 600;
+    font-size: 16px;
+    color: #333;
+}
+
+.modal-order-item .item-total {
+    text-align: right;
+    min-width: 120px;
+    flex-shrink: 0;
+}
+
+.modal-order-item .item-total .total-label {
+    font-size: 11px;
+    color: #888;
+    text-transform: uppercase;
+    display: block;
+}
+
+.modal-order-item .item-total .total-value {
+    font-weight: 600;
+    font-size: 16px;
+    color: #1890ff;
+}
+
+/* Address Card Styling */
+.address-card-content {
+    padding: 5px 0;
+}
+
+.address-card-content .address-label {
+    font-weight: 600;
+    color: #333;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+}
+
+.address-card-content .address-label i {
+    margin-right: 8px;
+    color: #1890ff;
+}
+
+.address-card-content .address-text {
+    margin-bottom: 12px;
+}
+
+.address-card-content .address-line {
+    color: #555;
+    margin-bottom: 2px;
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+.address-card-content .address-line:last-of-type {
+    margin-bottom: 0;
+}
+
+.address-card-content .no-address {
+    color: #999;
+    font-style: italic;
+    padding: 10px 0;
+}
+
+/* Delivery Map Styling */
+#orderDeliveryMap {
+    height: 180px;
+    width: 100%;
+    border-radius: 8px;
+    margin-top: 12px;
+    border: 1px solid #e0e0e0;
+}
+
+/* Leaflet tile fixes for modal */
+#orderDeliveryMap .leaflet-tile-pane img,
+#orderDeliveryMap img.leaflet-tile {
+    max-width: none !important;
+    max-height: none !important;
+    width: 256px !important;
+    height: 256px !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    border: none !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    opacity: 1 !important;
+}
+
+/* Hide marker shadow */
+#orderDeliveryMap .leaflet-marker-shadow {
+    display: none !important;
+}
+
+/* Marker icon proper sizing - override tile styling */
+#orderDeliveryMap .leaflet-marker-icon {
+    width: 25px !important;
+    height: 41px !important;
+    margin-left: -12px !important;
+    margin-top: -41px !important;
 }
 
 .item-price {
@@ -362,84 +264,184 @@
     color: #1890ff;
 }
 
-.tracking-info {
-    background: #f0f9ff;
-    padding: 15px;
-    border-radius: 6px;
-    margin-top: 15px;
-}
-
 .tracking-steps {
     display: flex;
     justify-content: space-between;
-    margin-top: 15px;
+    margin-top: 20px;
 }
 
 .tracking-step {
-    text-align: center;
-    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
     position: relative;
+    flex: 1;
+}
+
+.tracking-step::after {
+    content: '';
+    position: absolute;
+    top: 20px;
+    left: 50%;
+    width: 100%;
+    height: 2px;
+    background: #ddd;
+}
+
+.tracking-step:last-child::after {
+    display: none;
+}
+
+.tracking-step .step-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: #f8f9fa;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 10px;
+    z-index: 1;
 }
 
 .tracking-step.completed .step-icon {
-    background: #52c41a;
-    color: white;
+    background: #28a745;
+    color: #fff;
 }
 
 .tracking-step.active .step-icon {
     background: #1890ff;
-    color: white;
+    color: #fff;
 }
 
-.step-icon {
-    width: 30px;
-    height: 30px;
-    border-radius: 50%;
-    background: #d9d9d9;
-    color: #666;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    margin-bottom: 5px;
-}
-
-.step-title {
+.tracking-step .step-title {
+    font-weight: 600;
     font-size: 12px;
-    font-weight: 500;
 }
 
-.step-time {
-    font-size: 10px;
+.tracking-step .step-time {
+    font-size: 11px;
     color: #666;
 }
 
 @media (max-width: 768px) {
-    .account-sidebar {
-        margin-bottom: 30px;
-    }
-    
-    .order-item {
+    .order-card .row {
         flex-direction: column;
-        align-items: flex-start;
     }
     
     .order-item img {
-        margin-bottom: 10px;
+        width: 50px;
+        height: 50px;
     }
     
     .tracking-steps {
         flex-direction: column;
+        align-items: flex-start;
     }
     
     .tracking-step {
+        flex-direction: row;
         margin-bottom: 15px;
+    }
+    
+    .tracking-step::after {
+        display: none;
     }
 }
 </style>
 {% endblock %}
 
-{% block extra_js %}
+{% block cabinet_content %}
+<!-- Orders Header -->
+<div class="content-header mb-4">
+    <div class="d-flex justify-content-between align-items-center">
+        <h2><i class="far fa-shopping-bag"></i> {{ 'landing.account.orders'|t }}</h2>
+        <a href="{{ url_for('frontend.shop') }}" class="btn btn-primary">
+            <i class="far fa-plus"></i> {{ 'Place New Order'|t }}
+        </a>
+    </div>
+</div>
+
+<!-- Order Filters -->
+<div class="filters-section mb-4">
+    <div class="card">
+        <div class="card-body">
+            <div class="row">
+                <div class="col-md-3">
+                    <div class="form-group">
+                        <label for="statusFilter">{{ 'Order Status'|t }}</label>
+                        <select class="form-control" id="statusFilter">
+                            <option value="">{{ 'All Orders'|t }}</option>
+                            {% for status in order_statuses %}
+                            <option value="{{ status.value }}">{{ status.label|t }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="form-group">
+                        <label for="dateFilter">{{ 'Time Period'|t }}</label>
+                        <select class="form-control" id="dateFilter">
+                            <option value="">{{ 'All Time'|t }}</option>
+                            <option value="7">{{ 'Last 7 Days'|t }}</option>
+                            <option value="30">{{ 'Last 30 Days'|t }}</option>
+                            <option value="90">{{ 'Last 3 Months'|t }}</option>
+                            <option value="365">{{ 'Last Year'|t }}</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="form-group">
+                        <label for="searchOrder">{{ 'Search Orders'|t }}</label>
+                        <input type="text" class="form-control" id="searchOrder" placeholder="{{ 'Order number, product name...'|t }}">
+                    </div>
+                </div>
+                <div class="col-md-2">
+                    <div class="form-group">
+                        <label>&nbsp;</label>
+                        <button type="button" class="btn btn-outline-primary btn-block" onclick="applyFilters()">
+                            <i class="far fa-search"></i> {{ 'Filter'|t }}
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Orders List -->
+<div class="orders-list" id="ordersList">
+    <div class="loading-container text-center py-5" id="loadingOrders">
+        <i class="far fa-spinner fa-spin fa-2x"></i>
+        <p class="mt-2">{{ 'Loading your orders...'|t }}</p>
+    </div>
+</div>
+
+<!-- Empty State -->
+<div class="empty-state text-center py-5" id="emptyState" style="display: none;">
+    <i class="far fa-shopping-bag" style="font-size: 4rem; color: #ccc;"></i>
+    <h4 class="mt-3">{{ 'No orders found'|t }}</h4>
+    <p class="text-muted">{{ 'You havent placed any orders yet or no orders match your filters'|t }}</p>
+    <a href="{{ url_for('frontend.shop') }}" class="btn btn-primary">
+        <i class="far fa-shopping-cart"></i> {{ 'Start Shopping'|t }}
+    </a>
+</div>
+
+<!-- Pagination -->
+<div class="pagination-section" id="paginationSection" style="display: none;">
+    <nav aria-label="Orders pagination">
+        <ul class="pagination justify-content-center" id="ordersPagination">
+        </ul>
+    </nav>
+</div>
+
+<!-- Order Detail Modal (shared partial) -->
+{% include 'frontend/partials/order_detail_modal.html' %}
+{% endblock %}
+
+{% block cabinet_extra_js %}
 <script>
+
 document.addEventListener('DOMContentLoaded', function() {
     loadOrders();
 });
@@ -501,13 +503,13 @@ function displayOrders(orders) {
                         <strong>{{ 'Order'|t }} #${order.order_number}</strong>
                     </div>
                     <div class="col-md-3">
-                        <small class="text-muted">${formatDate(order.created_at)}</small>
+                        <small class="text-muted"><i class="far fa-calendar-alt mr-1"></i>{{ 'Order Date'|t }}: ${formatDate(order.created_at)}</small>
                     </div>
                     <div class="col-md-3">
-                        <span class="order-status status-${order.status}">${order.status}</span>
+                        <span class="order-status status-${order.status}">${capitalizeFirst(order.status)}</span>
                     </div>
                     <div class="col-md-3 text-right">
-                        <strong>${parseFloat(order.total_amount).toFixed(2)} UZS</strong>
+                        <strong>${formatAmount(order.total_amount)}</strong>
                     </div>
                 </div>
             </div>
@@ -521,7 +523,7 @@ function displayOrders(orders) {
                                     <div class="item-name">${item.product_name}</div>
                                     <div class="item-specs">{{ 'Quantity'|t }}: ${item.quantity}</div>
                                 </div>
-                                <div class="item-price">${parseFloat(item.unit_price).toLocaleString()} {{ 'currency.uzs'|t }}</div>
+                                <div class="item-price">${formatAmount(item.unit_price)}</div>
                             </div>
                         `).join('')}
                         ${(order.order_items || []).length > 2 ? `<div class="text-muted mt-2"><small>{{ 'and'|t }} ${order.order_items.length - 2} {{ 'more items'|t }}</small></div>` : ''}
@@ -615,71 +617,88 @@ function displayOrderDetail(order) {
     modalContent.innerHTML = `
         <div class="order-detail-content">
             <!-- Order Header -->
-            <div class="row mb-4">
-                <div class="col-md-6">
-                    <h4>{{ 'Order'|t }} #${order.order_number}</h4>
-                    <p class="text-muted">{{ 'Placed on'|t }} ${formatDate(order.created_at)}</p>
+            <div class="row mb-4 align-items-center">
+                <div class="col-md-8">
+                    <h4 class="mb-2">{{ 'Order'|t }} #${order.order_number}</h4>
+                    <p class="text-muted mb-0"><i class="far fa-calendar-alt mr-1"></i>{{ 'Placed on'|t }} ${formatDate(order.created_at)}</p>
                 </div>
-                <div class="col-md-6 text-right">
-                    <span class="order-status status-${order.status} h5">${order.status}</span>
+                <div class="col-md-4 text-right">
+                    <span class="order-status status-large status-${order.status}">${capitalizeFirst(order.status)}</span>
                 </div>
             </div>
             
             <!-- Order Items -->
             <div class="order-items-section mb-4">
-                <h5>{{ 'Order Items'|t }}</h5>
+                <h5 class="mb-3"><i class="far fa-box mr-2"></i>{{ 'Order Items'|t }}</h5>
                 <div class="card">
                     <div class="card-body">
-                        ${(order.order_items || []).map(item => `
-                            <div class="order-item">
-                                <img src="${item.product_image_url || '/static/images/products/default.jpg'}" alt="${item.product_name}">
-                                <div class="item-details">
-                                    <div class="item-name">${item.product_name}</div>
-                                    <div class="item-specs">{{ 'SKU'|t }}: ${item.product_sku || 'N/A'}</div>
+                        <div class="modal-order-items">
+                            ${(order.order_items || []).map(item => `
+                                <div class="modal-order-item">
+                                    <img class="item-image" src="${item.product_image_url || '/static/images/products/default.jpg'}" alt="${item.product_name}">
+                                    <div class="item-info">
+                                        <div class="item-name">${item.product_name}</div>
+                                        <div class="item-sku">{{ 'SKU'|t }}: ${item.product_sku || 'N/A'}</div>
+                                    </div>
+                                    <div class="item-qty">
+                                        <span class="qty-label">{{ 'Quantity'|t }}</span>
+                                        <span class="qty-value">${item.quantity}</span>
+                                    </div>
+                                    <div class="item-total">
+                                        <span class="total-label">{{ 'Price'|t }}</span>
+                                        <span class="total-value">${formatAmount(item.total_price || item.unit_price * item.quantity)}</span>
+                                    </div>
                                 </div>
-                                <div class="item-quantity">{{ 'Qty'|t }}: ${item.quantity}</div>
-                                <div class="item-price">${parseFloat(item.unit_price).toLocaleString()} {{ 'currency.uzs'|t }}</div>
-                            </div>
-                        `).join('')}
+                            `).join('')}
+                        </div>
                     </div>
                 </div>
             </div>
             
             <!-- Order Summary -->
-            <div class="row mb-4">
+            <div class="row mb-4 align-items-start">
                 <div class="col-md-6">
-                    <h5>{{ 'Delivery Address'|t }}</h5>
-                    <div class="card">
+                    <h5 class="mb-3"><i class="far fa-map-marker-alt mr-2"></i>{{ 'Delivery Address'|t }}</h5>
+                    <div class="card h-100">
                         <div class="card-body">
-                            <address>
-                                ${order.delivery_address?.recipient_name || order.user?.name || ''}<br>
-                                ${order.delivery_address?.street || ''}<br>
-                                ${order.delivery_address?.city || ''}<br>
-                                ${order.delivery_address?.phone || ''}
-                            </address>
+                            ${order.delivery_address ? `
+                                <div class="address-card-content">
+                                    ${order.delivery_address.title ? `<div class="address-label"><i class="far fa-tag"></i>${order.delivery_address.title}</div>` : ''}
+                                    <div class="address-text">
+                                        <div class="address-line">${order.delivery_address.street_address || order.delivery_address.full_address || ''}</div>
+                                        ${order.delivery_address.district ? `<div class="address-line">${order.delivery_address.district}</div>` : ''}
+                                    </div>
+                                    ${order.delivery_address.delivery_instructions || order.delivery_address.delivery_notes ? `<div class="text-muted mb-2" style="font-size: 13px;"><i class="far fa-sticky-note mr-1"></i>${order.delivery_address.delivery_instructions || order.delivery_address.delivery_notes}</div>` : ''}
+                                    ${(order.delivery_address.latitude && order.delivery_address.longitude) ? `<div id="orderDeliveryMap"></div>` : ''}
+                                </div>
+                            ` : `
+                                <div class="address-card-content">
+                                    <p class="no-address">{{ 'No delivery address provided'|t }}</p>
+                                </div>
+                            `}
                         </div>
                     </div>
                 </div>
                 <div class="col-md-6">
-                    <h5>{{ 'Order Summary'|t }}</h5>
-                    <div class="card">
+                    <h5 class="mb-3"><i class="far fa-receipt mr-2"></i>{{ 'Order Summary'|t }}</h5>
+                    <div class="card h-100">
                         <div class="card-body">
-                            <div class="d-flex justify-content-between">
+                            <div class="d-flex justify-content-between mb-2">
                                 <span>{{ 'Subtotal'|t }}</span>
-                                <span>${parseFloat(order.subtotal || order.total_amount).toFixed(2)} UZS</span>
+                                <span class="font-weight-medium">${formatAmount(order.subtotal || order.total_amount)}</span>
                             </div>
-                            <div class="d-flex justify-content-between">
+                            <div class="d-flex justify-content-between mb-2">
                                 <span>{{ 'Delivery Fee'|t }}</span>
-                                <span>${parseFloat(order.delivery_fee || 0).toFixed(2)} UZS</span>
+                                <span class="font-weight-medium">${formatAmount(order.delivery_fee || 0)}</span>
                             </div>
-                            <div class="d-flex justify-content-between">
+                            <div class="d-flex justify-content-between mb-2">
                                 <span>{{ 'Tax'|t }}</span>
-                                <span>${parseFloat(order.tax_amount || 0).toFixed(2)} UZS</span>
+                                <span class="font-weight-medium">${formatAmount(order.tax_amount || 0)}</span>
                             </div>
                             <hr>
-                            <div class="d-flex justify-content-between h5">
-                                <span>{{ 'Total'|t }}</span>
-                                <span>${parseFloat(order.total_amount).toFixed(2)} UZS</span>
+                            <div class="d-flex justify-content-between h5 mb-0">
+                                <span class="font-weight-bold">{{ 'Total'|t }}</span>
+                                <span class="font-weight-bold text-primary">${formatAmount(order.total_amount)}</span>
                             </div>
                         </div>
                     </div>
@@ -724,6 +743,17 @@ function displayOrderDetail(order) {
             ` : ''}
         </div>
     `;
+    
+    // Initialize map if coordinates are available
+    if (order.delivery_address && order.delivery_address.latitude && order.delivery_address.longitude) {
+        setTimeout(() => {
+            initOrderDeliveryMap(
+                order.delivery_address.latitude,
+                order.delivery_address.longitude,
+                order.delivery_address.title || order.delivery_address.label || order.delivery_address.street_address || '{{ "Delivery Location"|t }}'
+            );
+        }, 300);
+    }
 }
 
 function updatePagination(pagination) {
@@ -820,6 +850,18 @@ function formatDate(dateString) {
         month: 'short',
         day: 'numeric'
     });
+}
+
+function formatAmount(amount) {
+    // Format amount for Uzbekistan: no decimals, space-separated thousands
+    const intAmount = Math.floor(parseFloat(amount) || 0);
+    const formatted = intAmount.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+    return `${formatted} UZS`;
+}
+
+function capitalizeFirst(str) {
+    if (!str) return '';
+    return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
 }
 
 // Filter event listeners

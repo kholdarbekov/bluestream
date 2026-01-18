@@ -288,16 +288,27 @@ class NotificationService:
         )
     
     def send_loyalty_notification(self, user_id: int, event_type: str,
-                                 data: Dict[str, Any]) -> Dict[str, Any]:
-        """Send loyalty program notification"""
+                                 data: Dict[str, Any], 
+                                 notification_type: NotificationType = None) -> Dict[str, Any]:
+        """Send loyalty program notification
+        
+        Args:
+            user_id: User to notify
+            event_type: Type of loyalty event (earned, redeemed, etc.)
+            data: Template data
+            notification_type: Notification type to use (defaults to LOYALTY_REWARD)
+        """
         template_data = {
             'event_type': event_type,
             **data
         }
         
+        # Use provided notification type or default to LOYALTY_REWARD
+        notif_type = notification_type if notification_type else NotificationType.LOYALTY_REWARD
+        
         return self.send_notification(
             user_id,
-            NotificationType.LOYALTY_REWARD,
+            notif_type,
             None,
             template_data
         )
@@ -719,7 +730,8 @@ class NotificationService:
             NotificationType.SUBSCRIPTION_REMINDER: [NotificationChannel.EMAIL],
             NotificationType.PROMOTIONAL: [NotificationChannel.EMAIL],
             NotificationType.SYSTEM: [NotificationChannel.EMAIL, NotificationChannel.SMS],
-            NotificationType.LOYALTY_REWARD: [NotificationChannel.EMAIL, NotificationChannel.TELEGRAM]
+            NotificationType.LOYALTY_REWARD: [NotificationChannel.EMAIL, NotificationChannel.TELEGRAM],
+            NotificationType.REWARD_REDEEMED: [NotificationChannel.EMAIL]
         }
         
         return default_channels.get(notification_type, [NotificationChannel.EMAIL])

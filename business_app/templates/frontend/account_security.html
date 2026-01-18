@@ -1,350 +1,14 @@
-{% extends "frontend/base.html" %}
+{% extends "frontend/cabinet_base.html" %}
+{% set active_menu = 'security' %}
 
-{% block title %}{{ 'Account Security'|t }} - {{ company_name }}{% endblock %}
+{% block cabinet_title %}{{ 'Account Security'|t }}{% endblock %}
 
-{% block content %}
-        <!-- page-title -->
-        <section class="page-title">
-            <div class="bg-layer" style="background-image: url({{ url_for('static', filename='images/background/page-title.jpg') }});"></div>
-            <div class="auto-container">
-                <div class="content-box">
-                    <h1>{{ 'Account Security'|t }}</h1>
-                    <ul class="bread-crumb clearfix">
-                        <li><a href="{{ url_for('frontend.index') }}">{{ 'landing.nav.home'|t }}</a></li>
-                        <li><a href="{{ url_for('frontend.my_account') }}">{{ 'landing.nav.my_account'|t }}</a></li>
-                        <li>{{ 'Security'|t }}</li>
-                    </ul>
-                </div>
-            </div>
-        </section>
-        <!-- page-title end -->
-
-        <!-- security-section -->
-        <section class="security-section">
-            <div class="auto-container">
-                <div class="row clearfix">
-                    <!-- Account Sidebar -->
-                    <div class="col-lg-3 col-md-4 col-sm-12">
-                        <div class="account-sidebar">
-                            <div class="profile-box">
-                                <div class="profile-info text-center">
-                                    <div class="profile-avatar">
-                                        <i class="far fa-user-circle" style="font-size: 60px; color: #1890ff;"></i>
-                                    </div>
-                                    <h4>{{ user.first_name }} {{ user.last_name }}</h4>
-                                    <p class="text-muted">{{ user.email }}</p>
-                                </div>
-                            </div>
-                            
-                            <div class="account-menu">
-                                <ul class="list-unstyled">
-                                    <li>
-                                        <a href="{{ url_for('frontend.my_account') }}">
-                                            <i class="far fa-tachometer-alt"></i> {{ 'Dashboard'|t }}
-                                        </a>
-                                    </li>
-                                    <li>
-                                        <a href="{{ url_for('frontend.profile_settings') }}">
-                                            <i class="far fa-user-edit"></i> {{ 'Profile Settings'|t }}
-                                        </a>
-                                    </li>
-                                    <li>
-                                        <a href="{{ url_for('frontend.my_orders') }}">
-                                            <i class="far fa-shopping-bag"></i> {{ 'landing.account.orders'|t }}
-                                        </a>
-                                    </li>
-                                    <li>
-                                        <a href="{{ url_for('frontend.addresses') }}">
-                                            <i class="far fa-map-marker-alt"></i> {{ 'Addresses'|t }}
-                                        </a>
-                                    </li>
-                                    <li class="active">
-                                        <a href="{{ url_for('frontend.account_security') }}">
-                                            <i class="far fa-shield-alt"></i> {{ 'Security'|t }}
-                                        </a>
-                                    </li>
-                                    <li>
-                                        <a href="#" onclick="logout()">
-                                            <i class="far fa-sign-out-alt"></i> {{ 'landing.nav.logout'|t }}
-                                        </a>
-                                    </li>
-                                </ul>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <!-- Security Content -->
-                    <div class="col-lg-9 col-md-8 col-sm-12">
-                        <div class="security-content">
-                            <!-- Security Overview -->
-                            <div class="security-overview mb-4">
-                                <div class="card">
-                                    <div class="card-header">
-                                        <h5><i class="far fa-shield-alt"></i> {{ 'Security Overview'|t }}</h5>
-                                    </div>
-                                    <div class="card-body">
-                                        <div class="row">
-                                            <div class="col-md-4">
-                                                <div class="security-item text-center">
-                                                    <i class="far fa-envelope {{ 'text-success' if user.email_verified_at else 'text-warning' }}" style="font-size: 2rem;"></i>
-                                                    <h6 class="mt-2">{{ 'Email Verification'|t }}</h6>
-                                                    <span class="badge badge-{{ 'success' if user.email_verified_at else 'warning' }}">
-                                                        {{ 'Verified' if user.email_verified_at else 'Pending' }}
-                                                    </span>
-                                                </div>
-                                            </div>
-                                            <div class="col-md-4">
-                                                <div class="security-item text-center">
-                                                    <i class="far fa-mobile {{ 'text-success' if user.phone_verified_at else 'text-warning' }}" style="font-size: 2rem;"></i>
-                                                    <h6 class="mt-2">{{ 'Phone Verification'|t }}</h6>
-                                                    <span class="badge badge-{{ 'success' if user.phone_verified_at else 'warning' }}">
-                                                        {{ 'Verified' if user.phone_verified_at else 'Pending' }}
-                                                    </span>
-                                                </div>
-                                            </div>
-                                            <div class="col-md-4">
-                                                <div class="security-item text-center">
-                                                    <i class="far fa-lock text-success" style="font-size: 2rem;"></i>
-                                                    <h6 class="mt-2">{{ 'Password Protection'|t }}</h6>
-                                                    <span class="badge badge-success">{{ 'Active'|t }}</span>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <!-- Change Password -->
-                            <div class="change-password-section mb-4">
-                                <div class="card">
-                                    <div class="card-header">
-                                        <h5><i class="far fa-key"></i> {{ 'Change Password'|t }}</h5>
-                                    </div>
-                                    <div class="card-body">
-                                        <form id="changePasswordForm" class="default-form">
-                                            <div class="row clearfix">
-                                                <div class="col-lg-12 col-md-12 col-sm-12 form-group">
-                                                    <label>{{ 'Current Password'|t }}</label>
-                                                    <input type="password" name="current_password" placeholder="{{ 'Enter current password'|t }}" required>
-                                                </div>
-                                                <div class="col-lg-6 col-md-6 col-sm-12 form-group">
-                                                    <label>{{ 'New Password'|t }}</label>
-                                                    <input type="password" name="new_password" placeholder="{{ 'Enter new password'|t }}" required>
-                                                    <small class="text-muted">{{ 'Password must be at least 8 characters long'|t }}</small>
-                                                    <div class="password-strength">
-                                                        <div class="strength-bar">
-                                                            <div class="strength-fill" id="strengthFill"></div>
-                                                        </div>
-                                                        <small class="strength-text" id="strengthText">{{ 'Password strength'|t }}</small>
-                                                    </div>
-                                                </div>
-                                                <div class="col-lg-6 col-md-6 col-sm-12 form-group">
-                                                    <label>{{ 'Confirm New Password'|t }}</label>
-                                                    <input type="password" name="confirm_password" placeholder="{{ 'Confirm new password'|t }}" required>
-                                                </div>
-                                                <div class="col-lg-12 col-md-12 col-sm-12 form-group">
-                                                    <div class="check-box">
-                                                        <input class="check" type="checkbox" id="show_passwords">
-                                                        <label for="show_passwords">{{ 'Show passwords'|t }}</label>
-                                                    </div>
-                                                </div>
-                                                <div class="col-lg-12 col-md-12 col-sm-12 form-group">
-                                                    <button type="submit" class="theme-btn btn-one">
-                                                        <i class="far fa-save"></i> {{ 'Change Password'|t }}
-                                                    </button>
-                                                </div>
-                                            </div>
-                                        </form>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <!-- Two-Factor Authentication -->
-                            <div class="two-factor-section mb-4">
-                                <div class="card">
-                                    <div class="card-header">
-                                        <h5><i class="far fa-mobile-alt"></i> {{ 'Two-Factor Authentication'|t }}</h5>
-                                    </div>
-                                    <div class="card-body">
-                                        <div class="row">
-                                            <div class="col-md-8">
-                                                <h6>{{ 'SMS Authentication'|t }}</h6>
-                                                <p class="text-muted">{{ 'Add an extra layer of security by requiring SMS verification for login.'|t }}</p>
-                                            </div>
-                                            <div class="col-md-4 text-right">
-                                                {% if user.phone_verified_at %}
-                                                <button class="btn btn-outline-primary" onclick="setup2FA()">
-                                                    <i class="far fa-mobile"></i> {{ 'Enable 2FA'|t }}
-                                                </button>
-                                                {% else %}
-                                                <button class="btn btn-outline-warning" onclick="verifyPhoneFirst()">
-                                                    <i class="far fa-exclamation-triangle"></i> {{ 'Verify Phone First'|t }}
-                                                </button>
-                                                {% endif %}
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <!-- Account Activity -->
-                            <div class="account-activity-section mb-4">
-                                <div class="card">
-                                    <div class="card-header">
-                                        <h5><i class="far fa-history"></i> {{ 'Recent Account Activity'|t }}</h5>
-                                    </div>
-                                    <div class="card-body">
-                                        <div class="activity-list">
-                                            <div class="activity-item">
-                                                <div class="row align-items-center">
-                                                    <div class="col-md-1">
-                                                        <i class="far fa-sign-in-alt text-success"></i>
-                                                    </div>
-                                                    <div class="col-md-7">
-                                                        <h6>{{ 'landing.nav.login'|t }}</h6>
-                                                        <p class="text-muted">{{ 'Successful login from web browser'|t }}</p>
-                                                    </div>
-                                                    <div class="col-md-4 text-right">
-                                                        <small class="text-muted">{{ user.last_login.strftime('%Y-%m-%d %H:%M') if user.last_login else 'Today' }}</small>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                            <div class="activity-item">
-                                                <div class="row align-items-center">
-                                                    <div class="col-md-1">
-                                                        <i class="far fa-user-edit text-info"></i>
-                                                    </div>
-                                                    <div class="col-md-7">
-                                                        <h6>{{ 'Profile Updated'|t }}</h6>
-                                                        <p class="text-muted">{{ 'Personal information was updated'|t }}</p>
-                                                    </div>
-                                                    <div class="col-md-4 text-right">
-                                                        <small class="text-muted">{{ user.updated_at.strftime('%Y-%m-%d %H:%M') if user.updated_at else 'Never' }}</small>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                            <div class="activity-item">
-                                                <div class="row align-items-center">
-                                                    <div class="col-md-1">
-                                                        <i class="far fa-user-plus text-primary"></i>
-                                                    </div>
-                                                    <div class="col-md-7">
-                                                        <h6>{{ 'Account Created'|t }}</h6>
-                                                        <p class="text-muted">{{ 'Account was successfully created'|t }}</p>
-                                                    </div>
-                                                    <div class="col-md-4 text-right">
-                                                        <small class="text-muted">{{ user.created_at.strftime('%Y-%m-%d %H:%M') if user.created_at else 'Unknown' }}</small>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <!-- Security Settings -->
-                            <div class="security-settings-section mb-4">
-                                <div class="card">
-                                    <div class="card-header">
-                                        <h5><i class="far fa-cogs"></i> {{ 'Security Settings'|t }}</h5>
-                                    </div>
-                                    <div class="card-body">
-                                        <form id="securitySettingsForm" class="default-form">
-                                            <div class="row clearfix">
-                                                <div class="col-lg-12 col-md-12 col-sm-12 form-group">
-                                                    <div class="check-box">
-                                                        <input class="check" type="checkbox" id="login_notifications" name="login_notifications" checked>
-                                                        <label for="login_notifications">{{ 'Send email notifications for new logins'|t }}</label>
-                                                    </div>
-                                                </div>
-                                                <div class="col-lg-12 col-md-12 col-sm-12 form-group">
-                                                    <div class="check-box">
-                                                        <input class="check" type="checkbox" id="password_change_notifications" name="password_change_notifications" checked>
-                                                        <label for="password_change_notifications">{{ 'Send email notifications for password changes'|t }}</label>
-                                                    </div>
-                                                </div>
-                                                <div class="col-lg-12 col-md-12 col-sm-12 form-group">
-                                                    <button type="submit" class="theme-btn btn-one">
-                                                        <i class="far fa-save"></i> {{ 'Save Security Settings'|t }}
-                                                    </button>
-                                                </div>
-                                            </div>
-                                        </form>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </section>
-        <!-- security-section end -->
+{% block cabinet_breadcrumb_items %}
+<li>{{ 'Security'|t }}</li>
 {% endblock %}
 
-{% block extra_css %}
+{% block cabinet_extra_head %}
 <style>
-.account-sidebar {
-    background: #fff;
-    border-radius: 8px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-    padding: 20px;
-    margin-bottom: 20px;
-}
-
-.profile-box {
-    margin-bottom: 30px;
-    padding-bottom: 20px;
-    border-bottom: 1px solid #eee;
-}
-
-.account-menu ul li {
-    margin-bottom: 10px;
-}
-
-.account-menu ul li a {
-    display: block;
-    padding: 12px 15px;
-    color: #666;
-    text-decoration: none;
-    border-radius: 6px;
-    transition: all 0.3s;
-}
-
-.account-menu ul li a:hover,
-.account-menu ul li.active a {
-    background: #1890ff;
-    color: #fff;
-    text-decoration: none;
-}
-
-.account-menu ul li a i {
-    width: 20px;
-    margin-right: 10px;
-}
-
-.card {
-    border: none;
-    border-radius: 8px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-    margin-bottom: 20px;
-}
-
-.card-header {
-    background: #f8f9fa;
-    border-bottom: 1px solid #eee;
-    border-radius: 8px 8px 0 0 !important;
-}
-
-.card-header h5 {
-    margin: 0;
-    color: #333;
-}
-
-.card-header i {
-    margin-right: 10px;
-    color: #1890ff;
-}
-
 .security-item {
     margin-bottom: 20px;
 }
@@ -396,16 +60,210 @@
     margin-bottom: 0;
     font-size: 14px;
 }
-
-@media (max-width: 768px) {
-    .account-sidebar {
-        margin-bottom: 30px;
-    }
-}
 </style>
 {% endblock %}
 
-{% block extra_js %}
+{% block cabinet_content %}
+<!-- Security Overview -->
+<div class="security-overview mb-4">
+    <div class="card">
+        <div class="card-header">
+            <h5><i class="far fa-shield-alt"></i> {{ 'Security Overview'|t }}</h5>
+        </div>
+        <div class="card-body">
+            <div class="row">
+                <div class="col-md-4">
+                    <div class="security-item text-center">
+                        <i class="far fa-envelope {{ 'text-success' if user.email_verified_at else 'text-warning' }}" style="font-size: 2rem;"></i>
+                        <h6 class="mt-2">{{ 'Email Verification'|t }}</h6>
+                        <span class="badge badge-{{ 'success' if user.email_verified_at else 'warning' }}">
+                            {{ 'Verified' if user.email_verified_at else 'Pending' }}
+                        </span>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="security-item text-center">
+                        <i class="far fa-mobile {{ 'text-success' if user.phone_verified_at else 'text-warning' }}" style="font-size: 2rem;"></i>
+                        <h6 class="mt-2">{{ 'Phone Verification'|t }}</h6>
+                        <span class="badge badge-{{ 'success' if user.phone_verified_at else 'warning' }}">
+                            {{ 'Verified' if user.phone_verified_at else 'Pending' }}
+                        </span>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="security-item text-center">
+                        <i class="far fa-lock text-success" style="font-size: 2rem;"></i>
+                        <h6 class="mt-2">{{ 'Password Protection'|t }}</h6>
+                        <span class="badge badge-success">{{ 'Active'|t }}</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Change Password -->
+<div class="change-password-section mb-4">
+    <div class="card">
+        <div class="card-header">
+            <h5><i class="far fa-key"></i> {{ 'Change Password'|t }}</h5>
+        </div>
+        <div class="card-body">
+            <form id="changePasswordForm" class="default-form">
+                <div class="row clearfix">
+                    <div class="col-lg-12 col-md-12 col-sm-12 form-group">
+                        <label>{{ 'Current Password'|t }}</label>
+                        <input type="password" name="current_password" placeholder="{{ 'Enter current password'|t }}" required>
+                    </div>
+                    <div class="col-lg-6 col-md-6 col-sm-12 form-group">
+                        <label>{{ 'New Password'|t }}</label>
+                        <input type="password" name="new_password" placeholder="{{ 'Enter new password'|t }}" required>
+                        <small class="text-muted">{{ 'Password must be at least 8 characters long'|t }}</small>
+                        <div class="password-strength">
+                            <div class="strength-bar">
+                                <div class="strength-fill" id="strengthFill"></div>
+                            </div>
+                            <small class="strength-text" id="strengthText">{{ 'Password strength'|t }}</small>
+                        </div>
+                    </div>
+                    <div class="col-lg-6 col-md-6 col-sm-12 form-group">
+                        <label>{{ 'Confirm New Password'|t }}</label>
+                        <input type="password" name="confirm_password" placeholder="{{ 'Confirm new password'|t }}" required>
+                    </div>
+                    <div class="col-lg-12 col-md-12 col-sm-12 form-group">
+                        <div class="check-box">
+                            <input class="check" type="checkbox" id="show_passwords">
+                            <label for="show_passwords">{{ 'Show passwords'|t }}</label>
+                        </div>
+                    </div>
+                    <div class="col-lg-12 col-md-12 col-sm-12 form-group">
+                        <button type="submit" class="theme-btn btn-one">
+                            <i class="far fa-save"></i> {{ 'Change Password'|t }}
+                        </button>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Two-Factor Authentication -->
+<div class="two-factor-section mb-4">
+    <div class="card">
+        <div class="card-header">
+            <h5><i class="far fa-mobile-alt"></i> {{ 'Two-Factor Authentication'|t }}</h5>
+        </div>
+        <div class="card-body">
+            <div class="row">
+                <div class="col-md-8">
+                    <h6>{{ 'SMS Authentication'|t }}</h6>
+                    <p class="text-muted">{{ 'Add an extra layer of security by requiring SMS verification for login.'|t }}</p>
+                </div>
+                <div class="col-md-4 text-right">
+                    {% if user.phone_verified_at %}
+                    <button class="btn btn-outline-primary" onclick="setup2FA()">
+                        <i class="far fa-mobile"></i> {{ 'Enable 2FA'|t }}
+                    </button>
+                    {% else %}
+                    <button class="btn btn-outline-warning" onclick="verifyPhoneFirst()">
+                        <i class="far fa-exclamation-triangle"></i> {{ 'Verify Phone First'|t }}
+                    </button>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Account Activity -->
+<div class="account-activity-section mb-4">
+    <div class="card">
+        <div class="card-header">
+            <h5><i class="far fa-history"></i> {{ 'Recent Account Activity'|t }}</h5>
+        </div>
+        <div class="card-body">
+            <div class="activity-list">
+                <div class="activity-item">
+                    <div class="row align-items-center">
+                        <div class="col-md-1">
+                            <i class="far fa-sign-in-alt text-success"></i>
+                        </div>
+                        <div class="col-md-7">
+                            <h6>{{ 'landing.nav.login'|t }}</h6>
+                            <p class="text-muted">{{ 'Successful login from web browser'|t }}</p>
+                        </div>
+                        <div class="col-md-4 text-right">
+                            <small class="text-muted">{{ user.last_login.strftime('%Y-%m-%d %H:%M') if user.last_login else 'Today' }}</small>
+                        </div>
+                    </div>
+                </div>
+                <div class="activity-item">
+                    <div class="row align-items-center">
+                        <div class="col-md-1">
+                            <i class="far fa-user-edit text-info"></i>
+                        </div>
+                        <div class="col-md-7">
+                            <h6>{{ 'Profile Updated'|t }}</h6>
+                            <p class="text-muted">{{ 'Personal information was updated'|t }}</p>
+                        </div>
+                        <div class="col-md-4 text-right">
+                            <small class="text-muted">{{ user.updated_at.strftime('%Y-%m-%d %H:%M') if user.updated_at else 'Never' }}</small>
+                        </div>
+                    </div>
+                </div>
+                <div class="activity-item">
+                    <div class="row align-items-center">
+                        <div class="col-md-1">
+                            <i class="far fa-user-plus text-primary"></i>
+                        </div>
+                        <div class="col-md-7">
+                            <h6>{{ 'Account Created'|t }}</h6>
+                            <p class="text-muted">{{ 'Account was successfully created'|t }}</p>
+                        </div>
+                        <div class="col-md-4 text-right">
+                            <small class="text-muted">{{ user.created_at.strftime('%Y-%m-%d %H:%M') if user.created_at else 'Unknown' }}</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Security Settings -->
+<div class="security-settings-section mb-4">
+    <div class="card">
+        <div class="card-header">
+            <h5><i class="far fa-cogs"></i> {{ 'Security Settings'|t }}</h5>
+        </div>
+        <div class="card-body">
+            <form id="securitySettingsForm" class="default-form">
+                <div class="row clearfix">
+                    <div class="col-lg-12 col-md-12 col-sm-12 form-group">
+                        <div class="check-box">
+                            <input class="check" type="checkbox" id="login_notifications" name="login_notifications" checked>
+                            <label for="login_notifications">{{ 'Send email notifications for new logins'|t }}</label>
+                        </div>
+                    </div>
+                    <div class="col-lg-12 col-md-12 col-sm-12 form-group">
+                        <div class="check-box">
+                            <input class="check" type="checkbox" id="password_change_notifications" name="password_change_notifications" checked>
+                            <label for="password_change_notifications">{{ 'Send email notifications for password changes'|t }}</label>
+                        </div>
+                    </div>
+                    <div class="col-lg-12 col-md-12 col-sm-12 form-group">
+                        <button type="submit" class="theme-btn btn-one">
+                            <i class="far fa-save"></i> {{ 'Save Security Settings'|t }}
+                        </button>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block cabinet_extra_js %}
 <script>
 // Change Password Form
 document.getElementById('changePasswordForm').addEventListener('submit', async function(e) {

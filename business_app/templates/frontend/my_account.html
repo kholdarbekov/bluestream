@@ -1,439 +1,222 @@
-{% extends "frontend/base.html" %}
+{% extends "frontend/cabinet_base.html" %}
+{% set active_menu = 'dashboard' %}
 
-{% block title %}{{ 'landing.nav.my_account'|t }} - {{ company_name }}{% endblock %}
+{% block cabinet_title %}{{ 'landing.nav.my_account'|t }}{% endblock %}
 
-{% block content %}
-        <!-- page-title -->
-        <section class="page-title">
-            <div class="bg-layer" style="background-image: url({{ url_for('static', filename='images/background/page-title.jpg') }});"></div>
-            <div class="auto-container">
-                <div class="content-box">
-                    <h1>{{ 'landing.nav.my_account'|t }}</h1>
-                    <ul class="bread-crumb clearfix">
-                        <li><a href="{{ url_for('frontend.index') }}">{{ 'landing.nav.home'|t }}</a></li>
-                        <li>{{ 'landing.nav.my_account'|t }}</li>
-                    </ul>
-                </div>
-            </div>
-        </section>
-        <!-- page-title end -->
+{# Dashboard is the account root, so no extra breadcrumb items needed #}
+{% block cabinet_breadcrumb_items %}{% endblock %}
 
-        <!-- account-section -->
-        <section class="account-section">
-            <div class="auto-container">
-                <div class="row clearfix">
-                    <!-- Account Sidebar -->
-                    <div class="col-lg-3 col-md-4 col-sm-12">
-                        <div class="account-sidebar">
-                            <div class="profile-box">
-                                <div class="profile-info text-center">
-                                    <div class="profile-avatar">
-                                        <i class="far fa-user-circle" style="font-size: 60px; color: #1890ff;"></i>
-                                    </div>
-                                    <h4>{{ user.first_name }} {{ user.last_name }}</h4>
-                                    <p class="text-muted">{{ user.email }}</p>
-                                    <div class="verification-badges">
-                                        {% if user.email_verified_at %}
-                                        <span class="badge badge-success"><i class="far fa-check-circle"></i> {{ 'Email Verified'|t }}</span>
-                                        {% else %}
-                                        <span class="badge badge-warning"><i class="far fa-exclamation-circle"></i> {{ 'Email Pending'|t }}</span>
-                                        {% endif %}
-                                        
-                                        {% if user.phone_verified_at %}
-                                        <span class="badge badge-success"><i class="far fa-check-circle"></i> {{ 'Phone Verified'|t }}</span>
-                                        {% else %}
-                                        <span class="badge badge-warning"><i class="far fa-exclamation-circle"></i> {{ 'Phone Pending'|t }}</span>
-                                        {% endif %}
-                                    </div>
-                                </div>
-                            </div>
-                            
-                            <div class="account-menu">
-                                <ul class="list-unstyled">
-                                    <li class="active">
-                                        <a href="{{ url_for('frontend.my_account') }}">
-                                            <i class="far fa-tachometer-alt"></i> {{ 'Dashboard'|t }}
-                                        </a>
-                                    </li>
-                                    <li>
-                                        <a href="{{ url_for('frontend.profile_settings') }}">
-                                            <i class="far fa-user-edit"></i> {{ 'Profile Settings'|t }}
-                                        </a>
-                                    </li>
-                                    <li>
-                                        <a href="{{ url_for('frontend.my_orders') }}">
-                                            <i class="far fa-shopping-bag"></i> {{ 'landing.account.orders'|t }}
-                                        </a>
-                                    </li>
-                                    <li>
-                                        <a href="{{ url_for('frontend.addresses') }}">
-                                            <i class="far fa-map-marker-alt"></i> {{ 'Addresses'|t }}
-                                        </a>
-                                    </li>
-                                    <li>
-                                        <a href="{{ url_for('frontend.my_subscriptions') }}">
-                                            <i class="far fa-sync-alt"></i> {{ 'landing.nav.subscriptions'|t }}
-                                        </a>
-                                    </li>
-                                    <li>
-                                        <a href="{{ url_for('frontend.my_loyalty') }}">
-                                            <i class="far fa-star"></i> {{ 'landing.account.loyalty'|t }}
-                                        </a>
-                                    </li>
-                                    <li>
-                                        <a href="{{ url_for('frontend.account_security') }}">
-                                            <i class="far fa-shield-alt"></i> {{ 'Security'|t }}
-                                        </a>
-                                    </li>
-                                    <li>
-                                        <a href="#" onclick="logout()">
-                                            <i class="far fa-sign-out-alt"></i> {{ 'landing.nav.logout'|t }}
-                                        </a>
-                                    </li>
-                                </ul>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <!-- Account Content -->
-                    <div class="col-lg-9 col-md-8 col-sm-12">
-                        <div class="account-content">
-                            <!-- Welcome Section -->
-                            <div class="welcome-section mb-4">
-                                <div class="card bg-gradient-primary text-white">
-                                    <div class="card-body">
-                                        <div class="row align-items-center">
-                                            <div class="col-md-8">
-                                                <h3>{{ 'Welcome back'|t }}, {{ user.first_name }}!</h3>
-                                                <p class="mb-0">{{ 'Manage your account, orders, and preferences from your unified dashboard.'|t }}</p>
-                                                <small>{{ 'Connected platforms'|t }}: {{ 'Web App'|t }}{% if user.telegram_id %}, {{ 'Telegram Bot'|t }}{% endif %}</small>
-                                            </div>
-                                            <div class="col-md-4 text-center">
-                                                <div class="sync-status">
-                                                    <i class="far fa-sync-alt" style="font-size: 2rem;"></i>
-                                                    <div class="mt-2">
-                                                        <small id="syncStatus">{{ 'Synchronized'|t }}</small>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <!-- Quick Stats -->
-                            <div class="stats-section mb-4">
-                                <div class="row">
-                                    <div class="col-lg-3 col-md-6 col-sm-6">
-                                        <div class="stat-card clickable" onclick="window.location.href='{{ url_for('frontend.my_orders') }}'">
-                                            <div class="card text-center">
-                                                <div class="card-body">
-                                                    <i class="far fa-shopping-bag text-primary" style="font-size: 2rem;"></i>
-                                                    <h4 class="mt-2" id="totalOrdersCount">{{ recent_orders|length }}</h4>
-                                                    <p class="text-muted">{{ 'Total Orders'|t }}</p>
-                                                    <small class="text-primary">{{ 'landing.button.view_all'|t }}</small>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div class="col-lg-3 col-md-6 col-sm-6">
-                                        <div class="stat-card clickable" onclick="window.location.href='{{ url_for('frontend.my_subscriptions') }}'">
-                                            <div class="card text-center">
-                                                <div class="card-body">
-                                                    <i class="far fa-sync-alt text-success" style="font-size: 2rem;"></i>
-                                                    <h4 class="mt-2">{{ active_subscriptions|length }}</h4>
-                                                    <p class="text-muted">{{ 'Active Subscriptions'|t }}</p>
-                                                    <small class="text-success">{{ 'Manage'|t }}</small>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div class="col-lg-3 col-md-6 col-sm-6">
-                                        <div class="stat-card clickable" onclick="window.location.href='{{ url_for('frontend.my_loyalty') }}'">
-                                            <div class="card text-center">
-                                                <div class="card-body">
-                                                    <i class="far fa-star text-warning" style="font-size: 2rem;"></i>
-                                                    <h4 class="mt-2">{{ loyalty_account.current_balance if loyalty_account else 0 }}</h4>
-                                                    <p class="text-muted">{{ 'Loyalty Points'|t }}</p>
-                                                    <small class="text-warning">{{ 'Tier'|t }}: {{ loyalty_account.current_tier if loyalty_account else 'Bronze' }}</small>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div class="col-lg-3 col-md-6 col-sm-6">
-                                        <div class="stat-card clickable" onclick="window.location.href='{{ url_for('frontend.addresses') }}'">
-                                            <div class="card text-center">
-                                                <div class="card-body">
-                                                    <i class="far fa-map-marker-alt text-info" style="font-size: 2rem;"></i>
-                                                    <h4 class="mt-2" id="addressesCount">0</h4>
-                                                    <p class="text-muted">{{ 'Saved Addresses'|t }}</p>
-                                                    <small class="text-info">{{ 'Manage'|t }}</small>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <!-- Recent Orders -->
-                            <div class="recent-orders-section mb-4">
-                                <div class="card">
-                                    <div class="card-header d-flex justify-content-between align-items-center">
-                                        <h5>{{ 'Recent Orders'|t }}</h5>
-                                        <a href="{{ url_for('frontend.my_orders') }}" class="btn btn-outline-primary btn-sm">{{ 'landing.button.view_all'|t }}</a>
-                                    </div>
-                                    <div class="card-body">
-                                        {% if recent_orders %}
-                                        <div class="table-responsive">
-                                            <table class="table table-hover">
-                                                <thead>
-                                                    <tr>
-                                                        <th>{{ 'Order #'|t }}</th>
-                                                        <th>{{ 'Date'|t }}</th>
-                                                        <th>{{ 'Status'|t }}</th>
-                                                        <th>{{ 'Total'|t }}</th>
-                                                        <th>{{ 'Actions'|t }}</th>
-                                                    </tr>
-                                                </thead>
-                                                <tbody>
-                                                    {% for order in recent_orders %}
-                                                    <tr>
-                                                        <td><strong>#{{ order.order_number }}</strong></td>
-                                                        <td>{{ order.created_at.strftime('%Y-%m-%d') }}</td>
-                                                        <td>
-                                                            <span class="badge badge-{{ 'success' if order.status == 'delivered' else 'primary' if order.status == 'confirmed' else 'warning' }}">
-                                                                {{ order.status|title }}
-                                                            </span>
-                                                        </td>
-                                                        <td>{{ "%.2f"|format(order.total_amount) }} UZS</td>
-                                                        <td>
-                                                            <a href="{{ url_for('frontend.order_detail', order_id=order.id) }}" class="btn btn-sm btn-outline-primary">{{ 'View'|t }}</a>
-                                                        </td>
-                                                    </tr>
-                                                    {% endfor %}
-                                                </tbody>
-                                            </table>
-                                        </div>
-                                        {% else %}
-                                        <div class="text-center py-4">
-                                            <i class="far fa-shopping-bag" style="font-size: 3rem; color: #ccc;"></i>
-                                            <h5 class="mt-3">{{ 'No orders yet'|t }}</h5>
-                                            <p class="text-muted">{{ 'Start shopping to see your orders here'|t }}</p>
-                                            <a href="{{ url_for('frontend.shop') }}" class="btn btn-primary">{{ 'Start Shopping'|t }}</a>
-                                        </div>
-                                        {% endif %}
-                                    </div>
-                                </div>
-                            </div>
-
-                            <!-- Active Subscriptions -->
-                            {% if active_subscriptions %}
-                            <div class="subscriptions-section mb-4">
-                                <div class="card">
-                                    <div class="card-header d-flex justify-content-between align-items-center">
-                                        <h5>{{ 'Active Subscriptions'|t }}</h5>
-                                        <a href="{{ url_for('frontend.my_subscriptions') }}" class="btn btn-outline-primary btn-sm">{{ 'Manage All'|t }}</a>
-                                    </div>
-                                    <div class="card-body">
-                                        <div class="row">
-                                            {% for subscription in active_subscriptions %}
-                                            <div class="col-md-6">
-                                                <div class="subscription-card">
-                                                    <div class="card">
-                                                        <div class="card-body">
-                                                            <h6>{{ subscription.name }}</h6>
-                                                            <p class="text-muted">{{ subscription.description }}</p>
-                                                            <div class="d-flex justify-content-between align-items-center">
-                                                                <span class="text-primary">{{ "%.0f"|format(subscription.billing_amount) }} UZS / {{ subscription.delivery_frequency.value }}</span>
-                                                                <span class="badge badge-success">{{ 'Active'|t }}</span>
-                                                            </div>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                            {% endfor %}
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                            {% endif %}
-
-                            <!-- Account Activity Summary -->
-                            <div class="activity-summary-section mb-4">
-                                <div class="card">
-                                    <div class="card-header">
-                                        <h5><i class="far fa-chart-line"></i> {{ 'Account Activity'|t }}</h5>
-                                    </div>
-                                    <div class="card-body">
-                                        <div class="row">
-                                            <div class="col-md-6">
-                                                <div class="activity-item">
-                                                    <h6>{{ 'Platform Usage'|t }}</h6>
-                                                    <div class="platform-usage">
-                                                        <div class="platform-item">
-                                                            <span class="platform-name">{{ 'Web App'|t }}</span>
-                                                            <span class="badge badge-success">{{ 'Active'|t }}</span>
-                                                        </div>
-                                                        {% if user.telegram_id %}
-                                                        <div class="platform-item">
-                                                            <span class="platform-name">{{ 'Telegram Bot'|t }}</span>
-                                                            <span class="badge badge-success">{{ 'Connected'|t }}</span>
-                                                        </div>
-                                                        {% else %}
-                                                        <div class="platform-item">
-                                                            <span class="platform-name">{{ 'Telegram Bot'|t }}</span>
-                                                            <button class="btn btn-sm btn-outline-primary" onclick="connectTelegram()">{{ 'Connect'|t }}</button>
-                                                        </div>
-                                                        {% endif %}
-                                                    </div>
-                                                </div>
-                                            </div>
-                                            <div class="col-md-6">
-                                                <div class="activity-item">
-                                                    <h6>{{ 'Recent Activity'|t }}</h6>
-                                                    <ul class="recent-activity-list">
-                                                        <li><i class="far fa-sign-in-alt text-success"></i> {{ 'Last login'|t }}: {{ user.last_login.strftime('%Y-%m-%d %H:%M') if user.last_login else 'Today' }}</li>
-                                                        <li><i class="far fa-user-edit text-info"></i> {{ 'Profile updated'|t }}: {{ user.updated_at.strftime('%Y-%m-%d') if user.updated_at else 'Never' }}</li>
-                                                        <li><i class="far fa-shopping-bag text-primary"></i> {{ 'Last order'|t }}: {{ recent_orders[0].created_at.strftime('%Y-%m-%d') if recent_orders else 'No orders yet' }}</li>
-                                                    </ul>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <!-- Quick Actions -->
-                            <div class="quick-actions-section">
-                                <div class="card">
-                                    <div class="card-header">
-                                        <h5><i class="far fa-bolt"></i> {{ 'Quick Actions'|t }}</h5>
-                                    </div>
-                                    <div class="card-body">
-                                        <div class="row">
-                                            <div class="col-md-3">
-                                                <a href="{{ url_for('frontend.shop') }}" class="btn btn-outline-primary btn-block action-btn">
-                                                    <i class="far fa-shopping-cart"></i>
-                                                    {{ 'Shop Products'|t }}
-                                                </a>
-                                            </div>
-                                            <div class="col-md-3">
-                                                <a href="{{ url_for('frontend.profile_settings') }}" class="btn btn-outline-secondary btn-block action-btn">
-                                                    <i class="far fa-user-edit"></i>
-                                                    {{ 'Edit Profile'|t }}
-                                                </a>
-                                            </div>
-                                            <div class="col-md-3">
-                                                <a href="{{ url_for('frontend.addresses') }}" class="btn btn-outline-info btn-block action-btn">
-                                                    <i class="far fa-map-marker-alt"></i>
-                                                    {{ 'Manage Addresses'|t }}
-                                                </a>
-                                            </div>
-                                            <div class="col-md-3">
-                                                <button class="btn btn-outline-warning btn-block action-btn" onclick="downloadAccountData()">
-                                                    <i class="far fa-download"></i>
-                                                    {{ 'Export Data'|t }}
-                                                </button>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </section>
-        <!-- account-section end -->
-{% endblock %}
-
-{% block extra_css %}
+{% block cabinet_extra_head %}
+<!-- Leaflet CSS for map -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+      crossorigin=""/>
 <style>
-.account-sidebar {
-    background: #fff;
-    border-radius: 8px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-    padding: 20px;
-    margin-bottom: 20px;
+/* Welcome Section - Fixed contrast with white text on blue */
+.welcome-section .card {
+    border: none;
+    border-radius: 16px;
+    overflow: hidden;
 }
 
-.profile-box {
-    margin-bottom: 30px;
-    padding-bottom: 20px;
-    border-bottom: 1px solid #eee;
+.welcome-section .bg-gradient-primary {
+    background: linear-gradient(135deg, #1890ff 0%, #0050b3 100%);
+    position: relative;
 }
 
-.verification-badges {
-    margin-top: 15px;
+.welcome-section .bg-gradient-primary::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.05'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+    opacity: 0.5;
 }
 
-.verification-badges .badge {
-    display: block;
-    margin: 5px 0;
-    padding: 5px 10px;
+.welcome-section .card-body {
+    position: relative;
+    z-index: 1;
+    padding: 30px;
 }
 
-.account-menu ul li {
+.welcome-section h3 {
+    color: #ffffff !important;
+    font-weight: 700;
     margin-bottom: 10px;
 }
 
-.account-menu ul li a {
-    display: block;
-    padding: 12px 15px;
-    color: #666;
-    text-decoration: none;
-    border-radius: 6px;
-    transition: all 0.3s;
+.welcome-section p,
+.welcome-section small {
+    color: rgba(255, 255, 255, 0.9) !important;
 }
 
-.account-menu ul li a:hover,
-.account-menu ul li.active a {
-    background: #1890ff;
-    color: #fff;
-    text-decoration: none;
+.welcome-section .sync-status {
+    color: #ffffff;
 }
 
-.account-menu ul li a i {
-    width: 20px;
-    margin-right: 10px;
+.welcome-section .sync-status i {
+    color: #ffffff;
 }
 
+/* Stat Cards - Enhanced with colored icon backgrounds */
 .stat-card .card {
     border: none;
-    border-radius: 8px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-    transition: transform 0.3s;
+    border-radius: 12px;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08);
+    transition: all 0.3s ease;
+    overflow: hidden;
 }
 
 .stat-card .card:hover {
     transform: translateY(-5px);
+    box-shadow: 0 8px 25px rgba(0, 0, 0, 0.12);
 }
 
 .stat-card.clickable {
     cursor: pointer;
 }
 
-.bg-gradient-primary {
-    background: linear-gradient(135deg, #1890ff 0%, #096dd9 100%);
+.stat-card .card-body {
+    padding: 25px 20px;
 }
 
-.sync-status {
-    animation: pulse 2s infinite;
+.stat-card .card-body i {
+    width: 60px;
+    height: 60px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 12px;
+    font-size: 1.5rem !important;
+    margin-bottom: 15px;
 }
 
-@keyframes pulse {
-    0% { opacity: 1; }
-    50% { opacity: 0.5; }
-    100% { opacity: 1; }
+.stat-card .card-body i.text-primary {
+    background: rgba(24, 144, 255, 0.12);
 }
 
+.stat-card .card-body i.text-success {
+    background: rgba(82, 196, 26, 0.12);
+}
+
+.stat-card .card-body i.text-warning {
+    background: rgba(250, 173, 20, 0.12);
+}
+
+.stat-card .card-body i.text-info {
+    background: rgba(23, 162, 184, 0.12);
+}
+
+.stat-card h4 {
+    font-size: 32px;
+    font-weight: 700;
+    color: #1a1a2e;
+    margin-bottom: 5px;
+}
+
+.stat-card p {
+    font-size: 14px;
+    color: #666;
+    margin-bottom: 10px;
+}
+
+.stat-card small {
+    font-weight: 600;
+    font-size: 13px;
+}
+
+/* Recent Orders Table - Better contrast */
+.recent-orders-section .table {
+    margin: 0;
+}
+
+.recent-orders-section .table thead th {
+    background: #f8f9fa;
+    border-bottom: 2px solid #e8e8e8;
+    color: #666;
+    font-weight: 600;
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 14px 16px;
+}
+
+.recent-orders-section .table tbody tr {
+    transition: background 0.2s;
+}
+
+.recent-orders-section .table tbody tr:hover {
+    background: #f8f9fa;
+}
+
+.recent-orders-section .table tbody td {
+    padding: 16px;
+    vertical-align: middle;
+    border-bottom: 1px solid #f0f0f0;
+}
+
+/* Badge Improvements */
+.badge-success {
+    background: #52c41a !important;
+    color: #fff !important;
+}
+
+.badge-primary {
+    background: #1890ff !important;
+    color: #fff !important;
+}
+
+.badge-warning {
+    background: #faad14 !important;
+    color: #fff !important;
+}
+
+.badge-info {
+    background: #13c2c2 !important;
+    color: #fff !important;
+}
+
+.badge-danger {
+    background: #ff4d4f !important;
+    color: #fff !important;
+}
+
+/* Enhanced status badges */
+.recent-orders-section .badge {
+    padding: 8px 14px;
+    font-size: 13px;
+    font-weight: 600;
+    border-radius: 20px;
+}
+
+/* Subscription Cards */
+.subscription-card .card {
+    border: 1px solid #f0f0f0;
+    border-radius: 10px;
+    height: 100%;
+    transition: all 0.3s ease;
+}
+
+.subscription-card .card:hover {
+    border-color: #1890ff;
+    box-shadow: 0 4px 12px rgba(24, 144, 255, 0.15);
+}
+
+.subscription-card h6 {
+    font-weight: 600;
+    color: #1a1a2e;
+}
+
+/* Activity Section */
 .platform-item {
     display: flex;
     justify-content: space-between;
     align-items: center;
     margin-bottom: 10px;
-    padding: 8px 0;
-    border-bottom: 1px solid #eee;
+    padding: 10px 0;
+    border-bottom: 1px solid #f0f0f0;
 }
 
 .platform-item:last-child {
@@ -443,11 +226,13 @@
 .recent-activity-list {
     list-style: none;
     padding: 0;
+    margin: 0;
 }
 
 .recent-activity-list li {
-    padding: 8px 0;
-    border-bottom: 1px solid #eee;
+    padding: 10px 0;
+    border-bottom: 1px solid #f0f0f0;
+    color: #555;
 }
 
 .recent-activity-list li:last-child {
@@ -455,49 +240,356 @@
 }
 
 .recent-activity-list i {
+    width: 24px;
     margin-right: 10px;
-    width: 20px;
 }
 
-.action-btn {
-    margin-bottom: 10px;
-    padding: 12px 10px;
+/* Quick Actions - Enhanced buttons */
+.quick-actions-section .card-body .row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
 }
 
-.card {
-    border: none;
-    border-radius: 8px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-    margin-bottom: 20px;
-}
-
-.card-header {
-    background: #f8f9fa;
-    border-bottom: 1px solid #eee;
-    border-radius: 8px 8px 0 0 !important;
-}
-
-.subscription-card .card {
-    height: 100%;
+.quick-actions-section .card-body .row > div {
+    flex: 1;
+    min-width: 180px;
+    max-width: calc(25% - 12px);
+    padding: 0;
 }
 
 .quick-actions-section .btn {
-    margin-bottom: 10px;
+    padding: 16px 20px;
+    border-radius: 10px;
+    font-weight: 500;
+    transition: all 0.3s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    width: 100%;
+    height: 100%;
+    min-height: 56px;
 }
 
-@media (max-width: 768px) {
-    .account-sidebar {
-        margin-bottom: 30px;
+.quick-actions-section .btn i {
+    font-size: 18px;
+}
+
+.quick-actions-section .btn-outline-primary:hover,
+.quick-actions-section .btn-outline-secondary:hover,
+.quick-actions-section .btn-outline-info:hover,
+.quick-actions-section .btn-outline-warning:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
+
+@media (max-width: 992px) {
+    .quick-actions-section .card-body .row > div {
+        max-width: calc(50% - 12px);
     }
-    
+}
+
+@media (max-width: 576px) {
+    .quick-actions-section .card-body .row > div {
+        max-width: 100%;
+    }
+}
+
+/* Sync Animation */
+.sync-status {
+    animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+    0% { opacity: 1; }
+    50% { opacity: 0.7; }
+    100% { opacity: 1; }
+}
+
+/* Cards General Styling */
+.card-header h5 {
+    font-weight: 600;
+    color: #1a1a2e;
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.card-header h5 i {
+    color: #1890ff;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
     .stats-section .col-lg-3 {
         margin-bottom: 15px;
+    }
+    
+    .welcome-section .card-body {
+        padding: 20px;
+    }
+    
+    .welcome-section h3 {
+        font-size: 1.25rem;
+    }
+    
+    .quick-actions-section .btn {
+        margin-bottom: 10px;
     }
 }
 </style>
 {% endblock %}
 
-{% block extra_js %}
+{% block cabinet_content %}
+<!-- Welcome Section -->
+<div class="welcome-section mb-4">
+    <div class="card bg-gradient-primary text-white">
+        <div class="card-body">
+            <div class="row align-items-center">
+                <div class="col-md-8">
+                    <h3>{{ 'Welcome back'|t }}, {{ user.first_name }}!</h3>
+                    <p class="mb-0">{{ 'Manage your account, orders, and preferences from your unified dashboard.'|t }}</p>
+                    <small>{{ 'Connected platforms'|t }}: {{ 'Web App'|t }}{% if user.telegram_id %}, {{ 'Telegram Bot'|t }}{% endif %}</small>
+                </div>
+                <div class="col-md-4 text-center">
+                    <div class="sync-status">
+                        <i class="far fa-sync-alt" style="font-size: 2rem;"></i>
+                        <div class="mt-2">
+                            <small id="syncStatus">{{ 'Synchronized'|t }}</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Quick Stats -->
+<div class="stats-section mb-4">
+    <div class="row">
+        <div class="col-lg-3 col-md-6 col-sm-6">
+            <div class="stat-card clickable" onclick="window.location.href='{{ url_for('frontend.my_orders') }}'">
+                <div class="card text-center">
+                    <div class="card-body">
+                        <i class="far fa-shopping-bag text-primary" style="font-size: 2rem;"></i>
+                        <h4 class="mt-2" id="totalOrdersCount">{{ recent_orders|length }}</h4>
+                        <p class="text-muted">{{ 'Total Orders'|t }}</p>
+                        <small class="text-primary">{{ 'landing.button.view_all'|t }}</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-3 col-md-6 col-sm-6">
+            <div class="stat-card clickable" onclick="window.location.href='{{ url_for('frontend.my_subscriptions') }}'">
+                <div class="card text-center">
+                    <div class="card-body">
+                        <i class="far fa-sync-alt text-success" style="font-size: 2rem;"></i>
+                        <h4 class="mt-2">{{ active_subscriptions|length }}</h4>
+                        <p class="text-muted">{{ 'Active Subscriptions'|t }}</p>
+                        <small class="text-success">{{ 'Manage'|t }}</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-3 col-md-6 col-sm-6">
+            <div class="stat-card clickable" onclick="window.location.href='{{ url_for('frontend.my_loyalty') }}'">
+                <div class="card text-center">
+                    <div class="card-body">
+                        <i class="far fa-star text-warning" style="font-size: 2rem;"></i>
+                        <h4 class="mt-2">{{ loyalty_account.current_balance if loyalty_account else 0 }}</h4>
+                        <p class="text-muted">{{ 'Loyalty Points'|t }}</p>
+                        <small class="text-warning">{{ 'Tier'|t }}: {{ loyalty_account.current_tier if loyalty_account else 'Bronze' }}</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-3 col-md-6 col-sm-6">
+            <div class="stat-card clickable" onclick="window.location.href='{{ url_for('frontend.addresses') }}'">
+                <div class="card text-center">
+                    <div class="card-body">
+                        <i class="far fa-map-marker-alt text-info" style="font-size: 2rem;"></i>
+                        <h4 class="mt-2" id="addressesCount">0</h4>
+                        <p class="text-muted">{{ 'Saved Addresses'|t }}</p>
+                        <small class="text-info">{{ 'Manage'|t }}</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Recent Orders -->
+<div class="recent-orders-section mb-4">
+    <div class="card">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <h5>{{ 'Recent Orders'|t }}</h5>
+            <a href="{{ url_for('frontend.my_orders') }}" class="btn btn-outline-primary btn-sm">{{ 'landing.button.view_all'|t }}</a>
+        </div>
+        <div class="card-body">
+            {% if recent_orders %}
+            <div class="table-responsive">
+                <table class="table table-hover">
+                    <thead>
+                        <tr>
+                            <th>{{ 'Order #'|t }}</th>
+                            <th>{{ 'Date'|t }}</th>
+                            <th>{{ 'Status'|t }}</th>
+                            <th>{{ 'Total'|t }}</th>
+                            <th>{{ 'Actions'|t }}</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for order in recent_orders %}
+                        <tr>
+                            <td><strong>#{{ order.order_number }}</strong></td>
+                            <td>{{ order.created_at.strftime('%Y-%m-%d') }}</td>
+                            <td>
+                                <span class="badge badge-{{ 'success' if order.status.value == 'delivered' else 'primary' if order.status.value == 'confirmed' else 'warning' }}">
+                                    {{ order.status.value|title }}
+                                </span>
+                            </td>
+                            <td>{{ "{:,.0f}".format(order.total_amount)|replace(",", " ") }} UZS</td>
+                            <td>
+                                <button class="btn btn-sm btn-outline-primary" onclick="showOrderDetail({{ order.id }})">{{ 'View'|t }}</button>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="text-center py-4">
+                <i class="far fa-shopping-bag" style="font-size: 3rem; color: #ccc;"></i>
+                <h5 class="mt-3">{{ 'No orders yet'|t }}</h5>
+                <p class="text-muted">{{ 'Start shopping to see your orders here'|t }}</p>
+                <a href="{{ url_for('frontend.shop') }}" class="btn btn-primary">{{ 'Start Shopping'|t }}</a>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- Active Subscriptions -->
+{% if active_subscriptions %}
+<div class="subscriptions-section mb-4">
+    <div class="card">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <h5>{{ 'Active Subscriptions'|t }}</h5>
+            <a href="{{ url_for('frontend.my_subscriptions') }}" class="btn btn-outline-primary btn-sm">{{ 'Manage All'|t }}</a>
+        </div>
+        <div class="card-body">
+            <div class="row">
+                {% for subscription in active_subscriptions %}
+                <div class="col-md-6">
+                    <div class="subscription-card">
+                        <div class="card">
+                            <div class="card-body">
+                                <h6>{{ subscription.name }}</h6>
+                                <p class="text-muted">{{ subscription.description }}</p>
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <span class="text-primary">{{ "%.0f"|format(subscription.billing_amount) }} UZS / {{ subscription.delivery_frequency.value }}</span>
+                                    <span class="badge badge-success">{{ 'Active'|t }}</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<!-- Account Activity Summary -->
+<div class="activity-summary-section mb-4">
+    <div class="card">
+        <div class="card-header">
+            <h5><i class="far fa-chart-line"></i> {{ 'Account Activity'|t }}</h5>
+        </div>
+        <div class="card-body">
+            <div class="row">
+                <div class="col-md-6">
+                    <div class="activity-item">
+                        <h6>{{ 'Platform Usage'|t }}</h6>
+                        <div class="platform-usage">
+                            <div class="platform-item">
+                                <span class="platform-name">{{ 'Web App'|t }}</span>
+                                <span class="badge badge-success">{{ 'Active'|t }}</span>
+                            </div>
+                            {% if user.telegram_id %}
+                            <div class="platform-item">
+                                <span class="platform-name">{{ 'Telegram Bot'|t }}</span>
+                                <span class="badge badge-success">{{ 'Connected'|t }}</span>
+                            </div>
+                            {% else %}
+                            <div class="platform-item">
+                                <span class="platform-name">{{ 'Telegram Bot'|t }}</span>
+                                <button class="btn btn-sm btn-outline-primary" onclick="connectTelegram()">{{ 'Connect'|t }}</button>
+                            </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <div class="activity-item">
+                        <h6>{{ 'Recent Activity'|t }}</h6>
+                        <ul class="recent-activity-list">
+                            <li><i class="far fa-sign-in-alt text-success"></i> {{ 'Last login'|t }}: {{ user.last_login.strftime('%Y-%m-%d %H:%M') if user.last_login else 'Today' }}</li>
+                            <li><i class="far fa-user-edit text-info"></i> {{ 'Profile updated'|t }}: {{ user.updated_at.strftime('%Y-%m-%d') if user.updated_at else 'Never' }}</li>
+                            <li><i class="far fa-shopping-bag text-primary"></i> {{ 'Last order'|t }}: {{ recent_orders[0].created_at.strftime('%Y-%m-%d') if recent_orders else 'No orders yet' }}</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Quick Actions -->
+<div class="quick-actions-section">
+    <div class="card">
+        <div class="card-header">
+            <h5><i class="far fa-bolt"></i> {{ 'Quick Actions'|t }}</h5>
+        </div>
+        <div class="card-body">
+            <div class="row">
+                <div class="col-md-3">
+                    <a href="{{ url_for('frontend.shop') }}" class="btn btn-outline-primary btn-block action-btn">
+                        <i class="far fa-shopping-cart"></i>
+                        {{ 'Shop Products'|t }}
+                    </a>
+                </div>
+                <div class="col-md-3">
+                    <a href="{{ url_for('frontend.profile_settings') }}" class="btn btn-outline-secondary btn-block action-btn">
+                        <i class="far fa-user-edit"></i>
+                        {{ 'Edit Profile'|t }}
+                    </a>
+                </div>
+                <div class="col-md-3">
+                    <a href="{{ url_for('frontend.addresses') }}" class="btn btn-outline-info btn-block action-btn">
+                        <i class="far fa-map-marker-alt"></i>
+                        {{ 'Manage Addresses'|t }}
+                    </a>
+                </div>
+                <div class="col-md-3">
+                    <button class="btn btn-outline-warning btn-block action-btn" onclick="downloadAccountData()">
+                        <i class="far fa-download"></i>
+                        {{ 'Export Data'|t }}
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Order Detail Modal (shared partial) -->
+{% include 'frontend/partials/order_detail_modal.html' %}
+{% endblock %}
+
+{% block cabinet_extra_js %}
 <script>
 // Initialize unified account dashboard
 document.addEventListener('DOMContentLoaded', function() {

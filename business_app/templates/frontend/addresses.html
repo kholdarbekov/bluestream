@@ -1,309 +1,13 @@
-{% extends "frontend/base.html" %}
+{% extends "frontend/cabinet_base.html" %}
+{% set active_menu = 'addresses' %}
 
-{% block title %}{{ 'My Addresses'|t }} - {{ company_name }}{% endblock %}
+{% block cabinet_title %}{{ 'My Addresses'|t }}{% endblock %}
 
-{% block content %}
-        <!-- page-title -->
-        <section class="page-title">
-            <div class="bg-layer" style="background-image: url({{ url_for('static', filename='images/background/page-title.jpg') }});"></div>
-            <div class="auto-container">
-                <div class="content-box">
-                    <h1>{{ 'My Addresses'|t }}</h1>
-                    <ul class="bread-crumb clearfix">
-                        <li><a href="{{ url_for('frontend.index') }}">{{ 'landing.nav.home'|t }}</a></li>
-                        <li><a href="{{ url_for('frontend.my_account') }}">{{ 'landing.nav.my_account'|t }}</a></li>
-                        <li>{{ 'Addresses'|t }}</li>
-                    </ul>
-                </div>
-            </div>
-        </section>
-        <!-- page-title end -->
-
-        <!-- addresses-section -->
-        <section class="addresses-section">
-            <div class="auto-container">
-                <div class="row clearfix">
-                    <!-- Account Sidebar -->
-                    <div class="col-lg-3 col-md-4 col-sm-12">
-                        <div class="account-sidebar">
-                            <div class="profile-box">
-                                <div class="profile-info text-center">
-                                    <div class="profile-avatar">
-                                        <i class="far fa-user-circle" style="font-size: 60px; color: #1890ff;"></i>
-                                    </div>
-                                    <h4>{{ user.first_name }} {{ user.last_name }}</h4>
-                                    <p class="text-muted">{{ user.email }}</p>
-                                </div>
-                            </div>
-                            
-                            <div class="account-menu">
-                                <ul class="list-unstyled">
-                                    <li>
-                                        <a href="{{ url_for('frontend.my_account') }}">
-                                            <i class="far fa-tachometer-alt"></i> {{ 'Dashboard'|t }}
-                                        </a>
-                                    </li>
-                                    <li>
-                                        <a href="{{ url_for('frontend.profile_settings') }}">
-                                            <i class="far fa-user-edit"></i> {{ 'Profile Settings'|t }}
-                                        </a>
-                                    </li>
-                                    <li>
-                                        <a href="{{ url_for('frontend.my_orders') }}">
-                                            <i class="far fa-shopping-bag"></i> {{ 'landing.account.orders'|t }}
-                                        </a>
-                                    </li>
-                                    <li class="active">
-                                        <a href="{{ url_for('frontend.addresses') }}">
-                                            <i class="far fa-map-marker-alt"></i> {{ 'Addresses'|t }}
-                                        </a>
-                                    </li>
-                                    <li>
-                                        <a href="{{ url_for('frontend.account_security') }}">
-                                            <i class="far fa-shield-alt"></i> {{ 'Security'|t }}
-                                        </a>
-                                    </li>
-                                    <li>
-                                        <a href="#" onclick="logout()">
-                                            <i class="far fa-sign-out-alt"></i> {{ 'landing.nav.logout'|t }}
-                                        </a>
-                                    </li>
-                                </ul>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <!-- Addresses Content -->
-                    <div class="col-lg-9 col-md-8 col-sm-12">
-                        <div class="addresses-content">
-                            <!-- Add New Address Button -->
-                            <div class="add-address-section mb-4">
-                                <div class="d-flex justify-content-between align-items-center">
-                                    <h3>{{ 'My Addresses'|t }}</h3>
-                                    <button class="btn btn-primary" onclick="showAddAddressModal()">
-                                        <i class="far fa-plus"></i> {{ 'Add New Address'|t }}
-                                    </button>
-                                </div>
-                            </div>
-
-                            <!-- Addresses List -->
-                            <div class="addresses-list" id="addressesList">
-                                <!-- This will be populated by JavaScript -->
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </section>
-
-        <!-- Address Wizard Modal -->
-        <div class="modal fade" id="addressWizardModal" tabindex="-1" role="dialog" data-backdrop="static">
-            <div class="modal-dialog modal-lg" role="document">
-                <div class="modal-content">
-                    <div class="modal-header">
-                        <h5 class="modal-title">{{ 'Add New Address'|t }}</h5>
-                        <button type="button" class="close" data-dismiss="modal">
-                            <span>&times;</span>
-                        </button>
-                    </div>
-                    <div class="modal-body">
-                        <!-- Step Indicators -->
-                        <div class="wizard-steps">
-                            <div class="step-indicator active">
-                                <span class="step-number">1</span>
-                                <span class="step-label">{{ 'Select Location'|t }}</span>
-                            </div>
-                            <div class="step-connector"></div>
-                            <div class="step-indicator">
-                                <span class="step-number">2</span>
-                                <span class="step-label">{{ 'Address Details'|t }}</span>
-                            </div>
-                            <div class="step-connector"></div>
-                            <div class="step-indicator">
-                                <span class="step-number">3</span>
-                                <span class="step-label">{{ 'Confirm'|t }}</span>
-                            </div>
-                        </div>
-
-                        <form id="addressWizardForm">
-                            <!-- Hidden fields for coordinates -->
-                            <input type="hidden" id="selectedLatitude" name="latitude">
-                            <input type="hidden" id="selectedLongitude" name="longitude">
-
-                            <!-- Step 1: Select Location on Map -->
-                            <div class="wizard-step active" id="wizardStep1">
-                                <h5><i class="fas fa-map-marked-alt"></i> {{ 'Select Your Location'|t }}</h5>
-
-                                <!-- Map Controls -->
-                                <div class="map-controls">
-                                    <input type="text" id="addressSearchInput" class="form-control"
-                                           placeholder="{{ 'Search for an address...'|t }}">
-                                    <button type="button" id="searchAddressBtn" class="btn btn-outline-primary">
-                                        <i class="fas fa-search"></i>
-                                    </button>
-                                    <button type="button" id="useMyLocationBtn" class="btn btn-outline-secondary">
-                                        <i class="fas fa-location-arrow"></i> {{ 'Use My Location'|t }}
-                                    </button>
-                                </div>
-
-                                <!-- Map Container -->
-                                <div class="map-container">
-                                    <div id="addressWizardMap"></div>
-                                </div>
-
-                                <!-- Hint -->
-                                <div class="map-hint">
-                                    <i class="fas fa-info-circle"></i>
-                                    <p>{{ 'Click on the map to select your delivery location. You can drag the marker to adjust the position.'|t }}</p>
-                                </div>
-
-                                <!-- Location Status -->
-                                <div id="locationStatus" class="d-none">
-                                    <i class="fas fa-check-circle"></i>
-                                    <span id="locationStatusText"></span>
-                                </div>
-                            </div>
-
-                            <!-- Step 2: Address Details -->
-                            <div class="wizard-step" id="wizardStep2">
-                                <h5><i class="fas fa-edit"></i> {{ 'Address Details'|t }}</h5>
-
-                                <!-- Quick Title Selection -->
-                                <div class="form-group">
-                                    <label>{{ 'Quick Select Title'|t }}</label>
-                                    <div class="quick-titles">
-                                        <button type="button" class="quick-title-btn" data-title="{{ 'Home'|t }}">
-                                            <i class="fas fa-home"></i> {{ 'Home'|t }}
-                                        </button>
-                                        <button type="button" class="quick-title-btn" data-title="{{ 'Work'|t }}">
-                                            <i class="fas fa-briefcase"></i> {{ 'Work'|t }}
-                                        </button>
-                                        <button type="button" class="quick-title-btn" data-title="{{ 'Other'|t }}">
-                                            <i class="fas fa-map-pin"></i> {{ 'Other'|t }}
-                                        </button>
-                                    </div>
-                                </div>
-
-                                <div class="row">
-                                    <div class="col-md-12 form-group">
-                                        <label for="addressTitle">{{ 'Address Title'|t }} <span class="text-danger">*</span></label>
-                                        <input type="text" id="addressTitle" class="form-control"
-                                               placeholder="{{ 'e.g., Home, Office, etc.'|t }}" required>
-                                    </div>
-
-                                    <div class="col-md-12 form-group">
-                                        <label for="fullAddress">{{ 'Full Address'|t }}</label>
-                                        <textarea id="fullAddress" class="form-control" rows="2"
-                                                  placeholder="{{ 'Auto-filled from map selection'|t }}"></textarea>
-                                    </div>
-
-                                    <div class="col-md-6 form-group">
-                                        <label for="districtSelect">{{ 'District'|t }}</label>
-                                        <select id="districtSelect" class="form-control">
-                                            <option value="">-- {{ 'Select District'|t }} --</option>
-                                        </select>
-                                    </div>
-
-                                    <div class="col-md-6 form-group">
-                                        <label for="streetAddress">{{ 'Street'|t }}</label>
-                                        <input type="text" id="streetAddress" class="form-control"
-                                               placeholder="{{ 'Street name'|t }}">
-                                    </div>
-
-                                    <div class="col-md-4 form-group">
-                                        <label for="buildingNumber">{{ 'Building'|t }}</label>
-                                        <input type="text" id="buildingNumber" class="form-control"
-                                               placeholder="{{ 'Building #'|t }}">
-                                    </div>
-
-                                    <div class="col-md-4 form-group">
-                                        <label for="entranceNumber">{{ 'Entrance'|t }}</label>
-                                        <input type="text" id="entranceNumber" class="form-control"
-                                               placeholder="{{ 'Entrance #'|t }}">
-                                    </div>
-
-                                    <div class="col-md-4 form-group">
-                                        <label for="floorNumber">{{ 'Floor'|t }}</label>
-                                        <input type="text" id="floorNumber" class="form-control"
-                                               placeholder="{{ 'Floor #'|t }}">
-                                    </div>
-
-                                    <div class="col-md-6 form-group">
-                                        <label for="apartmentNumber">{{ 'Apartment'|t }}</label>
-                                        <input type="text" id="apartmentNumber" class="form-control"
-                                               placeholder="{{ 'Apartment #'|t }}">
-                                    </div>
-
-                                    <div class="col-md-6 form-group">
-                                        <label for="landmark">{{ 'Landmark'|t }}</label>
-                                        <input type="text" id="landmark" class="form-control"
-                                               placeholder="{{ 'Nearby landmark'|t }}">
-                                    </div>
-                                </div>
-                            </div>
-
-                            <!-- Step 3: Confirmation & Options -->
-                            <div class="wizard-step" id="wizardStep3">
-                                <h5><i class="fas fa-check-circle"></i> {{ 'Confirm & Save'|t }}</h5>
-
-                                <div class="form-group">
-                                    <label for="deliveryInstructions">{{ 'Delivery Instructions'|t }}</label>
-                                    <textarea id="deliveryInstructions" class="form-control" rows="3"
-                                              placeholder="{{ 'Special instructions for delivery (e.g., ring doorbell, leave at door, etc.)'|t }}"></textarea>
-                                </div>
-
-                                <div class="row">
-                                    <div class="col-md-6 form-group">
-                                        <div class="custom-control custom-checkbox">
-                                            <input type="checkbox" class="custom-control-input" id="isDefault">
-                                            <label class="custom-control-label" for="isDefault">
-                                                {{ 'Set as default address'|t }}
-                                            </label>
-                                        </div>
-                                    </div>
-                                    <div class="col-md-6 form-group">
-                                        <div class="custom-control custom-checkbox">
-                                            <input type="checkbox" class="custom-control-input" id="isBusiness">
-                                            <label class="custom-control-label" for="isBusiness">
-                                                {{ 'This is a business address'|t }}
-                                            </label>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <!-- Summary -->
-                                <div class="confirmation-card">
-                                    <h6><i class="fas fa-info-circle"></i> {{ 'Address Summary'|t }}</h6>
-                                    <p class="text-muted small mb-0">
-                                        {{ 'Your address will be saved with the location you selected on the map. Make sure the pin was placed correctly.'|t }}
-                                    </p>
-                                </div>
-                            </div>
-                        </form>
-                    </div>
-                    <div class="modal-footer wizard-navigation">
-                        <button type="button" id="wizardPrevBtn" class="btn btn-secondary" style="display: none;">
-                            <i class="fas fa-arrow-left"></i> {{ 'Back'|t }}
-                        </button>
-                        <div>
-                            <button type="button" class="btn btn-outline-secondary" data-dismiss="modal">
-                                {{ 'Cancel'|t }}
-                            </button>
-                            <button type="button" id="wizardNextBtn" class="btn btn-primary" disabled>
-                                {{ 'Next'|t }} <i class="fas fa-arrow-right"></i>
-                            </button>
-                            <button type="button" id="wizardSaveBtn" class="btn btn-success" style="display: none;">
-                                <i class="fas fa-check"></i> {{ 'Save Address'|t }}
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-        <!-- addresses-section end -->
+{% block cabinet_breadcrumb_items %}
+<li>{{ 'Addresses'|t }}</li>
 {% endblock %}
 
-{% block extra_head %}
+{% block cabinet_extra_head %}
 <!-- Leaflet CSS for map -->
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
       integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
@@ -313,14 +17,6 @@
 <style>
 /*
  * Fix for Leaflet tiles not displaying properly due to global img styles.
- *
- * ROOT CAUSE: style.css has a global img rule with transition-property: all
- * which includes visibility transitions. Leaflet tiles start as visibility:hidden
- * and change to visibility:inherit when loaded. The global transition causes
- * a 0.8s delay (0.1s delay + 0.7s duration) before tiles become visible.
- *
- * SOLUTION: Override ALL transition properties with high specificity selectors.
- * Using !important and multiple selector combinations to ensure override.
  */
 
 /* High specificity reset for ALL Leaflet tile images */
@@ -332,10 +28,8 @@
 .leaflet-container img.leaflet-tile,
 .leaflet-pane img,
 .leaflet-tile-pane img {
-    /* Override max-width from global img */
     max-width: none !important;
     max-height: none !important;
-    /* CRITICAL: Reset ALL transition properties individually */
     -webkit-transition: none !important;
     -moz-transition: none !important;
     -o-transition: none !important;
@@ -348,10 +42,8 @@
     transition-delay: 0s !important;
     -webkit-transition-timing-function: initial !important;
     transition-timing-function: initial !important;
-    /* Force visibility - don't rely on inherit */
     visibility: visible !important;
     opacity: 1 !important;
-    /* Reset display from inline-block */
     display: block !important;
 }
 
@@ -405,109 +97,236 @@
     visibility: visible !important;
     opacity: 1 !important;
 }
-</style>
-<style>
-.account-sidebar {
-    background: #fff;
-    border-radius: 8px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-    padding: 20px;
-    margin-bottom: 20px;
-}
 
-.profile-box {
-    margin-bottom: 30px;
-    padding-bottom: 20px;
-    border-bottom: 1px solid #eee;
-}
-
-.account-menu ul li {
-    margin-bottom: 10px;
-}
-
-.account-menu ul li a {
-    display: block;
-    padding: 12px 15px;
-    color: #666;
-    text-decoration: none;
-    border-radius: 6px;
-    transition: all 0.3s;
-}
-
-.account-menu ul li a:hover,
-.account-menu ul li.active a {
-    background: #1890ff;
-    color: #fff;
-    text-decoration: none;
-}
-
-.account-menu ul li a i {
-    width: 20px;
-    margin-right: 10px;
-}
-
+/* Address card styles */
 .address-card {
     background: #fff;
-    border: 1px solid #eee;
-    border-radius: 8px;
-    padding: 20px;
+    border: 1px solid #e8e8e8;
+    border-radius: 12px;
+    padding: 24px;
     margin-bottom: 20px;
-    transition: all 0.3s;
+    transition: all 0.3s ease;
+    position: relative;
+    overflow: hidden;
+}
+
+.address-card::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 4px;
+    background: linear-gradient(180deg, #1890ff 0%, #0d6efd 100%);
+    opacity: 0;
+    transition: opacity 0.3s ease;
 }
 
 .address-card:hover {
-    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    box-shadow: 0 8px 24px rgba(24, 144, 255, 0.12);
+    border-color: #d0e3ff;
+    transform: translateY(-2px);
+}
+
+.address-card:hover::before {
+    opacity: 1;
 }
 
 .address-card.default {
     border-color: #1890ff;
-    background: #f6f9ff;
+    background: linear-gradient(135deg, #f6f9ff 0%, #e6f4ff 100%);
+}
+
+.address-card.default::before {
+    opacity: 1;
+    background: linear-gradient(180deg, #52c41a 0%, #389e0d 100%);
+}
+
+.address-card-content {
+    display: flex;
+    gap: 20px;
+}
+
+.address-icon {
+    flex-shrink: 0;
+    width: 48px;
+    height: 48px;
+    border-radius: 12px;
+    background: linear-gradient(135deg, #e6f4ff 0%, #bae0ff 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #1890ff;
+    font-size: 20px;
+}
+
+.address-card.default .address-icon {
+    background: linear-gradient(135deg, #f6ffed 0%, #d9f7be 100%);
+    color: #52c41a;
+}
+
+.address-info {
+    flex: 1;
+    min-width: 0;
 }
 
 .address-header {
     display: flex;
-    justify-content: between;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.address-title-wrapper {
+    display: flex;
     align-items: center;
-    margin-bottom: 15px;
+    gap: 10px;
+    flex-wrap: wrap;
 }
 
 .address-title {
     font-weight: 600;
-    color: #333;
+    color: #1a1a2e;
     margin: 0;
+    font-size: 1.1rem;
 }
 
 .address-actions {
     display: flex;
-    gap: 10px;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.address-actions .btn {
+    padding: 6px 14px;
+    font-size: 13px;
+    border-radius: 20px;
+    transition: all 0.2s ease;
+    font-weight: 500;
+}
+
+.address-actions .btn-outline-primary {
+    border-color: #1890ff;
+    color: #1890ff;
+}
+
+.address-actions .btn-outline-primary:hover {
+    background: #1890ff;
+    color: #fff;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(24, 144, 255, 0.3);
+}
+
+.address-actions .btn-outline-success {
+    border-color: #52c41a;
+    color: #52c41a;
+}
+
+.address-actions .btn-outline-success:hover {
+    background: #52c41a;
+    color: #fff;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(82, 196, 26, 0.3);
+}
+
+.address-actions .btn-outline-danger {
+    border-color: #ff4d4f;
+    color: #ff4d4f;
+}
+
+.address-actions .btn-outline-danger:hover {
+    background: #ff4d4f;
+    color: #fff;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(255, 77, 79, 0.3);
 }
 
 .address-details {
     color: #666;
-    line-height: 1.6;
+    line-height: 1.7;
+    font-size: 14px;
+}
+
+.address-details p {
+    margin-bottom: 6px;
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+}
+
+.address-details p:last-child {
+    margin-bottom: 0;
+}
+
+.address-details strong {
+    color: #8c8c8c;
+    font-weight: 500;
+    min-width: 100px;
+    flex-shrink: 0;
 }
 
 .default-badge {
-    background: #1890ff;
+    background: linear-gradient(135deg, #52c41a 0%, #389e0d 100%);
     color: white;
-    padding: 2px 8px;
-    border-radius: 12px;
-    font-size: 12px;
-    margin-left: 10px;
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    box-shadow: 0 2px 8px rgba(82, 196, 26, 0.3);
+}
+
+.business-badge {
+    background: linear-gradient(135deg, #722ed1 0%, #531dab 100%);
+    color: white;
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    box-shadow: 0 2px 8px rgba(114, 46, 209, 0.3);
 }
 
 .modal-content {
-    border-radius: 8px;
+    border-radius: 12px;
+    overflow: hidden;
 }
 
 .modal-header {
-    background: #f8f9fa;
-    border-bottom: 1px solid #eee;
+    background: linear-gradient(135deg, #1890ff 0%, #0d6efd 100%);
+    border-bottom: none;
+    color: white;
+    padding: 20px 24px;
+}
+
+.modal-header .modal-title {
+    font-weight: 600;
+}
+
+.modal-header .close {
+    color: white;
+    opacity: 0.8;
+    text-shadow: none;
+}
+
+.modal-header .close:hover {
+    opacity: 1;
 }
 
 @media (max-width: 768px) {
-    .account-sidebar {
-        margin-bottom: 30px;
+    .address-card-content {
+        flex-direction: column;
+        gap: 15px;
+    }
+    
+    .address-icon {
+        width: 40px;
+        height: 40px;
+        font-size: 18px;
     }
     
     .address-header {
@@ -517,12 +336,244 @@
     
     .address-actions {
         margin-top: 10px;
+        width: 100%;
+    }
+    
+    .address-actions .btn {
+        flex: 1;
+        text-align: center;
+    }
+    
+    .address-details strong {
+        min-width: auto;
     }
 }
 </style>
 {% endblock %}
 
-{% block extra_js %}
+{% block cabinet_content %}
+<!-- Add New Address Button -->
+<div class="add-address-section mb-4">
+    <div class="d-flex justify-content-between align-items-center">
+        <h3>{{ 'My Addresses'|t }}</h3>
+        <button class="btn btn-primary" onclick="showAddAddressModal()">
+            <i class="far fa-plus"></i> {{ 'Add New Address'|t }}
+        </button>
+    </div>
+</div>
+
+<!-- Addresses List -->
+<div class="addresses-list" id="addressesList">
+    <!-- This will be populated by JavaScript -->
+</div>
+
+<!-- Address Wizard Modal -->
+<div class="modal fade" id="addressWizardModal" tabindex="-1" role="dialog" data-backdrop="static">
+    <div class="modal-dialog modal-lg" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="addressWizardModalTitle">{{ 'Add New Address'|t }}</h5>
+                <button type="button" class="close" data-dismiss="modal">
+                    <span>&times;</span>
+                </button>
+            </div>
+            <div class="modal-body">
+                <!-- Step Indicators -->
+                <div class="wizard-steps">
+                    <div class="step-indicator active">
+                        <span class="step-number">1</span>
+                        <span class="step-label">{{ 'Select Location'|t }}</span>
+                    </div>
+                    <div class="step-connector"></div>
+                    <div class="step-indicator">
+                        <span class="step-number">2</span>
+                        <span class="step-label">{{ 'Address Details'|t }}</span>
+                    </div>
+                    <div class="step-connector"></div>
+                    <div class="step-indicator">
+                        <span class="step-number">3</span>
+                        <span class="step-label">{{ 'Confirm'|t }}</span>
+                    </div>
+                </div>
+
+                <form id="addressWizardForm">
+                    <!-- Hidden fields for coordinates -->
+                    <input type="hidden" id="selectedLatitude" name="latitude">
+                    <input type="hidden" id="selectedLongitude" name="longitude">
+
+                    <!-- Step 1: Select Location on Map -->
+                    <div class="wizard-step active" id="wizardStep1">
+                        <h5><i class="fas fa-map-marked-alt"></i> {{ 'Select Your Location'|t }}</h5>
+
+                        <!-- Map Controls -->
+                        <div class="map-controls">
+                            <input type="text" id="addressSearchInput" class="form-control"
+                                   placeholder="{{ 'Search for an address...'|t }}">
+                            <button type="button" id="searchAddressBtn" class="btn btn-outline-primary">
+                                <i class="fas fa-search"></i>
+                            </button>
+                            <button type="button" id="useMyLocationBtn" class="btn btn-outline-secondary">
+                                <i class="fas fa-location-arrow"></i> {{ 'Use My Location'|t }}
+                            </button>
+                        </div>
+
+                        <!-- Map Container -->
+                        <div class="map-container">
+                            <div id="addressWizardMap"></div>
+                        </div>
+
+                        <!-- Hint -->
+                        <div class="map-hint">
+                            <i class="fas fa-info-circle"></i>
+                            <p>{{ 'Click on the map to select your delivery location. You can drag the marker to adjust the position.'|t }}</p>
+                        </div>
+
+                        <!-- Location Status -->
+                        <div id="locationStatus" class="d-none">
+                            <i class="fas fa-check-circle"></i>
+                            <span id="locationStatusText"></span>
+                        </div>
+                    </div>
+
+                    <!-- Step 2: Address Details -->
+                    <div class="wizard-step" id="wizardStep2">
+                        <h5><i class="fas fa-edit"></i> {{ 'Address Details'|t }}</h5>
+
+                        <!-- Quick Title Selection -->
+                        <div class="form-group">
+                            <label>{{ 'Quick Select Title'|t }}</label>
+                            <div class="quick-titles">
+                                <button type="button" class="quick-title-btn" data-title="{{ 'Home'|t }}">
+                                    <i class="fas fa-home"></i> {{ 'Home'|t }}
+                                </button>
+                                <button type="button" class="quick-title-btn" data-title="{{ 'Work'|t }}">
+                                    <i class="fas fa-briefcase"></i> {{ 'Work'|t }}
+                                </button>
+                                <button type="button" class="quick-title-btn" data-title="{{ 'Other'|t }}">
+                                    <i class="fas fa-map-pin"></i> {{ 'Other'|t }}
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="row">
+                            <div class="col-md-12 form-group">
+                                <label for="addressTitle">{{ 'Address Title'|t }} <span class="text-danger">*</span></label>
+                                <input type="text" id="addressTitle" class="form-control"
+                                       placeholder="{{ 'e.g., Home, Office, etc.'|t }}" required>
+                            </div>
+
+                            <div class="col-md-12 form-group">
+                                <label for="fullAddress">{{ 'Full Address'|t }}</label>
+                                <textarea id="fullAddress" class="form-control" rows="2"
+                                          placeholder="{{ 'Auto-filled from map selection'|t }}"></textarea>
+                            </div>
+
+                            <div class="col-md-6 form-group">
+                                <label for="districtSelect">{{ 'District'|t }}</label>
+                                <select id="districtSelect" class="form-control">
+                                    <option value="">-- {{ 'Select District'|t }} --</option>
+                                </select>
+                            </div>
+
+                            <div class="col-md-6 form-group">
+                                <label for="streetAddress">{{ 'Street'|t }}</label>
+                                <input type="text" id="streetAddress" class="form-control"
+                                       placeholder="{{ 'Street name'|t }}">
+                            </div>
+
+                            <div class="col-md-4 form-group">
+                                <label for="buildingNumber">{{ 'Building'|t }}</label>
+                                <input type="text" id="buildingNumber" class="form-control"
+                                       placeholder="{{ 'Building #'|t }}">
+                            </div>
+
+                            <div class="col-md-4 form-group">
+                                <label for="entranceNumber">{{ 'Entrance'|t }}</label>
+                                <input type="text" id="entranceNumber" class="form-control"
+                                       placeholder="{{ 'Entrance #'|t }}">
+                            </div>
+
+                            <div class="col-md-4 form-group">
+                                <label for="floorNumber">{{ 'Floor'|t }}</label>
+                                <input type="text" id="floorNumber" class="form-control"
+                                       placeholder="{{ 'Floor #'|t }}">
+                            </div>
+
+                            <div class="col-md-6 form-group">
+                                <label for="apartmentNumber">{{ 'Apartment'|t }}</label>
+                                <input type="text" id="apartmentNumber" class="form-control"
+                                       placeholder="{{ 'Apartment #'|t }}">
+                            </div>
+
+                            <div class="col-md-6 form-group">
+                                <label for="landmark">{{ 'Landmark'|t }}</label>
+                                <input type="text" id="landmark" class="form-control"
+                                       placeholder="{{ 'Nearby landmark'|t }}">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Step 3: Confirmation & Options -->
+                    <div class="wizard-step" id="wizardStep3">
+                        <h5><i class="fas fa-check-circle"></i> {{ 'Confirm & Save'|t }}</h5>
+
+                        <div class="form-group">
+                            <label for="deliveryInstructions">{{ 'Delivery Instructions'|t }}</label>
+                            <textarea id="deliveryInstructions" class="form-control" rows="3"
+                                      placeholder="{{ 'Special instructions for delivery (e.g., ring doorbell, leave at door, etc.)'|t }}"></textarea>
+                        </div>
+
+                        <div class="row">
+                            <div class="col-md-6 form-group">
+                                <div class="custom-control custom-checkbox">
+                                    <input type="checkbox" class="custom-control-input" id="isDefault">
+                                    <label class="custom-control-label" for="isDefault">
+                                        {{ 'Set as default address'|t }}
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="col-md-6 form-group">
+                                <div class="custom-control custom-checkbox">
+                                    <input type="checkbox" class="custom-control-input" id="isBusiness">
+                                    <label class="custom-control-label" for="isBusiness">
+                                        {{ 'This is a business address'|t }}
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Summary -->
+                        <div class="confirmation-card">
+                            <h6><i class="fas fa-info-circle"></i> {{ 'Address Summary'|t }}</h6>
+                            <p class="text-muted small mb-0">
+                                {{ 'Your address will be saved with the location you selected on the map. Make sure the pin was placed correctly.'|t }}
+                            </p>
+                        </div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer wizard-navigation">
+                <button type="button" id="wizardPrevBtn" class="btn btn-secondary" style="display: none;">
+                    <i class="fas fa-arrow-left"></i> {{ 'Back'|t }}
+                </button>
+                <div>
+                    <button type="button" class="btn btn-outline-secondary" data-dismiss="modal">
+                        {{ 'Cancel'|t }}
+                    </button>
+                    <button type="button" id="wizardNextBtn" class="btn btn-primary" disabled>
+                        {{ 'Next'|t }} <i class="fas fa-arrow-right"></i>
+                    </button>
+                    <button type="button" id="wizardSaveBtn" class="btn btn-success" style="display: none;">
+                        <i class="fas fa-check"></i> {{ 'Save Address'|t }}
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block cabinet_extra_js %}
 <!-- Leaflet JS for map -->
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
         integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
@@ -577,34 +628,39 @@ function renderAddresses() {
 
     const addressesHTML = addresses.map(address => `
         <div class="address-card ${address.is_default ? 'default' : ''}">
-            <div class="address-header">
-                <div>
-                    <h5 class="address-title">
-                        ${address.title}
-                        ${address.is_default ? '<span class="default-badge">{{ "Default"|t }}</span>' : ''}
-                        ${address.is_business ? '<span class="badge badge-info ml-2">{{ "Business"|t }}</span>' : ''}
-                    </h5>
+            <div class="address-card-content">
+                <div class="address-icon">
+                    <i class="fas ${address.is_business ? 'fa-building' : 'fa-map-marker-alt'}"></i>
                 </div>
-                <div class="address-actions">
-                    <button class="btn btn-outline-primary btn-sm" onclick="editAddress(${address.id})">
-                        <i class="far fa-edit"></i> {{ 'Edit'|t }}
-                    </button>
-                    ${!address.is_default ? `
-                    <button class="btn btn-outline-success btn-sm" onclick="setDefaultAddress(${address.id})">
-                        <i class="far fa-check"></i> {{ 'Set Default'|t }}
-                    </button>
-                    <button class="btn btn-outline-danger btn-sm" onclick="deleteAddress(${address.id})">
-                        <i class="far fa-trash"></i> {{ 'Delete'|t }}
-                    </button>
-                    ` : ''}
+                <div class="address-info">
+                    <div class="address-header">
+                        <div class="address-title-wrapper">
+                            <h5 class="address-title">${address.title}</h5>
+                            ${address.is_default ? '<span class="default-badge">{{ "Default"|t }}</span>' : ''}
+                            ${address.is_business ? '<span class="business-badge">{{ "Business"|t }}</span>' : ''}
+                        </div>
+                        <div class="address-actions">
+                            <button class="btn btn-outline-primary btn-sm" onclick="editAddress(${address.id})">
+                                <i class="far fa-edit"></i> {{ 'Edit'|t }}
+                            </button>
+                            ${!address.is_default ? `
+                            <button class="btn btn-outline-success btn-sm" onclick="setDefaultAddress(${address.id})">
+                                <i class="far fa-check-circle"></i> {{ 'Set Default'|t }}
+                            </button>
+                            <button class="btn btn-outline-danger btn-sm" onclick="deleteAddress(${address.id})">
+                                <i class="far fa-trash-alt"></i> {{ 'Delete'|t }}
+                            </button>
+                            ` : ''}
+                        </div>
+                    </div>
+                    <div class="address-details">
+                        <p><strong>{{ 'landing.contact.info.address'|t }}:</strong> <span>${address.full_address || address.street_address}</span></p>
+                        <p><strong>{{ 'City'|t }}:</strong> <span>${address.city}${address.district ? ', ' + address.district : ''}</span></p>
+                        ${address.apartment_number ? `<p><strong>{{ 'Apartment/Floor'|t }}:</strong> <span>${address.apartment_number}</span></p>` : ''}
+                        ${address.landmark ? `<p><strong>{{ 'Landmark'|t }}:</strong> <span>${address.landmark}</span></p>` : ''}
+                        ${address.delivery_instructions ? `<p><strong>{{ 'Instructions'|t }}:</strong> <span>${address.delivery_instructions}</span></p>` : ''}
+                    </div>
                 </div>
-            </div>
-            <div class="address-details">
-                <p><strong>{{ 'landing.contact.info.address'|t }}:</strong> ${address.full_address || address.street_address}</p>
-                <p><strong>{{ 'City'|t }}:</strong> ${address.city}${address.district ? ', ' + address.district : ''}</p>
-                ${address.apartment_number ? `<p><strong>{{ 'Apartment/Floor'|t }}:</strong> ${address.apartment_number}</p>` : ''}
-                ${address.landmark ? `<p><strong>{{ 'Landmark'|t }}:</strong> ${address.landmark}</p>` : ''}
-                ${address.delivery_instructions ? `<p><strong>{{ 'Instructions'|t }}:</strong> ${address.delivery_instructions}</p>` : ''}
             </div>
         </div>
     `).join('');
@@ -626,8 +682,6 @@ function editAddress(addressId) {
         console.error('Address wizard not loaded');
     }
 }
-
-// Note: saveAddress() is now handled by the AddressWizard in address-wizard.js
 
 // Set default address
 async function setDefaultAddress(addressId) {

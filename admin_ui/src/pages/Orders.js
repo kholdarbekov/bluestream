@@ -160,12 +160,23 @@ const Orders = () => {
   const orderStatusColors = {
     pending: 'orange',
     confirmed: 'blue',
-    processing: 'cyan',
-    shipped: 'purple',
+    preparing: 'cyan',
+    out_for_delivery: 'purple',
     delivered: 'green',
     cancelled: 'red',
-    refunded: 'volcano'
+    returned: 'volcano'
   };
+
+  // Fetch order statuses from backend (single source of truth)
+  const { data: statusesData } = useQuery(
+    ['order-statuses'],
+    async () => {
+      const response = await fetch('/api/orders/statuses');
+      return response.json();
+    },
+    { staleTime: 1000 * 60 * 60 * 24 } // Cache for 24 hour
+  );
+  const orderStatuses = statusesData?.data?.statuses || [];
 
   const columns = [
     {
@@ -421,15 +432,13 @@ const Orders = () => {
               placeholder={t('ui.orders.filter_by_status')}
               allowClear
               onChange={handleStatusFilter}
-              style={{ width: 150 }}
+              style={{ width: 180 }}
             >
-              <Option value="pending">{t('ui.orders.status_pending')}</Option>
-              <Option value="confirmed">{t('ui.orders.status_confirmed')}</Option>
-              <Option value="processing">{t('ui.orders.status_processing')}</Option>
-              <Option value="shipped">{t('ui.orders.status_shipped')}</Option>
-              <Option value="delivered">{t('ui.orders.status_delivered')}</Option>
-              <Option value="cancelled">{t('ui.orders.status_cancelled')}</Option>
-              <Option value="refunded">{t('ui.orders.status_refunded')}</Option>
+              {orderStatuses.map(status => (
+                <Option key={status.value} value={status.value}>
+                  {t(`ui.orders.status_${status.value}`, status.label)}
+                </Option>
+              ))}
             </Select>
             <RangePicker
               onChange={handleDateRangeChange}
@@ -521,59 +530,59 @@ const Orders = () => {
             <Spin spinning={orderDetailsLoading}>
               <div style={{ marginTop: 16 }}>
                 {(selectedOrder.items && selectedOrder.items.length > 0) || (selectedOrder.items_summary && selectedOrder.items_summary.length > 0) ? (
-                <Table
-                  dataSource={selectedOrder.items || selectedOrder.items_summary}
-                  rowKey={(_, index) => `item-${index}`}
-                  pagination={false}
-                  size="small"
-                  columns={[
-                    {
-                      title: t('ui.orders.product_name', 'Product'),
-                      dataIndex: 'product_name',
-                      key: 'product_name',
-                    },
-                    {
-                      title: t('ui.orders.quantity', 'Qty'),
-                      dataIndex: 'quantity',
-                      key: 'quantity',
-                      width: 80,
-                      align: 'center',
-                    },
-                    {
-                      title: t('ui.orders.unit_price', 'Unit Price'),
-                      dataIndex: 'unit_price',
-                      key: 'unit_price',
-                      width: 120,
-                      align: 'right',
-                      render: (price) => `${price?.toLocaleString()} UZS`,
-                    },
-                    {
-                      title: t('ui.orders.total_price', 'Total'),
-                      dataIndex: 'total_price',
-                      key: 'total_price',
-                      width: 120,
-                      align: 'right',
-                      render: (price) => (
-                        <span style={{ fontWeight: 'bold' }}>
-                          {price?.toLocaleString()} UZS
+                  <Table
+                    dataSource={selectedOrder.items || selectedOrder.items_summary}
+                    rowKey={(_, index) => `item-${index}`}
+                    pagination={false}
+                    size="small"
+                    columns={[
+                      {
+                        title: t('ui.orders.product_name', 'Product'),
+                        dataIndex: 'product_name',
+                        key: 'product_name',
+                      },
+                      {
+                        title: t('ui.orders.quantity', 'Qty'),
+                        dataIndex: 'quantity',
+                        key: 'quantity',
+                        width: 80,
+                        align: 'center',
+                      },
+                      {
+                        title: t('ui.orders.unit_price', 'Unit Price'),
+                        dataIndex: 'unit_price',
+                        key: 'unit_price',
+                        width: 120,
+                        align: 'right',
+                        render: (price) => `${price?.toLocaleString()} UZS`,
+                      },
+                      {
+                        title: t('ui.orders.total_price', 'Total'),
+                        dataIndex: 'total_price',
+                        key: 'total_price',
+                        width: 120,
+                        align: 'right',
+                        render: (price) => (
+                          <span style={{ fontWeight: 'bold' }}>
+                            {price?.toLocaleString()} UZS
+                          </span>
+                        ),
+                      },
+                    ]}
+                    footer={() => (
+                      <div style={{ textAlign: 'right' }}>
+                        <strong>{t('ui.orders.order_total', 'Order Total')}: </strong>
+                        <span style={{ fontSize: 16, color: '#52c41a', fontWeight: 'bold' }}>
+                          {selectedOrder.total_amount?.toLocaleString()} UZS
                         </span>
-                      ),
-                    },
-                  ]}
-                  footer={() => (
-                    <div style={{ textAlign: 'right' }}>
-                      <strong>{t('ui.orders.order_total', 'Order Total')}: </strong>
-                      <span style={{ fontSize: 16, color: '#52c41a', fontWeight: 'bold' }}>
-                        {selectedOrder.total_amount?.toLocaleString()} UZS
-                      </span>
-                    </div>
-                  )}
-                />
-              ) : (
-                <p style={{ color: '#999', textAlign: 'center' }}>
-                  {t('ui.orders.no_items', 'No items in this order')}
-                </p>
-              )}
+                      </div>
+                    )}
+                  />
+                ) : (
+                  <p style={{ color: '#999', textAlign: 'center' }}>
+                    {t('ui.orders.no_items', 'No items in this order')}
+                  </p>
+                )}
               </div>
             </Spin>
 
@@ -615,13 +624,11 @@ const Orders = () => {
             rules={[{ required: true, message: t('ui.orders.select_status_required') }]}
           >
             <Select>
-              <Option value="pending">{t('ui.orders.status_pending')}</Option>
-              <Option value="confirmed">{t('ui.orders.status_confirmed')}</Option>
-              <Option value="processing">{t('ui.orders.status_processing')}</Option>
-              <Option value="shipped">{t('ui.orders.status_shipped')}</Option>
-              <Option value="delivered">{t('ui.orders.status_delivered')}</Option>
-              <Option value="cancelled">{t('ui.orders.status_cancelled')}</Option>
-              <Option value="refunded">{t('ui.orders.status_refunded')}</Option>
+              {orderStatuses.map(status => (
+                <Option key={status.value} value={status.value}>
+                  {t(`ui.orders.status_${status.value}`, status.label)}
+                </Option>
+              ))}
             </Select>
           </Form.Item>
 

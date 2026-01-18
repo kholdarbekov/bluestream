@@ -136,6 +136,7 @@ class NotificationType(Enum):
 
     # Loyalty notification types
     LOYALTY_REWARD = 'loyalty_reward'
+    REWARD_REDEEMED = 'reward_redeemed'
 
 class NotificationChannel(Enum):
     """Notification channel enumeration"""

@@ -453,6 +453,8 @@ def my_loyalty():
 @jwt_required()
 def my_orders():
     """User orders page"""
+    from business_app.utils.constants import OrderStatus
+    
     current_user_id = get_jwt_identity()
     user = User.query.get(current_user_id)
     page = request.args.get('page', 1, type=int)
@@ -461,7 +463,13 @@ def my_orders():
         desc(Order.created_at)
     ).paginate(page=page, per_page=10, error_out=False)
     
-    return render_template('frontend/orders.html', user=user, orders=orders)
+    # Build order statuses list from enum (single source of truth)
+    order_statuses = [
+        {'value': status.value, 'label': status.value.replace('_', ' ').title()}
+        for status in OrderStatus
+    ]
+    
+    return render_template('frontend/orders.html', user=user, orders=orders, order_statuses=order_statuses)
 
 
 @frontend_bp.route('/order/<int:order_id>')

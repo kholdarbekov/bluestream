@@ -48,6 +48,18 @@ def make_celery(app=None):
             'schedule': crontab(hour=0, minute=0),
         },
         
+        # Send points expiring soon reminders daily at 10 AM
+        'points-expiring-reminders': {
+            'task': 'business_app.tasks.loyalty_tasks.send_points_expiring_soon_reminders',
+            'schedule': crontab(hour=10, minute=0),
+        },
+        
+        # Update loyalty tiers monthly on 1st at 1 AM
+        'update-loyalty-tiers': {
+            'task': 'business_app.tasks.loyalty_tasks.update_loyalty_tiers',
+            'schedule': crontab(hour=1, minute=0, day_of_month=1),
+        },
+        
         # Send delivery reminders every 30 minutes
         'delivery-reminders': {
             'task': 'business_app.tasks.delivery_tasks.send_delivery_reminders',

@@ -362,6 +362,11 @@ def serialize_order(order: Order, include_items=False, include_delivery=False, i
         if include_payment and hasattr(order, 'payment') and order.payment:
             order_data['payment_info'] = serialize_order_payment(order.payment)
         
+        # Always include delivery address if available
+        if hasattr(order, 'delivery_address') and order.delivery_address:
+            addr = order.delivery_address
+            order_data['delivery_address'] = addr.to_dict()
+        
         return order_data
         
     except Exception as e:

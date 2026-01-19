@@ -89,6 +89,8 @@ def manager_or_higher_required(f):
         user_role = claims.get('role')
         user_id = get_jwt_identity()
         
+        current_app.logger.info(f"user {user_id}: JWT claims {claims}")
+        
         try:
             role_enum = UserRole(user_role)
         except (ValueError, TypeError):
@@ -125,6 +127,8 @@ def staff_or_higher_required(f):
         claims = get_jwt()
         user_role = claims.get('role')
         user_id = get_jwt_identity()
+        
+        current_app.logger.info(f"user {user_id}: JWT claims {claims}")
         
         try:
             role_enum = UserRole(user_role)

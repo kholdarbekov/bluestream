@@ -35,6 +35,7 @@ import {
 import { useQuery, useMutation, useQueryClient } from 'react-query';
 import moment from 'moment';
 import adminService from '../services/adminService';
+import api from '../services/api';
 import { useTranslation } from 'react-i18next';
 
 const { Option } = Select;
@@ -171,10 +172,10 @@ const Orders = () => {
   const { data: statusesData } = useQuery(
     ['order-statuses'],
     async () => {
-      const response = await fetch('/api/orders/statuses');
-      return response.json();
+      const response = await api.get('/orders/statuses');
+      return response.data;
     },
-    { staleTime: 1000 * 60 * 60 * 24 } // Cache for 24 hour
+    { staleTime: 1000 * 60 * 60 * 24 } // Cache for 24 hours
   );
   const orderStatuses = statusesData?.data?.statuses || [];
 

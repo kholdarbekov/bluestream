@@ -163,108 +163,50 @@ def setup_request_handlers(app):
         session_lang = session.get('language')
         browser_lang = request.headers.get('Accept-Language', '')[:10] if request.headers.get('Accept-Language') else None
 
-        if should_log:
-            import os
-            # Log comprehensive request/session info
-            app.logger.info(f"")
-            app.logger.info(f"[LANG-DEBUG] ========== before_request START ==========")
-            app.logger.info(f"[LANG-DEBUG] Request ID: {g.request_id}")
-            app.logger.info(f"[LANG-DEBUG] Path: {request.path}")
-            app.logger.info(f"[LANG-DEBUG] Method: {request.method}")
-            app.logger.info(f"[LANG-DEBUG] PID: {os.getpid()}")
-            app.logger.info(f"[LANG-DEBUG] ----- Session State -----")
-            app.logger.info(f"[LANG-DEBUG] session.new: {session.new}")
-            app.logger.info(f"[LANG-DEBUG] session.modified: {session.modified}")
-            app.logger.info(f"[LANG-DEBUG] session.permanent: {session.permanent}")
-            app.logger.info(f"[LANG-DEBUG] session full dict: {dict(session)}")
-            app.logger.info(f"[LANG-DEBUG] session.get('language'): {session_lang}")
-            app.logger.info(f"[LANG-DEBUG] ----- Request Sources -----")
-            app.logger.info(f"[LANG-DEBUG] URL param 'lang': {url_lang}")
-            app.logger.info(f"[LANG-DEBUG] Accept-Language header: {browser_lang}")
-            app.logger.info(f"[LANG-DEBUG] ----- Cookies -----")
-            for cookie_name, cookie_value in request.cookies.items():
-                # Truncate cookie values for readability
-                display_value = cookie_value[:50] + '...' if len(cookie_value) > 50 else cookie_value
-                app.logger.info(f"[LANG-DEBUG]   {cookie_name}: {display_value}")
-
         # 1. Check URL parameter first (highest priority)
         if url_lang and url_lang in app.config['LANGUAGES']:
             lang = url_lang
             lang_source = "URL parameter"
-            if should_log:
-                app.logger.info(f"[LANG-DEBUG] [REQ:{g.request_id}] Step 1: MATCHED URL param -> lang='{lang}'")
 
         # 2. Check session language (from set-language endpoint) - PRIORITY over DB
         # This ensures explicit user language changes via UI take immediate effect
         if not lang:
-            if should_log:
-                app.logger.info(f"[LANG-DEBUG] [REQ:{g.request_id}] Step 2: Checking session...")
+
             if session_lang and session_lang in app.config['LANGUAGES']:
                 lang = session_lang
                 lang_source = "Session"
-                if should_log:
-                    app.logger.info(f"[LANG-DEBUG] [REQ:{g.request_id}] Step 2: MATCHED Session -> lang='{lang}'")
-            elif should_log:
-                app.logger.info(f"[LANG-DEBUG] [REQ:{g.request_id}] Step 2: No valid session language (session_lang='{session_lang}')")
 
         # 3. Check if user is logged in and has a preferred language in DB
         # This is a fallback for logged-in users who haven't set a session preference
         if not lang:
-            if should_log:
-                app.logger.info(f"[LANG-DEBUG] [REQ:{g.request_id}] Step 3: Checking JWT/DB preference...")
             try:
                 verify_jwt_in_request(optional=True)
                 current_user_id = get_jwt_identity()
-                if should_log:
-                    app.logger.info(f"[LANG-DEBUG] [REQ:{g.request_id}] Step 3: JWT user_id: {current_user_id}")
                 if current_user_id:
                     from business_app.models.user import User
                     user = User.query.get(current_user_id)
                     if user:
-                        if should_log:
-                            app.logger.info(f"[LANG-DEBUG] [REQ:{g.request_id}] Step 3: User DB preferred_language: '{user.preferred_language}'")
                         if user.preferred_language and user.preferred_language in app.config['LANGUAGES']:
                             lang = user.preferred_language
                             lang_source = "User DB preference"
-                            if should_log:
-                                app.logger.info(f"[LANG-DEBUG] [REQ:{g.request_id}] Step 3: MATCHED User DB preference -> lang='{lang}'")
-                    elif should_log:
-                        app.logger.info(f"[LANG-DEBUG] [REQ:{g.request_id}] Step 3: User not found in DB")
             except Exception as e:
-                if should_log:
-                    app.logger.info(f"[LANG-DEBUG] [REQ:{g.request_id}] Step 3: JWT check exception: {e}")
                 pass  # Continue with other methods
 
 
         # 4. Fall back to browser Accept-Language header
         if not lang:
-            if should_log:
-                app.logger.info(f"[LANG-DEBUG] [REQ:{g.request_id}] Step 4: Checking Accept-Language header...")
             full_browser_lang = request.headers.get('Accept-Language', '')
             if full_browser_lang and full_browser_lang[:2] in app.config['LANGUAGES']:
                 lang = full_browser_lang[:2]
                 lang_source = "Accept-Language header"
-                if should_log:
-                    app.logger.info(f"[LANG-DEBUG] [REQ:{g.request_id}] Step 4: MATCHED Accept-Language -> lang='{lang}'")
-            elif should_log:
-                app.logger.info(f"[LANG-DEBUG] [REQ:{g.request_id}] Step 4: No valid Accept-Language (header='{full_browser_lang}')")
 
         # 5. Use default language if nothing else worked
         if not lang or lang not in app.config['LANGUAGES']:
-            if should_log:
-                app.logger.info(f"[LANG-DEBUG] [REQ:{g.request_id}] Step 5: Using default language...")
             lang = app.config['DEFAULT_LANGUAGE']
             lang_source = "Default"
 
         # Set the language in request context
         g.language = lang
-
-        if should_log:
-            app.logger.info(f"[LANG-DEBUG] [REQ:{g.request_id}] ========== FINAL RESULT ==========")
-            app.logger.info(f"[LANG-DEBUG] [REQ:{g.request_id}] g.language set to: '{lang}'")
-            app.logger.info(f"[LANG-DEBUG] [REQ:{g.request_id}] Source: {lang_source}")
-            app.logger.info(f"[LANG-DEBUG] [REQ:{g.request_id}] ========== before_request END ==========")
-            app.logger.info(f"")
     
     @app.after_request
     def after_request(response):

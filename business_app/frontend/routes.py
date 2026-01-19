@@ -612,51 +612,32 @@ def set_language_route(language):
     4. Redirects back to the referring page
     """
     import os
-    current_app.logger.info(f"[LANG-DEBUG] === set_language_route START (PID: {os.getpid()}) ===")
-    current_app.logger.info(f"[LANG-DEBUG] Requested language: {language}")
-    current_app.logger.info(f"[LANG-DEBUG] Session BEFORE: {dict(session)}")
-    current_app.logger.info(f"[LANG-DEBUG] Cookies: {request.cookies}")
-    current_app.logger.info(f"[LANG-DEBUG] Referrer: {request.referrer}")
 
     # Validate language
     if language not in current_app.config['LANGUAGES']:
-        current_app.logger.warning(f"[LANG-DEBUG] Invalid language requested: {language}, using default")
         language = current_app.config['DEFAULT_LANGUAGE']
 
     # Store in session (this is checked BEFORE DB preference in before_request)
     session['language'] = language
     session.permanent = True  # Persist session across browser sessions
     session.modified = True  # Ensure session is marked as modified
-    current_app.logger.info(f"[LANG-DEBUG] Session 'language' set to: {language}")
-    current_app.logger.info(f"[LANG-DEBUG] Session AFTER: {dict(session)}")
-
     g.language = language  # Also set in g for immediate use in this request
 
     # Also persist to user profile if logged in (for cross-session persistence)
     try:
         verify_jwt_in_request(optional=True)
         current_user_id = get_jwt_identity()
-        current_app.logger.info(f"[LANG-DEBUG] JWT user_id: {current_user_id}")
         if current_user_id:
             user = User.query.get(current_user_id)
             if user:
                 old_pref = user.preferred_language
                 user.preferred_language = language
                 db.session.commit()
-                current_app.logger.info(f"[LANG-DEBUG] User {current_user_id} preferred_language: {old_pref} -> {language}")
-            else:
-                current_app.logger.info(f"[LANG-DEBUG] User {current_user_id} not found in DB")
-        else:
-            current_app.logger.info(f"[LANG-DEBUG] No JWT user (not logged in)")
     except Exception as exc:
-        # Log the error but don't fail - session language will still work
-        current_app.logger.warning(f"[LANG-DEBUG] Failed to update user preferred_language: {exc}")
         # Ensure we don't leave a broken transaction
         db.session.rollback()
 
     redirect_url = request.referrer or url_for('frontend.index')
-    current_app.logger.info(f"[LANG-DEBUG] Redirecting to: {redirect_url}")
-    current_app.logger.info(f"[LANG-DEBUG] === set_language_route END ===")
 
     resp = redirect(redirect_url)
     

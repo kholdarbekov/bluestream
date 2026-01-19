@@ -303,9 +303,20 @@ def setup_request_handlers(app):
             
             if target_timestamp > exp_timestamp:
                 # Token is within 30 minutes of expiring - refresh it
-                access_token = create_access_token(identity=get_jwt_identity())
+                # IMPORTANT: Preserve original claims (especially 'role') when refreshing
+                # Otherwise admin users lose their role and get 403 Forbidden errors
+                jwt_data = get_jwt()
+                additional_claims = {
+                    key: jwt_data[key] 
+                    for key in ['user_id', 'email', 'role', 'status', 'verified', 'platform', 'session_id']
+                    if key in jwt_data
+                }
+                access_token = create_access_token(
+                    identity=get_jwt_identity(),
+                    additional_claims=additional_claims
+                )
                 set_access_cookies(response, access_token)
-                app.logger.info(f"JWT auto-refreshed for user {get_jwt_identity()}")
+                app.logger.info(f"JWT auto-refreshed for user {get_jwt_identity()} with role={additional_claims.get('role')}")
         except (RuntimeError, KeyError):
             # No valid JWT in request (anonymous user, API call, etc.)
             # Just return the original response

@@ -213,38 +213,25 @@ def get_current_language() -> str:
     
     # Return the language already set by before_request hook
     if hasattr(g, 'language') and g.language:
-        logger.info(f"[LANG-HELPER] [REQ:{request_id}] get_current_language() -> '{g.language}' (from g.language)")
         return g.language
 
     # Fallback: If called outside request context or before_request hasn't run yet
     default_language = current_app.config.get('DEFAULT_LANGUAGE', 'uz')
-    logger.warning(f"[LANG-HELPER] [REQ:{request_id}] get_current_language() -> '{default_language}' (FALLBACK - g.language not set!)")
     return default_language
 
 
 def set_language(language: str):
     """Set language in request context"""
-    request_id = getattr(g, 'request_id', 'N/A')
-    old_language = getattr(g, 'language', None)
     g.language = language
-    logger.info(f"[SET-LANG] [REQ:{request_id}] set_language() called: old='{old_language}' -> new='{language}'")
 
 
 def translate_text(key: str, language: str = None, **kwargs) -> str:
     """Translate text using key and current language"""
-    request_id = getattr(g, 'request_id', 'N/A')
     if language is None:
         language = get_current_language()
     
-    if key.startswith('landing.'):
-        logger.info(f"[TRANSLATE-TEXT] [REQ:{request_id}] translate_text() called: key='{key}', lang='{language}'")
-    
     from .translations import get_translation
     result = get_translation(key, language, **kwargs)
-    
-    if key.startswith('landing.'):
-        preview = result[:40] if len(result) > 40 else result
-        logger.info(f"[TRANSLATE-TEXT] [REQ:{request_id}] result: key='{key}', value='{preview}'")
     
     return result
 

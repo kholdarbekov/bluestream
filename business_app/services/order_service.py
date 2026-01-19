@@ -649,11 +649,11 @@ class OrderService:
                 self._process_loyalty_points_for_order(order)
         
         elif new_status == OrderStatus.DELIVERED:
-            # Mark delivery as completed
+            # Mark delivery as completed (sync_order_status=False to prevent circular callback)
             if order.delivery:
                 from .delivery_service import DeliveryService
                 delivery_service = DeliveryService()
-                delivery_service.complete_delivery(order.delivery.id)
+                delivery_service.complete_delivery(order.delivery.id, sync_order_status=False)
             
             # For cash orders, confirm inventory and award loyalty points on delivery
             is_cash_order = order.payment_method == PaymentMethod.CASH if order.payment_method else False

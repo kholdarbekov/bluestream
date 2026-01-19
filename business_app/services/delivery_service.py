@@ -121,8 +121,20 @@ class DeliveryService:
     
     def update_delivery_status(self, delivery_id: int, new_status: DeliveryStatus,
                               driver_id: int = None, notes: str = None,
-                              current_location: Tuple[float, float] = None) -> Delivery:
-        """Update delivery status"""
+                              current_location: Tuple[float, float] = None,
+                              sync_order_status: bool = True) -> Delivery:
+        """Update delivery status
+        
+        Args:
+            delivery_id: ID of the delivery to update
+            new_status: New delivery status
+            driver_id: Optional driver ID who made the update
+            notes: Optional notes about the status change
+            current_location: Optional current location tuple (lat, lon)
+            sync_order_status: If True, update associated order status when delivery
+                             is completed. Set to False when called from OrderService
+                             to prevent circular callbacks.
+        """
         delivery = Delivery.query.get(delivery_id)
         if not delivery:
             raise NotFoundError("Delivery not found")
@@ -145,7 +157,7 @@ class DeliveryService:
         db.session.commit()
         
         # Handle status-specific actions
-        self._handle_delivery_status_change(delivery, new_status)
+        self._handle_delivery_status_change(delivery, new_status, sync_order_status)
         
         return delivery
     
@@ -297,13 +309,25 @@ class DeliveryService:
         }
     
     def complete_delivery(self, delivery_id: int, driver_id: int = None, 
-                         proof_photo: str = None, customer_signature: str = None) -> Delivery:
-        """Mark delivery as completed"""
+                         proof_photo: str = None, customer_signature: str = None,
+                         sync_order_status: bool = True) -> Delivery:
+        """Mark delivery as completed
+        
+        Args:
+            delivery_id: ID of the delivery to complete
+            driver_id: Optional driver ID who completed the delivery
+            proof_photo: Optional proof of delivery photo
+            customer_signature: Optional customer signature
+            sync_order_status: If True, update associated order status to DELIVERED.
+                             Set to False when called from OrderService to prevent
+                             circular callbacks.
+        """
         delivery = self.update_delivery_status(
             delivery_id, 
             DeliveryStatus.DELIVERED, 
             driver_id, 
-            "Delivery completed successfully"
+            "Delivery completed successfully",
+            sync_order_status=sync_order_status
         )
         
         # Add completion details
@@ -374,6 +398,7 @@ class DeliveryService:
         """Check if delivery status transition is valid"""
         valid_transitions = {
             DeliveryStatus.PENDING: [DeliveryStatus.ASSIGNED, DeliveryStatus.FAILED],
+            DeliveryStatus.SCHEDULED: [DeliveryStatus.ASSIGNED, DeliveryStatus.PICKED_UP, DeliveryStatus.IN_TRANSIT, DeliveryStatus.ARRIVED, DeliveryStatus.DELIVERED, DeliveryStatus.FAILED],
             DeliveryStatus.ASSIGNED: [DeliveryStatus.PICKED_UP, DeliveryStatus.FAILED],
             DeliveryStatus.PICKED_UP: [DeliveryStatus.IN_TRANSIT, DeliveryStatus.FAILED],
             DeliveryStatus.IN_TRANSIT: [DeliveryStatus.ARRIVED, DeliveryStatus.FAILED],
@@ -420,14 +445,23 @@ class DeliveryService:
         
         db.session.add(history)
     
-    def _handle_delivery_status_change(self, delivery: Delivery, new_status: DeliveryStatus):
-        """Handle actions when delivery status changes"""
+    def _handle_delivery_status_change(self, delivery: Delivery, new_status: DeliveryStatus,
+                                       sync_order_status: bool = True):
+        """Handle actions when delivery status changes
+        
+        Args:
+            delivery: The delivery object
+            new_status: The new delivery status
+            sync_order_status: If True, update associated order status when delivery
+                             is completed. Set to False when this was triggered by
+                             OrderService to prevent circular callbacks.
+        """
         # Send notifications
         from ..tasks.notification_tasks import send_delivery_update_task
         send_delivery_update_task.delay(delivery.id, new_status.value)
         
-        # Update order status if delivery is completed
-        if new_status == DeliveryStatus.DELIVERED:
+        # Update order status if delivery is completed AND sync is enabled
+        if new_status == DeliveryStatus.DELIVERED and sync_order_status:
             from .order_service import OrderService
             order_service = OrderService()
             order_service.update_order_status(delivery.order_id, OrderStatus.DELIVERED)

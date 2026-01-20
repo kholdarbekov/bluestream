@@ -429,6 +429,93 @@
         justify-content: center;
     }
 }
+
+/* Minimum Order Warning */
+.min-order-warning {
+    background: linear-gradient(135deg, #fff3cd 0%, #ffe69c 100%);
+    border: 2px solid #ffc107;
+    border-radius: 10px;
+    padding: 15px 20px;
+    margin: 20px 0;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.min-order-warning.error {
+    background: linear-gradient(135deg, #f8d7da 0%, #f5c2c7 100%);
+    border-color: #dc3545;
+}
+
+.min-order-warning.success {
+    background: linear-gradient(135deg, #d1e7dd 0%, #badbcc 100%);
+    border-color: #198754;
+}
+
+.min-order-warning i {
+    font-size: 24px;
+    flex-shrink: 0;
+}
+
+.min-order-warning.error i {
+    color: #dc3545;
+}
+
+.min-order-warning:not(.error):not(.success) i {
+    color: #856404;
+}
+
+.min-order-warning.success i {
+    color: #198754;
+}
+
+.min-order-warning-content {
+    flex: 1;
+}
+
+.min-order-warning-title {
+    font-weight: 700;
+    font-size: 14px;
+    margin-bottom: 2px;
+}
+
+.min-order-warning.error .min-order-warning-title {
+    color: #721c24;
+}
+
+.min-order-warning:not(.error):not(.success) .min-order-warning-title {
+    color: #856404;
+}
+
+.min-order-warning.success .min-order-warning-title {
+    color: #155724;
+}
+
+.min-order-warning-text {
+    font-size: 13px;
+    color: #666;
+}
+
+.min-order-progress {
+    height: 6px;
+    background: rgba(0,0,0,0.1);
+    border-radius: 3px;
+    margin-top: 8px;
+    overflow: hidden;
+}
+
+.min-order-progress-bar {
+    height: 100%;
+    background: linear-gradient(90deg, #dc3545 0%, #ffc107 50%, #198754 100%);
+    border-radius: 3px;
+    transition: width 0.3s ease;
+}
+
+.checkout-btn-disabled {
+    opacity: 0.6 !important;
+    cursor: not-allowed !important;
+    pointer-events: none;
+}
 </style>
 {% endblock %}
 
@@ -490,13 +577,25 @@
                         <span class="summary-value" id="summary-total">0 UZS</span>
                     </div>
 
+                    <!-- Minimum Order Warning -->
+                    <div id="min-order-warning" class="min-order-warning" style="display: none;">
+                        <i class="far fa-exclamation-triangle"></i>
+                        <div class="min-order-warning-content">
+                            <div class="min-order-warning-title" id="min-order-title">{{ 'Minimum order amount not met'|t }}</div>
+                            <div class="min-order-warning-text" id="min-order-text"></div>
+                            <div class="min-order-progress">
+                                <div class="min-order-progress-bar" id="min-order-progress" style="width: 0%;"></div>
+                            </div>
+                        </div>
+                    </div>
+
                     <div class="delivery-notice" style="border-color: #17a2b8; background: #e7f5ff; color: #0c5460;">
                         <i class="far fa-truck"></i>
                         {{ 'Delivery fee will be calculated at checkout'|t }}
                     </div>
 
                     <div class="cart-actions">
-                        <a href="{{ url_for('frontend.checkout') }}" class="theme-btn btn-one">
+                        <a href="{{ url_for('frontend.checkout') }}" class="theme-btn btn-one" id="checkout-btn">
                             <i class="far fa-check-circle"></i> {{ 'Proceed to Checkout'|t }}
                         </a>
                         <a href="{{ url_for('frontend.shop') }}" class="theme-btn btn-three">
@@ -707,10 +806,55 @@ function renderCart(products) {
     document.getElementById('items-count').textContent = cartItems.length;
 }
 
+// Minimum order amount (in UZS)
+const MIN_ORDER_AMOUNT = {{ config.get('MIN_ORDER_AMOUNT', 20000) }};
+
 // Update cart summary
 function updateSummary(subtotal) {
     document.getElementById('summary-subtotal').textContent = formatPrice(subtotal);
     document.getElementById('summary-total').textContent = formatPrice(subtotal);
+    
+    // Update minimum order warning
+    const warningEl = document.getElementById('min-order-warning');
+    const titleEl = document.getElementById('min-order-title');
+    const textEl = document.getElementById('min-order-text');
+    const progressEl = document.getElementById('min-order-progress');
+    const checkoutBtn = document.getElementById('checkout-btn');
+    
+    if (subtotal < MIN_ORDER_AMOUNT) {
+        const remaining = MIN_ORDER_AMOUNT - subtotal;
+        const progress = Math.min((subtotal / MIN_ORDER_AMOUNT) * 100, 100);
+        
+        warningEl.style.display = 'flex';
+        warningEl.classList.add('error');
+        warningEl.classList.remove('success');
+        warningEl.querySelector('i').className = 'far fa-exclamation-triangle';
+        
+        titleEl.textContent = '{{ "Minimum order amount not met"|t }}';
+        textEl.textContent = '{{ "Add"|t }} ' + formatPrice(remaining) + ' {{ "more to checkout"|t }}. {{ "Minimum order amount"|t }}: ' + formatPrice(MIN_ORDER_AMOUNT);
+        progressEl.style.width = progress + '%';
+        
+        // Disable checkout button
+        checkoutBtn.classList.add('checkout-btn-disabled');
+        checkoutBtn.onclick = function(e) {
+            e.preventDefault();
+            showNotification('{{ "Minimum order amount is"|t }} ' + formatPrice(MIN_ORDER_AMOUNT), 'warning');
+        };
+    } else {
+        // Show success message
+        warningEl.style.display = 'flex';
+        warningEl.classList.remove('error');
+        warningEl.classList.add('success');
+        warningEl.querySelector('i').className = 'far fa-check-circle';
+        
+        titleEl.textContent = '{{ "Ready for checkout!"|t }}';
+        textEl.textContent = '{{ "Your order meets the minimum amount"|t }}';
+        progressEl.style.width = '100%';
+        
+        // Enable checkout button
+        checkoutBtn.classList.remove('checkout-btn-disabled');
+        checkoutBtn.onclick = null;
+    }
 }
 
 // Update quantity

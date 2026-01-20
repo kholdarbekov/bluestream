@@ -10,6 +10,9 @@ from decimal import Decimal
 from pydantic import BaseModel, Field, field_validator, ConfigDict
 from pydantic.alias_generators import to_camel
 
+# Import centralized tier configuration
+from business_app.utils.constants import MEMBERSHIP_TIERS, MEMBERSHIP_TIER_ORDER
+
 
 class LoyaltyTier(str, Enum):
     BRONZE = "bronze"
@@ -442,6 +445,7 @@ def serialize_loyalty_reward(reward, user=None) -> Dict[str, Any]:
             'points_required': points_cost,  # Alias for backwards compatibility
             'is_active': reward.is_active,
             'is_featured': getattr(reward, 'is_featured', False),
+            'is_system_reward': getattr(reward, 'is_system_reward', False),
             'tier_requirement': reward.tier_requirement.value if hasattr(reward, 'tier_requirement') and reward.tier_requirement else None,
             'usage_limit_per_user': getattr(reward, 'usage_limit_per_user', None) or getattr(reward, 'max_uses_per_user', None),
             'total_usage_limit': getattr(reward, 'total_usage_limit', None) or getattr(reward, 'max_redemptions', None),
@@ -501,6 +505,7 @@ def serialize_loyalty_reward(reward, user=None) -> Dict[str, Any]:
             'points_cost': points_cost,
             'points_required': points_cost,
             'is_active': getattr(reward, 'is_active', True),
+            'is_system_reward': getattr(reward, 'is_system_reward', False),
             'reward_type': getattr(reward, 'reward_type', 'discount')
         }
 
@@ -600,71 +605,30 @@ def serialize_challenge(challenge, user=None) -> Dict[str, Any]:
 
 # Helper functions
 def get_tier_info(tier_name: str) -> Optional[Dict[str, Any]]:
-    """Get tier information"""
-    tiers = {
-        'bronze': {
-            'tier': 'bronze',
-            'name': 'Bronze',
-            'description': 'Welcome to our loyalty program!',
-            'min_points': 0,
-            'benefits': ['Earn points on purchases', 'Birthday bonus'],
-            'discount_percentage': 0,
-            'color': '#CD7F32',
-            'icon_url': '/static/images/tiers/bronze.png'
-        },
-        'silver': {
-            'tier': 'silver',
-            'name': 'Silver',
-            'description': 'Enjoy enhanced benefits!',
-            'min_points': 1000,
-            'benefits': ['5% discount on orders', 'Priority support', 'Early access to sales'],
-            'discount_percentage': 5,
-            'color': '#C0C0C0',
-            'icon_url': '/static/images/tiers/silver.png'
-        },
-        'gold': {
-            'tier': 'gold',
-            'name': 'Gold',
-            'description': 'Premium member benefits!',
-            'min_points': 5000,
-            'benefits': ['10% discount on orders', 'Free delivery', 'Exclusive rewards'],
-            'discount_percentage': 10,
-            'color': '#FFD700',
-            'icon_url': '/static/images/tiers/gold.png'
-        },
-        'platinum': {
-            'tier': 'platinum',
-            'name': 'Platinum',
-            'description': 'Elite member privileges!',
-            'min_points': 15000,
-            'benefits': ['15% discount on orders', 'Free delivery', 'Personal advisor', 'VIP support'],
-            'discount_percentage': 15,
-            'color': '#E5E4E2',
-            'icon_url': '/static/images/tiers/platinum.png'
-        },
-        'diamond': {
-            'tier': 'diamond',
-            'name': 'Diamond',
-            'description': 'Ultimate luxury experience!',
-            'min_points': 50000,
-            'benefits': ['20% discount on orders', 'Free delivery', 'Personal advisor', 'VIP support', 'Exclusive events'],
-            'discount_percentage': 20,
-            'color': '#B9F2FF',
-            'icon_url': '/static/images/tiers/diamond.png'
+    """Get tier information from centralized config"""
+    tier_config = MEMBERSHIP_TIERS.get(tier_name)
+    if tier_config:
+        return {
+            'tier': tier_name.lower(),
+            'name': tier_config['name'],
+            'description': f"Earn {tier_config['points_multiplier']}x points per 100 UZS",
+            'min_points': tier_config['min_points'],
+            'benefits': tier_config['benefits'],
+            'discount_percentage': tier_config['discount_percentage'],
+            'color': tier_config['color'],
+            'icon_url': f"/static/images/tiers/{tier_name.lower()}.png"
         }
-    }
-    
-    return tiers.get(tier_name.lower())
+    return None
 
 
 def get_next_tier_info(current_tier: str) -> Optional[Dict[str, Any]]:
-    """Get next tier information"""
-    tier_progression = ['bronze', 'silver', 'gold', 'platinum', 'diamond']
-    
+    """Get next tier information from centralized config"""
     try:
-        current_index = tier_progression.index(current_tier.lower())
-        if current_index < len(tier_progression) - 1:
-            next_tier = tier_progression[current_index + 1]
+        # Normalize tier name to match MEMBERSHIP_TIER_ORDER format
+        normalized_tier = current_tier.capitalize()
+        current_index = MEMBERSHIP_TIER_ORDER.index(normalized_tier)
+        if current_index < len(MEMBERSHIP_TIER_ORDER) - 1:
+            next_tier = MEMBERSHIP_TIER_ORDER[current_index + 1]
             return get_tier_info(next_tier)
     except ValueError:
         pass

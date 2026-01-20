@@ -19,7 +19,10 @@ from business_app.serializers.loyalty_serializers import (
     GiftPointsRequest, JoinChallengeRequest, LoyaltyResponseSchema
 )
 from business_app.utils.decorators import validate_json, cache_response
-from business_app.utils.constants import LoyaltyTransactionType, RewardStatus, NotificationType
+from business_app.utils.constants import (
+    LoyaltyTransactionType, RewardStatus, NotificationType,
+    MEMBERSHIP_TIERS, MEMBERSHIP_TIER_ORDER, get_tier_for_points, get_next_tier
+)
 from business_app.utils.api_responses import (
     success_response, error_response, paginated_response, created_response,
     not_found_response, validation_error_response, internal_error_response
@@ -27,6 +30,43 @@ from business_app.utils.api_responses import (
 from business_app import db
 
 loyalty_bp = Blueprint('loyalty', __name__)
+
+
+@loyalty_bp.route('/tiers', methods=['GET'])
+@cache_response(3600)  # Cache for 1 hour
+def get_membership_tiers():
+    """Get all membership tier configurations - single source of truth"""
+    try:
+        tiers = []
+        for tier_name in MEMBERSHIP_TIER_ORDER:
+            tier_config = MEMBERSHIP_TIERS[tier_name]
+            # Format the points range for display
+            if tier_config['max_points'] is not None:
+                points_range = f"{tier_config['min_points']:,} - {tier_config['max_points']:,}"
+            else:
+                points_range = f"{tier_config['min_points']:,}+"
+            
+            tiers.append({
+                'name': tier_name,
+                'min_points': tier_config['min_points'],
+                'max_points': tier_config['max_points'],
+                'points_range': points_range,
+                'points_multiplier': tier_config['points_multiplier'],
+                'discount_percentage': tier_config['discount_percentage'],
+                'benefits': tier_config['benefits'],
+                'color': tier_config['color'],
+                'icon': tier_config['icon']
+            })
+        
+        return success_response(
+            data={
+                'tiers': tiers,
+                'tier_count': len(tiers)
+            }
+        )
+    except Exception as e:
+        current_app.logger.error(f"Get membership tiers error: {e}")
+        return internal_error_response('Failed to get membership tiers')
 
 
 @loyalty_bp.route('/points', methods=['GET'])
@@ -78,34 +118,27 @@ def get_loyalty_account():
             LoyaltyTransaction.created_at >= month_start
         ).scalar() or 0
 
-        # Calculate tier progress
-        tier_thresholds = {
-            'Bronze': 0,
-            'Silver': 5000,
-            'Gold': 20000,
-            'Platinum': 45000
-        }
-        
+        # Calculate tier progress using centralized config
         current_tier = loyalty_points.current_tier or 'Bronze'
         current_balance = loyalty_points.current_balance or 0
         
-        # Find next tier threshold
-        tiers = ['Bronze', 'Silver', 'Gold', 'Platinum']
-        current_tier_index = tiers.index(current_tier) if current_tier in tiers else 0
+        # Get current tier config
+        current_tier_config = MEMBERSHIP_TIERS.get(current_tier, MEMBERSHIP_TIERS['Bronze'])
+        current_tier_points = current_tier_config['min_points']
         
-        if current_tier_index < len(tiers) - 1:
-            next_tier = tiers[current_tier_index + 1]
-            next_tier_points = tier_thresholds[next_tier]
-            current_tier_points = tier_thresholds[current_tier]
+        # Find next tier info
+        next_tier_info = get_next_tier(current_tier)
+        
+        if next_tier_info:
+            next_tier_points = next_tier_info['min_points']
             points_needed = max(0, next_tier_points - current_balance)
         else:
-            next_tier_points = tier_thresholds['Platinum']
-            current_tier_points = tier_thresholds['Platinum']
+            next_tier_points = current_tier_points
             points_needed = 0
 
         tier_progress = {
-            'current': current_balance - current_tier_points if current_tier_index < len(tiers) - 1 else current_balance,
-            'next_tier_points': next_tier_points - current_tier_points if current_tier_index < len(tiers) - 1 else 0,
+            'current': current_balance - current_tier_points if next_tier_info else current_balance,
+            'next_tier_points': next_tier_points - current_tier_points if next_tier_info else 0,
             'points_needed': points_needed
         }
 
@@ -397,6 +430,10 @@ def redeem_reward(reward_id):
 
         if not reward:
             return not_found_response('Reward not found')
+
+        # System rewards cannot be manually redeemed - they are applied automatically by the system
+        if reward.is_system_reward:
+            return error_response('This reward is automatically applied by the system and cannot be manually redeemed')
 
         # Check if reward is available (use correct model field names)
         if reward.max_redemptions and reward.redemptions_used >= reward.max_redemptions:

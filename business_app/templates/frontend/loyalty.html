@@ -508,6 +508,60 @@
     color: #999;
 }
 
+/* System Reward Card - Auto-applied rewards styling */
+.reward-card.system-reward {
+    border: 2px solid #52c41a;
+    background: linear-gradient(to bottom, rgba(82, 196, 26, 0.05), #ffffff);
+}
+
+.reward-card.system-reward::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 4px;
+    background: linear-gradient(135deg, #52c41a 0%, #389e0d 100%);
+}
+
+.system-reward-badge {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    padding: 6px 12px;
+    border-radius: 20px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    z-index: 2;
+    background: linear-gradient(135deg, #52c41a 0%, #389e0d 100%);
+    color: white;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.system-reward-badge i {
+    font-size: 0.65rem;
+}
+
+.system-reward-info {
+    background: linear-gradient(135deg, #f6ffed 0%, #d9f7be 100%);
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-size: 0.8rem;
+    color: #389e0d;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: auto;
+}
+
+.system-reward-info i {
+    font-size: 0.9rem;
+}
+
 /* ============================================
    WAYS TO EARN POINTS - Enhanced Design
    ============================================ */
@@ -792,76 +846,11 @@
             <h5><i class="far fa-crown"></i> {{ 'Membership Tiers'|t }}</h5>
         </div>
         <div class="card-body">
-            <div class="row">
-                <div class="col-md-3">
-                    <div class="tier-card bronze">
-                        <div class="tier-header">
-                            <i class="far fa-medal"></i>
-                            <h6>{{ 'Bronze'|t }}</h6>
-                            <p>0 - 4,999 {{ 'points'|t }}</p>
-                        </div>
-                        <div class="tier-benefits">
-                            <ul>
-                                <li>{{ '1 point per 100 UZS spent'|t }}</li>
-                                <li>{{ 'Standard shipping'|t }}</li>
-                                <li>{{ 'Basic customer support'|t }}</li>
-                            </ul>
-                        </div>
-                    </div>
-                </div>
-                <div class="col-md-3">
-                    <div class="tier-card silver">
-                        <div class="tier-header">
-                            <i class="far fa-medal"></i>
-                            <h6>{{ 'Silver'|t }}</h6>
-                            <p>5,000 - 19,999 {{ 'points'|t }}</p>
-                        </div>
-                        <div class="tier-benefits">
-                            <ul>
-                                <li>{{ '1.25 points per 100 UZS spent'|t }}</li>
-                                <li>{{ 'Free standard shipping'|t }}</li>
-                                <li>{{ 'Priority customer support'|t }}</li>
-                                <li>{{ 'Exclusive monthly offers'|t }}</li>
-                            </ul>
-                        </div>
-                    </div>
-                </div>
-                <div class="col-md-3">
-                    <div class="tier-card gold">
-                        <div class="tier-header">
-                            <i class="far fa-medal"></i>
-                            <h6>{{ 'Gold'|t }}</h6>
-                            <p>20,000 - 44,999 {{ 'points'|t }}</p>
-                        </div>
-                        <div class="tier-benefits">
-                            <ul>
-                                <li>{{ '1.5 points per 100 UZS spent'|t }}</li>
-                                <li>{{ 'Free expedited shipping'|t }}</li>
-                                <li>{{ 'VIP customer support'|t }}</li>
-                                <li>{{ 'Early access to new products'|t }}</li>
-                                <li>{{ '10% birthday discount'|t }}</li>
-                            </ul>
-                        </div>
-                    </div>
-                </div>
-                <div class="col-md-3">
-                    <div class="tier-card platinum">
-                        <div class="tier-header">
-                            <i class="far fa-crown"></i>
-                            <h6>{{ 'Platinum'|t }}</h6>
-                            <p>45,000+ {{ 'points'|t }}</p>
-                        </div>
-                        <div class="tier-benefits">
-                            <ul>
-                                <li>{{ '2 points per 100 UZS spent'|t }}</li>
-                                <li>{{ 'Free same-day delivery'|t }}</li>
-                                <li>{{ 'Dedicated account manager'|t }}</li>
-                                <li>{{ 'Exclusive platinum rewards'|t }}</li>
-                                <li>{{ '15% birthday discount'|t }}</li>
-                                <li>{{ 'VIP events access'|t }}</li>
-                            </ul>
-                        </div>
-                    </div>
+            <div class="row" id="membershipTiersContainer">
+                <!-- Tier cards will be dynamically loaded from API -->
+                <div class="col-12 text-center py-4">
+                    <i class="far fa-spinner fa-spin fa-2x"></i>
+                    <p class="mt-2">{{ 'Loading membership tiers...'|t }}</p>
                 </div>
             </div>
         </div>
@@ -1056,6 +1045,8 @@
 {% block cabinet_extra_js %}
 <script>
 document.addEventListener('DOMContentLoaded', async function() {
+    // Load membership tiers (can run in parallel)
+    loadMembershipTiers();
     // Load loyalty data FIRST so currentPoints is set before rewards check it
     await loadLoyaltyData();
     // Now load rewards (they check currentPoints to determine can_redeem)
@@ -1065,6 +1056,59 @@ document.addEventListener('DOMContentLoaded', async function() {
 });
 
 let currentUserReferralCode = '';
+let currentUserTier = 'Bronze';
+
+async function loadMembershipTiers() {
+    const container = document.getElementById('membershipTiersContainer');
+    
+    try {
+        const response = await apiRequest('/loyalty/tiers');
+        const result = await response.json();
+        
+        if (response.ok && result.success) {
+            renderMembershipTiers(result.data.tiers);
+        } else {
+            container.innerHTML = '<div class="col-12 text-center py-4"><p class="text-muted">{{ "Failed to load membership tiers"|t }}</p></div>';
+        }
+    } catch (error) {
+        console.error('Failed to load membership tiers:', error);
+        container.innerHTML = '<div class="col-12 text-center py-4"><p class="text-muted">{{ "Failed to load membership tiers"|t }}</p></div>';
+    }
+}
+
+function renderMembershipTiers(tiers) {
+    const container = document.getElementById('membershipTiersContainer');
+    
+    if (!tiers || tiers.length === 0) {
+        container.innerHTML = '<div class="col-12 text-center py-4"><p class="text-muted">{{ "No membership tiers available"|t }}</p></div>';
+        return;
+    }
+    
+    const tiersHtml = tiers.map(tier => {
+        const tierClass = tier.name.toLowerCase();
+        const icon = tier.icon || 'fa-medal';
+        const isCurrentTier = tier.name === currentUserTier;
+        
+        return `
+            <div class="col-md-3">
+                <div class="tier-card ${tierClass} ${isCurrentTier ? 'current-tier' : ''}">
+                    <div class="tier-header">
+                        <i class="far ${icon}"></i>
+                        <h6>${tier.name}</h6>
+                        <p>${tier.points_range} {{ 'points'|t }}</p>
+                    </div>
+                    <div class="tier-benefits">
+                        <ul>
+                            ${tier.benefits.map(benefit => `<li>${benefit}</li>`).join('')}
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        `;
+    }).join('');
+    
+    container.innerHTML = tiersHtml;
+}
 
 async function loadLoyaltyData() {
     try {
@@ -1090,9 +1134,12 @@ async function loadLoyaltyData() {
 }
 
 function updateLoyaltyOverview(loyalty) {
+    // Update global currentUserTier for tier card highlighting
+    currentUserTier = loyalty.current_tier || 'Bronze';
+    
     document.getElementById('currentPoints').textContent = loyalty.current_balance || 0;
     document.getElementById('pointsThisMonth').textContent = `+${loyalty.points_this_month || 0} {{ 'this month'|t }}`;
-    document.getElementById('currentTier').textContent = loyalty.current_tier || 'Bronze';
+    document.getElementById('currentTier').textContent = currentUserTier;
     document.getElementById('availableRewards').textContent = loyalty.available_rewards_count || 0;
     
     if (loyalty.tier_progress) {
@@ -1199,6 +1246,7 @@ function displayRewards(rewards) {
         const pointsCost = reward.points_cost || reward.points_required || 0;
         const canRedeem = currentPoints >= pointsCost;
         const rewardType = reward.reward_type || 'discount';
+        const isSystemReward = reward.is_system_reward || false;
         const typeLabel = {
             'discount': '{{ "Discount"|t }}',
             'free_delivery': '{{ "Free Delivery"|t }}',
@@ -1206,6 +1254,40 @@ function displayRewards(rewards) {
             'gift_card': '{{ "Gift Card"|t }}'
         }[rewardType] || rewardType;
         
+        // System rewards (like Free Delivery) are displayed differently
+        if (isSystemReward) {
+            return `
+                <div class="reward-card system-reward">
+                    <span class="reward-type-badge ${rewardType}">${typeLabel}</span>
+                    <span class="system-reward-badge">
+                        <i class="fas fa-check-circle"></i>
+                        {{ "Auto-Applied"|t }}
+                    </span>
+                    <div class="reward-image" style="${reward.image_url ? '' : 'display: flex; align-items: center; justify-content: center;'}">
+                        ${reward.image_url ? 
+                            `<img src="${reward.image_url}" alt="${reward.name}" style="width:100%; height:100%; object-fit:cover;" onerror="this.style.display='none'">` : 
+                            `<i class="fas fa-truck" style="font-size: 3rem; color: #52c41a;"></i>`
+                        }
+                    </div>
+                    <div class="reward-content">
+                        <h5>${reward.name}</h5>
+                        <p>${reward.description || ''}</p>
+                        <div class="system-reward-info">
+                            <i class="fas fa-magic"></i>
+                            <span>{{ "Applied automatically to every order"|t }}</span>
+                        </div>
+                        <div class="reward-points-cost" style="border-top: none; padding-top: 0.75rem;">
+                            <span class="points-badge" style="background: linear-gradient(135deg, #52c41a 0%, #389e0d 100%);">
+                                <i class="far fa-star"></i>
+                                ${pointsCost.toLocaleString()} {{ 'pts'|t }}
+                            </span>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+        
+        // Regular rewards with redeem button
         return `
             <div class="reward-card">
                 <span class="reward-type-badge ${rewardType}">${typeLabel}</span>

@@ -147,21 +147,28 @@ class LoyaltyPoints(db.Model, TimestampMixin):
     
     def calculate_tier(self):
         """Calculate user's current tier based on points"""
-        if not self.program or not self.program.tier_thresholds:
-            return 'Bronze'
+        # Import centralized tier config for fallback
+        from business_app.utils.constants import MEMBERSHIP_TIERS, MEMBERSHIP_TIER_ORDER, get_tier_for_points, get_next_tier
         
-        thresholds = self.program.tier_thresholds
         total_points = self.total_earned
         
-        current_tier = 'Bronze'
-        points_to_next = 0
-        
-        for tier, threshold in sorted(thresholds.items(), key=lambda x: x[1]):
-            if total_points >= threshold:
-                current_tier = tier
-            else:
-                points_to_next = threshold - total_points
-                break
+        # Use program-specific thresholds if available, otherwise use centralized config
+        if self.program and self.program.tier_thresholds:
+            thresholds = self.program.tier_thresholds
+            current_tier = 'Bronze'
+            points_to_next = 0
+            
+            for tier, threshold in sorted(thresholds.items(), key=lambda x: x[1]):
+                if total_points >= threshold:
+                    current_tier = tier
+                else:
+                    points_to_next = threshold - total_points
+                    break
+        else:
+            # Use centralized tier config
+            current_tier = get_tier_for_points(total_points)
+            next_tier_info = get_next_tier(current_tier)
+            points_to_next = max(0, next_tier_info['min_points'] - total_points) if next_tier_info else 0
         
         self.current_tier = current_tier
         self.points_to_next_tier = points_to_next
@@ -211,6 +218,7 @@ class LoyaltyReward(db.Model, TimestampMixin, TranslatableMixin):
     # Availability
     is_active = Column(Boolean, default=True)
     is_featured = Column(Boolean, default=False)
+    is_system_reward = Column(Boolean, default=False, nullable=False)  # System rewards (e.g., Free Delivery) cannot be manually redeemed
     valid_from = Column(DateTime, nullable=True)
     valid_until = Column(DateTime, nullable=True)
     
@@ -277,6 +285,7 @@ class LoyaltyReward(db.Model, TimestampMixin, TranslatableMixin):
             'voucher_code': self.voucher_code,
             'is_active': self.is_active,
             'is_featured': self.is_featured,
+            'is_system_reward': self.is_system_reward,
             'valid_from': self.valid_from.isoformat() if self.valid_from else None,
             'valid_until': self.valid_until.isoformat() if self.valid_until else None,
             'redemptions_used': self.redemptions_used,

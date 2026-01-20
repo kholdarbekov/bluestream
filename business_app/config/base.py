@@ -176,7 +176,7 @@ class BaseConfig:
     FREE_DELIVERY_THRESHOLD = int(os.environ.get('FREE_DELIVERY_THRESHOLD', 50000))  # UZS
     DELIVERY_RADIUS_KM = int(os.environ.get('DELIVERY_RADIUS_KM', 50))
     MAX_DELIVERY_TIME_HOURS = int(os.environ.get('MAX_DELIVERY_TIME_HOURS', 24))
-    MIN_ORDER_AMOUNT = int(os.environ.get('MIN_ORDER_AMOUNT', 10000))  # UZS
+    MIN_ORDER_AMOUNT = int(os.environ.get('MIN_ORDER_AMOUNT', 20000))  # UZS - ensures 200+ pts for free delivery
     
     # Loyalty Program Configuration
     LOYALTY_POINTS_RATIO = int(os.environ.get('LOYALTY_POINTS_RATIO', 100))  # 1 point per 100 UZS

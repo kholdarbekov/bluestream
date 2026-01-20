@@ -297,8 +297,14 @@ class OrderKeyboards:
     """Order-related keyboards"""
     
     @staticmethod
-    def cart_actions(language: str = 'en', cart_is_empty: bool = True) -> InlineKeyboardMarkup:
-        """Shopping cart action buttons"""
+    def cart_actions(language: str = 'en', cart_is_empty: bool = True, meets_minimum: bool = True) -> InlineKeyboardMarkup:
+        """Shopping cart action buttons
+        
+        Args:
+            language: Language code
+            cart_is_empty: Whether cart has no items
+            meets_minimum: Whether cart total meets minimum order amount
+        """
         if cart_is_empty:
             buttons = [
                 [
@@ -307,14 +313,25 @@ class OrderKeyboards:
                 [{'text': i18n.get('telegram.back', language), 'callback_data': 'back_to_main'}]
             ]
         else:
-            buttons = [
-                [{'text': i18n.get('telegram.cart.checkout', language), 'callback_data': 'cart_checkout'}],
-                [
-                    {'text': '🗑️ Clear Cart', 'callback_data': 'cart_clear'},
-                    {'text': '🛍️ Continue Shopping', 'callback_data': 'menu_products'}
-                ],
-                [{'text': i18n.get('telegram.back', language), 'callback_data': 'back_to_main'}]
-            ]
+            # Show checkout button only if minimum is met
+            if meets_minimum:
+                buttons = [
+                    [{'text': i18n.get('telegram.cart.checkout', language), 'callback_data': 'cart_checkout'}],
+                    [
+                        {'text': '🗑️ Clear Cart', 'callback_data': 'cart_clear'},
+                        {'text': '🛍️ Continue Shopping', 'callback_data': 'menu_products'}
+                    ],
+                    [{'text': i18n.get('telegram.back', language), 'callback_data': 'back_to_main'}]
+                ]
+            else:
+                # Minimum not met - show warning and no checkout button
+                buttons = [
+                    [{'text': '⚠️ ' + i18n.get('telegram.cart.add_more', language), 'callback_data': 'menu_products'}],
+                    [
+                        {'text': '🗑️ Clear Cart', 'callback_data': 'cart_clear'},
+                    ],
+                    [{'text': i18n.get('telegram.back', language), 'callback_data': 'back_to_main'}]
+                ]
         
         return KeyboardBuilder.build_inline_keyboard(buttons)
     

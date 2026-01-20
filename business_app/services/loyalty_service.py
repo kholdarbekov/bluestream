@@ -11,7 +11,7 @@ from business_app.models.loyalty import LoyaltyPoints, LoyaltyTransaction, Loyal
 from business_app.models.user import User
 from business_app.models.order import Order
 from business_app.utils.exceptions import ValidationError, NotFoundError, ConflictError
-from business_app.utils.constants import LoyaltyActionType, LoyaltyTransactionType
+from business_app.utils.constants import LoyaltyActionType, LoyaltyTransactionType, MEMBERSHIP_TIERS, MEMBERSHIP_TIER_ORDER, get_tier_for_points, get_next_tier
 from business_app.utils.helpers import generate_referral_code, calculate_loyalty_points, calculate_discount_from_points
 from business_app import db
 
@@ -49,7 +49,7 @@ class LoyaltyService:
                 total_expired=0,
                 current_balance=0,
                 current_tier='Bronze',
-                points_to_next_tier=1000
+                points_to_next_tier=MEMBERSHIP_TIERS['Silver']['min_points']
             )
             
             db.session.add(account)
@@ -303,6 +303,10 @@ class LoyaltyService:
         if not reward or not reward.is_active:
             raise NotFoundError("Reward not found or inactive")
         
+        # System rewards cannot be manually redeemed - they are applied automatically
+        if reward.is_system_reward:
+            raise ValidationError("This reward is automatically applied by the system and cannot be manually redeemed")
+        
         # Check expiry - use valid_until (the actual model field)
         if reward.valid_until and reward.valid_until < datetime.now(timezone.utc):
             raise ValidationError("Reward has expired")
@@ -513,85 +517,46 @@ class LoyaltyService:
             db.session.commit()
     
     def _check_tier_upgrade(self, account: LoyaltyPoints):
-        """Check if user qualifies for tier upgrade"""
-        tier_thresholds = {
-            'Bronze': 0,
-            'Silver': 1000,
-            'Gold': 5000,
-            'Platinum': 15000,
-            'Diamond': 50000
-        }
-        
+        """Check if user qualifies for tier upgrade using centralized tier config"""
         current_tier = account.current_tier
         points_earned = account.total_earned
         
-        new_tier = 'Bronze'
-        for tier, threshold in tier_thresholds.items():
-            if points_earned >= threshold:
-                new_tier = tier
+        # Use the centralized tier calculation function
+        new_tier = get_tier_for_points(points_earned)
         
         if new_tier != current_tier:
             account.current_tier = new_tier
+            
+            # Update points to next tier
+            next_tier_info = get_next_tier(new_tier)
+            if next_tier_info:
+                account.points_to_next_tier = max(0, next_tier_info['min_points'] - points_earned)
+            else:
+                account.points_to_next_tier = 0
             
             # Send tier upgrade notification
             self._send_tier_upgrade_notification(account.user_id, new_tier)
     
     def _get_tier_benefits(self, tier: str) -> Dict[str, Any]:
-        """Get benefits for a specific tier"""
-        benefits = {
-            'Bronze': {
-                'discount_percentage': 0,
-                'free_delivery_threshold': 50000,
-                'priority_support': False,
-                'exclusive_offers': False
-            },
-            'Silver': {
-                'discount_percentage': 5,
-                'free_delivery_threshold': 40000,
-                'priority_support': False,
-                'exclusive_offers': True
-            },
-            'Gold': {
-                'discount_percentage': 10,
-                'free_delivery_threshold': 30000,
-                'priority_support': True,
-                'exclusive_offers': True
-            },
-            'Platinum': {
-                'discount_percentage': 15,
-                'free_delivery_threshold': 20000,
-                'priority_support': True,
-                'exclusive_offers': True
-            },
-            'Diamond': {
-                'discount_percentage': 20,
-                'free_delivery_threshold': 0,
-                'priority_support': True,
-                'exclusive_offers': True
-            }
+        """Get benefits for a specific tier using centralized config"""
+        tier_config = MEMBERSHIP_TIERS.get(tier, MEMBERSHIP_TIERS['Bronze'])
+        return {
+            'discount_percentage': tier_config.get('discount_percentage', 0),
+            'points_multiplier': tier_config.get('points_multiplier', 1.0),
+            'benefits': tier_config.get('benefits', []),
+            'color': tier_config.get('color', '#CD7F32')
         }
-        
-        return benefits.get(tier, benefits['Bronze'])
     
     def _get_next_tier_info(self, account: LoyaltyPoints) -> Optional[Dict[str, Any]]:
-        """Get information about the next tier"""
-        tier_order = ['Bronze', 'Silver', 'Gold', 'Platinum', 'Diamond']
-        tier_thresholds = {
-            'Silver': 1000,
-            'Gold': 5000,
-            'Platinum': 15000,
-            'Diamond': 50000
-        }
+        """Get information about the next tier using centralized config"""
+        next_tier = get_next_tier(account.current_tier)
         
-        current_index = tier_order.index(account.current_tier)
-        if current_index < len(tier_order) - 1:
-            next_tier = tier_order[current_index + 1]
-            points_needed = tier_thresholds[next_tier] - account.total_earned
-            
+        if next_tier:
+            points_needed = next_tier['min_points'] - account.total_earned
             return {
-                'tier': next_tier,
+                'tier': next_tier['name'],
                 'points_needed': max(0, points_needed),
-                'threshold': tier_thresholds[next_tier]
+                'threshold': next_tier['min_points']
             }
         
         return None

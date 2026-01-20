@@ -666,16 +666,14 @@ class OrderService:
         """
         Process loyalty points for an order:
         1. Award points based on order amount
-        2. Auto-apply Free Delivery reward (deduct 200 points to cover delivery)
+        2. Auto-apply Free Delivery reward (deduct points to cover delivery)
         
-        This ensures delivery is always free while maintaining a sustainable points economy.
-        The minimum order (2 qty) earns ~360 points, so users always have enough for the 200 point
-        free delivery deduction.
+        This ensures delivery is always "free" from the customer's perspective 
+        while the cost is covered by loyalty points. With MIN_ORDER_AMOUNT at 20,000 UZS,
+        customers always earn enough points (200+) to cover the FREE_DELIVERY_POINTS_COST.
         """
         from .loyalty_service import LoyaltyService
-        from business_app.utils.constants import LoyaltyActionType
-        
-        FREE_DELIVERY_POINTS_COST = 200  # Points required for free delivery
+        from business_app.utils.constants import LoyaltyActionType, FREE_DELIVERY_POINTS_COST
         
         try:
             loyalty_service = LoyaltyService()
@@ -700,14 +698,33 @@ class OrderService:
                     current_points = loyalty_service.get_available_points(order.user_id)
                     
                     if current_points >= FREE_DELIVERY_POINTS_COST:
-                        # Deduct points for free delivery
+                        # Deduct points for free delivery (skip notification - this is automatic)
                         loyalty_service.deduct_points(
                             order.user_id,
                             FREE_DELIVERY_POINTS_COST,
                             f"Free Delivery reward - Order #{order.order_number}",
-                            order.id
+                            order.id,
+                            skip_notification=True  # No notification for auto-applied system rewards
                         )
                         logger.info(f"Applied Free Delivery reward ({FREE_DELIVERY_POINTS_COST} points) for order {order.order_number}")
+                        
+                        # Log successful Free Delivery application for analytics
+                        audit_logger.log_event(
+                            event_type=AuditEventType.ORDER_UPDATED,
+                            action="free_delivery_reward_applied",
+                            severity=AuditSeverity.LOW,
+                            resource_type="order",
+                            resource_id=str(order.id),
+                            description=f"Auto-applied Free Delivery reward for order {order.order_number}",
+                            additional_data={
+                                'order_id': order.id,
+                                'order_number': order.order_number,
+                                'user_id': order.user_id,
+                                'points_deducted': FREE_DELIVERY_POINTS_COST,
+                                'points_earned': points_earned,
+                                'net_points': points_earned - FREE_DELIVERY_POINTS_COST
+                            }
+                        )
                     else:
                         # User doesn't have enough points - log but don't fail the order
                         logger.warning(

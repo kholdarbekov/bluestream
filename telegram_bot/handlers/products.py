@@ -436,6 +436,10 @@ class ProductHandlers:
         # This loads cart from database
         user_id = update.effective_user.id
         language = await i18n.get_user_language(user_id)
+        
+        # Minimum order amount (should match backend config)
+        MIN_ORDER_AMOUNT = 20000  # TODO: Consider fetching from API config endpoint
+        
         async with api_client as client:
             user_token = await get_auth_token(update, context, client)
             if not user_token:
@@ -452,6 +456,8 @@ class ProductHandlers:
             cart_items = cart.get('cart_items', [])
         
         cart_is_empty = None
+        meets_minimum = True
+        
         if not cart_items:
             cart_text = i18n.get('telegram.cart_empty', language)
             cart_is_empty = True
@@ -470,8 +476,22 @@ class ProductHandlers:
                 )
             cart_is_empty = total_amount <= 0
             lines.append(f"\n💰 {i18n.get('telegram.cart_total', language)}: {format_price(total_amount)} UZS")
+            
+            # Add minimum order warning if needed
+            if total_amount < MIN_ORDER_AMOUNT:
+                meets_minimum = False
+                remaining = MIN_ORDER_AMOUNT - total_amount
+                lines.append("")
+                lines.append("⚠️ " + i18n.get('telegram.cart_min_order_warning', language, 
+                    min_amount=format_price(MIN_ORDER_AMOUNT),
+                    remaining=format_price(remaining)))
+            else:
+                lines.append("")
+                lines.append("✅ " + i18n.get('telegram.cart_ready_checkout', language))
+            
             cart_text = "\n".join(lines)
-        keyboard = OrderKeyboards.cart_actions(language, cart_is_empty)
+        
+        keyboard = OrderKeyboards.cart_actions(language, cart_is_empty, meets_minimum)
         
         await update.callback_query.edit_message_text(
             text=cart_text,

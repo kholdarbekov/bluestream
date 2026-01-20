@@ -218,6 +218,117 @@ class RewardStatus(Enum):
     CANCELLED = 'cancelled'
 
 
+# Free Delivery Reward Constants
+FREE_DELIVERY_REWARD_SLUG = 'free-delivery'
+FREE_DELIVERY_POINTS_COST = 200  # Points required for free delivery
+
+
+class MembershipTier(Enum):
+    """Membership tier enumeration"""
+    BRONZE = 'bronze'
+    SILVER = 'silver'
+    GOLD = 'gold'
+    PLATINUM = 'platinum'
+
+
+# Membership Tier Configuration - Single Source of Truth
+# All services and frontend must use these values for consistency
+MEMBERSHIP_TIERS = {
+    'Bronze': {
+        'name': 'Bronze',
+        'min_points': 0,
+        'max_points': 4999,
+        'points_multiplier': 1.0,  # 1 point per 100 UZS
+        'discount_percentage': 0,
+        'benefits': [
+            '1 point per 100 UZS spent',
+            'Standard shipping',
+            'Basic customer support'
+        ],
+        'color': '#CD7F32',
+        'icon': 'fa-medal'
+    },
+    'Silver': {
+        'name': 'Silver',
+        'min_points': 5000,
+        'max_points': 19999,
+        'points_multiplier': 1.25,  # 1.25 points per 100 UZS
+        'discount_percentage': 5,
+        'benefits': [
+            '1.25 points per 100 UZS spent',
+            'Free standard shipping',
+            'Priority customer support',
+            'Exclusive monthly offers'
+        ],
+        'color': '#C0C0C0',
+        'icon': 'fa-medal'
+    },
+    'Gold': {
+        'name': 'Gold',
+        'min_points': 20000,
+        'max_points': 44999,
+        'points_multiplier': 1.5,  # 1.5 points per 100 UZS
+        'discount_percentage': 10,
+        'benefits': [
+            '1.5 points per 100 UZS spent',
+            'Free expedited shipping',
+            'VIP customer support',
+            'Early access to new products',
+            '10% birthday discount'
+        ],
+        'color': '#FFD700',
+        'icon': 'fa-medal'
+    },
+    'Platinum': {
+        'name': 'Platinum',
+        'min_points': 45000,
+        'max_points': None,  # No upper limit
+        'points_multiplier': 2.0,  # 2 points per 100 UZS
+        'discount_percentage': 15,
+        'benefits': [
+            '2 points per 100 UZS spent',
+            'Free same-day delivery',
+            'Dedicated account manager',
+            'Exclusive platinum rewards',
+            '15% birthday discount',
+            'VIP events access'
+        ],
+        'color': '#7C3AED',
+        'icon': 'fa-crown'
+    }
+}
+
+# List of tier names in order for progression
+MEMBERSHIP_TIER_ORDER = ['Bronze', 'Silver', 'Gold', 'Platinum']
+
+
+def get_tier_for_points(points: int) -> str:
+    """Get the tier name for a given number of points"""
+    current_tier = 'Bronze'
+    for tier_name in MEMBERSHIP_TIER_ORDER:
+        tier = MEMBERSHIP_TIERS[tier_name]
+        if points >= tier['min_points']:
+            current_tier = tier_name
+        else:
+            break
+    return current_tier
+
+
+def get_next_tier(current_tier: str) -> dict:
+    """Get the next tier info for a given current tier"""
+    try:
+        current_index = MEMBERSHIP_TIER_ORDER.index(current_tier)
+        if current_index < len(MEMBERSHIP_TIER_ORDER) - 1:
+            next_tier_name = MEMBERSHIP_TIER_ORDER[current_index + 1]
+            return {
+                'name': next_tier_name,
+                **MEMBERSHIP_TIERS[next_tier_name]
+            }
+    except ValueError:
+        pass
+    return None
+
+
 class NotificationStatus(Enum):
     """Notification status enumeration"""
     PENDING = 'pending'
@@ -277,7 +388,7 @@ API_MESSAGES = {
 
 # Business Rules Constants
 BUSINESS_RULES = {
-    'MIN_ORDER_AMOUNT': 10000,  # UZS
+    'MIN_ORDER_AMOUNT': 20000,  # UZS - ensures 200+ pts for free delivery
     'MAX_ORDER_ITEMS': 50,
     'MAX_DELIVERY_DISTANCE': 20,  # km
     'DEFAULT_DELIVERY_TIME': 60,  # minutes

@@ -841,6 +841,15 @@
                                 </li>
                             </ul>
 
+                            <!-- Minimum Order Warning -->
+                            <div id="min-order-warning" class="min-order-warning" style="display: none; background: linear-gradient(135deg, #f8d7da 0%, #f5c2c7 100%); border: 2px solid #dc3545; border-radius: 10px; padding: 15px 20px; margin: 20px 0; align-items: center; gap: 12px;">
+                                <i class="far fa-exclamation-triangle" style="font-size: 24px; color: #dc3545; flex-shrink: 0;"></i>
+                                <div style="flex: 1;">
+                                    <div style="font-weight: 700; font-size: 14px; color: #721c24; margin-bottom: 2px;" id="min-order-title">{{ 'Minimum order amount not met'|t }}</div>
+                                    <div style="font-size: 13px; color: #666;" id="min-order-text"></div>
+                                </div>
+                            </div>
+
                             <div class="checkout-actions">
                                 <a href="{{ url_for('frontend.cart') }}" class="theme-btn btn-two">
                                     <i class="far fa-arrow-left"></i> {{ 'Back to Cart'|t }}
@@ -1080,6 +1089,27 @@ document.addEventListener('DOMContentLoaded', async function() {
     }
 });
 
+// Clear cart after successful order (both localStorage and database)
+async function clearCartAfterOrder() {
+    // Clear localStorage
+    localStorage.removeItem('cart');
+    
+    // Clear database cart
+    try {
+        await apiRequest('/cart/clear', { method: 'POST' });
+    } catch (error) {
+        console.error('Error clearing database cart:', error);
+        // Continue anyway - order was successful
+    }
+    
+    // Update cart count in header
+    const cartCountElements = document.querySelectorAll('.cart-count, .cart-badge');
+    cartCountElements.forEach(el => {
+        el.textContent = '0';
+        el.style.display = 'none';
+    });
+}
+
 // Load cart summary
 async function loadCartSummary() {
     cartItems = JSON.parse(localStorage.getItem('cart') || '[]');
@@ -1153,6 +1183,9 @@ function renderOrderSummary(products) {
     updateSummaryTotals(subtotal, null);
 }
 
+// Minimum order amount (in UZS)
+const MIN_ORDER_AMOUNT = {{ config.get('MIN_ORDER_AMOUNT', 20000) }};
+
 // Update summary totals
 // deliveryFee: number (fee amount) or null (not yet calculated)
 function updateSummaryTotals(subtotal, deliveryFee) {
@@ -1175,6 +1208,33 @@ function updateSummaryTotals(subtotal, deliveryFee) {
 
     // Store current delivery fee for order placement
     window.currentDeliveryFee = deliveryFee;
+    
+    // Update minimum order warning
+    const warningEl = document.getElementById('min-order-warning');
+    const titleEl = document.getElementById('min-order-title');
+    const textEl = document.getElementById('min-order-text');
+    const placeOrderBtn = document.getElementById('place-order-btn');
+    
+    if (subtotal < MIN_ORDER_AMOUNT) {
+        const remaining = MIN_ORDER_AMOUNT - subtotal;
+        
+        warningEl.style.display = 'flex';
+        titleEl.textContent = '{{ "Minimum order amount not met"|t }}';
+        textEl.textContent = '{{ "Add"|t }} ' + formatPrice(remaining) + ' {{ "more to place order"|t }}. {{ "Minimum order amount"|t }}: ' + formatPrice(MIN_ORDER_AMOUNT);
+        
+        // Disable place order button
+        placeOrderBtn.disabled = true;
+        placeOrderBtn.style.opacity = '0.6';
+        placeOrderBtn.style.cursor = 'not-allowed';
+        placeOrderBtn.title = '{{ "Minimum order amount is"|t }} ' + formatPrice(MIN_ORDER_AMOUNT);
+    } else {
+        // Hide warning and enable button
+        warningEl.style.display = 'none';
+        placeOrderBtn.disabled = false;
+        placeOrderBtn.style.opacity = '';
+        placeOrderBtn.style.cursor = '';
+        placeOrderBtn.title = '';
+    }
 }
 
 // Select address
@@ -1588,9 +1648,8 @@ async function processPaymentWithVerifiedCard() {
         const data = await response.json();
 
         if (data.success) {
-            // Clear cart
-            localStorage.removeItem('cart');
-            updateCartCount();
+            // Clear cart (localStorage + database)
+            await clearCartAfterOrder();
 
             // Redirect to success page
             window.location.href = data.data.redirect_url || `/my-orders?order_id=${data.data.order_id}&payment=success`;
@@ -1803,8 +1862,8 @@ async function placeOrderWithCash() {
         const data = await response.json();
 
         if (data.success) {
-            localStorage.removeItem('cart');
-            updateCartCount();
+            // Clear cart (localStorage + database)
+            await clearCartAfterOrder();
             window.location.href = `/order-confirmation?order_id=${data.data.order.id}`;
         } else {
             throw new Error(data.message || 'Order creation failed');
@@ -1840,8 +1899,8 @@ async function placeOrderWithClick() {
         const data = await response.json();
 
         if (data.success && data.data.payment_url) {
-            localStorage.removeItem('cart');
-            updateCartCount();
+            // Clear cart (localStorage + database)
+            await clearCartAfterOrder();
             window.location.href = data.data.payment_url;
         } else {
             throw new Error(data.message || 'Order creation failed');

@@ -2560,6 +2560,8 @@ def check_phone_availability():
     
     # Mask the user info for privacy
     masked_name = existing_user.first_name[:1] + '***' if existing_user.first_name else '***'
+    if existing_user.last_name:
+        masked_name += ' ' + existing_user.last_name[:1] + '***'
     masked_email = None
     if existing_user.email and not existing_user.email.endswith('@bluestream.local'):
         parts = existing_user.email.split('@')
@@ -2911,7 +2913,7 @@ def sync_profile():
             'schema': {
                 'type': 'object',
                 'properties': {
-                    'email': {'type': 'string', 'example': 'admin@bluestream.com'},
+                    'email': {'type': 'string', 'example': 'admin@bluestream.uz'},
                     'password': {'type': 'string', 'example': 'SecurePassword123'},
                     'first_name': {'type': 'string', 'example': 'John'},
                     'last_name': {'type': 'string', 'example': 'Admin'},

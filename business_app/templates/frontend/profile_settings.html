@@ -323,7 +323,7 @@
                     <div class="col-lg-6 col-md-6 col-sm-12 form-group">
                         <label>{{ 'Phone Number'|t }}</label>
                         <div class="input-group">
-                            <input type="tel" name="phone" value="{{ user.phone or '' }}" placeholder="{{ '+998901234567'|t }}">
+                            <input type="tel" name="phone" value="{{ user.phone or '' }}" placeholder="+998901234567">
                             <div class="input-group-append">
                                 {% if user.phone_verified_at %}
                                 <span class="input-group-text text-success">

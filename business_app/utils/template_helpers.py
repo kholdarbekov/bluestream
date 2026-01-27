@@ -243,9 +243,6 @@ def register_multilingual_filters(app):
         from flask import current_app, g
 
         request_id = getattr(g, 'request_id', 'N/A')
-        
-        # AGGRESSIVE DEBUG: Log ALL landing.* keys using current_app.logger for visibility
-        is_debug_key = key.startswith('landing.')
 
         # Resolve language if not provided
         if language is None:
@@ -256,15 +253,7 @@ def register_multilingual_filters(app):
                 current_app.logger.warning(f"[FILTER] [REQ:{request_id}] Language resolution error: {e}")
                 language = current_app.config.get('DEFAULT_LANGUAGE', 'uz')
 
-        if is_debug_key:
-            current_app.logger.info(f"[FILTER] [REQ:{request_id}] translate_filter: key='{key}', g.language='{getattr(g, 'language', None)}', resolved_lang='{language}'")
-
-        # Get translation
         result = get_translation(key, language, **kwargs)
-
-        if is_debug_key:
-            preview = result[:40] if len(result) > 40 else result
-            current_app.logger.info(f"[FILTER] [REQ:{request_id}] translate_filter result: key='{key}', lang='{language}', result='{preview}'")
 
         return result
 
@@ -312,15 +301,6 @@ def register_multilingual_filters(app):
     @app.template_filter('t')
     def t_filter(key, language=None, **kwargs):
         """Short alias for translate: {{ 'ui.button.save'|t }}"""
-        print(f"!!! T_FILTER CALLED WITH KEY: {key}, language: {language}, kwargs: {kwargs}")
-        from flask import g, current_app
-        print(f"!!! T_FILTER current_app id: {id(current_app._get_current_object())}, current_app.config['DEBUG']: {current_app.config.get('DEBUG')}")
-        request_id = getattr(g, 'request_id', 'N/A')
-
-        # AGGRESSIVE DEBUG: Log ALL landing.* keys using current_app.logger
-        if key.startswith('landing.'):
-            current_app.logger.info(f"[T-FILTER] [REQ:{request_id}] t_filter called: key='{key}', g.language='{getattr(g, 'language', None)}'")
-
         return translate_filter(key, language, **kwargs)
 
 

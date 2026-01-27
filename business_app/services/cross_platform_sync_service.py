@@ -144,7 +144,7 @@ class CrossPlatformSyncService:
                 raise ValueError("Primary user account is not active")
             
             # Perform the linking based on registration sources
-            if primary_user.registration_source == 'web' and secondary_user.registration_source == 'telegram':
+            if primary_user.registration_source in ('web', 'admin_created') and secondary_user.registration_source == 'telegram':
                 return self._link_web_primary_telegram_secondary(primary_user, secondary_user, link_type)
             elif primary_user.registration_source == 'telegram' and secondary_user.registration_source == 'web':
                 return self._link_telegram_primary_web_secondary(primary_user, secondary_user, link_type)

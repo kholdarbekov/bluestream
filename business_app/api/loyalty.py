@@ -7,7 +7,7 @@ from flask_jwt_extended import jwt_required, get_jwt_identity
 from sqlalchemy import and_, or_, desc, func
 from datetime import datetime, UTC, timedelta
 
-from business_app.models.loyalty import LoyaltyProgram, LoyaltyPoints, LoyaltyReward, LoyaltyTransaction
+from business_app.models.loyalty import LoyaltyProgram, LoyaltyPoints, LoyaltyReward, LoyaltyTransaction, LoyaltyTierConfig
 from business_app.models.user import User
 from business_app.models.order import Order
 from business_app.utils.service_factory import get_loyalty_service, get_notification_service
@@ -20,8 +20,7 @@ from business_app.serializers.loyalty_serializers import (
 )
 from business_app.utils.decorators import validate_json, cache_response
 from business_app.utils.constants import (
-    LoyaltyTransactionType, RewardStatus, NotificationType,
-    MEMBERSHIP_TIERS, MEMBERSHIP_TIER_ORDER, get_tier_for_points, get_next_tier
+    LoyaltyTransactionType, RewardStatus, NotificationType
 )
 from business_app.utils.api_responses import (
     success_response, error_response, paginated_response, created_response,
@@ -35,28 +34,16 @@ loyalty_bp = Blueprint('loyalty', __name__)
 @loyalty_bp.route('/tiers', methods=['GET'])
 @cache_response(3600)  # Cache for 1 hour
 def get_membership_tiers():
-    """Get all membership tier configurations - single source of truth"""
+    """
+    Get all membership tier configurations.
+    
+    Returns tier configurations from database (LoyaltyTierConfig).
+    Falls back to hardcoded MEMBERSHIP_TIERS if no database tiers exist.
+    """
     try:
-        tiers = []
-        for tier_name in MEMBERSHIP_TIER_ORDER:
-            tier_config = MEMBERSHIP_TIERS[tier_name]
-            # Format the points range for display
-            if tier_config['max_points'] is not None:
-                points_range = f"{tier_config['min_points']:,} - {tier_config['max_points']:,}"
-            else:
-                points_range = f"{tier_config['min_points']:,}+"
-            
-            tiers.append({
-                'name': tier_name,
-                'min_points': tier_config['min_points'],
-                'max_points': tier_config['max_points'],
-                'points_range': points_range,
-                'points_multiplier': tier_config['points_multiplier'],
-                'discount_percentage': tier_config['discount_percentage'],
-                'benefits': tier_config['benefits'],
-                'color': tier_config['color'],
-                'icon': tier_config['icon']
-            })
+        # Get tiers from LoyaltyService (queries database first, falls back to constants)
+        loyalty_service = get_loyalty_service()
+        tiers = loyalty_service.get_tiers()
         
         return success_response(
             data={
@@ -121,24 +108,35 @@ def get_loyalty_account():
         # Calculate tier progress using centralized config
         current_tier = loyalty_points.current_tier or 'Bronze'
         current_balance = loyalty_points.current_balance or 0
+        program_id = loyalty_points.program_id
         
         # Get current tier config
-        current_tier_config = MEMBERSHIP_TIERS.get(current_tier, MEMBERSHIP_TIERS['Bronze'])
-        current_tier_points = current_tier_config['min_points']
+        current_tier_config = LoyaltyTierConfig.query.filter_by(
+            name=current_tier, 
+            program_id=program_id,
+            is_active=True
+        ).first()
+        
+        current_tier_points = current_tier_config.min_points if current_tier_config else 0
+        current_tier_order = current_tier_config.display_order if current_tier_config else -1
         
         # Find next tier info
-        next_tier_info = get_next_tier(current_tier)
+        next_tier_config = LoyaltyTierConfig.query.filter(
+            LoyaltyTierConfig.program_id == program_id,
+            LoyaltyTierConfig.is_active == True,
+            LoyaltyTierConfig.display_order > current_tier_order
+        ).order_by(LoyaltyTierConfig.display_order.asc()).first()
         
-        if next_tier_info:
-            next_tier_points = next_tier_info['min_points']
+        if next_tier_config:
+            next_tier_points = next_tier_config.min_points
             points_needed = max(0, next_tier_points - current_balance)
         else:
             next_tier_points = current_tier_points
             points_needed = 0
 
         tier_progress = {
-            'current': current_balance - current_tier_points if next_tier_info else current_balance,
-            'next_tier_points': next_tier_points - current_tier_points if next_tier_info else 0,
+            'current': current_balance - current_tier_points if next_tier_config else current_balance,
+            'next_tier_points': next_tier_points - current_tier_points if next_tier_config else 0,
             'points_needed': points_needed
         }
 

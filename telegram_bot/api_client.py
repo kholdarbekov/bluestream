@@ -144,7 +144,8 @@ class BusinessAPIClient:
                           headers: Optional[Dict] = None,
                           data: Optional[Dict] = None,
                           params: Optional[Dict] = None,
-                          user_token: Optional[str] = None) -> APIResponse:
+                          user_token: Optional[str] = None,
+                          language: Optional[str] = None) -> APIResponse:
         """Make HTTP request with retry logic"""
         url = self._get_url(endpoint)
         
@@ -158,6 +159,10 @@ class BusinessAPIClient:
         if user_token:
             request_headers['Authorization'] = f'Bearer {user_token}'
             logger.info(f"Authorization header added with token: {user_token[:20]}...")
+        
+        if language:
+            request_headers['Accept-Language'] = language
+            logger.info(f"Accept-Language header added: {language}")
         
         logger.info(f"Request headers: {request_headers}")
         if data:
@@ -469,26 +474,37 @@ class BusinessAPIClient:
     
     # Product methods
     async def get_products(self, user_token: str, category: Optional[str] = None,
-                          search: Optional[str] = None, page: int = 1) -> APIResponse:
+                          search: Optional[str] = None, page: int = 1,
+                          per_page: int = 20,
+                          language: Optional[str] = None) -> APIResponse:
         """Get products list"""
-        params = {'page': page}
+        params = {'page': page, 'per_page': per_page}
         if category:
             params['category_id'] = category
         if search:
             params['search'] = search
 
         return await self._make_request('GET', '/api/v1/products',
-                                       user_token=user_token, params=params)
+                                       user_token=user_token, params=params,
+                                       language=language)
     
-    async def get_product(self, user_token: str, product_id: int) -> APIResponse:
+    async def get_product(self, user_token: str, product_id: int, language: Optional[str] = None) -> APIResponse:
         """Get single product details"""
         return await self._make_request('GET', f'/api/v1/products/{product_id}', 
-                                       user_token=user_token)
+                                       user_token=user_token,
+                                       language=language)
     
-    async def get_product_categories(self, user_token: str) -> APIResponse:
+    async def get_product_categories(self, user_token: str, language: Optional[str] = None) -> APIResponse:
         """Get product categories"""
         return await self._make_request('GET', '/api/v1/products/categories', 
-                                       user_token=user_token)
+                                       user_token=user_token,
+                                       language=language)
+
+    async def get_category(self, user_token: str, category_id: int, language: Optional[str] = None) -> APIResponse:
+        """Get specific category details"""
+        return await self._make_request('GET', f'/api/v1/products/categories/{category_id}', 
+                                       user_token=user_token,
+                                       language=language)
     
     # Cart methods
     async def get_cart(self, user_token: str) -> APIResponse:
@@ -544,7 +560,7 @@ class BusinessAPIClient:
     
     async def cancel_order(self, user_token: str, order_id: int) -> APIResponse:
         """Cancel order"""
-        return await self._make_request('PUT', f'/api/v1/orders/{order_id}/cancel', 
+        return await self._make_request('POST', f'/api/v1/orders/{order_id}/cancel', 
                                        user_token=user_token)
     
     async def track_order(self, user_token: str, order_id: int) -> APIResponse:

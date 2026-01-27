@@ -399,14 +399,9 @@ def cache_response(timeout: int = 300, key_prefix: str = None):
             
             # CRITICAL: Include language in cache key to prevent serving wrong language
             # Priority: URL param > g.language > session > default
-            language = request.args.get('language') or request.args.get('lang')
-            if not language:
-                language = getattr(g, 'language', None)
-            if not language:
-                from flask import session
-                language = session.get('language')
-            if not language:
-                language = current_app.config.get('DEFAULT_LANGUAGE', 'uz')
+            # Use improved helper to consistently detect language including Accept-Language header support
+            from .helpers import get_current_language
+            language = get_current_language()
             
             if key_prefix:
                 cache_key = f"{key_prefix}:{language}:{request.path}:{query_string}:{hash(str(args) + str(kwargs))}"
@@ -470,6 +465,51 @@ def cache_response(timeout: int = 300, key_prefix: str = None):
         
         return decorated_function
     return decorator
+
+
+def invalidate_cache(pattern: str):
+    """
+    Invalidate cached data matching a pattern.
+    
+    Args:
+        pattern: Cache key pattern to invalidate (e.g., 'loyalty:tiers', 'response:*:/api/v1/loyalty/tiers*')
+        
+    Usage:
+        invalidate_cache('loyalty:tiers')  # Exact key
+        invalidate_cache('response:*:/api/v1/loyalty/tiers*')  # Pattern with wildcards
+    """
+    try:
+        redis_client = redis.from_url(current_app.config['REDIS_URL'])
+        
+        # Find all keys matching the pattern
+        if '*' in pattern:
+            # Pattern-based deletion
+            keys = redis_client.keys(pattern)
+            if keys:
+                deleted = redis_client.delete(*keys)
+                current_app.logger.info(f"[CACHE-INVALIDATE] Deleted {deleted} keys matching pattern: {pattern}")
+            else:
+                current_app.logger.debug(f"[CACHE-INVALIDATE] No keys found matching pattern: {pattern}")
+        else:
+            # Exact key deletion
+            deleted = redis_client.delete(pattern)
+            if deleted:
+                current_app.logger.info(f"[CACHE-INVALIDATE] Deleted key: {pattern}")
+            else:
+                current_app.logger.debug(f"[CACHE-INVALIDATE] Key not found: {pattern}")
+        
+        # Also invalidate related response cache keys for API endpoints
+        if 'loyalty:tiers' in pattern:
+            # Invalidate all cached /api/v1/loyalty/tiers responses (all languages)
+            tier_response_keys = redis_client.keys('response:*:/api/v1/loyalty/tiers*')
+            if tier_response_keys:
+                redis_client.delete(*tier_response_keys)
+                current_app.logger.info(f"[CACHE-INVALIDATE] Deleted {len(tier_response_keys)} tier API response cache keys")
+                
+    except redis.RedisError as e:
+        current_app.logger.warning(f"[CACHE-INVALIDATE] Redis error: {e}")
+    except Exception as e:
+        current_app.logger.error(f"[CACHE-INVALIDATE] Unexpected error: {e}")
 
 
 def measure_time(f):

@@ -25,7 +25,8 @@ async def main_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.info(f"Main menu requested by user {user_id}")
         language = await i18n.get_user_language(user_id)
 
-        menu_text = i18n.get('telegram.main_menu', language)
+        # menu_text = i18n.get('telegram.main_menu', language)
+        menu_text = i18n.get('telegram.welcome', language)
         keyboard = MenuKeyboards.main_menu(language)
         
         if update.callback_query:

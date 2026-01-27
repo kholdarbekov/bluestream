@@ -692,24 +692,126 @@ class ProfileHandlers:
 
             phone = normalize_phone_number(phone_text)
 
-            # Store phone number
-            await self.user_repo.set_user_phone(user_id, phone)
+            # Check if phone is available via API
+            try:
+                async with api_client as client:
+                    response = await client.check_phone_availability(user_id, phone)
+                    
+                    # Extract nested data - API returns {'data': {...}, 'success': True}
+                    response_data = response.data.get('data', {}) if response.data else {}
+                    
+                    if response.success and response_data.get('available'):
+                        # Phone is available - save it normally
+                        await self.user_repo.set_user_phone(user_id, phone)
+                        
+                        # Remove the share contact keyboard first
+                        await update.message.reply_text(
+                            i18n.get('telegram.phone.phone_accepted', language) or "✅ Phone number accepted",
+                            reply_markup=ReplyKeyboardRemove()
+                        )
 
-            # Registration complete
-            complete_text = i18n.get('telegram.registration_complete', language)
-            keyboard = MenuKeyboards.main_menu(language)
+                        # Registration complete
+                        complete_text = i18n.get('telegram.registration_complete', language)
+                        keyboard = MenuKeyboards.main_menu(language)
+                        
+                        await update.message.reply_text(
+                            text=complete_text,
+                            reply_markup=keyboard
+                        )
+                        
+                        logger.info(f"Registration completed for user {user_id}")
+                        return ConversationHandler.END
+                    
+                    elif response.success and not response_data.get('available'):
+                        # Phone exists - check if linking is possible
+                        available = response_data.get('available', False)
+                        can_link = response_data.get('can_link', False)
+                        existing_user = response_data.get('existing_user_masked', {})
+                        
+                        logger.info(f"Phone check for user {user_id}: available={available}, can_link={can_link}, existing_user={existing_user}")
+                        
+                        if can_link:
+                            # Store phone for linking
+                            context.user_data['pending_link_phone'] = phone
+                            
+                            # Remove the share contact keyboard first
+                            await update.message.reply_text(
+                                i18n.get('telegram.phone.phone_accepted', language) or "✅ Phone number accepted",
+                                reply_markup=ReplyKeyboardRemove()
+                            )
 
-            await update.message.reply_text(
-                text=complete_text,
-                reply_markup=keyboard
-            )
+                            # Show linking option
+                            masked_name = existing_user.get('name', '***') if existing_user else '***'
+                            
+                            link_text = (
+                                f"📱 This phone number is already registered to an account ({masked_name}).\n\n"
+                                f"Would you like to link your Telegram to this existing account?\n"
+                                f"This will merge your accounts."
+                            )
+                            
+                            keyboard = KeyboardBuilder.build_inline_keyboard([
+                                [{'text': "✅ Yes, link accounts", 'callback_data': "link_yes"}],
+                                [{'text': "❌ No, use different phone", 'callback_data': "link_no"}]
+                            ])
+                            
+                            await update.message.reply_text(
+                                text=link_text,
+                                reply_markup=keyboard
+                            )
+                            
+                            return LINK_ACCOUNT_CONFIRM
+                        else:
+                            # Cannot link - phone belongs to another telegram user
+                            await update.message.reply_text(
+                                "❌ This phone number is already linked to another Telegram account.\n"
+                                "Please use a different phone number.",
+                                reply_markup=ProfileKeyboards.phone_request(language)
+                            )
+                            return PHONE
+                    else:
+                        # API error
+                        logger.error(f"Failed to check phone availability: {response.error}")
+                        await update.message.reply_text(
+                            "❌ Unable to verify phone. Please try again.",
+                            reply_markup=ProfileKeyboards.phone_request(language)
+                        )
+                        return PHONE
+                        
+            except Exception as api_error:
+                logger.error(f"API error checking phone: {api_error}")
+                # Fall back to direct save (will fail if duplicate, which is caught below)
+                await self.user_repo.set_user_phone(user_id, phone)
+                
+                # Remove the share contact keyboard first
+                await update.message.reply_text(
+                    i18n.get('telegram.phone.phone_accepted', language) or "✅ Phone number accepted",
+                    reply_markup=ReplyKeyboardRemove()
+                )
 
-            logger.info(f"Registration completed for user {user_id}")
-
-            return ConversationHandler.END
+                complete_text = i18n.get('telegram.registration_complete', language)
+                keyboard = MenuKeyboards.main_menu(language)
+                
+                await update.message.reply_text(
+                    text=complete_text,
+                    reply_markup=keyboard
+                )
+                
+                logger.info(f"Registration completed for user {user_id}")
+                return ConversationHandler.END
 
         except Exception as e:
             logger.error(f"Error handling phone text: {e}")
+            
+            # Check if it's a duplicate key error
+            if 'duplicate key' in str(e).lower() or 'unique constraint' in str(e).lower():
+                language = await i18n.get_user_language(update.effective_user.id)
+                await update.message.reply_text(
+                    "❌ This phone number is already registered.\n"
+                    "Please use a different phone number or contact support.",
+                    reply_markup=ProfileKeyboards.phone_request(language)
+                )
+                return PHONE
+            
             return ConversationHandler.END
     
     async def link_account_confirm(self, update: Update, context: ContextTypes.DEFAULT_TYPE):

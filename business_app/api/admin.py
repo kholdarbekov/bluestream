@@ -27,8 +27,16 @@ from business_app.services.payment_service import PaymentService
 from business_app.services.review_service import ReviewService
 from business_app.serializers.admin_serializers import (
     serialize_user_admin, serialize_order_admin, serialize_product_admin,
-    serialize_delivery_person_admin, generate_admin_dashboard_data,
-    UserAdminSchema, OrderAdminSchema, ProductAdminSchema, AdminDashboardSchema
+    serialize_delivery_person_admin, serialize_category_admin,
+    UserAdminSchema, OrderAdminSchema, ProductAdminSchema,
+    DeliveryPersonAdminSchema, SystemSettingSchema,
+    AuditLogSchema, AuditLogListSchema, AdminDashboardSchema,
+    BulkActionRequestSchema, BulkActionResultSchema,
+    ReportConfigSchema, GeneratedReportSchema, BackupConfigSchema,
+    NotificationTemplateAdminSchema,
+    UpdateUserStatusRequest, UpdateOrderStatusRequest,
+    StockAdjustmentRequest, SystemMaintenanceRequest,
+    AdminResponseSchema
 )
 # from business_app.services.file_storage_service import FileStorageService
 from business_app.utils.decorators import (
@@ -1651,6 +1659,11 @@ def create_product():
         db.session.add(product)
         db.session.commit()
 
+        # Handle translations if provided
+        if 'translations' in data:
+            product.set_translations(data['translations'])
+            db.session.commit()
+
         return success_response(
             data={'product': serialize_product_admin(product)},
             message='Product created successfully'
@@ -1757,6 +1770,10 @@ def update_product(product_id):
             product.meta_title = data['meta_title']
         if 'meta_description' in data:
             product.meta_description = data['meta_description']
+
+        # Handle translations if provided
+        if 'translations' in data:
+            product.set_translations(data['translations'])
 
         product.updated_at = datetime.now(UTC)
         db.session.commit()
@@ -1888,17 +1905,13 @@ def get_categories():
         categories_data = []
         for category in pagination.items:
             product_count = Product.query.filter_by(category_id=category.id, is_active=True).count()
-            category_dict = {
-                'id': category.id,
-                'name': category.name,
-                'description': category.description,
-                'is_active': category.is_active,
-                'sort_order': category.sort_order,
-                'icon_url': category.icon_url,
-                'product_count': product_count,
-                'created_at': category.created_at.isoformat() if category.created_at else None,
-                'updated_at': category.updated_at.isoformat() if category.updated_at else None
-            }
+            
+            # Use serialize_category_admin
+            category_dict = serialize_category_admin(category)
+            
+            # Add computed fields
+            category_dict['product_count'] = product_count
+            
             categories_data.append(category_dict)
 
         return paginated_response(
@@ -1927,19 +1940,15 @@ def get_category(category_id):
         # Get products in this category
         products = Product.query.filter_by(category_id=category_id).all()
 
-        category_data = {
-            'id': category.id,
-            'name': category.name,
-            'description': category.description,
-            'is_active': category.is_active,
-            'sort_order': category.sort_order,
-            'icon_url': category.icon_url,
+        # Use serialize_category_admin
+        category_data = serialize_category_admin(category)
+        
+        # Add computed fields
+        category_data.update({
             'product_count': len(products),
             'active_product_count': len([p for p in products if p.is_active]),
-            'created_at': category.created_at.isoformat() if category.created_at else None,
-            'updated_at': category.updated_at.isoformat() if category.updated_at else None,
             'products': [{'id': p.id, 'name': p.name, 'sku': p.sku, 'is_active': p.is_active} for p in products[:10]]  # First 10 products
-        }
+        })
 
         return success_response(data={'category': category_data})
 
@@ -1977,17 +1986,15 @@ def create_category():
         db.session.add(category)
         db.session.commit()
 
+        # Handle translations if provided
+        if 'translations' in data:
+            category.set_translations(data['translations'])
+            db.session.commit()  # Commit translations
+
         current_app.logger.info(f"Category created: {category.name} (ID: {category.id})")
 
         return success_response(
-            data={'category': {
-                'id': category.id,
-                'name': category.name,
-                'description': category.description,
-                'is_active': category.is_active,
-                'sort_order': category.sort_order,
-                'icon_url': category.icon_url
-            }},
+            data={'category': serialize_category_admin(category)},
             message='Category created successfully',
             status_code=201
         )
@@ -2029,19 +2036,16 @@ def update_category(category_id):
         if 'icon_url' in data:
             category.icon_url = data['icon_url']
 
+        # Handle translations if provided
+        if 'translations' in data:
+            category.set_translations(data['translations'])
+
         db.session.commit()
 
         current_app.logger.info(f"Category updated: {category.name} (ID: {category.id})")
 
         return success_response(
-            data={'category': {
-                'id': category.id,
-                'name': category.name,
-                'description': category.description,
-                'is_active': category.is_active,
-                'sort_order': category.sort_order,
-                'icon_url': category.icon_url
-            }},
+            data={'category': serialize_category_admin(category)},
             message='Category updated successfully'
         )
 
@@ -6456,6 +6460,237 @@ def delete_loyalty_program(program_id):
         db.session.rollback()
         current_app.logger.error(f"Delete loyalty program error: {e}")
         return internal_error_response('Failed to delete loyalty program')
+
+
+# ============================================================================
+# LOYALTY TIER CONFIGURATION MANAGEMENT ENDPOINTS
+# ============================================================================
+
+@admin_bp.route('/loyalty/tiers', methods=['GET'])
+@jwt_required()
+@validate_admin_action(['view_loyalty', 'manage_loyalty'])
+def get_loyalty_tier_configs():
+    """
+    Get all loyalty tier configurations.
+    
+    Query Parameters:
+        - program_id: Filter by loyalty program (optional, uses default if not specified)
+    """
+    try:
+        from business_app.models.loyalty import LoyaltyTierConfig
+        
+        program_id = request.args.get('program_id', type=int)
+        
+        query = LoyaltyTierConfig.query
+        
+        if program_id:
+            query = query.filter_by(program_id=program_id)
+        else:
+            # Get default program's tiers
+            default_program = LoyaltyProgram.query.filter_by(is_default=True, is_active=True).first()
+            if default_program:
+                query = query.filter_by(program_id=default_program.id)
+        
+        tiers = query.order_by(LoyaltyTierConfig.display_order.asc()).all()
+        
+        return success_response(
+            data={
+                'tiers': [tier.to_dict() for tier in tiers],
+                'tier_count': len(tiers)
+            }
+        )
+    
+    except Exception as e:
+        current_app.logger.error(f"Get loyalty tier configs error: {e}")
+        return internal_error_response('Failed to get loyalty tier configurations')
+
+
+@admin_bp.route('/loyalty/tiers', methods=['POST'])
+@jwt_required()
+@validate_admin_action(['manage_loyalty'])
+@validate_json(['name', 'min_points'])
+def create_loyalty_tier_config():
+    """
+    Create a new loyalty tier configuration.
+    
+    Request Body:
+        - name: Tier name (e.g., "Diamond")
+        - program_id: Loyalty program ID (optional, uses default)
+        - display_order: Order for display (optional)
+        - min_points: Minimum points to qualify
+        - max_points: Maximum points (null for highest tier)
+        - points_multiplier: Points earning multiplier (default: 1.0)
+        - discount_percentage: Discount percentage (default: 0)
+        - benefits: List of benefit descriptions
+        - color: Hex color for UI
+        - icon: Font Awesome icon class
+        - is_active: Active status (default: true)
+    """
+    try:
+        from business_app.models.loyalty import LoyaltyTierConfig
+        
+        data = request.get_json()
+        
+        # Get program ID
+        program_id = data.get('program_id')
+        if not program_id:
+            default_program = LoyaltyProgram.query.filter_by(is_default=True).first()
+            if not default_program:
+                return validation_error_response('No default loyalty program found')
+            program_id = default_program.id
+        
+        # Check for duplicate tier name in same program
+        existing = LoyaltyTierConfig.query.filter_by(
+            program_id=program_id,
+            name=data.get('name')
+        ).first()
+        
+        if existing:
+            return validation_error_response(f"Tier '{data.get('name')}' already exists in this program")
+        
+        # Create tier
+        tier = LoyaltyTierConfig(
+            program_id=program_id,
+            name=data.get('name'),
+            display_order=data.get('display_order', 0),
+            min_points=data.get('min_points', 0),
+            max_points=data.get('max_points'),
+            points_multiplier=data.get('points_multiplier', 1.0),
+            discount_percentage=data.get('discount_percentage', 0),
+            benefits=data.get('benefits', []),
+            color=data.get('color', '#CD7F32'),
+            icon=data.get('icon', 'fa-medal'),
+            is_active=data.get('is_active', True)
+        )
+        
+        db.session.add(tier)
+        db.session.commit()
+        
+        # Invalidate tier cache
+        from business_app.utils.decorators import invalidate_cache
+        invalidate_cache('loyalty:tiers')
+        
+        current_app.logger.info(f"Loyalty tier created: {tier.name} (ID: {tier.id})")
+        
+        return success_response(
+            data={'tier': tier.to_dict()},
+            message='Loyalty tier created successfully',
+            status_code=201
+        )
+    
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(f"Create loyalty tier config error: {e}")
+        import traceback
+        current_app.logger.error(traceback.format_exc())
+        return internal_error_response('Failed to create loyalty tier')
+
+
+@admin_bp.route('/loyalty/tiers/<int:tier_id>', methods=['PUT'])
+@jwt_required()
+@validate_admin_action(['manage_loyalty'])
+def update_loyalty_tier_config(tier_id):
+    """Update an existing loyalty tier configuration"""
+    try:
+        from business_app.models.loyalty import LoyaltyTierConfig
+        
+        tier = LoyaltyTierConfig.query.get(tier_id)
+        
+        if not tier:
+            return not_found_response('Loyalty tier not found')
+        
+        data = request.get_json()
+        
+        # Update fields
+        if 'name' in data:
+            # Check for duplicate name
+            existing = LoyaltyTierConfig.query.filter(
+                LoyaltyTierConfig.program_id == tier.program_id,
+                LoyaltyTierConfig.name == data['name'],
+                LoyaltyTierConfig.id != tier_id
+            ).first()
+            if existing:
+                return validation_error_response(f"Tier '{data['name']}' already exists")
+            tier.name = data['name']
+        
+        if 'display_order' in data:
+            tier.display_order = data['display_order']
+        if 'min_points' in data:
+            tier.min_points = data['min_points']
+        if 'max_points' in data:
+            tier.max_points = data['max_points']
+        if 'points_multiplier' in data:
+            tier.points_multiplier = data['points_multiplier']
+        if 'discount_percentage' in data:
+            tier.discount_percentage = data['discount_percentage']
+        if 'benefits' in data:
+            tier.benefits = data['benefits']
+        if 'color' in data:
+            tier.color = data['color']
+        if 'icon' in data:
+            tier.icon = data['icon']
+        if 'is_active' in data:
+            tier.is_active = data['is_active']
+        
+        db.session.commit()
+        
+        # Invalidate tier cache
+        from business_app.utils.decorators import invalidate_cache
+        invalidate_cache('loyalty:tiers')
+        
+        current_app.logger.info(f"Loyalty tier updated: {tier.name} (ID: {tier.id})")
+        
+        return success_response(
+            data={'tier': tier.to_dict()},
+            message='Loyalty tier updated successfully'
+        )
+    
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(f"Update loyalty tier config error: {e}")
+        return internal_error_response('Failed to update loyalty tier')
+
+
+@admin_bp.route('/loyalty/tiers/<int:tier_id>', methods=['DELETE'])
+@jwt_required()
+@validate_admin_action(['manage_loyalty'])
+def delete_loyalty_tier_config(tier_id):
+    """Delete a loyalty tier configuration"""
+    try:
+        from business_app.models.loyalty import LoyaltyTierConfig, LoyaltyPoints
+        
+        tier = LoyaltyTierConfig.query.get(tier_id)
+        
+        if not tier:
+            return not_found_response('Loyalty tier not found')
+        
+        # Check if users are currently in this tier
+        users_in_tier = LoyaltyPoints.query.filter_by(current_tier=tier.name).count()
+        
+        if users_in_tier > 0:
+            # Soft delete - deactivate instead
+            tier.is_active = False
+            db.session.commit()
+            current_app.logger.info(f"Loyalty tier deactivated: {tier.name} (has {users_in_tier} users)")
+            return success_response(message=f'Tier deactivated (has {users_in_tier} users in this tier)')
+        
+        # Hard delete
+        tier_name = tier.name
+        db.session.delete(tier)
+        db.session.commit()
+        
+        # Invalidate tier cache
+        from business_app.utils.decorators import invalidate_cache
+        invalidate_cache('loyalty:tiers')
+        
+        current_app.logger.info(f"Loyalty tier deleted: {tier_name} (ID: {tier_id})")
+        
+        return success_response(message='Loyalty tier deleted successfully')
+    
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(f"Delete loyalty tier config error: {e}")
+        return internal_error_response('Failed to delete loyalty tier')
 
 
 @admin_bp.route('/loyalty/analytics', methods=['GET'])

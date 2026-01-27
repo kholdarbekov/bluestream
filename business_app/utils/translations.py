@@ -73,35 +73,18 @@ class TranslationService:
         Returns:
             Translated string
         """
-        # AGGRESSIVE DEBUG: Log ALL landing.* translation requests
-        is_debug_key = key.startswith('landing.')
-        
-        if is_debug_key:
-            logger.info(f"[TRANS-SVC] get_translation: key='{key}', requested_lang='{language}'")
 
         # Try cache first
         cached_translation = self._get_cached_translation(key, language)
         if cached_translation:
-            if is_debug_key:
-                preview = cached_translation[:50] if len(cached_translation) > 50 else cached_translation
-                logger.info(f"[TRANS-SVC] CACHE HIT: key='{key}', lang='{language}', value='{preview}'")
             return self._format_translation(cached_translation, **kwargs)
-
-        if is_debug_key:
-            logger.info(f"[TRANS-SVC] CACHE MISS: key='{key}', lang='{language}'")
 
         # Get from database
         translation = self._get_db_translation(key, language)
         if translation:
-            if is_debug_key:
-                preview = translation[:50] if len(translation) > 50 else translation
-                logger.info(f"[TRANS-SVC] DB HIT: key='{key}', lang='{language}', value='{preview}'")
             # Cache the translation
             self._cache_translation(key, language, translation)
             return self._format_translation(translation, **kwargs)
-
-        if is_debug_key:
-            logger.info(f"[TRANS-SVC] DB MISS: key='{key}', lang='{language}', trying fallback...")
 
         # Fallback chain: uz → en → ru → return key
         fallback_languages = ['uz', 'en', 'ru']
@@ -111,14 +94,9 @@ class TranslationService:
         for fallback_lang in fallback_languages:
             fallback_translation = self._get_db_translation(key, fallback_lang)
             if fallback_translation:
-                if is_debug_key:
-                    preview = fallback_translation[:50] if len(fallback_translation) > 50 else fallback_translation
-                    logger.info(f"[TRANS-SVC] FALLBACK: key='{key}', using lang='{fallback_lang}' instead of '{language}', value='{preview}'")
                 return self._format_translation(fallback_translation, **kwargs)
 
         # Return key with indicator if no translation found (helps identify missing translations)
-        if is_debug_key:
-            logger.info(f"[TRANS-SVC] NOT FOUND: key='{key}'")
         return key
     
     def _get_cached_translation(self, key: str, language: str) -> Optional[str]:
@@ -132,12 +110,6 @@ class TranslationService:
             cache_key = f"{self.cache_prefix}:{language}:{key}"
             cached = redis_client.get(cache_key)
             result = cached.decode('utf-8') if cached else None
-            if key.startswith('landing.'):
-                if result:
-                    preview = result[:30] if len(result) > 30 else result
-                    logger.info(f"[CACHE] HIT: cache_key='{cache_key}', value='{preview}...'")
-                else:
-                    logger.info(f"[CACHE] MISS: cache_key='{cache_key}'")
             return result
         except Exception as e:
             logger.error(f"[CACHE] ERROR: cache_key lookup failed: {e}")
@@ -442,27 +414,14 @@ def get_translation(key: str, language: str = None, **kwargs) -> str:
         Translated string
     """
     from flask import g
-    
-    # AGGRESSIVE DEBUG: Log EVERY call
-    is_debug_key = key.startswith('landing.')
-    
-    if is_debug_key:
-        logger.info(f"[TRANS-FUNC] get_translation() CALLED: key='{key}', language_param='{language}'")
-        logger.info(f"[TRANS-FUNC] g.language='{getattr(g, 'language', None)}'")
 
     # Resolve language parameter
     if language is None:
         g_language = getattr(g, 'language', None)
         language = g_language if g_language else current_app.config.get('DEFAULT_LANGUAGE', 'en')
-        if is_debug_key:
-            logger.info(f"[TRANS-FUNC] Language resolved from g.language='{g_language}' -> using='{language}'")
 
     # Get translation from service
     result = translation_service.get_translation(key, language, **kwargs)
-
-    if is_debug_key:
-        preview = result[:50] if len(result) > 50 else result
-        logger.info(f"[TRANS-FUNC] RESULT: key='{key}', lang='{language}', value='{preview}'")
 
     return result
 

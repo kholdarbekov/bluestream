@@ -10,7 +10,7 @@ from decimal import Decimal
 
 from pydantic import BaseModel, Field, field_validator, ConfigDict
 from pydantic.alias_generators import to_camel
-from business_app.models.product import Product
+from business_app.models.product import Product, ProductCategory
 from business_app.models.order import Order
 
 
@@ -719,7 +719,15 @@ def serialize_product_admin(product: Product) -> Dict[str, Any]:
             'images': images,
             'image_url': image_url,  # First image for display convenience
             'created_at': product.created_at.isoformat() if product.created_at else None,
-            'updated_at': product.updated_at.isoformat() if product.updated_at else None
+            'updated_at': product.updated_at.isoformat() if product.updated_at else None,
+            
+            # Translations
+            'name_translations': product.get_all_translations('name'),
+            'description_translations': product.get_all_translations('description'),
+            'short_description_translations': product.get_all_translations('short_description'),
+            'ingredients_translations': product.get_all_translations('ingredients'),
+            'meta_title_translations': product.get_all_translations('meta_title'),
+            'meta_description_translations': product.get_all_translations('meta_description')
         }
 
         # Add category information
@@ -795,31 +803,8 @@ def serialize_delivery_person_admin(person) -> Dict[str, Any]:
         # Add performance metrics
         data['total_deliveries'] = getattr(person, 'total_deliveries', 0)
         data['successful_deliveries'] = getattr(person, 'successful_deliveries', 0)
-        data['failed_deliveries'] = getattr(person, 'failed_deliveries', 0)
-        
-        # Calculate success rate
-        total = data['total_deliveries']
-        if total > 0:
-            data['success_rate'] = round((data['successful_deliveries'] / total) * 100, 2)
-        else:
-            data['success_rate'] = 0.0
-        
+        data['success_rate'] = float(getattr(person, 'success_rate', 0))
         data['average_rating'] = float(getattr(person, 'average_rating', 0))
-        data['rating_count'] = getattr(person, 'rating_count', 0)
-        data['average_delivery_time'] = getattr(person, 'average_delivery_time', None)
-        data['on_time_percentage'] = getattr(person, 'on_time_percentage', 0)
-        
-        # Add current workload
-        data['active_deliveries'] = get_active_deliveries_count(person.id)
-        data['pending_deliveries'] = get_pending_deliveries_count(person.id)
-        
-        # Add admin fields
-        data['hire_date'] = getattr(person, 'hire_date', None)
-        data['employee_id'] = getattr(person, 'employee_id', None)
-        data['emergency_contact'] = getattr(person, 'emergency_contact', None)
-        data['monthly_earnings'] = float(getattr(person, 'monthly_earnings', 0))
-        data['verification_status'] = getattr(person, 'verification_status', 'verified')
-        data['background_check_status'] = getattr(person, 'background_check_status', 'passed')
         
         return data
         
@@ -829,9 +814,52 @@ def serialize_delivery_person_admin(person) -> Dict[str, Any]:
             'id': person.id,
             'full_name': person.full_name,
             'phone': person.phone,
-            'vehicle_type': getattr(person, 'vehicle_type', 'car'),
+            'vehicle_type': person.vehicle_type.value if person.vehicle_type else None,
             'is_active': person.is_active
         }
+
+
+def serialize_category_admin(category: ProductCategory) -> Dict[str, Any]:
+    """
+    Serialize product category for admin view
+    
+    Args:
+        category: ProductCategory model instance
+        
+    Returns:
+        Serialized category data for admin
+    """
+    try:
+        data = {
+            'id': category.id,
+            'name': category.name,  # Raw name (default language)
+            'description': category.description,  # Raw description
+            'is_active': category.is_active,
+            'sort_order': category.sort_order,
+            'icon_url': category.icon_url,
+            'created_at': category.created_at.isoformat() if category.created_at else None,
+            'updated_at': category.updated_at.isoformat() if category.updated_at else None,
+            
+            # Translations
+            'name_translations': category.get_all_translations('name'),
+            'description_translations': category.get_all_translations('description')
+        }
+        
+        # Add computed fields if available (added by query)
+        if hasattr(category, 'product_count'):
+            data['product_count'] = category.product_count
+            
+        return data
+        
+    except Exception as e:
+        logging.error(f"Exception in serialize_category_admin: {e}")
+        # Fallback to basic serialization
+        return {
+            'id': category.id,
+            'name': category.name,
+            'is_active': category.is_active
+        }
+
 
 
 def generate_admin_dashboard_data() -> Dict[str, Any]:

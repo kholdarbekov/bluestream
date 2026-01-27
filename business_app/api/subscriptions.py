@@ -23,7 +23,9 @@ from business_app.serializers.subscription_serializers import (
     UpdateSubscriptionItemRequest, SubscriptionPreviewRequest, SubscriptionPreviewResponse,
     ChangePaymentMethodRequest, SkipDeliveryRequest
 )
-from business_app.utils.constants import SubscriptionStatus, PaymentMethod, NotificationType, NotificationChannel
+from business_app.utils.constants import (
+    SubscriptionStatus, PaymentMethod, NotificationType, NotificationChannel, SubscriptionFrequency
+)
 from business_app.utils.pydantic_helpers import (
     validate_json_with_model, serialize_database_model, serialize_response
 )
@@ -943,13 +945,50 @@ def get_subscription_statistics():
         cancelled_subscriptions = len([s for s in subscriptions if s.status == SubscriptionStatus.CANCELLED])
 
         # Calculate total spent on subscriptions
-        total_spent = sum(s.total_amount_billed for s in subscriptions)
+        total_spent = sum((s.total_amount_billed or 0) for s in subscriptions)
 
         # Calculate savings from subscriptions
         total_savings = sum(
-            s.total_amount_billed * (s.discount_percentage / 100)
-            for s in subscriptions if s.discount_percentage > 0
+            (s.total_amount_billed or 0) * (s.discount_percentage / 100)
+            for s in subscriptions if s.discount_percentage and s.discount_percentage > 0
         )
+        
+        # Calculate total deliveries (sum of all orders generated from these subscriptions)
+        total_deliveries = sum((s.total_orders_generated or 0) for s in subscriptions)
+        
+        # Calculate average order value
+        average_order_value = 0
+        if total_deliveries > 0:
+            average_order_value = round(float(total_spent) / total_deliveries, 2)
+            
+        # Find most ordered product
+        product_counts = {}
+        for sub in subscriptions:
+            for item in sub.subscription_items:
+                if item.product:
+                    # Use English name as fallback or key, ideally we'd use ID but for display name is needed
+                    # If we want the translated name, we'd need the language here.
+                    # The endpoint does not seem to get language explicitly, but `get_current_language()` helper exists.
+                    # However, strictly aggregating by name might be risky if names change, but simplest for now.
+                    # Better to aggregate by ID and then get the name of the winner.
+                    product_id = item.product_id
+                    product_counts[product_id] = product_counts.get(product_id, 0) + item.quantity
+        
+        most_ordered_product = None
+        if product_counts:
+            most_popular_product_id = max(product_counts, key=product_counts.get)
+            # Find the product instance to get the name
+            # We can find it in the already loaded items to avoid a query
+            for sub in subscriptions:
+                for item in sub.subscription_items:
+                    if item.product_id == most_popular_product_id and item.product:
+                         # Use helpers.get_current_language() if we imported it, or just use .name
+                         # From lines 17, `get_current_language` is imported.
+                         language = get_current_language()
+                         most_ordered_product = item.product.get_translated('name', language)
+                         break
+                if most_ordered_product:
+                    break
 
         # Get upcoming deliveries count
         from datetime import date
@@ -972,15 +1011,24 @@ def get_subscription_statistics():
                 # This is simplified - in reality you'd query actual payments
                 if (subscription.created_at.date() <= month_start.date() and
                     (not subscription.end_date or subscription.end_date.date() >= month_start.date())):
+                    
+                    billing_amount = subscription.billing_amount or 0
 
-                    if subscription.billing_cycle == 'monthly':
-                        month_total += subscription.billing_amount
-                    elif subscription.billing_cycle == 'weekly':
-                        month_total += subscription.billing_amount * 4
-                    elif subscription.billing_cycle == 'daily':
-                        month_total += subscription.billing_amount * 30
+                    if subscription.billing_cycle == SubscriptionFrequency.MONTHLY: # Updated to use enum comparison safely if needed or ensure string consistency
+                         month_total += billing_amount
+                    elif subscription.billing_cycle == SubscriptionFrequency.WEEKLY:
+                         month_total += billing_amount * 4
+                    elif subscription.billing_cycle == SubscriptionFrequency.DAILY:
+                         month_total += billing_amount * 30
+                    # Fallback for string values if Enum comparison fails due to mixed types (though model uses Enum)
+                    elif str(subscription.billing_cycle) == 'monthly':
+                        month_total += billing_amount
+                    elif str(subscription.billing_cycle) == 'weekly':
+                        month_total += billing_amount * 4
+                    elif str(subscription.billing_cycle) == 'daily':
+                        month_total += billing_amount * 30
 
-            monthly_spending[month_key] = month_total
+            monthly_spending[month_key] = float(month_total)
 
         return success_response(
             data={
@@ -989,8 +1037,11 @@ def get_subscription_statistics():
                     'active_subscriptions': active_subscriptions,
                     'paused_subscriptions': paused_subscriptions,
                     'cancelled_subscriptions': cancelled_subscriptions,
-                    'total_spent': total_spent,
-                    'total_savings': total_savings,
+                    'total_spent': float(total_spent),
+                    'total_savings': float(total_savings),
+                    'total_deliveries': total_deliveries,
+                    'average_order_value': float(average_order_value),
+                    'most_ordered_product': most_ordered_product,
                     'upcoming_deliveries': upcoming_deliveries,
                     'monthly_spending_trend': monthly_spending
                 }

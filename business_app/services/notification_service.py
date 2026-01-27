@@ -712,9 +712,10 @@ class NotificationService:
     def _get_user_preferred_channels(self, user_id: int, 
                                    notification_type: NotificationType) -> List[NotificationChannel]:
         """Get user's preferred notification channels for a type"""
+        notification_type_val = notification_type.value if hasattr(notification_type, 'value') else str(notification_type)
         preferences = NotificationPreference.query.filter_by(
             user_id=user_id,
-            notification_type=notification_type.value,
+            notification_type=notification_type_val,
             is_enabled=True
         ).all()
         
@@ -741,9 +742,12 @@ class NotificationService:
         """Get notification template"""
         # NotificationTemplate uses TranslatableMixin, so we don't filter by language
         # Instead, we get the template and then retrieve translated content
+        notification_type_val = notification_type.value if hasattr(notification_type, 'value') else str(notification_type)
+        channel_val = channel.value if hasattr(channel, 'value') else str(channel)
+        
         template = NotificationTemplate.query.filter_by(
-            notification_type=notification_type.value,
-            channel=channel.value,
+            notification_type=notification_type_val,
+            channel=channel_val,
             is_active=True
         ).first()
 

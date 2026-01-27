@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { MapContainer, TileLayer, Marker, useMapEvents, Rectangle, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, useMapEvents, Rectangle, Polygon, useMap } from 'react-leaflet';
 import { Button, Input, Space, Spin, message, Typography } from 'antd';
 import { AimOutlined, SearchOutlined, EnvironmentOutlined } from '@ant-design/icons';
 import L from 'leaflet';
@@ -17,15 +17,47 @@ L.Icon.Default.mergeOptions({
 const { Text } = Typography;
 
 // Component to handle map click events
-const MapClickHandler = ({ onLocationSelect, bounds }) => {
+// Helper to check if point is in polygon (Ray Casting)
+const isPointInPolygon = (lat, lng, polygon) => {
+  if (!polygon || polygon.length === 0) return false;
+
+  let x = lat, y = lng;
+  let inside = false;
+
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    let xi = polygon[i][0], yi = polygon[i][1];
+    let xj = polygon[j][0], yj = polygon[j][1];
+
+    let intersect = ((yi > y) !== (yj > y))
+      && (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+
+    if (intersect) inside = !inside;
+  }
+
+  return inside;
+};
+
+// Component to handle map click events
+const MapClickHandler = ({ onLocationSelect, bounds, polygon }) => {
   useMapEvents({
     click: (e) => {
       const { lat, lng } = e.latlng;
 
-      // Check if within bounds
-      if (bounds &&
-          (lat < bounds.min_lat || lat > bounds.max_lat ||
-           lng < bounds.min_lng || lng > bounds.max_lng)) {
+      // Check if within bounds/polygon
+      let isValid = true;
+
+      if (polygon && polygon.length > 0) {
+        if (!isPointInPolygon(lat, lng, polygon)) {
+          isValid = false;
+        }
+      } else if (bounds) {
+        if (lat < bounds.min_lat || lat > bounds.max_lat ||
+          lng < bounds.min_lng || lng > bounds.max_lng) {
+          isValid = false;
+        }
+      }
+
+      if (!isValid) {
         message.warning('Selected location is outside the delivery area');
         return;
       }
@@ -146,15 +178,25 @@ const AddressMapPicker = ({
       (pos) => {
         const { latitude, longitude } = pos.coords;
 
-        // Check bounds
-        if (geoConfig?.bounds) {
+        // Check bounds/polygon
+        let isValid = true;
+
+        if (geoConfig?.polygon && geoConfig.polygon.length > 0) {
+          if (!isPointInPolygon(latitude, longitude, geoConfig.polygon)) {
+            isValid = false;
+          }
+        } else if (geoConfig?.bounds) {
           const bounds = geoConfig.bounds;
           if (latitude < bounds.min_lat || latitude > bounds.max_lat ||
-              longitude < bounds.min_lng || longitude > bounds.max_lng) {
-            message.warning('Your location is outside the delivery area');
-            setLocationLoading(false);
-            return;
+            longitude < bounds.min_lng || longitude > bounds.max_lng) {
+            isValid = false;
           }
+        }
+
+        if (!isValid) {
+          message.warning('Your location is outside the delivery area');
+          setLocationLoading(false);
+          return;
         }
 
         handleLocationSelect(latitude, longitude);
@@ -192,15 +234,25 @@ const AddressMapPicker = ({
       if (result?.success && result?.data?.latitude && result?.data?.longitude) {
         const { latitude, longitude } = result.data;
 
-        // Check bounds
-        if (geoConfig?.bounds) {
+        // Check bounds/polygon
+        let isValid = true;
+
+        if (geoConfig?.polygon && geoConfig.polygon.length > 0) {
+          if (!isPointInPolygon(latitude, longitude, geoConfig.polygon)) {
+            isValid = false;
+          }
+        } else if (geoConfig?.bounds) {
           const bounds = geoConfig.bounds;
           if (latitude < bounds.min_lat || latitude > bounds.max_lat ||
-              longitude < bounds.min_lng || longitude > bounds.max_lng) {
-            message.warning('Address is outside the delivery area');
-            setSearchLoading(false);
-            return;
+            longitude < bounds.min_lng || longitude > bounds.max_lng) {
+            isValid = false;
           }
+        }
+
+        if (!isValid) {
+          message.warning('Address is outside the delivery area');
+          setSearchLoading(false);
+          return;
         }
 
         handleLocationSelect(latitude, longitude);
@@ -308,7 +360,18 @@ const AddressMapPicker = ({
           />
 
           {/* Show delivery area boundary */}
-          {boundaryCoords && (
+          {geoConfig.polygon && geoConfig.polygon.length > 0 ? (
+            <Polygon
+              positions={geoConfig.polygon}
+              pathOptions={{
+                color: '#1890ff',
+                weight: 2,
+                opacity: 0.5,
+                fillOpacity: 0.05,
+                dashArray: '5, 10'
+              }}
+            />
+          ) : boundaryCoords && (
             <Rectangle
               bounds={boundaryCoords}
               pathOptions={{
@@ -331,10 +394,21 @@ const AddressMapPicker = ({
                   const marker = e.target;
                   const pos = marker.getLatLng();
 
-                  // Check bounds
-                  if (bounds &&
-                      (pos.lat < bounds.min_lat || pos.lat > bounds.max_lat ||
-                       pos.lng < bounds.min_lng || pos.lng > bounds.max_lng)) {
+                  // Check bounds/polygon
+                  let isValid = true;
+
+                  if (geoConfig?.polygon && geoConfig.polygon.length > 0) {
+                    if (!isPointInPolygon(pos.lat, pos.lng, geoConfig.polygon)) {
+                      isValid = false;
+                    }
+                  } else if (bounds) {
+                    if (pos.lat < bounds.min_lat || pos.lat > bounds.max_lat ||
+                      pos.lng < bounds.min_lng || pos.lng > bounds.max_lng) {
+                      isValid = false;
+                    }
+                  }
+
+                  if (!isValid) {
                     // Reset to previous position
                     marker.setLatLng(position);
                     message.warning('Cannot move marker outside the delivery area');
@@ -351,6 +425,7 @@ const AddressMapPicker = ({
           <MapClickHandler
             onLocationSelect={handleLocationSelect}
             bounds={bounds}
+            polygon={geoConfig.polygon}
           />
 
           {/* Recenter when position changes */}

@@ -3,8 +3,9 @@ Order management handlers
 """
 import logging
 from typing import Dict, Any, List
-from telegram import Update
+from telegram import Update, constants
 from telegram.ext import ContextTypes
+from telegram.helpers import escape_markdown
 
 from i18n import i18n
 from keyboards import OrderKeyboards, MenuKeyboards, ProfileKeyboards, PaymentKeyboards
@@ -135,15 +136,20 @@ class OrderHandlers:
                     details_text += f"• {item.get('product_name', 'Unknown')} x{item.get('quantity', 1)}\n"
                     details_text += f"  💰 {format_price(item.get('total_price', 0))} UZS\n"
             
+            details_text = escape_markdown(details_text, version=2)
+            
             # Add delivery info if available
             if order.get('delivery_address'):
-                details_text += f"\n📍 {i18n.get('telegram.orders.delivery_info', language)}:\n{order['delivery_address']}"
+                # Make order delivery address title bold. 
+                details_text += f"\n{i18n.get('telegram.orders.delivery_info', language)}:\n*{escape_markdown(order['delivery_address'].get('title', 'Unknown'), version=2)}* \- {escape_markdown(order['delivery_address'].get('full_address', ''), version=2)}"
             
             keyboard = OrderKeyboards.order_details(order_id, order.get('status', ''), language)
             
+            logger.info(f"order_details handler: details_text after escaping: {details_text}")
             await query.edit_message_text(
                 text=details_text,
-                reply_markup=keyboard
+                reply_markup=keyboard,
+                parse_mode=constants.ParseMode.MARKDOWN_V2
             )
             await query.answer()
             
@@ -153,6 +159,99 @@ class OrderHandlers:
             logger.error(f"Error in order details: {e}")
             await self._handle_error(update)
     
+    async def cancel_order(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle order cancellation"""
+        try:
+            query = update.callback_query
+            user_id = update.effective_user.id
+            language = await i18n.get_user_language(user_id)
+            
+            # Extract order ID from callback data (format: cancel_order_123)
+            order_id = int(query.data.split('_')[2])
+            
+            # Confirm cancellation
+            if 'confirm' not in query.data:
+                # Ask for confirmation first
+                confirm_keyboard = MenuKeyboards.yes_no_buttons(
+                    language, 
+                    yes_callback='cancel_order_confirm_yes', 
+                    no_callback='cancel_order_confirm_no'
+                )
+                
+                # Context needs to know which order we are cancelling
+                context.user_data['cancelling_order_id'] = order_id
+                
+                await query.edit_message_text(
+                    text=i18n.get('telegram.orders.cancel_confirm', language) or "Are you sure you want to cancel this order?",
+                    reply_markup=confirm_keyboard
+                )
+                await query.answer()
+                return
+
+        except Exception as e:
+            logger.error(f"Error in cancel_order: {e}")
+            await self._handle_error(update)
+
+    async def cancel_order_confirm_yes(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Process confirmed cancellation"""
+        try:
+            query = update.callback_query
+            user_id = update.effective_user.id
+            language = await i18n.get_user_language(user_id)
+            
+            # Check if this is for order cancellation
+            order_id = context.user_data.get('cancelling_order_id')
+            if not order_id:
+                # Not for us, or expired
+                await query.answer()
+                return
+
+            async with api_client as client:
+                user_token = await get_auth_token(update, context, client)
+                if not user_token:
+                    await self._handle_auth_error(update, language)
+                    return
+                
+                response = await client.cancel_order(user_token, order_id)
+                
+                if response.success:
+                    await query.answer(i18n.get('telegram.orders.cancel_success', language) or "Order cancelled successfully")
+                    # Clear context
+                    context.user_data.pop('cancelling_order_id', None)
+                    # Redirect to orders list
+                    await self.orders_menu(update, context)
+                else:
+                    await self._handle_api_error(update, response.error, language)
+                    
+        except Exception as e:
+            logger.error(f"Error processing cancellation: {e}")
+            await self._handle_error(update)
+
+    async def cancel_order_confirm_no(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Process cancelled cancellation (User clicked No)"""
+        try:
+            query = update.callback_query
+            user_id = update.effective_user.id
+            language = await i18n.get_user_language(user_id)
+            
+            # Check if this is for order cancellation
+            order_id = context.user_data.get('cancelling_order_id')
+            if not order_id:
+                await query.answer()
+                return
+            
+            # Clear context
+            context.user_data.pop('cancelling_order_id', None)
+            
+            # Return to order details
+            # Hack: modify query.data to be what order_details expects
+            query.data = f"order_{order_id}"
+            await self.order_details(update, context)
+            
+        except Exception as e:
+            logger.error(f"Error denying cancellation: {e}")
+            await self._handle_error(update)
+
     async def track_order(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Show order tracking information with visual timeline"""
         try:

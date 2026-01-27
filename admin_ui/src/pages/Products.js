@@ -19,7 +19,8 @@ import {
   Image,
   Switch,
   Divider,
-  Avatar
+  Avatar,
+  Tabs
 } from 'antd';
 import {
   ShoppingOutlined,
@@ -283,6 +284,12 @@ const Products = () => {
     editForm.setFieldsValue({
       name: product.name,
       description: product.description,
+      // Russian translations
+      name_ru: product.name_translations?.ru || '',
+      description_ru: product.description_translations?.ru || '',
+      // English translations
+      name_en: product.name_translations?.en || '',
+      description_en: product.description_translations?.en || '',
       category_id: product.category_id,
       price: product.price,
       stock_quantity: product.stock_quantity,
@@ -317,6 +324,35 @@ const Products = () => {
     });
   };
 
+  const prepareProductData = (values) => {
+    const {
+      name_ru, description_ru,
+      name_en, description_en,
+      ...baseValues
+    } = values;
+
+    const data = { ...baseValues };
+
+    // Construct translations object
+    const translations = {
+      name: {},
+      description: {}
+    };
+
+    if (name_ru) translations.name.ru = name_ru;
+    if (name_en) translations.name.en = name_en;
+
+    if (description_ru) translations.description.ru = description_ru;
+    if (description_en) translations.description.en = description_en;
+
+    // Only add translations if there are any
+    if (Object.keys(translations.name).length > 0 || Object.keys(translations.description).length > 0) {
+      data.translations = translations;
+    }
+
+    return data;
+  };
+
   const handleCreateSubmit = async (values) => {
     try {
       let imageUrl = null;
@@ -338,7 +374,7 @@ const Products = () => {
 
       // Add image to product data
       const productData = {
-        ...values,
+        ...prepareProductData(values),
         images: imageUrl ? [imageUrl] : []
       };
 
@@ -372,7 +408,7 @@ const Products = () => {
       }
 
       const productData = {
-        ...values,
+        ...prepareProductData(values),
         images: images
       };
 
@@ -650,37 +686,108 @@ const Products = () => {
           layout="vertical"
           onFinish={handleCreateSubmit}
         >
-          <Form.Item
-            name="name"
-            label={t('ui.products.product_name_label')}
-            rules={[{ required: true, message: t('ui.products.product_name_required') }]}
-          >
-            <Input placeholder={t('ui.products.product_name_placeholder')} />
-          </Form.Item>
+          <Tabs
+            defaultActiveKey="uz"
+            items={[
+              {
+                key: 'uz',
+                label: 'Uzbek (Default)',
+                children: (
+                  <>
+                    <Form.Item
+                      name="name"
+                      label={t('ui.products.product_name_label')}
+                      rules={[{ required: true, message: t('ui.products.product_name_required') }]}
+                    >
+                      <Input placeholder={t('ui.products.product_name_placeholder')} />
+                    </Form.Item>
+
+                    <Form.Item
+                      name="description"
+                      label={t('ui.products.description_label')}
+                    >
+                      <TextArea
+                        rows={3}
+                        placeholder={t('ui.products.description_placeholder')}
+                      />
+                    </Form.Item>
+                  </>
+                )
+              },
+              {
+                key: 'ru',
+                label: 'Russian',
+                children: (
+                  <>
+                    <Form.Item
+                      name="name_ru"
+                      label="Product Name (Russian)"
+                    >
+                      <Input placeholder="Enter Russian name" />
+                    </Form.Item>
+
+                    <Form.Item
+                      name="description_ru"
+                      label="Description (Russian)"
+                    >
+                      <TextArea
+                        rows={3}
+                        placeholder="Enter Russian description"
+                      />
+                    </Form.Item>
+                  </>
+                )
+              },
+              {
+                key: 'en',
+                label: 'English',
+                children: (
+                  <>
+                    <Form.Item
+                      name="name_en"
+                      label="Product Name (English)"
+                    >
+                      <Input placeholder="Enter English name" />
+                    </Form.Item>
+
+                    <Form.Item
+                      name="description_en"
+                      label="Description (English)"
+                    >
+                      <TextArea
+                        rows={3}
+                        placeholder="Enter English description"
+                      />
+                    </Form.Item>
+                  </>
+                )
+              }
+            ]}
+          />
 
           <Row gutter={16}>
             <Col span={12}>
               <Form.Item
-              name="sku"
-              label={t('ui.products.sku_label')}
-              rules={[{ required: true, message: t('ui.products.sku_required') }]}
-            >
-              <Input placeholder={t('ui.products.sku_placeholder')} />
-            </Form.Item>
+                name="sku"
+                label={t('ui.products.sku_label')}
+                rules={[{ required: true, message: t('ui.products.sku_required') }]}
+              >
+                <Input placeholder={t('ui.products.sku_placeholder')} />
+              </Form.Item>
             </Col>
             <Col span={12}>
               <Form.Item
-              name="volume"
-              label={t('ui.products.volume_label')}
-              rules={[{ required: true, message: t('ui.products.volume_required') }]}
-            >
-              <InputNumber
+                name="volume"
+                label={t('ui.products.volume_label')}
+                rules={[{ required: true, message: t('ui.products.volume_required') }]}
+              >
+                <InputNumber
                   placeholder={t('ui.products.volume_placeholder')}
                   style={{ width: '100%' }}
                   min={0}
                   precision={1}
                 />
-            </Form.Item>
+              </Form.Item>
             </Col>
           </Row>
 
@@ -752,15 +859,7 @@ const Products = () => {
             </Col>
           </Row>
 
-          <Form.Item
-            name="description"
-            label={t('ui.products.description_label')}
-          >
-            <TextArea
-              rows={3}
-              placeholder={t('ui.products.description_placeholder')}
-            />
-          </Form.Item>
+
 
           <Form.Item
             name="is_featured"
@@ -816,13 +915,84 @@ const Products = () => {
           layout="vertical"
           onFinish={handleEditSubmit}
         >
-          <Form.Item
-            name="name"
-            label={t('ui.products.product_name_label')}
-            rules={[{ required: true, message: t('ui.products.product_name_required') }]}
-          >
-            <Input placeholder={t('ui.products.product_name_placeholder')} />
-          </Form.Item>
+          <Tabs
+            defaultActiveKey="uz"
+            items={[
+              {
+                key: 'uz',
+                label: 'Uzbek (Default)',
+                children: (
+                  <>
+                    <Form.Item
+                      name="name"
+                      label={t('ui.products.product_name_label')}
+                      rules={[{ required: true, message: t('ui.products.product_name_required') }]}
+                    >
+                      <Input placeholder={t('ui.products.product_name_placeholder')} />
+                    </Form.Item>
+
+                    <Form.Item
+                      name="description"
+                      label={t('ui.products.description_label')}
+                    >
+                      <TextArea
+                        rows={3}
+                        placeholder={t('ui.products.description_placeholder')}
+                      />
+                    </Form.Item>
+                  </>
+                )
+              },
+              {
+                key: 'ru',
+                label: 'Russian',
+                children: (
+                  <>
+                    <Form.Item
+                      name="name_ru"
+                      label="Product Name (Russian)"
+                    >
+                      <Input placeholder="Enter Russian name" />
+                    </Form.Item>
+
+                    <Form.Item
+                      name="description_ru"
+                      label="Description (Russian)"
+                    >
+                      <TextArea
+                        rows={3}
+                        placeholder="Enter Russian description"
+                      />
+                    </Form.Item>
+                  </>
+                )
+              },
+              {
+                key: 'en',
+                label: 'English',
+                children: (
+                  <>
+                    <Form.Item
+                      name="name_en"
+                      label="Product Name (English)"
+                    >
+                      <Input placeholder="Enter English name" />
+                    </Form.Item>
+
+                    <Form.Item
+                      name="description_en"
+                      label="Description (English)"
+                    >
+                      <TextArea
+                        rows={3}
+                        placeholder="Enter English description"
+                      />
+                    </Form.Item>
+                  </>
+                )
+              }
+            ]}
+          />
 
           <Row gutter={16}>
             <Col span={12}>
@@ -891,15 +1061,7 @@ const Products = () => {
             </Col>
           </Row>
 
-          <Form.Item
-            name="description"
-            label={t('ui.products.description_label')}
-          >
-            <TextArea
-              rows={3}
-              placeholder={t('ui.products.description_placeholder')}
-            />
-          </Form.Item>
+
 
           <Form.Item
             name="is_featured"

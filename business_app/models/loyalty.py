@@ -63,7 +63,8 @@ class LoyaltyProgram(db.Model, TimestampMixin):
     is_default = Column(Boolean, default=False)
     
     # Earning rules
-    points_per_uzs = Column(Float, default=1.0)  # Points earned per UZS spent
+    points_per_uzs = Column(Float, default=1.0)  # DEPRECATED: Points earned per UZS spent
+    uzs_per_point = Column(Integer, default=250)  # UZS spent to earn 1 point
     signup_bonus = Column(Integer, default=100)  # Welcome bonus points
     referral_bonus = Column(Integer, default=50)  # Points for referring someone
     birthday_bonus = Column(Integer, default=25)  # Birthday bonus points
@@ -72,7 +73,7 @@ class LoyaltyProgram(db.Model, TimestampMixin):
     points_expiry_days = Column(Integer, default=365)  # Points expire after X days
     min_redemption_points = Column(Integer, default=100)  # Minimum points to redeem
     
-    # Tier system
+    # Tier system (DEPRECATED - use LoyaltyTierConfig instead)
     tier_thresholds = Column(JSON, default={})  # Points needed for each tier
     tier_multipliers = Column(JSON, default={})  # Point multipliers per tier
     
@@ -80,6 +81,9 @@ class LoyaltyProgram(db.Model, TimestampMixin):
     terms_and_conditions = Column(Text, nullable=True)
     start_date = Column(DateTime, nullable=True)
     end_date = Column(DateTime, nullable=True)
+    
+    # Relationship to tiers
+    tiers = relationship('LoyaltyTierConfig', back_populates='program', order_by='LoyaltyTierConfig.display_order')
     
     def to_dict(self):
         return {
@@ -102,6 +106,121 @@ class LoyaltyProgram(db.Model, TimestampMixin):
         }
 
 
+class LoyaltyTierConfig(db.Model, TimestampMixin):
+    """
+    Admin-managed loyalty tier configuration.
+    
+    Replaces hardcoded MEMBERSHIP_TIERS in constants.py.
+    Each tier belongs to a LoyaltyProgram and defines:
+    - Point thresholds for tier qualification
+    - Points multiplier (earn more points at higher tiers)
+    - Discount percentage
+    - Benefits list
+    - Visual styling (color, icon)
+    """
+    __tablename__ = 'loyalty_tier_configs'
+    
+    id = Column(Integer, primary_key=True)
+    program_id = Column(Integer, ForeignKey('loyalty_programs.id'), nullable=False, index=True)
+    
+    # Tier identification
+    name = Column(String(50), nullable=False)  # e.g., "Bronze", "Silver", "Gold", "Platinum"
+    display_order = Column(Integer, default=0)  # Order for display (0=lowest tier)
+    
+    # Point thresholds
+    min_points = Column(Integer, nullable=False, default=0)  # Minimum points to qualify
+    max_points = Column(Integer, nullable=True)  # Maximum points (NULL = unlimited/highest tier)
+    
+    # Earning multipliers
+    points_multiplier = Column(Float, default=1.0)  # e.g., 1.5 = earn 50% more points
+    
+    # Tier benefits
+    discount_percentage = Column(Float, default=0)  # e.g., 10 = 10% discount
+    benefits = Column(JSON, default=[])  # List of benefit descriptions
+    
+    # Visual styling
+    color = Column(String(20), default='#CD7F32')  # Hex color for UI
+    icon = Column(String(50), default='fa-medal')  # Font Awesome icon class
+    
+    # Status
+    is_active = Column(Boolean, default=True)
+    
+    # Relationship
+    program = relationship('LoyaltyProgram', back_populates='tiers')
+    
+    def to_dict(self):
+        """Serialize tier configuration for API responses"""
+        # Calculate points range string for display
+        if self.max_points is not None:
+            points_range = f"{self.min_points:,} - {self.max_points:,}"
+        else:
+            points_range = f"{self.min_points:,}+"
+        
+        return {
+            'id': self.id,
+            'program_id': self.program_id,
+            'name': self.name,
+            'display_order': self.display_order,
+            'min_points': self.min_points,
+            'max_points': self.max_points,
+            'points_range': points_range,
+            'points_multiplier': self.points_multiplier,
+            'discount_percentage': self.discount_percentage,
+            'benefits': self.benefits or [],
+            'color': self.color,
+            'icon': self.icon,
+            'is_active': self.is_active,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None
+        }
+    
+    @classmethod
+    def get_tier_for_points(cls, points: int, program_id: int = None) -> 'LoyaltyTierConfig':
+        """
+        Determine the appropriate tier for a given point balance.
+        
+        Args:
+            points: User's current point balance
+            program_id: Optional program ID (uses default program if not specified)
+            
+        Returns:
+            LoyaltyTierConfig instance for the matching tier, or None
+        """
+        query = cls.query.filter_by(is_active=True)
+        
+        if program_id:
+            query = query.filter_by(program_id=program_id)
+        else:
+            # Get default program's tiers
+            default_program = LoyaltyProgram.query.filter_by(is_default=True, is_active=True).first()
+            if default_program:
+                query = query.filter_by(program_id=default_program.id)
+        
+        # Order by min_points descending to find highest qualifying tier
+        tiers = query.order_by(cls.min_points.desc()).all()
+        
+        for tier in tiers:
+            if points >= tier.min_points:
+                return tier
+        
+        # Return lowest tier if no match (shouldn't happen if Bronze starts at 0)
+        return query.order_by(cls.min_points.asc()).first()
+    
+    @classmethod
+    def get_all_tiers(cls, program_id: int = None) -> list:
+        """Get all active tiers for a program, ordered by display_order"""
+        query = cls.query.filter_by(is_active=True)
+        
+        if program_id:
+            query = query.filter_by(program_id=program_id)
+        else:
+            default_program = LoyaltyProgram.query.filter_by(is_default=True, is_active=True).first()
+            if default_program:
+                query = query.filter_by(program_id=default_program.id)
+        
+        return query.order_by(cls.display_order.asc()).all()
+
+
 class LoyaltyPoints(db.Model, TimestampMixin):
     """User loyalty points balance"""
     __tablename__ = 'loyalty_points'
@@ -119,6 +238,12 @@ class LoyaltyPoints(db.Model, TimestampMixin):
     # Tier information
     current_tier = Column(String(50), default='Bronze')
     points_to_next_tier = Column(Integer, default=0)
+    tier_valid_until = Column(DateTime, nullable=True)  # Date until current tier is guaranteed
+    
+    # Streak Tracking
+    current_streak = Column(Integer, default=0)
+    last_streak_update = Column(DateTime, nullable=True)
+    streak_orders_this_month = Column(Integer, default=0)
     
     # Metadata
     last_activity_date = Column(DateTime, nullable=True)
@@ -147,9 +272,6 @@ class LoyaltyPoints(db.Model, TimestampMixin):
     
     def calculate_tier(self):
         """Calculate user's current tier based on points"""
-        # Import centralized tier config for fallback
-        from business_app.utils.constants import MEMBERSHIP_TIERS, MEMBERSHIP_TIER_ORDER, get_tier_for_points, get_next_tier
-        
         total_points = self.total_earned
         
         # Use program-specific thresholds if available, otherwise use centralized config
@@ -166,9 +288,30 @@ class LoyaltyPoints(db.Model, TimestampMixin):
                     break
         else:
             # Use centralized tier config
-            current_tier = get_tier_for_points(total_points)
-            next_tier_info = get_next_tier(current_tier)
-            points_to_next = max(0, next_tier_info['min_points'] - total_points) if next_tier_info else 0
+            # Use LoyaltyTierConfig model directly
+            from business_app.models.loyalty import LoyaltyTierConfig
+            
+            # Find current tier
+            tier = LoyaltyTierConfig.get_tier_for_points(total_points, self.program_id)
+            current_tier = tier.name if tier else 'Bronze'
+            
+            # Find next tier
+            next_tier = None
+            if tier:
+                next_tier = LoyaltyTierConfig.query.filter(
+                    LoyaltyTierConfig.program_id == self.program_id,
+                    LoyaltyTierConfig.is_active == True,
+                    LoyaltyTierConfig.display_order > tier.display_order
+                ).order_by(LoyaltyTierConfig.display_order.asc()).first()
+            else:
+                 # If fell back to bronze or none, find lowest tier that is higher than 0?
+                 # Actually if no tier found, assuming below lowest. Find lowest.
+                 next_tier = LoyaltyTierConfig.query.filter(
+                    LoyaltyTierConfig.program_id == self.program_id,
+                    LoyaltyTierConfig.is_active == True
+                 ).order_by(LoyaltyTierConfig.display_order.asc()).first()
+
+            points_to_next = max(0, next_tier.min_points - total_points) if next_tier else 0
         
         self.current_tier = current_tier
         self.points_to_next_tier = points_to_next
@@ -185,6 +328,9 @@ class LoyaltyPoints(db.Model, TimestampMixin):
             'current_balance': self.current_balance,
             'current_tier': self.current_tier,
             'points_to_next_tier': self.points_to_next_tier,
+            'tier_valid_until': self.tier_valid_until.isoformat() if self.tier_valid_until else None,
+            'current_streak': self.current_streak,
+            'streak_orders_this_month': self.streak_orders_this_month,
             'last_activity_date': self.last_activity_date.isoformat() if self.last_activity_date else None,
             'created_at': self.created_at.isoformat() if self.created_at else None
         }

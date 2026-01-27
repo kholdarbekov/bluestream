@@ -1065,6 +1065,11 @@ let verificationState = {
 
 // Initialize checkout
 document.addEventListener('DOMContentLoaded', async function() {
+    // Wait for global sync to finish so we don't checkout with stale data
+    if (window.cartSyncPromise) {
+        await window.cartSyncPromise;
+    }
+
     // Set minimum date to today
     const today = new Date().toISOString().split('T')[0];
     document.getElementById('delivery-date').min = today;
@@ -1094,13 +1099,13 @@ async function clearCartAfterOrder() {
     // Clear localStorage
     localStorage.removeItem('cart');
     
-    // Clear database cart
-    try {
-        await apiRequest('/cart/clear', { method: 'POST' });
-    } catch (error) {
-        console.error('Error clearing database cart:', error);
-        // Continue anyway - order was successful
-    }
+    // Clear database cart - handled by backend now
+    // try {
+    //     await apiRequest('/cart/clear', { method: 'POST' });
+    // } catch (error) {
+    //     console.error('Error clearing database cart:', error);
+    //     // Continue anyway - order was successful
+    // }
     
     // Update cart count in header
     const cartCountElements = document.querySelectorAll('.cart-count, .cart-badge');

@@ -791,15 +791,23 @@ class CartService:
         final_total: float,
         user: User
     ) -> int:
-        """Calculate loyalty points to be earned"""
-        # Standard: 1 point per 1000 UZS spent
-        base_rate = 1000
-
-        # Premium users earn 2x points
-        multiplier = 2 if getattr(user, 'is_premium', False) else 1
-
-        points = int((final_total / base_rate) * multiplier)
-        return max(0, points)
+        """
+        Calculate loyalty points to be earned.
+        
+        Uses LoyaltyService.calculate_points_for_purchase() for proper
+        program-aware and tier-based point calculation.
+        """
+        if not user or not user.id:
+            return 0
+        
+        try:
+            from .loyalty_service import LoyaltyService
+            loyalty_service = LoyaltyService()
+            return loyalty_service.calculate_points_for_purchase(user.id, int(final_total))
+        except Exception as e:
+            logger.warning(f"Failed to calculate loyalty points for user {user.id}: {e}")
+            # Fallback to simple calculation if service fails
+            return max(0, int(final_total / 100))
 
 
 # Singleton instance

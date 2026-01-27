@@ -208,6 +208,27 @@ class AdminService {
     return response.data;
   }
 
+  // Loyalty Tier management
+  async getLoyaltyTiers(params = {}) {
+    const response = await api.get('/admin/loyalty/tiers', { params });
+    return response.data;
+  }
+
+  async createLoyaltyTier(tierData) {
+    const response = await api.post('/admin/loyalty/tiers', tierData);
+    return response.data;
+  }
+
+  async updateLoyaltyTier(tierId, tierData) {
+    const response = await api.put(`/admin/loyalty/tiers/${tierId}`, tierData);
+    return response.data;
+  }
+
+  async deleteLoyaltyTier(tierId) {
+    const response = await api.delete(`/admin/loyalty/tiers/${tierId}`);
+    return response.data;
+  }
+
   // Notification management
   async getNotificationCampaigns(params = {}) {
     const response = await api.get('/admin/notification-campaigns', { params });

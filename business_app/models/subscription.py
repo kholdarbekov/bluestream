@@ -110,17 +110,19 @@ class Subscription(db.Model, TimestampMixin, TranslatableMixin):
         if self.delivery_frequency == SubscriptionFrequency.DAILY:
             return today + timedelta(days=1)
         elif self.delivery_frequency == SubscriptionFrequency.WEEKLY:
-            days_ahead = self.delivery_day_of_week - today.weekday()
+            day_of_week = self.delivery_day_of_week if self.delivery_day_of_week is not None else 1 # Default to Monday
+            days_ahead = day_of_week - today.weekday()
             if days_ahead <= 0:  # Target day already happened this week
                 days_ahead += 7
             return today + timedelta(days=days_ahead)
         elif self.delivery_frequency == SubscriptionFrequency.MONTHLY:
             # Next month, same day
+            day_of_month = self.delivery_day_of_month if self.delivery_day_of_month is not None else 1 # Default to 1st
             if today.month == 12:
-                next_month = today.replace(year=today.year + 1, month=1, day=self.delivery_day_of_month)
+                next_month = today.replace(year=today.year + 1, month=1, day=day_of_month)
             else:
                 try:
-                    next_month = today.replace(month=today.month + 1, day=self.delivery_day_of_month)
+                    next_month = today.replace(month=today.month + 1, day=day_of_month)
                 except ValueError:  # Day doesn't exist in next month
                     next_month = today.replace(month=today.month + 1, day=28)
             return next_month

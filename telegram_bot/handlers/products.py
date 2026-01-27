@@ -4,8 +4,10 @@ Product browsing and shopping cart handlers
 import logging
 import json
 from typing import Dict, Any, List
-from telegram import Update
+from telegram import Update, constants
 from telegram.ext import ContextTypes
+from telegram.helpers import escape_markdown
+
 
 from i18n import i18n
 from keyboards import ProductKeyboards, MenuKeyboards, OrderKeyboards
@@ -43,7 +45,7 @@ class ProductHandlers:
                     return
                 
                 # Get product categories
-                response = await client.get_product_categories(user_token)
+                response = await client.get_product_categories(user_token, language=language)
                 if not response.success:
                     await self._handle_api_error(update, response.error, language)
                     return
@@ -73,16 +75,32 @@ class ProductHandlers:
             if update.callback_query:
                 logger.info("Editing message via callback query...")
                 try:
-                    await update.callback_query.edit_message_text(
-                        text=menu_text,
-                        reply_markup=keyboard
-                    )
-                    logger.info("Message edited successfully")
+                    # Check if previous message had a photo (cannot edit text of photo message directly to text-only easily)
+                    if update.callback_query.message.photo:
+                         await update.callback_query.message.delete()
+                         await update.callback_query.message.reply_text(
+                            text=menu_text,
+                            reply_markup=keyboard
+                        )
+                    else:
+                        await update.callback_query.edit_message_text(
+                            text=menu_text,
+                            reply_markup=keyboard
+                        )
+                    logger.info("Message updated successfully")
                     await update.callback_query.answer()
                     logger.info("Callback query answered")
                 except Exception as edit_error:
                     logger.error(f"Error editing message: {edit_error}")
-                    raise
+                    # Fallback
+                    try:
+                        await update.callback_query.message.delete()
+                        await update.callback_query.message.reply_text(
+                            text=menu_text,
+                            reply_markup=keyboard
+                        )
+                    except:
+                        pass
             else:
                 logger.info("Sending new message...")
                 await update.message.reply_text(
@@ -119,7 +137,9 @@ class ProductHandlers:
                 response = await client.get_products(
                     user_token,
                     category=category_id,
-                    page=page
+                    page=page,
+                    per_page=6,
+                    language=language
                 )
                 
                 if not response.success:
@@ -134,16 +154,33 @@ class ProductHandlers:
                     # Fallback to old structure
                     products = response.data.get('products', [])
                     total_pages = response.data.get('total_pages', 1)
+                
+                # Fetch category details for image
+                category_img_url = None
+                try:
+                    cat_response = await client.get_category(user_token, int(category_id), language=language)
+                    if cat_response.success and cat_response.data and 'category' in cat_response.data.get('data', {}):
+                        category_data = cat_response.data['data']['category']
+                        # Try image_url first, then icon_url
+                        category_img_url = category_data.get('image_url') or category_data.get('icon_url')
+                except Exception as cat_error:
+                    logger.warning(f"Failed to fetch category details: {cat_error}")
             
             # Store category for pagination
             context.user_data['current_category'] = category_id
             context.user_data['current_page'] = page
 
             if not products:
-                await query.edit_message_text(
-                    text=i18n.get('telegram.products.category_empty', language),
-                    reply_markup=MenuKeyboards.back_button(language)
-                )
+                # If we have an image, show it even if empty? Likely no, just show text message
+                text = i18n.get('telegram.products.category_empty', language)
+                if query.message.photo:
+                    await query.message.delete()
+                    await query.message.reply_text(text, reply_markup=MenuKeyboards.back_button(language))
+                else:
+                    await query.edit_message_text(
+                        text=text,
+                        reply_markup=MenuKeyboards.back_button(language)
+                    )
                 await query.answer()
                 return
 
@@ -153,10 +190,49 @@ class ProductHandlers:
             # Create inline keyboard with product buttons
             keyboard = ProductKeyboards.product_list(products, page, total_pages, language)
 
-            await query.edit_message_text(
-                text=products_text,
-                reply_markup=keyboard
-            )
+            # Check if we should send a photo
+            if category_img_url:
+                try:
+                    await query.message.delete()
+                    await context.bot.send_photo(
+                        chat_id=user_id,
+                        photo=category_img_url,
+                        caption=products_text,
+                        reply_markup=keyboard,
+                        parse_mode=constants.ParseMode.MARKDOWN_V2
+                    )
+                except Exception as img_error:
+                    logger.error(f"Failed to send category image: {img_error}")
+                    # Fallback to text
+                    try:
+                        # If message was deleted effectively, we sent nothing.
+                        # We must send text message
+                        await context.bot.send_message(
+                            chat_id=user_id,
+                            text=products_text,
+                            reply_markup=keyboard,
+                            parse_mode=constants.ParseMode.MARKDOWN_V2
+                        )
+                    except:
+                        pass
+            else:
+                # No image, use text
+                if query.message.photo:
+                    # Previous was photo, so delete and send text
+                    await query.message.delete()
+                    await query.message.reply_text(
+                        text=products_text,
+                        reply_markup=keyboard,
+                        parse_mode=constants.ParseMode.MARKDOWN_V2
+                    )
+                else:
+                    # Previous was text, edit it
+                    await query.edit_message_text(
+                        text=products_text,
+                        reply_markup=keyboard,
+                        parse_mode=constants.ParseMode.MARKDOWN_V2
+                    )
+            
             await query.answer()
 
             logger.info(f"Products in category {category_id} shown to user {user_id}")
@@ -173,7 +249,10 @@ class ProductHandlers:
             language = await i18n.get_user_language(user_id)
             
             # Extract product ID
-            product_id = int(query.data.split('_')[1])
+            if 'back_to_product_' in query.data:
+                product_id = int(query.data.split('_')[3])  # back_to_product_{id}
+            else:
+                product_id = int(query.data.split('_')[1])  # product_{id}
             
             # Get user token
             async with api_client as client:
@@ -183,34 +262,71 @@ class ProductHandlers:
                     return
                 
                 # Get product details
-                response = await client.get_product(user_token, product_id)
+                response = await client.get_product(user_token, product_id, language=language)
                 if not response.success:
                     await self._handle_api_error(update, response.error, language)
                     return
                 
                 product = response.data['data']['product']
             
+            # Get category ID for back button
+            category_id = product.get('category', {}).get('id')
+            
             # Format product details
             details_text = self._format_product_details(product, language)
-            keyboard = ProductKeyboards.product_details(product_id, language)
+            keyboard = ProductKeyboards.product_details(product_id, category_id, language)
             
-            await query.edit_message_text(
-                text=details_text,
-                reply_markup=keyboard
-            )
-            await query.answer()
-            
-            # Send product image if available
+            # Get product image
+            image_url = None
             if product.get('media', {}).get('images') and len(product.get('media', {})['images']) > 0:
+                image_url = product.get('media', {})['images'][0]
+                # Check for localhost
+                if image_url and 'localhost' in image_url:
+                    # Replace with business_app container alias if needed, 
+                    # but Telegram cannot access internal container URLs unless we download and send.
+                    # For now, just log warning and fallback to text to avoid "Wrong http url" error
+                    logger.warning(f"Skipping localhost image URL: {image_url}")
+                    image_url = None
+            
+            if image_url:
                 try:
-                    image_url = product.get('media', {})['images'][0]
+                    await query.message.delete()
                     await context.bot.send_photo(
                         chat_id=user_id,
                         photo=image_url,
-                        caption=f"📸 {product['name']}"
+                        caption=details_text,
+                        reply_markup=keyboard,
+                        parse_mode=constants.ParseMode.MARKDOWN_V2
                     )
                 except Exception as img_error:
-                    logger.warning(f"Could not send product image: {img_error}")
+                     logger.error(f"Failed to send product image: {img_error}")
+                     # Fallback to text
+                     try:
+                         # Use send_message since we deleted (or tried to)
+                         await context.bot.send_message(
+                             chat_id=user_id,
+                             text=details_text,
+                             reply_markup=keyboard,
+                             parse_mode=constants.ParseMode.MARKDOWN_V2
+                         )
+                     except:
+                        pass
+            else:
+                 if query.message.photo:
+                    await query.message.delete()
+                    await query.message.reply_text(
+                        text=details_text,
+                        reply_markup=keyboard,
+                        parse_mode=constants.ParseMode.MARKDOWN_V2
+                    )
+                 else:
+                    await query.edit_message_text(
+                        text=details_text,
+                        reply_markup=keyboard,
+                        parse_mode=constants.ParseMode.MARKDOWN_V2
+                    )
+            
+            await query.answer()
             
             logger.info(f"Product {product_id} details shown to user {user_id}")
             
@@ -235,7 +351,7 @@ class ProductHandlers:
                     await self._handle_auth_error(update, language)
                     return
                 
-                response = await client.get_product(user_token, product_id)
+                response = await client.get_product(user_token, product_id, language=language)
                 if not response.success:
                     await self._handle_api_error(update, response.error, language)
                     return
@@ -252,10 +368,20 @@ class ProductHandlers:
                     await self._handle_api_error(update, add_response.error, language)
                     return
                 
+                # Get actual quantity from cart response
+                current_qty = 1
+                try:
+                    cart_data = add_response.data.get('data', {}).get('cart', {})
+                    for item in cart_data.get('cart_items', []):
+                        if item.get('product_id') == product_id:
+                            current_qty = item.get('quantity', 1)
+                            break
+                except Exception as e:
+                    logger.error(f"Error parsing cart response: {e}")
             
             # Show quantity selector
-            quantity_text = f"🛒 {product['name']}\n\n{i18n.get('telegram.quantity', language)}: 1\n{i18n.get('telegram.price', language)}: {format_price(product['pricing']['base_price'])} UZS"
-            keyboard = ProductKeyboards.quantity_selector(product_id, 1, language)
+            quantity_text = f"🛒 {product['name']}\n\n{i18n.get('telegram.quantity', language)}: {current_qty}\n{i18n.get('telegram.price', language)}: {format_price(product['pricing']['base_price'] * current_qty)} UZS"
+            keyboard = ProductKeyboards.quantity_selector(product_id, current_qty, language)
             
             await query.edit_message_text(
                 text=quantity_text,
@@ -291,7 +417,7 @@ class ProductHandlers:
             # Get product for price calculation
             async with api_client as client:
                 user_token = await get_auth_token(update, context, client)
-                response = await client.get_product(user_token, product_id)
+                response = await client.get_product(user_token, product_id, language=language)
                 if response.success:
                     product = response.data['data']['product']
                     total_price = product['pricing']['base_price'] * new_qty
@@ -360,7 +486,8 @@ class ProductHandlers:
                 response = await client.get_products(
                     user_token,
                     search=search_term,
-                    page=1
+                    page=1,
+                    language=language
                 )
                 
                 if not response.success:
@@ -400,35 +527,35 @@ class ProductHandlers:
         
         formatted_lines = []
         for product in products:
-            price_str = format_price(product['pricing']['base_price'])
+            price_str = escape_markdown(format_price(product['pricing']['base_price']), version=2)
             stock_indicator = "✅" if product['inventory'].get('stock_quantity', 0) > 0 else "❌"
             
             formatted_lines.append(
-                f"{stock_indicator} **{product['name']}**\n"
-                f"   💰 {price_str} UZS | 📦 {product['specifications'].get('volume', 'N/A')}{product['specifications'].get('volume_unit', '')}"
+                f"{stock_indicator} *{escape_markdown(product['name'], version=2)}*\n"
+                f"   💰 {price_str} UZS \| 📦 {escape_markdown(str(product['specifications'].get('volume', 'N/A')), version=2)}{escape_markdown(product['specifications'].get('volume_unit', ''), version=2)}"
             )
         
         return "\n\n".join(formatted_lines)
     
     def _format_product_details(self, product: Dict, language: str) -> str:
         """Format single product details"""
-        price_str = format_price(product['pricing']['base_price'])
+        price_str = escape_markdown(format_price(product['pricing']['base_price']), version=2)
         stock = product['inventory'].get('stock_quantity', 0)
         stock_status = i18n.get('telegram.products.in_stock', language) if stock > 0 else i18n.get('telegram.products.out_of_stock', language)
         
         details = [
-            f"🏷️ **{product['name']}**",
+            f"🏷️ *{escape_markdown(product['name'], version=2)}*",
             f"💰 {i18n.get('telegram.price', language)}: {price_str} UZS",
-            f"📦 {i18n.get('telegram.products.volume_label', language)}: {product['specifications'].get('volume', 'N/A')}{product['specifications'].get('volume_unit', '')}",
+            f"📦 {i18n.get('telegram.products.volume_label', language)}: {escape_markdown(str(product['specifications'].get('volume', 'N/A')), version=2)}{escape_markdown(product['specifications'].get('volume_unit', ''), version=2)}",
             f"📊 {i18n.get('telegram.products.stock_label', language)}: {stock_status}",
         ]
         
         if product.get('description'):
-            details.append(f"📝 {product['description']}")
+            details.append(f"📝 {escape_markdown(product['description'], version=2)}")
         
         if product.get('category'):
-            details.append(f"📂 Category: {product['category']}")
-        
+            details.append(f"📂 Category: {escape_markdown(product['category'].get('name', 'N/A'), version=2)}")
+
         return "\n\n".join(details)
     
     async def _show_cart(self, update: Update, context: ContextTypes.DEFAULT_TYPE):

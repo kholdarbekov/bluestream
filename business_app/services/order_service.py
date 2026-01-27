@@ -20,7 +20,7 @@ from business_app.models.delivery import Delivery
 from business_app.utils.exceptions import ValidationError, NotFoundError, ConflictError
 from business_app.utils.constants import OrderStatus, PaymentStatus, DeliveryStatus
 from business_app.models.order import OrderStatusHistory
-from business_app.utils.helpers import calculate_delivery_fee, calculate_loyalty_points
+from business_app.utils.helpers import calculate_delivery_fee
 # Note: inventory_service imported lazily to avoid circular imports
 from business_app.utils.audit_logger import audit_logger, AuditEventType, AuditSeverity
 from business_app import db
@@ -260,12 +260,24 @@ class OrderService:
         if not order:
             raise NotFoundError("Order not found")
         
+        # Connect to DB status being potentially a string
+        current_status = order.status
+        if isinstance(current_status, str):
+            try:
+                # Try to convert string to Enum
+                current_status = OrderStatus(current_status)
+            except ValueError:
+                # If invalid string, keep as is (validation will likely fail)
+                pass
+
         # Validate status transition
-        if not self._is_valid_status_transition(order.status, new_status):
-            raise ValidationError(f"Cannot change status from {order.status.value} to {new_status.value}")
+        if not self._is_valid_status_transition(current_status, new_status):
+            current_val = current_status.value if hasattr(current_status, 'value') else str(current_status)
+            new_val = new_status.value if hasattr(new_status, 'value') else str(new_status)
+            raise ValidationError(f"Cannot change status from {current_val} to {new_val}")
         
         # Update order
-        old_status = order.status
+        old_status = current_status
         order.status = new_status
         order.updated_at = datetime.now(timezone.utc)
         
@@ -296,18 +308,26 @@ class OrderService:
         
         order = self.get_order(order_id, user_id)
         
+        # Ensure status is Enum for logic checks
+        current_status = order.status
+        if isinstance(current_status, str):
+            try:
+                current_status = OrderStatus(current_status)
+            except ValueError:
+                pass
+        
         # Check if order can be cancelled
-        if order.status in [OrderStatus.DELIVERED, OrderStatus.CANCELLED]:
+        if current_status in [OrderStatus.DELIVERED, OrderStatus.CANCELLED]:
             raise ConflictError("Order cannot be cancelled")
         
-        if order.status == OrderStatus.OUT_FOR_DELIVERY:
+        if current_status == OrderStatus.OUT_FOR_DELIVERY:
             raise ConflictError("Order is out for delivery and cannot be cancelled")
         
         # Determine if stock was already deducted from the database
         # For non-cash orders: stock is deducted on CONFIRMED
         # For cash orders: stock is deducted on DELIVERED (which can't be cancelled anyway)
         is_cash_order = order.payment_method == PaymentMethod.CASH if order.payment_method else False
-        stock_was_deducted = not is_cash_order and order.status in [
+        stock_was_deducted = not is_cash_order and current_status in [
             OrderStatus.CONFIRMED, OrderStatus.PREPARING, OrderStatus.OUT_FOR_DELIVERY
         ]
         
@@ -561,15 +581,8 @@ class OrderService:
     
     def _calculate_delivery_fee(self, delivery_address: Dict[str, Any], subtotal: int) -> int:
         """Calculate delivery fee"""
-        # Use delivery service to calculate fee
-        from .delivery_service import DeliveryService
-        delivery_service = DeliveryService()
-        
-        return delivery_service.calculate_delivery_fee(
-            delivery_address['latitude'],
-            delivery_address['longitude'],
-            subtotal
-        )
+        # "Always Free Delivery" strategy
+        return 0
     
     def _is_valid_status_transition(self, current_status: OrderStatus, new_status: OrderStatus) -> bool:
         """Check if status transition is valid"""
@@ -661,25 +674,35 @@ class OrderService:
                 self._confirm_inventory_for_order(order)
                 # Process loyalty points for cash orders
                 self._process_loyalty_points_for_order(order)
+
+            # --- LOYALTY OVERHAUL TRIGGERS ---
+            # Triggers that must happen only on successful delivery
+            try:
+                from .loyalty_service import LoyaltyService
+                loyalty_service = LoyaltyService()
+                
+                # Check/Update Streak
+                loyalty_service.update_streak(order.user_id)
+                
+                # Check for Surprise Reward
+                loyalty_service.check_surprise_reward(order.user_id)
+                
+            except Exception as e:
+                logger.error(f"Failed to process loyalty triggers for delivered order {order.id}: {e}")
     
     def _process_loyalty_points_for_order(self, order: Order):
         """
         Process loyalty points for an order:
-        1. Award points based on order amount
-        2. Auto-apply Free Delivery reward (deduct points to cover delivery)
-        
-        This ensures delivery is always "free" from the customer's perspective 
-        while the cost is covered by loyalty points. With MIN_ORDER_AMOUNT at 20,000 UZS,
-        customers always earn enough points (200+) to cover the FREE_DELIVERY_POINTS_COST.
+        Award points based on order amount.
         """
         from .loyalty_service import LoyaltyService
-        from business_app.utils.constants import LoyaltyActionType, FREE_DELIVERY_POINTS_COST
+        from business_app.utils.constants import LoyaltyActionType
         
         try:
             loyalty_service = LoyaltyService()
             
-            # Step 1: Award points for the purchase
-            points_earned = calculate_loyalty_points(order.total_amount)
+            # Award points for the purchase using program configuration and tier multipliers
+            points_earned = loyalty_service.calculate_points_for_purchase(order.user_id, int(order.total_amount))
             if points_earned > 0:
                 loyalty_service.award_points(
                     order.user_id, 
@@ -688,52 +711,9 @@ class OrderService:
                     LoyaltyActionType.PURCHASE,
                     order.id
                 )
+                # Update order with earned points for reference
+                order.loyalty_points_earned = points_earned
                 logger.info(f"Awarded {points_earned} points for order {order.order_number}")
-            
-            # Step 2: Auto-apply Free Delivery reward (deduct points for delivery)
-            # This makes delivery effectively "free" - the cost is covered by loyalty points
-            if order.delivery_fee > 0:
-                try:
-                    # Check if user has enough points for free delivery
-                    current_points = loyalty_service.get_available_points(order.user_id)
-                    
-                    if current_points >= FREE_DELIVERY_POINTS_COST:
-                        # Deduct points for free delivery (skip notification - this is automatic)
-                        loyalty_service.deduct_points(
-                            order.user_id,
-                            FREE_DELIVERY_POINTS_COST,
-                            f"Free Delivery reward - Order #{order.order_number}",
-                            order.id,
-                            skip_notification=True  # No notification for auto-applied system rewards
-                        )
-                        logger.info(f"Applied Free Delivery reward ({FREE_DELIVERY_POINTS_COST} points) for order {order.order_number}")
-                        
-                        # Log successful Free Delivery application for analytics
-                        audit_logger.log_event(
-                            event_type=AuditEventType.ORDER_UPDATED,
-                            action="free_delivery_reward_applied",
-                            severity=AuditSeverity.LOW,
-                            resource_type="order",
-                            resource_id=str(order.id),
-                            description=f"Auto-applied Free Delivery reward for order {order.order_number}",
-                            additional_data={
-                                'order_id': order.id,
-                                'order_number': order.order_number,
-                                'user_id': order.user_id,
-                                'points_deducted': FREE_DELIVERY_POINTS_COST,
-                                'points_earned': points_earned,
-                                'net_points': points_earned - FREE_DELIVERY_POINTS_COST
-                            }
-                        )
-                    else:
-                        # User doesn't have enough points - log but don't fail the order
-                        logger.warning(
-                            f"User {order.user_id} doesn't have enough points for Free Delivery. "
-                            f"Required: {FREE_DELIVERY_POINTS_COST}, Available: {current_points}"
-                        )
-                except Exception as e:
-                    # Don't fail the order if free delivery deduction fails
-                    logger.error(f"Failed to apply Free Delivery reward for order {order.order_number}: {e}")
                     
         except Exception as e:
             # Don't fail the order if loyalty processing fails

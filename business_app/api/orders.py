@@ -326,8 +326,14 @@ def get_order_statistics():
                         if month_start.month < 12 
                         else month_start.replace(year=month_start.year + 1, month=1))
             
-            month_orders = [o for o in orders 
-                          if month_start <= o.created_at < month_end]
+            month_orders = []
+            for o in orders:
+                created_at = o.created_at
+                if created_at.tzinfo is None:
+                    created_at = created_at.replace(tzinfo=UTC)
+                
+                if month_start <= created_at < month_end:
+                    month_orders.append(o)
             month_total = sum(o.total_amount for o in month_orders)
             
             monthly_spending[month_start.strftime('%Y-%m')] = month_total
@@ -449,6 +455,13 @@ def create_order():
 
         order = get_order_service().create_order(current_user_id, order_data)
         current_app.logger.info(f"CREATE ORDER API: Order created successfully: order={order}")
+
+        # Clear user's cart after successful order creation
+        try:
+            get_cart_service().clear_cart(current_user_id)
+            current_app.logger.info(f"CREATE ORDER API: Cart cleared for user {current_user_id}")
+        except Exception as e:
+            current_app.logger.error(f"CREATE ORDER API: Failed to clear cart: {e}")
 
         # Create delivery record if delivery details provided
         if order.delivery_date and order.delivery_time_slot:
@@ -732,7 +745,11 @@ def track_order(order_id):
         # Calculate estimated time remaining
         time_remaining = None
         if order.delivery and order.delivery.estimated_delivery_time:
-            remaining = order.delivery.estimated_delivery_time - datetime.now(UTC)
+            estimated_time = order.delivery.estimated_delivery_time
+            if estimated_time.tzinfo is None:
+                estimated_time = estimated_time.replace(tzinfo=UTC)
+            
+            remaining = estimated_time - datetime.now(UTC)
             if remaining.total_seconds() > 0:
                 time_remaining = {
                     'hours': remaining.seconds // 3600,
@@ -937,6 +954,9 @@ def schedule_order():
         scheduled_date = data.get('scheduled_date')
         try:
             scheduled_dt = datetime.fromisoformat(scheduled_date)
+            if scheduled_dt.tzinfo is None:
+                scheduled_dt = scheduled_dt.replace(tzinfo=UTC)
+            
             if scheduled_dt <= datetime.now(UTC):
                 return error_response(
                     message=get_translation('error.validation.invalid_date'),

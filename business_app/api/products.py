@@ -47,7 +47,7 @@ products_bp = Blueprint('products', __name__)
 def get_categories():
     """Get all product categories"""
     try:
-        language = request.args.get('language', 'uz')
+        language = get_current_language()
         product_service = get_product_service()
 
         categories = product_service.get_categories()
@@ -69,7 +69,7 @@ def get_categories():
 def get_category(category_id):
     """Get specific category"""
     try:
-        language = request.args.get('language', 'uz')
+        language = get_current_language()
         product_service = get_product_service()
 
         category = product_service.get_category_by_id(category_id)
@@ -102,7 +102,7 @@ def get_products():
         is_featured = request.args.get('is_featured', type=bool)
         min_price = request.args.get('min_price', type=float)
         max_price = request.args.get('max_price', type=float)
-        language = request.args.get('language', 'uz')
+        language = get_current_language()
         in_stock_only = request.args.get('in_stock_only', type=bool, default=False)
 
         # Get current user for personalized pricing
@@ -159,7 +159,7 @@ def get_products():
 def get_product(product_id):
     """Get specific product details"""
     try:
-        language = request.args.get('language', 'uz')
+        language = get_current_language()
         quantity = int(request.args.get('quantity', 1))
 
         # Get current user for personalized pricing
@@ -326,7 +326,7 @@ def add_product_review(product_id):
 def get_featured_products():
     """Get featured products"""
     try:
-        language = request.args.get('language', 'uz')
+        language = get_current_language()
         limit = min(int(request.args.get('limit', 8)), 20)
 
         # Get current user for personalized pricing
@@ -392,7 +392,7 @@ def get_products_bulk():
                 errors={'product_ids': 'Maximum 50 products can be fetched at once'}
             )
 
-        language = request.args.get('language') or data.get('language', 'uz')
+        language = get_current_language()
 
         # Get current user for personalized pricing
         current_user = None
@@ -476,7 +476,7 @@ def get_search_suggestions():
     """Get search suggestions"""
     try:
         query = request.args.get('q', '').strip()
-        language = request.args.get('language', 'uz')
+        language = get_current_language()
         limit = min(int(request.args.get('limit', 5)), 10)
 
         if len(query) < 2:
@@ -502,7 +502,7 @@ def get_search_suggestions():
 def get_popular_products():
     """Get popular products based on sales and views"""
     try:
-        language = request.args.get('language', 'uz')
+        language = get_current_language()
         limit = min(int(request.args.get('limit', 10)), 20)
         period = request.args.get('period', 'week')  # week, month, all
 

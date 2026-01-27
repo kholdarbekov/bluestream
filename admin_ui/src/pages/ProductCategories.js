@@ -15,7 +15,8 @@ import {
   Statistic,
   message,
   Switch,
-  Divider
+  Divider,
+  Tabs
 } from 'antd';
 import {
   SearchOutlined,
@@ -218,6 +219,15 @@ const ProductCategories = () => {
     editForm.setFieldsValue({
       name: category.name,
       description: category.description,
+
+      // Russian translations
+      name_ru: category.name_translations?.ru || '',
+      description_ru: category.description_translations?.ru || '',
+
+      // English translations
+      name_en: category.name_translations?.en || '',
+      description_en: category.description_translations?.en || '',
+
       sort_order: category.sort_order,
       icon_url: category.icon_url,
       is_active: category.is_active
@@ -245,14 +255,43 @@ const ProductCategories = () => {
     });
   };
 
+  const prepareCategoryData = (values) => {
+    const {
+      name_ru, description_ru,
+      name_en, description_en,
+      ...baseValues
+    } = values;
+
+    const data = { ...baseValues };
+
+    // Construct translations object
+    const translations = {
+      name: {},
+      description: {}
+    };
+
+    if (name_ru) translations.name.ru = name_ru;
+    if (name_en) translations.name.en = name_en;
+
+    if (description_ru) translations.description.ru = description_ru;
+    if (description_en) translations.description.en = description_en;
+
+    // Only add translations if there are any
+    if (Object.keys(translations.name).length > 0 || Object.keys(translations.description).length > 0) {
+      data.translations = translations;
+    }
+
+    return data;
+  };
+
   const handleCreateSubmit = (values) => {
-    createCategoryMutation.mutate(values);
+    createCategoryMutation.mutate(prepareCategoryData(values));
   };
 
   const handleEditSubmit = (values) => {
     updateCategoryMutation.mutate({
       categoryId: selectedCategory.id,
-      categoryData: values
+      categoryData: prepareCategoryData(values)
     });
   };
 
@@ -423,23 +462,84 @@ const ProductCategories = () => {
           layout="vertical"
           onFinish={handleCreateSubmit}
         >
-          <Form.Item
-            name="name"
-            label="Category Name"
-            rules={[{ required: true, message: 'Please enter category name' }]}
-          >
-            <Input placeholder="Enter category name" />
-          </Form.Item>
+          <Tabs
+            defaultActiveKey="uz"
+            items={[
+              {
+                key: 'uz',
+                label: 'Uzbek (Default)',
+                children: (
+                  <>
+                    <Form.Item
+                      name="name"
+                      label="Category Name (Uzbek)"
+                      rules={[{ required: true, message: 'Please enter category name' }]}
+                    >
+                      <Input placeholder="Enter category name" />
+                    </Form.Item>
 
-          <Form.Item
-            name="description"
-            label="Description"
-          >
-            <TextArea
-              rows={3}
-              placeholder="Enter category description..."
-            />
-          </Form.Item>
+                    <Form.Item
+                      name="description"
+                      label="Description (Uzbek)"
+                    >
+                      <TextArea
+                        rows={3}
+                        placeholder="Enter category description..."
+                      />
+                    </Form.Item>
+                  </>
+                )
+              },
+              {
+                key: 'ru',
+                label: 'Russian',
+                children: (
+                  <>
+                    <Form.Item
+                      name="name_ru"
+                      label="Category Name (Russian)"
+                    >
+                      <Input placeholder="Enter Russian category name" />
+                    </Form.Item>
+
+                    <Form.Item
+                      name="description_ru"
+                      label="Description (Russian)"
+                    >
+                      <TextArea
+                        rows={3}
+                        placeholder="Enter Russian description..."
+                      />
+                    </Form.Item>
+                  </>
+                )
+              },
+              {
+                key: 'en',
+                label: 'English',
+                children: (
+                  <>
+                    <Form.Item
+                      name="name_en"
+                      label="Category Name (English)"
+                    >
+                      <Input placeholder="Enter English category name" />
+                    </Form.Item>
+
+                    <Form.Item
+                      name="description_en"
+                      label="Description (English)"
+                    >
+                      <TextArea
+                        rows={3}
+                        placeholder="Enter English description..."
+                      />
+                    </Form.Item>
+                  </>
+                )
+              }
+            ]}
+          />
 
           <Row gutter={16}>
             <Col span={12}>
@@ -504,23 +604,84 @@ const ProductCategories = () => {
           layout="vertical"
           onFinish={handleEditSubmit}
         >
-          <Form.Item
-            name="name"
-            label="Category Name"
-            rules={[{ required: true, message: 'Please enter category name' }]}
-          >
-            <Input placeholder="Enter category name" />
-          </Form.Item>
+          <Tabs
+            defaultActiveKey="uz"
+            items={[
+              {
+                key: 'uz',
+                label: 'Uzbek (Default)',
+                children: (
+                  <>
+                    <Form.Item
+                      name="name"
+                      label="Category Name (Uzbek)"
+                      rules={[{ required: true, message: 'Please enter category name' }]}
+                    >
+                      <Input placeholder="Enter category name" />
+                    </Form.Item>
 
-          <Form.Item
-            name="description"
-            label="Description"
-          >
-            <TextArea
-              rows={3}
-              placeholder="Enter category description..."
-            />
-          </Form.Item>
+                    <Form.Item
+                      name="description"
+                      label="Description (Uzbek)"
+                    >
+                      <TextArea
+                        rows={3}
+                        placeholder="Enter category description..."
+                      />
+                    </Form.Item>
+                  </>
+                )
+              },
+              {
+                key: 'ru',
+                label: 'Russian',
+                children: (
+                  <>
+                    <Form.Item
+                      name="name_ru"
+                      label="Category Name (Russian)"
+                    >
+                      <Input placeholder="Enter Russian category name" />
+                    </Form.Item>
+
+                    <Form.Item
+                      name="description_ru"
+                      label="Description (Russian)"
+                    >
+                      <TextArea
+                        rows={3}
+                        placeholder="Enter Russian description..."
+                      />
+                    </Form.Item>
+                  </>
+                )
+              },
+              {
+                key: 'en',
+                label: 'English',
+                children: (
+                  <>
+                    <Form.Item
+                      name="name_en"
+                      label="Category Name (English)"
+                    >
+                      <Input placeholder="Enter English category name" />
+                    </Form.Item>
+
+                    <Form.Item
+                      name="description_en"
+                      label="Description (English)"
+                    >
+                      <TextArea
+                        rows={3}
+                        placeholder="Enter English description..."
+                      />
+                    </Form.Item>
+                  </>
+                )
+              }
+            ]}
+          />
 
           <Row gutter={16}>
             <Col span={12}>

@@ -434,6 +434,7 @@ def get_geo_configuration():
     return success_response(data={
         'center': config['center'],
         'bounds': config['bounds'],
+        'polygon': config.get('polygon'),
         'districts': config['districts'],
         'region': 'tashkent_city',
         'region_name': {

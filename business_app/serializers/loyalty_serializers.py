@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field, field_validator, ConfigDict
 from pydantic.alias_generators import to_camel
 
 # Import centralized tier configuration
-from business_app.utils.constants import MEMBERSHIP_TIERS, MEMBERSHIP_TIER_ORDER
+from business_app.models.loyalty import LoyaltyTierConfig
 
 
 class LoyaltyTier(str, Enum):
@@ -605,32 +605,42 @@ def serialize_challenge(challenge, user=None) -> Dict[str, Any]:
 
 # Helper functions
 def get_tier_info(tier_name: str) -> Optional[Dict[str, Any]]:
-    """Get tier information from centralized config"""
-    tier_config = MEMBERSHIP_TIERS.get(tier_name)
-    if tier_config:
-        return {
-            'tier': tier_name.lower(),
-            'name': tier_config['name'],
-            'description': f"Earn {tier_config['points_multiplier']}x points per 100 UZS",
-            'min_points': tier_config['min_points'],
-            'benefits': tier_config['benefits'],
-            'discount_percentage': tier_config['discount_percentage'],
-            'color': tier_config['color'],
-            'icon_url': f"/static/images/tiers/{tier_name.lower()}.png"
-        }
+    """Get tier information from database config"""
+    try:
+        tier_config = LoyaltyTierConfig.query.filter_by(name=tier_name, is_active=True).first()
+        if tier_config:
+            return {
+                'tier': tier_name.lower(),
+                'name': tier_config.name,
+                'description': f"Earn {tier_config.points_multiplier}x points per 250 UZS",
+                'min_points': tier_config.min_points,
+                'benefits': tier_config.benefits,
+                'discount_percentage': tier_config.discount_percentage,
+                'color': tier_config.color,
+                'icon_url': f"/static/images/tiers/{tier_name.lower()}.png"
+            }
+    except Exception:
+        pass
     return None
 
 
 def get_next_tier_info(current_tier: str) -> Optional[Dict[str, Any]]:
-    """Get next tier information from centralized config"""
+    """Get next tier information from database config"""
     try:
-        # Normalize tier name to match MEMBERSHIP_TIER_ORDER format
-        normalized_tier = current_tier.capitalize()
-        current_index = MEMBERSHIP_TIER_ORDER.index(normalized_tier)
-        if current_index < len(MEMBERSHIP_TIER_ORDER) - 1:
-            next_tier = MEMBERSHIP_TIER_ORDER[current_index + 1]
-            return get_tier_info(next_tier)
-    except ValueError:
+        current = LoyaltyTierConfig.query.filter_by(name=current_tier, is_active=True).first()
+        if current:
+            next_tier = LoyaltyTierConfig.query.filter(
+                LoyaltyTierConfig.program_id == current.program_id,
+                LoyaltyTierConfig.is_active == True,
+                LoyaltyTierConfig.display_order > current.display_order
+            ).order_by(LoyaltyTierConfig.display_order.asc()).first()
+            
+            if next_tier:
+                return get_tier_info(next_tier.name)
+        else:
+             # Try to find lowest tier if current not found? Or just return None
+             pass
+    except Exception:
         pass
     
     return None

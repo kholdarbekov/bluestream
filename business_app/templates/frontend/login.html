@@ -122,6 +122,29 @@ document.getElementById('loginForm').addEventListener('submit', async function(e
 
         if (response.ok) {
             setAuthToken(result.access_token);
+            
+            // Sync anonymous cart items to account
+            const localCart = JSON.parse(localStorage.getItem('cart') || '[]');
+            if (localCart.length > 0) {
+                try {
+                    const syncResponse = await apiRequest('/cart/sync', {
+                        method: 'POST',
+                        body: JSON.stringify({ cart_items: localCart })
+                    });
+                    
+                    if (syncResponse.ok) {
+                        const syncData = await syncResponse.json();
+                        if (syncData.success && syncData.data.cart) {
+                            // Update local storage with merged cart from server
+                            localStorage.setItem('cart', JSON.stringify(syncData.data.cart.cart_items || []));
+                        }
+                    }
+                } catch (error) {
+                    console.error('Cart sync failed:', error);
+                    // Continue anyway - don't block login
+                }
+            }
+
             showNotification('{{ "Login successful!"|t }}', 'success');
 
             // Check for redirect URL in query parameters

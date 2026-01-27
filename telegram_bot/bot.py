@@ -214,6 +214,7 @@ class WaterBusinessBot:
             CallbackQueryHandler(product_handlers.products_menu, pattern="^back_to_categories$"),
             CallbackQueryHandler(product_handlers.category_handler, pattern="^category_"),
             CallbackQueryHandler(product_handlers.product_details, pattern="^product_"),
+            CallbackQueryHandler(product_handlers.product_details, pattern="^back_to_product_"),
             CallbackQueryHandler(product_handlers.add_to_cart, pattern="^add_to_cart_"),
             CallbackQueryHandler(product_handlers.quantity_handler, pattern="^qty_"),
             CallbackQueryHandler(product_handlers.cart_handler, pattern="^cart_"),
@@ -227,6 +228,12 @@ class WaterBusinessBot:
             CallbackQueryHandler(order_handlers.confirm_order, pattern="^confirm_order"),
             CallbackQueryHandler(order_handlers.track_order, pattern="^track_order_"),
             CallbackQueryHandler(order_handlers.orders_menu, pattern="^back_to_orders$"),
+            CallbackQueryHandler(order_handlers.cancel_order, pattern="^cancel_order_\\d+"),
+            
+            # Confirmation callbacks
+            # Order Cancellation
+            CallbackQueryHandler(order_handlers.cancel_order_confirm_yes, pattern="^cancel_order_confirm_yes$"),
+            CallbackQueryHandler(order_handlers.cancel_order_confirm_no, pattern="^cancel_order_confirm_no$"),
             
             # Subscription callbacks
             CallbackQueryHandler(subscription_handlers.subscriptions_menu, pattern="^menu_subscriptions$"),

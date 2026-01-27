@@ -117,9 +117,9 @@ class Order(db.Model, TimestampMixin):
         # Calculate final total
         self.total_amount = self.subtotal - self.discount_amount - self.loyalty_discount + self.delivery_fee
         
-        # Calculate loyalty points earned (1% of total)
-        if not self.is_subscription_order:
-            self.loyalty_points_earned = int(self.total_amount * Decimal('0.01') / Decimal('100'))
+        # NOTE: loyalty_points_earned is calculated by LoyaltyService.calculate_points_for_purchase()
+        # when the order is confirmed/processed, using LoyaltyProgram configuration and tier multipliers.
+        # Do NOT calculate points here to avoid duplication and ensure proper program settings are used.
         
         return self.total_amount
     

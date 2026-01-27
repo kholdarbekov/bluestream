@@ -786,25 +786,28 @@
 {% block cabinet_content %}
 <!-- Loyalty Header -->
 <div class="content-header mb-4">
-    <h2><i class="far fa-star"></i> {{ 'Blue Stream Loyalty Program'|t }}</h2>
-    <p class="text-muted">{{ 'Earn points with every purchase and unlock exclusive rewards'|t }}</p>
+    <h2><i class="far fa-coins"></i> {{ 'Blue Stream AquaCoins'|t }}</h2>
+    <p class="text-muted">{{ 'Earn AquaCoins with every purchase, build streaks, and unlock exclusive rewards'|t }}</p>
 </div>
 
 <!-- Loyalty Overview -->
 <div class="loyalty-overview mb-4">
     <div class="row">
+        <!-- AquaCoins Balance -->
         <div class="col-md-4">
             <div class="card loyalty-card">
                 <div class="card-body text-center">
                     <div class="loyalty-icon">
-                        <i class="far fa-star fa-3x text-warning"></i>
+                        <i class="far fa-coins fa-3x text-warning"></i>
                     </div>
                     <h3 class="text-primary" id="currentPoints">0</h3>
-                    <p class="text-muted">{{ 'Current Points'|t }}</p>
+                    <p class="text-muted">{{ 'AquaCoins Balance'|t }}</p>
                     <small class="text-success" id="pointsThisMonth">+0 {{ 'this month'|t }}</small>
                 </div>
             </div>
         </div>
+        
+        <!-- Tier Status -->
         <div class="col-md-4">
             <div class="card loyalty-card">
                 <div class="card-body text-center">
@@ -812,27 +815,42 @@
                         <i class="far fa-trophy fa-3x text-success"></i>
                     </div>
                     <h3 class="text-primary" id="currentTier">Bronze</h3>
-                    <p class="text-muted">{{ 'Current Tier'|t }}</p>
-                    <div class="tier-progress">
+                    <!-- Tier Guarantee & Requalification -->
+                     <div class="tier-status-details mt-2">
+                        <small class="d-block text-muted font-weight-bold" id="tierGuaranteeText"></small>
+                        <small class="d-block text-info mt-1" id="tierRequalificationText"></small>
+                    </div>
+                    <div class="tier-progress mt-3">
                         <div class="progress" style="height: 8px;">
                             <div class="progress-bar" role="progressbar" style="width: 0%" id="tierProgress"></div>
                         </div>
-                        <small class="text-muted" id="tierProgressText">0 {{ 'points to next tier'|t }}</small>
+                        <small class="text-muted" id="tierProgressText">0 {{ 'AquaCoins to next tier'|t }}</small>
                     </div>
                 </div>
             </div>
         </div>
+        
+        <!-- Streak Widget -->
         <div class="col-md-4">
             <div class="card loyalty-card">
                 <div class="card-body text-center">
                     <div class="loyalty-icon">
-                        <i class="far fa-gift fa-3x text-info"></i>
+                        <i class="far fa-fire fa-3x text-danger"></i>
                     </div>
-                    <h3 class="text-primary" id="availableRewards">0</h3>
-                    <p class="text-muted">{{ 'Available Rewards'|t }}</p>
-                    <button class="btn btn-sm btn-primary" onclick="showRewards()">
-                        {{ 'View Rewards'|t }}
-                    </button>
+                    <h3 class="text-primary" id="currentStreak">0</h3>
+                    <p class="text-muted">{{ 'Month Streak'|t }}</p>
+                    
+                    <!-- Streak Progress Bar -->
+                    <div class="mt-2 mb-2">
+                        <div class="progress" style="height: 6px;">
+                            <div class="progress-bar bg-danger" role="progressbar" style="width: 0%" id="streakProgress"></div>
+                        </div>
+                    </div>
+                    
+                    <small class="text-danger font-weight-bold" id="streakNextText">{{ 'Order more to keep streak!'|t }}</small>
+                    <div class="mt-3">
+                         <span class="badge badge-light border">{{ 'Bonus: 3 Orders/Month'|t }}</span>
+                    </div>
                 </div>
             </div>
         </div>
@@ -915,9 +933,9 @@
                         <div class="earn-details">
                             <h6>
                                 {{ 'Make Purchases'|t }}
-                                <span class="earn-points-value">1-2 pts / 100 UZS</span>
+                                <span class="earn-points-value">1 AquaCoin / 250 UZS</span>
                             </h6>
-                            <p>{{ 'Earn points for every 100 UZS spent. Higher tiers earn more points per purchase!'|t }}</p>
+                            <p>{{ 'Earn 1 AquaCoin for every 250 UZS spent. Higher tiers earn up to 2x coins!'|t }}</p>
                         </div>
                     </div>
                 </div>
@@ -929,7 +947,7 @@
                         <div class="earn-details">
                             <h6>
                                 {{ 'Refer Friends'|t }}
-                                <span class="earn-points-value">+500 pts</span>
+                                <span class="earn-points-value">+500 AquaCoins</span>
                             </h6>
                             <p>{{ 'Invite friends with your referral code. Earn 500 points when they place their first order!'|t }}</p>
                         </div>
@@ -943,7 +961,7 @@
                         <div class="earn-details">
                             <h6>
                                 {{ 'Write Reviews'|t }}
-                                <span class="earn-points-value">+50 pts</span>
+                                <span class="earn-points-value">+50 AquaCoins</span>
                             </h6>
                             <p>{{ 'Share your experience by reviewing products. Get 50 points for each review!'|t }}</p>
                         </div>
@@ -957,7 +975,7 @@
                         <div class="earn-details">
                             <h6>
                                 {{ 'Birthday Bonus'|t }}
-                                <span class="earn-points-value">+200 pts</span>
+                                <span class="earn-points-value">+200 AquaCoins</span>
                             </h6>
                             <p>{{ 'Celebrate with us! Receive 200 bonus points automatically on your birthday.'|t }}</p>
                         </div>
@@ -1087,21 +1105,37 @@ function renderMembershipTiers(tiers) {
     const tiersHtml = tiers.map(tier => {
         const tierClass = tier.name.toLowerCase();
         const icon = tier.icon || 'fa-medal';
+        const color = tier.color || '#CD7F32';  // Use color from API
         const isCurrentTier = tier.name === currentUserTier;
+        
+        // Build benefits list
+        const benefitsHtml = (tier.benefits || []).map(benefit => `<li>${benefit}</li>`).join('');
+        
+        // Show multiplier if >= 1
+        const multiplierBadge = tier.points_multiplier >= 1 
+            ? `<span class="badge" style="background: ${color}; color: white;">${tier.points_multiplier}x {{ 'AquaCoins'|t }}</span>` 
+            : '';
         
         return `
             <div class="col-md-3">
-                <div class="tier-card ${tierClass} ${isCurrentTier ? 'current-tier' : ''}">
+                <div class="tier-card ${tierClass} ${isCurrentTier ? 'current-tier' : ''}" 
+                     style="border-left-color: ${color};">
                     <div class="tier-header">
-                        <i class="far ${icon}"></i>
+                        <i class="far ${icon}" style="color: ${color};"></i>
                         <h6>${tier.name}</h6>
-                        <p>${tier.points_range} {{ 'points'|t }}</p>
+                        <p>${tier.points_range} {{ 'AquaCoins'|t }}</p>
+                        ${multiplierBadge}
                     </div>
                     <div class="tier-benefits">
                         <ul>
-                            ${tier.benefits.map(benefit => `<li>${benefit}</li>`).join('')}
+                            ${benefitsHtml}
                         </ul>
                     </div>
+                    ${tier.discount_percentage > 0 ? `
+                        <div class="tier-discount" style="color: ${color};">
+                            <i class="far fa-tag"></i> ${tier.discount_percentage}% {{ 'discount'|t }}
+                        </div>
+                    ` : ''}
                 </div>
             </div>
         `;
@@ -1137,15 +1171,62 @@ function updateLoyaltyOverview(loyalty) {
     // Update global currentUserTier for tier card highlighting
     currentUserTier = loyalty.current_tier || 'Bronze';
     
+    // AquaCoins & Tier Basic Info
     document.getElementById('currentPoints').textContent = loyalty.current_balance || 0;
     document.getElementById('pointsThisMonth').textContent = `+${loyalty.points_this_month || 0} {{ 'this month'|t }}`;
     document.getElementById('currentTier').textContent = currentUserTier;
-    document.getElementById('availableRewards').textContent = loyalty.available_rewards_count || 0;
     
+    // Streak Widget
+    if (loyalty.streak) {
+        document.getElementById('currentStreak').textContent = loyalty.streak.current_streak || 0;
+        // Logic for "N orders left" - we need to know how many orders. Assuming 'orders_this_month' is passed.
+        // Target is 3 orders per month for streak bonus (as per service logic)
+        const ordersThisMonth = loyalty.streak.orders_this_month || 0;
+        const targetOrders = 3;
+        const ordersNeeded = Math.max(0, targetOrders - ordersThisMonth);
+        const progressPercent = Math.min((ordersThisMonth / targetOrders) * 100, 100);
+        
+        // Update Progress Bar
+        const progressBar = document.getElementById('streakProgress');
+        if (progressBar) {
+            progressBar.style.width = `${progressPercent}%`;
+            progressBar.setAttribute('aria-valuenow', progressPercent);
+        }
+        
+        if (ordersNeeded > 0) {
+             document.getElementById('streakNextText').textContent = `${ordersNeeded} {{ 'more orders for bonus'|t }}`;
+             document.getElementById('streakNextText').className = 'text-warning font-weight-bold';
+        } else {
+             document.getElementById('streakNextText').textContent = `{{ 'Monthly Goal Achieved!'|t }}`;
+             document.getElementById('streakNextText').className = 'text-success font-weight-bold';
+        }
+    }
+
+    // Tier Guarantee & Requalification
+    if (loyalty.tier_valid_until) {
+        // Format date
+        const date = new Date(loyalty.tier_valid_until);
+        const dateStr = date.toLocaleDateString();
+        document.getElementById('tierGuaranteeText').textContent = `{{ 'Guaranteed until'|t }} ${dateStr}`;
+    } else {
+        document.getElementById('tierGuaranteeText').textContent = '';
+    }
+
+    if (loyalty.requalification) {
+        const needed = loyalty.requalification.points_needed_to_keep || 0;
+        if (needed > 0) {
+             document.getElementById('tierRequalificationText').textContent = `{{ 'Earn'|t }} ${needed} {{ 'more coins to keep status'|t }}`;
+        } else {
+             document.getElementById('tierRequalificationText').textContent = `{{ 'Status Secured'|t }}`;
+             document.getElementById('tierRequalificationText').className = 'text-success mt-1';
+        }
+    }
+
+    // Progress Bar
     if (loyalty.tier_progress) {
         const progressPercent = (loyalty.tier_progress.current / loyalty.tier_progress.next_tier_points) * 100;
         document.getElementById('tierProgress').style.width = `${Math.min(progressPercent, 100)}%`;
-        document.getElementById('tierProgressText').textContent = `${loyalty.tier_progress.points_needed || loyalty.tier_progress.next_tier_points} {{ 'points to next tier'|t }}`;
+        document.getElementById('tierProgressText').textContent = `${loyalty.tier_progress.points_needed || loyalty.tier_progress.next_tier_points} {{ 'AquaCoins to next tier'|t }}`;
     }
     
     // Highlight current tier card
@@ -1196,7 +1277,7 @@ function displayPointsHistory(transactions) {
                 ${transaction.order_number ? `<br><small class="text-primary">{{ 'Order'|t }} #${transaction.order_number}</small>` : ''}
             </div>
             <div class="points-amount ${transaction.points > 0 ? 'positive' : 'negative'}">
-                ${transaction.points > 0 ? '+' : ''}${transaction.points} {{ 'pts'|t }}
+                ${transaction.points > 0 ? '+' : ''}${transaction.points} {{ 'AquaCoins'|t }}
             </div>
         </div>
     `).join('');
@@ -1279,7 +1360,7 @@ function displayRewards(rewards) {
                         <div class="reward-points-cost" style="border-top: none; padding-top: 0.75rem;">
                             <span class="points-badge" style="background: linear-gradient(135deg, #52c41a 0%, #389e0d 100%);">
                                 <i class="far fa-star"></i>
-                                ${pointsCost.toLocaleString()} {{ 'pts'|t }}
+                                ${pointsCost.toLocaleString()} {{ 'AquaCoins'|t }}
                             </span>
                         </div>
                     </div>
@@ -1303,7 +1384,7 @@ function displayRewards(rewards) {
                     <div class="reward-points-cost">
                         <span class="points-badge">
                             <i class="far fa-star"></i>
-                            ${pointsCost.toLocaleString()} {{ 'pts'|t }}
+                            ${pointsCost.toLocaleString()} {{ 'AquaCoins'|t }}
                         </span>
                         <button class="btn redeem-btn ${canRedeem ? 'can-redeem' : 'cannot-redeem'}" 
                                 onclick="redeemReward(${reward.id})" 
@@ -1351,10 +1432,10 @@ function showRewardModal(reward) {
                     <p class="text-muted">${reward.description}</p>
                     <div class="reward-info">
                         <div class="info-item">
-                            <strong>{{ 'Points Required'|t }}:</strong> ${reward.points_required} {{ 'pts'|t }}
+                            <strong>{{ 'Points Required'|t }}:</strong> ${reward.points_required} {{ 'AquaCoins'|t }}
                         </div>
                         <div class="info-item">
-                            <strong>{{ 'Your Points'|t }}:</strong> ${document.getElementById('currentPoints').textContent} {{ 'pts'|t }}
+                            <strong>{{ 'Your Points'|t }}:</strong> ${document.getElementById('currentPoints').textContent} {{ 'AquaCoins'|t }}
                         </div>
                         ${reward.expiry_date ? `<div class="info-item"><strong>{{ 'Expires'|t }}:</strong> ${formatDate(reward.expiry_date)}</div>` : ''}
                         ${reward.terms_conditions ? `<div class="info-item mt-3"><small class="text-muted">${reward.terms_conditions}</small></div>` : ''}

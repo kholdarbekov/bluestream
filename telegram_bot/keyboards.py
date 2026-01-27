@@ -101,12 +101,12 @@ class MenuKeyboards:
         return KeyboardBuilder.build_inline_keyboard(buttons)
     
     @staticmethod
-    def yes_no_buttons(language: str = 'en') -> InlineKeyboardMarkup:
+    def yes_no_buttons(language: str = 'en', yes_callback: str = 'confirm_yes', no_callback: str = 'confirm_no') -> InlineKeyboardMarkup:
         """Yes/No confirmation buttons"""
         buttons = [
             [
-                {'text': i18n.get('telegram.yes', language), 'callback_data': 'confirm_yes'},
-                {'text': i18n.get('telegram.no', language), 'callback_data': 'confirm_no'}
+                {'text': i18n.get('telegram.yes', language), 'callback_data': yes_callback},
+                {'text': i18n.get('telegram.no', language), 'callback_data': no_callback}
             ]
         ]
         return KeyboardBuilder.build_inline_keyboard(buttons)
@@ -240,11 +240,14 @@ class ProductKeyboards:
         return KeyboardBuilder.build_inline_keyboard(buttons)
     
     @staticmethod
-    def product_details(product_id: int, language: str = 'en') -> InlineKeyboardMarkup:
+    def product_details(product_id: int, category_id: Optional[int] = None, language: str = 'en') -> InlineKeyboardMarkup:
         """Product details keyboard"""
+        # Determine back button action
+        back_callback = f'category_{category_id}' if category_id else 'menu_products'
+        
         buttons = [
             [{'text': i18n.get('telegram.product.add_to_cart', language), 'callback_data': f'add_to_cart_{product_id}'}],
-            [{'text': i18n.get('telegram.back', language), 'callback_data': 'back_to_products'}]
+            [{'text': i18n.get('telegram.back', language), 'callback_data': back_callback}]
         ]
 
         return KeyboardBuilder.build_inline_keyboard(buttons)

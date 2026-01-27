@@ -18,6 +18,7 @@ from business_app.utils.helpers import get_current_language
 import json
 from functools import lru_cache
 from typing import Dict, Optional, List
+from flask import current_app
 
 
 # DEPRECATED: TranslatableContent class - replaced by unified Translation system
@@ -113,6 +114,21 @@ class TranslatableMixin:
             self._translation_cache[cache_key] = translation_obj.value
             return translation_obj.value
 
+        # Get original value from the column
+        original_value = getattr(self, field_name, None)
+        
+        # If the requested language is the default language (uz), 
+        # prioritize the original column value over fallbacks
+        # This prevents English translations from overriding the Uzbek default value
+        # stored in the column when no explicit Uzbek translation exists.
+        default_language = 'uz' # Default fallback
+        if hasattr(current_app, 'config'):
+            default_language = current_app.config.get('DEFAULT_LANGUAGE', 'uz')
+            
+        if language == default_language and original_value:
+            self._translation_cache[cache_key] = original_value
+            return original_value
+
         # Fallback chain: uz → en → ru
         fallback_languages = ['uz', 'en', 'ru']
         if language in fallback_languages:
@@ -140,7 +156,6 @@ class TranslatableMixin:
                 return translation_obj.value
 
         # Final fallback to original field value if exists
-        original_value = getattr(self, field_name, None)
         # Cache the original value as fallback
         self._translation_cache[cache_key] = original_value
         return original_value

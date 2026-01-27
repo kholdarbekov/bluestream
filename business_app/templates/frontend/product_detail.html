@@ -221,7 +221,7 @@
                                     <button type="button" class="qty-plus" onclick="changeQty(1)">+</button>
                                 </div>
                             </div>
-                            <button class="add-to-cart-btn theme-btn btn-one" onclick="addToCart({{ product.id }})" {% if product.stock_quantity <= 0 %}disabled{% endif %}>
+                            <button class="add-to-cart-btn theme-btn btn-one" onclick="addToCart({{ product.id }}, qty)" {% if product.stock_quantity <= 0 %}disabled{% endif %}>
                                 <i class="far fa-shopping-cart"></i>
                                 Savatga qo'shish
                             </button>

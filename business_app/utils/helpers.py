@@ -285,7 +285,23 @@ def get_time_slots(start_hour: int = 9, end_hour: int = 21, interval_minutes: in
 
 
 def calculate_loyalty_points(amount: int) -> int:
-    """Calculate loyalty points earned from purchase amount"""
+    """
+    Calculate loyalty points earned from purchase amount.
+    
+    DEPRECATED: This function uses a hardcoded ratio from Flask config and does not
+    apply tier-based multipliers or LoyaltyProgram.points_per_uzs configuration.
+    
+    Use LoyaltyService.calculate_points_for_purchase(user_id, amount) instead for
+    proper program-aware and tier-based point calculations.
+    
+    This function is kept for backward compatibility but will be removed in future versions.
+    """
+    import warnings
+    warnings.warn(
+        "calculate_loyalty_points() is deprecated. Use LoyaltyService.calculate_points_for_purchase() instead.",
+        DeprecationWarning,
+        stacklevel=2
+    )
     points_ratio = current_app.config['LOYALTY_POINTS_RATIO']
     return amount // points_ratio
 

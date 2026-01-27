@@ -575,7 +575,7 @@
             });
         }
         
-        function addToCart(productId, quantity = 1) {
+        async function addToCart(productId, quantity = 1) {
             const existingItem = cart.find(item => item.product_id === productId);
             if (existingItem) {
                 existingItem.quantity += quantity;
@@ -585,6 +585,22 @@
             localStorage.setItem('cart', JSON.stringify(cart));
             updateCartCount();
             showNotification('{{ "landing.notification.product_added_to_cart"|t }}', 'success');
+
+            // Sync with backend if authenticated
+            if (CURRENT_USER) {
+                try {
+                    await apiRequest('/cart/items', {
+                        method: 'POST',
+                        body: JSON.stringify({
+                            product_id: productId,
+                            quantity: quantity
+                        })
+                    });
+                } catch (error) {
+                    console.error('Failed to sync item to backend cart:', error);
+                    // Silently fail as local cart is still valid
+                }
+            }
         }
         
         function removeFromCart(productId) {
@@ -953,28 +969,37 @@
         // Sync cart from database to localStorage for authenticated users
         async function syncCartFromDatabase() {
             try {
+                console.log('SYNC: Requesting cart from server...');
                 const response = await apiRequest('/cart/');
+                console.log('SYNC: Response status:', response.status);
+                
                 if (response.ok) {
                     const data = await response.json();
-                    if (data.success && data.data.cart && data.data.cart.cart_items) {
-                        const dbCart = data.data.cart.cart_items.map(item => ({
-                            product_id: item.product_id,
-                            quantity: item.quantity
-                        }));
-                        // Merge with localStorage cart (DB takes precedence for same products)
-                        const localCart = JSON.parse(localStorage.getItem('cart') || '[]');
-                        const mergedCart = [...dbCart];
+                    console.log('SYNC: Data received:', data);
+                    
+                    if (data.success) {
+                        let dbCart = [];
                         
-                        // Add local items that aren't in DB cart
-                        localCart.forEach(localItem => {
-                            if (!mergedCart.find(dbItem => dbItem.product_id === localItem.product_id)) {
-                                mergedCart.push(localItem);
-                            }
-                        });
+                        // Parse server cart if it exists
+                        if (data.data.cart && data.data.cart.cart_items) {
+                            console.log('SYNC: Server has cart items:', data.data.cart.cart_items);
+                            dbCart = data.data.cart.cart_items.map(item => ({
+                                product_id: item.product_id,
+                                quantity: item.quantity
+                            }));
+                        } else {
+                            console.log('SYNC: Server cart is empty (null or no items)');
+                        }
                         
-                        localStorage.setItem('cart', JSON.stringify(mergedCart));
-                        cart = mergedCart;
+                        // SERVER TRUTH: Always overwrite local cart with database cart (even if empty)
+                        console.log('SYNC: Overwriting localStorage with:', dbCart);
+                        localStorage.setItem('cart', JSON.stringify(dbCart));
+                        cart = dbCart;
+                    } else {
+                        console.error('SYNC: API returned success=false', data);
                     }
+                } else {
+                    console.error('SYNC: API request failed');
                 }
             } catch (error) {
                 console.error('Error syncing cart from database:', error);
@@ -984,8 +1009,13 @@
         // Initialize on page load
         document.addEventListener('DOMContentLoaded', async function() {
             // For authenticated users, sync cart from database first
+            // We expose this promise so other scripts (cart.html, checkout.html) can wait for it
+            // to ensure they don't read stale localStorage data before we've synced correctly.
             {% if current_user %}
-            await syncCartFromDatabase();
+            window.cartSyncPromise = syncCartFromDatabase();
+            await window.cartSyncPromise;
+            {% else %}
+            window.cartSyncPromise = Promise.resolve();
             {% endif %}
             
             updateCartCount();

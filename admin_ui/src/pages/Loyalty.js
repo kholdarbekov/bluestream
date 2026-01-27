@@ -37,7 +37,8 @@ import {
   StarOutlined,
   UserOutlined,
   ExportOutlined,
-  PercentageOutlined
+  PercentageOutlined,
+  BgColorsOutlined
 } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from 'react-query';
 import { useTranslation } from 'react-i18next';
@@ -56,12 +57,17 @@ const Loyalty = () => {
   const [statusFilter, setStatusFilter] = useState('');
   const [selectedProgram, setSelectedProgram] = useState(null);
   const [selectedCustomer, setSelectedCustomer] = useState(null);
+  const [selectedTier, setSelectedTier] = useState(null);
   const [isProgramModalVisible, setIsProgramModalVisible] = useState(false);
   const [isEditProgramModalVisible, setIsEditProgramModalVisible] = useState(false);
   const [isCustomerModalVisible, setIsCustomerModalVisible] = useState(false);
+  const [isTierModalVisible, setIsTierModalVisible] = useState(false);
+  const [isEditTierModalVisible, setIsEditTierModalVisible] = useState(false);
   const [pagination, setPagination] = useState({ page: 1, per_page: 20 });
   const [programForm] = Form.useForm();
   const [editForm] = Form.useForm();
+  const [tierForm] = Form.useForm();
+  const [editTierForm] = Form.useForm();
 
   const queryClient = useQueryClient();
 
@@ -121,6 +127,61 @@ const Loyalty = () => {
       },
       onError: (error) => {
         message.error(t('ui.loyalty.update_error'));
+      }
+    }
+  );
+
+  // Fetch loyalty tiers
+  const { data: tiersData, isLoading: tiersLoading } = useQuery(
+    ['loyalty-tiers', activeTab],
+    () => adminService.getLoyaltyTiers(),
+    {
+      enabled: activeTab === 'tiers'
+    }
+  );
+
+  // Create tier mutation
+  const createTierMutation = useMutation(
+    (tierData) => adminService.createLoyaltyTier(tierData),
+    {
+      onSuccess: () => {
+        message.success(t('ui.loyalty.tier_create_success'));
+        queryClient.invalidateQueries('loyalty-tiers');
+        setIsTierModalVisible(false);
+        tierForm.resetFields();
+      },
+      onError: () => {
+        message.error(t('ui.loyalty.tier_create_error'));
+      }
+    }
+  );
+
+  // Update tier mutation
+  const updateTierMutation = useMutation(
+    ({ tierId, tierData }) => adminService.updateLoyaltyTier(tierId, tierData),
+    {
+      onSuccess: () => {
+        message.success(t('ui.loyalty.tier_update_success'));
+        queryClient.invalidateQueries('loyalty-tiers');
+        setIsEditTierModalVisible(false);
+        editTierForm.resetFields();
+      },
+      onError: () => {
+        message.error(t('ui.loyalty.tier_update_error'));
+      }
+    }
+  );
+
+  // Delete tier mutation
+  const deleteTierMutation = useMutation(
+    (tierId) => adminService.deleteLoyaltyTier(tierId),
+    {
+      onSuccess: () => {
+        message.success(t('ui.loyalty.tier_delete_success'));
+        queryClient.invalidateQueries('loyalty-tiers');
+      },
+      onError: () => {
+        message.error(t('ui.loyalty.tier_delete_error'));
       }
     }
   );
@@ -301,6 +362,115 @@ const Loyalty = () => {
       )
     }
   ];
+
+  const tierColumns = [
+    {
+      title: t('ui.loyalty.tier_name'),
+      dataIndex: 'name',
+      key: 'name',
+      render: (text, record) => (
+        <div>
+          <Tag color={record.color || '#CD7F32'}>
+            <i className={`far ${record.icon || 'fa-medal'}`} style={{ marginRight: 5 }} />
+            {text}
+          </Tag>
+        </div>
+      )
+    },
+    {
+      title: t('ui.loyalty.points_range'),
+      key: 'points',
+      render: (_, record) => (
+        <span>
+          {record.min_points.toLocaleString()}
+          {record.max_points ? ` - ${record.max_points.toLocaleString()}` : '+'}
+          {' '}{t('ui.loyalty.pts')}
+        </span>
+      )
+    },
+    {
+      title: t('ui.loyalty.multiplier'),
+      dataIndex: 'points_multiplier',
+      key: 'multiplier',
+      render: (multiplier) => (
+        <Tag color="cyan">{multiplier}x</Tag>
+      )
+    },
+    {
+      title: t('ui.loyalty.discount'),
+      dataIndex: 'discount_percentage',
+      key: 'discount',
+      render: (discount) => (
+        <span>{discount}%</span>
+      )
+    },
+    {
+      title: t('ui.loyalty.display_order'),
+      dataIndex: 'display_order',
+      key: 'display_order',
+      sorter: (a, b) => a.display_order - b.display_order,
+    },
+    {
+      title: t('ui.loyalty.status'),
+      dataIndex: 'is_active',
+      key: 'is_active',
+      render: (isActive) => (
+        <Tag color={isActive ? 'green' : 'red'}>
+          {isActive ? t('ui.loyalty.active') : t('ui.loyalty.inactive')}
+        </Tag>
+      )
+    },
+    {
+      title: t('ui.loyalty.actions'),
+      key: 'actions',
+      render: (_, record) => (
+        <Space>
+          <Button
+            type="text"
+            icon={<EditOutlined />}
+            onClick={() => handleEditTier(record)}
+          />
+          <Button
+            type="text"
+            danger
+            icon={<DeleteOutlined />}
+            onClick={() => handleDeleteTier(record)}
+          />
+        </Space>
+      )
+    }
+  ];
+
+  const handleCreateTier = (values) => {
+    createTierMutation.mutate(values);
+  };
+
+  const handleUpdateTier = (values) => {
+    updateTierMutation.mutate({
+      tierId: selectedTier.id,
+      tierData: values
+    });
+  };
+
+  const handleEditTier = (tier) => {
+    setSelectedTier(tier);
+    editTierForm.setFieldsValue(tier);
+    setIsEditTierModalVisible(true);
+  };
+
+  const handleDeleteTier = (tier) => {
+    Modal.confirm({
+      title: t('ui.loyalty.delete_tier_confirm_title'),
+      content: t('ui.loyalty.delete_tier_confirm_message', { name: tier.name }),
+      okText: t('ui.common.yes'),
+      okType: 'danger',
+      cancelText: t('ui.common.no'),
+      onOk: () => {
+        deleteTierMutation.mutate(tier.id);
+      }
+    });
+  };
+
 
   const handleViewProgram = (program) => {
     setSelectedProgram(program);
@@ -533,6 +703,81 @@ const Loyalty = () => {
                   t('ui.loyalty.pagination_members', { from: range[0], to: range[1], total })
               }}
               onChange={handleTableChange}
+              className="admin-table"
+            />
+          </Card>
+        </div>
+      )
+    },
+    {
+      key: 'tiers',
+      label: t('ui.loyalty.tab_tiers'),
+      children: (
+        <div>
+          {/* Summary Cards for Tiers */}
+          <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
+            <Col xs={24} sm={8}>
+              <Card>
+                <Statistic
+                  title={t('ui.loyalty.active_tiers')}
+                  value={tiersData?.data?.tier_count || 0}
+                  prefix={<CrownOutlined />}
+                  valueStyle={{ color: '#722ed1' }}
+                />
+              </Card>
+            </Col>
+            <Col xs={24} sm={8}>
+              <Card>
+                <Statistic
+                  title={t('ui.loyalty.max_multiplier')}
+                  value={Math.max(...(tiersData?.data?.tiers || []).map(t => t.points_multiplier), 1)}
+                  precision={1}
+                  suffix="x"
+                  prefix={<PercentageOutlined />}
+                  valueStyle={{ color: '#1890ff' }}
+                />
+              </Card>
+            </Col>
+            <Col xs={24} sm={8}>
+              <Card>
+                <Statistic
+                  title={t('ui.loyalty.tier_programs')}
+                  value={1} // Currently supporting single program
+                  prefix={<TrophyOutlined />}
+                />
+              </Card>
+            </Col>
+          </Row>
+
+          <Card>
+            <div className="table-actions">
+              <Space>
+                <Button
+                  type="primary"
+                  icon={<PlusOutlined />}
+                  onClick={() => {
+                    tierForm.resetFields();
+                    tierForm.setFieldsValue({
+                      points_multiplier: 1.0,
+                      discount_percentage: 0,
+                      display_order: (tiersData?.data?.tiers?.length || 0),
+                      color: '#CD7F32',
+                      is_active: true
+                    });
+                    setIsTierModalVisible(true);
+                  }}
+                >
+                  {t('ui.loyalty.create_tier')}
+                </Button>
+              </Space>
+            </div>
+
+            <Table
+              columns={tierColumns}
+              dataSource={tiersData?.data?.tiers || []}
+              loading={tiersLoading}
+              rowKey="id"
+              pagination={false} // Tiers list is usually short
               className="admin-table"
             />
           </Card>
@@ -851,6 +1096,248 @@ const Loyalty = () => {
             </div>
           </div>
         )}
+      </Modal>
+
+      {/* Create Tier Modal */}
+      <Modal
+        title={t('ui.loyalty.create_tier')}
+        open={isTierModalVisible}
+        onCancel={() => setIsTierModalVisible(false)}
+        footer={null}
+        width={600}
+      >
+        <Form
+          form={tierForm}
+          layout="vertical"
+          onFinish={handleCreateTier}
+        >
+          <Form.Item
+            name="name"
+            label={t('ui.loyalty.tier_name')}
+            rules={[{ required: true, message: t('ui.loyalty.tier_name_required') }]}
+          >
+            <Input placeholder="e.g. Bronze, Silver" />
+          </Form.Item>
+
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item
+                name="min_points"
+                label={t('ui.loyalty.min_points')}
+                rules={[{ required: true, message: t('ui.loyalty.min_points_required') }]}
+              >
+                <InputNumber min={0} style={{ width: '100%' }} />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item
+                name="max_points"
+                label={t('ui.loyalty.max_points')}
+                tooltip={t('ui.loyalty.max_points_tooltip')}
+              >
+                <InputNumber min={0} style={{ width: '100%' }} placeholder="Leave empty for highest tier" />
+              </Form.Item>
+            </Col>
+          </Row>
+
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item
+                name="points_multiplier"
+                label={t('ui.loyalty.multiplier')}
+                rules={[{ required: true, message: t('ui.loyalty.multiplier_required') }]}
+              >
+                <InputNumber min={1.0} step={0.1} style={{ width: '100%' }} />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item
+                name="discount_percentage"
+                label={t('ui.loyalty.discount_percent')}
+              >
+                <InputNumber min={0} max={100} style={{ width: '100%' }} formatter={value => `${value}%`} parser={value => value.replace('%', '')} />
+              </Form.Item>
+            </Col>
+          </Row>
+
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item
+                name="color"
+                label={t('ui.loyalty.tier_color')}
+              >
+                <Input prefix={<BgColorsOutlined />} placeholder="#CD7F32" />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item
+                name="icon"
+                label={t('ui.loyalty.tier_icon')}
+              >
+                <Input prefix={<StarOutlined />} placeholder="fa-medal" />
+              </Form.Item>
+            </Col>
+          </Row>
+
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item
+                name="display_order"
+                label={t('ui.loyalty.display_order')}
+              >
+                <InputNumber min={0} style={{ width: '100%' }} />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item
+                name="is_active"
+                label={t('ui.loyalty.status')}
+                valuePropName="checked"
+              >
+                <Switch
+                  checkedChildren={t('ui.loyalty.active')}
+                  unCheckedChildren={t('ui.loyalty.inactive')}
+                />
+              </Form.Item>
+            </Col>
+          </Row>
+
+          <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
+            <Space>
+              <Button onClick={() => setIsTierModalVisible(false)}>
+                {t('ui.loyalty.cancel')}
+              </Button>
+              <Button
+                type="primary"
+                htmlType="submit"
+                loading={createTierMutation.isLoading}
+              >
+                {t('ui.loyalty.create')}
+              </Button>
+            </Space>
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      {/* Edit Tier Modal */}
+      <Modal
+        title={t('ui.loyalty.edit_tier')}
+        open={isEditTierModalVisible}
+        onCancel={() => setIsEditTierModalVisible(false)}
+        footer={null}
+        width={600}
+      >
+        <Form
+          form={editTierForm}
+          layout="vertical"
+          onFinish={handleUpdateTier}
+        >
+          <Form.Item
+            name="name"
+            label={t('ui.loyalty.tier_name')}
+            rules={[{ required: true, message: t('ui.loyalty.tier_name_required') }]}
+          >
+            <Input placeholder="e.g. Bronze, Silver" />
+          </Form.Item>
+
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item
+                name="min_points"
+                label={t('ui.loyalty.min_points')}
+                rules={[{ required: true, message: t('ui.loyalty.min_points_required') }]}
+              >
+                <InputNumber min={0} style={{ width: '100%' }} />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item
+                name="max_points"
+                label={t('ui.loyalty.max_points')}
+                tooltip={t('ui.loyalty.max_points_tooltip')}
+              >
+                <InputNumber min={0} style={{ width: '100%' }} placeholder="Leave empty for highest tier" />
+              </Form.Item>
+            </Col>
+          </Row>
+
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item
+                name="points_multiplier"
+                label={t('ui.loyalty.multiplier')}
+                rules={[{ required: true, message: t('ui.loyalty.multiplier_required') }]}
+              >
+                <InputNumber min={1.0} step={0.1} style={{ width: '100%' }} />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item
+                name="discount_percentage"
+                label={t('ui.loyalty.discount_percent')}
+              >
+                <InputNumber min={0} max={100} style={{ width: '100%' }} formatter={value => `${value}%`} parser={value => value.replace('%', '')} />
+              </Form.Item>
+            </Col>
+          </Row>
+
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item
+                name="color"
+                label={t('ui.loyalty.tier_color')}
+              >
+                <Input prefix={<BgColorsOutlined />} placeholder="#CD7F32" />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item
+                name="icon"
+                label={t('ui.loyalty.tier_icon')}
+              >
+                <Input prefix={<StarOutlined />} placeholder="fa-medal" />
+              </Form.Item>
+            </Col>
+          </Row>
+
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item
+                name="display_order"
+                label={t('ui.loyalty.display_order')}
+              >
+                <InputNumber min={0} style={{ width: '100%' }} />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item
+                name="is_active"
+                label={t('ui.loyalty.status')}
+                valuePropName="checked"
+              >
+                <Switch
+                  checkedChildren={t('ui.loyalty.active')}
+                  unCheckedChildren={t('ui.loyalty.inactive')}
+                />
+              </Form.Item>
+            </Col>
+          </Row>
+
+          <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
+            <Space>
+              <Button onClick={() => setIsEditTierModalVisible(false)}>
+                {t('ui.loyalty.cancel')}
+              </Button>
+              <Button
+                type="primary"
+                htmlType="submit"
+                loading={updateTierMutation.isLoading}
+              >
+                {t('ui.loyalty.update')}
+              </Button>
+            </Space>
+          </Form.Item>
+        </Form>
       </Modal>
     </div>
   );

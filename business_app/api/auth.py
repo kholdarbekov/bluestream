@@ -2555,7 +2555,7 @@ def check_phone_availability():
     can_link = (
         existing_user.telegram_id is None and 
         user_status == 'active' and
-        existing_user.registration_source in ['web', 'email', 'phone']
+        existing_user.registration_source in ['web', 'email', 'phone', 'admin_created']
     )
     
     # Mask the user info for privacy

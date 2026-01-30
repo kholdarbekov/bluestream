@@ -1175,7 +1175,7 @@ class PaymentService:
     
     def process_refund(self, payment_id: int, amount: int, reason: str = None) -> bool:
         """Process payment refund"""
-        payment = Payment.query.get(payment_id)
+        payment: Payment = Payment.query.get(payment_id)
         if not payment:
             raise NotFoundError(get_translation('error.not_found'))
 
@@ -1186,9 +1186,7 @@ class PaymentService:
             raise ValidationError(get_translation('error.validation.amount_exceeds_total'))
         
         # Process refund based on payment method
-        if payment.method in [PaymentMethod.PAYME, PaymentMethod.CLICK]:
-            success = self._process_gateway_refund(payment, amount, reason)
-        elif payment.method == PaymentMethod.LOYALTY_POINTS:
+        if payment.payment_method == PaymentMethod.LOYALTY_POINTS:
             success = self._process_points_refund(payment, amount, reason)
         else:
             # Cash refund - manual process
@@ -1197,18 +1195,9 @@ class PaymentService:
         if success:
             # Update payment status
             if amount == payment.amount:
-                payment.status = PaymentStatus.REFUNDED
+                payment.status = PaymentStatus.CANCELLED
             else:
                 payment.status = PaymentStatus.PARTIALLY_REFUNDED
-            
-            payment.refunded_amount = (payment.refunded_amount or 0) + amount
-            payment.refunded_at = datetime.now(timezone.utc)
-            
-            # Create transaction record
-            self._create_transaction(payment, 'refund_processed', {
-                'refund_amount': amount,
-                'reason': reason
-            })
             
             db.session.commit()
         
@@ -1705,7 +1694,7 @@ class PaymentService:
         payme_trans_id = params.get('id')
         
         # 1. Find transaction
-        transaction = PaymentTransaction.query.filter_by(provider_transaction_id=payme_trans_id).first()
+        transaction: PaymentTransaction = PaymentTransaction.query.filter_by(provider_transaction_id=payme_trans_id).first()
         if not transaction:
             return {'error': {'code': PaymeErrors.TRANSACTION_NOT_FOUND, 'message': 'Transaction not found'}}
             
@@ -1727,7 +1716,7 @@ class PaymentService:
                 return {'error': {'code': PaymeErrors.OPERATION_NOT_ALLOWED, 'message': 'Transaction timed out'}}
             
             # Perform Payment
-            payment = transaction.payment
+            payment: Payment = transaction.payment
             
             if payment.status == PaymentStatus.COMPLETED:
                 # Already paid (maybe via another channel?), but transaction was pending?
@@ -1737,6 +1726,7 @@ class PaymentService:
                 # Mark payment as completed
                 payment.status = PaymentStatus.COMPLETED
                 payment.paid_at = datetime.now(timezone.utc)
+                payment.provider_transaction_id = payme_trans_id
                 
                 # Update Order
                 self._handle_successful_payment(payment)
@@ -1772,7 +1762,7 @@ class PaymentService:
         payme_trans_id = params.get('id')
         reason = params.get('reason')
         
-        transaction = PaymentTransaction.query.filter_by(provider_transaction_id=payme_trans_id).first()
+        transaction: PaymentTransaction = PaymentTransaction.query.filter_by(provider_transaction_id=payme_trans_id).first()
         if not transaction:
             return {'error': {'code': PaymeErrors.TRANSACTION_NOT_FOUND, 'message': 'Transaction not found'}}
 
@@ -1793,11 +1783,15 @@ class PaymentService:
             
         # State 2 (Completed) -> Check if reversible
         if transaction.status == 'completed':
-             payment = transaction.payment
+             payment: Payment = transaction.payment
              # Check if we can refund
              # Example: if order is already delivered, usually no refund via API
-             if payment.order.status == OrderStatus.DELIVERED:
-                  return {'error': {'code': PaymeErrors.UNABLE_TO_CANCEL, 'message': 'Order delivered, cannot cancel'}}
+             if payment.order.status in [OrderStatus.DELIVERED, OrderStatus.OUT_FOR_DELIVERY]:
+                  return {'error': {'code': PaymeErrors.UNABLE_TO_CANCEL, 'message': 'Order delivered or being delivered, cannot cancel'}}
+             else:
+                # Update order status to cancelled if needed
+                payment.order.status = OrderStatus.CANCELLED
+                db.session.commit()
                   
              # Process Refund
              # Mark Payment as Refunded
@@ -1995,20 +1989,6 @@ class PaymentService:
         # Send notification
         from ..tasks.notification_tasks import send_payment_confirmation_task
         send_payment_confirmation_task.delay(payment.id)
-    
-    def _process_gateway_refund(self, payment: Payment, amount: int, reason: str) -> bool:
-        """Process refund through payment gateway"""
-        try:
-            if payment.payment_method == PaymentMethod.PAYME:
-                return self._process_payme_refund(payment, amount, reason)
-            elif payment.payment_method == PaymentMethod.CLICK:
-                return self._process_click_refund(payment, amount, reason)
-            else:
-                current_app.logger.error(f"Unsupported payment method for refund: {payment.payment_method}")
-                return False
-        except Exception as e:
-            current_app.logger.error(f"Gateway refund failed for payment {payment.id}: {e}")
-            return False
     
     def _process_points_refund(self, payment: Payment, amount: int, reason: str) -> bool:
         """Process loyalty points refund"""
@@ -2376,20 +2356,6 @@ class PaymentService:
 
         return True
     
-    def _tokenize_card(self, card_number: str, card_brand: str) -> str:
-        """
-        Tokenize card number (simplified implementation)
-        In production, this should integrate with actual payment processor tokenization
-        
-        Args:
-            card_number: Clean card number
-            card_brand: Card brand
-        
-        Returns:
-            str: Card token
-        """
-        return card_token
-    
     def create_card_token(self, number: str, expire: str, save: bool = False) -> Dict[str, Any]:
         """
         Create card token via Payme API
@@ -2443,104 +2409,3 @@ class PaymentService:
         
         return provider_mapping.get(card_brand, 'payme')
     
-    def _process_payme_refund(self, payment: Payment, amount: int, reason: str) -> bool:
-        """Process refund through Payme gateway"""
-        try:
-            if not self.payme_secret_key_with_billing or not self.payme_merchant_id_with_billing:
-                current_app.logger.error("Payme credentials not configured for refund")
-                return False
-            
-            # Get the original transaction from payment
-            transaction_id = payment.provider_transaction_id
-            if not transaction_id:
-                current_app.logger.error(f"No Payme transaction ID found for payment {payment.id}")
-                return False
-            
-            # Prepare refund request to Payme
-            refund_payload = {
-                "method": "CancelTransaction",
-                "params": {
-                    "id": transaction_id,
-                    "reason": reason or "Customer request"
-                }
-            }
-            
-            # Make refund request to Payme
-            response = requests.post(
-                self.payme_endpoint,
-                json=refund_payload,
-                auth=(self.payme_merchant_id_with_billing, self.payme_secret_key_with_billing),
-                timeout=30
-            )
-            
-            if response.status_code == 200:
-                result = response.json()
-                if 'result' in result:
-                    current_app.logger.info(f"Payme refund successful for payment {payment.id}")
-                    return True
-                elif 'error' in result:
-                    current_app.logger.error(f"Payme refund failed for payment {payment.id}: {result['error']}")
-                    return False
-            else:
-                current_app.logger.error(f"Payme refund API error for payment {payment.id}: HTTP {response.status_code}")
-                return False
-                
-        except requests.RequestException as e:
-            current_app.logger.error(f"Payme refund network error for payment {payment.id}: {e}")
-            return False
-        except Exception as e:
-            current_app.logger.error(f"Payme refund unexpected error for payment {payment.id}: {e}")
-            return False
-    
-    def _process_click_refund(self, payment: Payment, amount: int, reason: str) -> bool:
-        """Process refund through Click gateway"""
-        try:
-            if not self.click_secret_key or not self.click_service_id:
-                current_app.logger.error("Click credentials not configured for refund")
-                return False
-            
-            # Get the original transaction from payment metadata
-            click_trans_id = payment.provider_data.get('click_trans_id')
-            if not click_trans_id:
-                current_app.logger.error(f"No Click transaction ID found for payment {payment.id}")
-                return False
-            
-            # Prepare refund request to Click
-            refund_data = {
-                'service_id': self.click_service_id,
-                'click_trans_id': click_trans_id,
-                'merchant_trans_id': payment.payment_id,
-                'amount': amount,
-                'action': 'refund',
-                'sign_time': datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
-            }
-            
-            # Generate signature for refund request
-            signature_data = f"{click_trans_id}{self.click_service_id}{self.click_secret_key}{payment.payment_id}{amount}refund{refund_data['sign_time']}"
-            refund_data['sign_string'] = hashlib.md5(signature_data.encode('utf-8')).hexdigest()
-            
-            # Make refund request to Click
-            response = requests.post(
-                f"{self.click_endpoint}/refund",
-                data=refund_data,
-                timeout=30
-            )
-            
-            if response.status_code == 200:
-                result = response.json()
-                if result.get('error', 0) == 0:
-                    current_app.logger.info(f"Click refund successful for payment {payment.id}")
-                    return True
-                else:
-                    current_app.logger.error(f"Click refund failed for payment {payment.id}: {result.get('error_note', 'Unknown error')}")
-                    return False
-            else:
-                current_app.logger.error(f"Click refund API error for payment {payment.id}: HTTP {response.status_code}")
-                return False
-                
-        except requests.RequestException as e:
-            current_app.logger.error(f"Click refund network error for payment {payment.id}: {e}")
-            return False
-        except Exception as e:
-            current_app.logger.error(f"Click refund unexpected error for payment {payment.id}: {e}")
-            return False

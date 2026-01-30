@@ -1670,7 +1670,7 @@ class PaymentService:
         payment = Payment.query.filter_by(order_id=order_id, payment_method=PaymentMethod.PAYME).first()
         if not payment:
              # If using redirect flow without link gen (e.g. direct), create payment
-             payment = self.create_payment({
+             payment = self.create_payment(**{
                  'order_id': order_id,
                  'amount': order.total_amount,
                  'payment_method': PaymentMethod.PAYME,

@@ -1858,6 +1858,7 @@ class PaymentService:
             state = PaymeState.REFUNDED.value
             cancel_time = to_ms(transaction.processed_at)
             perform_time = to_ms(transaction.processed_at)
+            reason = 5 # Default reason or extract
             
         return {
             'result': {

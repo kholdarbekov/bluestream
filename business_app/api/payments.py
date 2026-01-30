@@ -26,7 +26,7 @@ from business_app.serializers.payment_serializers import (
     CreatePaymentRequest, ProcessPaymentRequest, RefundPaymentRequest
 )
 from business_app.utils.decorators import validate_json, rate_limit
-from business_app.utils.constants import PaymentStatus, PaymentMethodType, PaymentMethod
+from business_app.utils.constants import PaymeErrors, PaymentStatus, PaymentMethodType, PaymentMethod
 from business_app.utils.validation_helpers import (
     validate_list_request_params, FilterValidator, PaginationHelper,
     StatusValidator, RequestDataValidator
@@ -722,7 +722,7 @@ def payment_webhook(provider):
             return jsonify({
                 'jsonrpc': '2.0',
                 'id': request_id,
-                'error': {'code': -32000, 'message': 'Server error'}
+                'error': {'code': PaymeErrors.INTERNAL_ERROR, 'message': 'Server error'}
             }), 200
 
         elif provider.lower() == 'click':

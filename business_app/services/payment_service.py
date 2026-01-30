@@ -19,7 +19,7 @@ from business_app.models.payment import Payment, PaymentTransaction, CreditCard
 from business_app.models.user import User
 from business_app.utils.exceptions import PaymentError, ValidationError, NotFoundError
 from business_app.utils.constants import OrderStatus, PaymentStatus, PaymentMethod, PaymeErrors, PaymeState
-from business_app.utils.helpers import generate_random_string
+from business_app.utils.helpers import generate_random_string, to_ms
 from business_app.utils.audit_logger import audit_logger, AuditEventType, AuditSeverity
 from business_app.utils.card_validation import CardValidator, CardSecurityValidator
 from business_app.utils.translations import get_translation
@@ -1150,7 +1150,7 @@ class PaymentService:
             return {
                 'jsonrpc': '2.0',
                 'id': request_id, 
-                'error': {'code': PaymeErrors.SYSTEM_ERROR, 'message': 'Internal system error'}
+                'error': {'code': PaymeErrors.INTERNAL_ERROR, 'message': 'Internal system error'}
             }
     
     def handle_click_webhook(self, webhook_data: Dict[str, Any]) -> Dict[str, Any]:

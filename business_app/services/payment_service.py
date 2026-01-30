@@ -1591,7 +1591,7 @@ class PaymentService:
         # 3. Check order status
         # If order is already PAID or CANCELLED, we might want to reject
         if order.is_paid:
-            return {'error': {'code': PaymeErrors.ALREADY_PAID, 'message': 'Order already paid'}}
+            return {'error': {'code': PaymeErrors.ORDER_ALREADY_PAID, 'message': 'Order already paid'}}
             
         if order.status == OrderStatus.CANCELLED:
              # Payme doesn't have specific error for cancelled order, generic -31050 fits
@@ -1655,7 +1655,7 @@ class PaymentService:
         ).first()
 
         if existing_pending:
-             return {'error': {'code': PaymeErrors.OPERATION_NOT_ALLOWED, 'message': 'Order has pending transaction'}}
+             return {'error': {'code': PaymeErrors.ORDER_HAS_PENDING_PAYMENT, 'message': 'Order has pending transaction'}}
 
         # Perform check first
         check_result = self._payme_check_perform_transaction(params)

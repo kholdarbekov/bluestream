@@ -1404,7 +1404,7 @@ class PaymentService:
                 return False
             
             # Validate request content-type
-            if request.content_type != 'application/json':
+            if request.content_type != 'application/json' and request.content_type != 'application/json; charset=UTF-8':
                 current_app.logger.warning(f"Invalid content-type for Payme webhook: {request.content_type}")
                 return False
             

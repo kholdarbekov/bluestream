@@ -1552,7 +1552,7 @@ class PaymentService:
             username, password = decoded_credentials.split(':', 1)
             
             # Verify credentials against merchant ID and secret key
-            expected_username = self.payme_merchant_id
+            expected_username = "Paycom" # self.payme_merchant_id
             expected_password = self.payme_secret_key_with_billing
             
             if username != expected_username or password != expected_password:

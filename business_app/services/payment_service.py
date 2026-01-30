@@ -1831,7 +1831,7 @@ class PaymentService:
     def _payme_check_transaction(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """Handle Payme CheckTransaction"""
         payme_trans_id = params.get('id')
-        transaction = PaymentTransaction.query.filter_by(provider_transaction_id=payme_trans_id).first()
+        transaction: PaymentTransaction = PaymentTransaction.query.filter_by(provider_transaction_id=payme_trans_id).first()
         
         if not transaction:
              return {'error': {'code': PaymeErrors.TRANSACTION_NOT_FOUND, 'message': 'Transaction not found'}}
@@ -1852,10 +1852,12 @@ class PaymentService:
         elif transaction.status == 'cancelled':
             state = PaymeState.CANCELLED.value
             cancel_time = to_ms(transaction.processed_at)
+            perform_time = to_ms(transaction.processed_at)
             reason = 5 # Default reason or extract
         elif transaction.status == 'refunded':
             state = PaymeState.REFUNDED.value
             cancel_time = to_ms(transaction.processed_at)
+            perform_time = to_ms(transaction.processed_at)
             
         return {
             'result': {

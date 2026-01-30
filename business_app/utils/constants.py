@@ -289,6 +289,27 @@ class LogLevel(Enum):
     CRITICAL = 'critical'
 
 
+# Payme Integration Constants
+class PaymeState(Enum):
+    """Payme Transaction States"""
+    CREATED = 1
+    COMPLETED = 2
+    CANCELLED = -1
+    REFUNDED = -2
+
+
+class PaymeErrors:
+    """Payme Error Codes"""
+    INTERNAL_ERROR = -32400
+    INVALID_AMOUNT = -31001
+    TRANSACTION_NOT_FOUND = -31003
+    UNABLE_TO_CANCEL = -31007
+    OPERATION_NOT_ALLOWED = -31008
+    ORDER_NOT_FOUND = -31050
+    ALREADY_PAID = -31051
+    AUTH_FAILED = -32504
+
+
 # API Response Messages
 API_MESSAGES = {
     'SUCCESS': 'Operation completed successfully',
@@ -318,6 +339,7 @@ BUSINESS_RULES = {
     'PASSWORD_RESET_EXPIRY_HOURS': 24,
     'MAX_LOGIN_ATTEMPTS': 5,
     'ACCOUNT_LOCKOUT_MINUTES': 30,
+    'PAYME_TIMEOUT_HOURS': 12,  # Payme transaction timeout
 }
 
 # Geographic Constants - imported from shared module

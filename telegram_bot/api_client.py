@@ -576,7 +576,7 @@ class BusinessAPIClient:
     
     async def create_payment(self, user_token: str, payment_data: Dict) -> APIResponse:
         """Create payment for order"""
-        return await self._make_request('POST', '/api/v1/payments', 
+        return await self._make_request('POST', '/api/v1/payments/create', 
                                        user_token=user_token, data=payment_data)
     
     async def get_payment_status(self, user_token: str, payment_id: str) -> APIResponse:

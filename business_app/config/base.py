@@ -117,6 +117,7 @@ class BaseConfig:
     @property
     def TELEGRAM_BOT_TOKEN(self):
         return get_secret('telegram_bot_token', 'TELEGRAM_BOT_TOKEN', required=True)
+    TELEGRAM_BOT_USERNAME = os.environ.get('TELEGRAM_BOT_USERNAME', 'aqua_element_bot')
     WEBHOOK_URL = os.environ.get('WEBHOOK_URL')
     TELEGRAM_ADMIN_CHAT_ID = os.environ.get('TELEGRAM_ADMIN_CHAT_ID')
 
@@ -155,14 +156,25 @@ class BaseConfig:
     PAYME_MERCHANT_ID = get_secret('payme_merchant_id', 'PAYME_MERCHANT_ID', required=False)
     if PAYME_MERCHANT_ID:
         PAYME_MERCHANT_ID = PAYME_MERCHANT_ID.strip("'").strip('"')
+    
+    PAYME_MERCHANT_ID_WITH_BILLING = get_secret('payme_merchant_id_with_billing', 'PAYME_MERCHANT_ID_WITH_BILLING', required=False)
+    if PAYME_MERCHANT_ID_WITH_BILLING:
+        PAYME_MERCHANT_ID_WITH_BILLING = PAYME_MERCHANT_ID_WITH_BILLING.strip("'").strip('"')
         
     PAYME_SECRET_KEY = get_secret('payme_secret_key', 'PAYME_SECRET_KEY', required=False)
     if PAYME_SECRET_KEY:
         PAYME_SECRET_KEY = PAYME_SECRET_KEY.strip("'").strip('"')
+
+    PAYME_SECRET_KEY_WITH_BILLING = get_secret('payme_secret_key_with_billing', 'PAYME_SECRET_KEY_WITH_BILLING', required=False)
+    if PAYME_SECRET_KEY_WITH_BILLING:
+        PAYME_SECRET_KEY_WITH_BILLING = PAYME_SECRET_KEY_WITH_BILLING.strip("'").strip('"')
         
     CLICK_MERCHANT_ID = get_secret('click_merchant_id', 'CLICK_MERCHANT_ID', required=False)
     CLICK_SERVICE_ID = get_secret('click_service_id', 'CLICK_SERVICE_ID', required=False)
     CLICK_SECRET_KEY = get_secret('click_secret_key', 'CLICK_SECRET_KEY', required=False)
+    
+    # Payme Configuration
+    PAYME_TIMEOUT_MS = int(os.environ.get('PAYME_TIMEOUT_MS', 43200000))  # 12 hours timeout for transactions
     
     # Business Configuration
     COMPANY_NAME = os.environ.get('COMPANY_NAME', 'BlueStream Water Delivery')

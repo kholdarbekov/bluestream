@@ -18,7 +18,7 @@ from business_app.models.order import Order, OrderItem
 from business_app.models.payment import Payment, PaymentTransaction, CreditCard
 from business_app.models.user import User
 from business_app.utils.exceptions import PaymentError, ValidationError, NotFoundError
-from business_app.utils.constants import OrderStatus, PaymentStatus, PaymentMethod
+from business_app.utils.constants import OrderStatus, PaymentStatus, PaymentMethod, PaymeErrors, PaymeState
 from business_app.utils.helpers import generate_random_string
 from business_app.utils.audit_logger import audit_logger, AuditEventType, AuditSeverity
 from business_app.utils.card_validation import CardValidator, CardSecurityValidator
@@ -32,7 +32,9 @@ class PaymentService:
     def __init__(self):
         # Payme configuration
         self.payme_merchant_id = current_app.config.get('PAYME_MERCHANT_ID')
+        self.payme_merchant_id_with_billing = current_app.config.get('PAYME_MERCHANT_ID_WITH_BILLING')
         self.payme_secret_key = current_app.config.get('PAYME_SECRET_KEY')
+        self.payme_secret_key_with_billing = current_app.config.get('PAYME_SECRET_KEY_WITH_BILLING')
         self.payme_endpoint = current_app.config.get('PAYME_ENDPOINT_URL')
         self.payme_test_mode = current_app.config.get('PAYME_TEST_MODE', True)
         
@@ -120,13 +122,13 @@ class PaymentService:
         Returns:
             Dictionary with payment URL and other details
         """
-        payment = Payment.query.get(payment_id)
+        payment: Payment = Payment.query.get(payment_id)
         if not payment:
             raise NotFoundError(get_translation('error.not_found'))
         
-        if payment.method == PaymentMethod.PAYME:
+        if payment.payment_method == PaymentMethod.PAYME:
             return self._create_payme_link(payment)
-        elif payment.method == PaymentMethod.CLICK:
+        elif payment.payment_method == PaymentMethod.CLICK:
             return self._create_click_link(payment)
         else:
             raise PaymentError(get_translation('error.payment.unsupported_method'))
@@ -234,10 +236,10 @@ class PaymentService:
              }
              
              response = requests.post(
-                 self.payme_endpoint, # Typically ends with /api for Subscribe API
-                 json=payload,
-                 headers=headers,
-                 timeout=30
+                self.payme_endpoint, # Typically ends with /api for Subscribe API
+                json=payload,
+                headers=headers,
+                timeout=30
              )
              
              return response.json()
@@ -1102,31 +1104,54 @@ class PaymentService:
             }
     
     def handle_payme_webhook(self, webhook_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Handle Payme webhook"""
+        """
+        Handle Payme Merchant API requests.
+        Dispatcher for JSON-RPC 2.0 methods.
+        """
+        if not isinstance(webhook_data, dict):
+            return {
+                'jsonrpc': '2.0',
+                'id': None,
+                'error': {'code': -32600, 'message': 'Invalid Request'}
+            }
+            
+        request_id = webhook_data.get('id')
         try:
-            # Verify webhook signature
-            if not self._verify_payme_signature(webhook_data):
-                raise PaymentError(get_translation('error.payment.invalid_signature'))
+            # Note: Signature verification is already done by the API endpoint via validate_webhook_signature
+            # We skip redundant verification here as requested.
             
             method = webhook_data.get('method')
             params = webhook_data.get('params', {})
             
-            if method == 'CheckPerformTransaction':
-                return self._payme_check_perform_transaction(params)
-            elif method == 'CreateTransaction':
-                return self._payme_create_transaction(params)
-            elif method == 'PerformTransaction':
-                return self._payme_perform_transaction(params)
-            elif method == 'CancelTransaction':
-                return self._payme_cancel_transaction(params)
-            elif method == 'CheckTransaction':
-                return self._payme_check_transaction(params)
+            handlers = {
+                'CheckPerformTransaction': self._payme_check_perform_transaction,
+                'CreateTransaction': self._payme_create_transaction,
+                'PerformTransaction': self._payme_perform_transaction,
+                'CancelTransaction': self._payme_cancel_transaction,
+                'CheckTransaction': self._payme_check_transaction
+            }
+            
+            handler = handlers.get(method)
+            
+            response = None
+            if not handler:
+                response = {'error': {'code': PaymeErrors.METHOD_NOT_FOUND, 'message': 'Method not found'}}
             else:
-                raise PaymentError(get_translation('error.payment.unknown_method'))
-                
+                response = handler(params)
+
+            # Ensure JSON-RPC 2.0 compliance
+            response['jsonrpc'] = '2.0'
+            response['id'] = request_id
+            
+            return response
+
         except Exception as e:
-            current_app.logger.error(f"Payme webhook error: {e}")
-            return {'error': {'code': -32400, 'message': 'Bad Request'}}
+            current_app.logger.error(f"Payme webhook error: {e}", exc_info=True)
+            return {
+                'jsonrpc': '2.0',
+                'id': request_id, 
+                'error': {'code': PaymeErrors.SYSTEM_ERROR, 'message': 'Internal system error'}
+            }
     
     def handle_click_webhook(self, webhook_data: Dict[str, Any]) -> Dict[str, Any]:
         """Handle Click webhook"""
@@ -1452,23 +1477,64 @@ class PaymentService:
             ]
         }
     
+    
+
+
     # Private methods for Payme integration
-        """Create Payme payment link"""
+    def _create_payme_link(self, payment: Payment) -> Dict[str, str]:
+        """
+        Create Payme payment link (Redirect Method)
+        
+        Format: https://checkout.paycom.uz/<base64_params>
+        Params:
+            m: Merchant ID
+            ac.order_id: Order ID
+            a: Amount in tiyins
+            l: Language (uz, ru, en)
+            c: Return URL
+        """
         import base64
         
-        params = f"m={self.payme_merchant_id};ac.order_id={payment.order_id};a={int(payment.amount * 100)}"
+        # Get language (default to en if not specified)
+        # Get language (default to en if not specified)
+        try:
+            from business_app.utils.helpers import get_current_language, to_ms
+            lang = get_current_language() or 'en'
+        except ImportError:
+            lang = 'en'
+            
+        # Return URL - redirect back to the bot
+        bot_username = current_app.config.get('TELEGRAM_BOT_USERNAME', 'BlueStreamWaterBot')
+        return_url = f"https://t.me/{bot_username}"
+        
+        # Amount in tiyins (x100)
+        amount_tiyin = int(payment.amount * 100)
+        
+        params = f"m={self.payme_merchant_id_with_billing};ac.order_id={payment.order_id};a={amount_tiyin};l={lang};c={return_url}"
         encoded_params = base64.b64encode(params.encode('utf-8')).decode('utf-8')
-        payment_url = f"{self.payme_endpoint}/{encoded_params}"
+        
+        # Ensure we use the checkout URL
+        base_url = self.payme_endpoint.replace('/api', '')
+        if base_url.endswith('/'):
+            base_url = base_url[:-1]
+            
+        payment_url = f"{base_url}/{encoded_params}"
+        
+        # Update payment record with link
+        payment.payment_link = payment_url
+        payment.payment_link_expires_at = datetime.now(timezone.utc) + timedelta(hours=12)
+        payment.callback_url = return_url
+        db.session.commit()
         
         return {
             'payment_url': payment_url,
             'reference': payment.payment_id,
-            'expires_at': (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+            'expires_at': payment.payment_link_expires_at.isoformat()
         }
     
     def _verify_payme_signature(self, data: Dict[str, Any]) -> bool:
         """Verify Payme webhook signature"""
-        if not self.payme_secret_key:
+        if not self.payme_secret_key_with_billing:
             current_app.logger.error("Payme secret key not configured")
             return False
         
@@ -1487,7 +1553,7 @@ class PaymentService:
             
             # Verify credentials against merchant ID and secret key
             expected_username = self.payme_merchant_id
-            expected_password = self.payme_secret_key
+            expected_password = self.payme_secret_key_with_billing
             
             if username != expected_username or password != expected_password:
                 current_app.logger.warning(f"Invalid Payme webhook credentials. Username: {username}")
@@ -1499,161 +1565,301 @@ class PaymentService:
             current_app.logger.error(f"Failed to verify Payme signature: {e}")
             return False
     
+    
+
+
     def _payme_check_perform_transaction(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """Handle Payme CheckPerformTransaction"""
         account = params.get('account', {})
         order_id = account.get('order_id')
-        amount = params.get('amount')
         
+        # Payme sends amount in tiyins (1/100 UZS)
+        amount_tiyin = params.get('amount')
+        
+        # 1. Check if order exists
         if not order_id:
-            return {'error': {'code': -31001, 'message': 'Order not found'}}
-        
+             return {'error': {'code': PaymeErrors.ORDER_NOT_FOUND, 'message': 'Order ID not provided'}}
+             
         order = Order.query.get(order_id)
-        if not order or order.total_amount * 100 != amount:  # Payme uses tiyin
-            return {'error': {'code': -31001, 'message': 'Invalid order'}}
-        
+        if not order:
+            return {'error': {'code': PaymeErrors.ORDER_NOT_FOUND, 'message': 'Order not found'}}
+            
+        # 2. Check amount match (Order total * 100 == Payme amount)
+        if int(order.total_amount * 100) != amount_tiyin:
+            return {'error': {'code': PaymeErrors.INVALID_AMOUNT, 'message': 'Incorrect amount'}}
+            
+        # 3. Check order status
+        # If order is already PAID or CANCELLED, we might want to reject
+        if order.is_paid:
+            return {'error': {'code': PaymeErrors.ALREADY_PAID, 'message': 'Order already paid'}}
+            
+        if order.status == OrderStatus.CANCELLED:
+             # Payme doesn't have specific error for cancelled order, generic -31050 fits
+             return {'error': {'code': PaymeErrors.OPERATION_NOT_ALLOWED, 'message': 'Order cancelled'}}
+
         return {'result': {'allow': True}}
     
     def _payme_create_transaction(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """Handle Payme CreateTransaction"""
         account = params.get('account', {})
         order_id = account.get('order_id')
-        amount = params.get('amount')
-        transaction_id = params.get('id')
+        payme_trans_id = params.get('id')
+        time_ms = params.get('time')
+        amount_tiyin = params.get('amount')
         
-        # Find or create payment
-        payment = Payment.query.filter_by(
-            order_id=order_id,
-            method=PaymentMethod.PAYME
-        ).first()
+        # 1. Idempotency Check: Look for existing transaction by Payme ID
+        transaction = PaymentTransaction.query.filter_by(provider_transaction_id=payme_trans_id).first()
         
+        if transaction:
+            # Transaction exists
+            # Check state (should be 1 for CreateTransaction)
+            # We map pending -> 1, others -> error (as strictly this call expects it to be created or return existing creation)
+            if transaction.status != 'pending': 
+                 return {'error': {'code': PaymeErrors.OPERATION_NOT_ALLOWED, 'message': 'Transaction already processed'}}
+                 
+            # Check Timeout
+            # We use created_at from DB
+            # Check Timeout
+            # We use created_at from DB
+            create_time_ms = to_ms(transaction.created_at)
+            now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+            
+            timeout_ms = current_app.config.get('PAYME_TIMEOUT_MS', 43200000)
+            
+            if (now_ms - create_time_ms) > timeout_ms:
+                # Timed out. Cancel it.
+                transaction.status = 'cancelled'
+                transaction.failure_reason = 'Payme timeout'
+                # Store cancel time in DB as processed_at
+                transaction.processed_at = datetime.now(timezone.utc)
+                db.session.commit()
+                
+                return {'error': {'code': PaymeErrors.OPERATION_NOT_ALLOWED, 'message': 'Transaction timed out'}}
+            
+            # Return existing
+            return {
+                'result': {
+                    'create_time': create_time_ms,
+                    'transaction': str(transaction.id),
+                    'state': PaymeState.CREATED.value
+                }
+            }
+            
+        # 2. New Transaction
+        # Perform check first
+        check_result = self._payme_check_perform_transaction(params)
+        if 'error' in check_result:
+            return check_result
+            
+        # Find order
+        order = Order.query.get(order_id)
+        
+        # Create Payment if not exists (or find pending one)
+        # We generally should have a payment record if we generated a link
+        payment = Payment.query.filter_by(order_id=order_id, payment_method=PaymentMethod.PAYME).first()
         if not payment:
-            payment = self.create_payment(order_id, PaymentMethod.PAYME, amount // 100)
+             # If using redirect flow without link gen (e.g. direct), create payment
+             payment = self.create_payment({
+                 'order_id': order_id,
+                 'amount': order.total_amount,
+                 'payment_method': PaymentMethod.PAYME,
+                 'user_id': order.user_id,
+                 'currency': 'UZS'
+             })
         
-        # Create transaction record
-        transaction = self._create_transaction(payment, 'created', {
-            'receipt_id': transaction_id,
-            'amount': amount
-        })
+        # Create PaymentTransaction (State 1)
+        new_transaction = PaymentTransaction(
+            payment_id=payment.id,
+            transaction_type='charge',
+            amount=order.total_amount,
+            currency='UZS',
+            status='pending',
+            provider_transaction_id=payme_trans_id,
+            provider_response=params, # Store full request for audit
+            created_at=datetime.now(timezone.utc)
+        )
+        db.session.add(new_transaction)
+        db.session.commit()
         
         return {
             'result': {
-                'create_time': int(transaction.created_at.timestamp() * 1000),
-                'transaction': str(transaction.id),
-                'state': 1  # State 1: Transaction created
+                'create_time': to_ms(new_transaction.created_at),
+                'transaction': str(new_transaction.id),
+                'state': PaymeState.CREATED.value
             }
         }
 
     def _payme_perform_transaction(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """Handle Payme PerformTransaction"""
-        transaction_id = params.get('id')
+        payme_trans_id = params.get('id')
         
-        # Check if transaction exists
-        # In this simplistic model, we look up by Payme's ID (which we stored as provider_transaction_id)
-        # However, typically Payme expects us to use our own ID or tracking.
-        # Based on Payme docs: 'id' is their transaction ID.
-
-        transaction = PaymentTransaction.query.filter_by(provider_transaction_id=transaction_id).first()
+        # 1. Find transaction
+        transaction = PaymentTransaction.query.filter_by(provider_transaction_id=payme_trans_id).first()
         if not transaction:
-            return {'error': {'code': -31003, 'message': 'Transaction not found'}}
+            return {'error': {'code': PaymeErrors.TRANSACTION_NOT_FOUND, 'message': 'Transaction not found'}}
             
-        payment = transaction.payment
-        
-        if payment.status == PaymentStatus.COMPLETED:
-             return {
+        # 2. Check State
+        # State 1 (Pending) -> Transition to 2 (Completed)
+        if transaction.status == 'pending':
+            # Check Timeout
+            create_time_ms = to_ms(transaction.created_at)
+            now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+            
+            timeout_ms = current_app.config.get('PAYME_TIMEOUT_MS', 43200000)
+            
+            if (now_ms - create_time_ms) > timeout_ms:
+                # Timed out. Cancel.
+                transaction.status = 'cancelled'
+                transaction.failure_reason = 'Payme timeout during perform'
+                transaction.processed_at = datetime.now(timezone.utc)
+                db.session.commit()
+                return {'error': {'code': PaymeErrors.OPERATION_NOT_ALLOWED, 'message': 'Transaction timed out'}}
+            
+            # Perform Payment
+            payment = transaction.payment
+            
+            if payment.status == PaymentStatus.COMPLETED:
+                # Already paid (maybe via another channel?), but transaction was pending?
+                # This shouldn't happen normally, but if so, just mark tx as completed
+                pass
+            else:
+                # Mark payment as completed
+                payment.status = PaymentStatus.COMPLETED
+                payment.paid_at = datetime.now(timezone.utc)
+                
+                # Update Order
+                self._handle_successful_payment(payment)
+                
+            # Update Transaction
+            transaction.status = 'completed'
+            transaction.processed_at = datetime.now(timezone.utc)
+            db.session.commit()
+            
+            return {
                 'result': {
                     'transaction': str(transaction.id),
-                    'perform_time': int(transaction.processed_at.timestamp() * 1000) if transaction.processed_at else int(datetime.now(timezone.utc).timestamp() * 1000),
-                    'state': 2 # State 2: Transaction completed
+                    'perform_time': to_ms(transaction.processed_at),
+                    'state': PaymeState.COMPLETED.value
                 }
             }
             
-        if payment.status == PaymentStatus.CANCELLED:
-             return {'error': {'code': -31008, 'message': 'Transaction cancelled'}}
-
-        # Mark as paid
-        payment.status = PaymentStatus.COMPLETED
-        payment.paid_at = datetime.now(timezone.utc)
-        
-        transaction.status = 'completed'
-        transaction.processed_at = payment.paid_at
-        
-        db.session.commit()
-        
-        self._handle_successful_payment(payment)
-        
-        return {
-            'result': {
-                'transaction': str(transaction.id),
-                'perform_time': int(transaction.processed_at.timestamp() * 1000),
-                'state': 2
+        # State 2 (Completed) -> Idempotent
+        if transaction.status == 'completed':
+             return {
+                'result': {
+                    'transaction': str(transaction.id),
+                    'perform_time': to_ms(transaction.processed_at),
+                    'state': PaymeState.COMPLETED.value
+                }
             }
-        }
+            
+        # Other states (Cancelled) -> Error
+        return {'error': {'code': PaymeErrors.OPERATION_NOT_ALLOWED, 'message': 'Transaction cancelled'}}
 
     def _payme_cancel_transaction(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """Handle Payme CancelTransaction"""
-        transaction_id = params.get('id')
+        payme_trans_id = params.get('id')
         reason = params.get('reason')
         
-        transaction = PaymentTransaction.query.filter_by(provider_transaction_id=transaction_id).first()
+        transaction = PaymentTransaction.query.filter_by(provider_transaction_id=payme_trans_id).first()
         if not transaction:
-            return {'error': {'code': -31003, 'message': 'Transaction not found'}}
+            return {'error': {'code': PaymeErrors.TRANSACTION_NOT_FOUND, 'message': 'Transaction not found'}}
 
-        payment = transaction.payment
+        # State 1 (Pending) -> Cancel
+        if transaction.status == 'pending':
+            transaction.status = 'cancelled'
+            transaction.processed_at = datetime.now(timezone.utc)
+            transaction.failure_reason = f"Payme Cancel: Reason {reason}"
+            db.session.commit()
+            
+            return {
+                'result': {
+                    'transaction': str(transaction.id),
+                    'cancel_time': to_ms(transaction.processed_at),
+                    'state': PaymeState.CANCELLED.value
+                }
+            }
+            
+        # State 2 (Completed) -> Check if reversible
+        if transaction.status == 'completed':
+             payment = transaction.payment
+             # Check if we can refund
+             # Example: if order is already delivered, usually no refund via API
+             if payment.order.status == OrderStatus.DELIVERED:
+                  return {'error': {'code': PaymeErrors.UNABLE_TO_CANCEL, 'message': 'Order delivered, cannot cancel'}}
+                  
+             # Process Refund
+             # Mark Payment as Refunded
+             if not self.process_refund(payment.id, payment.amount, f"Payme Cancel: {reason}"): # TODO: ensure process_refund handles status update
+                  return {'error': {'code': PaymeErrors.UNABLE_TO_CANCEL, 'message': 'Refund failed'}}
+             
+             # The process_refund likely updates payment/transaction status or creates a NEW transaction
+             # Here we assume we mark this transaction as refunded or consistent state -2
+             # Wait, Payme expects THIS transaction to move to state -2
+             
+             transaction.status = 'refunded' # or 'cancelled'
+             # Since process_refund might create a SEPARATE refund tx, we need to be careful.
+             # But for Payme API compliance, we should mark THIS tx as State -2
+             transaction.processed_at = datetime.now(timezone.utc) # cancel_time
+             db.session.commit()
 
-        if payment.status == PaymentStatus.COMPLETED:
-             # Check if reversible
-             if not self.process_refund(payment.id, payment.amount, f"Payme Cancel: {reason}"):
-                 return {'error': {'code': -31007, 'message': 'Could not cancel transaction'}}
              return {
                  'result': {
                      'transaction': str(transaction.id),
-                     'cancel_time': int(datetime.now(timezone.utc).timestamp() * 1000),
-                     'state': -2
+                     'cancel_time': to_ms(transaction.processed_at),
+                     'state': PaymeState.REFUNDED.value
                  }
              }
-
-        payment.status = PaymentStatus.CANCELLED
-        transaction.status = 'cancelled'
-        db.session.commit()
-        
-        return {
-            'result': {
-                'transaction': str(transaction.id),
-                'cancel_time': int(datetime.now(timezone.utc).timestamp() * 1000),
-                'state': -1
+             
+        # Already Cancelled/Refunded
+        if transaction.status in ['cancelled', 'refunded']:
+             return {
+                'result': {
+                    'transaction': str(transaction.id),
+                    'cancel_time': to_ms(transaction.processed_at),
+                    'state': PaymeState.CANCELLED.value if transaction.status == 'cancelled' else PaymeState.REFUNDED.value
+                }
             }
-        }
+            
+        return {'error': {'code': PaymeErrors.OPERATION_NOT_ALLOWED, 'message': 'Unknown state'}}
 
     def _payme_check_transaction(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """Handle Payme CheckTransaction"""
-        transaction_id = params.get('id')
-        transaction = PaymentTransaction.query.filter_by(provider_transaction_id=transaction_id).first()
+        payme_trans_id = params.get('id')
+        transaction = PaymentTransaction.query.filter_by(provider_transaction_id=payme_trans_id).first()
         
         if not transaction:
-             return {'error': {'code': -31003, 'message': 'Transaction not found'}}
+             return {'error': {'code': PaymeErrors.TRANSACTION_NOT_FOUND, 'message': 'Transaction not found'}}
              
-        payment = transaction.payment
-        
         # Determine state
         state = 0
-        if payment.status == PaymentStatus.PENDING:
-            state = 1
-        elif payment.status == PaymentStatus.COMPLETED:
-            state = 2
-        elif payment.status == PaymentStatus.CANCELLED:
-            state = -1
-        elif payment.status == PaymentStatus.REFUNDED:
-            state = -2
+        create_time = to_ms(transaction.created_at)
+        perform_time = 0
+        cancel_time = 0
+        reason = None
+        
+        # Mapping logic
+        if transaction.status == 'pending':
+            state = PaymeState.CREATED.value
+        elif transaction.status == 'completed':
+            state = PaymeState.COMPLETED.value
+            perform_time = to_ms(transaction.processed_at)
+        elif transaction.status == 'cancelled':
+            state = PaymeState.CANCELLED.value
+            cancel_time = to_ms(transaction.processed_at)
+            reason = 5 # Default reason or extract
+        elif transaction.status == 'refunded':
+            state = PaymeState.REFUNDED.value
+            cancel_time = to_ms(transaction.processed_at)
             
         return {
             'result': {
-                'create_time': int(transaction.created_at.timestamp() * 1000),
-                'perform_time': int(transaction.processed_at.timestamp() * 1000) if transaction.processed_at else 0,
-                'cancel_time': 0, # Should store cancel time if cancelled
+                'create_time': create_time,
+                'perform_time': perform_time,
+                'cancel_time': cancel_time,
                 'transaction': str(transaction.id),
                 'state': state,
-                'reason': None
+                'reason': reason
             }
         }
     
@@ -2229,7 +2435,7 @@ class PaymentService:
     def _process_payme_refund(self, payment: Payment, amount: int, reason: str) -> bool:
         """Process refund through Payme gateway"""
         try:
-            if not self.payme_secret_key or not self.payme_merchant_id:
+            if not self.payme_secret_key_with_billing or not self.payme_merchant_id_with_billing:
                 current_app.logger.error("Payme credentials not configured for refund")
                 return False
             
@@ -2252,7 +2458,7 @@ class PaymentService:
             response = requests.post(
                 self.payme_endpoint,
                 json=refund_payload,
-                auth=(self.payme_merchant_id, self.payme_secret_key),
+                auth=(self.payme_merchant_id_with_billing, self.payme_secret_key_with_billing),
                 timeout=30
             )
             

@@ -12,7 +12,7 @@ import logging
 from typing import Dict, Any, Optional
 from decimal import Decimal
 
-from telegram import Update, LabeledPrice
+from telegram import Update, LabeledPrice, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes
 
 from config import config
@@ -68,108 +68,113 @@ class PaymentHandlers:
         order_data: Dict[str, Any]
     ) -> bool:
         """
-        Send Payme invoice to user via Telegram Payments API.
-
-        Args:
-            update: Telegram update object
-            context: Bot context
-            order_data: Order details including id, order_number, total_amount, items
-
-        Returns:
-            bool: True if invoice sent successfully
+        Send Payme payment link to user via Redirect Method.
+        
+        Differs from native invoice: sends a message with an inline button
+        that redirects to Payme checkout page.
         """
         try:
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
-
-            # Validate provider token
-            if not self.provider_token:
-                logger.error("Cannot send invoice: TELEGRAM_PROVIDER_TOKEN not configured")
-                await self._send_error_message(
-                    update, context,
-                    i18n.get('telegram.payment.error_config', language) or
-                    "Payment system is not configured. Please contact support."
-                )
-                return False
-
+            
             # Extract order details
             order_id = order_data.get('id')
             order_number = order_data.get('order_number', str(order_id))
             total_amount = order_data.get('total_amount', 0)
-            order_items = order_data.get('order_items', [])
+            
+            # 1. Authenticate with Backend
+            async with api_client as client:
+                token = await get_auth_token(update, context, client)
+                if not token:
+                    logger.error("Failed to get auth token for Payme link generation")
+                    await self._send_error_message(
+                        update, context, 
+                        i18n.get('telegram.auth.login_required', language) or 
+                        "Authentication failed. Please try again."
+                    )
+                    return False
+                    
+                # 2. Request Payment Link
+                # We use the generic 'POST /payments/create' endpoint via api_client
+                # Use dynamic bot username
+                bot = context.bot
+                bot_username = bot.username or (await bot.get_me()).username
+                return_url = f"https://t.me/{bot_username}"
 
-            # Convert amount to smallest currency unit (tiyin for UZS)
-            # UZS has 2 decimal places: 1 UZS = 100 tiyin
-            amount_in_tiyin = int(Decimal(str(total_amount)) * 100)
+                result = await client.create_payment(token, {
+                    'order_id': order_id,
+                    'payment_method': 'payme',
+                    'return_url': return_url
+                })
+                
+                if not result.success:
+                    logger.error(f"Failed to create Payme link: {result.error}")
+                    await self._send_error_message(
+                        update, context, 
+                        f"Failed to create payment link: {result.error}"
+                    )
+                    return False
+                    
+                data = result.data
+                # API returns: {'data': {'payment': ..., 'payment_link': {'payment_url': ...}}}
+                # But api_client might unwrap 'data'.
+                # Let's check api_client.post handling. It returns APIResponse.data as json body.
+                # business_app returns `created_response(data={'payment': ..., 'payment_link': ...})`
+                # so the body is {'status': 'success', 'data': {...}}
+                # APIResponse.data usually contains the 'data' field or the whole body?
+                # Step 182 line 196: response_data = response.json().
+                # Step 182 line 393: data = response.data.get('data', {}) implies response.data IS the whole json.
+                # So we need to access result.data.get('data', {}) typically?
+                # create_payment calls _make_request.
+                
+                # Let's inspect result structure safely
+                response_body = result.data or {}
+                if 'data' in response_body:
+                    response_data = response_body['data']
+                else:
+                    response_data = response_body
 
-            # Create secure payload
-            payload = self._create_invoice_payload(order_id, user_id, amount_in_tiyin)
-
-            # Build invoice title and description
-            title = i18n.get('telegram.payment.invoice_title', language) or "BlueStream Order"
-            title = title[:32]  # Max 32 characters
-
-            description = i18n.get(
-                'telegram.payment.invoice_description',
-                language,
-                order_number=order_number
-            ) or f"Water delivery order #{order_number}"
-            description = description[:255]  # Max 255 characters
-
-            # Build price breakdown
-            prices = self._build_prices(order_items, total_amount, language)
-
-            # Store order data in context for later reference
-            context.user_data['pending_payment'] = {
-                'order_id': order_id,
-                'order_number': order_number,
-                'amount': total_amount,
-                'amount_tiyin': amount_in_tiyin,
-                'timestamp': int(time.time())
-            }
-
-            # Send processing message first
-            processing_text = i18n.get('telegram.payment.processing', language) or "Processing your payment..."
-
-            if update.callback_query:
-                await update.callback_query.edit_message_text(
-                    text=f"{processing_text}\n\n"
-                         f"Order: #{order_number}\n"
-                         f"Amount: {format_price(total_amount)} UZS"
-                )
-
-            # Send the invoice
-            chat_id = update.effective_chat.id
-
-            await context.bot.send_invoice(
-                chat_id=chat_id,
-                title=title,
-                description=description,
-                payload=payload,
-                provider_token=self.provider_token,
-                currency="UZS",
-                prices=prices,
-                need_name=False,  # Already have from registration
-                need_phone_number=False,  # Already have from registration
-                need_email=False,
-                need_shipping_address=False,  # Delivery address already selected
-                is_flexible=False,  # Price is fixed
-                protect_content=True,  # Prevent forwarding
+                payment_link_data = response_data.get('payment_link', {})
+                # It accepts dict (from payment_service) or string? 
+                # payment_service returns dict.
+                if isinstance(payment_link_data, dict):
+                    payment_url = payment_link_data.get('payment_url')
+                else:
+                    payment_url = str(payment_link_data)
+                
+                if not payment_url:
+                     logger.error(f"No payment_url in response: {result.data}")
+                     await self._send_error_message(update, context, "Invalid payment link received.")
+                     return False
+                     
+            # 3. Send Message with Button
+            msg_text = i18n.get('telegram.payment.pay_message', language, 
+                                order_number=order_number, 
+                                amount=format_price(total_amount)) \
+                       or f"Order #{order_number}\nAmount: {format_price(total_amount)} UZS\n\nPlease pay using the button below:"
+            
+            pay_btn_text = i18n.get('telegram.payment.pay_btn', language) or "💸 Pay via Payme"
+            
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton(
+                    text=pay_btn_text,
+                    url=payment_url
+                )]
+            ])
+            
+            await update.effective_message.reply_text(
+                text=msg_text,
+                reply_markup=keyboard
             )
-
-            logger.info(
-                f"Invoice sent for order {order_id} to user {user_id}, "
-                f"amount: {total_amount} UZS ({amount_in_tiyin} tiyin)"
-            )
-
+            
+            logger.info(f"Payme link sent for order {order_id}")
             return True
-
+            
         except Exception as e:
             logger.error(f"Error sending Payme invoice: {e}", exc_info=True)
-
             language = await i18n.get_user_language(update.effective_user.id)
             await self._send_error_message(
-                update, context,
+                update, context, 
                 i18n.get('telegram.payment.failed_message', language) or
                 "Failed to create payment. Please try again."
             )

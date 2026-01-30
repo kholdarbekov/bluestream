@@ -392,3 +392,14 @@ def generate_invoice_number() -> str:
     timestamp = datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')
     random_suffix = generate_random_string(3).upper()
     return f"INV{timestamp}{random_suffix}"
+
+
+def to_ms(dt: datetime) -> int:
+    """Convert datetime to milliseconds timestamp"""
+    if not dt:
+        return 0
+    from datetime import timezone
+    # Ensure timezone aware
+    if dt.tzinfo is None:
+         dt = dt.replace(tzinfo=timezone.utc)
+    return int(dt.timestamp() * 1000)

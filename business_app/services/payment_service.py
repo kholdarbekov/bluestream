@@ -1556,7 +1556,7 @@ class PaymentService:
             expected_password = self.payme_secret_key_with_billing
             
             if username != expected_username or password != expected_password:
-                current_app.logger.warning(f"Invalid Payme webhook credentials. Username: {username}")
+                current_app.logger.warning(f"Invalid Payme webhook credentials. Username: {username}, Password: {password}, Expected Username: {expected_username}, Expected Password: {expected_password}")
                 return False
             
             return True

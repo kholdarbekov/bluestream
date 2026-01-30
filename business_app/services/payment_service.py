@@ -1646,6 +1646,17 @@ class PaymentService:
             }
             
         # 2. New Transaction
+        # Check for existing pending transaction for this order
+        # We don't want multiple pending Payme transactions for the same order
+        existing_pending = PaymentTransaction.query.join(Payment).filter(
+            Payment.order_id == order_id,
+            Payment.payment_method == PaymentMethod.PAYME,
+            PaymentTransaction.status == 'pending'
+        ).first()
+
+        if existing_pending:
+             return {'error': {'code': PaymeErrors.OPERATION_NOT_ALLOWED, 'message': 'Order has pending transaction'}}
+
         # Perform check first
         check_result = self._payme_check_perform_transaction(params)
         if 'error' in check_result:

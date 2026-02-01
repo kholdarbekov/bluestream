@@ -466,8 +466,6 @@ class OrderHandlers:
             payment_methods = [
                 {'type': 'cash', 'name': i18n.get('telegram.payment_cash', language)},
                 {'type': 'card', 'name': i18n.get('telegram.payment_card', language)},
-                {'type': 'payme', 'name': i18n.get('telegram.payment_payme', language)},
-                {'type': 'click', 'name': i18n.get('telegram.payment_click', language)},
             ]
 
             payment_text = i18n.get('telegram.orders.select_payment', language)
@@ -556,8 +554,8 @@ class OrderHandlers:
                 order = response.data['data']['order']
 
             # Handle different payment methods
-            if payment_method == 'payme':
-                # Payme payment - send invoice via Telegram Payments API
+            if payment_method in ['payme', 'card']:
+                # Payme payment flow
                 # Don't clear cart yet - wait for successful payment
                 from handlers.payments import payment_handlers
 
@@ -593,11 +591,6 @@ class OrderHandlers:
                 # Don't clear context data - needed for payment flow
                 logger.info(f"Payme invoice sent for order {order['id']} to user {user_id}")
                 return
-
-            elif payment_method == 'click':
-                # Click payment - similar flow (to be implemented)
-                # For now, treat like cash
-                pass
 
             # Cash or other payment methods - process immediately
             async with api_client as client:

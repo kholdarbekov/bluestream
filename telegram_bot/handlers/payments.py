@@ -114,18 +114,6 @@ class PaymentHandlers:
                         f"Failed to create payment link: {result.error}"
                     )
                     return False
-                    
-                data = result.data
-                # API returns: {'data': {'payment': ..., 'payment_link': {'payment_url': ...}}}
-                # But api_client might unwrap 'data'.
-                # Let's check api_client.post handling. It returns APIResponse.data as json body.
-                # business_app returns `created_response(data={'payment': ..., 'payment_link': ...})`
-                # so the body is {'status': 'success', 'data': {...}}
-                # APIResponse.data usually contains the 'data' field or the whole body?
-                # Step 182 line 196: response_data = response.json().
-                # Step 182 line 393: data = response.data.get('data', {}) implies response.data IS the whole json.
-                # So we need to access result.data.get('data', {}) typically?
-                # create_payment calls _make_request.
                 
                 # Let's inspect result structure safely
                 response_body = result.data or {}
@@ -490,8 +478,7 @@ class PaymentHandlers:
 
             payment_methods = [
                 {'type': 'cash', 'name': i18n.get('telegram.payment_cash', language) or 'Cash'},
-                {'type': 'payme', 'name': i18n.get('telegram.payment_payme', language) or 'Payme'},
-                {'type': 'click', 'name': i18n.get('telegram.payment_click', language) or 'Click'},
+                {'type': 'card', 'name': i18n.get('telegram.payment_card', language) or 'Card'},
             ]
 
             from keyboards import OrderKeyboards

@@ -365,8 +365,7 @@ class OrderKeyboards:
         icons = {
             'cash': '💵',
             'card': '💳',
-            'payme': '📱',
-            'click': '💙',
+            'payme': '💳',
             'loyalty_points': '🏆',
             'business_account': '🏢'
         }
@@ -460,8 +459,12 @@ class OrderKeyboards:
                 'callback_data': f'track_order_{order_id}'
             }])
         
-        # Add cancel button for pending orders
+        # Add pay and cancel buttons for pending orders
         if order_status == 'pending':
+            buttons.append([{
+                'text': i18n.get('telegram.payment.pay_now', language) or '💳 Pay Now',
+                'callback_data': f'payment_retry_{order_id}'
+            }])
             buttons.append([{
                 'text': '❌ Cancel Order',
                 'callback_data': f'cancel_order_{order_id}'
@@ -614,7 +617,6 @@ class SubscriptionKeyboards:
             [{'text': '💳 Card', 'callback_data': 'sub_payment_card'}],
             [{'text': '💰 Cash on Delivery', 'callback_data': 'sub_payment_cash'}],
             [{'text': '📱 Payme', 'callback_data': 'sub_payment_payme'}],
-            [{'text': '🔵 Click', 'callback_data': 'sub_payment_click'}],
             [{'text': i18n.get('telegram.back', language), 'callback_data': 'back_to_address_selection'}]
         ]
         return KeyboardBuilder.build_inline_keyboard(buttons)

@@ -124,11 +124,20 @@ document.getElementById('loginForm').addEventListener('submit', async function(e
             setAuthToken(result.access_token);
             
             // Sync anonymous cart items to account
+            // Note: Using direct fetch instead of apiRequest to avoid 401 redirect handler
+            // which could interfere with our proper next URL redirect below
             const localCart = JSON.parse(localStorage.getItem('cart') || '[]');
             if (localCart.length > 0) {
                 try {
-                    const syncResponse = await apiRequest('/cart/sync', {
+                    const csrfToken = getCookie('csrf_access_token');
+                    const syncResponse = await fetch(API_BASE_URL + '/cart/sync', {
                         method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-Platform': 'web',
+                            ...(csrfToken ? {'X-CSRF-TOKEN': csrfToken} : {})
+                        },
+                        credentials: 'include',
                         body: JSON.stringify({ cart_items: localCart })
                     });
                     
@@ -144,6 +153,8 @@ document.getElementById('loginForm').addEventListener('submit', async function(e
                     // Continue anyway - don't block login
                 }
             }
+            // Note: If no local cart exists, the database cart will be synced by
+            // base.html's syncCartFromDatabase() when user lands on the next page
 
             showNotification('{{ "Login successful!"|t }}', 'success');
 

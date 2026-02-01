@@ -674,16 +674,14 @@
                                                    value="{{ address.id }}"
                                                    {% if loop.first %}checked{% endif %}>
                                             <div class="address-name">
-                                                {% if address.label %}{{ address.label }}{% else %}{{ 'landing.contact.info.address'|t }} {{ loop.index }}{% endif %}
+                                                {% if address.title %}{{ address.title }}{% else %}{{ address.full_address }}{% endif %}
                                             </div>
                                             <div class="address-details">
-                                                {{ address.address_line1 }}<br>
-                                                {% if address.address_line2 %}{{ address.address_line2 }}<br>{% endif %}
-                                                {{ address.city }}{% if address.postal_code %}, {{ address.postal_code }}{% endif %}
+                                                {{ address.full_address }}
                                             </div>
-                                            {% if address.phone_number %}
-                                            <div class="address-phone">
-                                                <i class="far fa-phone"></i> {{ address.phone_number }}
+                                            {% if address.delivery_instructions %}
+                                            <div class="address-note" style="font-size: 13px; color: #888; font-style: italic; margin-top: 6px;">
+                                                <i class="far fa-sticky-note"></i> {{ address.delivery_instructions }}
                                             </div>
                                             {% endif %}
                                         </div>
@@ -742,15 +740,9 @@
                                     </div>
 
                                     <div class="payment-method" onclick="selectPaymentMethod('payme')" data-method="payme">
-                                        <i class="far fa-mobile-alt"></i>
-                                        <div class="payment-method-name">Payme</div>
-                                        <div class="payment-method-desc">{{ 'Pay via Payme'|t }}</div>
-                                    </div>
-
-                                    <div class="payment-method" onclick="selectPaymentMethod('click')" data-method="click">
                                         <i class="far fa-credit-card"></i>
-                                        <div class="payment-method-name">Click</div>
-                                        <div class="payment-method-desc">{{ 'Pay via Click'|t }}</div>
+                                        <div class="payment-method-name">{{ 'Card'|t }}</div>
+                                        <div class="payment-method-desc">{{ 'Pay with card'|t }}</div>
                                     </div>
                                 </div>
 
@@ -1065,6 +1057,12 @@ let verificationState = {
 
 // Initialize checkout
 document.addEventListener('DOMContentLoaded', async function() {
+    // Check if user is authenticated - redirect guests to login
+    if (!CURRENT_USER) {
+        window.location.href = '{{ url_for("frontend.login") }}?next={{ url_for("frontend.checkout") }}';
+        return;
+    }
+
     // Wait for global sync to finish so we don't checkout with stale data
     if (window.cartSyncPromise) {
         await window.cartSyncPromise;

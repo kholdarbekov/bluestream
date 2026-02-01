@@ -186,9 +186,9 @@ def checkout():
         verify_jwt_in_request(optional=True)
         current_user_id = get_jwt_identity()
         if not current_user_id:
-            return redirect(url_for('frontend.login', next=request.url))
+            return redirect(url_for('frontend.login', next=request.path))
     except Exception:
-        return redirect(url_for('frontend.login', next=request.url))
+        return redirect(url_for('frontend.login', next=request.path))
 
     user = User.query.get(current_user_id)
 
@@ -521,10 +521,14 @@ def privacy():
 @frontend_bp.route('/login')
 def login():
     """Login page"""
-    # If user is already logged in, redirect to account
+    # If user is already logged in, redirect to next URL or account
     try:
         verify_jwt_in_request(optional=True)
         if get_jwt_identity():
+            # Respect the next parameter if provided
+            next_url = request.args.get('next')
+            if next_url and next_url.startswith('/') and not next_url.startswith('//'):
+                return redirect(next_url)
             return redirect(url_for('frontend.my_account'))
     except:
         pass
@@ -535,10 +539,14 @@ def login():
 @frontend_bp.route('/register')
 def register():
     """Registration page"""
-    # If user is already logged in, redirect to account
+    # If user is already logged in, redirect to next URL or account
     try:
         verify_jwt_in_request(optional=True)
         if get_jwt_identity():
+            # Respect the next parameter if provided
+            next_url = request.args.get('next')
+            if next_url and next_url.startswith('/') and not next_url.startswith('//'):
+                return redirect(next_url)
             return redirect(url_for('frontend.my_account'))
     except:
         pass

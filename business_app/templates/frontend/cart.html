@@ -632,7 +632,7 @@ const PRODUCT_DETAIL_URL_TEMPLATE = '{{ url_for("frontend.product_detail", produ
 
 // Cart state
 let cartItems = [];
-let isAuthenticated = true; // Assume authenticated - auth is cookie-based, API will return 401 if not
+let isAuthenticated = CURRENT_USER !== null; // Check if user is logged in
 
 // Initialize cart on page load
 document.addEventListener('DOMContentLoaded', async function() {

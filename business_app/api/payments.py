@@ -144,7 +144,36 @@ def create_payment():
         if order.is_paid:
             return error_response(message=get_translation('api.payments.error.already_paid'))
 
-        # Create payment
+        # Check for existing pending payment for this order with same payment method
+        # This prevents duplicate payments when user retries payment
+        existing_payment = Payment.query.filter(
+            Payment.order_id == order_id,
+            Payment.user_id == current_user_id,
+            Payment.status == PaymentStatus.PENDING
+        ).first()
+
+        if existing_payment:
+            current_app.logger.info(
+                f"Reusing existing pending payment {existing_payment.id} for order {order_id}"
+            )
+            # For cash payments, just return the existing payment
+            if payment_method == 'cash':
+                return created_response(
+                    data={
+                        'payment': serialize_payment(existing_payment),
+                        'message': 'Cash payment created. Pay on delivery.'
+                    }
+                )
+            # For card payments, generate a fresh payment link for the existing payment
+            payment_link = get_payment_service().create_payment_link(existing_payment.id)
+            return created_response(
+                data={
+                    'payment': serialize_payment(existing_payment),
+                    'payment_link': payment_link
+                }
+            )
+
+        # Create new payment
         payment_data = {
             'order_id': order_id,
             'user_id': current_user_id,

@@ -136,12 +136,13 @@ class PaymentHandlers:
                      return False
                      
             # 3. Send Message with Button
-            msg_text = i18n.get('telegram.payment.pay_message', language, 
-                                order_number=order_number, 
-                                amount=format_price(total_amount)) \
+            order_number_text = i18n.get('telegram.order.number', language, order_number)
+            amount_text = i18n.get('telegram.order.total', language, format_price(total_amount))
+            
+            msg_text = i18n.get('telegram.payment.pay_message', language, order_number_text, amount_text) \
                        or f"Order #{order_number}\nAmount: {format_price(total_amount)} UZS\n\nPlease pay using the button below:"
             
-            pay_btn_text = i18n.get('telegram.payment.pay_btn', language) or "💸 Pay via Payme"
+            pay_btn_text = i18n.get('telegram.payment.pay_btn', language) or "Pay"
             
             keyboard = InlineKeyboardMarkup([
                 [InlineKeyboardButton(

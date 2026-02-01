@@ -104,7 +104,7 @@ const Translations = () => {
   );
 
   // Available categories
-  const CATEGORIES = ['telegram', 'ui', 'email', 'sms'];
+  const CATEGORIES = ['telegram', 'ui', 'email', 'sms', 'common'];
 
   // Mutations
   const createTranslationMutation = useMutation(adminService.createTranslation, {

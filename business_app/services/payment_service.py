@@ -1778,7 +1778,7 @@ class PaymentService:
             return {
                 'result': {
                     'transaction': str(transaction.id),
-                    'cancel_time': to_ms(transaction.processed_at),
+                    'cancel_time': to_ms(transaction.updated_at),
                     'state': PaymeState.CANCELLED.value
                 }
             }
@@ -1812,7 +1812,7 @@ class PaymentService:
              return {
                  'result': {
                      'transaction': str(transaction.id),
-                     'cancel_time': to_ms(transaction.processed_at),
+                     'cancel_time': to_ms(transaction.updated_at),
                      'state': PaymeState.REFUNDED.value
                  }
              }
@@ -1854,12 +1854,14 @@ class PaymentService:
             state = PaymeState.CANCELLED.value
             cancel_time = to_ms(transaction.updated_at)
             perform_time = to_ms(transaction.processed_at) if transaction.processed_at else 0
-            reason = 5 # Default reason or extract
+            reason_str = transaction.failure_reason.split('Reason')[-1].strip() if transaction.failure_reason else None
+            reason = int(reason_str) if reason_str and reason_str.isdigit() else 5 # Default reason or extract
         elif transaction.status == 'refunded':
             state = PaymeState.REFUNDED.value
             cancel_time = to_ms(transaction.updated_at)
             perform_time = to_ms(transaction.processed_at) if transaction.processed_at else 0
-            reason = 5 # Default reason or extract
+            reason_str = transaction.failure_reason.split('Reason')[-1].strip() if transaction.failure_reason else None
+            reason = int(reason_str) if reason_str and reason_str.isdigit() else 5 # Default reason or extract
             
         return {
             'result': {

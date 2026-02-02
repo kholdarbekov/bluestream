@@ -651,7 +651,7 @@ class OrderHandlers:
             if not cart:
                 await self._handle_api_error(update, i18n.get('telegram.orders.cart_empty', language), language)
                 return
-            confirmation_text += f"🛒 {i18n.get('telegram.orders.items_header', language)}:\n"
+            confirmation_text += f"{i18n.get('telegram.orders.items_header', language)}:\n"
             for item in cart.get('cart_items', []):
                 confirmation_text += f"• {item.get('product', {}).get('name', 'Unknown')} x{item.get('quantity', 1)}\n"
                 item_subtotal_price = item.get('product', {}).get('current_price', 0) * item.get('quantity', 1)
@@ -661,18 +661,18 @@ class OrderHandlers:
         # Add address info
         address_id = context.user_data.get('selected_address_id')
         if address_id:
-            confirmation_text += f"📍 {i18n.get('telegram.delivery_address', language)}: Selected address #{address_id}\n\n"
+            confirmation_text += f"{i18n.get('telegram.delivery_address', language)}: Selected address #{address_id}\n\n"
 
         # Add payment method
         payment_method = context.user_data.get('selected_payment_method')
         if payment_method:
-            confirmation_text += f"💳 {i18n.get('telegram.orders.payment_info', language)}: {payment_method.title()}\n\n"
+            confirmation_text += f"{i18n.get('telegram.orders.payment_info', language)}: {payment_method.title()}\n\n"
 
         # Add total amount
         confirmation_text += f"💰 {i18n.get('telegram.total', language)}: {format_price(cart_total_amount)} UZS\n"
-        confirmation_text += f"🚚 {i18n.get('telegram.orders.delivery_fee', language)}: Free\n"
+        confirmation_text += f"🚚 {i18n.get('telegram.orders.delivery_fee', language, amount=0)}\n"
         confirmation_text += "────────────────\n"
-        confirmation_text += f"💳 {i18n.get('telegram.orders.grand_total', language)}: {format_price(cart_total_amount)} UZS"
+        confirmation_text += f"💳 {i18n.get('telegram.orders.grand_total', language, amount=format_price(cart_total_amount))}"
         
         keyboard = OrderKeyboards.order_confirmation(language)
         

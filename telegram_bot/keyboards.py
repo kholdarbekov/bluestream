@@ -219,12 +219,12 @@ class ProductKeyboards:
             nav_row = []
             if page > 1:
                 nav_row.append({
-                    'text': '⬅️ Previous',
+                    'text': i18n.get('telegram.pagination.previous', language) or '⬅️ Previous',
                     'callback_data': f'page_{page - 1}'
                 })
             if page < total_pages:
                 nav_row.append({
-                    'text': 'Next ➡️',
+                    'text': i18n.get('telegram.pagination.next', language) or 'Next ➡️',
                     'callback_data': f'page_{page + 1}'
                 })
             
@@ -267,8 +267,8 @@ class ProductKeyboards:
 
         # Add navigation buttons
         buttons.append([
-            {'text': '➕ Add More Items', 'callback_data': 'sub_add_more_items'},
-            {'text': '✅ Done', 'callback_data': 'sub_items_done'}
+            {'text': i18n.get('telegram.subscription.add_more_items', language) or '➕ Add More Items', 'callback_data': 'sub_add_more_items'},
+            {'text': i18n.get('telegram.done', language) or '✅ Done', 'callback_data': 'sub_items_done'}
         ])
 
         # Add back button
@@ -311,7 +311,7 @@ class OrderKeyboards:
         if cart_is_empty:
             buttons = [
                 [
-                    {'text': '🛍️ Continue Shopping', 'callback_data': 'menu_products'}
+                    {'text': i18n.get('telegram.cart.continue_shopping', language) or '🛍️ Continue Shopping', 'callback_data': 'menu_products'}
                 ],
                 [{'text': i18n.get('telegram.back', language), 'callback_data': 'back_to_main'}]
             ]
@@ -321,8 +321,8 @@ class OrderKeyboards:
                 buttons = [
                     [{'text': i18n.get('telegram.cart.checkout', language), 'callback_data': 'cart_checkout'}],
                     [
-                        {'text': '🗑️ Clear Cart', 'callback_data': 'cart_clear'},
-                        {'text': '🛍️ Continue Shopping', 'callback_data': 'menu_products'}
+                        {'text': i18n.get('telegram.cart.clear', language) or '🗑️ Clear Cart', 'callback_data': 'cart_clear'},
+                        {'text': i18n.get('telegram.cart.continue_shopping', language) or '🛍️ Continue Shopping', 'callback_data': 'menu_products'}
                     ],
                     [{'text': i18n.get('telegram.back', language), 'callback_data': 'back_to_main'}]
                 ]
@@ -331,7 +331,7 @@ class OrderKeyboards:
                 buttons = [
                     [{'text': '⚠️ ' + i18n.get('telegram.cart.add_more', language), 'callback_data': 'menu_products'}],
                     [
-                        {'text': '🗑️ Clear Cart', 'callback_data': 'cart_clear'},
+                        {'text': i18n.get('telegram.cart.clear', language) or '🗑️ Clear Cart', 'callback_data': 'cart_clear'},
                     ],
                     [{'text': i18n.get('telegram.back', language), 'callback_data': 'back_to_main'}]
                 ]
@@ -350,7 +350,7 @@ class OrderKeyboards:
             }])
         
         buttons.extend([
-            [{'text': '➕ Add New Address', 'callback_data': 'add_new_address'}],
+            [{'text': i18n.get('telegram.address.add_new', language) or '➕ Add New Address', 'callback_data': 'add_new_address'}],
             [{'text': i18n.get('telegram.back', language), 'callback_data': 'back_to_cart'}]
         ])
         
@@ -408,10 +408,10 @@ class OrderKeyboards:
         """Order confirmation buttons"""
         buttons = [
             [
-                {'text': '✅ Confirm Order', 'callback_data': 'confirm_order'},
-                {'text': '❌ Cancel', 'callback_data': 'cancel_order'}
+                {'text': i18n.get('telegram.order.confirm', language) or '✅ Confirm Order', 'callback_data': 'confirm_order'},
+                {'text': i18n.get('telegram.cancel', language) or '❌ Cancel', 'callback_data': 'cancel_order'}
             ],
-            [{'text': '✏️ Edit Order', 'callback_data': 'edit_order'}]
+            [{'text': i18n.get('telegram.order.edit', language) or '✏️ Edit Order', 'callback_data': 'edit_order'}]
         ]
         
         return KeyboardBuilder.build_inline_keyboard(buttons)
@@ -455,7 +455,7 @@ class OrderKeyboards:
         # Add track button for active orders
         if order_status in ['confirmed', 'preparing', 'out_for_delivery']:
             buttons.append([{
-                'text': '📍 Track Order',
+                'text': i18n.get('telegram.order.track', language) or '📍 Track Order',
                 'callback_data': f'track_order_{order_id}'
             }])
         
@@ -466,14 +466,14 @@ class OrderKeyboards:
                 'callback_data': f'payment_retry_{order_id}'
             }])
             buttons.append([{
-                'text': '❌ Cancel Order',
+                'text': i18n.get('telegram.payment.cancel_order', language) or '❌ Cancel Order',
                 'callback_data': f'cancel_order_{order_id}'
             }])
         
         # Add reorder button for delivered orders
         if order_status == 'delivered':
             buttons.append([{
-                'text': '🔄 Reorder',
+                'text': i18n.get('telegram.order.reorder', language) or '🔄 Reorder',
                 'callback_data': f'reorder_{order_id}'
             }])
         
@@ -542,8 +542,8 @@ class SubscriptionKeyboards:
             }])
         
         buttons.extend([
-            [{'text': '➕ Create Subscription', 'callback_data': 'create_subscription'}],
-            [{'text': '📊 My Statistics', 'callback_data': 'subscription_statistics'}],
+            [{'text': i18n.get('telegram.subscription.create', language) or '➕ Create Subscription', 'callback_data': 'create_subscription'}],
+            [{'text': i18n.get('telegram.subscription.statistics', language) or '📊 My Statistics', 'callback_data': 'subscription_statistics'}],
             [{'text': i18n.get('telegram.back', language), 'callback_data': 'back_to_main'}]
         ])
 
@@ -556,27 +556,27 @@ class SubscriptionKeyboards:
 
         if status == 'active':
             buttons.append([{
-                'text': '⏸️ Pause',
+                'text': i18n.get('telegram.subscription.pause', language) or '⏸️ Pause',
                 'callback_data': f'pause_sub_{subscription_id}'
             }])
             buttons.append([{
-                'text': '⏭️ Skip Next Delivery',
+                'text': i18n.get('telegram.subscription.skip_next', language) or '⏭️ Skip Next Delivery',
                 'callback_data': f'skip_sub_{subscription_id}'
             }])
         elif status == 'paused':
             buttons.append([{
-                'text': '▶️ Resume',
+                'text': i18n.get('telegram.subscription.resume', language) or '▶️ Resume',
                 'callback_data': f'resume_sub_{subscription_id}'
             }])
 
         buttons.extend([
-            [{'text': '✏️ Edit Subscription', 'callback_data': f'edit_sub_{subscription_id}'}],
-            [{'text': '📦 Manage Items', 'callback_data': f'manage_items_{subscription_id}'}],
+            [{'text': i18n.get('telegram.subscription.edit', language) or '✏️ Edit Subscription', 'callback_data': f'edit_sub_{subscription_id}'}],
+            [{'text': i18n.get('telegram.subscription.manage_items', language) or '📦 Manage Items', 'callback_data': f'manage_items_{subscription_id}'}],
             [
-                {'text': '💳 Billing', 'callback_data': f'billing_history_{subscription_id}'},
-                {'text': '📋 Logs', 'callback_data': f'view_logs_{subscription_id}'}
+                {'text': i18n.get('telegram.subscription.billing', language) or '💳 Billing', 'callback_data': f'billing_history_{subscription_id}'},
+                {'text': i18n.get('telegram.subscription.logs', language) or '📋 Logs', 'callback_data': f'view_logs_{subscription_id}'}
             ],
-            [{'text': '❌ Cancel', 'callback_data': f'cancel_sub_{subscription_id}'}],
+            [{'text': i18n.get('telegram.cancel', language) or '❌ Cancel', 'callback_data': f'cancel_sub_{subscription_id}'}],
             [{'text': i18n.get('telegram.back', language), 'callback_data': 'back_to_subscriptions'}]
         ])
 
@@ -586,8 +586,8 @@ class SubscriptionKeyboards:
     def subscription_creation_options(language: str = 'en') -> InlineKeyboardMarkup:
         """Options for creating subscription (template or custom)"""
         buttons = [
-            [{'text': '📋 Use Template', 'callback_data': 'subscription_use_template'}],
-            [{'text': '✨ Create Custom', 'callback_data': 'subscription_custom'}],
+            [{'text': i18n.get('telegram.subscription.use_template', language) or '📋 Use Template', 'callback_data': 'subscription_use_template'}],
+            [{'text': i18n.get('telegram.subscription.create_custom', language) or '✨ Create Custom', 'callback_data': 'subscription_custom'}],
             [{'text': i18n.get('telegram.back', language), 'callback_data': 'back_to_subscriptions'}]
         ]
         return KeyboardBuilder.build_inline_keyboard(buttons)
@@ -614,9 +614,9 @@ class SubscriptionKeyboards:
     def payment_methods(language: str = 'en') -> InlineKeyboardMarkup:
         """Payment method selection for subscription"""
         buttons = [
-            [{'text': '💳 Card', 'callback_data': 'sub_payment_card'}],
-            [{'text': '💰 Cash on Delivery', 'callback_data': 'sub_payment_cash'}],
-            [{'text': '📱 Payme', 'callback_data': 'sub_payment_payme'}],
+            [{'text': i18n.get('telegram.payment_card', language) or '💳 Card', 'callback_data': 'sub_payment_card'}],
+            [{'text': i18n.get('telegram.payment_cash', language) or '💰 Cash on Delivery', 'callback_data': 'sub_payment_cash'}],
+            [{'text': i18n.get('telegram.payment_payme', language) or '📱 Payme', 'callback_data': 'sub_payment_payme'}],
             [{'text': i18n.get('telegram.back', language), 'callback_data': 'back_to_address_selection'}]
         ]
         return KeyboardBuilder.build_inline_keyboard(buttons)
@@ -637,7 +637,7 @@ class SubscriptionKeyboards:
             ])
 
         # Add new item button
-        buttons.append([{'text': '➕ Add Item', 'callback_data': f'add_item_{subscription_id}'}])
+        buttons.append([{'text': i18n.get('telegram.subscription.add_item', language) or '➕ Add Item', 'callback_data': f'add_item_{subscription_id}'}])
 
         # Back button
         buttons.append([{'text': i18n.get('telegram.back', language), 'callback_data': f'subscription_{subscription_id}'}])
@@ -648,10 +648,10 @@ class SubscriptionKeyboards:
     def edit_subscription_menu(subscription_id: int, language: str = 'en') -> InlineKeyboardMarkup:
         """Edit subscription menu"""
         buttons = [
-            [{'text': '📅 Change Frequency', 'callback_data': f'change_frequency_{subscription_id}'}],
-            [{'text': '💳 Change Payment Method', 'callback_data': f'change_payment_{subscription_id}'}],
-            [{'text': '✏️ Manage Items', 'callback_data': f'manage_items_{subscription_id}'}],
-            [{'text': '📋 View Activity Log', 'callback_data': f'view_logs_{subscription_id}'}],
+            [{'text': i18n.get('telegram.subscription.change_frequency', language) or '📅 Change Frequency', 'callback_data': f'change_frequency_{subscription_id}'}],
+            [{'text': i18n.get('telegram.subscription.change_payment', language) or '💳 Change Payment Method', 'callback_data': f'change_payment_{subscription_id}'}],
+            [{'text': i18n.get('telegram.subscription.manage_items', language) or '✏️ Manage Items', 'callback_data': f'manage_items_{subscription_id}'}],
+            [{'text': i18n.get('telegram.subscription.view_logs', language) or '📋 View Activity Log', 'callback_data': f'view_logs_{subscription_id}'}],
             [{'text': i18n.get('telegram.back', language), 'callback_data': f'subscription_{subscription_id}'}]
         ]
         return KeyboardBuilder.build_inline_keyboard(buttons)
@@ -665,15 +665,15 @@ class ProfileKeyboards:
         """Profile menu keyboard"""
         buttons = [
             [
-                {'text': '✏️ Edit Profile', 'callback_data': 'edit_profile'},
-                {'text': '📍 Addresses', 'callback_data': 'manage_addresses'}
+                {'text': i18n.get('telegram.profile.edit', language) or '✏️ Edit Profile', 'callback_data': 'edit_profile'},
+                {'text': i18n.get('telegram.profile.addresses', language) or '📍 Addresses', 'callback_data': 'manage_addresses'}
             ],
             [
-                {'text': '📱 Phone Verification', 'callback_data': 'phone_verification'},
-                {'text': '🔔 Notifications', 'callback_data': 'notification_settings'}
+                {'text': i18n.get('telegram.profile.phone_verification', language) or '📱 Phone Verification', 'callback_data': 'phone_verification'},
+                {'text': i18n.get('telegram.profile.notifications', language) or '🔔 Notifications', 'callback_data': 'notification_settings'}
             ],
             [
-                {'text': '💳 Payment Methods', 'callback_data': 'payment_methods'}
+                {'text': i18n.get('telegram.profile.payment_methods', language) or '💳 Payment Methods', 'callback_data': 'payment_methods'}
             ],
             [{'text': i18n.get('telegram.back', language), 'callback_data': 'back_to_main'}]
         ]
@@ -684,7 +684,7 @@ class ProfileKeyboards:
     def phone_request(language: str = 'en') -> ReplyKeyboardMarkup:
         """Phone number request keyboard"""
         button = KeyboardButton(
-            text="📱 Share Phone Number",
+            text=i18n.get('telegram.profile.share_phone', language) or "📱 Share Phone Number",
             request_contact=True
         )
         
@@ -698,7 +698,7 @@ class ProfileKeyboards:
     def location_request(language: str = 'en') -> ReplyKeyboardMarkup:
         """Location request keyboard"""
         button = KeyboardButton(
-            text="📍 Share Location",
+            text=i18n.get('telegram.address.share_location_button', language) or "📍 Share Location",
             request_location=True
         )
         
@@ -724,10 +724,10 @@ class ProfileKeyboards:
         
         # Add management action buttons
         buttons.extend([
-            [{'text': '➕ Add New Address', 'callback_data': 'add_new_address'}],
+            [{'text': i18n.get('telegram.address.add_new', language) or '➕ Add New Address', 'callback_data': 'add_new_address'}],
             [
-                {'text': '✏️ Edit Address', 'callback_data': 'select_edit_address'},
-                {'text': '🗑️ Delete Address', 'callback_data': 'select_delete_address'}
+                {'text': i18n.get('telegram.address.edit', language) or '✏️ Edit Address', 'callback_data': 'select_edit_address'},
+                {'text': i18n.get('telegram.address.delete', language) or '🗑️ Delete Address', 'callback_data': 'select_delete_address'}
             ],
             [{'text': i18n.get('telegram.back', language), 'callback_data': 'menu_profile'}]
         ])
@@ -738,7 +738,7 @@ class ProfileKeyboards:
     def empty_addresses(language: str = 'en') -> InlineKeyboardMarkup:
         """Keyboard for when user has no addresses"""
         buttons = [
-            [{'text': '➕ Add Your First Address', 'callback_data': 'add_new_address'}],
+            [{'text': i18n.get('telegram.address.add_first', language) or '➕ Add Your First Address', 'callback_data': 'add_new_address'}],
             [{'text': i18n.get('telegram.back', language), 'callback_data': 'menu_profile'}]
         ]
 
@@ -757,6 +757,26 @@ class ProfileKeyboards:
 
         return ReplyKeyboardMarkup(
             [[location_button], [skip_button]],
+            one_time_keyboard=True,
+            resize_keyboard=True
+        )
+
+    @staticmethod
+    def location_request_with_retry(language: str = 'en') -> ReplyKeyboardMarkup:
+        """Location request keyboard for retry after wrong geocode"""
+        location_button = KeyboardButton(
+            text=i18n.get('telegram.address.share_location_button', language) or "📍 Share Location",
+            request_location=True
+        )
+        retry_button = KeyboardButton(
+            text=i18n.get('telegram.address.reenter_manually_button', language) or "✏️ Re-enter Address"
+        )
+        cancel_button = KeyboardButton(
+            text=i18n.get('telegram.cancel', language) or "❌ Cancel"
+        )
+
+        return ReplyKeyboardMarkup(
+            [[location_button], [retry_button], [cancel_button]],
             one_time_keyboard=True,
             resize_keyboard=True
         )
@@ -817,20 +837,30 @@ class ProfileKeyboards:
         return KeyboardBuilder.build_inline_keyboard(buttons)
 
     @staticmethod
-    def geocode_confirmation(language: str = 'en') -> InlineKeyboardMarkup:
-        """Confirmation keyboard after geocoding"""
+    def geocode_confirmation(language: str = 'en', show_edit: bool = True) -> InlineKeyboardMarkup:
+        """Confirmation keyboard after geocoding
+        
+        Args:
+            language: Language code
+            show_edit: If True, show Edit Details button (for existing addresses)
+                       If False, hide it (for new address creation)
+        """
         buttons = [
             [
                 {'text': i18n.get('telegram.address.location_correct', language) or '✅ Yes, Correct',
                  'callback_data': 'confirm_geocode'},
-                {'text': i18n.get('telegram.address.location_wrong', language) or '❌ No, Re-enter',
+                {'text': i18n.get('telegram.address.location_wrong', language) or '❌ No, Wrong',
                  'callback_data': 'retry_geocode'}
-            ],
-            [{'text': i18n.get('telegram.address.edit_details', language) or '✏️ Edit Details',
-              'callback_data': 'edit_address_details'}],
-            [{'text': i18n.get('telegram.cancel', language) or '❌ Cancel',
-              'callback_data': 'cancel_address_creation'}]
+            ]
         ]
+        
+        if show_edit:
+            buttons.append([{'text': i18n.get('telegram.address.edit_details', language) or '✏️ Edit Details',
+                            'callback_data': 'edit_address_details'}])
+        
+        buttons.append([{'text': i18n.get('telegram.cancel', language) or '❌ Cancel',
+                        'callback_data': 'cancel_address_creation'}])
+        
         return KeyboardBuilder.build_inline_keyboard(buttons)
 
     @staticmethod
@@ -862,14 +892,14 @@ class ProfileKeyboards:
 
         if not is_default:
             buttons.append([{
-                'text': '⭐ Set as Default',
+                'text': i18n.get('telegram.address.set_default', language) or '⭐ Set as Default',
                 'callback_data': f'set_default_address_{address_id}'
             }])
 
         buttons.extend([
             [
-                {'text': '✏️ Edit', 'callback_data': f'edit_address_{address_id}'},
-                {'text': '🗑️ Delete', 'callback_data': f'delete_address_{address_id}'}
+                {'text': i18n.get('telegram.edit', language) or '✏️ Edit', 'callback_data': f'edit_address_{address_id}'},
+                {'text': i18n.get('telegram.delete', language) or '🗑️ Delete', 'callback_data': f'delete_address_{address_id}'}
             ],
             [{'text': i18n.get('telegram.back', language) or '⬅️ Back',
               'callback_data': 'manage_addresses'}]

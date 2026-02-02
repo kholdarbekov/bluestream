@@ -3,7 +3,8 @@ User profile and registration handlers
 """
 import logging
 from typing import Dict, Any
-from telegram import Update, ReplyKeyboardRemove
+from telegram import constants, Update, ReplyKeyboardRemove
+from telegram.helpers import escape_markdown
 from telegram.ext import ContextTypes, ConversationHandler
 from telegram.error import BadRequest
 
@@ -42,6 +43,9 @@ class ProfileHandlers:
             
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
+            
+            # Clear any pending input state
+            await self.user_repo.update_user_state(user_id, {})
             
             # Get user profile from API
             async with api_client as client:
@@ -1114,6 +1118,9 @@ class ProfileHandlers:
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
             
+            # Clear any pending input state
+            await self.user_repo.update_user_state(user_id, {})
+            
             # Get user addresses
             async with api_client as client:
                 user_token = await get_auth_token(update, context, client)
@@ -1158,6 +1165,9 @@ class ProfileHandlers:
         try:
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
+            
+            # Clear any pending database state before starting address flow
+            await self.user_repo.update_user_state(user_id, {})
 
             logger.info(f"=== ADD ADDRESS CONVERSATION ENTRY POINT ===")
             logger.info(f"User: {user_id}")
@@ -1402,6 +1412,38 @@ class ProfileHandlers:
             logger.error(f"Error canceling address: {e}")
             return ConversationHandler.END
 
+    async def cancel_address_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Cancel address adding from text button (removes ReplyKeyboard)"""
+        try:
+            user_id = update.effective_user.id
+            language = await i18n.get_user_language(user_id)
+
+            cancel_text = i18n.get('telegram.action_cancelled', language)
+            
+            # First remove the reply keyboard
+            await update.message.reply_text(
+                "❌ Cancelled",
+                reply_markup=ReplyKeyboardRemove()
+            )
+            
+            # Then show main menu
+            keyboard = MenuKeyboards.main_menu(language)
+            await update.message.reply_text(
+                text=cancel_text,
+                reply_markup=keyboard
+            )
+
+            # Clear all temporary address data
+            context.user_data.pop('temp_location', None)
+            context.user_data.pop('temp_address', None)
+            context.user_data.pop('temp_address_data', None)
+
+            return ConversationHandler.END
+
+        except Exception as e:
+            logger.error(f"Error canceling address from text: {e}")
+            return ConversationHandler.END
+
     # ==================== MANUAL ADDRESS ENTRY HANDLERS ====================
 
     async def skip_location_sharing(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1481,6 +1523,33 @@ class ProfileHandlers:
             logger.error(f"Traceback: {traceback.format_exc()}")
             return ConversationHandler.END
 
+    async def back_to_region(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle back button from district selection - go back to region selection"""
+        try:
+            query = update.callback_query
+            user_id = update.effective_user.id
+            language = await i18n.get_user_language(user_id)
+
+            await query.answer()
+            logger.info(f"User {user_id} going back to region selection")
+
+            # Show region selection again
+            region_prompt = i18n.get('telegram.address.select_region', language) or "Please select your region:"
+            keyboard = ProfileKeyboards.region_selection(language)
+
+            await query.edit_message_text(
+                region_prompt,
+                reply_markup=keyboard
+            )
+
+            return ADDRESS_REGION
+
+        except Exception as e:
+            logger.error(f"Error in back_to_region: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            return ConversationHandler.END
+
     async def district_selected(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle district selection"""
         try:
@@ -1504,17 +1573,16 @@ class ProfileHandlers:
 
             await query.answer()
 
-            # Ask for street name (optional)
-            street_prompt = i18n.get('telegram.address.enter_street', language) or (
-                f"📍 District: *{district_name}*\n\n"
-                "Please enter your street name, or skip if you don't want to specify:"
+            # Ask for street name (required, no skip option)
+            street_prompt = escape_markdown(i18n.get('telegram.address.enter_street_required', language), version=2) or (
+                f"📍 District: *{escape_markdown(district_name, version=2)}*\n\n"
+                "🛤️ Please enter your street name (required):"
             )
-            keyboard = ProfileKeyboards.optional_field_keyboard('street', language)
+            # No skip keyboard - street is required
 
             await query.edit_message_text(
                 street_prompt,
-                reply_markup=keyboard,
-                parse_mode='Markdown'
+                parse_mode=constants.ParseMode.MARKDOWN_V2
             )
 
             return ADDRESS_STREET
@@ -1672,8 +1740,15 @@ class ProfileHandlers:
             logger.info(f"User {user_id} entered delivery instructions")
             context.user_data['temp_address_data']['delivery_instructions'] = instructions
 
-            # Proceed to geocoding and confirmation
-            return await self.geocode_and_confirm(update, context)
+            # Check if we already have coordinates from location sharing
+            addr_data = context.user_data.get('temp_address_data', {})
+            if addr_data.get('latitude') and addr_data.get('longitude') and addr_data.get('location_source') == 'shared':
+                # Location was shared - save directly without geocoding
+                logger.info(f"Location already set from sharing, saving address directly")
+                return await self.save_address_final(update, context)
+            else:
+                # Manual entry flow - proceed to geocoding and confirmation
+                return await self.geocode_and_confirm(update, context)
 
         except Exception as e:
             logger.error(f"Error in delivery_instructions_received: {e}")
@@ -1693,16 +1768,17 @@ class ProfileHandlers:
             await query.answer()
 
             # Determine next state based on skipped field
+            # Note: Street field is no longer skippable - it's required
             if field_name == 'street':
-                # Skip to delivery instructions
-                instructions_prompt = i18n.get('telegram.address.enter_delivery_instructions', language) or (
-                    "Any special delivery instructions?\n"
-                    "(e.g., door code, call before arriving)\n\n"
-                    "Or skip if none:"
+                # This case should not happen anymore since street has no skip button
+                # But keep it here for safety - redirect to building
+                logger.warning(f"Street skip attempted but street is required")
+                building_prompt = i18n.get('telegram.address.enter_building', language) or (
+                    "Please enter your building/house number, or skip:"
                 )
-                keyboard = ProfileKeyboards.delivery_instructions_keyboard(language)
-                await query.edit_message_text(instructions_prompt, reply_markup=keyboard)
-                return ADDRESS_DELIVERY_INSTRUCTIONS
+                keyboard = ProfileKeyboards.optional_field_keyboard('building', language)
+                await query.edit_message_text(building_prompt, reply_markup=keyboard)
+                return ADDRESS_BUILDING
 
             elif field_name == 'building':
                 # Skip to delivery instructions
@@ -1738,8 +1814,15 @@ class ProfileHandlers:
                 return ADDRESS_DELIVERY_INSTRUCTIONS
 
             elif field_name == 'delivery_instructions':
-                # Proceed to geocoding
-                return await self.geocode_and_confirm_callback(update, context)
+                # Check if we already have coordinates from location sharing
+                addr_data = context.user_data.get('temp_address_data', {})
+                if addr_data.get('latitude') and addr_data.get('longitude') and addr_data.get('location_source') == 'shared':
+                    # Location was shared - save directly without geocoding
+                    logger.info(f"Location already set from sharing, saving address directly")
+                    return await self.save_address_final(update, context, is_callback=True)
+                else:
+                    # Manual entry flow - proceed to geocoding
+                    return await self.geocode_and_confirm_callback(update, context)
 
             else:
                 logger.warning(f"Unknown field skipped: {field_name}")
@@ -1817,7 +1900,7 @@ class ProfileHandlers:
             if not geocode_success:
                 confirm_text += "\n\n⚠️ _Note: Exact location could not be determined. Using approximate district center._"
 
-            keyboard = ProfileKeyboards.geocode_confirmation(language)
+            keyboard = ProfileKeyboards.geocode_confirmation(language, show_edit=False)
 
             await update.message.reply_text(
                 confirm_text,
@@ -1901,7 +1984,7 @@ class ProfileHandlers:
             if not geocode_success:
                 confirm_text += "\n\n⚠️ _Note: Using approximate district center location._"
 
-            keyboard = ProfileKeyboards.geocode_confirmation(language)
+            keyboard = ProfileKeyboards.geocode_confirmation(language, show_edit=False)
 
             await query.message.reply_text(
                 confirm_text,
@@ -1946,28 +2029,37 @@ class ProfileHandlers:
             return ConversationHandler.END
 
     async def retry_geocode(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """User wants to re-enter address - go back to region selection"""
+        """User says location is wrong - offer to share location or re-enter manually"""
         try:
             query = update.callback_query
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
 
-            await query.answer("Let's try again!")
-            logger.info(f"User {user_id} requested to re-enter address")
+            await query.answer("Let's fix the location!")
+            logger.info(f"User {user_id} says geocode is wrong, offering correction options")
 
-            # Clear previous address data but keep the flow
-            context.user_data['temp_address_data'] = {'location_source': 'manual'}
+            # Delete previous message with inline keyboard
+            await query.delete_message()
 
-            # Show region selection again
-            region_prompt = i18n.get('telegram.address.select_region', language) or "Please select your region:"
-            keyboard = ProfileKeyboards.region_selection(language)
+            # Keep temp address data but reset for potential location share
+            if 'temp_address_data' in context.user_data:
+                context.user_data['temp_address_data']['location_source'] = 'retry'
 
-            await query.edit_message_text(
-                region_prompt,
+            # Offer location sharing or manual re-entry
+            retry_text = i18n.get('telegram.address.retry_location', language) or (
+                "📍 Let's fix the location\n\n"
+                "Please share your exact location for accurate delivery,\n"
+                "or click 'Re-enter Address' to try again manually."
+            )
+            
+            keyboard = ProfileKeyboards.location_request_with_retry(language)
+
+            await query.message.reply_text(
+                retry_text,
                 reply_markup=keyboard
             )
 
-            return ADDRESS_REGION
+            return ADDRESS_LOCATION  # Go back to location state to handle shared location
 
         except Exception as e:
             logger.error(f"Error in retry_geocode: {e}")
@@ -2079,6 +2171,9 @@ class ProfileHandlers:
             query = update.callback_query
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
+            
+            # Clear any pending input state (user may have cancelled an edit)
+            await self.user_repo.update_user_state(user_id, {})
             
             # Extract address ID from callback data
             address_id = query.data.split('_')[-1]
@@ -2292,6 +2387,9 @@ class ProfileHandlers:
             query = update.callback_query
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
+            
+            # Clear any old pending input state before showing edit menu
+            await self.user_repo.update_user_state(user_id, {})
             
             # Extract address ID from callback data
             address_id = query.data.split('_')[-1]

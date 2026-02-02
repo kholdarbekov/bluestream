@@ -207,7 +207,7 @@ class WaterBusinessBot:
             # Main menu callbacks
             CallbackQueryHandler(main_menu_handler, pattern="^back_to_main$"),
             CallbackQueryHandler(language_handler.language_menu, pattern="^menu_language$"),
-            # CallbackQueryHandler(language_handler.set_language, pattern="^set_language_"),
+            CallbackQueryHandler(language_handler.set_language, pattern="^set_language_"),
             
             # Product callbacks
             CallbackQueryHandler(product_handlers.products_menu, pattern="^menu_products$"),
@@ -366,10 +366,15 @@ class WaterBusinessBot:
                 # Location sharing or manual entry choice
                 ADDRESS_LOCATION: [
                     MessageHandler(filters.LOCATION, profile_handlers.location_received),
-                    # Handle "Enter Manually" text button
+                    # Handle "Enter Manually" or "Re-enter Address" text buttons
                     MessageHandler(
-                        filters.TEXT & filters.Regex(r"(?i).*(manual|enter manually|✏️).*"),
+                        filters.TEXT & filters.Regex(r"(?i).*(manual|enter manually|re-enter|✏️).*"),
                         profile_handlers.skip_location_sharing
+                    ),
+                    # Handle "Cancel" text button from retry keyboard
+                    MessageHandler(
+                        filters.TEXT & filters.Regex(r"(?i).*(cancel|❌ cancel).*"),
+                        profile_handlers.cancel_address_text
                     ),
                 ],
                 # Address title input
@@ -386,7 +391,7 @@ class WaterBusinessBot:
                 ADDRESS_DISTRICT: [
                     CallbackQueryHandler(profile_handlers.district_selected, pattern="^district_"),
                     CallbackQueryHandler(profile_handlers.cancel_address, pattern="^cancel_address_creation$"),
-                    CallbackQueryHandler(profile_handlers.region_selected, pattern="^back_to_region$"),
+                    CallbackQueryHandler(profile_handlers.back_to_region, pattern="^back_to_region$"),
                 ],
                 # Manual entry flow - Street input
                 ADDRESS_STREET: [

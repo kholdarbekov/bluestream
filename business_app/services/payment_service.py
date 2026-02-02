@@ -1715,7 +1715,6 @@ class PaymentService:
                 # Timed out. Cancel.
                 transaction.status = 'cancelled'
                 transaction.failure_reason = 'Payme timeout during perform'
-                transaction.processed_at = datetime.now(timezone.utc)
                 db.session.commit()
                 return {'error': {'code': PaymeErrors.OPERATION_NOT_ALLOWED, 'message': 'Transaction timed out'}}
             
@@ -1773,7 +1772,6 @@ class PaymentService:
         # State 1 (Pending) -> Cancel
         if transaction.status == 'pending':
             transaction.status = 'cancelled'
-            transaction.processed_at = datetime.now(timezone.utc)
             transaction.failure_reason = f"Payme Cancel: Reason {reason}"
             db.session.commit()
             
@@ -1809,7 +1807,6 @@ class PaymentService:
              transaction.status = 'refunded' # or 'cancelled'
              # Since process_refund might create a SEPARATE refund tx, we need to be careful.
              # But for Payme API compliance, we should mark THIS tx as State -2
-             transaction.processed_at = datetime.now(timezone.utc) # cancel_time
              db.session.commit()
 
              return {
@@ -1825,7 +1822,7 @@ class PaymentService:
              return {
                 'result': {
                     'transaction': str(transaction.id),
-                    'cancel_time': to_ms(transaction.processed_at),
+                    'cancel_time': to_ms(transaction.updated_at),
                     'state': PaymeState.CANCELLED.value if transaction.status == 'cancelled' else PaymeState.REFUNDED.value
                 }
             }
@@ -1855,13 +1852,13 @@ class PaymentService:
             perform_time = to_ms(transaction.processed_at)
         elif transaction.status == 'cancelled':
             state = PaymeState.CANCELLED.value
-            cancel_time = to_ms(transaction.processed_at)
-            perform_time = to_ms(transaction.processed_at)
+            cancel_time = to_ms(transaction.updated_at)
+            perform_time = to_ms(transaction.processed_at) if transaction.processed_at else 0
             reason = 5 # Default reason or extract
         elif transaction.status == 'refunded':
             state = PaymeState.REFUNDED.value
-            cancel_time = to_ms(transaction.processed_at)
-            perform_time = to_ms(transaction.processed_at)
+            cancel_time = to_ms(transaction.updated_at)
+            perform_time = to_ms(transaction.processed_at) if transaction.processed_at else 0
             reason = 5 # Default reason or extract
             
         return {

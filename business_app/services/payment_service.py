@@ -1941,8 +1941,8 @@ class PaymentService:
                 state = PaymeState.CREATED.value  # Default
             
             create_time_ms = to_ms(tx.created_at) if tx.created_at else 0
-            perform_time_ms = to_ms(tx.processed_at) if tx.status == 'completed' and tx.processed_at else 0
-            cancel_time_ms = to_ms(tx.processed_at) if tx.status in ['cancelled', 'refunded'] and tx.processed_at else 0
+            perform_time_ms = to_ms(tx.processed_at) if tx.processed_at else 0
+            cancel_time_ms = to_ms(tx.updated_at) if tx.status in ['cancelled', 'refunded'] and tx.updated_at else 0
             
             # Extract cancellation reason if available
             reason = None

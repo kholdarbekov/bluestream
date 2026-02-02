@@ -1128,7 +1128,8 @@ class PaymentService:
                 'CreateTransaction': self._payme_create_transaction,
                 'PerformTransaction': self._payme_perform_transaction,
                 'CancelTransaction': self._payme_cancel_transaction,
-                'CheckTransaction': self._payme_check_transaction
+                'CheckTransaction': self._payme_check_transaction,
+                'GetStatement': self._payme_get_statement
             }
             
             handler = handlers.get(method)
@@ -1608,8 +1609,6 @@ class PaymentService:
                  
             # Check Timeout
             # We use created_at from DB
-            # Check Timeout
-            # We use created_at from DB
             create_time_ms = to_ms(transaction.created_at)
             now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
             
@@ -1667,7 +1666,11 @@ class PaymentService:
                  'currency': 'UZS'
              })
         
+        # Convert Payme's time (milliseconds) to datetime for storage
+        payme_create_time = datetime.fromtimestamp(time_ms / 1000, tz=timezone.utc) if time_ms else datetime.now(timezone.utc)
+        
         # Create PaymentTransaction (State 1)
+        # Use Payme's time parameter for created_at to ensure GetStatement filtering works correctly
         new_transaction = PaymentTransaction(
             payment_id=payment.id,
             transaction_type='charge',
@@ -1676,14 +1679,15 @@ class PaymentService:
             status='pending',
             provider_transaction_id=payme_trans_id,
             provider_response=params, # Store full request for audit
-            created_at=datetime.now(timezone.utc)
+            created_at=payme_create_time
         )
         db.session.add(new_transaction)
         db.session.commit()
         
+        # Return Payme's original time_ms for consistency
         return {
             'result': {
-                'create_time': to_ms(new_transaction.created_at),
+                'create_time': time_ms if time_ms else to_ms(new_transaction.created_at),
                 'transaction': str(new_transaction.id),
                 'state': PaymeState.CREATED.value
             }
@@ -1870,6 +1874,115 @@ class PaymentService:
                 'reason': reason
             }
         }
+
+    def _payme_get_statement(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Handle Payme GetStatement - returns list of transactions for a specified period.
+        
+        Used for reconciliation between merchant and Payme systems.
+        
+        Request params:
+            from: Start timestamp in milliseconds
+            to: End timestamp in milliseconds
+            
+        Response:
+            transactions: List of transaction objects with:
+                - id: Payme transaction ID
+                - time: Transaction creation time in ms
+                - amount: Amount in tiyins
+                - account: Account info (order_id)
+                - create_time: Transaction creation time in ms
+                - perform_time: Time when transaction was performed (0 if not performed)
+                - cancel_time: Time when transaction was cancelled (0 if not cancelled)
+                - transaction: Merchant's transaction ID
+                - state: Transaction state
+                - reason: Cancellation reason (null if not cancelled)
+        """
+        from_time_ms = params.get('from')
+        to_time_ms = params.get('to')
+        
+        # Validate required parameters
+        if from_time_ms is None or to_time_ms is None:
+            return {'error': {'code': PaymeErrors.JSON_VALIDATION_ERROR, 'message': 'from and to parameters are required'}}
+        
+        try:
+            from_time_ms = int(from_time_ms)
+            to_time_ms = int(to_time_ms)
+        except (ValueError, TypeError):
+            return {'error': {'code': PaymeErrors.JSON_VALIDATION_ERROR, 'message': 'from and to must be valid timestamps'}}
+        
+        # Convert millisecond timestamps to datetime objects
+        from_dt = datetime.fromtimestamp(from_time_ms / 1000, tz=timezone.utc)
+        to_dt = datetime.fromtimestamp(to_time_ms / 1000, tz=timezone.utc)
+        
+        # Query transactions created within the time range
+        # Filter only Payme transactions (those with provider_transaction_id set)
+        # Exclude failed creation attempts - only include successfully created transactions
+        transactions = PaymentTransaction.query.join(Payment).filter(
+            Payment.payment_method == PaymentMethod.PAYME,
+            PaymentTransaction.provider_transaction_id.isnot(None),
+            PaymentTransaction.created_at >= from_dt,
+            PaymentTransaction.created_at <= to_dt
+        ).order_by(PaymentTransaction.created_at.asc()).all()
+        
+        # Build transaction list for response
+        transaction_list = []
+        for tx in transactions:
+            # Determine state based on transaction status
+            if tx.status == 'pending':
+                state = PaymeState.CREATED.value
+            elif tx.status == 'completed':
+                state = PaymeState.COMPLETED.value
+            elif tx.status == 'cancelled':
+                state = PaymeState.CANCELLED.value
+            elif tx.status == 'refunded':
+                state = PaymeState.REFUNDED.value
+            else:
+                state = PaymeState.CREATED.value  # Default
+            
+            create_time_ms = to_ms(tx.created_at) if tx.created_at else 0
+            perform_time_ms = to_ms(tx.processed_at) if tx.status == 'completed' and tx.processed_at else 0
+            cancel_time_ms = to_ms(tx.processed_at) if tx.status in ['cancelled', 'refunded'] and tx.processed_at else 0
+            
+            # Extract cancellation reason if available
+            reason = None
+            if tx.status in ['cancelled', 'refunded']:
+                # Try to extract reason code from failure_reason
+                if tx.failure_reason and 'Reason' in tx.failure_reason:
+                    try:
+                        # Format: "Payme Cancel: Reason X"
+                        reason_str = tx.failure_reason.split('Reason')[-1].strip()
+                        reason = int(reason_str)
+                    except (ValueError, IndexError):
+                        reason = 5  # Default reason
+                else:
+                    reason = 5  # Default reason
+            
+            # Build account object with order_id
+            order_id = tx.payment.order_id if tx.payment else None
+            account = {'order_id': str(order_id)} if order_id else {}
+            
+            tx_data = {
+                'id': tx.provider_transaction_id,
+                'time': create_time_ms,
+                'amount': int(float(tx.amount) * 100),  # Convert to tiyins
+                'account': account,
+                'create_time': create_time_ms,
+                'perform_time': perform_time_ms,
+                'cancel_time': cancel_time_ms,
+                'transaction': str(tx.id),
+                'state': state,
+                'reason': reason
+            }
+            
+            transaction_list.append(tx_data)
+        
+        current_app.logger.info(
+            f"Payme GetStatement: Returned {len(transaction_list)} transactions "
+            f"from {from_dt.isoformat()} to {to_dt.isoformat()}"
+        )
+        
+        return {'result': {'transactions': transaction_list}}
     
     # Private methods for Click integration
     def _create_click_link(self, payment: Payment) -> Dict[str, str]:

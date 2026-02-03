@@ -253,7 +253,7 @@ const Orders = () => {
       key: 'payment_status',
       width: 100,
       render: (status) => (
-        <Tag color={status === 'paid' ? 'green' : status === 'pending' ? 'orange' : 'red'}>
+        <Tag color={status === 'completed' ? 'green' : status === 'pending' ? 'orange' : 'red'}>
           {t(`ui.orders.payment_${status}`)}
         </Tag>
       )
@@ -517,7 +517,7 @@ const Orders = () => {
                 </span>
               </Descriptions.Item>
               <Descriptions.Item label={t('ui.orders.payment_status')}>
-                <Tag color={selectedOrder.payment_status === 'paid' ? 'green' : 'orange'}>
+                <Tag color={selectedOrder.payment_status === 'completed' ? 'green' : 'orange'}>
                   {t(`ui.orders.payment_${selectedOrder.payment_status}`)}
                 </Tag>
               </Descriptions.Item>

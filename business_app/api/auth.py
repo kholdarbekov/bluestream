@@ -2739,12 +2739,23 @@ def link_phone_verify():
             message='Invalid OTP. Please try again.',
             status_code=400
         )
-    
+	
     # OTP verified - now merge accounts
     web_user = User.query.get(web_user_id)
     if not web_user:
         return not_found_response(message='Web account not found')
     
+	# Set is_verified and phone_verified_at on both users
+    now_utc = datetime.now(timezone.utc)
+    telegram_user.is_verified = True
+    telegram_user.phone = phone
+    telegram_user.phone_verified_at = now_utc
+    web_user.is_verified = True
+    web_user.phone = phone
+    web_user.phone_verified_at = now_utc
+    
+    db.session.commit()
+	
     # Use cross-platform sync service to link accounts
     from business_app.services.cross_platform_sync_service import cross_platform_sync_service
     

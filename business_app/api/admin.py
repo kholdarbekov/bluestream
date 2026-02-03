@@ -1421,7 +1421,8 @@ def get_order_details(order_id):
             db.joinedload(Order.user),
             db.joinedload(Order.order_items).joinedload(OrderItem.product),
             db.joinedload(Order.delivery_address),
-            db.joinedload(Order.delivery)
+            db.joinedload(Order.delivery),
+            db.joinedload(Order.payment)
         ).get(order_id)
 
         if not order:
@@ -1439,7 +1440,7 @@ def get_order_details(order_id):
             'discount_amount': float(getattr(order, 'discount_amount', 0)),
             'delivery_fee': float(getattr(order, 'delivery_fee', 0)),
             'payment_method': order.payment_method.value if order.payment_method else None,
-            'payment_status': order.payment_status.value if hasattr(order, 'payment_status') and order.payment_status else 'pending',
+            'payment_status': order.payment.status.value if order.payment and hasattr(order.payment.status, 'value') else ('pending' if not order.payment else str(order.payment.status)),
             'delivery_date': order.delivery_date.isoformat() if order.delivery_date else None,
             'special_instructions': getattr(order, 'special_instructions', None),
             'admin_notes': getattr(order, 'admin_notes', None),

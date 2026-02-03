@@ -665,6 +665,12 @@ def serialize_order_admin(order: Order) -> Dict[str, Any]:
         data['admin_notes'] = getattr(order, 'admin_notes', None)
         data['priority_level'] = getattr(order, 'priority_level', 'normal')
         
+        # Add payment status from related Payment model
+        if hasattr(order, 'payment') and order.payment:
+            data['payment_status'] = order.payment.status.value if hasattr(order.payment.status, 'value') else str(order.payment.status)
+        else:
+            data['payment_status'] = 'pending'
+        
         return data
         
     except Exception as e:

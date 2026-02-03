@@ -5,6 +5,8 @@ from typing import Dict, List, Optional, Any, Type, Union
 from sqlalchemy.orm import joinedload, selectinload, subqueryload, contains_eager, Query
 from sqlalchemy.orm.strategy_options import Load
 from sqlalchemy import func, text, case
+
+
 class EagerLoadingStrategy:
     """Central strategy for eager loading commonly accessed relationships"""
     
@@ -90,6 +92,9 @@ class EagerLoadingStrategy:
                 strategies.append(joinedload(model_class.order))
             elif strategy_name == 'order_admin_detail' and hasattr(model_class, 'user'):
                 strategies.append(joinedload(model_class.user))
+                # Add payment eager loading for payment status display
+                if hasattr(model_class, 'payment'):
+                    strategies.append(joinedload(model_class.payment))
                 
         except Exception:
             # Return empty list if unable to build strategies

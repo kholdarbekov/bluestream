@@ -76,12 +76,12 @@ class TranslationService:
 
         # Try cache first
         cached_translation = self._get_cached_translation(key, language)
-        if cached_translation:
+        if cached_translation is not None:
             return self._format_translation(cached_translation, **kwargs)
 
         # Get from database
         translation = self._get_db_translation(key, language)
-        if translation:
+        if translation is not None:
             # Cache the translation
             self._cache_translation(key, language, translation)
             return self._format_translation(translation, **kwargs)

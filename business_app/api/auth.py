@@ -2745,13 +2745,13 @@ def link_phone_verify():
     if not web_user:
         return not_found_response(message='Web account not found')
     
-	# Set is_verified and phone_verified_at on both users
+    # Set is_verified and phone_verified_at on web_user only
+    # Note: telegram_user should NOT have phone set - web_user already owns this phone
+    # and the unique constraint would be violated if we try to set it on both users.
+    # The telegram_user will be marked as 'merged' by cross_platform_sync_service anyway.
     now_utc = datetime.now(timezone.utc)
     telegram_user.is_verified = True
-    telegram_user.phone = phone
-    telegram_user.phone_verified_at = now_utc
     web_user.is_verified = True
-    web_user.phone = phone
     web_user.phone_verified_at = now_utc
     
     db.session.commit()

@@ -38,7 +38,6 @@ def get_membership_tiers():
     Get all membership tier configurations.
     
     Returns tier configurations from database (LoyaltyTierConfig).
-    Falls back to hardcoded MEMBERSHIP_TIERS if no database tiers exist.
     """
     try:
         # Get tiers from LoyaltyService (queries database first, falls back to constants)

@@ -31,7 +31,6 @@ class LoyaltyService:
         
         Uses LoyaltyProgram.points_per_uzs from database as primary source,
         then applies tier-based multiplier from LoyaltyTierConfig (database).
-        Falls back to MEMBERSHIP_TIERS constants if no database tiers exist.
         
         Args:
             user_id: User ID
@@ -92,29 +91,17 @@ class LoyaltyService:
         """
         Get all tier configurations from database.
         
-        Falls back to MEMBERSHIP_TIERS constants if no database tiers exist.
+        Returns an empty list if no tiers are configured.
         """
         try:
             tiers = LoyaltyTierConfig.get_all_tiers(program_id)
             if tiers:
                 return [tier.to_dict() for tier in tiers]
         except Exception:
-            pass  # Fall back to constants
+            pass
         
-        # Fallback to hardcoded constants
-        return [
-            {
-                'name': tier_name,
-                'min_points': tier_config['min_points'],
-                'max_points': tier_config['max_points'],
-                'points_multiplier': tier_config['points_multiplier'],
-                'discount_percentage': tier_config['discount_percentage'],
-                'benefits': tier_config['benefits'],
-                'color': tier_config['color'],
-                'icon': tier_config['icon']
-            }
-            for tier_name, tier_config in MEMBERSHIP_TIERS.items()
-        ]
+        # Return empty list if no tiers configured in database
+        return []
     
     def get_or_create_loyalty_account(self, user_id: int) -> LoyaltyPoints:
         """Get or create loyalty account for user"""
@@ -132,6 +119,22 @@ class LoyaltyService:
             
             program_id = program.id if program else 1
             
+            # Determine starting tier for 0 points using database config
+            # This mirrors the logic in LoyaltyPoints.calculate_tier()
+            starting_tier = LoyaltyTierConfig.get_tier_for_points(0, program_id)
+            current_tier_name = starting_tier.name if starting_tier else 'Bronze'
+            starting_order = starting_tier.display_order if starting_tier else -1
+            
+            # Find next tier above starting tier
+            next_tier = LoyaltyTierConfig.query.filter(
+                LoyaltyTierConfig.program_id == program_id,
+                LoyaltyTierConfig.is_active == True,
+                LoyaltyTierConfig.display_order > starting_order
+            ).order_by(LoyaltyTierConfig.display_order.asc()).first()
+            
+            # Points needed is the next tier's min_points (since user has 0 points)
+            points_to_next_tier = next_tier.min_points if next_tier else 0
+            
             account = LoyaltyPoints(
                 user_id=user_id,
                 program_id=program_id,
@@ -139,8 +142,8 @@ class LoyaltyService:
                 total_redeemed=0,
                 total_expired=0,
                 current_balance=0,
-                current_tier='Bronze',
-                points_to_next_tier=MEMBERSHIP_TIERS['Silver']['min_points']
+                current_tier=current_tier_name,
+                points_to_next_tier=points_to_next_tier
             )
             
             db.session.add(account)
@@ -683,6 +686,11 @@ class LoyaltyService:
                 
                 # Recalculate next tier target
                 self._update_points_to_next_tier(account, target_tier_config)
+
+        # CASE 3: Same tier - still need to update points_to_next_tier
+        # as user's qualifying_points may have changed
+        else:
+            self._update_points_to_next_tier(account, target_tier_config)
 
     def _update_points_to_next_tier(self, account: LoyaltyPoints, current_tier_config: LoyaltyTierConfig):
         """Helper to recalculate points needed for next level"""

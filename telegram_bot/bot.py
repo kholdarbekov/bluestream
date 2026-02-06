@@ -94,11 +94,6 @@ class WaterBusinessBot:
             # Load translations
             await i18n.load_translations()
 
-            # Start webhook server for bot management
-            logger.info("Starting webhook server...")
-            await webhook_server.start()
-            logger.info("Webhook server started successfully")
-
             # Initialize API client
             # Note: api_client will be used as async context manager in handlers
             
@@ -118,6 +113,12 @@ class WaterBusinessBot:
                 .build()
             )
             logger.info("Telegram Application created successfully!")
+
+            # Start webhook server for bot management
+            logger.info("Starting webhook server...")
+            webhook_server.set_application(self.application)
+            await webhook_server.start()
+            logger.info("Webhook server started successfully")
             
             # Test bot connection
             logger.info("Testing bot connection to Telegram...")
@@ -229,6 +230,8 @@ class WaterBusinessBot:
             CallbackQueryHandler(order_handlers.track_order, pattern="^track_order_"),
             CallbackQueryHandler(order_handlers.orders_menu, pattern="^back_to_orders$"),
             CallbackQueryHandler(order_handlers.cancel_order, pattern="^cancel_order_\\d+"),
+            # Back to delivery address selection (from payment method screen)
+            CallbackQueryHandler(order_handlers.checkout_handler, pattern="^back_to_delivery$"),
             
             # Confirmation callbacks
             # Order Cancellation

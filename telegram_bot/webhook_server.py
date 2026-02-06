@@ -171,6 +171,11 @@ class WebhookServer:
         self.app = None
         self.runner = None
         self.site = None
+        self.bot_app = None
+
+    def set_application(self, application):
+        """Set Telegram Application instance"""
+        self.bot_app = application
 
     async def setup(self):
         """Setup webhook server routes"""
@@ -178,10 +183,100 @@ class WebhookServer:
 
         # Add routes
         self.app.router.add_post('/internal/reload-translations', reload_translations_handler)
+        self.app.router.add_post('/internal/payment-success', self.payment_success_handler)
         self.app.router.add_get('/internal/stats', stats_handler)
         self.app.router.add_get('/health', health_handler)
 
         logger.info(f"Webhook server configured on {self.host}:{self.port}")
+
+    async def payment_success_handler(self, request):
+        """
+        Handle payment success webhook from backend
+        
+        POST /internal/payment-success
+        {
+            "user_id": 12345,
+            "order_id": 67890,
+            "amount": 15000,
+            "currency": "UZS"
+        }
+        """
+        try:
+            # Verify signature
+            if not verify_webhook_signature(request):
+                logger.warning(f"Invalid webhook signature from {request.remote}")
+                return web.json_response({
+                    'success': False,
+                    'message': 'Invalid signature'
+                }, status=401)
+                
+            if not self.bot_app:
+                logger.error("Bot application not initialized in webhook server")
+                return web.json_response({
+                    'success': False,
+                    'message': 'Bot not initialized'
+                }, status=503)
+
+            # Parse request data
+            try:
+                data = await request.json()
+            except Exception:
+                return web.json_response({
+                    'success': False,
+                    'message': 'Invalid JSON'
+                }, status=400)
+                
+            user_id = data.get('user_id')
+            telegram_id = data.get('telegram_id')
+            order_id = data.get('order_id')
+            order_number = data.get('order_number')
+            amount = data.get('amount')
+            currency = data.get('currency', 'UZS')
+            
+            if not user_id or not order_id:
+                return web.json_response({
+                    'success': False,
+                    'message': 'Missing required fields: user_id, order_id'
+                }, status=400)
+            
+            if not telegram_id:
+                logger.warning(f"Skipping notification for user {user_id}: No telegram_id provided")
+                return web.json_response({
+                    'success': True,
+                    'message': 'Skipped: No telegram_id'
+                })
+                
+            logger.info(f"Sending payment success notification to telegram_id {telegram_id} (user {user_id}) for order {order_number}")
+            
+            # Get user language
+            language = await i18n.get_user_language(telegram_id)
+            
+            # Construct message with localized formatting
+            message_text = i18n.get(
+                'telegram.payment.success_message', 
+                language, 
+                order_number=order_number or str(order_id),
+                amount=f"{amount:,.0f}",
+                currency=currency
+            )
+
+            # Send message
+            await self.bot_app.bot.send_message(
+                chat_id=telegram_id,
+                text=message_text
+            )
+            
+            return web.json_response({
+                'success': True,
+                'message': 'Notification sent'
+            })
+
+        except Exception as e:
+            logger.error(f"Error processing payment success: {e}", exc_info=True)
+            return web.json_response({
+                'success': False,
+                'message': f'Internal error: {str(e)}'
+            }, status=500)
 
     async def start(self):
         """Start the webhook server"""
@@ -198,6 +293,7 @@ class WebhookServer:
             logger.info(f"Webhook server started on http://{self.host}:{self.port}")
             logger.info("Available endpoints:")
             logger.info(f"  POST http://{self.host}:{self.port}/internal/reload-translations")
+            logger.info(f"  POST http://{self.host}:{self.port}/internal/payment-success")
             logger.info(f"  GET  http://{self.host}:{self.port}/internal/stats")
             logger.info(f"  GET  http://{self.host}:{self.port}/health")
 

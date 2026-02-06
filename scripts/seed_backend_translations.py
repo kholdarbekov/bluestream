@@ -741,6 +741,11 @@ BACKEND_TRANSLATIONS = {
     # ============================================================================
     # Telegram Payment Buttons (telegram.payment.*)
     # ============================================================================
+    'telegram.payment.success_message': {
+        'en': '✅ Payment successful!\n\nOrder No: #{order_number}\nAmount: {amount} {currency}\n\nThank you for your purchase!',
+        'uz': '✅ To\'lov muvaffaqiyatli amalga oshirildi!\n\nBuyurtma raqami: #{order_number}\nSumma: {amount} {currency}\n\nXaridingiz uchun rahmat!',
+        'ru': '✅ Оплата прошла успешно!\n\nНомер заказа: #{order_number}\nСумма: {amount} {currency}\n\nСпасибо за покупку!'
+    },
     'telegram.payment.pay_now': {
         'en': '💳 Pay Now',
         'uz': '💳 Hozir to\'lash',

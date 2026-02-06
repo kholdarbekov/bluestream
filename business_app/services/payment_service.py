@@ -2104,6 +2104,28 @@ class PaymentService:
         # Send notification
         from ..tasks.notification_tasks import send_payment_confirmation_task
         send_payment_confirmation_task.delay(payment.id)
+
+        # Trigger telegram bot notification
+        try:
+            from flask import current_app
+            user = payment.user
+            if user and user.telegram_id:
+                from business_app.utils.bot_webhook import trigger_bot_webhook
+                trigger_bot_webhook('/internal/payment-success', {
+                    'user_id': user.id,
+                    'telegram_id': user.telegram_id,
+                    'order_id': order.id,
+                    'order_number': order.order_number,
+                    'amount': float(order.total_amount),
+                    'currency': 'UZS'
+                })
+            else:
+                if current_app:
+                    current_app.logger.info(f"Skipping bot notification for payment {payment.id}: User has no telegram_id")
+        except Exception as e:
+            from flask import current_app
+            if current_app:
+                current_app.logger.error(f"Failed to trigger bot payment success webhook: {e}")
     
     def _process_points_refund(self, payment: Payment, amount: int, reason: str) -> bool:
         """Process loyalty points refund"""

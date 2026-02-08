@@ -65,6 +65,7 @@ services:
       dockerfile: Dockerfile
       target: business_app
     environment:
+      - TZ=${DISPLAY_TIMEZONE:-Asia/Tashkent}
       - FLASK_ENV=${FLASK_ENV:-production}
       - FLASK_DEBUG=${FLASK_DEBUG:-0}
       - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-dummy_password}@postgres:5432/${POSTGRES_DB:-bluestream_db}
@@ -135,10 +136,12 @@ services:
       dockerfile: Dockerfile
       target: telegram_bot
     environment:
+      - TZ=${DISPLAY_TIMEZONE:-Asia/Tashkent}
       - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-dummy_password}@postgres:5432/${POSTGRES_DB:-bluestream_db}
       - REDIS_URL=redis://redis:6379/1
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
       - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+      - WEBHOOK_SECRET=${WEBHOOK_SECRET:-}
       - USE_SECRETS_FALLBACK=true
       # - WEBHOOK_URL=${WEBHOOK_URL}
       # - BUSINESS_APP_URL=http://business_app:80
@@ -182,6 +185,7 @@ services:
       dockerfile: Dockerfile
       target: celery_worker
     environment:
+      - TZ=${DISPLAY_TIMEZONE:-Asia/Tashkent}
       - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-dummy_password}@postgres:5432/${POSTGRES_DB:-bluestream_db}
       - REDIS_URL=redis://redis:6379/0
       - SECRET_KEY=${SECRET_KEY}
@@ -210,7 +214,7 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    command: celery -A business_app.tasks.celery_app worker --loglevel=info --concurrency=${CELERY_WORKER_CONCURRENCY:-4} --max-memory-per-child=${CELERY_WORKER_MAX_MEMORY_PER_CHILD:-200000}
+    command: celery -A business_app.tasks.celery_app worker --loglevel=info --concurrency=${CELERY_WORKER_CONCURRENCY:-4} --max-memory-per-child=${CELERY_WORKER_MAX_MEMORY_PER_CHILD:-200000} --max-tasks-per-child=${CELERY_WORKER_MAX_TASKS_PER_CHILD:-1000}
     healthcheck:
       test: [ "CMD", "celery", "-A", "business_app.tasks.celery_app", "status" ]
       interval: 60s
@@ -238,6 +242,7 @@ services:
       dockerfile: Dockerfile
       target: celery_beat
     environment:
+      - TZ=${DISPLAY_TIMEZONE:-Asia/Tashkent}
       - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-dummy_password}@postgres:5432/${POSTGRES_DB:-bluestream_db}
       - REDIS_URL=redis://redis:6379/0
       - SECRET_KEY=${SECRET_KEY}
@@ -249,12 +254,13 @@ services:
       - ./business_app:/app/business_app
       - ./shared:/app/shared
       - ./logs:/app/logs
+      - celerybeat_schedule:/app/celerybeat
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
-    command: celery -A business_app.tasks.celery_app beat --loglevel=info
+    command: celery -A business_app.tasks.celery_app beat --loglevel=info --schedule=/app/celerybeat/celerybeat-schedule
     healthcheck:
       test: [ "CMD", "sh", "-c", "ps aux | grep 'celery.*beat' | grep -v grep || exit 1" ]
       interval: 60s
@@ -264,11 +270,11 @@ services:
     deploy:
       resources:
         limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
           memory: 256M
           cpus: '0.25'
-        reservations:
-          memory: 128M
-          cpus: '0.1'
     restart: unless-stopped
     logging:
       driver: "json-file"
@@ -287,9 +293,7 @@ services:
       - REACT_APP_ENVIRONMENT=${ENVIRONMENT:-production}
       - REACT_APP_APP_NAME=Blue Stream Admin
       - REACT_APP_VERSION=1.0.0
-    depends_on:
-      business_app:
-        condition: service_healthy
+      - REACT_APP_TIMEZONE_OFFSET=${DISPLAY_TIMEZONE_OFFSET:-+05:00}
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:80/health" ]
       interval: 30s
@@ -359,6 +363,7 @@ volumes:
   redis_data:
   uploads_data:
   nginx_cache:
+  celerybeat_schedule:
 
 
 networks:

@@ -14,8 +14,9 @@ from shared.constants import TASHKENT_DISTRICTS, get_district_name, get_district
 from handlers.menu import main_menu_handler
 from api_client import api_client
 from database import db_manager, BotUserRepository
-from utils import user_middleware, validate_phone_number, normalize_phone_number, get_auth_token
+from utils import user_middleware, validate_phone_number, normalize_phone_number, get_auth_token, otp_rate_limiter
 from config import config
+from handlers.base import BaseHandler
 
 logger = logging.getLogger('handlers')
 
@@ -28,11 +29,8 @@ logger = logging.getLogger('handlers')
  LINK_ACCOUNT_CONFIRM, LINK_ACCOUNT_OTP) = range(18)
 
 
-class ProfileHandlers:
+class ProfileHandlers(BaseHandler):
     """Profile management handlers"""
-    
-    def __init__(self):
-        self.user_repo = BotUserRepository(db_manager)
     
     async def profile_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Show user profile menu"""
@@ -839,6 +837,14 @@ class ProfileHandlers:
                     )
                     return PHONE
                 
+                # Rate limit OTP requests
+                if not await otp_rate_limiter.allow_otp_request(user_id):
+                    await query.edit_message_text(
+                        "⏳ Too many verification attempts. Please wait a few minutes and try again.",
+                        reply_markup=None
+                    )
+                    return PHONE
+
                 # Call API to send OTP
                 try:
                     async with api_client as client:
@@ -923,16 +929,29 @@ class ProfileHandlers:
                     if response.success:
                         # Account linked successfully!
                         context.user_data.pop('pending_link_phone', None)
-                        
+
+                        # Update cached tokens with the merged account's tokens
+                        new_tokens = response.data.get('tokens', {})
+                        if new_tokens.get('access_token') and new_tokens.get('refresh_token'):
+                            token_manager = context.bot_data.get('token_manager')
+                            if token_manager:
+                                await token_manager.store_tokens(
+                                    user_id,
+                                    new_tokens['access_token'],
+                                    new_tokens['refresh_token'],
+                                    new_tokens.get('expires_in', 3600)
+                                )
+                                logger.info(f"Updated cached tokens after account merge for user {user_id}")
+
                         user_data = response.data.get('user', {})
                         name = user_data.get('first_name', 'User')
-                        
+
                         await update.message.reply_text(
                             f"✅ Accounts linked successfully!\n\n"
                             f"Welcome back, {name}! Your Telegram is now connected to your existing account.",
                             reply_markup=MenuKeyboards.main_menu(language)
                         )
-                        
+
                         logger.info(f"Account linking completed for user {user_id}")
                         return ConversationHandler.END
                     else:
@@ -2793,25 +2812,6 @@ class ProfileHandlers:
             logger.error(f"Error handling address instructions edit: {e}")
             await update.message.reply_text("❌ An error occurred while updating delivery instructions. Please try again.")
     
-    async def _handle_auth_error(self, update: Update, language: str):
-        """Handle authentication error"""
-        error_msg = i18n.get('telegram.error.auth_failed', language)
-
-        if update.callback_query:
-            await update.callback_query.edit_message_text(error_msg)
-            await update.callback_query.answer()
-        else:
-            await update.message.reply_text(error_msg)
-    
-    async def _handle_api_error(self, update: Update, error: str, language: str):
-        """Handle API error"""
-        error_msg = f"❌ {error}"
-        
-        if update.callback_query:
-            await update.callback_query.answer(error_msg)
-        else:
-            await update.message.reply_text(error_msg)
-    
     async def logout_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle user logout from all platforms"""
         try:
@@ -2893,18 +2893,6 @@ class ProfileHandlers:
             logger.error(f"Error confirming logout: {e}")
             await self._handle_error(update)
     
-    async def _handle_error(self, update: Update):
-        """Handle general error"""
-        try:
-            language = await i18n.get_user_language(update.effective_user.id)
-            error_msg = i18n.get('telegram.error_occurred', language)
-        except:
-            error_msg = i18n.get('telegram.error_occurred', 'en')
-
-        if update.callback_query:
-            await update.callback_query.answer(error_msg)
-        else:
-            await update.message.reply_text(error_msg)
 
 
 # Global handler instance

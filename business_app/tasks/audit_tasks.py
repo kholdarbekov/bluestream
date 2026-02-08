@@ -4,17 +4,16 @@ Celery tasks for audit log maintenance and retention
 import logging
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Any
-from celery import current_task
+from celery import shared_task, current_task
 from sqlalchemy import and_
 
-from business_app.tasks.celery_app import celery
 from business_app import db
 from business_app.models.audit import AuditLog, AuditSeverity
 
 logger = logging.getLogger(__name__)
 
 
-@celery.task(bind=True, autoretry_for=(Exception,), retry_kwargs={'max_retries': 3, 'countdown': 300})
+@shared_task(bind=True, autoretry_for=(Exception,), retry_kwargs={'max_retries': 3, 'countdown': 300})
 def cleanup_old_audit_logs_task(
     self,
     retention_days: int = 90,
@@ -170,7 +169,7 @@ def cleanup_old_audit_logs_task(
         raise
 
 
-@celery.task(bind=True, autoretry_for=(Exception,), retry_kwargs={'max_retries': 3, 'countdown': 300})
+@shared_task(bind=True, autoretry_for=(Exception,), retry_kwargs={'max_retries': 3, 'countdown': 300})
 def archive_old_audit_logs_task(
     self,
     retention_days: int = 90,
@@ -284,7 +283,7 @@ def archive_old_audit_logs_task(
         raise
 
 
-@celery.task(bind=True)
+@shared_task(bind=True)
 def get_audit_log_statistics_task(self) -> Dict[str, Any]:
     """
     Get statistics about audit log storage and growth

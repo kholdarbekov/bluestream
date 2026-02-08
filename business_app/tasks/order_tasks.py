@@ -22,7 +22,7 @@ from business_app import db
 logger = get_task_logger(__name__)
 
 
-@shared_task(bind=True, max_retries=3, default_retry_delay=600)
+@shared_task(bind=True, max_retries=3, default_retry_delay=600, time_limit=600, soft_time_limit=540)
 def auto_confirm_order_task(self, order_id: int):
     """Automatically confirm order after specified time"""
     try:
@@ -58,7 +58,7 @@ def auto_confirm_order_task(self, order_id: int):
         raise self.retry(exc=exc)
 
 
-@shared_task
+@shared_task(time_limit=600, soft_time_limit=540)
 def auto_confirm_pending_orders():
     """Auto-confirm orders that have been pending for too long"""
     try:
@@ -79,7 +79,7 @@ def auto_confirm_pending_orders():
             try:
                 # Check if payment is completed or cash on delivery
                 if (order.payment and order.payment.status == PaymentStatus.COMPLETED) or \
-                   (order.payment and order.payment.method.value == 'cash'):
+                   (order.payment and order.payment.payment_method.value == 'cash'):
                     
                     order_service.update_order_status(
                         order.id,
@@ -114,7 +114,7 @@ def auto_confirm_pending_orders():
         return {'error': str(e)}
 
 
-@shared_task
+@shared_task(time_limit=600, soft_time_limit=540)
 def cancel_abandoned_orders():
     """Cancel orders that have been abandoned (no payment after 24 hours)"""
     try:
@@ -123,6 +123,7 @@ def cancel_abandoned_orders():
         # Get orders pending for more than 24 hours without payment
         cutoff_time = datetime.now(timezone.utc) - timedelta(hours=24)
         
+        # Use FOR UPDATE SKIP LOCKED to prevent concurrent workers from processing same orders
         abandoned_orders = Order.query.filter(
             Order.status == OrderStatus.PENDING,
             Order.created_at < cutoff_time,
@@ -130,7 +131,7 @@ def cancel_abandoned_orders():
                 Order.payment.is_(None),
                 and_(Order.payment.has(), Order.payment.status != 'completed')
             )
-        ).all()
+        ).with_for_update(skip_locked=True).all()
         
         order_service = OrderService()
         notification_service = NotificationService()
@@ -162,15 +163,17 @@ def cancel_abandoned_orders():
                 logger.error(f"Failed to cancel abandoned order {order.id}: {e}")
                 continue
         
+        db.session.commit()  # Release row locks
         logger.info(f"Cancelled {cancelled_count} abandoned orders")
         return {'cancelled_count': cancelled_count}
-        
+
     except Exception as e:
+        db.session.rollback()
         logger.error(f"Failed to cancel abandoned orders: {e}")
         return {'error': str(e)}
 
 
-@shared_task(bind=True, max_retries=3)
+@shared_task(bind=True, max_retries=3, time_limit=600, soft_time_limit=540)
 def update_inventory_after_order(self, order_id: int):
     """Update product inventory after order confirmation"""
     try:
@@ -189,33 +192,45 @@ def update_inventory_after_order(self, order_id: int):
         
         for item in order.order_items:
             try:
-                product = item.product
-                if product and product.stock_quantity is not None:
-                    # Reduce stock quantity
-                    new_stock = product.stock_quantity - item.quantity
-                    
-                    if new_stock < 0:
-                        logger.warning(f"Product {product.id} stock would go negative: {new_stock}")
-                        # Set to 0 and mark as out of stock
-                        product.stock_quantity = 0
-                        product.is_in_stock = False
-                    else:
-                        product.stock_quantity = new_stock
-                        product.is_in_stock = new_stock > 0
-                    
-                    product.updated_at = datetime.now(timezone.utc)
-                    
+                # Atomic inventory decrement — prevents overselling via concurrent orders
+                updated = Product.query.filter(
+                    Product.id == item.product_id,
+                    Product.stock_quantity >= item.quantity
+                ).update({
+                    Product.stock_quantity: Product.stock_quantity - item.quantity,
+                    Product.is_in_stock: (Product.stock_quantity - item.quantity) > 0,
+                    Product.updated_at: datetime.now(timezone.utc)
+                }, synchronize_session=False)
+
+                if not updated:
+                    # Insufficient stock — set to 0 if stock is less than requested
+                    logger.warning(
+                        f"Insufficient stock for product {item.product_id}, "
+                        f"requested: {item.quantity}"
+                    )
+                    Product.query.filter(
+                        Product.id == item.product_id,
+                        Product.stock_quantity < item.quantity
+                    ).update({
+                        Product.stock_quantity: 0,
+                        Product.is_in_stock: False,
+                        Product.updated_at: datetime.now(timezone.utc)
+                    }, synchronize_session=False)
+
+                # Refresh product to get updated values
+                product = Product.query.get(item.product_id)
+                if product:
                     inventory_updates.append({
                         'product_id': product.id,
                         'product_name': product.get_translated('name', get_current_language()),
                         'quantity_reduced': item.quantity,
                         'new_stock': product.stock_quantity
                     })
-                    
+
                     # Send low stock alert if needed
                     if product.stock_quantity <= product.min_stock_level:
                         send_low_stock_alert.delay(product.id)
-                
+
             except Exception as e:
                 logger.error(f"Failed to update inventory for item {item.id}: {e}")
                 continue
@@ -234,7 +249,7 @@ def update_inventory_after_order(self, order_id: int):
         raise self.retry(exc=exc)
 
 
-@shared_task(bind=True, max_retries=3)
+@shared_task(bind=True, max_retries=3, time_limit=600, soft_time_limit=540)
 def send_low_stock_alert(self, product_id: int):
     """Send low stock alert to management"""
     try:
@@ -274,7 +289,7 @@ def send_low_stock_alert(self, product_id: int):
         raise self.retry(exc=exc)
 
 
-@shared_task
+@shared_task(time_limit=600, soft_time_limit=540)
 def generate_daily_order_report():
     """Generate daily order summary report"""
     try:
@@ -372,7 +387,7 @@ def generate_daily_order_report():
         return {'error': str(e)}
 
 
-@shared_task
+@shared_task(time_limit=600, soft_time_limit=540)
 def process_bulk_order_updates(order_updates: List[Dict[str, Any]]):
     """Process bulk order status updates"""
     try:
@@ -412,7 +427,7 @@ def process_bulk_order_updates(order_updates: List[Dict[str, Any]]):
         return {'error': str(e)}
 
 
-@shared_task(bind=True, max_retries=2)
+@shared_task(bind=True, max_retries=2, time_limit=600, soft_time_limit=540)
 def send_order_followup(self, order_id: int, days_after_delivery: int = 3):
     """Send follow-up message after order delivery"""
     try:
@@ -468,7 +483,7 @@ def send_order_followup(self, order_id: int, days_after_delivery: int = 3):
         raise self.retry(exc=exc)
 
 
-@shared_task
+@shared_task(time_limit=600, soft_time_limit=540)
 def analyze_order_patterns():
     """Analyze order patterns and generate insights"""
     try:
@@ -561,7 +576,7 @@ def analyze_order_patterns():
         return {'error': str(e)}
 
 
-@shared_task
+@shared_task(time_limit=600, soft_time_limit=540)
 def cleanup_old_orders():
     """Archive old completed orders to optimize database performance"""
     try:
@@ -599,7 +614,7 @@ def cleanup_old_orders():
         return {'error': str(e)}
 
 
-@shared_task(bind=True, max_retries=3)
+@shared_task(bind=True, max_retries=3, time_limit=600, soft_time_limit=540)
 def validate_order_integrity(self, order_id: int):
     """Validate order data integrity and fix issues"""
     try:
@@ -670,7 +685,7 @@ def validate_order_integrity(self, order_id: int):
         raise self.retry(exc=exc)
 
 
-@shared_task
+@shared_task(time_limit=600, soft_time_limit=540)
 def monitor_order_anomalies():
     """Monitor for unusual order patterns that might indicate issues"""
     try:

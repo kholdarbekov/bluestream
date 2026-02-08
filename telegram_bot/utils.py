@@ -4,10 +4,14 @@ Utility functions for the Telegram Bot
 import logging
 import asyncio
 from typing import Dict, Optional, Any
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from functools import wraps
 import json
 
+from shared.constants import DISPLAY_TIMEZONE
+
+import redis.asyncio as aioredis
 import sentry_sdk
 from telegram import Update
 from telegram.ext import ContextTypes
@@ -21,69 +25,223 @@ logger = logging.getLogger('utils')
 
 
 class RateLimiter:
-    """Rate limiting for bot requests"""
-    
+    """Redis-backed sliding window rate limiter for bot requests.
+
+    Falls back to in-memory counters when Redis is unavailable.
+    """
+
+    CLEANUP_INTERVAL = 300  # Run cleanup every 5 minutes
+
     def __init__(self):
-        self.requests: Dict[int, list] = {}
         self.max_requests = config.telegram.rate_limit_requests
         self.window_seconds = config.telegram.rate_limit_window
-    
+        self._redis: Optional[aioredis.Redis] = None
+        self._redis_available = False
+        # In-memory fallback
+        self._local_requests: Dict[int, list] = {}
+        self._last_cleanup = datetime.now(timezone.utc)
+
+    async def _ensure_redis(self) -> bool:
+        """Lazily connect to Redis on first use."""
+        if self._redis_available:
+            return True
+        if self._redis is not None:
+            return False  # already tried and failed
+        try:
+            self._redis = aioredis.from_url(
+                config.redis.url, encoding='utf-8', decode_responses=True
+            )
+            await self._redis.ping()
+            self._redis_available = True
+            logger.info("RateLimiter connected to Redis")
+            return True
+        except Exception as e:
+            logger.warning(f"RateLimiter Redis unavailable, using in-memory fallback: {e}")
+            self._redis_available = False
+            return False
+
+    def _periodic_cleanup(self):
+        """Remove stale entries from in-memory fallback."""
+        now = datetime.now(timezone.utc)
+        if now - self._last_cleanup < timedelta(seconds=self.CLEANUP_INTERVAL):
+            return
+        self._last_cleanup = now
+        cutoff = now - timedelta(seconds=self.window_seconds)
+        stale_keys = [
+            uid for uid, times in self._local_requests.items()
+            if not times or times[-1] < cutoff
+        ]
+        for uid in stale_keys:
+            del self._local_requests[uid]
+
     async def allow_request(self, user_id: int) -> bool:
-        """Check if user is within rate limits"""
+        """Check if user is within rate limits (Redis or in-memory)."""
         if not config.telegram.rate_limit_enabled:
             return True
-        
-        now = datetime.now()
-        
-        # Clean old requests
-        if user_id in self.requests:
-            self.requests[user_id] = [
-                req_time for req_time in self.requests[user_id]
-                if now - req_time < timedelta(seconds=self.window_seconds)
+
+        if await self._ensure_redis():
+            return await self._allow_request_redis(user_id)
+        return self._allow_request_local(user_id)
+
+    async def _allow_request_redis(self, user_id: int) -> bool:
+        """Sliding window counter via Redis sorted set."""
+        key = f"rate:bot:{user_id}"
+        now = datetime.now(timezone.utc).timestamp()
+        window_start = now - self.window_seconds
+
+        pipe = self._redis.pipeline()
+        pipe.zremrangebyscore(key, 0, window_start)
+        pipe.zcard(key)
+        pipe.zadd(key, {str(now): now})
+        pipe.expire(key, self.window_seconds)
+        results = await pipe.execute()
+
+        current_count = results[1]  # zcard result
+        return current_count < self.max_requests
+
+    def _allow_request_local(self, user_id: int) -> bool:
+        """In-memory fallback."""
+        now = datetime.now(timezone.utc)
+        self._periodic_cleanup()
+
+        if user_id in self._local_requests:
+            self._local_requests[user_id] = [
+                t for t in self._local_requests[user_id]
+                if now - t < timedelta(seconds=self.window_seconds)
             ]
         else:
-            self.requests[user_id] = []
-        
-        # Check if under limit
-        if len(self.requests[user_id]) >= self.max_requests:
+            self._local_requests[user_id] = []
+
+        if len(self._local_requests[user_id]) >= self.max_requests:
             return False
-        
-        # Add current request
-        self.requests[user_id].append(now)
+
+        self._local_requests[user_id].append(now)
         return True
 
 
 class UserCache:
-    """Cache for user data"""
-    
+    """Cache for user data with max size and periodic cleanup"""
+
+    MAX_SIZE = 10000
+    CLEANUP_INTERVAL = 300  # 5 minutes
+    DEFAULT_CACHE_TIMEOUT = 300  # 5 minutes
+
     def __init__(self):
         self.cache: Dict[int, Dict[str, Any]] = {}
-        self.cache_timeout = 300  # 5 minutes
-    
+        self.cache_timeout = self.DEFAULT_CACHE_TIMEOUT
+        self._last_cleanup = datetime.now(timezone.utc)
+
+    def _periodic_cleanup(self):
+        """Remove expired entries periodically"""
+        now = datetime.now(timezone.utc)
+        if now - self._last_cleanup < timedelta(seconds=self.CLEANUP_INTERVAL):
+            return
+        self._last_cleanup = now
+        cutoff = now - timedelta(seconds=self.cache_timeout)
+        expired_keys = [
+            uid for uid, (_, ts) in self.cache.items()
+            if ts < cutoff
+        ]
+        for uid in expired_keys:
+            del self.cache[uid]
+
     def get(self, user_id: int) -> Optional[Dict[str, Any]]:
         """Get user data from cache"""
         if user_id in self.cache:
             data, timestamp = self.cache[user_id]
-            if datetime.now() - timestamp < timedelta(seconds=self.cache_timeout):
+            if datetime.now(timezone.utc) - timestamp < timedelta(seconds=self.cache_timeout):
                 return data
             else:
-                # Expired, remove from cache
                 del self.cache[user_id]
-        
         return None
-    
+
     def set(self, user_id: int, data: Dict[str, Any]):
         """Set user data in cache"""
-        self.cache[user_id] = (data, datetime.now())
-    
+        self._periodic_cleanup()
+        # Evict oldest entries if at max size
+        if len(self.cache) >= self.MAX_SIZE and user_id not in self.cache:
+            oldest_key = min(self.cache, key=lambda k: self.cache[k][1])
+            del self.cache[oldest_key]
+        self.cache[user_id] = (data, datetime.now(timezone.utc))
+
     def remove(self, user_id: int):
         """Remove user from cache"""
         if user_id in self.cache:
             del self.cache[user_id]
 
 
+class OTPRateLimiter:
+    """Redis-backed rate limiter for OTP requests (stricter limits).
+
+    Falls back to in-memory when Redis is unavailable.
+    """
+
+    MAX_OTP_REQUESTS = 3
+    OTP_WINDOW_SECONDS = 300  # 5 minutes
+
+    def __init__(self):
+        self._redis: Optional[aioredis.Redis] = None
+        self._redis_available = False
+        # In-memory fallback
+        self._local_requests: Dict[int, list] = {}
+
+    async def _ensure_redis(self) -> bool:
+        if self._redis_available:
+            return True
+        if self._redis is not None:
+            return False
+        try:
+            self._redis = aioredis.from_url(
+                config.redis.url, encoding='utf-8', decode_responses=True
+            )
+            await self._redis.ping()
+            self._redis_available = True
+            return True
+        except Exception:
+            self._redis_available = False
+            return False
+
+    async def allow_otp_request(self, user_id: int) -> bool:
+        """Check if user is within OTP rate limits (Redis or in-memory)."""
+        if await self._ensure_redis():
+            return await self._allow_redis(user_id)
+        return self._allow_local(user_id)
+
+    async def _allow_redis(self, user_id: int) -> bool:
+        key = f"rate:otp:{user_id}"
+        now = datetime.now(timezone.utc).timestamp()
+        window_start = now - self.OTP_WINDOW_SECONDS
+
+        pipe = self._redis.pipeline()
+        pipe.zremrangebyscore(key, 0, window_start)
+        pipe.zcard(key)
+        pipe.zadd(key, {str(now): now})
+        pipe.expire(key, self.OTP_WINDOW_SECONDS)
+        results = await pipe.execute()
+
+        current_count = results[1]
+        return current_count < self.MAX_OTP_REQUESTS
+
+    def _allow_local(self, user_id: int) -> bool:
+        now = datetime.now(timezone.utc)
+        if user_id in self._local_requests:
+            self._local_requests[user_id] = [
+                t for t in self._local_requests[user_id]
+                if now - t < timedelta(seconds=self.OTP_WINDOW_SECONDS)
+            ]
+        else:
+            self._local_requests[user_id] = []
+
+        if len(self._local_requests[user_id]) >= self.MAX_OTP_REQUESTS:
+            return False
+
+        self._local_requests[user_id].append(now)
+        return True
+
+
 # Global instances
 rate_limiter = RateLimiter()
+otp_rate_limiter = OTPRateLimiter()
 user_cache = UserCache()
 
 
@@ -143,9 +301,13 @@ async def authenticate_telegram_user(update: Update, api_client_instance, token_
                 logger.info(f"Authentication successful for user {user_id}")
                 return access_token
         
+        # Auth failed — invalidate any stale cached tokens so next attempt
+        # triggers a fresh authentication instead of reusing bad tokens
+        if token_manager:
+            await token_manager.invalidate_tokens(user_id)
         logger.error(f"Authentication failed for user {user_id}")
         return None
-        
+
     except Exception as e:
         logger.error(f"Error in authenticate_telegram_user: {e}")
         import traceback
@@ -225,13 +387,23 @@ def format_price(price: float) -> str:
 
 
 def format_datetime(dt: datetime, language: str = 'en') -> str:
-    """Format datetime for display"""
+    """Format datetime for display in the configured display timezone.
+
+    Converts UTC (or any timezone-aware) datetime to the display timezone
+    before formatting for user display.
+    """
+    tashkent_tz = ZoneInfo(DISPLAY_TIMEZONE)
+    if dt.tzinfo is None:
+        # Assume naive datetimes are UTC
+        dt = dt.replace(tzinfo=timezone.utc)
+    dt_local = dt.astimezone(tashkent_tz)
+
     if language == 'uz':
-        return dt.strftime("%d.%m.%Y, %H:%M")
+        return dt_local.strftime("%d.%m.%Y, %H:%M")
     elif language == 'ru':
-        return dt.strftime("%d.%m.%Y, %H:%M")
+        return dt_local.strftime("%d.%m.%Y, %H:%M")
     else:  # English
-        return dt.strftime("%m/%d/%Y, %I:%M %p")
+        return dt_local.strftime("%m/%d/%Y, %I:%M %p")
 
 
 def truncate_text(text: str, max_length: int = 100, suffix: str = "...") -> str:
@@ -255,8 +427,8 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
             user_id = update.effective_user.id
             username = update.effective_user.username
             language = await i18n.get_user_language(user_id)
-    except:
-        pass
+    except Exception as e:
+        logger.warning(f"Failed to get user info in error handler: {e}")
 
     # Capture exception with Sentry
     try:
@@ -355,79 +527,16 @@ async def send_typing_action(update: Update, context: ContextTypes.DEFAULT_TYPE)
         logger.warning(f"Failed to send typing action: {e}")
 
 
-def escape_markdown(text: str) -> str:
-    """Escape markdown special characters"""
-    special_chars = ['*', '_', '`', '[', ']', '(', ')', '~', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
-    for char in special_chars:
-        text = text.replace(char, f'\\{char}')
-    return text
-
-
 async def validate_phone_number(phone: str) -> bool:
-    """Validate phone number format"""
-    import re
-    
-    # Uzbekistan phone number pattern
-    pattern = r'^(\+998|998|8)?[0-9]{9}$'
-    
-    # Clean phone number
-    clean_phone = re.sub(r'[\s\-\(\)]', '', phone)
-    
-    return bool(re.match(pattern, clean_phone))
+    """Validate phone number format (delegates to shared validator)"""
+    from shared.validators import validate_phone_number as _validate
+    return _validate(phone)
 
 
 def normalize_phone_number(phone: str) -> str:
-    """Normalize phone number to standard format"""
-    import re
-    
-    # Remove all non-digit characters except +
-    clean_phone = re.sub(r'[^\d+]', '', phone)
-    
-    # Handle different formats
-    if clean_phone.startswith('+998'):
-        return clean_phone
-    elif clean_phone.startswith('998'):
-        return f'+{clean_phone}'
-    elif clean_phone.startswith('8') and len(clean_phone) == 10:
-        return f'+99{clean_phone[1:]}'
-    elif len(clean_phone) == 9:
-        return f'+998{clean_phone}'
-    
-    return clean_phone
-
-
-async def get_user_cart(user_id: int) -> Dict[str, Any]:
-    """Get user's shopping cart from cache/database"""
-    # This would typically use Redis for cart storage
-    # For now, return empty cart
-    return {
-        'items': [],
-        'total': 0,
-        'item_count': 0
-    }
-
-
-async def add_to_user_cart(user_id: int, product_id: int, quantity: int) -> bool:
-    """Add item to user's cart"""
-    try:
-        # This would typically store in Redis
-        # For now, just log the action
-        logger.info(f"Added product {product_id} (qty: {quantity}) to cart for user {user_id}")
-        return True
-    except Exception as e:
-        logger.error(f"Failed to add to cart: {e}")
-        return False
-
-
-async def clear_user_cart(user_id: int) -> bool:
-    """Clear user's shopping cart"""
-    try:
-        # This would typically clear Redis cart
-        logger.info(f"Cleared cart for user {user_id}")
-        return True
-    except Exception as e:
-        logger.error(f"Failed to clear cart: {e}")
-        return False
+    """Normalize phone number to standard format (delegates to shared validator)"""
+    from shared.validators import normalize_phone_number as _normalize
+    return _normalize(phone)
 
 
 def chunk_list(lst: list, chunk_size: int) -> list:
@@ -436,13 +545,14 @@ def chunk_list(lst: list, chunk_size: int) -> list:
 
 
 async def is_business_hours() -> bool:
-    """Check if current time is within business hours"""
-    now = datetime.now()
+    """Check if current time is within business hours (display timezone)"""
+    tashkent_tz = ZoneInfo(DISPLAY_TIMEZONE)
+    now = datetime.now(tashkent_tz)
     current_hour = now.hour
-    
-    business_start = config.features.get('business_hours_start', 9)
-    business_end = config.features.get('business_hours_end', 21)
-    
+
+    business_start = getattr(config.features, 'business_hours_start', 9)
+    business_end = getattr(config.features, 'business_hours_end', 21)
+
     return business_start <= current_hour < business_end
 
 
@@ -459,15 +569,8 @@ class MessageBuilder:
         ]
         
         if order.get('status'):
-            status_icons = {
-                'pending': '🕐',
-                'confirmed': '✅',
-                'preparing': '👨‍🍳',
-                'out_for_delivery': '🚚',
-                'delivered': '📦',
-                'cancelled': '❌'
-            }
-            icon = status_icons.get(order['status'], '📋')
+            from shared.constants import ORDER_STATUS_ICONS, DEFAULT_STATUS_ICON
+            icon = ORDER_STATUS_ICONS.get(order['status'], DEFAULT_STATUS_ICON)
             lines.append(f"📊 Status: {icon} {order['status'].replace('_', ' ').title()}")
         
         return '\n'.join(lines)

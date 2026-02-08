@@ -10,12 +10,13 @@ from datetime import datetime, timezone
 from aiohttp import web
 
 from config import config
+from database import db_manager
 from i18n import i18n
 
 logger = logging.getLogger(__name__)
 
 
-def verify_webhook_signature(request):
+async def verify_webhook_signature(request):
     """
     Verify webhook signature for security
 
@@ -29,14 +30,14 @@ def verify_webhook_signature(request):
     if not signature:
         return False
 
-    # Get webhook secret from config
-    webhook_secret = config.security.jwt_secret_key  # Use same secret as JWT
+    # Get webhook secret from config (falls back to JWT secret for backward compatibility)
+    webhook_secret = config.security.webhook_secret or config.security.jwt_secret_key
     if not webhook_secret:
         logger.error("Webhook secret not configured")
         return False
 
     # Calculate expected signature
-    body = request._read_bytes
+    body = await request.read()
     expected_signature = hmac.new(
         webhook_secret.encode('utf-8'),
         body,
@@ -55,7 +56,7 @@ async def reload_translations_handler(request):
     """
     try:
         # Verify signature
-        if not verify_webhook_signature(request):
+        if not await verify_webhook_signature(request):
             logger.warning(f"Invalid webhook signature from {request.remote}")
             return web.json_response({
                 'success': False,
@@ -86,7 +87,7 @@ async def reload_translations_handler(request):
         logger.error(f"Error reloading translations: {e}", exc_info=True)
         return web.json_response({
             'success': False,
-            'message': f'Failed to reload translations: {str(e)}'
+            'message': 'Internal server error'
         }, status=500)
 
 
@@ -96,29 +97,61 @@ async def health_handler(_request):
 
     GET /health
     """
+    checks = {}
+    overall_healthy = True
+
+    # Check translation status
     try:
-        # Check translation status
         translation_count = sum(len(keys) for keys in i18n.translations.values())
-
-        # Check missing keys
         missing_keys_count = sum(len(keys) for keys in i18n.missing_keys.values())
-
-        return web.json_response({
-            'status': 'healthy',
-            'timestamp': datetime.now(timezone.utc).isoformat(),
-            'translations': {
-                'total_count': translation_count,
-                'languages': list(i18n.translations.keys()),
-                'missing_keys_count': missing_keys_count
-            }
-        })
-
+        checks['translations'] = {
+            'status': 'ok',
+            'total_count': translation_count,
+            'languages': list(i18n.translations.keys()),
+            'missing_keys_count': missing_keys_count
+        }
     except Exception as e:
-        logger.error(f"Health check failed: {e}", exc_info=True)
-        return web.json_response({
-            'status': 'unhealthy',
-            'error': str(e)
-        }, status=500)
+        checks['translations'] = {'status': 'error', 'error': str(e)}
+        overall_healthy = False
+
+    # Check database connectivity
+    try:
+        if db_manager.pool:
+            async with db_manager.pool.acquire() as conn:
+                await conn.fetchval("SELECT 1")
+            pool_size = db_manager.pool.get_size()
+            pool_free = db_manager.pool.get_idle_size()
+            checks['database'] = {
+                'status': 'ok',
+                'pool_size': pool_size,
+                'pool_free': pool_free
+            }
+        else:
+            checks['database'] = {'status': 'not_connected'}
+            overall_healthy = False
+    except Exception as e:
+        checks['database'] = {'status': 'error', 'error': str(e)}
+        overall_healthy = False
+
+    # Check Redis connectivity (via token manager)
+    try:
+        from token_manager import token_manager
+        if token_manager and token_manager.redis:
+            await token_manager.redis.ping()
+            checks['redis'] = {'status': 'ok'}
+        else:
+            checks['redis'] = {'status': 'not_connected'}
+            overall_healthy = False
+    except Exception as e:
+        checks['redis'] = {'status': 'error', 'error': str(e)}
+        overall_healthy = False
+
+    status_code = 200 if overall_healthy else 503
+    return web.json_response({
+        'status': 'healthy' if overall_healthy else 'degraded',
+        'timestamp': datetime.now(timezone.utc).isoformat(),
+        'checks': checks
+    }, status=status_code)
 
 
 async def stats_handler(request):
@@ -129,7 +162,7 @@ async def stats_handler(request):
     """
     try:
         # Verify signature (stats are admin-only)
-        if not verify_webhook_signature(request):
+        if not await verify_webhook_signature(request):
             logger.warning(f"Invalid webhook signature from {request.remote}")
             return web.json_response({
                 'success': False,
@@ -158,7 +191,7 @@ async def stats_handler(request):
         logger.error(f"Error getting stats: {e}", exc_info=True)
         return web.json_response({
             'success': False,
-            'message': f'Failed to get stats: {str(e)}'
+            'message': 'Internal server error'
         }, status=500)
 
 
@@ -172,6 +205,9 @@ class WebhookServer:
         self.runner = None
         self.site = None
         self.bot_app = None
+        # Deduplication: track recently processed order_ids with timestamps
+        self._processed_orders: dict = {}
+        self._dedup_ttl = 300  # 5 minutes
 
     def set_application(self, application):
         """Set Telegram Application instance"""
@@ -179,7 +215,7 @@ class WebhookServer:
 
     async def setup(self):
         """Setup webhook server routes"""
-        self.app = web.Application()
+        self.app = web.Application(client_max_size=1024 * 1024)  # 1MB payload limit
 
         # Add routes
         self.app.router.add_post('/internal/reload-translations', reload_translations_handler)
@@ -203,7 +239,7 @@ class WebhookServer:
         """
         try:
             # Verify signature
-            if not verify_webhook_signature(request):
+            if not await verify_webhook_signature(request):
                 logger.warning(f"Invalid webhook signature from {request.remote}")
                 return web.json_response({
                     'success': False,
@@ -232,7 +268,7 @@ class WebhookServer:
             order_number = data.get('order_number')
             amount = data.get('amount')
             currency = data.get('currency', 'UZS')
-            
+
             if not user_id or not order_id:
                 return web.json_response({
                     'success': False,
@@ -246,8 +282,23 @@ class WebhookServer:
                     'message': 'Skipped: No telegram_id'
                 })
                 
+            # Deduplication: prevent duplicate notifications for the same order
+            now = datetime.now(timezone.utc)
+            # Clean stale entries
+            self._processed_orders = {
+                k: v for k, v in self._processed_orders.items()
+                if (now - v).total_seconds() < self._dedup_ttl
+            }
+            if order_id in self._processed_orders:
+                logger.info(f"Duplicate payment webhook for order {order_id}, skipping")
+                return web.json_response({
+                    'success': True,
+                    'message': 'Already processed (deduplicated)'
+                })
+            self._processed_orders[order_id] = now
+
             logger.info(f"Sending payment success notification to telegram_id {telegram_id} (user {user_id}) for order {order_number}")
-            
+
             # Get user language
             language = await i18n.get_user_language(telegram_id)
             
@@ -275,7 +326,7 @@ class WebhookServer:
             logger.error(f"Error processing payment success: {e}", exc_info=True)
             return web.json_response({
                 'success': False,
-                'message': f'Internal error: {str(e)}'
+                'message': 'Internal server error'
             }, status=500)
 
     async def start(self):

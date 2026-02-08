@@ -146,9 +146,9 @@ def setup_request_handlers(app):
         # Set request start time for performance monitoring
         g.start_time = datetime.now(UTC)
         
-        # Generate unique request ID for tracing
+        # Use incoming X-Request-ID for distributed tracing, or generate one
         import uuid
-        g.request_id = str(uuid.uuid4())[:8]
+        g.request_id = request.headers.get('X-Request-ID') or str(uuid.uuid4())[:8]
 
         # Skip logging for healthcheck endpoints and static assets
         is_healthcheck = request.path in ['/health', '/healthz', '/api/health']
@@ -213,6 +213,10 @@ def setup_request_handlers(app):
         """Execute after each request"""
         # Note: Security headers are now handled by SecurityHeadersMiddleware
         
+        # Echo request ID for distributed tracing
+        if hasattr(g, 'request_id'):
+            response.headers['X-Request-ID'] = g.request_id
+
         # Add performance monitoring
         if hasattr(g, 'start_time'):
             duration = (datetime.now(UTC) - g.start_time).total_seconds() * 1000
@@ -287,7 +291,7 @@ def setup_jwt_handlers(app):
     
     @jwt.expired_token_loader
     def expired_token_callback(jwt_header, jwt_payload):
-        app.logger.error(f'JWT Expired Token: header={jwt_header}, payload={jwt_payload}')
+        app.logger.warning(f'JWT Expired Token: user_id={jwt_payload.get("user_id")}, exp={jwt_payload.get("exp")}')
         return jsonify({
             'error': 'Token Expired',
             'message': 'The token has expired.'
@@ -419,14 +423,15 @@ def create_app(config_class=None):
         if not validation_passed and os.environ.get('FLASK_ENV') == 'production':
             raise RuntimeError("Environment validation failed in production")
     
-    # Disable Jinja2 template caching completely for development
-    # if app.debug:
-    app.jinja_env.cache = None
-    app.jinja_env.auto_reload = True
-    app.jinja_env.cache_size = 0
-    # Force template recompilation by modifying loader
-    if hasattr(app.jinja_loader, '_mapping'):
-        app.jinja_loader._mapping = {}
+    # Jinja2 template caching: disable in development, enable in production
+    if app.debug:
+        app.jinja_env.cache = None
+        app.jinja_env.auto_reload = True
+        app.jinja_env.cache_size = 0
+        if hasattr(app.jinja_loader, '_mapping'):
+            app.jinja_loader._mapping = {}
+    else:
+        app.jinja_env.auto_reload = False
     
     # Initialize extensions with app
     db.init_app(app)

@@ -2,7 +2,7 @@
 Centralized validation helpers to reduce duplicate validation logic across API endpoints
 """
 from typing import Optional, Dict, Any, List, Union, Tuple
-from datetime import datetime
+from datetime import datetime, UTC
 from flask import request
 from flask_jwt_extended import get_jwt_identity
 
@@ -91,7 +91,7 @@ class DateValidator:
         
         # Check future dates if not allowed
         if not allow_future:
-            now = datetime.now()
+            now = datetime.now(UTC)
             if start_date and start_date > now:
                 raise ValidationError("Start date cannot be in the future")
             if end_date and end_date > now:
@@ -124,7 +124,7 @@ class DateValidator:
         except ValueError:
             raise ValidationError(f"Invalid {field_name} format. Use ISO format (YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS)")
         
-        if not allow_future and parsed_date > datetime.now():
+        if not allow_future and parsed_date > datetime.now(UTC):
             raise ValidationError(f"{field_name.title()} cannot be in the future")
         
         return parsed_date

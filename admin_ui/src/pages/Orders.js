@@ -33,7 +33,7 @@ import {
   MinusCircleOutlined
 } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from 'react-query';
-import moment from 'moment';
+import { formatDate, formatDateTimeShort } from '../utils/dateUtils';
 import adminService from '../services/adminService';
 import api from '../services/api';
 import { useTranslation } from 'react-i18next';
@@ -263,7 +263,7 @@ const Orders = () => {
       dataIndex: 'created_at',
       key: 'created_at',
       width: 120,
-      render: (date) => moment(date).format('MMM DD, YYYY')
+      render: (date) => formatDate(date)
     },
     {
       title: t('ui.orders.actions'),
@@ -522,7 +522,7 @@ const Orders = () => {
                 </Tag>
               </Descriptions.Item>
               <Descriptions.Item label={t('ui.orders.order_date')}>
-                {moment(selectedOrder.created_at).format('YYYY-MM-DD HH:mm')}
+                {formatDateTimeShort(selectedOrder.created_at)}
               </Descriptions.Item>
             </Descriptions>
 

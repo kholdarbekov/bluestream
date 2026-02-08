@@ -14,7 +14,12 @@ logger = logging.getLogger(__name__)
 
 class Order(db.Model, TimestampMixin):
     __tablename__ = 'orders'
-    
+    __table_args__ = (
+        Index('idx_orders_user_status', 'user_id', 'status'),
+        Index('idx_orders_status_created', 'status', 'created_at'),
+        Index('idx_orders_user_created', 'user_id', 'created_at'),
+    )
+
     id = Column(Integer, primary_key=True)
     order_number = Column(String(50), unique=True, nullable=False, index=True)
     user_id = Column(Integer, ForeignKey('users.id'), nullable=False, index=True)
@@ -29,7 +34,7 @@ class Order(db.Model, TimestampMixin):
     
     # Delivery information
     delivery_address_id = Column(Integer, ForeignKey('addresses.id'), nullable=True)
-    delivery_date = Column(DateTime, nullable=True)
+    delivery_date = Column(DateTime(timezone=True), nullable=True)
     delivery_time_slot = Column(String(20), nullable=True)  # "09:00-12:00"
     delivery_notes = Column(Text, nullable=True)
     is_urgent = Column(Boolean, default=False)
@@ -37,7 +42,7 @@ class Order(db.Model, TimestampMixin):
     # Payment
     payment_method = Column(Enum(PaymentMethod, name='payment_method', values_callable=lambda x: [e.value for e in x]), nullable=True)
     is_paid = Column(Boolean, default=False, index=True)
-    paid_at = Column(DateTime, nullable=True)
+    paid_at = Column(DateTime(timezone=True), nullable=True)
     
     # Special fields
     is_subscription_order = Column(Boolean, default=False)
@@ -190,7 +195,7 @@ class OrderStatusHistory(db.Model, TimestampMixin):
     old_status = Column(Enum(OrderStatus, name='order_status', values_callable=lambda x: [e.value for e in x]), nullable=False)
     new_status = Column(Enum(OrderStatus, name='order_status', values_callable=lambda x: [e.value for e in x]), nullable=False)
     changed_by = Column(Integer, ForeignKey('users.id'), nullable=True)
-    changed_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    changed_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
     notes = Column(Text, nullable=True)
     
     # Additional context

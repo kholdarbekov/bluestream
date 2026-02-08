@@ -31,7 +31,7 @@ from business_app.utils.validation_helpers import (
     validate_list_request_params, FilterValidator, PaginationHelper,
     StatusValidator, RequestDataValidator
 )
-from business_app.utils.error_handlers import handle_api_exception, create_success_response
+from business_app.utils.error_handlers import handle_api_exception
 from business_app.utils.exceptions import ValidationError, NotFoundError
 from business_app.utils.exceptions import ValidationError, NotFoundError
 from business_app.tasks.payment_tasks import process_payment_verification, handle_payment_webhook
@@ -357,11 +357,13 @@ def get_payments():
         page=params['page'], per_page=params['per_page'], error_out=False
     )
 
-    return paginated_response(
-        items=[serialize_payment(payment) for payment in pagination.items],
-        page=params['page'],
-        per_page=params['per_page'],
-        total=pagination.total,
+    # Build standardized pagination response
+    response_data = PaginationHelper.build_pagination_response(
+        pagination.items, pagination, serialize_payment
+    )
+
+    return success_response(
+        data={'payments': response_data['items'], 'pagination': response_data['pagination']},
         message='Payments retrieved successfully'
     )
 

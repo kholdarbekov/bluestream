@@ -3,10 +3,11 @@ API client for communicating with the business application
 """
 import httpx
 import logging
+import uuid
 from typing import Dict, Any, Optional, List, Union
 from dataclasses import dataclass
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import ssl
 import os
 
@@ -14,6 +15,55 @@ from config import config
 from database import db_manager
 
 logger = logging.getLogger('api_client')
+
+
+class CircuitBreaker:
+    """
+    Simple circuit breaker to fail fast when the backend is down.
+
+    States:
+      CLOSED   – requests flow normally
+      OPEN     – requests fail immediately (backend presumed down)
+      HALF_OPEN – one probe request is allowed through to test recovery
+    """
+    CLOSED = 'closed'
+    OPEN = 'open'
+    HALF_OPEN = 'half_open'
+
+    def __init__(self, failure_threshold: int = 5, recovery_timeout: float = 30.0):
+        self.failure_threshold = failure_threshold
+        self.recovery_timeout = recovery_timeout  # seconds before OPEN -> HALF_OPEN
+        self._state = self.CLOSED
+        self._failure_count = 0
+        self._last_failure_time: Optional[datetime] = None
+
+    @property
+    def state(self) -> str:
+        if self._state == self.OPEN and self._last_failure_time:
+            elapsed = (datetime.now(timezone.utc) - self._last_failure_time).total_seconds()
+            if elapsed >= self.recovery_timeout:
+                self._state = self.HALF_OPEN
+        return self._state
+
+    def allow_request(self) -> bool:
+        """Return True if a request should be attempted."""
+        return self.state != self.OPEN
+
+    def record_success(self):
+        """Record a successful request – reset to CLOSED."""
+        self._failure_count = 0
+        self._state = self.CLOSED
+
+    def record_failure(self):
+        """Record a failed request – open circuit after threshold."""
+        self._failure_count += 1
+        self._last_failure_time = datetime.now(timezone.utc)
+        if self._failure_count >= self.failure_threshold:
+            self._state = self.OPEN
+            logger.warning(
+                f"Circuit breaker OPEN after {self._failure_count} consecutive failures. "
+                f"Failing fast for {self.recovery_timeout}s."
+            )
 
 
 @dataclass
@@ -34,6 +84,7 @@ class BusinessAPIClient:
         self.max_retries = config.business_api.max_retries
         self.retry_delay = config.business_api.retry_delay
         self._client = None
+        self._circuit_breaker = CircuitBreaker(failure_threshold=5, recovery_timeout=30.0)
     
     async def __aenter__(self):
         """Async context manager entry"""
@@ -140,39 +191,48 @@ class BusinessAPIClient:
         """Build full URL for endpoint"""
         return f"{self.base_url.rstrip('/')}{endpoint}"
     
-    async def _make_request(self, method: str, endpoint: str, 
+    async def _make_request(self, method: str, endpoint: str,
                           headers: Optional[Dict] = None,
                           data: Optional[Dict] = None,
                           params: Optional[Dict] = None,
                           user_token: Optional[str] = None,
-                          language: Optional[str] = None) -> APIResponse:
-        """Make HTTP request with retry logic"""
+                          language: Optional[str] = None,
+                          token_manager=None,
+                          telegram_id: Optional[int] = None) -> APIResponse:
+        """Make HTTP request with retry logic and circuit breaker"""
+        # Circuit breaker: fail fast if backend is presumed down
+        if not self._circuit_breaker.allow_request():
+            logger.warning(f"Circuit breaker OPEN – failing fast for {method.upper()} {endpoint}")
+            return APIResponse(
+                success=False,
+                error="Service temporarily unavailable (circuit breaker open)"
+            )
+
         url = self._get_url(endpoint)
         
-        logger.info(f"=== HTTP REQUEST DEBUG ===")
-        logger.info(f"Method: {method.upper()}")
-        logger.info(f"URL: {url}")
-        logger.info(f"Endpoint: {endpoint}")
-        
+        logger.debug(f"HTTP {method.upper()} {url}")
+
         # Set up headers
         request_headers = headers or {}
+        # Distributed tracing: generate request ID for correlation across services
+        request_id = f"bot-{uuid.uuid4().hex[:12]}"
+        request_headers['X-Request-ID'] = request_id
+
         if user_token:
             request_headers['Authorization'] = f'Bearer {user_token}'
-            logger.info(f"Authorization header added with token: {user_token[:20]}...")
-        
+
         if language:
             request_headers['Accept-Language'] = language
-            logger.info(f"Accept-Language header added: {language}")
-        
-        logger.info(f"Request headers: {request_headers}")
+
+        logger.debug(f"Request headers: {dict((k, '***' if k == 'Authorization' else v) for k, v in request_headers.items())}")
         if data:
-            logger.info(f"Request data: {data}")
+            logger.debug(f"Request data: {data}")
         if params:
-            logger.info(f"Request params: {params}")
+            logger.debug(f"Request params: {params}")
         
         for attempt in range(self.max_retries + 1):
             try:
-                logger.info(f"Making HTTP request (attempt {attempt + 1}/{self.max_retries + 1})...")
+                logger.debug(f"HTTP request attempt {attempt + 1}/{self.max_retries + 1}")
                 
                 if method.upper() == 'GET':
                     response = await self._client.get(url, headers=request_headers, params=params)
@@ -187,20 +247,21 @@ class BusinessAPIClient:
                 else:
                     raise ValueError(f"Unsupported HTTP method: {method}")
                 
-                logger.info(f"Response received - Status code: {response.status_code}")
-                logger.info(f"Response headers: {dict(response.headers)}")
-                
+                logger.info(f"HTTP {method.upper()} {endpoint} -> {response.status_code}")
+                logger.debug(f"Response headers: {dict(response.headers)}")
+
+                # Any HTTP response means backend is reachable – record success
+                self._circuit_breaker.record_success()
+
                 # Handle response
                 if response.status_code < 400:
                     try:
                         response_data = response.json()
-                        logger.info(f"Response JSON data: {response_data}")
+                        logger.debug(f"Response data: {response_data}")
                     except Exception as json_error:
                         response_data = response.text
-                        logger.info(f"Response text data: {response_data}")
+                        logger.debug(f"Response text: {response_data}")
                         logger.warning(f"Failed to parse JSON: {json_error}")
-                    
-                    logger.info("=== HTTP REQUEST SUCCESS ===")
                     return APIResponse(
                         success=True,
                         data=response_data,
@@ -211,15 +272,21 @@ class BusinessAPIClient:
                     try:
                         error_data = response.json()
                         error_msg = error_data.get('message', error_msg)
-                        logger.error(f"Error response JSON: {error_data}")
+                        logger.debug(f"Error response data: {error_data}")
                     except Exception as json_error:
                         error_text = response.text
-                        logger.error(f"Error response text: {error_text}")
-                        logger.warning(f"Failed to parse error JSON: {json_error}")
-                    
-                    logger.error(f"=== HTTP REQUEST FAILED - Status {response.status_code} ===")
-                    logger.error(f"Error message: {error_msg}")
-                    
+                        logger.debug(f"Error response text: {error_text}")
+
+                    logger.warning(f"HTTP {method.upper()} {endpoint} failed: {response.status_code} - {error_msg}")
+
+                    # Invalidate cached tokens on 401 (stale/revoked token)
+                    if response.status_code == 401 and token_manager and telegram_id:
+                        logger.info(f"Auth failure (401) for user {telegram_id}, invalidating cached tokens")
+                        try:
+                            await token_manager.invalidate_tokens(telegram_id)
+                        except Exception as inv_err:
+                            logger.warning(f"Failed to invalidate tokens: {inv_err}")
+
                     return APIResponse(
                         success=False,
                         error=error_msg,
@@ -240,6 +307,7 @@ class BusinessAPIClient:
                         "Please verify the server's SSL certificate."
                     )
                     # Don't retry SSL errors as they're unlikely to resolve
+                    self._circuit_breaker.record_failure()
                     return APIResponse(
                         success=False,
                         error=f"SSL certificate validation failed: {str(e)}"
@@ -251,6 +319,7 @@ class BusinessAPIClient:
                         logger.info(f"Retrying connection in {retry_delay} seconds...")
                         await asyncio.sleep(retry_delay)
                     else:
+                        self._circuit_breaker.record_failure()
                         logger.error("=== CONNECTION FAILED - MAX RETRIES REACHED ===")
                         return APIResponse(
                             success=False,
@@ -264,23 +333,25 @@ class BusinessAPIClient:
                     logger.info(f"Retrying after timeout in {retry_delay} seconds...")
                     await asyncio.sleep(retry_delay)
                 else:
+                    self._circuit_breaker.record_failure()
                     logger.error("=== REQUEST TIMEOUT - MAX RETRIES REACHED ===")
                     return APIResponse(
                         success=False,
                         error=f"Request timed out after {self.max_retries} retries"
                     )
-            
+
             except Exception as e:
                 logger.error(f"API request exception (attempt {attempt + 1}): {e}")
                 logger.error(f"Exception type: {type(e)}")
                 import traceback
                 logger.error(f"Traceback: {traceback.format_exc()}")
-                
+
                 if attempt < self.max_retries:
                     retry_delay = self.retry_delay * (attempt + 1)
                     logger.info(f"Retrying in {retry_delay} seconds...")
                     await asyncio.sleep(retry_delay)
                 else:
+                    self._circuit_breaker.record_failure()
                     logger.error("=== HTTP REQUEST FAILED - MAX RETRIES REACHED ===")
                     return APIResponse(
                         success=False,
@@ -316,7 +387,7 @@ class BusinessAPIClient:
                 data=auth_data
             )
             
-            logger.info(f"Response received - Success: {response.success}, Status: {response.status_code}")
+            logger.debug(f"Auth response - Success: {response.success}, Status: {response.status_code}")
             if response.success:
                 # The response has nested data structure: response.data['data']['access_token']
                 data = response.data.get('data', {})
@@ -324,7 +395,7 @@ class BusinessAPIClient:
                 refresh_token = data.get('refresh_token')
                 expires_in = data.get('expires_in', 3600)
                 if token:
-                    logger.info(f"Access token received: {token[:20]}...")
+                    logger.info(f"Authentication successful for telegram_id {telegram_id}")
                     # Return both tokens for caching
                     return {
                         'access_token': token,
@@ -418,7 +489,7 @@ class BusinessAPIClient:
             
             # Prepare additional data
             additional_data = {
-                'timestamp': datetime.now().isoformat(),
+                'timestamp': datetime.now(timezone.utc).isoformat(),
                 'api_client': 'telegram_bot',
                 'auth_method': 'telegram_login'
             }
@@ -846,65 +917,6 @@ class BusinessAPIClient:
         return await self._make_request('DELETE', f'/api/v1/auth/sessions/{session_id}',
                                        user_token=user_token)
 
-    # Telegram Payment methods
-    async def record_telegram_payment(self, user_token: str, payment_data: Dict) -> APIResponse:
-        """
-        Record successful Telegram payment in backend.
-
-        Args:
-            user_token: User authentication token
-            payment_data: Payment details including:
-                - order_id: Order ID
-                - amount: Payment amount in UZS
-                - currency: Currency code (UZS)
-                - payment_method: 'payme'
-                - telegram_payment_charge_id: Telegram's payment ID
-                - provider_payment_charge_id: Payme's payment ID
-                - status: 'completed'
-
-        Returns:
-            APIResponse with payment record
-        """
-        return await self._make_request('POST', '/api/v1/payments/telegram',
-                                       user_token=user_token, data=payment_data)
-
-    async def update_order_payment_status(self, user_token: str, order_id: int,
-                                          status: str, payment_data: Dict = None) -> APIResponse:
-        """
-        Update order payment status.
-
-        Args:
-            user_token: User authentication token
-            order_id: Order ID to update
-            status: New payment status ('pending', 'paid', 'failed')
-            payment_data: Optional additional payment data
-
-        Returns:
-            APIResponse with updated order
-        """
-        data = {'payment_status': status}
-        if payment_data:
-            data['payment_data'] = payment_data
-        return await self._make_request('PATCH', f'/api/v1/orders/{order_id}/payment-status',
-                                       user_token=user_token, data=data)
-
-    async def get_order_for_validation(self, user_token: str, order_id: int) -> APIResponse:
-        """
-        Get minimal order data for pre-checkout validation.
-
-        This endpoint should be optimized for fast response (< 2 seconds)
-        as pre-checkout queries must be answered within 10 seconds.
-
-        Args:
-            user_token: User authentication token
-            order_id: Order ID to validate
-
-        Returns:
-            APIResponse with order validation data (id, status, total_amount, user_id)
-        """
-        return await self._make_request('GET', f'/api/v1/orders/{order_id}/validate',
-                                       user_token=user_token)
-    
     # ==================== Account Linking ====================
     
     async def check_phone_availability(self, telegram_id: int, phone: str) -> APIResponse:

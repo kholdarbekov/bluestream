@@ -2,7 +2,7 @@
 Notification Serializers for the Water Business Platform using Pydantic v2
 This file contains Pydantic models for notification-related data serialization
 """
-from datetime import datetime
+from datetime import datetime, UTC
 from typing import Dict, Any, Optional, List
 from enum import Enum
 
@@ -623,7 +623,7 @@ def is_in_quiet_hours(preferences, current_time: datetime = None) -> bool:
         return False
     
     if current_time is None:
-        current_time = datetime.now()
+        current_time = datetime.now(UTC)
     
     try:
         start_hour, start_minute = map(int, preferences.quiet_hours_start.split(':'))

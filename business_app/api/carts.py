@@ -27,7 +27,7 @@ from business_app.utils.validation_helpers import (
     validate_list_request_params, FilterValidator, PaginationHelper,
     DateValidator, StatusValidator, RequestDataValidator
 )
-from business_app.utils.error_handlers import handle_api_exception, create_success_response
+from business_app.utils.error_handlers import handle_api_exception
 from business_app.utils.exceptions import ValidationError
 from business_app.utils.api_responses import (
     success_response, error_response, paginated_response, created_response,
@@ -53,7 +53,7 @@ def get_cart():
         cart_data = cart.to_dict()
     else:
         cart_data = None
-    return create_success_response(
+    return success_response(
         data={'cart': cart_data}
     )
 
@@ -72,7 +72,7 @@ def add_cart_item():
         data.get('quantity', 1)
     )
     
-    return create_success_response(
+    return success_response(
         data={'cart': cart.to_dict()}
     )
 
@@ -91,7 +91,7 @@ def update_cart_item(product_id):
         data.get('quantity', 1)
     )
     
-    return create_success_response(
+    return success_response(
         data={'cart': cart.to_dict()}
     )
 
@@ -108,7 +108,7 @@ def remove_cart_item(product_id):
         product_id
     )
     
-    return create_success_response(
+    return success_response(
         data={'cart': cart.to_dict() if cart else None}
     )
 
@@ -122,7 +122,7 @@ def clear_cart():
     cart_service = get_cart_service()
     cart_service.clear_cart(user_id)
 
-    return create_success_response(
+    return success_response(
         data={'message': 'Cart cleared successfully'}
     )
 
@@ -148,7 +148,7 @@ def sync_cart():
     cart_service = get_cart_service()
     cart = cart_service.sync_cart_from_local(user_id, local_cart_items)
 
-    return create_success_response(
+    return success_response(
         data={
             'cart': cart.to_dict() if cart else None,
             'message': 'Cart synchronized successfully'
@@ -184,7 +184,7 @@ def get_cart_estimate():
         promo_code=promo_code
     )
 
-    return create_success_response(data={'estimate': estimate})
+    return success_response(data={'estimate': estimate})
 
 
 @cart_bp.route('/validate', methods=['POST'])
@@ -206,7 +206,7 @@ def validate_cart():
         items=cart_items
     )
 
-    return create_success_response(
+    return success_response(
         data={
             'valid': validation_result.get('ready_for_checkout', False),
             'items': [

@@ -2,10 +2,15 @@
 Celery application configuration for the Water Business Platform
 This file should be placed in business_app/tasks/celery_app.py
 """
+import logging
 from celery import Celery
 from celery.schedules import crontab
-from flask import current_app
+from celery.signals import before_task_publish, task_prerun
+from flask import current_app, g, has_request_context
 import os
+from shared.constants import DISPLAY_TIMEZONE
+
+logger = logging.getLogger(__name__)
 
 
 def make_celery(app=None):
@@ -144,7 +149,7 @@ def make_celery(app=None):
     }
     
     # Set timezone
-    celery.conf.timezone = 'Asia/Tashkent'
+    celery.conf.timezone = DISPLAY_TIMEZONE
     
     class ContextTask(celery.Task):
         """Make celery tasks work with Flask app context"""
@@ -158,6 +163,33 @@ def make_celery(app=None):
 
 # Create default celery app
 celery = make_celery()
+
+
+# =========================================================================
+# Distributed tracing: propagate X-Request-ID from Flask → Celery tasks
+# =========================================================================
+
+@before_task_publish.connect
+def propagate_request_id(headers=None, **kwargs):
+    """Inject request_id into Celery task headers when publishing from Flask context."""
+    if headers is not None and has_request_context():
+        request_id = getattr(g, 'request_id', None)
+        if request_id:
+            headers['request_id'] = request_id
+
+
+@task_prerun.connect
+def set_task_request_id(task=None, **kwargs):
+    """Extract request_id from task headers and make it available in task context."""
+    request_id = getattr(task.request, 'request_id', None)
+    if not request_id:
+        # Check custom headers
+        headers = getattr(task.request, 'headers', None) or {}
+        request_id = headers.get('request_id')
+    if request_id:
+        # Store on task request for easy access in task code
+        task.request.request_id = request_id
+        logger.debug(f"Task {task.name} running with request_id={request_id}")
 
 
 # Task routing configuration
@@ -179,6 +211,28 @@ celery.conf.task_default_priority = 5
 celery.conf.worker_prefetch_multiplier = 1
 celery.conf.task_acks_late = True
 celery.conf.worker_disable_rate_limits = False
+
+# Per-task rate limits — prevents flooding external services (SMS, email, Telegram API)
+celery.conf.task_annotations = {
+    # Bulk/promotional notifications — strictest limits
+    'business_app.tasks.notification_tasks.send_bulk_promotional_notification': {'rate_limit': '5/m'},
+    'business_app.tasks.notification_tasks.send_bulk_notification_task': {'rate_limit': '10/m'},
+    'business_app.tasks.notification_tasks.send_emergency_notification': {'rate_limit': '10/m'},
+    # Individual notification sends
+    'business_app.tasks.notification_tasks.send_verification_sms_task': {'rate_limit': '30/m'},
+    'business_app.tasks.notification_tasks.send_verification_email_task': {'rate_limit': '30/m'},
+    'business_app.tasks.notification_tasks.send_password_reset_sms_task': {'rate_limit': '20/m'},
+    'business_app.tasks.notification_tasks.send_password_reset_email_task': {'rate_limit': '20/m'},
+    'business_app.tasks.notification_tasks.send_registration_otp_task': {'rate_limit': '30/m'},
+    'business_app.tasks.notification_tasks.send_welcome_sms_task': {'rate_limit': '30/m'},
+    # Transactional notifications — higher throughput
+    'business_app.tasks.notification_tasks.send_order_notification_task': {'rate_limit': '60/m'},
+    'business_app.tasks.notification_tasks.send_delivery_update_task': {'rate_limit': '60/m'},
+    'business_app.tasks.notification_tasks.send_payment_confirmation_task': {'rate_limit': '60/m'},
+    # Payment processing
+    'business_app.tasks.payment_tasks.process_payment_webhook': {'rate_limit': '60/m'},
+    'business_app.tasks.payment_tasks.retry_failed_payments': {'rate_limit': '10/m'},
+}
 
 
 # Error handling configuration

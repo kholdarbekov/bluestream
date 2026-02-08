@@ -6,6 +6,11 @@ from flask_sqlalchemy import SQLAlchemy
 from business_app import db
 from business_app.models import TimestampMixin
 from business_app.utils.constants import UserRole, UserStatus, UserGender
+from shared.constants import DISPLAY_TIMEZONE
+from shared.validators import (
+    validate_password_strength, validate_email, sanitize_user_input,
+    validate_uzbekistan_phone
+)
 
 
 class User(db.Model, TimestampMixin):
@@ -14,10 +19,10 @@ class User(db.Model, TimestampMixin):
     id = Column(Integer, primary_key=True)
     first_name = Column(String(100), nullable=True)
     last_name = Column(String(100), nullable=True)
-    email = Column(String(255), unique=True, nullable=True)
-    phone = Column(String(20), unique=True, nullable=True)  # Nullable for telegram registration, required before ordering
+    email = Column(String(255), unique=True, nullable=True, index=True)
+    phone = Column(String(20), unique=True, nullable=True, index=True)  # Nullable for telegram registration, required before ordering
     password_hash = Column(String(255), nullable=False)
-    date_of_birth = Column(DateTime, nullable=True)
+    date_of_birth = Column(DateTime(timezone=True), nullable=True)
     gender = Column(Enum(UserGender, name='user_gender', values_callable=lambda x: [e.value for e in x]), default=UserGender.UNKNOWN, index=True)
     role = Column(Enum(UserRole, name='user_role', values_callable=lambda x: [e.value for e in x]), default=UserRole.CUSTOMER, index=True)
     status = Column(Enum(UserStatus, name='user_status', values_callable=lambda x: [e.value for e in x]), default=UserStatus.ACTIVE, index=True)
@@ -25,7 +30,7 @@ class User(db.Model, TimestampMixin):
     is_premium = Column(Boolean, default=False)
     preferred_language = Column(String(5), default='en')
     preferred_currency = Column(String(3), default='UZS')
-    timezone = Column(String(50), default='Asia/Tashkent')
+    timezone = Column(String(50), default=DISPLAY_TIMEZONE)
     
     # Notification preferences
     email_notifications = Column(Boolean, default=True)
@@ -37,16 +42,15 @@ class User(db.Model, TimestampMixin):
     tax_id = Column(String(50), nullable=True)
     business_type = Column(String(50), nullable=True)
 
-    last_login = Column(DateTime, nullable=True)
+    last_login = Column(DateTime(timezone=True), nullable=True)
     failed_login_attempts = Column(Integer, default=0)
-    account_locked_until = Column(DateTime, nullable=True)
+    account_locked_until = Column(DateTime(timezone=True), nullable=True)
     password_reset_token = Column(String(255), nullable=True)
-    password_reset_expires = Column(DateTime, nullable=True)
+    password_reset_expires = Column(DateTime(timezone=True), nullable=True)
     email_verification_token = Column(String(255), nullable=True)
-    email_verified_at = Column(DateTime, nullable=True)
-    phone_verified_at = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    email_verified_at = Column(DateTime(timezone=True), nullable=True)
+    phone_verified_at = Column(DateTime(timezone=True), nullable=True)
+    # created_at and updated_at provided by TimestampMixin (timezone-aware)
     registration_source = Column(String(50), default='web', index=True)
     registration_method = Column(String(20), default='email', index=True)  # 'email', 'phone', 'telegram'
 
@@ -55,7 +59,7 @@ class User(db.Model, TimestampMixin):
     telegram_username = Column(String(255), nullable=True)
     is_bot_active = Column(Boolean, default=False, index=True)
     bot_state = Column(Text, nullable=True)  # JSON string for bot conversation state
-    last_bot_interaction = Column(DateTime, nullable=True)
+    last_bot_interaction = Column(DateTime(timezone=True), nullable=True)
 
     # Cart
     cart = relationship("Cart", back_populates="user", uselist=False)
@@ -69,77 +73,7 @@ class User(db.Model, TimestampMixin):
     reviews = relationship('Review', back_populates='user')
     notifications = relationship('Notification', back_populates='user')
     deliveries = relationship('Delivery', foreign_keys='Delivery.delivery_person_id', back_populates='delivery_person')
-    
-    @staticmethod
-    def validate_password_strength(password):
-        """Validate password meets security requirements"""
-        import re
-        
-        if not password or len(password) < 8:
-            return False, "Password must be at least 8 characters long"
-        
-        if not re.search(r'[A-Z]', password):
-            return False, "Password must contain at least one uppercase letter"
-        
-        if not re.search(r'[a-z]', password):
-            return False, "Password must contain at least one lowercase letter"
-        
-        if not re.search(r'[0-9]', password):
-            return False, "Password must contain at least one digit"
-        
-        if not re.search(r'[!@#$%^&*(),.?":{}|<>]', password):
-            return False, "Password must contain at least one special character"
-        
-        # Check for common weak patterns
-        weak_patterns = ['password', '123456', 'qwerty', 'admin', 'user', 'test']
-        if any(weak in password.lower() for weak in weak_patterns):
-            return False, "Password contains common weak patterns"
-        
-        return True, "Password is strong"
-    
-    @staticmethod
-    def validate_email(email):
-        """Validate email format"""
-        if not email:
-            return True, "Email is optional"
-        
-        # Basic email regex
-        email_pattern = r'^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$'
-        if not re.match(email_pattern, email):
-            return False, "Invalid email format"
-        
-        if email != email.lower():
-            return False, "Email must be lowercase"
-        
-        return True, "Email is valid"
-    
-    @staticmethod
-    def validate_phone(phone):
-        """Validate phone number format"""
-        if not phone:
-            return False, "Phone is required"
-        
-        # International format starting with +
-        phone_pattern = r'^\+[1-9][0-9]{7,14}$'
-        if not re.match(phone_pattern, phone):
-            return False, "Phone must be in international format (+1234567890)"
-        
-        return True, "Phone is valid"
-    
-    @staticmethod
-    def sanitize_user_input(input_text):
-        """Sanitize user input to prevent XSS and injection"""
-        if not input_text:
-            return input_text
-        
-        # Remove potentially dangerous characters
-        sanitized = re.sub(r'[<>"\'\`&;|$(){}[\]\\]', '', input_text)
-        
-        # Trim whitespace
-        sanitized = sanitized.strip()
-        
-        return sanitized if sanitized else None
-    
+
     @property
     def full_name(self) -> str:
         """Get full name by combining first and last names"""
@@ -168,15 +102,18 @@ class User(db.Model, TimestampMixin):
         """Validate all user data before saving"""
         errors = []
 
-        # Validate email
-        is_valid, message = self.validate_email(self.email)
+        # Validate email (shared validator)
+        is_valid, message = validate_email(self.email)
         if not is_valid:
             errors.append(f"Email: {message}")
 
-        # Validate phone if provided
-        is_valid, message = self.validate_phone(self.phone)
-        if not is_valid:
-            errors.append(f"Phone: {message}")
+        # Validate phone if provided (shared Uzbekistan validator)
+        if self.phone:
+            is_valid, message, normalized = validate_uzbekistan_phone(self.phone)
+            if not is_valid:
+                errors.append(f"Phone: {message}")
+            elif normalized:
+                self.phone = normalized
 
         # Validate role
         if self.role and not isinstance(self.role, UserRole):
@@ -194,16 +131,16 @@ class User(db.Model, TimestampMixin):
                 valid_statuses = [s.value for s in UserStatus]
                 errors.append(f"Status must be one of: {', '.join(valid_statuses)}")
 
-        # Validate names if provided
+        # Validate names if provided (shared sanitizer)
         if self.first_name:
-            sanitized = self.sanitize_user_input(self.first_name)
+            sanitized = sanitize_user_input(self.first_name)
             if not sanitized or len(sanitized) > 100:
                 errors.append("First name contains invalid characters or is too long")
             else:
                 self.first_name = sanitized
 
         if self.last_name:
-            sanitized = self.sanitize_user_input(self.last_name)
+            sanitized = sanitize_user_input(self.last_name)
             if not sanitized or len(sanitized) > 100:
                 errors.append("Last name contains invalid characters or is too long")
             else:
@@ -214,16 +151,15 @@ class User(db.Model, TimestampMixin):
             if not self.telegram_id.isdigit() or len(self.telegram_id) < 5 or len(self.telegram_id) > 15:
                 errors.append("Telegram ID must be a numeric string between 5-15 characters")
 
-        # Validate business fields if provided
+        # Validate business fields if provided (shared sanitizer)
         if self.company_name:
-            sanitized = self.sanitize_user_input(self.company_name)
+            sanitized = sanitize_user_input(self.company_name)
             if not sanitized or len(sanitized) > 200:
                 errors.append("Company name contains invalid characters or is too long")
             else:
                 self.company_name = sanitized
 
         if self.tax_id:
-            import re
             if not re.match(r'^[A-Z0-9-]+$', self.tax_id) or len(self.tax_id) < 5 or len(self.tax_id) > 20:
                 errors.append("Tax ID must contain only alphanumeric characters and dashes, 5-20 characters long")
 
@@ -306,10 +242,10 @@ class UserSession(db.Model, TimestampMixin):
     device_info = Column(String(255), nullable=True)
     ip_address = Column(String(45), nullable=True)
     user_agent = Column(String(500), nullable=True)
-    expires_at = Column(DateTime, nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
     is_active = Column(Boolean, default=True, index=True)
-    last_activity = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    ended_at = Column(DateTime, nullable=True)
+    last_activity = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    ended_at = Column(DateTime(timezone=True), nullable=True)
     
     user = relationship('User', backref='sessions')
     

@@ -3,14 +3,13 @@ Celery tasks for session and user maintenance
 """
 import logging
 from datetime import datetime, timezone
-from celery import current_task
-from business_app.tasks.celery_app import celery
+from celery import shared_task, current_task
 from business_app.services.session_cleanup_service import SessionCleanupService
 
 logger = logging.getLogger(__name__)
 
 
-@celery.task(bind=True, autoretry_for=(Exception,), retry_kwargs={'max_retries': 3, 'countdown': 60})
+@shared_task(bind=True, autoretry_for=(Exception,), retry_kwargs={'max_retries': 3, 'countdown': 60})
 def cleanup_expired_sessions_task(self, batch_size=1000):
     """
     Celery task to clean up expired sessions
@@ -42,7 +41,7 @@ def cleanup_expired_sessions_task(self, batch_size=1000):
         raise
 
 
-@celery.task(bind=True, autoretry_for=(Exception,), retry_kwargs={'max_retries': 3, 'countdown': 60})
+@shared_task(bind=True, autoretry_for=(Exception,), retry_kwargs={'max_retries': 3, 'countdown': 60})
 def cleanup_inactive_users_task(self, batch_size=500):
     """
     Celery task to clean up inactive users
@@ -74,7 +73,7 @@ def cleanup_inactive_users_task(self, batch_size=500):
         raise
 
 
-@celery.task(bind=True, autoretry_for=(Exception,), retry_kwargs={'max_retries': 3, 'countdown': 60})
+@shared_task(bind=True, autoretry_for=(Exception,), retry_kwargs={'max_retries': 3, 'countdown': 60})
 def cleanup_orphaned_data_task(self):
     """
     Celery task to clean up orphaned data
@@ -103,7 +102,7 @@ def cleanup_orphaned_data_task(self):
         raise
 
 
-@celery.task(bind=True, autoretry_for=(Exception,), retry_kwargs={'max_retries': 2, 'countdown': 300})
+@shared_task(bind=True, autoretry_for=(Exception,), retry_kwargs={'max_retries': 2, 'countdown': 300})
 def full_session_cleanup_task(self, batch_size=1000):
     """
     Comprehensive session and user cleanup task
@@ -135,7 +134,7 @@ def full_session_cleanup_task(self, batch_size=1000):
         raise
 
 
-@celery.task(bind=True)
+@shared_task(bind=True)
 def session_cleanup_health_check(self):
     """
     Health check task for session cleanup functionality
@@ -209,7 +208,8 @@ def register_periodic_tasks():
     This should be called from celery configuration
     """
     from celery.schedules import crontab
-    
+    from business_app.tasks.celery_app import celery
+
     # Daily session cleanup at 2 AM
     celery.conf.beat_schedule.update({
         'cleanup-expired-sessions-daily': {

@@ -25,7 +25,7 @@ class Notification(db.Model, TimestampMixin):
     
     # Delivery status
     is_sent = Column(Boolean, default=False, index=True)
-    sent_at = Column(DateTime, nullable=True)
+    sent_at = Column(DateTime(timezone=True), nullable=True)
     delivery_status = Column(Enum(NotificationStatus, name='notification_status', values_callable=lambda x: [e.value for e in x]), default=NotificationStatus.PENDING)
     failure_reason = Column(String(255), nullable=True)
     
@@ -39,7 +39,7 @@ class Notification(db.Model, TimestampMixin):
     delivery_id = Column(Integer, ForeignKey('deliveries.id'), nullable=True)
     
     # Scheduling
-    scheduled_for = Column(DateTime, nullable=True)
+    scheduled_for = Column(DateTime(timezone=True), nullable=True)
     priority = Column(Enum(Priority, name='priority', values_callable=lambda x: [e.value for e in x]), default=Priority.NORMAL)
     
     # Additional data
@@ -137,7 +137,7 @@ class PushNotificationToken(db.Model, TimestampMixin):
     
     # Status
     is_active = Column(Boolean, default=True, index=True)
-    last_used = Column(DateTime, nullable=True)
+    last_used = Column(DateTime(timezone=True), nullable=True)
     
     # Relationships
     user = relationship('User')

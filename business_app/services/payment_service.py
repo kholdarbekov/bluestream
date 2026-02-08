@@ -139,7 +139,7 @@ class PaymentService:
         if not payment:
             raise NotFoundError(get_translation('error.not_found'))
 
-        if payment.method != PaymentMethod.CASH:
+        if payment.payment_method != PaymentMethod.CASH:
             raise ValidationError(get_translation('error.payment.invalid_method'))
         
         # Update payment status
@@ -166,7 +166,7 @@ class PaymentService:
         if not payment:
             raise NotFoundError(get_translation('error.not_found'))
 
-        if payment.method != PaymentMethod.LOYALTY_POINTS:
+        if payment.payment_method != PaymentMethod.LOYALTY_POINTS:
             raise ValidationError(get_translation('error.payment.invalid_method'))
 
         # Check user points balance
@@ -221,8 +221,7 @@ class PaymentService:
         """
         try:
              # Subscribe API uses X-Auth headers
-             print(f"Payme: method: {method}, url: {self.payme_endpoint}")
-             print(f"params: {params}")
+             current_app.logger.debug(f"Payme: method: {method}, url: {self.payme_endpoint}")
              headers = {
                  'X-Auth': f"{self.payme_merchant_id}:{self.payme_secret_key}" if method.startswith('receipts.') else self.payme_merchant_id,
                  'Content-Type': 'application/json'
@@ -1444,7 +1443,7 @@ class PaymentService:
         return {
             'id': payment.id,
             'status': payment.status.value,
-            'method': payment.method.value,
+            'method': payment.payment_method.value,
             'amount': payment.amount,
             'currency': payment.currency,
             'payment_id': payment.payment_id,

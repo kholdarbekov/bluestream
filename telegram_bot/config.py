@@ -4,6 +4,7 @@ Configuration settings for the Telegram Bot
 import os
 from dataclasses import dataclass
 from typing import Dict, List, Optional
+from shared.constants import DISPLAY_TIMEZONE
 
 # Import secrets manager for secure secret retrieval
 # Temporarily use fallback for development/testing
@@ -133,9 +134,6 @@ class PaymentConfig:
     click_secret_key: Optional[str] = None
     click_test_mode: bool = True
     
-    # Telegram Payments
-    telegram_provider_token: Optional[str] = None
-    
     # Supported currencies
     supported_currencies: List[str] = None
     
@@ -154,6 +152,15 @@ class LocalizationConfig:
     def __post_init__(self):
         if self.supported_languages is None:
             self.supported_languages = ["en", "uz", "ru"]
+
+
+@dataclass
+class TimezoneConfig:
+    """Timezone configuration"""
+    default_timezone: str = DISPLAY_TIMEZONE
+    display_format_uz: str = "%d.%m.%Y, %H:%M"
+    display_format_ru: str = "%d.%m.%Y, %H:%M"
+    display_format_en: str = "%m/%d/%Y, %I:%M %p"
 
 
 @dataclass
@@ -194,6 +201,7 @@ class FeatureConfig:
 class SecurityConfig:
     """Security configuration"""
     jwt_secret_key: str
+    webhook_secret: Optional[str] = None  # Separate secret for webhook HMAC verification
     jwt_expiry_hours: int = 24
     jwt_refresh_expiry_days: int = 30
 
@@ -258,7 +266,6 @@ class BotConfig:
             click_service_id=os.getenv('CLICK_SERVICE_ID'),
             click_secret_key=get_secret('click_secret_key', 'CLICK_SECRET_KEY', required=False),
             click_test_mode=os.getenv('CLICK_TEST_MODE', 'true').lower() == 'true',
-            telegram_provider_token=os.getenv('TELEGRAM_PROVIDER_TOKEN'),
         )
         
         self.localization = LocalizationConfig(
@@ -266,9 +273,14 @@ class BotConfig:
         )
         
         self.features = FeatureConfig()
+
+        self.timezone = TimezoneConfig(
+            default_timezone=os.getenv('DISPLAY_TIMEZONE', DISPLAY_TIMEZONE),
+        )
         
         self.security = SecurityConfig(
             jwt_secret_key=os.environ.get('JWT_SECRET_KEY') or os.environ.get('SECRET_KEY'),
+            webhook_secret=os.environ.get('WEBHOOK_SECRET'),
             encryption_key=os.environ.get('ENCRYPTION_KEY'),
         )
 

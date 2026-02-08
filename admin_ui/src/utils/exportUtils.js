@@ -3,6 +3,7 @@ import { saveAs } from 'file-saver';
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 import adminService from '../services/adminService';
+import { formatLocalDate, formatLocaleDateTime, nowTashkent } from './dateUtils';
 
 class ExportUtils {
   // Export data to Excel
@@ -53,7 +54,7 @@ class ExportUtils {
 
       // Add date
       doc.setFontSize(10);
-      doc.text(`Generated on: ${new Date().toLocaleString()}`, 14, 30);
+      doc.text(`Generated on: ${nowTashkent()}`, 14, 30);
 
       // Prepare table data
       const tableColumns = columns || Object.keys(data[0] || {});
@@ -127,8 +128,8 @@ class ExportUtils {
           'Email': user.email,
           'Role': user.role,
           'Status': user.status,
-          'Created': new Date(user.created_at).toLocaleDateString(),
-          'Last Login': user.last_login ? new Date(user.last_login).toLocaleDateString() : 'Never'
+          'Created': formatLocalDate(user.created_at),
+          'Last Login': user.last_login ? formatLocalDate(user.last_login) : 'Never'
         }));
 
         return this.exportToExcel(exportData, filename, 'Users');
@@ -154,7 +155,7 @@ class ExportUtils {
         'Total Amount': `${order.total_amount?.toFixed(2)} UZS`,
         'Status': order.status,
         'Payment Status': order.payment_status,
-        'Order Date': new Date(order.created_at).toLocaleDateString(),
+        'Order Date': formatLocalDate(order.created_at),
         'Items Count': order.items_count
       }));
 
@@ -185,7 +186,7 @@ class ExportUtils {
         'Price': `${product.price?.toFixed(2)} UZS`,
         'Stock': product.stock_quantity,
         'Status': product.status,
-        'Created': new Date(product.created_at).toLocaleDateString(),
+        'Created': formatLocalDate(product.created_at),
         'Featured': product.is_featured ? 'Yes' : 'No'
       }));
 
@@ -217,8 +218,8 @@ class ExportUtils {
         'Address': delivery.delivery_address,
         'Status': delivery.status,
         'Priority': delivery.priority,
-        'Scheduled Date': new Date(delivery.scheduled_date).toLocaleDateString(),
-        'Created': new Date(delivery.created_at).toLocaleDateString()
+        'Scheduled Date': formatLocalDate(delivery.scheduled_date),
+        'Created': formatLocalDate(delivery.created_at)
       }));
 
       if (format === 'pdf') {
@@ -249,7 +250,7 @@ class ExportUtils {
         'Status': program.status,
         'Min Purchase': `${program.min_purchase_amount?.toFixed(2) || '0.00'} UZS`,
         'Expiry (Months)': program.expiry_months || 'Never',
-        'Created': new Date(program.created_at).toLocaleDateString()
+        'Created': formatLocalDate(program.created_at)
       }));
 
       return this.exportToExcel(exportData, filename, 'Loyalty Programs');
@@ -272,8 +273,8 @@ class ExportUtils {
         'Recipients': campaign.recipient_count,
         'Sent': campaign.sent_count,
         'Status': campaign.status,
-        'Scheduled': campaign.scheduled_at ? new Date(campaign.scheduled_at).toLocaleString() : 'Immediate',
-        'Created': new Date(campaign.created_at).toLocaleDateString()
+        'Scheduled': campaign.scheduled_at ? formatLocaleDateTime(campaign.scheduled_at) : 'Immediate',
+        'Created': formatLocalDate(campaign.created_at)
       }));
 
       return this.exportToExcel(exportData, filename, 'Notification Campaigns');

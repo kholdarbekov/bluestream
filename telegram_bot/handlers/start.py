@@ -187,7 +187,8 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(
                 i18n.get('telegram.error.generic', language)
             )
-        except:
+        except Exception as e:
+            logger.warning(f"Failed to send localized error in start handler fallback: {e}")
             await update.message.reply_text(
                 "❌ Something went wrong. Please try again later."
             )

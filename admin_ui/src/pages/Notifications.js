@@ -45,6 +45,7 @@ import {
 } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from 'react-query';
 import moment from 'moment';
+import { formatDate, formatDateTime } from '../utils/dateUtils';
 import adminService from '../services/adminService';
 
 const { Option } = Select;
@@ -208,7 +209,7 @@ const Notifications = () => {
       dataIndex: 'scheduled_at',
       key: 'scheduled_at',
       width: 120,
-      render: (date) => (date ? moment(date).format('MMM DD, YYYY HH:mm') : 'Immediate')
+      render: (date) => (date ? formatDateTime(date) : 'Immediate')
     },
     {
       title: 'Actions',
@@ -303,7 +304,7 @@ const Notifications = () => {
       dataIndex: 'created_at',
       key: 'created_at',
       width: 120,
-      render: (date) => moment(date).format('MMM DD, YYYY')
+      render: (date) => formatDate(date)
     },
     {
       title: 'Actions',

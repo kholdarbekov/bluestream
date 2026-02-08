@@ -2,7 +2,7 @@
 Delivery service for the Water Business Platform
 Handles delivery scheduling, route optimization, and tracking
 """
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta, UTC
 from typing import List, Dict, Any, Optional, Tuple
 from flask import current_app
 import math
@@ -78,7 +78,7 @@ class DeliveryService:
             status=DeliveryStatus.SCHEDULED,
             distance_km=round(distance, 2),
             estimated_delivery_time=estimated_time,
-            scheduled_date=order.delivery_date or datetime.now(),
+            scheduled_date=order.delivery_date or datetime.now(UTC),
             scheduled_time_slot=scheduled_time_slot or "09:00-12:00"
         )
         
@@ -183,14 +183,14 @@ class DeliveryService:
     def get_available_time_slots(self, date: datetime = None, delivery_type: DeliveryType = DeliveryType.STANDARD) -> List[str]:
         """Get available delivery time slots for a date"""
         if date is None:
-            date = datetime.now().date()
-        
+            date = datetime.now(UTC).date()
+
         # Get base time slots
         time_slots = get_time_slots()
-        
+
         # For express delivery, filter to next few hours
         if delivery_type == DeliveryType.EXPRESS:
-            now = datetime.now()
+            now = datetime.now(UTC)
             if date == now.date():
                 # Only show slots 2+ hours from now for express
                 current_time = now.time()
@@ -280,8 +280,8 @@ class DeliveryService:
     def optimize_routes(self, date: datetime = None) -> Dict[str, Any]:
         """Optimize delivery routes for a given date"""
         if date is None:
-            date = datetime.now().date()
-        
+            date = datetime.now(UTC).date()
+
         # Get pending deliveries for the date
         start_of_day = datetime.combine(date, datetime.min.time())
         end_of_day = datetime.combine(date, datetime.max.time())

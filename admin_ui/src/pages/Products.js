@@ -36,6 +36,7 @@ import {
 import { useQuery, useMutation, useQueryClient } from 'react-query';
 import adminService from '../services/adminService';
 import { useTranslation } from 'react-i18next';
+import { formatLocalDate } from '../utils/dateUtils';
 
 const { Option } = Select;
 const { TextArea } = Input;
@@ -232,7 +233,7 @@ const Products = () => {
       dataIndex: 'created_at',
       key: 'created_at',
       width: 120,
-      render: (date) => new Date(date).toLocaleDateString()
+      render: (date) => formatLocalDate(date)
     },
     {
       title: t('ui.products.actions'),

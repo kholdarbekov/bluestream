@@ -26,7 +26,7 @@ class LoyaltyTransaction(db.Model, TimestampMixin):
     subscription_id = Column(Integer, ForeignKey('subscriptions.id'), nullable=True)
     
     # Expiration for earned points
-    expires_at = Column(DateTime, nullable=True)
+    expires_at = Column(DateTime(timezone=True), nullable=True)
     is_expired = Column(Boolean, default=False)
     
     # Additional metadata
@@ -79,8 +79,8 @@ class LoyaltyProgram(db.Model, TimestampMixin):
     
     # Program metadata
     terms_and_conditions = Column(Text, nullable=True)
-    start_date = Column(DateTime, nullable=True)
-    end_date = Column(DateTime, nullable=True)
+    start_date = Column(DateTime(timezone=True), nullable=True)
+    end_date = Column(DateTime(timezone=True), nullable=True)
     
     # Relationship to tiers
     tiers = relationship('LoyaltyTierConfig', back_populates='program', order_by='LoyaltyTierConfig.display_order')
@@ -238,16 +238,16 @@ class LoyaltyPoints(db.Model, TimestampMixin):
     # Tier information
     current_tier = Column(String(50), default='Bronze')
     points_to_next_tier = Column(Integer, default=0)
-    tier_valid_until = Column(DateTime, nullable=True)  # Date until current tier is guaranteed
+    tier_valid_until = Column(DateTime(timezone=True), nullable=True)  # Date until current tier is guaranteed
     
     # Streak Tracking
     current_streak = Column(Integer, default=0)
-    last_streak_update = Column(DateTime, nullable=True)
+    last_streak_update = Column(DateTime(timezone=True), nullable=True)
     streak_orders_this_month = Column(Integer, default=0)
-    
+
     # Metadata
-    last_activity_date = Column(DateTime, nullable=True)
-    last_expiry_check = Column(DateTime, nullable=True)
+    last_activity_date = Column(DateTime(timezone=True), nullable=True)
+    last_expiry_check = Column(DateTime(timezone=True), nullable=True)
     
     program = relationship('LoyaltyProgram')
     
@@ -365,8 +365,8 @@ class LoyaltyReward(db.Model, TimestampMixin, TranslatableMixin):
     is_active = Column(Boolean, default=True)
     is_featured = Column(Boolean, default=False)
     is_system_reward = Column(Boolean, default=False, nullable=False)  # System rewards (e.g., Free Delivery) cannot be manually redeemed
-    valid_from = Column(DateTime, nullable=True)
-    valid_until = Column(DateTime, nullable=True)
+    valid_from = Column(DateTime(timezone=True), nullable=True)
+    valid_until = Column(DateTime(timezone=True), nullable=True)
     
     # Usage tracking
     redemptions_used = Column(Integer, default=0)
@@ -462,8 +462,8 @@ class ReferralProgram(db.Model, TimestampMixin):
     referee_bonus_points = Column(Integer, default=0)
     
     # Tracking
-    referred_at = Column(DateTime, nullable=False, default=lambda: datetime.now(UTC))
-    completed_at = Column(DateTime, nullable=True)
+    referred_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC))
+    completed_at = Column(DateTime(timezone=True), nullable=True)
     first_order_id = Column(Integer, ForeignKey('orders.id'), nullable=True)
     
     # Relationships

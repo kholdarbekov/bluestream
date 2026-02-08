@@ -6,6 +6,7 @@ from flask import Blueprint, request, jsonify, current_app, g
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from sqlalchemy import and_, or_, desc, func, text
 from datetime import datetime, UTC, timedelta
+from shared.constants import DISPLAY_TIMEZONE
 
 from business_app.models.user import User, UserAddress
 from business_app.models.order import Order, OrderItem
@@ -7217,7 +7218,7 @@ def get_system_settings():
         settings = {
             'general': {
                 'app_name': current_app.config.get('APP_NAME', 'BlueStream Water Delivery'),
-                'timezone': current_app.config.get('TIMEZONE', 'Asia/Tashkent'),
+                'timezone': current_app.config.get('TIMEZONE', DISPLAY_TIMEZONE),
                 'default_language': current_app.config.get('DEFAULT_LANGUAGE', 'uz'),
                 'supported_languages': current_app.config.get('SUPPORTED_LANGUAGES', ['uz', 'ru', 'en']),
                 'maintenance_mode': current_app.config.get('MAINTENANCE_MODE', False)
@@ -7467,7 +7468,7 @@ def reset_system_settings():
         # Define default values
         defaults = {
             'GENERAL_APP_NAME': 'BlueStream Water Delivery',
-            'GENERAL_TIMEZONE': 'Asia/Tashkent',
+            'GENERAL_TIMEZONE': DISPLAY_TIMEZONE,
             'GENERAL_DEFAULT_LANGUAGE': 'uz',
             'GENERAL_SUPPORTED_LANGUAGES': ['uz', 'ru', 'en'],
             'GENERAL_MAINTENANCE_MODE': False,

@@ -76,11 +76,13 @@ class Translation:
         elif self.fallback_language in self.translations and key in self.translations[self.fallback_language]:
             translation = self.translations[self.fallback_language][key]
             logger.debug(f"Using fallback language '{self.fallback_language}' for key '{key}'")
-        # Return key if no translation found
+        # Return user-friendly fallback when translation is missing
         else:
             self._track_missing_key(key, language)
             logger.warning(f"Translation not found for key '{key}' in language '{language}' or fallback '{self.fallback_language}'")
-            translation = key
+            # Derive a readable fallback from the key (e.g. "telegram.menu.products" -> "Products")
+            last_part = key.rsplit('.', 1)[-1] if '.' in key else key
+            translation = last_part.replace('_', ' ').capitalize()
 
         # Format with kwargs if provided
         if args or kwargs:
@@ -182,24 +184,24 @@ class Translation:
     
     def get_language_flag(self, language_code: str) -> str:
         """Get flag emoji for language"""
-        flags = {
+        flags = getattr(config.localization, 'language_flags', None) or {
             'en': '🇺🇸',
             'uz': '🇺🇿',
             'ru': '🇷🇺'
         }
         return flags.get(language_code, '🌐')
-    
+
     def get_language_name(self, language_code: str, display_language: str = None) -> str:
         """Get language name in specified display language"""
         if not display_language:
             display_language = language_code
-            
-        names = {
+
+        names = getattr(config.localization, 'language_names', None) or {
             'en': {'en': 'English', 'uz': 'Inglizcha', 'ru': 'Английский'},
             'uz': {'en': 'Uzbek', 'uz': 'O\'zbekcha', 'ru': 'Узбекский'},
             'ru': {'en': 'Russian', 'uz': 'Ruscha', 'ru': 'Русский'}
         }
-        
+
         return names.get(language_code, {}).get(display_language, language_code)
 
 

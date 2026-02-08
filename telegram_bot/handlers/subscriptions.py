@@ -9,6 +9,8 @@ from i18n import i18n
 from keyboards import SubscriptionKeyboards, MenuKeyboards, ProductKeyboards
 from api_client import api_client
 from utils import user_middleware, get_auth_token
+from shared.constants import SUBSCRIPTION_STATUS_ICONS
+from handlers.base import BaseHandler
 
 logger = logging.getLogger('handlers')
 
@@ -20,7 +22,7 @@ logger = logging.getLogger('handlers')
 (ITEM_ACTION, ITEM_SELECT_PRODUCT, ITEM_SELECT_QUANTITY) = range(7, 10)
 
 
-class SubscriptionHandlers:
+class SubscriptionHandlers(BaseHandler):
     """Subscription-related handlers with full functionality"""
 
     async def subscriptions_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -96,13 +98,7 @@ class SubscriptionHandlers:
                 items = items_response.data.get("data", {}).get('items', []) if items_response.success else []
 
             # Build details text
-            status_emoji = {
-                'active': '✅',
-                'paused': '⏸️',
-                'cancelled': '❌',
-                'expired': '⏱️',
-                'trial': '🎁'
-            }.get(subscription.get('status'), '❓')
+            status_emoji = SUBSCRIPTION_STATUS_ICONS.get(subscription.get('status'), '❓')
 
             details_text = f"🔄 {i18n.get('telegram.subscription.details_title', language)}\n\n"
             details_text += f"{status_emoji} {i18n.get('telegram.subscription.status', language)}: "
@@ -183,64 +179,13 @@ class SubscriptionHandlers:
     async def select_products(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Select products for subscription"""
         try:
-            query = update.callback_query
-            user_id = update.effective_user.id
-            language = await i18n.get_user_language(user_id)
-
-            async with api_client as client:
-                user_token = await get_auth_token(update, context, client)
-                if not user_token:
-                    await self._handle_auth_error(update, language)
-                    return ConversationHandler.END
-
-                # Get products
-                response = await client.get_products(user_token, {'per_page': 20})
-                if not response.success:
-                    await self._handle_api_error(update, response.error, language)
-                    return ConversationHandler.END
-
-                products = response.data.get('data', {}).get("items", [])
-
-            # Format product list for display
-            products_text = i18n.get('telegram.subscription.select_products', language) + "\n\n"
-            for i, product in enumerate(products[:10], 1):
-                price = product.get('base_price', product.get('pricing', {}).get('base_price', 0))
-                products_text += f"{i}. {product['name']} - {price} UZS\n"
-
-            # Create inline keyboard with product selection buttons
-            from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-            buttons = []
-            for product in products[:10]:
-                buttons.append([
-                    InlineKeyboardButton(
-                        f"➕ {product['name']}",
-                        callback_data=f"sub_product_{product['id']}"
-                    )
-                ])
-
-            # Add cancel button
-            buttons.append([
-                InlineKeyboardButton(
-                    i18n.get('telegram.cancel', language),
-                    callback_data='cancel_subscription_creation'
-                )
-            ])
-
-            keyboard = InlineKeyboardMarkup(buttons)
-
-            # Answer callback query and send/edit message
-            if query:
-                await query.edit_message_text(
-                    text=products_text,
-                    reply_markup=keyboard
-                )
-                await query.answer()
-            else:
-                await context.bot.send_message(
-                    chat_id=user_id,
-                    text=products_text,
-                    reply_markup=keyboard
-                )
+            language = await i18n.get_user_language(update.effective_user.id)
+            products = await self._fetch_and_display_products(
+                update, context, language,
+                header_key='telegram.subscription.select_products'
+            )
+            if products is None:
+                return ConversationHandler.END
 
             return SELECT_QUANTITY
 
@@ -252,21 +197,11 @@ class SubscriptionHandlers:
     async def select_quantity(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Select quantity for chosen product"""
         try:
-            query = update.callback_query
-            user_id = update.effective_user.id
-            language = await i18n.get_user_language(user_id)
-
-            product_id = int(query.data.split('_')[2])
-
-            # Store product selection
+            language = await i18n.get_user_language(update.effective_user.id)
+            product_id = int(update.callback_query.data.split('_')[2])
             context.user_data['current_product_id'] = product_id
 
-            text = i18n.get('telegram.subscription.select_quantity', language)
-            keyboard = SubscriptionKeyboards.quantity_selector(language)
-
-            await query.edit_message_text(text=text, reply_markup=keyboard)
-            await query.answer()
-
+            await self._show_quantity_selector(update, language, 'telegram.subscription.select_quantity')
             return SELECT_FREQUENCY
 
         except Exception as e:
@@ -784,60 +719,17 @@ class SubscriptionHandlers:
     async def add_item_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Start adding item to subscription"""
         try:
-            query = update.callback_query
-            user_id = update.effective_user.id
-            language = await i18n.get_user_language(user_id)
-
-            sub_id = int(query.data.split('_')[2])
+            language = await i18n.get_user_language(update.effective_user.id)
+            sub_id = int(update.callback_query.data.split('_')[2])
             context.user_data['editing_subscription_id'] = sub_id
 
-            # Get products
-            async with api_client as client:
-                user_token = await get_auth_token(update, context, client)
-                if not user_token:
-                    await self._handle_auth_error(update, language)
-                    return ConversationHandler.END
-
-                response = await client.get_products(user_token, {'per_page': 20})
-                if not response.success:
-                    await self._handle_api_error(update, response.error, language)
-                    return ConversationHandler.END
-
-                products = response.data.get("data", {}).get('items', [])
-
-            # Format product list for display
-            products_text = (i18n.get('telegram.subscription.select_product_to_add', language) or "Select a product to add") + "\n\n"
-            for i, product in enumerate(products[:10], 1):
-                price = product.get('base_price', product.get('pricing', {}).get('base_price', 0))
-                products_text += f"{i}. {product['name']} - {price} UZS\n"
-
-            # Create inline keyboard with product selection buttons
-            from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-            buttons = []
-            for product in products[:10]:
-                buttons.append([
-                    InlineKeyboardButton(
-                        f"➕ {product['name']}",
-                        callback_data=f"sub_product_{product['id']}"
-                    )
-                ])
-
-            # Add back button
-            buttons.append([
-                InlineKeyboardButton(
-                    i18n.get('telegram.back', language),
-                    callback_data=f'manage_items_{sub_id}'
-                )
-            ])
-
-            keyboard = InlineKeyboardMarkup(buttons)
-
-            # Answer callback and edit message
-            await query.edit_message_text(
-                text=products_text,
-                reply_markup=keyboard
+            products = await self._fetch_and_display_products(
+                update, context, language,
+                header_key='telegram.subscription.select_product_to_add',
+                back_callback=f'manage_items_{sub_id}'
             )
-            await query.answer()
+            if products is None:
+                return ConversationHandler.END
 
             return ITEM_SELECT_PRODUCT
 
@@ -849,19 +741,11 @@ class SubscriptionHandlers:
     async def add_item_select_quantity(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Select quantity for new item"""
         try:
-            query = update.callback_query
-            user_id = update.effective_user.id
-            language = await i18n.get_user_language(user_id)
-
-            product_id = int(query.data.split('_')[2])
+            language = await i18n.get_user_language(update.effective_user.id)
+            product_id = int(update.callback_query.data.split('_')[2])
             context.user_data['adding_product_id'] = product_id
 
-            text = i18n.get('telegram.subscription.select_quantity_for_item', language)
-            keyboard = SubscriptionKeyboards.quantity_selector(language)
-
-            await query.edit_message_text(text=text, reply_markup=keyboard)
-            await query.answer()
-
+            await self._show_quantity_selector(update, language, 'telegram.subscription.select_quantity_for_item')
             return ITEM_SELECT_QUANTITY
 
         except Exception as e:
@@ -923,24 +807,17 @@ class SubscriptionHandlers:
     async def update_item_quantity(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Update quantity for existing item"""
         try:
-            query = update.callback_query
-            user_id = update.effective_user.id
-            language = await i18n.get_user_language(user_id)
+            language = await i18n.get_user_language(update.effective_user.id)
 
             # Parse: update_item_{sub_id}_{item_id}
-            parts = query.data.split('_')
+            parts = update.callback_query.data.split('_')
             sub_id = int(parts[2])
             item_id = int(parts[3])
 
             context.user_data['editing_subscription_id'] = sub_id
             context.user_data['editing_item_id'] = item_id
 
-            text = i18n.get('telegram.subscription.select_new_quantity', language)
-            keyboard = SubscriptionKeyboards.quantity_selector(language)
-
-            await query.edit_message_text(text=text, reply_markup=keyboard)
-            await query.answer()
-
+            await self._show_quantity_selector(update, language, 'telegram.subscription.select_new_quantity')
             return ITEM_SELECT_QUANTITY
 
         except Exception as e:
@@ -1307,6 +1184,73 @@ class SubscriptionHandlers:
 
     # ========== HELPER METHODS ==========
 
+    async def _fetch_and_display_products(self, update, context, language, header_key, back_callback=None):
+        """Shared helper: fetch products from API and display selection keyboard.
+
+        Returns list of products on success, or None on failure (error already shown).
+        """
+        query = update.callback_query
+
+        async with api_client as client:
+            user_token = await get_auth_token(update, context, client)
+            if not user_token:
+                await self._handle_auth_error(update, language)
+                return None
+
+            response = await client.get_products(user_token, {'per_page': 20})
+            if not response.success:
+                await self._handle_api_error(update, response.error, language)
+                return None
+
+            products = response.data.get('data', {}).get('items', [])
+
+        # Build text
+        products_text = (i18n.get(header_key, language) or "Select a product") + "\n\n"
+        for idx, product in enumerate(products[:10], 1):
+            price = product.get('base_price', product.get('pricing', {}).get('base_price', 0))
+            products_text += f"{idx}. {product['name']} - {price} UZS\n"
+
+        # Build keyboard
+        buttons = []
+        for product in products[:10]:
+            buttons.append([InlineKeyboardButton(
+                f"➕ {product['name']}",
+                callback_data=f"sub_product_{product['id']}"
+            )])
+
+        if back_callback:
+            buttons.append([InlineKeyboardButton(
+                i18n.get('telegram.back', language),
+                callback_data=back_callback
+            )])
+        else:
+            buttons.append([InlineKeyboardButton(
+                i18n.get('telegram.cancel', language),
+                callback_data='cancel_subscription_creation'
+            )])
+
+        keyboard = InlineKeyboardMarkup(buttons)
+
+        if query:
+            await query.edit_message_text(text=products_text, reply_markup=keyboard)
+            await query.answer()
+        else:
+            await context.bot.send_message(
+                chat_id=update.effective_user.id,
+                text=products_text,
+                reply_markup=keyboard
+            )
+
+        return products
+
+    async def _show_quantity_selector(self, update, language, text_key):
+        """Shared helper: display quantity selection keyboard."""
+        query = update.callback_query
+        text = i18n.get(text_key, language) or "Select quantity"
+        keyboard = SubscriptionKeyboards.quantity_selector(language)
+        await query.edit_message_text(text=text, reply_markup=keyboard)
+        await query.answer()
+
     def _build_address_keyboard(self, addresses, language):
         """Build keyboard for address selection"""
         keyboard = []
@@ -1326,35 +1270,6 @@ class SubscriptionHandlers:
 
         return InlineKeyboardMarkup(keyboard)
 
-    async def _handle_auth_error(self, update: Update, language: str):
-        """Handle authentication error"""
-        error_msg = i18n.get('telegram.error.auth_error', language)
-        if update.callback_query:
-            await update.callback_query.edit_message_text(error_msg)
-            await update.callback_query.answer()
-        else:
-            await update.message.reply_text(error_msg)
-
-    async def _handle_api_error(self, update: Update, error: str, language: str):
-        """Handle API error"""
-        error_msg = f"❌ {error}"
-        if update.callback_query:
-            await update.callback_query.answer(error_msg, show_alert=True)
-        else:
-            await update.message.reply_text(error_msg)
-
-    async def _handle_error(self, update: Update):
-        """Handle general error"""
-        try:
-            language = await i18n.get_user_language(update.effective_user.id)
-            error_msg = i18n.get('telegram.error_occurred', language)
-        except:
-            error_msg = "❌ An error occurred. Please try again."
-
-        if update.callback_query:
-            await update.callback_query.answer(error_msg, show_alert=True)
-        else:
-            await update.message.reply_text(error_msg)
 
 
 # Global handler instance

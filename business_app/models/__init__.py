@@ -1,7 +1,5 @@
 from datetime import datetime, UTC, timedelta
 from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, Text, ForeignKey, Enum, JSON, Index
 
-class TimestampMixin:
-    """Mixin for created_at and updated_at timestamps"""
-    created_at = Column(DateTime, default=datetime.now)
-    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+# Re-export unified TimestampMixin from base module (timezone-aware)
+from business_app.models.base import TimestampMixin

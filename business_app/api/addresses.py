@@ -7,7 +7,7 @@ from flask_jwt_extended import jwt_required, get_jwt_identity
 from sqlalchemy import desc
 
 from business_app.models.user import User, UserAddress
-from business_app.utils.error_handlers import handle_api_exception, create_success_response
+from business_app.utils.error_handlers import handle_api_exception
 from business_app.utils.exceptions import ValidationError, NotFoundError, ForbiddenError
 from business_app.utils.decorators import validate_json, rate_limit
 from business_app.utils.api_responses import (

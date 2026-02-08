@@ -60,7 +60,7 @@ class BlogPost(db.Model, TimestampMixin, TranslatableMixin):
     # Publishing
     status = Column(SQLEnum(BlogStatus, name='blog_status', values_callable=lambda x: [e.value for e in x]),
                    nullable=False, default=BlogStatus.DRAFT, index=True)
-    published_at = Column(DateTime, nullable=True, index=True)
+    published_at = Column(DateTime(timezone=True), nullable=True, index=True)
 
     # Display settings
     is_featured = Column(Boolean, default=False)  # Show on homepage

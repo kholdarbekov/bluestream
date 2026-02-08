@@ -21,7 +21,7 @@ class CustomerSegment(db.Model, TimestampMixin, TranslatableMixin):
     
     # Segment stats
     customer_count = Column(Integer, default=0)
-    last_updated = Column(DateTime, default=datetime.now(UTC))
+    last_updated = Column(DateTime(timezone=True), default=datetime.now(UTC))
     
     # Automated actions
     auto_apply_discount = Column(Boolean, default=False)
@@ -69,8 +69,8 @@ class PromotionalCampaign(db.Model, TimestampMixin, TranslatableMixin):
     
     # Validity
     is_active = Column(Boolean, default=True)
-    start_date = Column(DateTime, nullable=False)
-    end_date = Column(DateTime, nullable=True)
+    start_date = Column(DateTime(timezone=True), nullable=False)
+    end_date = Column(DateTime(timezone=True), nullable=True)
     usage_limit = Column(Integer, nullable=True)  # Total usage limit
     usage_limit_per_customer = Column(Integer, default=1)
     
@@ -152,8 +152,8 @@ class AnalyticsReport(db.Model, TimestampMixin):
     title = Column(String(200), nullable=False)
     
     # Report metadata
-    start_date = Column(DateTime, nullable=False)
-    end_date = Column(DateTime, nullable=False)
+    start_date = Column(DateTime(timezone=True), nullable=False)
+    end_date = Column(DateTime(timezone=True), nullable=False)
     generated_by = Column(Integer, ForeignKey('users.id'), nullable=True)  # User ID who generated
     
     # Report data
@@ -197,7 +197,7 @@ class UserBehavior(db.Model, TimestampMixin):
     
     # Additional metadata
     extra_data = Column(JSON, default={})
-    timestamp = Column(DateTime, default=datetime.now(UTC), nullable=False)
+    timestamp = Column(DateTime(timezone=True), default=datetime.now(UTC), nullable=False)
     
     def to_dict(self):
         return {
@@ -221,9 +221,9 @@ class SalesMetric(db.Model, TimestampMixin):
     metric_type = Column(String(50), nullable=False)  # daily, weekly, monthly
     
     # Time period
-    period_start = Column(DateTime, nullable=False)
-    period_end = Column(DateTime, nullable=False)
-    
+    period_start = Column(DateTime(timezone=True), nullable=False)
+    period_end = Column(DateTime(timezone=True), nullable=False)
+
     # Metric values
     value = Column(Numeric(precision=10, scale=2), nullable=False)
     target_value = Column(Numeric(precision=10, scale=2), nullable=True)
@@ -404,8 +404,8 @@ class RevenueMetric(db.Model, TimestampMixin):
     id = Column(Integer, primary_key=True)
     
     # Time period
-    period_start = Column(DateTime, nullable=False, index=True)
-    period_end = Column(DateTime, nullable=False, index=True)
+    period_start = Column(DateTime(timezone=True), nullable=False, index=True)
+    period_end = Column(DateTime(timezone=True), nullable=False, index=True)
     period_type = Column(String(20), nullable=False)  # daily, weekly, monthly, yearly
     
     # Revenue metrics
@@ -458,7 +458,7 @@ class UserSegment(db.Model, TimestampMixin, TranslatableMixin):
     
     # Segment statistics
     user_count = Column(Integer, default=0)
-    last_calculated = Column(DateTime, nullable=True)
+    last_calculated = Column(DateTime(timezone=True), nullable=True)
     
     # Status
     is_active = Column(Boolean, default=True)

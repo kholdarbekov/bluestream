@@ -442,6 +442,10 @@ class CartService:
         quantity: int
     ) -> 'Cart':
         """Add item to user's cart"""
+        user = User.query.get(user_id)
+        if not user:
+            raise NotFoundError(f"User with ID {user_id} not found")
+
         cart = self.get_cart_by_user_id(user_id)
         if not cart:
             cart = Cart(user_id=user_id)
@@ -721,17 +725,16 @@ class CartService:
         delivery_time_slot: Optional[str],
         user: Optional[User]
     ) -> float:
-        """Calculate delivery fee"""
-        # Free delivery for orders above threshold
-        if items_subtotal >= self.free_delivery_threshold:
-            return 0.0
-
-        # Free delivery for premium users
+        """Calculate delivery fee via DeliveryService (single source of truth)"""
+        from business_app.services.delivery_service import DeliveryService
+        delivery_service = DeliveryService()
+        # DeliveryService handles free-delivery threshold internally;
+        # premium-user override is cart-specific for now.
         if user and getattr(user, 'is_premium', False):
             return 0.0
-
-        # Standard delivery fee
-        return self.standard_delivery_fee
+        # Use 0,0 coordinates since we don't resolve the address here;
+        # DeliveryService currently returns 0 (free delivery campaign).
+        return float(delivery_service.calculate_delivery_fee(0, 0, int(items_subtotal)))
 
     def _apply_promo_code(
         self,

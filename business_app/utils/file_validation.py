@@ -244,8 +244,8 @@ class FileValidator:
             path_components.append(str(user_id))
 
         # Add date-based subdirectory for organization
-        from datetime import datetime
-        date_folder = datetime.now().strftime('%Y/%m')
+        from datetime import datetime, UTC
+        date_folder = datetime.now(UTC).strftime('%Y/%m')
         path_components.extend(date_folder.split('/'))
 
         path_components.append(unique_filename)

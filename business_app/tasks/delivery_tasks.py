@@ -4,7 +4,7 @@ This file should be placed in business_app/tasks/delivery_tasks.py
 """
 from celery import shared_task
 from celery.utils.log import get_task_logger
-from datetime import datetime, timezone, timedelta, UTC
+from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, List
 from flask import current_app
 
@@ -21,22 +21,23 @@ from business_app import db
 logger = get_task_logger(__name__)
 
 
-@shared_task(bind=True, max_retries=3, default_retry_delay=300)
+@shared_task(bind=True, max_retries=3, default_retry_delay=300, time_limit=600, soft_time_limit=540)
 def auto_assign_delivery_task(self, delivery_id: int):
     """Automatically assign delivery to available driver"""
     try:
         logger.info(f"Auto-assigning delivery {delivery_id}")
         
-        delivery = Delivery.query.get(delivery_id)
+        # Lock delivery row to prevent concurrent assignment
+        delivery = Delivery.query.with_for_update().get(delivery_id)
         if not delivery:
             logger.error(f"Delivery {delivery_id} not found")
             return {'success': False, 'error': 'Delivery not found'}
-        
+
         # Check if delivery is still pending
         if delivery.status != DeliveryStatus.SCHEDULED:
             logger.info(f"Delivery {delivery_id} is no longer scheduled")
             return {'success': False, 'error': 'Delivery no longer scheduled'}
-        
+
         # Find available drivers
         available_drivers = User.query.filter(
             User.role == UserRole.DELIVERY_DRIVER,
@@ -49,12 +50,12 @@ def auto_assign_delivery_task(self, delivery_id: int):
         best_driver = None
         min_distance = float('inf')
         
+        import random
         for driver in available_drivers:
             if delivery_service._is_driver_available(driver.id):
-                # Calculate distance from driver's current location to delivery
-                # For now, using a simple algorithm - in production, use real-time location
-                distance = 5.0  # Placeholder distance calculation
-                
+                # TODO: Replace with real GPS-based distance calculation when driver location tracking is implemented
+                distance = random.uniform(1.0, 10.0)
+
                 if distance < min_distance:
                     min_distance = distance
                     best_driver = driver
@@ -80,14 +81,14 @@ def auto_assign_delivery_task(self, delivery_id: int):
         raise self.retry(exc=exc)
 
 
-@shared_task
+@shared_task(time_limit=600, soft_time_limit=540)
 def cleanup_completed_deliveries():
     """Clean up old completed delivery records"""
     try:
         logger.info("Cleaning up old completed deliveries")
         
         # Archive deliveries completed more than 1 year ago
-        cutoff_date = datetime.now(UTC) - timedelta(days=365)
+        cutoff_date = datetime.now(timezone.utc) - timedelta(days=365)
         
         old_deliveries = Delivery.query.filter(
             Delivery.delivered_at < cutoff_date,
@@ -99,12 +100,12 @@ def cleanup_completed_deliveries():
         for delivery in old_deliveries:
             # Move to archive table or update status (assuming you have an is_archived field)
             # delivery.is_archived = True
-            # delivery.archived_at = datetime.now(UTC)
+            # delivery.archived_at = datetime.now(timezone.utc)
             
             # For now, just update a field to mark as archived
             delivery.route_data = delivery.route_data or {}
             delivery.route_data['archived'] = True
-            delivery.route_data['archived_at'] = datetime.now(UTC).isoformat()
+            delivery.route_data['archived_at'] = datetime.now(timezone.utc).isoformat()
             archived_count += 1
         
         db.session.commit()
@@ -118,7 +119,7 @@ def cleanup_completed_deliveries():
         return {'error': str(e)}
     
 
-@shared_task(bind=True, max_retries=3)
+@shared_task(bind=True, max_retries=3, time_limit=600, soft_time_limit=540)
 def generate_driver_performance_report(self, driver_id: int, start_date: str, end_date: str):
     """Generate performance report for a specific driver"""
     try:
@@ -172,7 +173,7 @@ def generate_driver_performance_report(self, driver_id: int, start_date: str, en
                 'average_rating': round(avg_rating, 2),
                 'total_attempts': sum(d.delivery_attempts for d in deliveries)
             },
-            'generated_at': datetime.now(UTC).isoformat()
+            'generated_at': datetime.now(timezone.utc).isoformat()
         }
         
         # Send report to driver and management
@@ -198,14 +199,14 @@ def generate_driver_performance_report(self, driver_id: int, start_date: str, en
         raise self.retry(exc=exc)
     
 
-@shared_task
+@shared_task(time_limit=600, soft_time_limit=540)
 def monitor_delivery_delays():
     """Monitor deliveries for delays and send alerts"""
     try:
         logger.info("Monitoring delivery delays")
         
         # Get deliveries that are overdue
-        now = datetime.now(UTC)
+        now = datetime.now(timezone.utc)
         overdue_deliveries = Delivery.query.filter(
             Delivery.estimated_delivery_time < now,
             Delivery.status.in_([DeliveryStatus.ASSIGNED, DeliveryStatus.IN_TRANSIT, DeliveryStatus.PICKED_UP])
@@ -252,14 +253,14 @@ def monitor_delivery_delays():
         return {'error': str(e)}
 
 
-@shared_task(bind=True, max_retries=2)
+@shared_task(bind=True, max_retries=2, time_limit=600, soft_time_limit=540)
 def update_delivery_zones_task(self):
     """Update delivery zones based on demand and performance"""
     try:
         logger.info("Updating delivery zones")
         
         # Analyze delivery patterns from last 30 days
-        end_date = datetime.now(UTC)
+        end_date = datetime.now(timezone.utc)
         start_date = end_date - timedelta(days=30)
         
         from sqlalchemy import func
@@ -308,7 +309,7 @@ def update_delivery_zones_task(self):
         raise self.retry(exc=exc)
 
 
-@shared_task(bind=True, max_retries=3)
+@shared_task(bind=True, max_retries=3, time_limit=600, soft_time_limit=540)
 def optimize_driver_route_task(self, driver_id: int):
     """Optimize route for a specific driver"""
     try:
@@ -334,7 +335,7 @@ def optimize_driver_route_task(self, driver_id: int):
         for i, delivery in enumerate(optimized_deliveries):
             delivery.route_data = delivery.route_data or {}
             delivery.route_data['sequence'] = i + 1
-            delivery.updated_at = datetime.now(UTC)
+            delivery.updated_at = datetime.now(timezone.utc)
         
         db.session.commit()
         
@@ -344,7 +345,7 @@ def optimize_driver_route_task(self, driver_id: int):
             'delivery_count': len(optimized_deliveries),
             'total_distance_km': delivery_service._calculate_route_distance(optimized_deliveries),
             'estimated_time_hours': len(optimized_deliveries) * 0.5,
-            'optimized_at': datetime.now(UTC).isoformat()
+            'optimized_at': datetime.now(timezone.utc).isoformat()
         }
         
         # Send route update to driver
@@ -366,7 +367,7 @@ def optimize_driver_route_task(self, driver_id: int):
         raise self.retry(exc=exc)
 
 
-@shared_task
+@shared_task(time_limit=600, soft_time_limit=540)
 def optimize_daily_delivery_routes():
     """Optimize delivery routes for all drivers daily"""
     try:
@@ -396,14 +397,14 @@ def optimize_daily_delivery_routes():
         return {'error': str(e)}
 
 
-@shared_task
+@shared_task(time_limit=600, soft_time_limit=540)
 def send_delivery_reminders():
     """Send delivery reminders to customers and drivers"""
     try:
         logger.info("Sending delivery reminders")
         
         # Get deliveries scheduled for next 2 hours
-        now = datetime.now(UTC)
+        now = datetime.now(timezone.utc)
         reminder_window = now + timedelta(hours=2)
         
         upcoming_deliveries = Delivery.query.filter(
@@ -465,7 +466,7 @@ def send_delivery_reminders():
         return {'error': str(e)}
 
 
-@shared_task(bind=True, max_retries=3)
+@shared_task(bind=True, max_retries=3, time_limit=600, soft_time_limit=540)
 def track_delivery_location_task(self, delivery_id: int, latitude: float, longitude: float):
     """Update delivery location tracking"""
     try:
@@ -517,7 +518,7 @@ def track_delivery_location_task(self, delivery_id: int, latitude: float, longit
         raise self.retry(exc=exc)
 
 
-@shared_task(bind=True, max_retries=3)
+@shared_task(bind=True, max_retries=3, time_limit=600, soft_time_limit=540)
 def calculate_delivery_eta_task(self, delivery_id: int):
     """Calculate and update delivery ETA"""
     try:
@@ -542,11 +543,11 @@ def calculate_delivery_eta_task(self, delivery_id: int):
         
         # Calculate new ETA
         current_eta = delivery.estimated_delivery_time
-        new_eta = datetime.now(UTC) + timedelta(minutes=travel_time.get('duration_minutes', 30))
+        new_eta = datetime.now(timezone.utc) + timedelta(minutes=travel_time.get('duration_minutes', 30))
         
         # Update ETA
         delivery.estimated_delivery_time = new_eta
-        delivery.updated_at = datetime.now(UTC)
+        delivery.updated_at = datetime.now(timezone.utc)
         
         db.session.commit()
         
@@ -576,14 +577,14 @@ def calculate_delivery_eta_task(self, delivery_id: int):
         raise self.retry(exc=exc)
 
 
-@shared_task
+@shared_task(time_limit=600, soft_time_limit=540)
 def process_delivery_analytics():
     """Process delivery analytics and generate insights"""
     try:
         logger.info("Processing delivery analytics")
-        
-        end_date = datetime.now(UTC)
-        start_date = end_date - timedelta(days=1)
+
+        from business_app.utils.helpers import get_analytics_date_range
+        start_date, end_date = get_analytics_date_range(days=1)
         
         from sqlalchemy import func
         delivery_service = DeliveryService()
@@ -663,20 +664,7 @@ def process_delivery_analytics():
         return {'error': str(e)}
     
 
-@shared_task(bind=True, max_retries=2)
-def handle_delivery_exception_task(self, delivery_id: int, exception_type: str, details: Dict[str, Any]):
-    """Handle delivery exceptions (delays, issues, etc.)"""
-    try:
-        logger.info(f"Handling delivery exception for delivery {delivery_id}: {exception_type}")
-        
-        delivery = Delivery.query.get(delivery_id)
-        if not delivery:
-            logger.error(f"Delivery {delivery_id} not")
-    except Exception:
-        pass
-
-
-@shared_task(bind=True, max_retries=2)
+@shared_task(bind=True, max_retries=2, time_limit=600, soft_time_limit=540)
 def handle_delivery_exception_task(self, delivery_id: int, exception_type: str, details: Dict[str, Any]):
     """Handle delivery exceptions (delays, issues, etc.)"""
     try:
@@ -691,11 +679,11 @@ def handle_delivery_exception_task(self, delivery_id: int, exception_type: str, 
         
         if exception_type == 'delay':
             # Handle delivery delay
-            new_eta = datetime.fromisoformat(details.get('new_eta', datetime.now(UTC).isoformat()))
+            new_eta = datetime.fromisoformat(details.get('new_eta', datetime.now(timezone.utc).isoformat()))
             delay_reason = details.get('reason', 'Traffic conditions')
             
             delivery.estimated_delivery_time = new_eta
-            delivery.updated_at = datetime.now(UTC)
+            delivery.updated_at = datetime.now(timezone.utc)
             
             # Notify customer about delay
             notification_service.send_notification(
@@ -717,7 +705,7 @@ def handle_delivery_exception_task(self, delivery_id: int, exception_type: str, 
             delivery.status = DeliveryStatus.FAILED
             delivery.delivery_attempts += 1
             delivery.failed_delivery_reason = attempt_reason
-            delivery.updated_at = datetime.now(UTC)
+            delivery.updated_at = datetime.now(timezone.utc)
             
             # Notify customer and schedule retry
             notification_service.send_notification(
@@ -761,7 +749,7 @@ def handle_delivery_exception_task(self, delivery_id: int, exception_type: str, 
         raise self.retry(exc=exc)
 
 
-@shared_task(bind=True, max_retries=3, default_retry_delay=600)
+@shared_task(bind=True, max_retries=3, default_retry_delay=600, time_limit=600, soft_time_limit=540)
 def reschedule_failed_delivery_task(self, delivery_id: int):
     """Reschedule a failed delivery attempt"""
     try:
@@ -785,7 +773,7 @@ def reschedule_failed_delivery_task(self, delivery_id: int):
         
         # Clear driver assignment for reassignment
         delivery.delivery_person_id = None
-        delivery.updated_at = datetime.now(UTC)
+        delivery.updated_at = datetime.now(timezone.utc)
         
         db.session.commit()
         
@@ -812,7 +800,7 @@ def reschedule_failed_delivery_task(self, delivery_id: int):
         raise self.retry(exc=exc)
 
 
-@shared_task(bind=True, max_retries=3)
+@shared_task(bind=True, max_retries=3, time_limit=600, soft_time_limit=540)
 def process_delivery_confirmation_task(self, delivery_id: int, confirmation_data: Dict[str, Any]):
     """Process delivery confirmation with photos and signature"""
     try:
@@ -834,7 +822,7 @@ def process_delivery_confirmation_task(self, delivery_id: int, confirmation_data
         
         # Update order status
         delivery.order.status = OrderStatus.DELIVERED
-        delivery.order.updated_at = datetime.now(UTC)
+        delivery.order.updated_at = datetime.now(timezone.utc)
         
         db.session.commit()
         
@@ -865,7 +853,7 @@ def process_delivery_confirmation_task(self, delivery_id: int, confirmation_data
         raise self.retry(exc=exc)
 
 
-@shared_task
+@shared_task(time_limit=600, soft_time_limit=540)
 def request_delivery_feedback_task(delivery_id: int):
     """Request customer feedback for completed delivery"""
     try:
@@ -896,14 +884,14 @@ def request_delivery_feedback_task(delivery_id: int):
         return {'error': str(e)}
 
 
-@shared_task
+@shared_task(time_limit=600, soft_time_limit=540)
 def generate_delivery_heatmap_data():
     """Generate delivery heatmap data for admin dashboard"""
     try:
         logger.info("Generating delivery heatmap data")
         
         # Get delivery data from last 7 days
-        end_date = datetime.now(UTC)
+        end_date = datetime.now(timezone.utc)
         start_date = end_date - timedelta(days=7)
         
         from sqlalchemy import func
@@ -939,7 +927,7 @@ def generate_delivery_heatmap_data():
             'type': 'delivery_performance',
             'period': f"{start_date.date()} to {end_date.date()}",
             'data_points': heatmap_points,
-            'generated_at': datetime.now(UTC).isoformat()
+            'generated_at': datetime.now(timezone.utc).isoformat()
         })
         
         logger.info(f"Generated heatmap data with {len(heatmap_points)} points")
@@ -950,14 +938,14 @@ def generate_delivery_heatmap_data():
         return {'error': str(e)}
 
 
-@shared_task
+@shared_task(time_limit=600, soft_time_limit=540)
 def optimize_time_slots():
     """Optimize delivery time slots based on historical data"""
     try:
         logger.info("Optimizing delivery time slots")
         
         # Analyze time slot performance from last 30 days
-        end_date = datetime.now(UTC)
+        end_date = datetime.now(timezone.utc)
         start_date = end_date - timedelta(days=30)
         
         from sqlalchemy import func
@@ -1007,15 +995,15 @@ def optimize_time_slots():
         logger.error(f"Failed to optimize time slots: {e}")
         return {'error': str(e)}
 
-@shared_task
+@shared_task(time_limit=600, soft_time_limit=540)
 def send_daily_delivery_summary():
     """Send daily delivery summary to management"""
     try:
         logger.info("Sending daily delivery summary")
         
         # Get yesterday's data
-        yesterday = datetime.now(UTC).date() - timedelta(days=1)
-        start_date = datetime.combine(yesterday, datetime.min.time()).replace(tzinfo=UTC)
+        yesterday = datetime.now(timezone.utc).date() - timedelta(days=1)
+        start_date = datetime.combine(yesterday, datetime.min.time()).replace(tzinfo=timezone.utc)
         end_date = start_date + timedelta(days=1)
         
         from sqlalchemy import func

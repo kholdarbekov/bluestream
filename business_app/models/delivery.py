@@ -14,17 +14,21 @@ from business_app.models.order import Order
 
 class Delivery(db.Model, TimestampMixin):
     __tablename__ = 'deliveries'
-    
+    __table_args__ = (
+        Index('idx_deliveries_person_status', 'delivery_person_id', 'status'),
+        Index('idx_deliveries_status_scheduled', 'status', 'scheduled_date'),
+    )
+
     id = Column(Integer, primary_key=True)
     order_id = Column(Integer, ForeignKey('orders.id'), nullable=False, unique=True, index=True)
     delivery_person_id = Column(Integer, ForeignKey('users.id'), nullable=True, index=True)
     status = Column(Enum(DeliveryStatus, name='delivery_status', values_callable=lambda x: [e.value for e in x]), default=DeliveryStatus.SCHEDULED, index=True)
     
     # Scheduling
-    scheduled_date = Column(DateTime, nullable=False)
+    scheduled_date = Column(DateTime(timezone=True), nullable=False)
     scheduled_time_slot = Column(String(20), nullable=False)
-    estimated_delivery_time = Column(DateTime, nullable=True)
-    actual_delivery_time = Column(DateTime, nullable=True)
+    estimated_delivery_time = Column(DateTime(timezone=True), nullable=True)
+    actual_delivery_time = Column(DateTime(timezone=True), nullable=True)
     
     # Route and tracking
     route_data = Column(JSON, default={})  # Optimized route information
@@ -35,10 +39,10 @@ class Delivery(db.Model, TimestampMixin):
     # Real-time tracking
     current_location_lat = Column(Float, nullable=True)
     current_location_lng = Column(Float, nullable=True)
-    last_location_update = Column(DateTime, nullable=True)
-    
+    last_location_update = Column(DateTime(timezone=True), nullable=True)
+
     # Completion details
-    delivered_at = Column(DateTime, nullable=True)
+    delivered_at = Column(DateTime(timezone=True), nullable=True)
     delivery_confirmation_photos = Column(JSON, default=[])
     recipient_signature = Column(String(500), nullable=True)
     delivery_notes = Column(Text, nullable=True)
@@ -59,7 +63,7 @@ class Delivery(db.Model, TimestampMixin):
     
     def generate_tracking_number(self):
         """Generate unique tracking number"""
-        timestamp = datetime.now().strftime('%Y%m%d%H%M')
+        timestamp = datetime.now(UTC).strftime('%Y%m%d%H%M')
         random_suffix = str(uuid.uuid4().hex[:6]).upper()
         self.tracking_number = f"TRK{timestamp}{random_suffix}"
     
@@ -173,7 +177,7 @@ class DeliveryRoute(db.Model, TimestampMixin):
     # Route details
     start_location_lat = Column(Float, nullable=False)  # Depot/warehouse location
     start_location_lng = Column(Float, nullable=False)
-    route_date = Column(DateTime, nullable=False, index=True)
+    route_date = Column(DateTime(timezone=True), nullable=False, index=True)
     
     # Route optimization data
     optimized_order = Column(JSON, default=[])  # List of order IDs in optimized sequence
@@ -182,8 +186,8 @@ class DeliveryRoute(db.Model, TimestampMixin):
     
     # Route status
     status = Column(String(20), default='planned')  # planned, in_progress, completed, cancelled
-    started_at = Column(DateTime, nullable=True)
-    completed_at = Column(DateTime, nullable=True)
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
     
     # Performance metrics
     actual_distance_km = Column(Float, nullable=True)
@@ -237,7 +241,7 @@ class DeliveryStatusHistory(db.Model, TimestampMixin):
     old_status = Column(Enum(DeliveryStatus, name='delivery_status', values_callable=lambda x: [e.value for e in x]), nullable=False)
     new_status = Column(Enum(DeliveryStatus, name='delivery_status', values_callable=lambda x: [e.value for e in x]), nullable=False)
     changed_by = Column(Integer, ForeignKey('users.id'), nullable=True)
-    changed_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    changed_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC))
     
     # Location when status changed
     location_lat = Column(Float, nullable=True)
@@ -292,7 +296,7 @@ class DeliveryPerson(db.Model, TimestampMixin):
     
     # Work details
     employee_id = Column(String(50), nullable=True, unique=True)
-    hire_date = Column(DateTime, nullable=True)
+    hire_date = Column(DateTime(timezone=True), nullable=True)
     
     # Vehicle information
     vehicle_type = Column(String(50), nullable=True)  # motorcycle, car, truck, bicycle
@@ -307,8 +311,8 @@ class DeliveryPerson(db.Model, TimestampMixin):
     # Location tracking
     current_location_lat = Column(Float, nullable=True)
     current_location_lng = Column(Float, nullable=True)
-    last_location_update = Column(DateTime, nullable=True)
-    
+    last_location_update = Column(DateTime(timezone=True), nullable=True)
+
     # Status and metrics
     is_active = Column(Boolean, default=True, index=True)
     is_available = Column(Boolean, default=True, index=True)  # Available for new deliveries
@@ -343,9 +347,9 @@ class DeliveryPerson(db.Model, TimestampMixin):
         if not self.is_active or not self.is_available:
             return False
         
-        from datetime import datetime, time
-        
-        now = datetime.now().time()
+        from datetime import datetime, time, UTC
+
+        now = datetime.now(UTC).time()
         start_time = time.fromisoformat(self.working_hours_start)
         end_time = time.fromisoformat(self.working_hours_end)
         

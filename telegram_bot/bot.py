@@ -35,8 +35,7 @@ if _sentry_dsn:
 from telegram import Update, BotCommand, ReplyKeyboardRemove
 from telegram.ext import (
     Application, CommandHandler, MessageHandler, CallbackQueryHandler,
-    ConversationHandler, filters, ContextTypes, TypeHandler,
-    PreCheckoutQueryHandler
+    ConversationHandler, filters, ContextTypes, TypeHandler
 )
 from telegram.error import TelegramError
 
@@ -146,38 +145,44 @@ class WaterBusinessBot:
             self.application.add_error_handler(error_handler)
             logger.info("Error handler setup completed!")
 
-            # Add middleware to log ALL updates
+            # Add middleware to log updates (minimal in production, detailed in DEBUG)
             async def log_all_updates(update: Update, context: ContextTypes.DEFAULT_TYPE):
-                logger.info(f"!!! UPDATE RECEIVED: type={type(update).__name__}")
+                import logging as _logging
+                user_id = update.effective_user.id if update.effective_user else 'N/A'
+
+                if not logger.isEnabledFor(_logging.DEBUG):
+                    # Production: log minimal info only, no sensitive data
+                    update_type = 'message'
+                    if update.message and update.message.successful_payment:
+                        update_type = 'successful_payment'
+                    elif update.callback_query:
+                        update_type = 'callback_query'
+                    elif update.pre_checkout_query:
+                        update_type = 'pre_checkout_query'
+                    elif update.edited_message:
+                        update_type = 'edited_message'
+                    logger.info(f"Update received: type={update_type}, user={user_id}")
+                    return
+
+                # DEBUG level: log full details with sensitive data redacted
+                logger.debug(f"UPDATE RECEIVED: type={type(update).__name__}")
                 if update.message:
-                    # Check for successful payment specifically
                     if update.message.successful_payment:
-                        logger.info("=" * 70)
-                        logger.info("!!! SUCCESSFUL_PAYMENT MESSAGE RECEIVED !!!")
-                        logger.info(f"User: {update.effective_user.id}")
-                        logger.info(f"Payment: {update.message.successful_payment}")
-                        logger.info(f"Amount: {update.message.successful_payment.total_amount} {update.message.successful_payment.currency}")
-                        logger.info(f"Telegram charge ID: {update.message.successful_payment.telegram_payment_charge_id}")
-                        logger.info(f"Provider charge ID: {update.message.successful_payment.provider_payment_charge_id}")
-                        logger.info(f"Payload: {update.message.successful_payment.invoice_payload}")
-                        logger.info("=" * 70)
+                        sp = update.message.successful_payment
+                        logger.debug(
+                            f"SUCCESSFUL_PAYMENT - User: {user_id}, "
+                            f"Currency: {sp.currency}, "
+                            f"Telegram charge ID: {sp.telegram_payment_charge_id[:8]}..."
+                        )
                     else:
-                        logger.info(f"!!! Message update from user {update.effective_user.id}, text: {update.message.text[:100] if update.message.text else 'NO TEXT'}")
+                        logger.debug(f"Message from user {user_id}, text: {update.message.text[:50] if update.message.text else 'NO TEXT'}")
                 if update.callback_query:
-                    logger.info(f"!!! CALLBACK QUERY: {update.callback_query.data} from user {update.effective_user.id}")
-                if update.edited_message:
-                    logger.info(f"!!! Edited message update")
+                    logger.debug(f"CALLBACK QUERY: {update.callback_query.data} from user {user_id}")
                 if update.pre_checkout_query:
-                    logger.info("=" * 70)
-                    logger.info("!!! PRE_CHECKOUT_QUERY RECEIVED !!!")
-                    logger.info(f"User: {update.effective_user.id}")
-                    logger.info(f"Query ID: {update.pre_checkout_query.id}")
-                    logger.info(f"From: {update.pre_checkout_query.from_user}")
-                    logger.info(f"Amount: {update.pre_checkout_query.total_amount} {update.pre_checkout_query.currency}")
-                    logger.info(f"Payload: {update.pre_checkout_query.invoice_payload}")
-                    logger.info(f"Shipping option: {update.pre_checkout_query.shipping_option_id}")
-                    logger.info(f"Order info: {update.pre_checkout_query.order_info}")
-                    logger.info("=" * 70)
+                    logger.debug(
+                        f"PRE_CHECKOUT_QUERY - User: {user_id}, "
+                        f"Currency: {update.pre_checkout_query.currency}"
+                    )
 
             
             self.application.add_handler(TypeHandler(Update, log_all_updates), group=-10)
@@ -219,7 +224,8 @@ class WaterBusinessBot:
             CallbackQueryHandler(product_handlers.add_to_cart, pattern="^add_to_cart_"),
             CallbackQueryHandler(product_handlers.quantity_handler, pattern="^qty_"),
             CallbackQueryHandler(product_handlers.cart_handler, pattern="^cart_"),
-            
+            CallbackQueryHandler(product_handlers.show_cart, pattern="^back_to_cart$"),
+
             # Order callbacks
             CallbackQueryHandler(order_handlers.orders_menu, pattern="^menu_orders$"),
             CallbackQueryHandler(order_handlers.order_details, pattern="^order_"),
@@ -301,19 +307,6 @@ class WaterBusinessBot:
             CallbackQueryHandler(payment_handlers.cancel_payment, pattern="^payment_cancel_"),
         ]
 
-        # Telegram Payments handlers (Pre-checkout and Successful Payment)
-        # PreCheckoutQuery - CRITICAL: Must respond within 10 seconds
-        self.application.add_handler(
-            PreCheckoutQueryHandler(payment_handlers.handle_pre_checkout_query)
-        )
-
-        # Successful Payment message handler
-        self.application.add_handler(
-            MessageHandler(
-                filters.SUCCESSFUL_PAYMENT,
-                payment_handlers.handle_successful_payment
-            )
-        )
 
         # Add logging callback handler to catch all callbacks for debugging
         async def debug_callback_handler(update, context):

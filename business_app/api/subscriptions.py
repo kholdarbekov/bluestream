@@ -340,6 +340,11 @@ def pause_subscription(subscription_id):
 
         # Pause the subscription
         subscription.pause(reason=reason, resume_date=resume_date)
+        db.session.add(SubscriptionLog(
+            subscription_id=subscription_id,
+            action='paused',
+            details=f"Reason: {reason}" if reason else "Subscription paused"
+        ))
         db.session.commit()
 
         # Send notification
@@ -396,6 +401,11 @@ def resume_subscription(subscription_id):
 
         # Resume the subscription
         subscription.resume()
+        db.session.add(SubscriptionLog(
+            subscription_id=subscription_id,
+            action='resumed',
+            details="Subscription resumed"
+        ))
         db.session.commit()
 
         # Send notification
@@ -448,6 +458,11 @@ def cancel_subscription(subscription_id):
         # Cancel the subscription
         if immediate:
             subscription.cancel(reason=reason)
+            db.session.add(SubscriptionLog(
+                subscription_id=subscription_id,
+                action='cancelled',
+                details=f"Reason: {reason}" if reason else "Subscription cancelled"
+            ))
         else:
             # Cancel at end of current billing period
             subscription.auto_renew = False

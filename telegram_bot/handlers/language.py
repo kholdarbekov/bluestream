@@ -65,8 +65,8 @@ class LanguageHandler:
                     await update.callback_query.answer(error_msg)
                 else:
                     await update.message.reply_text(error_msg)
-            except:
-                pass
+            except Exception as e:
+                logger.warning(f"Failed to send error message in language handler fallback: {e}")
     
     async def set_language(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle language selection"""
@@ -125,8 +125,8 @@ class LanguageHandler:
             try:
                 current_language = await i18n.get_user_language(user_id)
                 await update.callback_query.answer(i18n.get('telegram.language.error_changing', current_language))
-            except:
-                pass
+            except Exception as e:
+                logger.warning(f"Failed to send error message in set_language fallback: {e}")
 
 
 # Create global handler instance

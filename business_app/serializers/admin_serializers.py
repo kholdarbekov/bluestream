@@ -3,7 +3,7 @@ Admin Serializers for the Water Business Platform using Pydantic v2
 This file contains Pydantic models for admin-related data serialization
 """
 import logging
-from datetime import datetime, date
+from datetime import datetime, date, UTC
 from typing import Dict, Any, Optional, List, Union
 from enum import Enum
 from decimal import Decimal
@@ -913,7 +913,7 @@ def generate_admin_dashboard_data() -> Dict[str, Any]:
         recent_users=[],
         low_stock_alerts=[],
         pending_deliveries=[],
-        generated_at=datetime.now()
+        generated_at=datetime.now(UTC)
     )
     
     return dashboard.model_dump()

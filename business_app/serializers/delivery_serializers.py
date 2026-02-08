@@ -2,7 +2,7 @@
 Delivery Serializers for the Water Business Platform using Pydantic v2
 This file contains Pydantic models for delivery-related data serialization
 """
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 from typing import Dict, Any, Optional, List
 from enum import Enum
 from decimal import Decimal
@@ -608,7 +608,7 @@ def is_location_recent(delivery) -> bool:
     if not hasattr(delivery, 'last_location_update') or not delivery.last_location_update:
         return False
     
-    time_diff = datetime.now() - delivery.last_location_update
+    time_diff = datetime.now(UTC) - delivery.last_location_update
     return time_diff.total_seconds() < 300  # 5 minutes
 
 
@@ -671,7 +671,7 @@ def calculate_estimated_arrival(delivery) -> Optional[str]:
         return delivery.estimated_delivery_time.isoformat()
     
     # Fallback: add 30-60 minutes from now
-    estimated = datetime.now() + timedelta(minutes=45)
+    estimated = datetime.now(UTC) + timedelta(minutes=45)
     return estimated.isoformat()
 
 

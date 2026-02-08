@@ -517,35 +517,6 @@ def register_error_handlers(app):
         return "Page not found", 404
 
 
-# Helper function to create consistent success responses
-def create_success_response(
-    data: Any = None,
-    message: str = None,
-    status_code: int = 200,
-    meta: Optional[Dict[str, Any]] = None
-) -> Tuple[Dict[str, Any], int]:
-    """Create standardized success response"""
-
-    response = {
-        'success': True,
-        'status_code': status_code,
-        'timestamp': datetime.now(timezone.utc).isoformat(),
-    }
-
-    if message:
-        response['message'] = message
-
-    if data is not None:
-        response['data'] = data
-
-    if meta:
-        response['meta'] = meta
-
-    if hasattr(g, 'trace_id'):
-        response['request_id'] = g.trace_id
-
-    return response, status_code
-
 
 # Helper function to create error responses with translated messages
 def create_translated_error_response(

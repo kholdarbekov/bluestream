@@ -14,15 +14,13 @@ from keyboards import ProductKeyboards, MenuKeyboards, OrderKeyboards
 from api_client import api_client
 from database import db_manager, BotUserRepository
 from utils import user_middleware, format_price, get_auth_token
+from handlers.base import BaseHandler
 
 logger = logging.getLogger('handlers')
 
 
-class ProductHandlers:
+class ProductHandlers(BaseHandler):
     """Product-related handlers"""
-    
-    def __init__(self):
-        self.user_repo = BotUserRepository(db_manager)
     
     async def products_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Show product categories"""
@@ -99,8 +97,8 @@ class ProductHandlers:
                             text=menu_text,
                             reply_markup=keyboard
                         )
-                    except:
-                        pass
+                    except Exception as e:
+                        logger.warning(f"Failed to send fallback product menu message: {e}")
             else:
                 logger.info("Sending new message...")
                 await update.message.reply_text(
@@ -213,8 +211,8 @@ class ProductHandlers:
                             reply_markup=keyboard,
                             parse_mode=constants.ParseMode.MARKDOWN_V2
                         )
-                    except:
-                        pass
+                    except Exception as e:
+                        logger.warning(f"Failed to send fallback category text message: {e}")
             else:
                 # No image, use text
                 if query.message.photo:
@@ -309,8 +307,8 @@ class ProductHandlers:
                              reply_markup=keyboard,
                              parse_mode=constants.ParseMode.MARKDOWN_V2
                          )
-                     except:
-                        pass
+                     except Exception as e:
+                        logger.warning(f"Failed to send fallback product detail message: {e}")
             else:
                  if query.message.photo:
                     await query.message.delete()
@@ -457,7 +455,7 @@ class ProductHandlers:
             action = query.data.split('_')[1]  # cart_{action}
             
             if action == 'view':
-                await self._show_cart(update, context)
+                await self.show_cart(update, context)
             elif action == 'clear':
                 await self._clear_cart(update, context)
             elif action == 'checkout':
@@ -558,7 +556,7 @@ class ProductHandlers:
 
         return "\n\n".join(details)
     
-    async def _show_cart(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def show_cart(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Show shopping cart contents"""
         # This loads cart from database
         user_id = update.effective_user.id
@@ -644,39 +642,8 @@ class ProductHandlers:
                 return
         
         await update.callback_query.answer("🗑️ Cart cleared!")
-        await self._show_cart(update, context)
+        await self.show_cart(update, context)
     
-    async def _handle_auth_error(self, update: Update, language: str):
-        """Handle authentication error"""
-        error_msg = i18n.get('telegram.error.auth_failed', language)
-
-        if update.callback_query:
-            await update.callback_query.edit_message_text(error_msg)
-            await update.callback_query.answer()
-        else:
-            await update.message.reply_text(error_msg)
-    
-    async def _handle_api_error(self, update: Update, error: str, language: str):
-        """Handle API error"""
-        error_msg = f"❌ {error}"
-        
-        if update.callback_query:
-            await update.callback_query.answer(error_msg)
-        else:
-            await update.message.reply_text(error_msg)
-    
-    async def _handle_error(self, update: Update):
-        """Handle general error"""
-        try:
-            language = await i18n.get_user_language(update.effective_user.id)
-            error_msg = i18n.get('telegram.error_occurred', language)
-        except:
-            error_msg = i18n.get('telegram.error_occurred', 'en')
-
-        if update.callback_query:
-            await update.callback_query.answer(error_msg)
-        else:
-            await update.message.reply_text(error_msg)
 
 
 # Global handler instance

@@ -2,8 +2,37 @@
 Shared constants for the Water Business Platform.
 These constants are used by both business_app and telegram_bot.
 """
+import os
 
-# Geographic Constants
+# ─── Timezone (Single Source of Truth) ─────────────────────────────────
+# Override via DISPLAY_TIMEZONE / DISPLAY_TIMEZONE_OFFSET in .env
+DISPLAY_TIMEZONE = os.environ.get('DISPLAY_TIMEZONE', 'Asia/Tashkent')
+DISPLAY_TIMEZONE_OFFSET = os.environ.get('DISPLAY_TIMEZONE_OFFSET', '+05:00')
+
+# ─── Status Icon Mappings ───────────────────────────────────────────────
+
+ORDER_STATUS_ICONS = {
+    'created': '📝',
+    'pending': '🕐',
+    'confirmed': '✅',
+    'preparing': '👨\u200d🍳',
+    'out_for_delivery': '🚚',
+    'delivered': '📦',
+    'cancelled': '❌',
+    'returned': '↩️',
+}
+
+SUBSCRIPTION_STATUS_ICONS = {
+    'active': '✅',
+    'paused': '⏸️',
+    'cancelled': '❌',
+    'expired': '⏰',
+    'trial': '🎁',
+}
+
+DEFAULT_STATUS_ICON = '📋'
+
+# ─── Geographic Constants ───────────────────────────────────────────────
 TASHKENT_COORDINATES = {
     'latitude': 41.2995,
     'longitude': 69.2401

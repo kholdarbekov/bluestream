@@ -21,7 +21,7 @@ from business_app import db
 logger = get_task_logger(__name__)
 
 
-@shared_task(bind=True, max_retries=3, default_retry_delay=30)
+@shared_task(bind=True, max_retries=3, default_retry_delay=30, time_limit=120, soft_time_limit=100)
 def send_telegram_security_alert_task(self, user_id: int, alert_type: str, message: str):
     """
     Send security alert notification via Telegram.
@@ -78,7 +78,7 @@ def send_telegram_security_alert_task(self, user_id: int, alert_type: str, messa
         raise self.retry(exc=exc)
 
 
-@shared_task(bind=True, max_retries=3, default_retry_delay=30)
+@shared_task(bind=True, max_retries=3, default_retry_delay=30, time_limit=120, soft_time_limit=100)
 def send_account_locked_notification_task(self, user_id: int, lockout_until: str, lockout_minutes: int):
     """
     Send notification when user account is locked due to failed login attempts.
@@ -151,7 +151,7 @@ def send_account_locked_notification_task(self, user_id: int, lockout_until: str
         raise self.retry(exc=exc)
 
 
-@shared_task(bind=True, max_retries=3, default_retry_delay=60)
+@shared_task(bind=True, max_retries=3, default_retry_delay=60, time_limit=120, soft_time_limit=100)
 def send_loyalty_notification_task(self, user_id: int, event_type: str, data: Dict[str, Any], 
                                    notification_type_str: str = None):
     """Send loyalty program notification
@@ -185,7 +185,7 @@ def send_loyalty_notification_task(self, user_id: int, event_type: str, data: Di
         raise self.retry(exc=exc)
 
 
-@shared_task(bind=True, max_retries=3, default_retry_delay=60)
+@shared_task(bind=True, max_retries=3, default_retry_delay=60, time_limit=120, soft_time_limit=100)
 def notify_driver_assignment_task(self, delivery_id: int):
     """Notify driver about new delivery assignment"""
     try:
@@ -223,7 +223,7 @@ def notify_driver_assignment_task(self, delivery_id: int):
         raise self.retry(exc=exc)
 
 
-@shared_task(bind=True, max_retries=3, default_retry_delay=60)
+@shared_task(bind=True, max_retries=3, default_retry_delay=60, time_limit=120, soft_time_limit=100)
 def notify_delivery_cancellation_task(self, delivery_id: int):
     """Notify about delivery cancellation"""
     try:
@@ -272,51 +272,62 @@ def notify_delivery_cancellation_task(self, delivery_id: int):
         raise self.retry(exc=exc)
 
 
-@shared_task
-def send_bulk_promotional_notification(user_ids: List[int], campaign_data: Dict[str, Any]):
-    """Send bulk promotional notifications"""
+@shared_task(time_limit=1800, soft_time_limit=1700)
+def send_bulk_promotional_notification(user_ids: List[int], campaign_data: Dict[str, Any], batch_size: int = 50):
+    """Send bulk promotional notifications in batches"""
+    import time as _time
+
     try:
-        logger.info(f"Sending bulk promotional notification to {len(user_ids)} users")
-        
+        logger.info(f"Sending bulk promotional notification to {len(user_ids)} users (batch_size={batch_size})")
+
         notification_service = NotificationService()
-        
+
         results = {
             'total_users': len(user_ids),
             'successful': 0,
             'failed': 0,
             'errors': []
         }
-        
-        for user_id in user_ids:
-            try:
-                result = notification_service.send_notification(
-                    user_id,
-                    NotificationType.PROMOTIONAL,
-                    None,
-                    campaign_data
-                )
-                
-                if any(r.get('success') for r in result.values()):
-                    results['successful'] += 1
-                else:
+
+        for batch_start in range(0, len(user_ids), batch_size):
+            batch = user_ids[batch_start:batch_start + batch_size]
+            batch_num = batch_start // batch_size + 1
+            logger.info(f"Processing batch {batch_num} ({len(batch)} users)")
+
+            for user_id in batch:
+                try:
+                    result = notification_service.send_notification(
+                        user_id,
+                        NotificationType.PROMOTIONAL,
+                        None,
+                        campaign_data
+                    )
+
+                    if any(r.get('success') for r in result.values()):
+                        results['successful'] += 1
+                    else:
+                        results['failed'] += 1
+
+                except Exception as e:
                     results['failed'] += 1
-                    
-            except Exception as e:
-                results['failed'] += 1
-                results['errors'].append({
-                    'user_id': user_id,
-                    'error': str(e)
-                })
-        
+                    results['errors'].append({
+                        'user_id': user_id,
+                        'error': str(e)
+                    })
+
+            # Brief pause between batches to avoid overwhelming external services
+            if batch_start + batch_size < len(user_ids):
+                _time.sleep(1)
+
         logger.info(f"Bulk promotional notification completed: {results['successful']} successful, {results['failed']} failed")
         return results
-        
+
     except Exception as e:
         logger.error(f"Bulk promotional notification failed: {e}")
         return {'error': str(e)}
 
 
-@shared_task
+@shared_task(time_limit=120, soft_time_limit=100)
 def send_daily_delivery_reminders():
     """Send daily delivery reminders to customers"""
     try:
@@ -365,7 +376,7 @@ def send_daily_delivery_reminders():
         return {'error': str(e)}
 
 
-@shared_task
+@shared_task(time_limit=1800, soft_time_limit=1700)
 def cleanup_old_notifications():
     """Clean up old notification records"""
     try:
@@ -389,7 +400,7 @@ def cleanup_old_notifications():
         return {'error': str(e)}
 
 
-@shared_task(bind=True, max_retries=3, default_retry_delay=60)
+@shared_task(bind=True, max_retries=3, default_retry_delay=60, time_limit=120, soft_time_limit=100)
 def send_emergency_notification(self, user_ids: List[int], message: str, channels: List[str] = None):
     """Send emergency notification to specified users"""
     try:
@@ -425,14 +436,14 @@ def send_emergency_notification(self, user_ids: List[int], message: str, channel
         raise self.retry(exc=exc)
 
 
-@shared_task
+@shared_task(time_limit=120, soft_time_limit=100)
 def process_notification_analytics():
     """Process notification analytics and generate reports"""
     try:
         logger.info("Processing notification analytics")
-        
-        end_date = datetime.now(timezone.utc)
-        start_date = end_date - timedelta(days=1)
+
+        from business_app.utils.helpers import get_analytics_date_range
+        start_date, end_date = get_analytics_date_range(days=1)
         
         # Get notification metrics
         total_notifications = Notification.query.filter(
@@ -495,7 +506,7 @@ def process_notification_analytics():
         return {'error': str(e)}
 
 
-@shared_task(bind=True, max_retries=2)
+@shared_task(bind=True, max_retries=2, time_limit=120, soft_time_limit=100)
 def send_scheduled_notification(self, user_id: int, notification_type: str, 
                                template_data: Dict[str, Any], scheduled_time: str):
     """Send scheduled notification at specified time"""
@@ -529,7 +540,7 @@ def send_scheduled_notification(self, user_id: int, notification_type: str,
         raise self.retry(exc=exc)
 
 
-@shared_task
+@shared_task(time_limit=120, soft_time_limit=100)
 def update_notification_preferences_bulk(user_preferences: List[Dict[str, Any]]):
     """Update notification preferences for multiple users"""
     try:
@@ -559,7 +570,7 @@ def update_notification_preferences_bulk(user_preferences: List[Dict[str, Any]])
         return {'error': str(e)}
 
 
-@shared_task(bind=True, max_retries=3, default_retry_delay=60)
+@shared_task(bind=True, max_retries=3, default_retry_delay=60, time_limit=120, soft_time_limit=100)
 def send_order_notification_task(self, order_id: int, notification_type: str):
     """Send order-related notification"""
     try:
@@ -576,7 +587,7 @@ def send_order_notification_task(self, order_id: int, notification_type: str):
         raise self.retry(exc=exc)
 
 
-@shared_task(bind=True, max_retries=3, default_retry_delay=60)
+@shared_task(bind=True, max_retries=3, default_retry_delay=60, time_limit=120, soft_time_limit=100)
 def send_delivery_update_task(self, delivery_id: int, status: str):
     """Send delivery status update notification"""
     try:
@@ -593,15 +604,25 @@ def send_delivery_update_task(self, delivery_id: int, status: str):
         raise self.retry(exc=exc)
 
 
-@shared_task(bind=True, max_retries=3, default_retry_delay=60)
+@shared_task(bind=True, max_retries=3, default_retry_delay=60, time_limit=120, soft_time_limit=100)
 def send_payment_confirmation_task(self, payment_id: int):
     """Send payment confirmation notification"""
     try:
         logger.info(f"Sending payment confirmation for payment {payment_id}")
-        
+
+        # Idempotency check via Redis
+        from business_app import redis_client
+        idempotency_key = f"notif:payment_confirm:{payment_id}"
+        if redis_client.get(idempotency_key):
+            logger.info(f"Payment confirmation already sent for {payment_id}, skipping")
+            return {'success': True, 'skipped': True, 'reason': 'already_sent'}
+
         notification_service = NotificationService()
         result = notification_service.send_payment_notification(payment_id)
-        
+
+        # Mark as sent with 24h TTL
+        redis_client.setex(idempotency_key, 86400, "1")
+
         logger.info(f"Payment confirmation sent successfully for payment {payment_id}")
         return result
         
@@ -610,7 +631,7 @@ def send_payment_confirmation_task(self, payment_id: int):
         raise self.retry(exc=exc)
 
 
-@shared_task(bind=True, max_retries=3, default_retry_delay=60)
+@shared_task(bind=True, max_retries=3, default_retry_delay=60, time_limit=120, soft_time_limit=100)
 def send_verification_email_task(self, user_id: int, verification_token: str):
     """Send email verification notification"""
     try:
@@ -646,7 +667,7 @@ def send_verification_email_task(self, user_id: int, verification_token: str):
         raise self.retry(exc=exc)
 
 
-@shared_task(bind=True, max_retries=3, default_retry_delay=60)
+@shared_task(bind=True, max_retries=3, default_retry_delay=60, time_limit=120, soft_time_limit=100)
 def send_verification_sms_task(self, user_id: int, otp_code: str, phone_number: str = None):
     """
     Send SMS verification notification
@@ -706,7 +727,7 @@ def send_verification_sms_task(self, user_id: int, otp_code: str, phone_number: 
         raise self.retry(exc=exc)
 
 
-@shared_task(bind=True, max_retries=3, default_retry_delay=60)
+@shared_task(bind=True, max_retries=3, default_retry_delay=60, time_limit=120, soft_time_limit=100)
 def send_password_reset_email_task(self, user_id: int, reset_token: str):
     """Send password reset email"""
     try:
@@ -742,7 +763,7 @@ def send_password_reset_email_task(self, user_id: int, reset_token: str):
         raise self.retry(exc=exc)
 
 
-@shared_task(bind=True, max_retries=3, default_retry_delay=30)
+@shared_task(bind=True, max_retries=3, default_retry_delay=30, time_limit=120, soft_time_limit=100)
 def send_password_reset_sms_task(self, user_id: int, otp_code: str):
     """
     Send password reset OTP via SMS.
@@ -792,7 +813,7 @@ def send_password_reset_sms_task(self, user_id: int, otp_code: str):
         raise self.retry(exc=exc)
 
 
-@shared_task(bind=True, max_retries=3, default_retry_delay=60)
+@shared_task(bind=True, max_retries=3, default_retry_delay=60, time_limit=120, soft_time_limit=100)
 def send_subscription_confirmation_task(self, subscription_id: int):
     """Send subscription confirmation notification"""
     try:
@@ -809,7 +830,7 @@ def send_subscription_confirmation_task(self, subscription_id: int):
         raise self.retry(exc=exc)
 
 
-@shared_task(bind=True, max_retries=3, default_retry_delay=60)
+@shared_task(bind=True, max_retries=3, default_retry_delay=60, time_limit=120, soft_time_limit=100)
 def send_subscription_notification_task(self, subscription_id: int, event_type: str):
     """Send subscription-related notification"""
     try:
@@ -826,44 +847,56 @@ def send_subscription_notification_task(self, subscription_id: int, event_type: 
         raise self.retry(exc=exc)
 
 
-@shared_task(bind=True, max_retries=3, default_retry_delay=60)
-def send_bulk_notification_task(self, notification_type: str, recipient_ids: List[int], 
-                                template_data: Dict[str, Any] = None, channel: str = 'email'):
-    """Send bulk notifications to multiple recipients"""
+@shared_task(bind=True, max_retries=3, default_retry_delay=60, time_limit=1800, soft_time_limit=1700)
+def send_bulk_notification_task(self, notification_type: str, recipient_ids: List[int],
+                                template_data: Dict[str, Any] = None, channel: str = 'email',
+                                batch_size: int = 50):
+    """Send bulk notifications to multiple recipients in batches"""
+    import time as _time
+
     try:
-        logger.info(f"Starting bulk notification send: {notification_type} to {len(recipient_ids)} recipients")
-        
+        logger.info(f"Starting bulk notification send: {notification_type} to {len(recipient_ids)} recipients (batch_size={batch_size})")
+
         template_data = template_data or {}
-        
+
         notification_service = NotificationService()
         results = []
-        
-        for recipient_id in recipient_ids:
-            try:
-                result = notification_service.send_notification(
-                    recipient_id,
-                    notification_type,
-                    channel=channel,
-                    template_data=template_data
-                )
-                results.append({
-                    'recipient_id': recipient_id,
-                    'success': result.get('success', False),
-                    'notification_id': result.get('notification_id')
-                })
-            except Exception as e:
-                logger.error(f"Failed to send notification to recipient {recipient_id}: {e}")
-                results.append({
-                    'recipient_id': recipient_id,
-                    'success': False,
-                    'error': str(e)
-                })
-        
+
+        for batch_start in range(0, len(recipient_ids), batch_size):
+            batch = recipient_ids[batch_start:batch_start + batch_size]
+            batch_num = batch_start // batch_size + 1
+            logger.info(f"Processing batch {batch_num} ({len(batch)} recipients)")
+
+            for recipient_id in batch:
+                try:
+                    result = notification_service.send_notification(
+                        recipient_id,
+                        notification_type,
+                        channel=channel,
+                        template_data=template_data
+                    )
+                    results.append({
+                        'recipient_id': recipient_id,
+                        'success': result.get('success', False),
+                        'notification_id': result.get('notification_id')
+                    })
+                except Exception as e:
+                    logger.error(f"Failed to send notification to recipient {recipient_id}: {e}")
+                    results.append({
+                        'recipient_id': recipient_id,
+                        'success': False,
+                        'error': str(e)
+                    })
+
+            # Brief pause between batches to avoid overwhelming external services
+            if batch_start + batch_size < len(recipient_ids):
+                _time.sleep(1)
+
         successful_sends = sum(1 for r in results if r['success'])
         failed_sends = len(results) - successful_sends
-        
+
         logger.info(f"Bulk notification completed: {successful_sends} successful, {failed_sends} failed")
-        
+
         return {
             'total_recipients': len(recipient_ids),
             'successful_sends': successful_sends,
@@ -880,7 +913,7 @@ def send_bulk_notification_task(self, notification_type: str, recipient_ids: Lis
 # Phone Registration OTP Tasks
 # =============================================================================
 
-@shared_task(bind=True, max_retries=3, default_retry_delay=30)
+@shared_task(bind=True, max_retries=3, default_retry_delay=30, time_limit=120, soft_time_limit=100)
 def send_registration_otp_task(self, phone: str, otp_code: str, language: str = 'uz'):
     """
     Send registration OTP via SMS to a phone number.
@@ -926,7 +959,7 @@ def send_registration_otp_task(self, phone: str, otp_code: str, language: str = 
         raise self.retry(exc=exc)
 
 
-@shared_task(bind=True, max_retries=3, default_retry_delay=30)
+@shared_task(bind=True, max_retries=3, default_retry_delay=30, time_limit=120, soft_time_limit=100)
 def send_welcome_sms_task(self, user_id: int):
     """
     Send welcome SMS after successful phone registration.

@@ -4,7 +4,7 @@ This file should be placed in business_app/tasks/subscription_tasks.py
 """
 from celery import shared_task
 from celery.utils.log import get_task_logger
-from datetime import datetime, timezone, timedelta, UTC
+from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, List
 from flask import current_app
 from sqlalchemy import func, and_, or_, text
@@ -23,7 +23,7 @@ from business_app import db
 logger = get_task_logger(__name__)
 
 
-@shared_task(bind=True, max_retries=3)
+@shared_task(bind=True, max_retries=3, time_limit=600, soft_time_limit=540)
 def schedule_subscription_delivery_task(self, subscription_id: int):
     """Schedule delivery for subscription"""
     try:
@@ -63,7 +63,7 @@ def schedule_subscription_delivery_task(self, subscription_id: int):
         raise self.retry(exc=exc)
 
 
-@shared_task(bind=True, max_retries=3)
+@shared_task(bind=True, max_retries=3, time_limit=600, soft_time_limit=540)
 def create_subscription_delivery_task(self, subscription_id: int):
     """Create order and delivery for subscription"""
     try:
@@ -99,7 +99,7 @@ def create_subscription_delivery_task(self, subscription_id: int):
         raise self.retry(exc=exc)
 
 
-@shared_task
+@shared_task(time_limit=600, soft_time_limit=540)
 def process_daily_subscription_billing():
     """Process subscription billing for all due subscriptions"""
     try:
@@ -156,7 +156,7 @@ def process_daily_subscription_billing():
         return {'error': str(e)}
 
 
-@shared_task
+@shared_task(time_limit=600, soft_time_limit=540)
 def send_renewal_reminders():
     """Send subscription renewal reminders"""
     try:
@@ -204,7 +204,7 @@ def send_renewal_reminders():
         return {'error': str(e)}
 
 
-@shared_task
+@shared_task(time_limit=600, soft_time_limit=540)
 def handle_failed_subscription_payments():
     """Handle failed subscription payments and retry logic"""
     try:
@@ -283,7 +283,7 @@ def handle_failed_subscription_payments():
         return {'error': str(e)}
 
 
-@shared_task(bind=True, max_retries=2)
+@shared_task(bind=True, max_retries=2, time_limit=600, soft_time_limit=540)
 def cancel_subscription_deliveries_task(self, subscription_id: int):
     """Cancel pending deliveries for a paused/cancelled subscription"""
     try:
@@ -323,7 +323,7 @@ def cancel_subscription_deliveries_task(self, subscription_id: int):
         raise self.retry(exc=exc)
 
 
-@shared_task
+@shared_task(time_limit=600, soft_time_limit=540)
 def update_subscription_analytics():
     """Update subscription analytics and metrics"""
     try:
@@ -388,7 +388,7 @@ def update_subscription_analytics():
         return {'error': str(e)}
 
 
-@shared_task
+@shared_task(time_limit=600, soft_time_limit=540)
 def process_subscription_upgrades_downgrades():
     """Process pending subscription plan changes"""
     try:
@@ -459,7 +459,7 @@ def process_subscription_upgrades_downgrades():
         return {'error': str(e)}
 
 
-@shared_task
+@shared_task(time_limit=600, soft_time_limit=540)
 def cleanup_expired_trials():
     """Clean up expired trial subscriptions"""
     try:
@@ -529,7 +529,7 @@ def cleanup_expired_trials():
         return {'error': str(e)}
 
 
-@shared_task(bind=True, max_retries=3)
+@shared_task(bind=True, max_retries=3, time_limit=600, soft_time_limit=540)
 def send_subscription_usage_summary(self, subscription_id: int):
     """Send monthly subscription usage summary to customer"""
     try:
@@ -589,7 +589,7 @@ def send_subscription_usage_summary(self, subscription_id: int):
         raise self.retry(exc=exc)
 
 
-@shared_task
+@shared_task(time_limit=600, soft_time_limit=540)
 def optimize_subscription_delivery_schedule():
     """Optimize delivery schedules for all active subscriptions"""
     try:
@@ -671,7 +671,7 @@ def _optimize_area_delivery_schedule(subscriptions: List[Subscription]) -> Dict[
     return optimization
 
 
-@shared_task
+@shared_task(time_limit=600, soft_time_limit=540)
 def generate_subscription_churn_prediction():
     """Generate churn predictions for subscription customers"""
     try:
@@ -807,7 +807,7 @@ def _calculate_subscription_churn_risk(subscription: Subscription) -> float:
     return min(1.0, max(0.0, risk_score))
 
 
-@shared_task
+@shared_task(time_limit=600, soft_time_limit=540)
 def send_subscription_satisfaction_survey():
     """Send satisfaction surveys to subscription customers"""
     try:
@@ -865,7 +865,7 @@ def send_subscription_satisfaction_survey():
         return {'error': str(e)}
 
 
-@shared_task(bind=True, max_retries=3, default_retry_delay=300)
+@shared_task(bind=True, max_retries=3, default_retry_delay=300, time_limit=600, soft_time_limit=540)
 def process_subscription_billing(self, subscription_id: int):
     """Process billing for a subscription"""
     try:
@@ -931,7 +931,7 @@ def process_subscription_billing(self, subscription_id: int):
         raise self.retry(exc=exc)
 
 
-@shared_task(bind=True, max_retries=2)
+@shared_task(bind=True, max_retries=2, time_limit=600, soft_time_limit=540)
 def send_subscription_reminder(self, subscription_id: int, reminder_type: str):
     """Send subscription-related reminders"""
     try:
@@ -952,7 +952,7 @@ def send_subscription_reminder(self, subscription_id: int, reminder_type: str):
                 'subscription_name': subscription.name,
                 'billing_amount': subscription.billing_amount,
                 'billing_date': subscription.next_billing_date.isoformat() if subscription.next_billing_date else None,
-                'days_until_billing': (subscription.next_billing_date - datetime.now(UTC)).days if subscription.next_billing_date else None
+                'days_until_billing': (subscription.next_billing_date - datetime.now(timezone.utc)).days if subscription.next_billing_date else None
             }
             
         elif reminder_type == 'upcoming_delivery':
@@ -981,7 +981,7 @@ def send_subscription_reminder(self, subscription_id: int, reminder_type: str):
             template_data = {
                 'subscription_name': subscription.name,
                 'billing_amount': subscription.billing_amount,
-                'failed_date': datetime.now(UTC).isoformat()
+                'failed_date': datetime.now(timezone.utc).isoformat()
             }
             
         else:
@@ -1007,7 +1007,7 @@ def send_subscription_reminder(self, subscription_id: int, reminder_type: str):
         raise self.retry(exc=exc)
 
 
-@shared_task(bind=True, max_retries=2)
+@shared_task(bind=True, max_retries=2, time_limit=600, soft_time_limit=540)
 def resume_subscription_task(self, subscription_id: int, user_id: int = None):
     """Resume a paused subscription"""
     try:

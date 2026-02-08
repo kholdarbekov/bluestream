@@ -39,6 +39,7 @@ import adminService from '../services/adminService';
 import api from '../services/api';
 import useResponsive from '../hooks/useResponsive';
 import AddressMapPicker from '../components/AddressMapPicker';
+import { formatLocalDate, formatLocaleDateTime } from '../utils/dateUtils';
 
 const { Option } = Select;
 
@@ -462,14 +463,14 @@ const Users = () => {
       render: (text, record) => (
         <Space direction="vertical" size={2}>
           <div style={{ fontSize: '11px' }}>
-            {t('ui.users.created')}: {new Date(record.created_at).toLocaleDateString()}
+            {t('ui.users.created')}: {formatLocalDate(record.created_at)}
           </div>
           <div style={{ fontSize: '11px' }}>
-            {t('ui.users.login')}: {record.last_login ? new Date(record.last_login).toLocaleDateString() : t('ui.users.never')}
+            {t('ui.users.login')}: {record.last_login ? formatLocalDate(record.last_login) : t('ui.users.never')}
           </div>
           {record.last_bot_interaction && (
             <div style={{ fontSize: '11px', color: '#1890ff' }}>
-              {t('ui.users.bot')}: {new Date(record.last_bot_interaction).toLocaleDateString()}
+              {t('ui.users.bot')}: {formatLocalDate(record.last_bot_interaction)}
             </div>
           )}
         </Space>
@@ -827,7 +828,7 @@ const Users = () => {
                     <div style={{ marginBottom: 8 }}>
                       <strong>{t('ui.users.last_bot_interaction')}:</strong>
                       <div style={{ fontSize: '12px', marginTop: '2px' }}>
-                        {selectedUser.last_bot_interaction ? new Date(selectedUser.last_bot_interaction).toLocaleString() : t('ui.users.never')}
+                        {selectedUser.last_bot_interaction ? formatLocaleDateTime(selectedUser.last_bot_interaction) : t('ui.users.never')}
                       </div>
                     </div>
                   </Col>
@@ -842,13 +843,13 @@ const Users = () => {
                   <div style={{ marginBottom: 8 }}>
                     <strong>{t('ui.users.created')}:</strong>
                     <div style={{ fontSize: '12px', marginTop: '2px' }}>
-                      {new Date(selectedUser.created_at).toLocaleString()}
+                      {formatLocaleDateTime(selectedUser.created_at)}
                     </div>
                   </div>
                   <div style={{ marginBottom: 8 }}>
                     <strong>{t('ui.users.updated')}:</strong>
                     <div style={{ fontSize: '12px', marginTop: '2px' }}>
-                      {selectedUser.updated_at ? new Date(selectedUser.updated_at).toLocaleString() : t('ui.users.na')}
+                      {selectedUser.updated_at ? formatLocaleDateTime(selectedUser.updated_at) : t('ui.users.na')}
                     </div>
                   </div>
                 </Col>
@@ -856,7 +857,7 @@ const Users = () => {
                   <div style={{ marginBottom: 8 }}>
                     <strong>{t('ui.users.last_login')}:</strong>
                     <div style={{ fontSize: '12px', marginTop: '2px' }}>
-                      {selectedUser.last_login ? new Date(selectedUser.last_login).toLocaleString() : t('ui.users.never')}
+                      {selectedUser.last_login ? formatLocaleDateTime(selectedUser.last_login) : t('ui.users.never')}
                     </div>
                   </div>
                   <div style={{ marginBottom: 8 }}>

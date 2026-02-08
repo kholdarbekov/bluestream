@@ -102,36 +102,6 @@ def serialize_item(item: Any) -> Any:
         return item
 
 
-def create_success_response(
-    message: str,
-    data: Optional[Any] = None,
-    status_code: int = 200,
-    **extra_fields
-) -> tuple:
-    """
-    Create a standardized success response
-    
-    Args:
-        message: Success message
-        data: Optional data to include
-        status_code: HTTP status code
-        **extra_fields: Additional fields to include in response
-        
-    Returns:
-        Tuple of (response_dict, status_code)
-    """
-    response = {
-        'success': True,
-        'message': message,
-        **extra_fields
-    }
-    
-    if data is not None:
-        response['data'] = serialize_response(data)
-    
-    return jsonify(response), status_code
-
-
 def create_error_response(
     error: str,
     status_code: int = 400,

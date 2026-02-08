@@ -273,8 +273,8 @@ def format_datetime(dt: datetime, format_type: str = 'full', language: str = Non
 def get_time_slots(start_hour: int = 9, end_hour: int = 21, interval_minutes: int = 60) -> List[str]:
     """Generate available time slots for delivery"""
     slots = []
-    current_time = datetime.now().replace(hour=start_hour, minute=0, second=0, microsecond=0)
-    end_time = datetime.now().replace(hour=end_hour, minute=0, second=0, microsecond=0)
+    current_time = datetime.now(timezone.utc).replace(hour=start_hour, minute=0, second=0, microsecond=0)
+    end_time = datetime.now(timezone.utc).replace(hour=end_hour, minute=0, second=0, microsecond=0)
     
     while current_time < end_time:
         next_time = current_time + timedelta(minutes=interval_minutes)
@@ -341,8 +341,8 @@ def generate_otp(length: int = 6) -> str:
 def is_business_hours(dt: datetime = None) -> bool:
     """Check if current time is within business hours"""
     if dt is None:
-        dt = datetime.now()
-    
+        dt = datetime.now(timezone.utc)
+
     # Business hours: 9 AM to 9 PM
     return 9 <= dt.hour < 21
 
@@ -350,7 +350,7 @@ def is_business_hours(dt: datetime = None) -> bool:
 def get_next_business_day(dt: datetime = None) -> datetime:
     """Get next business day (Monday-Sunday, we deliver every day)"""
     if dt is None:
-        dt = datetime.now()
+        dt = datetime.now(timezone.utc)
     
     # If it's past business hours, move to next day
     if dt.hour >= 21:
@@ -403,3 +403,11 @@ def to_ms(dt: datetime) -> int:
     if dt.tzinfo is None:
          dt = dt.replace(tzinfo=timezone.utc)
     return int(dt.timestamp() * 1000)
+
+
+def get_analytics_date_range(days: int = 1):
+    """Get (start_date, end_date) for analytics tasks looking back N days from now."""
+    from datetime import timezone, timedelta
+    end_date = datetime.now(timezone.utc)
+    start_date = end_date - timedelta(days=days)
+    return start_date, end_date

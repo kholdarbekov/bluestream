@@ -90,19 +90,9 @@ class Product(db.Model, TimestampMixin, TranslatableMixin):
     
     def calculate_price(self, user=None, quantity=1):
         """Calculate dynamic price based on user and quantity"""
-        # Use discount_price if available, otherwise use base_price
         final_price = self.discount_price if self.discount_price else self.base_price
-        
-        # TODO: Add price rules logic when price_rules relationship is properly configured
-        # For now, just return the base or discounted price
-        
-        return max(final_price, 0)  # Ensure price is not negative
-    
-    def update_rating(self):
-        """Update average rating based on reviews"""
-        # TODO: Implement when reviews relationship is properly configured
-        pass
-        
+        return max(final_price, 0)
+
     def to_dict(self, user=None, quantity=1, language=None, include_all_translations=False):
         """Convert to dictionary with multilingual support"""
         result = self.to_dict_multilingual(language, include_all_translations)
@@ -145,8 +135,8 @@ class PriceRule(db.Model, TimestampMixin, TranslatableMixin):
     
     # Validity
     is_active = Column(Boolean, default=True)
-    valid_from = Column(DateTime, nullable=True)
-    valid_until = Column(DateTime, nullable=True)
+    valid_from = Column(DateTime(timezone=True), nullable=True)
+    valid_until = Column(DateTime(timezone=True), nullable=True)
     
     # Relationship removed - Product model doesn't have price_rules relationship
     # product = relationship('Product', back_populates='price_rules')

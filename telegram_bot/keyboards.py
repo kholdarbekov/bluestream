@@ -6,13 +6,26 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton,
 
 from i18n import i18n
 from config import config
+from shared.constants import ORDER_STATUS_ICONS, SUBSCRIPTION_STATUS_ICONS, DEFAULT_STATUS_ICON
+
+
+MAX_DISPLAYED_ADDRESSES = 5
+
+
+def i18n_button(key: str, language: str, callback_data: str, **fmt) -> Dict[str, str]:
+    """Create a button dict with translated text.
+
+    Usage:
+        i18n_button('telegram.menu.products', lang, 'menu_products')
+    """
+    return {'text': i18n.get(key, language, **fmt), 'callback_data': callback_data}
 
 
 class KeyboardBuilder:
     """Helper class for building keyboards"""
-    
+
     @staticmethod
-    def build_inline_keyboard(buttons: List[List[Dict[str, str]]], 
+    def build_inline_keyboard(buttons: List[List[Dict[str, str]]],
                              row_width: int = 2) -> InlineKeyboardMarkup:
         """Build inline keyboard from button definitions"""
         keyboard = []
@@ -421,18 +434,8 @@ class OrderKeyboards:
         """Order list keyboard"""
         buttons = []
         
-        # Status icons
-        status_icons = {
-            'pending': '🕐',
-            'confirmed': '✅',
-            'preparing': '👨‍🍳',
-            'out_for_delivery': '🚚',
-            'delivered': '📦',
-            'cancelled': '❌'
-        }
-        
         for order in orders:
-            icon = status_icons.get(order['status'], '📋')
+            icon = ORDER_STATUS_ICONS.get(order['status'], DEFAULT_STATUS_ICON)
             date = order['created_at'][:10] if 'created_at' in order else ''
             
             buttons.append([{
@@ -526,16 +529,8 @@ class SubscriptionKeyboards:
         """Subscription list keyboard"""
         buttons = []
         
-        # Status icons
-        status_icons = {
-            'active': '✅',
-            'paused': '⏸️',
-            'cancelled': '❌',
-            'expired': '⏰'
-        }
-        
         for sub in subscriptions:
-            icon = status_icons.get(sub['status'], '📋')
+            icon = SUBSCRIPTION_STATUS_ICONS.get(sub['status'], DEFAULT_STATUS_ICON)
             buttons.append([{
                 'text': f"{icon} {sub['name']} - {sub['delivery_frequency']}",
                 'callback_data': f"subscription_{sub['id']}"
@@ -714,7 +709,7 @@ class ProfileKeyboards:
         buttons = []
         
         # Add individual address buttons
-        for address in addresses[:5]:  # Limit to 5 addresses to avoid clutter
+        for address in addresses[:MAX_DISPLAYED_ADDRESSES]:
             status = "🏠" if address.get('is_default') else "📍"
             title = address.get('title', f"Address {address.get('id')}")
             buttons.append([{

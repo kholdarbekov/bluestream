@@ -20,7 +20,7 @@ from business_app import db
 logger = get_task_logger(__name__)
 
 
-@shared_task
+@shared_task(time_limit=3600, soft_time_limit=3300)
 def generate_daily_analytics_report():
     """Generate daily analytics report"""
     try:
@@ -78,7 +78,7 @@ def generate_daily_analytics_report():
         return {'error': str(e)}
 
 
-@shared_task
+@shared_task(time_limit=3600, soft_time_limit=3300)
 def generate_weekly_business_report():
     """Generate weekly business report"""
     try:
@@ -141,7 +141,7 @@ def generate_weekly_business_report():
         return {'error': str(e)}
 
 
-@shared_task(bind=True, max_retries=2)
+@shared_task(bind=True, max_retries=2, time_limit=3600, soft_time_limit=3300)
 def track_user_activity_task(self, user_id: int, activity_type: str, endpoint: str,
                             method: str, ip_address: str, user_agent: str):
     """Track user activity for analytics"""
@@ -178,7 +178,7 @@ def track_user_activity_task(self, user_id: int, activity_type: str, endpoint: s
         raise self.retry(exc=exc)
 
 
-@shared_task
+@shared_task(time_limit=3600, soft_time_limit=3300)
 def update_real_time_metrics(activity_type: str, user_id: int = None):
     """Update real-time business metrics"""
     try:
@@ -234,16 +234,13 @@ def update_real_time_metrics(activity_type: str, user_id: int = None):
         return {'error': str(e)}
 
 
-@shared_task
+@shared_task(time_limit=3600, soft_time_limit=3300)
 def update_customer_segments():
     """Update customer segments based on behavior and purchase patterns"""
     try:
         logger.info("Updating customer segments")
         
         analytics_service = AnalyticsService()
-        
-        # Get all active customers
-        customers = User.query.filter_by(is_active=True).all()
         
         segment_updates = {
             'high_value': 0,
@@ -252,24 +249,35 @@ def update_customer_segments():
             'at_risk': 0,
             'new': 0
         }
-        
-        for customer in customers:
+
+        # Single aggregate query instead of 3N+1 per-user queries
+        customer_metrics = db.session.query(
+            User.id.label('user_id'),
+            db.func.coalesce(
+                db.func.sum(
+                    db.case(
+                        (Order.status != 'cancelled', Order.total_amount),
+                        else_=0
+                    )
+                ), 0
+            ).label('total_spent'),
+            db.func.count(Order.id).label('order_count'),
+            db.func.max(Order.created_at).label('last_order_date')
+        ).outerjoin(Order, Order.user_id == User.id)\
+         .filter(User.is_active == True)\
+         .group_by(User.id)\
+         .all()
+
+        now = datetime.now(timezone.utc)
+        for row in customer_metrics:
             try:
-                # Calculate customer metrics
-                total_spent = db.session.query(db.func.sum(Order.total_amount)).filter(
-                    Order.user_id == customer.id,
-                    Order.status != 'cancelled'
-                ).scalar() or 0
-                
-                order_count = Order.query.filter_by(user_id=customer.id).count()
-                
-                # Days since last order
-                last_order = Order.query.filter_by(user_id=customer.id).order_by(Order.created_at.desc()).first()
+                total_spent = float(row.total_spent or 0)
+                order_count = row.order_count
                 days_since_last_order = 999
-                
-                if last_order:
-                    days_since_last_order = (datetime.now(timezone.utc) - last_order.created_at).days
-                
+
+                if row.last_order_date:
+                    days_since_last_order = (now - row.last_order_date).days
+
                 # Determine segment
                 if total_spent >= 100000:  # High value: >100k UZS
                     segment = 'high_value'
@@ -282,17 +290,19 @@ def update_customer_segments():
                         segment = 'low_value'
                 else:  # New customers with no orders
                     segment = 'new'
-                
+
                 # Update customer segment
-                customer.customer_segment = segment
-                customer.segment_updated_at = datetime.now(timezone.utc)
-                
+                User.query.filter_by(id=row.user_id).update({
+                    'customer_segment': segment,
+                    'segment_updated_at': now
+                }, synchronize_session=False)
+
                 segment_updates[segment] += 1
-                
+
             except Exception as e:
-                logger.error(f"Failed to update segment for customer {customer.id}: {e}")
+                logger.error(f"Failed to update segment for customer {row.user_id}: {e}")
                 continue
-        
+
         db.session.commit()
         
         logger.info(f"Customer segments updated: {segment_updates}")
@@ -303,7 +313,7 @@ def update_customer_segments():
         return {'error': str(e)}
 
 
-@shared_task
+@shared_task(time_limit=3600, soft_time_limit=3300)
 def generate_churn_prediction_report():
     """Generate customer churn prediction report"""
     try:
@@ -372,7 +382,7 @@ def generate_churn_prediction_report():
         return {'error': str(e)}
 
 
-@shared_task
+@shared_task(time_limit=3600, soft_time_limit=3300)
 def generate_demand_forecast():
     """Generate demand forecast for inventory planning"""
     try:
@@ -441,7 +451,7 @@ def generate_demand_forecast():
         return {'error': str(e)}
 
 
-@shared_task
+@shared_task(time_limit=3600, soft_time_limit=3300)
 def cleanup_old_analytics_data():
     """Clean up old analytics data to manage database size"""
     try:
@@ -487,7 +497,7 @@ def cleanup_old_analytics_data():
         return {'error': str(e)}
 
 
-@shared_task
+@shared_task(time_limit=3600, soft_time_limit=3300)
 def calculate_customer_lifetime_value():
     """Calculate and update customer lifetime value metrics"""
     try:
@@ -589,7 +599,7 @@ def generate_business_insights(report_data: Dict[str, Any]) -> List[str]:
     return insights
 
 
-@shared_task
+@shared_task(time_limit=3600, soft_time_limit=3300)
 def monitor_business_kpis():
     """Monitor key performance indicators and send alerts"""
     try:
@@ -671,7 +681,7 @@ def monitor_business_kpis():
         return {'error': str(e)}
 
 
-@shared_task
+@shared_task(time_limit=3600, soft_time_limit=3300)
 def generate_product_performance_analysis():
     """Analyze product performance and generate recommendations"""
     try:
@@ -733,7 +743,7 @@ def generate_product_performance_analysis():
         return {'error': str(e)}
 
 
-@shared_task
+@shared_task(time_limit=3600, soft_time_limit=3300)
 def update_geographic_analytics():
     """Update geographic analytics for delivery optimization"""
     try:

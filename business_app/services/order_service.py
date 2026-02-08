@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Any, Optional, Tuple
 from flask import current_app
 from sqlalchemy import and_, or_
+from sqlalchemy.orm import joinedload
 
 from business_app.utils.service_logging import (
     log_service_call, log_business_event, log_database_query
@@ -21,22 +22,25 @@ from business_app.utils.exceptions import ValidationError, NotFoundError, Confli
 from business_app.utils.constants import OrderStatus, PaymentStatus, DeliveryStatus
 from business_app.models.order import OrderStatusHistory
 from business_app.utils.helpers import calculate_delivery_fee
-# Note: inventory_service imported lazily to avoid circular imports
 from business_app.utils.audit_logger import audit_logger, AuditEventType, AuditSeverity
 from business_app import db
 
 
 class OrderService:
     """Service for managing orders"""
-    
-    def __init__(self):
+
+    def __init__(self, inventory_service=None):
         self.min_order_amount = current_app.config.get('MIN_ORDER_AMOUNT', 10000)
         self.max_order_items = current_app.config.get('MAX_ORDER_ITEMS', 50)
-    
-    def _get_inventory_service(self):
-        """Get inventory service with lazy loading to avoid circular imports"""
-        from business_app.services.inventory_service import get_inventory_service
-        return get_inventory_service()
+        self._inventory_service = inventory_service
+
+    @property
+    def inventory_service(self):
+        """Lazy-initialise inventory service if not injected via constructor."""
+        if self._inventory_service is None:
+            from business_app.services.inventory_service import get_inventory_service
+            self._inventory_service = get_inventory_service()
+        return self._inventory_service
     
     @log_service_call(operation_type='order', track_performance=True)
     @log_business_event(event_type='created', entity_type='order')
@@ -129,7 +133,7 @@ class OrderService:
         
         # Reserve inventory for this order
         try:
-            reservation_result = self._get_inventory_service().reserve_inventory(
+            reservation_result = self.inventory_service.reserve_inventory(
                 order_id=order.id,
                 items=items_data,
                 user_id=user_id
@@ -177,7 +181,12 @@ class OrderService:
     
     def get_order(self, order_id: int, user_id: int = None) -> Order:
         """Get order by ID"""
-        query = Order.query.filter_by(id=order_id)
+        query = Order.query.options(
+            joinedload(Order.order_items).joinedload(OrderItem.product),
+            joinedload(Order.payment),
+            joinedload(Order.delivery_address),
+            joinedload(Order.delivery)
+        ).filter_by(id=order_id)
         
         if user_id:
             query = query.filter_by(user_id=user_id)
@@ -229,10 +238,14 @@ class OrderService:
         return timeline
 
 
-    def get_user_orders(self, user_id: int, status: OrderStatus = None, 
+    def get_user_orders(self, user_id: int, status: OrderStatus = None,
                        page: int = 1, per_page: int = 20) -> Dict[str, Any]:
         """Get user's orders with pagination"""
-        query = Order.query.filter_by(user_id=user_id)
+        query = Order.query.options(
+            joinedload(Order.order_items).joinedload(OrderItem.product),
+            joinedload(Order.payment),
+            joinedload(Order.delivery_address)
+        ).filter_by(user_id=user_id)
         
         if status:
             query = query.filter_by(status=status)
@@ -337,7 +350,7 @@ class OrderService:
         else:
             # Just release Redis reservations for pending orders
             try:
-                release_result = self._get_inventory_service().release_reservations(order_id)
+                release_result = self.inventory_service.release_reservations(order_id)
                 if release_result['success']:
                     logger.info(f"Released inventory reservations for cancelled order {order_id}")
                 else:
@@ -366,7 +379,7 @@ class OrderService:
         """Restore stock quantities for a cancelled order that had stock deducted"""
         from business_app.services.inventory_service import InventoryOperationType
         
-        inventory_service = self._get_inventory_service()
+        inventory_service = self.inventory_service
         cancellation_reason = reason or "Order cancelled"
         
         for item in order.order_items:
@@ -524,7 +537,7 @@ class OrderService:
                 raise ValidationError(f"Maximum quantity per item is 100")
         
         # Perform comprehensive inventory availability check
-        availability_results = self._get_inventory_service().check_multiple_products_availability(
+        availability_results = self.inventory_service.check_multiple_products_availability(
             items_data, exclude_order_id=order_id
         )
         
@@ -580,9 +593,12 @@ class OrderService:
         return processed_items, subtotal
     
     def _calculate_delivery_fee(self, delivery_address: Dict[str, Any], subtotal: int) -> int:
-        """Calculate delivery fee"""
-        # "Always Free Delivery" strategy
-        return 0
+        """Calculate delivery fee via DeliveryService (single source of truth)"""
+        from business_app.services.delivery_service import DeliveryService
+        delivery_service = DeliveryService()
+        latitude = delivery_address.get('latitude', 0)
+        longitude = delivery_address.get('longitude', 0)
+        return delivery_service.calculate_delivery_fee(latitude, longitude, subtotal)
     
     def _is_valid_status_transition(self, current_status: OrderStatus, new_status: OrderStatus) -> bool:
         """Check if status transition is valid"""
@@ -722,7 +738,7 @@ class OrderService:
     def _confirm_inventory_for_order(self, order: Order):
         """Confirm inventory reservations and reduce stock for an order"""
         try:
-            confirmation_result = self._get_inventory_service().confirm_reservations(order.id)
+            confirmation_result = self.inventory_service.confirm_reservations(order.id)
             if confirmation_result['success']:
                 logger.info(f"Confirmed inventory reservations for order {order.id}")
                 
@@ -807,7 +823,7 @@ class OrderService:
             ],
             'payment': {
                 'status': order.payment.status.value if order.payment else 'pending',
-                'method': order.payment.method.value if order.payment else None
+                'method': order.payment.payment_method.value if order.payment else None
             } if order.payment else None,
             'delivery': {
                 'status': order.delivery.status.value if order.delivery else 'pending',

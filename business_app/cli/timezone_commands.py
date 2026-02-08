@@ -7,6 +7,7 @@ from flask.cli import with_appcontext
 from datetime import datetime
 import logging
 
+from shared.constants import DISPLAY_TIMEZONE
 from business_app import db
 from business_app.utils.db_timezone import (
     create_timezone_aware_indexes, 
@@ -137,7 +138,7 @@ def fix_naive_datetimes_cmd(table, dry_run):
 
 
 @timezone.command()
-@click.option('--timezone', default='Asia/Tashkent', help='User timezone for testing')
+@click.option('--timezone', default=DISPLAY_TIMEZONE, help='User timezone for testing')
 @with_appcontext
 def test():
     """Test timezone functionality"""
@@ -155,9 +156,9 @@ def test():
         click.echo(f"   UTC now: {utc_now}")
         
         # Test 2: Convert to user timezone
-        user_tz = pytz.timezone('Asia/Tashkent')
+        user_tz = pytz.timezone(DISPLAY_TIMEZONE)
         local_time = utc_to_local(utc_now, user_tz)
-        click.echo(f"   Local time (Asia/Tashkent): {local_time}")
+        click.echo(f"   Local time ({DISPLAY_TIMEZONE}): {local_time}")
         
         # Test 3: Convert back to UTC
         back_to_utc = local_to_utc(local_time, user_tz)
@@ -210,7 +211,7 @@ def info():
         
         # Show time in default timezone
         from business_app.utils.timezone_utils import utc_to_local
-        default_tz = current_app.config.get('DISPLAY_TIMEZONE', 'Asia/Tashkent')
+        default_tz = current_app.config.get('DISPLAY_TIMEZONE', DISPLAY_TIMEZONE)
         local_now = utc_to_local(utc_now, default_tz)
         click.echo(f"   Current {default_tz} time: {local_now}")
         

@@ -29,8 +29,8 @@ class Subscription(db.Model, TimestampMixin, TranslatableMixin):
     # Billing cycle
     billing_cycle = Column(Enum(SubscriptionFrequency, name='subscription_frequency', values_callable=lambda x: [e.value for e in x]), nullable=False)
     billing_amount = Column(Numeric(precision=10, scale=2), nullable=False)
-    next_billing_date = Column(DateTime, nullable=False)
-    last_billing_date = Column(DateTime, nullable=True)
+    next_billing_date = Column(DateTime(timezone=True), nullable=False)
+    last_billing_date = Column(DateTime(timezone=True), nullable=True)
 
     # Delivery schedule
     delivery_frequency = Column(Enum(SubscriptionFrequency, name='subscription_frequency', values_callable=lambda x: [e.value for e in x]), nullable=False)
@@ -38,12 +38,12 @@ class Subscription(db.Model, TimestampMixin, TranslatableMixin):
     delivery_day_of_month = Column(Integer, nullable=True)  # 1-31
     delivery_time_slot_id = Column(Integer, ForeignKey('delivery_time_slots.id'), nullable=True)  # User may not have preference
     delivery_address_id = Column(Integer, ForeignKey('addresses.id'), nullable=False)
-    next_delivery_date = Column(DateTime, nullable=True)
-    last_delivery_date = Column(DateTime, nullable=True)
+    next_delivery_date = Column(DateTime(timezone=True), nullable=True)
+    last_delivery_date = Column(DateTime(timezone=True), nullable=True)
 
     # Subscription period
-    start_date = Column(DateTime, nullable=False)
-    end_date = Column(DateTime, nullable=True)  # null for indefinite
+    start_date = Column(DateTime(timezone=True), nullable=False)
+    end_date = Column(DateTime(timezone=True), nullable=True)  # null for indefinite
     auto_renew = Column(Boolean, default=True)
 
     # Payment settings
@@ -53,17 +53,17 @@ class Subscription(db.Model, TimestampMixin, TranslatableMixin):
     failed_payment_count = Column(Integer, default=0)
 
     # Pause/Resume functionality
-    paused_at = Column(DateTime, nullable=True)
+    paused_at = Column(DateTime(timezone=True), nullable=True)
     pause_reason = Column(String(255), nullable=True)
-    pause_start_date = Column(DateTime, nullable=True)
-    pause_end_date = Column(DateTime, nullable=True)
-    resume_date = Column(DateTime, nullable=True)
+    pause_start_date = Column(DateTime(timezone=True), nullable=True)
+    pause_end_date = Column(DateTime(timezone=True), nullable=True)
+    resume_date = Column(DateTime(timezone=True), nullable=True)
     
     # Analytics
     total_orders_generated = Column(Integer, default=0)
     total_amount_billed = Column(Numeric(precision=10, scale=2), default=Decimal('0.00'))
     failed_billing_attempts = Column(Integer, default=0)
-    last_successful_billing = Column(DateTime, nullable=True)
+    last_successful_billing = Column(DateTime(timezone=True), nullable=True)
     
     # Special features
     discount_percentage = Column(Float, default=0.0)  # Subscription discount
@@ -85,7 +85,7 @@ class Subscription(db.Model, TimestampMixin, TranslatableMixin):
     
     def generate_subscription_number(self):
         """Generate unique subscription number"""
-        timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
+        timestamp = datetime.now(UTC).strftime('%Y%m%d%H%M%S')
         random_suffix = str(uuid.uuid4().hex[:4]).upper()
         self.subscription_number = f"SUB{timestamp}{random_suffix}"
     
@@ -104,48 +104,46 @@ class Subscription(db.Model, TimestampMixin, TranslatableMixin):
         return self.next_billing_date
     
     def calculate_next_delivery_date(self):
-        """Calculate next delivery date based on delivery frequency"""
-        today = datetime.now().date()
+        """Calculate next delivery date based on delivery frequency.
+
+        For weekly: finds the next occurrence of delivery_day_of_week (1=Mon, 7=Sun).
+        For monthly: uses delivery_day_of_month, falling back to 28th if day doesn't exist.
+
+        Returns:
+            date: The next scheduled delivery date.
+        """
+        today = datetime.now(UTC).date()
 
         if self.delivery_frequency == SubscriptionFrequency.DAILY:
             return today + timedelta(days=1)
         elif self.delivery_frequency == SubscriptionFrequency.WEEKLY:
-            day_of_week = self.delivery_day_of_week if self.delivery_day_of_week is not None else 1 # Default to Monday
+            day_of_week = self.delivery_day_of_week if self.delivery_day_of_week is not None else 1
             days_ahead = day_of_week - today.weekday()
             if days_ahead <= 0:  # Target day already happened this week
                 days_ahead += 7
             return today + timedelta(days=days_ahead)
         elif self.delivery_frequency == SubscriptionFrequency.MONTHLY:
-            # Next month, same day
-            day_of_month = self.delivery_day_of_month if self.delivery_day_of_month is not None else 1 # Default to 1st
+            day_of_month = self.delivery_day_of_month if self.delivery_day_of_month is not None else 1
             if today.month == 12:
                 next_month = today.replace(year=today.year + 1, month=1, day=day_of_month)
             else:
                 try:
                     next_month = today.replace(month=today.month + 1, day=day_of_month)
-                except ValueError:  # Day doesn't exist in next month
+                except ValueError:  # e.g. Feb 30 → fall back to 28th
                     next_month = today.replace(month=today.month + 1, day=28)
             return next_month
 
         return today
     
     def pause(self, reason=None, resume_date=None):
-        """Pause subscription"""
+        """Pause subscription (state change only — logging handled by service/API layer)"""
         self.status = SubscriptionStatus.PAUSED
         self.paused_at = datetime.now(UTC)
         self.pause_reason = reason
         self.resume_date = resume_date
 
-        # Log the pause
-        log = SubscriptionLog(
-            subscription_id=self.id,
-            action='paused',
-            details=f"Reason: {reason}" if reason else "Subscription paused"
-        )
-        db.session.add(log)
-    
     def resume(self):
-        """Resume subscription"""
+        """Resume subscription (state change only — logging handled by service/API layer)"""
         self.status = SubscriptionStatus.ACTIVE
         self.paused_at = None
         self.pause_reason = None
@@ -154,25 +152,9 @@ class Subscription(db.Model, TimestampMixin, TranslatableMixin):
         # Recalculate next billing date
         self.next_billing_date = self.calculate_next_billing_date()
 
-        # Log the resume
-        log = SubscriptionLog(
-            subscription_id=self.id,
-            action='resumed',
-            details="Subscription resumed"
-        )
-        db.session.add(log)
-    
     def cancel(self, reason=None):
-        """Cancel subscription"""
+        """Cancel subscription (state change only — logging handled by service/API layer)"""
         self.status = SubscriptionStatus.CANCELLED
-
-        # Log the cancellation
-        log = SubscriptionLog(
-            subscription_id=self.id,
-            action='cancelled',
-            details=f"Reason: {reason}" if reason else "Subscription cancelled"
-        )
-        db.session.add(log)
     
     def get_total_value(self):
         """Calculate total subscription value per billing cycle"""

@@ -40,7 +40,7 @@ import { useQuery, useMutation, useQueryClient } from 'react-query';
 import { useTranslation } from 'react-i18next';
 import { Editor } from '@tinymce/tinymce-react';
 import adminService from '../services/adminService';
-import moment from 'moment';
+import { formatDate } from '../utils/dateUtils';
 
 const { Option } = Select;
 const { TextArea } = Input;
@@ -328,7 +328,7 @@ const Blog = () => {
       dataIndex: 'published_at',
       key: 'published_at',
       width: 120,
-      render: (date) => date ? moment(date).format('MMM D, YYYY') : '-'
+      render: (date) => date ? formatDate(date, 'MMM D, YYYY') : '-'
     },
     {
       title: t('ui.blog.actions'),

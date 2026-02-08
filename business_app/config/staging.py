@@ -4,6 +4,7 @@ Staging environment configuration
 import os
 from datetime import timedelta
 from .base import BaseConfig
+from shared.constants import DISPLAY_TIMEZONE
 
 
 class StagingConfig(BaseConfig):
@@ -46,7 +47,7 @@ class StagingConfig(BaseConfig):
         'task_serializer': 'json',
         'accept_content': ['json'],
         'result_serializer': 'json',
-        'timezone': 'Asia/Tashkent',
+        'timezone': DISPLAY_TIMEZONE,
         'enable_utc': True,
         'task_track_started': True,
         'result_expires': 3600,

@@ -12,6 +12,7 @@ from business_app.models.user import User
 from business_app.models.product import Product
 from business_app.utils.exceptions import ValidationError, NotFoundError, ConflictError
 from business_app.utils.constants import SubscriptionStatus, SubscriptionFrequency, PaymentMethod
+from sqlalchemy.orm import joinedload
 from business_app import db
 
 
@@ -408,10 +409,13 @@ class SubscriptionService:
                 'error': str(e)
             }
     
-    def get_user_subscriptions(self, user_id: int, 
+    def get_user_subscriptions(self, user_id: int,
                               status: SubscriptionStatus = None) -> List[Subscription]:
         """Get user's subscriptions"""
-        query = Subscription.query.filter_by(user_id=user_id)
+        query = Subscription.query.options(
+            joinedload(Subscription.subscription_items).joinedload(SubscriptionItem.product),
+            joinedload(Subscription.delivery_address)
+        ).filter_by(user_id=user_id)
         
         if status:
             query = query.filter_by(status=status)

@@ -30,6 +30,7 @@ import {
 import { useQuery } from 'react-query';
 import { useTranslation } from 'react-i18next';
 import moment from 'moment';
+import { formatDate } from '../utils/dateUtils';
 import LineChart from '../components/charts/LineChart';
 import BarChart from '../components/charts/BarChart';
 import PieChart from '../components/charts/PieChart';
@@ -197,7 +198,7 @@ const Analytics = () => {
       dataIndex: 'last_order_date',
       key: 'last_order_date',
       width: 120,
-      render: (date) => (date ? moment(date).format('MMM DD, YYYY') : t('ui.analytics.never'))
+      render: (date) => (date ? formatDate(date) : t('ui.analytics.never'))
     },
     {
       title: t('ui.analytics.total_spent'),

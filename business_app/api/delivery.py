@@ -13,9 +13,8 @@ from business_app.models.user import User
 from business_app.utils.service_factory import (
     get_delivery_service, get_maps_service, get_notification_service, get_file_storage_service
 )
-from business_app.utils.error_handlers import (
-    handle_api_exception, create_success_response
-)
+from business_app.utils.error_handlers import handle_api_exception
+from business_app.utils.api_responses import success_response, error_response
 from business_app.utils.exceptions import (
     ValidationError, NotFoundError
 )
@@ -79,7 +78,7 @@ def track_delivery_public(tracking_number):
                 'phone': delivery.delivery_person.phone
             }
 
-    return create_success_response(
+    return success_response(
         data={'delivery': tracking_info},
         message='Delivery tracking information retrieved successfully'
     )
@@ -137,7 +136,7 @@ def get_my_deliveries():
         }
     }
 
-    return create_success_response(
+    return success_response(
         data={'deliveries': response_data['items'], 'pagination': response_data['pagination']},
         message='Deliveries retrieved successfully'
     )
@@ -301,7 +300,7 @@ def calculate_delivery_fee():
             order_total=int(order_total)
         )
 
-    return create_success_response(
+    return success_response(
         data={
             'delivery_fee': delivery_fee,
             'address_id': address_id,

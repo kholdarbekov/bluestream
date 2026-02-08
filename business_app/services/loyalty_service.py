@@ -18,6 +18,7 @@ from business_app import db
 
 class LoyaltyService:
     """Service for managing loyalty programs"""
+    # TODO: Note for mylself: correct loyalty points for user_id in (8,9,1, 12,7,13,10,31,22);
     
     def __init__(self):
         self.points_ratio = current_app.config.get('LOYALTY_POINTS_RATIO', 100)  # 1 point per 100 UZS

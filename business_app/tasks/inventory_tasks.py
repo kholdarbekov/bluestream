@@ -17,7 +17,7 @@ from business_app import db
 logger = logging.getLogger(__name__)
 
 
-@shared_task(bind=True, max_retries=3)
+@shared_task(bind=True, max_retries=3, time_limit=600, soft_time_limit=540)
 def cleanup_expired_inventory_reservations(self):
     """
     Clean up expired inventory reservations
@@ -52,7 +52,7 @@ def cleanup_expired_inventory_reservations(self):
         raise self.retry(exc=exc, countdown=60)
 
 
-@shared_task(bind=True, max_retries=3)
+@shared_task(bind=True, max_retries=3, time_limit=600, soft_time_limit=540)
 def send_low_stock_alert_task(self, product_id: int):
     """
     Send low stock alert for a product
@@ -126,7 +126,7 @@ def send_low_stock_alert_task(self, product_id: int):
             severity=AuditSeverity.MEDIUM,
             resource_type="product_inventory",
             resource_id=str(product_id),
-            description=f"Low stock alert sent for {product.get_translated('name', language)}"/
+            description=f"Low stock alert sent for {product.get_translated('name', language)}",
             additional_data=notification_data
         )
         
@@ -138,7 +138,7 @@ def send_low_stock_alert_task(self, product_id: int):
         raise self.retry(exc=exc, countdown=120)
 
 
-@shared_task(bind=True, max_retries=3)
+@shared_task(bind=True, max_retries=3, time_limit=600, soft_time_limit=540)
 def generate_inventory_report_task(self, report_type: str = 'daily'):
     """
     Generate inventory report
@@ -153,10 +153,11 @@ def generate_inventory_report_task(self, report_type: str = 'daily'):
         out_of_stock_products = []
         total_inventory_value = 0
         
+        language = get_current_language()
         for product in products:
             try:
                 inventory_status = get_inventory_service().get_inventory_status(product.id)
-                
+
                 if inventory_status['is_out_of_stock']:
                     out_of_stock_products.append({
                         'id': product.id,
@@ -241,7 +242,7 @@ def generate_inventory_report_task(self, report_type: str = 'daily'):
         raise self.retry(exc=exc, countdown=300)
 
 
-@shared_task(bind=True, max_retries=3)
+@shared_task(bind=True, max_retries=3, time_limit=600, soft_time_limit=540)
 def auto_reorder_products_task(self):
     """
     Automatically create reorder suggestions for products below minimum stock
@@ -251,7 +252,8 @@ def auto_reorder_products_task(self):
         
         # Get products that are below minimum stock level
         products_to_reorder = []
-        
+        language = get_current_language()
+
         products = Product.query.filter(
             Product.is_active == True,
             Product.min_stock_level.isnot(None),

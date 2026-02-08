@@ -6,6 +6,7 @@ from typing import Optional, Union
 import pytz
 from flask import current_app, g, request
 import logging
+from shared.constants import DISPLAY_TIMEZONE
 
 logger = logging.getLogger(__name__)
 
@@ -41,12 +42,12 @@ def get_user_timezone() -> pytz.BaseTzInfo:
                 return pytz.timezone(tz_header)
         
         # Fall back to configured display timezone
-        display_tz = current_app.config.get('DISPLAY_TIMEZONE', 'Asia/Tashkent')
+        display_tz = current_app.config.get('DISPLAY_TIMEZONE', DISPLAY_TIMEZONE)
         return pytz.timezone(display_tz)
-        
+
     except Exception as e:
         logger.warning(f"Error getting user timezone, using default: {e}")
-        return pytz.timezone('Asia/Tashkent')
+        return pytz.timezone(DISPLAY_TIMEZONE)
 
 
 def utc_to_local(dt: datetime, target_tz: Optional[Union[str, pytz.BaseTzInfo]] = None) -> datetime:

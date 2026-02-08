@@ -14,7 +14,7 @@ from business_app.services.notification_service import NotificationService
 logger = get_task_logger(__name__)
 
 
-@shared_task
+@shared_task(time_limit=1800, soft_time_limit=1700)
 def expire_loyalty_points() -> Dict[str, Any]:
     """
     Expire loyalty points that have passed their expiration date.
@@ -61,45 +61,7 @@ def expire_loyalty_points() -> Dict[str, Any]:
         }
 
 
-@shared_task(bind=True, max_retries=3)
-def send_loyalty_notification_task(self, user_id: int, notification_type: str,
-                                    template_data: Dict[str, Any] = None) -> Dict[str, Any]:
-    """
-    Send loyalty-related notifications to users.
-
-    Args:
-        user_id: The user to notify
-        notification_type: Type of loyalty notification (points_earned, points_expired,
-                          reward_redeemed, tier_upgraded, etc.)
-        template_data: Additional data for the notification template
-
-    Returns:
-        Dict with notification result
-    """
-    try:
-        logger.info(f"Sending loyalty notification '{notification_type}' to user {user_id}")
-
-        notification_service = NotificationService()
-
-        result = notification_service.send_notification(
-            user_id,
-            notification_type,
-            template_data=template_data or {}
-        )
-
-        if result:
-            logger.info(f"Loyalty notification sent to user {user_id}")
-            return {'success': True, 'user_id': user_id, 'notification_type': notification_type}
-        else:
-            logger.warning(f"Failed to send loyalty notification to user {user_id}")
-            return {'success': False, 'user_id': user_id, 'error': 'Notification send failed'}
-
-    except Exception as exc:
-        logger.error(f"Failed to send loyalty notification: {exc}")
-        raise self.retry(exc=exc)
-
-
-@shared_task
+@shared_task(time_limit=1800, soft_time_limit=1700)
 def process_pending_referral_rewards() -> Dict[str, Any]:
     """
     Process pending referral rewards.
@@ -142,7 +104,7 @@ def process_pending_referral_rewards() -> Dict[str, Any]:
         }
 
 
-@shared_task
+@shared_task(time_limit=1800, soft_time_limit=1700)
 def send_points_expiring_soon_reminders() -> Dict[str, Any]:
     """
     Send reminders to users whose points are expiring soon.
@@ -204,7 +166,7 @@ def send_points_expiring_soon_reminders() -> Dict[str, Any]:
         }
 
 
-@shared_task
+@shared_task(time_limit=1800, soft_time_limit=1700)
 def update_loyalty_tiers() -> Dict[str, Any]:
     """
     Update loyalty tiers for all active users based on their current points.

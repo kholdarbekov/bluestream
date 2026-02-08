@@ -179,8 +179,6 @@ def cart():
 @frontend_bp.route('/checkout')
 def checkout():
     """Checkout page"""
-    from datetime import datetime
-    
     # Check authentication
     try:
         verify_jwt_in_request(optional=True)
@@ -196,7 +194,7 @@ def checkout():
     addresses = user.addresses if user else []
 
     # Get today's date for date picker
-    today = datetime.now().strftime('%Y-%m-%d')
+    today = datetime.now(UTC).strftime('%Y-%m-%d')
 
     return render_template('frontend/checkout.html',
                          user=user,
@@ -685,14 +683,13 @@ def set_language_route(language):
 @frontend_bp.context_processor
 def inject_global_vars():
     """Inject global variables into all templates"""
-    from datetime import datetime
     from flask import g
 
     class MomentJS:
         def format(self, fmt):
             if fmt == 'YYYY':
-                return datetime.now().year
-            return datetime.now().strftime(fmt)
+                return datetime.now(UTC).year
+            return datetime.now(UTC).strftime(fmt)
 
     # Get current language
     from business_app.utils.helpers import get_current_language

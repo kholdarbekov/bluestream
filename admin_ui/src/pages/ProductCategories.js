@@ -31,6 +31,7 @@ import {
 } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from 'react-query';
 import adminService from '../services/adminService';
+import { formatLocalDate } from '../utils/dateUtils';
 
 const { TextArea } = Input;
 
@@ -167,7 +168,7 @@ const ProductCategories = () => {
       dataIndex: 'created_at',
       key: 'created_at',
       width: 120,
-      render: (date) => date ? new Date(date).toLocaleDateString() : '-'
+      render: (date) => formatLocalDate(date)
     },
     {
       title: 'Actions',

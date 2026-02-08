@@ -12,15 +12,14 @@ from keyboards import OrderKeyboards, MenuKeyboards, ProfileKeyboards, PaymentKe
 from api_client import api_client
 from database import db_manager, BotUserRepository
 from utils import user_middleware, format_price, MessageBuilder, get_auth_token
+from shared.constants import ORDER_STATUS_ICONS, DEFAULT_STATUS_ICON, DISPLAY_TIMEZONE
+from handlers.base import BaseHandler
 
 logger = logging.getLogger('handlers')
 
 
-class OrderHandlers:
+class OrderHandlers(BaseHandler):
     """Order-related handlers"""
-    
-    def __init__(self):
-        self.user_repo = BotUserRepository(db_manager)
     
     async def orders_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Show user's orders"""
@@ -280,17 +279,7 @@ class OrderHandlers:
                 timeline = tracking_data.get('timeline', [])
                 time_remaining = tracking_data.get('estimated_time_remaining', {})
             
-            # Status icons mapping
-            status_icons = {
-                'created': '📝',
-                'pending': '🕐',
-                'confirmed': '✅',
-                'preparing': '👨‍🍳',
-                'out_for_delivery': '🚚',
-                'delivered': '📦',
-                'cancelled': '❌',
-                'returned': '↩️'
-            }
+            status_icons = ORDER_STATUS_ICONS
             
             # Status labels mapping
             status_labels = {
@@ -318,14 +307,17 @@ class OrderHandlers:
                     is_current = entry.get('is_current', False)
                     notes = entry.get('notes', '')
                     
-                    # Format timestamp for display
+                    # Format timestamp for display (convert UTC → display timezone)
                     formatted_time = ''
                     if timestamp:
                         try:
                             from datetime import datetime
+                            from zoneinfo import ZoneInfo
                             dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
-                            formatted_time = dt.strftime('%d %b %H:%M')
-                        except:
+                            dt_local = dt.astimezone(ZoneInfo(DISPLAY_TIMEZONE))
+                            formatted_time = dt_local.strftime('%d %b %H:%M')
+                        except (ValueError, TypeError) as e:
+                            logger.warning(f"Failed to parse order timestamp '{timestamp}': {e}")
                             formatted_time = timestamp[:16] if len(timestamp) > 16 else timestamp
                     
                     icon = status_icons.get(status, '📋')
@@ -682,37 +674,6 @@ class OrderHandlers:
         )
         await update.callback_query.answer()
     
-    async def _handle_auth_error(self, update: Update, language: str):
-        """Handle authentication error"""
-        error_msg = i18n.get('telegram.error.auth_failed', language)
-
-        if update.callback_query:
-            await update.callback_query.edit_message_text(error_msg)
-            await update.callback_query.answer()
-        else:
-            await update.message.reply_text(error_msg)
-    
-    async def _handle_api_error(self, update: Update, error: str, language: str):
-        """Handle API error"""
-        error_msg = f"❌ {error}"
-        
-        if update.callback_query:
-            await update.callback_query.answer(error_msg)
-        else:
-            await update.message.reply_text(error_msg)
-    
-    async def _handle_error(self, update: Update):
-        """Handle general error"""
-        try:
-            language = await i18n.get_user_language(update.effective_user.id)
-            error_msg = i18n.get('telegram.error_occurred', language)
-        except:
-            error_msg = i18n.get('telegram.error_occurred', 'en')
-
-        if update.callback_query:
-            await update.callback_query.answer(error_msg)
-        else:
-            await update.message.reply_text(error_msg)
 
 
 # Global handler instance

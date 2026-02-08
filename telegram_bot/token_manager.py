@@ -24,9 +24,10 @@ class TokenManager:
     
     # Token refresh buffer - refresh 5 minutes before expiry
     REFRESH_BUFFER_SECONDS = 300
-    
+
     # Default TTL for cached tokens (30 days to match refresh token lifetime)
-    DEFAULT_TTL_SECONDS = 30 * 24 * 3600
+    REFRESH_TOKEN_LIFETIME_DAYS = 30
+    DEFAULT_TTL_SECONDS = REFRESH_TOKEN_LIFETIME_DAYS * 24 * 3600
     
     def __init__(self, redis_url: str):
         """
@@ -290,6 +291,36 @@ class TokenManager:
         
         # Try to refresh if refresh token is valid
         if self.is_refresh_token_valid(tokens):
+            # Acquire per-user lock to prevent concurrent refresh
+            lock_key = f"bot:refresh_lock:{telegram_id}"
+            try:
+                lock_acquired = await self.redis.set(lock_key, "1", nx=True, ex=10)
+            except Exception as e:
+                logger.warning(f"Redis lock failed for user {telegram_id}: {e}")
+                # Return current token as fallback instead of proceeding without lock
+                if tokens.get('access_token'):
+                    return tokens['access_token']
+                lock_acquired = True  # Last resort: proceed with refresh
+
+            if not lock_acquired:
+                # Another handler is refreshing; wait with exponential backoff
+                import asyncio
+                for attempt in range(3):
+                    backoff_delay = 2 ** attempt  # 1s, 2s, 4s
+                    await asyncio.sleep(backoff_delay)
+                    refreshed_tokens = await self.get_cached_tokens(telegram_id)
+                    if refreshed_tokens and self.is_access_token_valid(refreshed_tokens):
+                        return refreshed_tokens['access_token']
+
+                # All retries exhausted — return existing token as last resort
+                if tokens.get('access_token'):
+                    logger.warning(
+                        f"TokenManager: Returning potentially expired token "
+                        f"for user {telegram_id} after lock contention"
+                    )
+                    return tokens['access_token']
+                return None
+
             logger.info(f"TokenManager: Refreshing token for user {telegram_id}")
             try:
                 new_tokens = await api_client.refresh_token(tokens['refresh_token'])
@@ -305,6 +336,11 @@ class TokenManager:
                     return new_tokens['access_token']
             except Exception as e:
                 logger.warning(f"Token refresh failed: {e}")
+            finally:
+                try:
+                    await self.redis.delete(lock_key)
+                except Exception:
+                    pass
         
         # Both tokens expired - need full re-authentication
         logger.info(f"TokenManager: Tokens expired for user {telegram_id}, re-auth needed")

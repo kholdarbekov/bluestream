@@ -57,5 +57,5 @@ async def main_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.callback_query.answer(error_msg)
             else:
                 await update.message.reply_text(error_msg)
-        except:
-            pass
+        except Exception as e:
+            logger.warning(f"Failed to send error message in main menu fallback: {e}")

@@ -5,6 +5,8 @@ import os
 from datetime import timedelta
 from typing import Optional
 
+from shared.constants import DISPLAY_TIMEZONE as _DISPLAY_TIMEZONE
+
 # Import secrets manager for secure secret retrieval
 # Temporarily use fallback for development/testing
 use_fallback = os.environ.get('USE_SECRETS_FALLBACK', 'true').lower() == 'true'
@@ -307,13 +309,13 @@ For complete documentation, examples, and SDKs visit: [API Documentation](/docs/
     }
     DEFAULT_LANGUAGE = 'uz'
     BABEL_DEFAULT_LOCALE = 'uz'
-    BABEL_DEFAULT_TIMEZONE = 'Asia/Tashkent'
-    
+    BABEL_DEFAULT_TIMEZONE = _DISPLAY_TIMEZONE
+
     # Timezone Configuration
     # All internal operations use UTC, display uses local timezone
     USE_TZ = True
     TIMEZONE = 'UTC'  # Internal storage timezone
-    DISPLAY_TIMEZONE = os.environ.get('DISPLAY_TIMEZONE', 'Asia/Tashkent')  # User display timezone
+    DISPLAY_TIMEZONE = _DISPLAY_TIMEZONE  # User display timezone (from shared.constants → .env)
     ALLOWED_TIMEZONES = [
         'UTC',
         'Asia/Tashkent',

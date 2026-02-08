@@ -13,7 +13,12 @@ from business_app.models import TimestampMixin
 
 class Payment(db.Model, TimestampMixin):
     __tablename__ = 'payments'
-    
+    __table_args__ = (
+        Index('idx_payments_user_status', 'user_id', 'status'),
+        Index('idx_payments_status_created', 'status', 'created_at'),
+        Index('idx_payments_order_status', 'order_id', 'status'),
+    )
+
     id = Column(Integer, primary_key=True)
     payment_id = Column(String(100), unique=True, nullable=False, index=True)
     user_id = Column(Integer, ForeignKey('users.id'), nullable=False, index=True)
@@ -31,7 +36,7 @@ class Payment(db.Model, TimestampMixin):
     
     # Payment link details (for Payme/Click)
     payment_link = Column(String(500), nullable=True)
-    payment_link_expires_at = Column(DateTime, nullable=True)
+    payment_link_expires_at = Column(DateTime(timezone=True), nullable=True)
     
     # Webhook processing
     webhook_processed = Column(Boolean, default=False)
@@ -104,7 +109,7 @@ class PaymentTransaction(db.Model, TimestampMixin):
     failure_reason = Column(String(500), nullable=True)
     
     # Processing details
-    processed_at = Column(DateTime, nullable=True)
+    processed_at = Column(DateTime(timezone=True), nullable=True)
     processing_time_ms = Column(Integer, nullable=True)
     
     # Additional data
@@ -163,7 +168,7 @@ class CreditCard(db.Model, TimestampMixin):
     fingerprint = Column(String(100), nullable=True)  # Unique card fingerprint
     
     # Usage tracking
-    last_used_at = Column(DateTime, nullable=True)
+    last_used_at = Column(DateTime(timezone=True), nullable=True)
     usage_count = Column(Integer, default=0)
 
     # Payme verification tracking (for SMS OTP flow)
@@ -177,9 +182,10 @@ class CreditCard(db.Model, TimestampMixin):
     
     def is_expired(self):
         """Check if card is expired"""
-        from datetime import datetime
-        current_month = datetime.now().month
-        current_year = datetime.now().year
+        from datetime import datetime, UTC
+        now = datetime.now(UTC)
+        current_month = now.month
+        current_year = now.year
 
         return (self.expiry_year < current_year) or \
                (self.expiry_year == current_year and self.expiry_month < current_month)

@@ -18,50 +18,66 @@ from business_app import db
 logger = get_task_logger(__name__)
 
 
-@shared_task(bind=True, max_retries=3, default_retry_delay=60)
+@shared_task(bind=True, max_retries=3, default_retry_delay=60, time_limit=300, soft_time_limit=270)
 def process_payment_webhook(self, payment_id: int, webhook_data: Dict[str, Any]):
     """Process payment webhook from external gateway"""
     try:
         logger.info(f"Processing payment webhook for payment {payment_id}")
-        
+
         payment_service = PaymentService()
-        payment = Payment.query.get(payment_id)
-        
+
+        # Acquire row-level lock for idempotent processing
+        payment = Payment.query.filter_by(id=payment_id).with_for_update().first()
+
         if not payment:
             logger.error(f"Payment {payment_id} not found")
             return {'success': False, 'error': 'Payment not found'}
-        
+
+        # Idempotency check: skip if already completed (now race-safe with row lock)
+        if payment.status == PaymentStatus.COMPLETED:
+            logger.info(f"Payment {payment_id} already completed, skipping webhook")
+            db.session.commit()  # Release the row lock
+            return {'success': True, 'skipped': True, 'reason': 'already_completed'}
+
         # Process webhook based on payment method
-        if payment.method.value == 'payme':
+        if payment.payment_method.value == 'payme':
             result = payment_service.handle_payme_webhook(webhook_data)
-        elif payment.method.value == 'click':
+        elif payment.payment_method.value == 'click':
             result = payment_service.handle_click_webhook(webhook_data)
         else:
-            logger.error(f"Unsupported payment method for webhook: {payment.method.value}")
+            logger.error(f"Unsupported payment method for webhook: {payment.payment_method.value}")
+            db.session.commit()  # Release the row lock
             return {'success': False, 'error': 'Unsupported payment method'}
-        
+
+        db.session.commit()  # Release the row lock
         logger.info(f"Payment webhook processed successfully for payment {payment_id}")
         return result
-        
+
     except Exception as exc:
+        db.session.rollback()
         logger.error(f"Payment webhook processing failed: {exc}")
         raise self.retry(exc=exc)
 
 
-@shared_task(bind=True, max_retries=3)
+@shared_task(bind=True, max_retries=3, time_limit=300, soft_time_limit=270)
 def process_payment_confirmation(self, payment_id: int):
     """Process payment confirmation and update order status"""
     try:
         logger.info(f"Processing payment confirmation for payment {payment_id}")
-        
+
         payment = Payment.query.get(payment_id)
         if not payment:
             logger.error(f"Payment {payment_id} not found")
             return {'success': False, 'error': 'Payment not found'}
-        
+
         if payment.status == PaymentStatus.COMPLETED:
-            # Update order status
+            # Idempotency check: skip if order already confirmed
             order = payment.order
+            if order and order.status != OrderStatus.PENDING:
+                logger.info(f"Order for payment {payment_id} already confirmed, skipping")
+                return {'success': True, 'skipped': True, 'reason': 'already_confirmed'}
+
+            # Update order status
             if order and order.status == OrderStatus.PENDING:
                 from business_app.services.order_service import OrderService
                 order_service = OrderService()
@@ -81,7 +97,7 @@ def process_payment_confirmation(self, payment_id: int):
         raise self.retry(exc=exc)
 
 
-@shared_task
+@shared_task(time_limit=300, soft_time_limit=270)
 def process_pending_payments():
     """Process pending payments and check their status"""
     try:
@@ -97,30 +113,34 @@ def process_pending_payments():
         payment_service = PaymentService()
         processed_count = 0
         
+        confirmed_payment_ids = []
         for payment in pending_payments:
             try:
                 # Check payment status with gateway
-                if payment.method.value in ['payme', 'click']:
+                if payment.payment_method.value in ['payme', 'click']:
                     status = payment_service.check_payment_status(payment.id)
                     if status.get('status') == 'completed':
                         payment.status = PaymentStatus.COMPLETED
                         payment.paid_at = datetime.now(timezone.utc)
-                        db.session.commit()
-                        
-                        # Trigger confirmation processing
-                        process_payment_confirmation.delay(payment.id)
+                        confirmed_payment_ids.append(payment.id)
                         processed_count += 1
-                        
+
                 elif payment.created_at < datetime.now(timezone.utc) - timedelta(hours=1):
                     # Auto-cancel payments pending for more than 1 hour
                     payment.status = PaymentStatus.CANCELLED
-                    db.session.commit()
-                    logger.info(f"Auto-cancelled payment {payment.id} due to timeout")
-                    
+                    logger.info(f"Auto-cancelling payment {payment.id} due to timeout")
+
             except Exception as e:
                 logger.error(f"Error processing pending payment {payment.id}: {e}")
+                db.session.rollback()
                 continue
-        
+
+        db.session.commit()
+
+        # Trigger confirmation processing after successful commit
+        for payment_id in confirmed_payment_ids:
+            process_payment_confirmation.delay(payment_id)
+
         logger.info(f"Processed {processed_count} pending payments")
         return {'processed_count': processed_count}
         
@@ -129,7 +149,7 @@ def process_pending_payments():
         return {'error': str(e)}
 
 
-@shared_task(bind=True, max_retries=3)
+@shared_task(bind=True, max_retries=3, time_limit=300, soft_time_limit=270)
 def process_refund(self, payment_id: int, amount: int, reason: str = None):
     """Process payment refund"""
     try:
@@ -164,7 +184,7 @@ def process_refund(self, payment_id: int, amount: int, reason: str = None):
         raise self.retry(exc=exc)
 
 
-@shared_task
+@shared_task(time_limit=300, soft_time_limit=270)
 def retry_failed_payments():
     """Retry failed payments that might be recoverable"""
     try:
@@ -214,7 +234,7 @@ def retry_failed_payments():
         return {'error': str(e)}
 
 
-@shared_task(bind=True, max_retries=2)
+@shared_task(bind=True, max_retries=2, time_limit=300, soft_time_limit=270)
 def process_loyalty_points_payment(self, payment_id: int, points_to_use: int):
     """Process payment using loyalty points"""
     try:
@@ -238,7 +258,7 @@ def process_loyalty_points_payment(self, payment_id: int, points_to_use: int):
         raise self.retry(exc=exc)
 
 
-@shared_task
+@shared_task(time_limit=300, soft_time_limit=270)
 def generate_payment_analytics_report():
     """Generate daily payment analytics report"""
     try:
@@ -265,13 +285,13 @@ def generate_payment_analytics_report():
         # Payment method breakdown
         from sqlalchemy import func
         method_breakdown = db.session.query(
-            Payment.method,
+            Payment.payment_method,
             func.count(Payment.id),
             func.sum(Payment.amount)
         ).filter(
             Payment.created_at.between(start_date, end_date),
             Payment.status == PaymentStatus.COMPLETED
-        ).group_by(Payment.method).all()
+        ).group_by(Payment.payment_method).all()
         
         # Total revenue
         total_revenue = db.session.query(func.sum(Payment.amount)).filter(
@@ -309,7 +329,7 @@ def generate_payment_analytics_report():
         return {'error': str(e)}
 
 
-@shared_task(bind=True, max_retries=3)
+@shared_task(bind=True, max_retries=3, time_limit=300, soft_time_limit=270)
 def send_payment_reminder(self, order_id: int):
     """Send payment reminder for unpaid orders"""
     try:
@@ -345,7 +365,7 @@ def send_payment_reminder(self, order_id: int):
         raise self.retry(exc=exc)
 
 
-@shared_task
+@shared_task(time_limit=300, soft_time_limit=270)
 def cleanup_old_payment_records():
     """Clean up old payment transaction records"""
     try:
@@ -368,7 +388,7 @@ def cleanup_old_payment_records():
         return {'error': str(e)}
 
 
-@shared_task(bind=True, max_retries=3)
+@shared_task(bind=True, max_retries=3, time_limit=300, soft_time_limit=270)
 def validate_payment_integrity(self, payment_id: int):
     """Validate payment data integrity and consistency"""
     try:
@@ -410,7 +430,7 @@ def validate_payment_integrity(self, payment_id: int):
         raise self.retry(exc=exc)
 
 
-@shared_task(bind=True, max_retries=3, default_retry_delay=30)
+@shared_task(bind=True, max_retries=3, default_retry_delay=30, time_limit=300, soft_time_limit=270)
 def process_payment_verification(self, payment_id: int, verification_data: Dict[str, Any]):
     """Process payment verification from external gateway"""
     try:
@@ -479,7 +499,7 @@ def process_payment_verification(self, payment_id: int, verification_data: Dict[
         raise self.retry(exc=exc)
 
 
-@shared_task(bind=True, max_retries=3, default_retry_delay=60)
+@shared_task(bind=True, max_retries=3, default_retry_delay=60, time_limit=300, soft_time_limit=270)
 def handle_payment_webhook(self, webhook_metadata: Dict[str, Any], webhook_source: str):
     """Handle payment webhook from external payment providers with enhanced security"""
     try:

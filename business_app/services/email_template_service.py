@@ -6,7 +6,7 @@ Uses Jinja2 templates stored in business_app/templates/emails/
 import os
 import logging
 from typing import Dict, Any, Optional
-from datetime import datetime
+from datetime import datetime, UTC
 from flask import current_app, render_template_string
 from jinja2 import Environment, FileSystemLoader, TemplateNotFound
 
@@ -162,7 +162,7 @@ class EmailTemplateService:
             'company_email': company_email,
             'company_address': company_address,
             'company_website': company_website,
-            'current_year': datetime.now().year,
+            'current_year': datetime.now(UTC).year,
         }
 
     def get_template_name_for_notification_type(self, notification_type: str) -> str:

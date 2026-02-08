@@ -10,22 +10,7 @@ from decimal import Decimal
 from pydantic import BaseModel, Field, field_validator, ConfigDict
 from pydantic.alias_generators import to_camel
 
-
-class PaymentStatus(str, Enum):
-    PENDING = "pending"
-    PROCESSING = "processing"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    CANCELLED = "cancelled"
-    REFUNDED = "refunded"
-
-
-class PaymentMethod(str, Enum):
-    PAYME = "payme"
-    CLICK = "click"
-    UZCARD = "uzcard"
-    HUMO = "humo"
-    CASH = "cash"
+from business_app.utils.constants import PaymentStatus, PaymentMethod
 
 
 class RefundStatus(str, Enum):

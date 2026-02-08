@@ -2,7 +2,7 @@
 Analytics Serializers for the Water Business Platform using Pydantic v2
 This file contains Pydantic models for analytics-related data serialization
 """
-from datetime import datetime, date
+from datetime import datetime, date, UTC
 from typing import Dict, Any, Optional, List, Union
 from enum import Enum
 from decimal import Decimal
@@ -728,7 +728,7 @@ def get_real_time_metrics() -> Dict[str, Any]:
         popular_pages=[],
         active_promotions=[],
         system_health={'status': 'healthy', 'uptime': '99.9%'},
-        last_updated=datetime.now()
+        last_updated=datetime.now(UTC)
     )
     
     return metrics.model_dump()
@@ -751,7 +751,7 @@ def generate_predictive_analytics(model_data: Dict[str, Any]) -> Dict[str, Any]:
         time_horizon=model_data.get('time_horizon', 'next_month'),
         predictions=model_data.get('predictions', []),
         model_accuracy=model_data.get('model_accuracy', 0.0),
-        last_trained=model_data.get('last_trained', datetime.now()),
+        last_trained=model_data.get('last_trained', datetime.now(UTC)),
         insights=model_data.get('insights', []),
         recommendations=model_data.get('recommendations', [])
     )

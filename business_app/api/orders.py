@@ -5,6 +5,7 @@ This file should be placed in business_app/api/orders.py
 from flask import Blueprint, request, jsonify, current_app, g
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from sqlalchemy import and_, or_, desc, func
+from sqlalchemy.orm import joinedload
 from datetime import datetime, UTC, timedelta
 
 from business_app.models.order import Order, OrderItem
@@ -30,7 +31,7 @@ from business_app.utils.validation_helpers import (
     validate_list_request_params, FilterValidator, PaginationHelper,
     DateValidator, StatusValidator, RequestDataValidator
 )
-from business_app.utils.error_handlers import handle_api_exception, create_success_response
+from business_app.utils.error_handlers import handle_api_exception
 from business_app.utils.exceptions import ValidationError
 from business_app.utils.api_responses import (
     success_response, error_response, paginated_response, created_response,
@@ -59,8 +60,12 @@ def get_orders():
         allow_future_dates=True
     )
     
-    # Build query
-    query = Order.query.filter_by(user_id=params['user_id'])
+    # Build query with eager loading to prevent N+1 queries
+    query = Order.query.options(
+        joinedload(Order.order_items).joinedload(OrderItem.product),
+        joinedload(Order.payment),
+        joinedload(Order.delivery_address)
+    ).filter_by(user_id=params['user_id'])
     
     # Apply filters using centralized filter builders
     query = FilterValidator.build_status_filter_query(
@@ -84,7 +89,7 @@ def get_orders():
         pagination.items, pagination, lambda order: serialize_order(order, include_items=True)
     )
     
-    return create_success_response(
+    return success_response(
         data={'orders': response_data['items'], 'pagination': response_data['pagination']},
         message=get_translation('api.orders.list_retrieved')
     )
@@ -97,7 +102,12 @@ def get_order(order_id):
     try:
         current_user_id = get_jwt_identity()
 
-        order = Order.query.filter_by(
+        order = Order.query.options(
+            joinedload(Order.order_items).joinedload(OrderItem.product),
+            joinedload(Order.payment),
+            joinedload(Order.delivery_address),
+            joinedload(Order.delivery)
+        ).filter_by(
             id=order_id,
             user_id=current_user_id
         ).first()
@@ -292,30 +302,45 @@ def get_order_statistics():
         if start_date:
             query = query.filter(Order.created_at >= start_date)
         
-        # Calculate statistics
-        orders = query.all()
-        total_orders = len(orders)
-        total_spent = sum(order.total_amount for order in orders)
-        
-        # Orders by status
-        status_counts = {}
+        # Calculate statistics using SQL aggregation
+        stats = query.with_entities(
+            func.count(Order.id),
+            func.coalesce(func.sum(Order.total_amount), 0)
+        ).first()
+        total_orders = stats[0]
+        total_spent = float(stats[1])
+
+        # Orders by status using SQL GROUP BY
+        status_rows = query.with_entities(
+            Order.status, func.count(Order.id)
+        ).group_by(Order.status).all()
+        status_counts = {status.value: count for status, count in status_rows}
         for status in OrderStatus:
-            status_counts[status.value] = len([o for o in orders if o.status == status])
-        
+            status_counts.setdefault(status.value, 0)
+
         # Average order value
         avg_order_value = total_spent / total_orders if total_orders > 0 else 0
-        
-        # Most ordered products
-        from collections import Counter
-        product_counter = Counter()
-        for order in orders:
-            for item in order.order_items:
-                product_name = item.product.name if item.product else 'Unknown Product'
-                product_counter[product_name] += item.quantity
-        
+
+        # Most ordered products using SQL aggregation with JOIN
+        from business_app import db
+        top_products_query = db.session.query(
+            Product.name, func.sum(OrderItem.quantity).label('total_qty')
+        ).join(
+            OrderItem, OrderItem.product_id == Product.id
+        ).join(
+            Order, Order.id == OrderItem.order_id
+        ).filter(
+            Order.user_id == current_user_id
+        )
+        if start_date:
+            top_products_query = top_products_query.filter(Order.created_at >= start_date)
+        top_products_rows = top_products_query.group_by(
+            Product.id, Product.name
+        ).order_by(desc('total_qty')).limit(5).all()
+
         top_products = [
-            {'name': name, 'quantity': qty} 
-            for name, qty in product_counter.most_common(5)
+            {'name': name, 'quantity': int(qty)}
+            for name, qty in top_products_rows
         ]
         
         # Monthly spending trend (last 12 months)

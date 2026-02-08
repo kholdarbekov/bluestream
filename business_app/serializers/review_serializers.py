@@ -2,7 +2,7 @@
 Review Serializers for the Water Business Platform
 This file contains serializers for review-related models
 """
-from datetime import datetime
+from datetime import datetime, UTC
 from typing import Dict, Any, Optional, List
 
 from business_app.utils.constants import UserRole
@@ -248,7 +248,7 @@ class ReviewModerationSerializer:
         if not self.review.user or not self.review.user.created_at:
             return 0
         
-        return (datetime.now() - self.review.user.created_at).days
+        return (datetime.now(UTC) - self.review.user.created_at).days
 
 
 class ReviewFilterSerializer:

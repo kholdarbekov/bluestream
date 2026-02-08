@@ -42,7 +42,7 @@ import {
 } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from 'react-query';
 import { useTranslation } from 'react-i18next';
-import moment from 'moment';
+import { formatDate, formatDateTime } from '../utils/dateUtils';
 import adminService from '../services/adminService';
 
 const { Option } = Select;
@@ -256,7 +256,7 @@ const Loyalty = () => {
       dataIndex: 'created_at',
       key: 'created_at',
       width: 120,
-      render: (date) => moment(date).format('MMM DD, YYYY')
+      render: (date) => formatDate(date)
     },
     {
       title: t('ui.loyalty.actions'),
@@ -347,7 +347,7 @@ const Loyalty = () => {
       dataIndex: 'last_activity',
       key: 'last_activity',
       width: 120,
-      render: (date) => moment(date).format('MMM DD, YYYY')
+      render: (date) => formatDate(date)
     },
     {
       title: t('ui.loyalty.actions'),
@@ -1082,7 +1082,7 @@ const Loyalty = () => {
                   <List.Item.Meta
                     avatar={<Avatar icon={<StarOutlined />} />}
                     title={item.activity}
-                    description={moment(item.date).format('MMM DD, YYYY HH:mm')}
+                    description={formatDateTime(item.date)}
                   />
                   <div>{item.points} {t('ui.loyalty.pts')}</div>
                 </List.Item>

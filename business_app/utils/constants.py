@@ -3,37 +3,20 @@ Application constants for the Water Business Platform
 """
 from enum import Enum
 
+from shared.constants import DISPLAY_TIMEZONE
 
-class OrderStatus(Enum):
-    """Order status enumeration"""
-    PENDING = 'pending'
-    CONFIRMED = 'confirmed'
-    PREPARING = 'preparing'
-    OUT_FOR_DELIVERY = 'out_for_delivery'
-    DELIVERED = 'delivered'
-    CANCELLED = 'cancelled'
-    RETURNED = 'returned'
-
-
-class PaymentStatus(Enum):
-    """Payment status enumeration"""
-    PENDING = 'pending'
-    PROCESSING = 'processing'
-    COMPLETED = 'completed'
-    FAILED = 'failed'
-    CANCELLED = 'cancelled'
-    REFUNDED = 'refunded'
-    PARTIALLY_REFUNDED = 'partially_refunded'
-
-
-class PaymentMethod(Enum):
-    """Payment method enumeration"""
-    CASH = 'cash'
-    CARD = 'card'
-    PAYME = 'payme'
-    CLICK = 'click'
-    LOYALTY_POINTS = 'loyalty_points'
-    BUSINESS_ACCOUNT = 'business_account'
+# Core domain enums — canonical source is shared/enums.py
+from shared.enums import (  # noqa: F401
+    OrderStatus,
+    PaymentStatus,
+    PaymentMethod,
+    DeliveryStatus,
+    SubscriptionStatus,
+    SubscriptionFrequency,
+    UserGender,
+    UserRole,
+    UserStatus,
+)
 
 
 class PaymentMethodType(Enum):
@@ -43,58 +26,6 @@ class PaymentMethodType(Enum):
     DIGITAL_WALLET = 'digital_wallet'  # Payme, Click
     POINTS = 'points'            # Loyalty points
     ACCOUNT_BALANCE = 'account_balance'  # Business account
-
-
-class DeliveryStatus(Enum):
-    """Delivery status enumeration"""
-    SCHEDULED = 'scheduled'
-    PENDING = 'pending'
-    ASSIGNED = 'assigned'
-    PICKED_UP = 'picked_up'
-    IN_TRANSIT = 'in_transit'
-    ARRIVED = 'arrived'
-    DELIVERED = 'delivered'
-    FAILED = 'failed'
-    RETURNED = 'returned'
-
-
-class SubscriptionStatus(Enum):
-    """Subscription status enumeration"""
-    ACTIVE = 'active'
-    PAUSED = 'paused'
-    CANCELLED = 'cancelled'
-    EXPIRED = 'expired'
-    TRIAL = 'trial'
-
-
-class SubscriptionFrequency(Enum):
-    """Subscription frequency enumeration"""
-    DAILY = 'daily'
-    WEEKLY = 'weekly'
-    BIWEEKLY = 'biweekly'
-    MONTHLY = 'monthly'
-
-class UserGender(Enum):
-    """User gender enumeration"""
-    MALE = 'male'
-    FEMALE = 'female'
-    UNKNOWN = 'unknown'
-
-class UserRole(Enum):
-    """User role enumeration"""
-    CUSTOMER = 'customer'
-    ADMIN = 'admin'
-    MANAGER = 'manager'
-    DELIVERY_DRIVER = 'delivery_driver'
-    OPERATOR = 'operator'
-
-
-class UserStatus(Enum):
-    """User status enumeration"""
-    ACTIVE = 'active'
-    INACTIVE = 'inactive'
-    BANNED = 'banned'
-    PENDING_VERIFICATION = 'pending_verification'
 
 
 class NotificationType(Enum):
@@ -453,7 +384,7 @@ ERROR_CODES = {
 DEFAULTS = {
     'LANGUAGE': 'en',
     'CURRENCY': 'UZS',
-    'TIMEZONE': 'Asia/Tashkent',
+    'TIMEZONE': DISPLAY_TIMEZONE,
     'PAGE_SIZE': 20,
     'DELIVERY_FEE': 5000,
     'LOYALTY_POINTS_RATIO': 100,

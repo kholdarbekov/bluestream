@@ -804,10 +804,10 @@ def business_hours_only(f):
     """Restrict access to business hours only"""
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        from datetime import datetime
+        from datetime import datetime, UTC
         from .constants import BUSINESS_HOURS
-        
-        now = datetime.now()
+
+        now = datetime.now(UTC)
         if not (BUSINESS_HOURS['start'] <= now.hour < BUSINESS_HOURS['end']):
             return jsonify({
                 'error': 'Outside Business Hours',

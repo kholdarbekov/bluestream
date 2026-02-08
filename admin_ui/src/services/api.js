@@ -87,37 +87,40 @@ api.interceptors.response.use(
   async (error) => {
     const message = error.response?.data?.message || error.message || 'An error occurred';
 
-    // Handle CSRF token errors
+    // Handle CSRF token errors (max 3 retries)
     if (error.response?.status === 400 &&
         (message.toLowerCase().includes('csrf') || error.response?.data?.error?.toLowerCase().includes('csrf'))) {
-      console.log('CSRF token error, fetching new token...');
-      await fetchCSRFToken();
+      const retryCount = error.config?.__csrfRetryCount || 0;
+      if (retryCount < 3) {
+        console.log(`CSRF token error, fetching new token... (attempt ${retryCount + 1}/3)`);
+        await fetchCSRFToken();
 
-      // Retry the request with new CSRF token
-      if (csrfToken && error.config && !error.config.__isRetry) {
-        error.config.__isRetry = true;
-        error.config.headers['X-CSRF-TOKEN'] = csrfToken;
-        return api.request(error.config);
+        if (csrfToken && error.config) {
+          error.config.__csrfRetryCount = retryCount + 1;
+          error.config.headers['X-CSRF-TOKEN'] = csrfToken;
+          return api.request(error.config);
+        }
       }
 
-      toast.error('Security token expired. Please try again.');
+      toast.error('Security token expired. Please refresh the page.');
       return Promise.reject(error);
     }
 
-    // Handle JWT CSRF errors (422 status from Flask-JWT-Extended)
+    // Handle JWT CSRF errors (422 status from Flask-JWT-Extended, max 3 retries)
     if (error.response?.status === 422 &&
         (message.toLowerCase().includes('csrf') || error.response?.data?.msg?.toLowerCase().includes('csrf'))) {
-      console.log('JWT CSRF token error, retrying with token from cookie...');
-
-      // Retry the request with JWT CSRF token from cookie
-      const jwtCsrfToken = getJWTCSRFToken();
-      if (jwtCsrfToken && error.config && !error.config.__isRetry) {
-        error.config.__isRetry = true;
-        error.config.headers['X-CSRF-TOKEN'] = jwtCsrfToken;
-        return api.request(error.config);
+      const retryCount = error.config?.__csrfRetryCount || 0;
+      if (retryCount < 3) {
+        console.log(`JWT CSRF token error, retrying with token from cookie... (attempt ${retryCount + 1}/3)`);
+        const jwtCsrfToken = getJWTCSRFToken();
+        if (jwtCsrfToken && error.config) {
+          error.config.__csrfRetryCount = retryCount + 1;
+          error.config.headers['X-CSRF-TOKEN'] = jwtCsrfToken;
+          return api.request(error.config);
+        }
       }
 
-      toast.error('Security token expired. Please try again.');
+      toast.error('Security token expired. Please refresh the page.');
       return Promise.reject(error);
     }
 

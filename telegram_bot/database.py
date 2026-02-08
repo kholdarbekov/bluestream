@@ -15,18 +15,20 @@ logger = logging.getLogger(__name__)
 
 class DatabaseManager:
     """Manages database connections and operations"""
-    
+
+    POOL_MIN_SIZE = 5
+
     def __init__(self):
         self.pool: Optional[asyncpg.Pool] = None
         self._is_connected = False
-    
+
     async def connect(self):
         """Establish database connection pool"""
         logger.info(f"DB connect: {config.database.url[-10:]}, {config.database.pool_size}, {config.database.pool_timeout}")
         try:
             self.pool = await asyncpg.create_pool(
                 config.database.url,
-                min_size=5,
+                min_size=self.POOL_MIN_SIZE,
                 max_size=config.database.pool_size,
                 command_timeout=config.database.pool_timeout,
             )
@@ -97,6 +99,7 @@ class BotUserRepository:
         FROM users u
         WHERE u.telegram_id = $1
         """
+        # telegram_id DB column is varchar(50), so cast int to str for query
         row = await self.db.fetchone(query, str(telegram_id))
         return dict(row) if row else None
     

@@ -39,7 +39,7 @@ import {
 } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from 'react-query';
 import { useTranslation } from 'react-i18next';
-import moment from 'moment';
+import { formatDate, formatDateTimeShort } from '../utils/dateUtils';
 import adminService from '../services/adminService';
 
 const { Option } = Select;
@@ -200,7 +200,7 @@ const Delivery = () => {
       dataIndex: 'scheduled_date',
       key: 'scheduled_date',
       width: 120,
-      render: (date) => moment(date).format('MMM DD, YYYY')
+      render: (date) => formatDate(date)
     },
     {
       title: t('ui.delivery.actions'),
@@ -488,7 +488,7 @@ const Delivery = () => {
                 {selectedDelivery.driver_phone || t('ui.delivery.na')}
               </Descriptions.Item>
               <Descriptions.Item label={t('ui.delivery.scheduled_date')} span={2}>
-                {moment(selectedDelivery.scheduled_date).format('YYYY-MM-DD HH:mm')}
+                {formatDateTimeShort(selectedDelivery.scheduled_date)}
               </Descriptions.Item>
               <Descriptions.Item label={t('ui.delivery.delivery_address')} span={2}>
                 {selectedDelivery.delivery_address}
@@ -546,7 +546,7 @@ const Delivery = () => {
               <h4>{t('ui.delivery.current_status')}: <Tag color={deliveryStatusColors[selectedDelivery.status]}>
                 {t(`ui.delivery.status_${selectedDelivery.status}`)}
               </Tag></h4>
-              <p><strong>{t('ui.delivery.estimated_delivery')}:</strong> {moment(selectedDelivery.scheduled_date).format('YYYY-MM-DD HH:mm')}</p>
+              <p><strong>{t('ui.delivery.estimated_delivery')}:</strong> {formatDateTimeShort(selectedDelivery.scheduled_date)}</p>
             </div>
 
             <Steps

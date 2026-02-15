@@ -6,7 +6,7 @@ import logging
 from typing import Dict, Any, Optional
 from dataclasses import dataclass
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 import os
 
 from config import config
@@ -73,24 +73,29 @@ class StaffAPIClient:
         self._client = None
         self._circuit_breaker = CircuitBreaker(failure_threshold=5, recovery_timeout=30.0)
 
-    async def __aenter__(self):
+    def _resolve_verify_config(self):
+        """Resolve SSL verification configuration for httpx client."""
         ssl_verify = config.business_api.ssl_verify
         ssl_cert_path = config.business_api.ssl_cert_path
 
         if ssl_verify and ssl_cert_path:
             if not os.path.exists(ssl_cert_path):
                 raise FileNotFoundError(f"SSL certificate file not found: {ssl_cert_path}")
-            verify_config = ssl_cert_path
-        elif ssl_verify:
-            verify_config = True
-        else:
-            verify_config = False
+            return ssl_cert_path
+        if ssl_verify:
+            return True
+        return False
 
-        self._client = httpx.AsyncClient(
+    def _build_http_client(self) -> httpx.AsyncClient:
+        """Create a configured HTTP client instance."""
+        return httpx.AsyncClient(
             base_url=self.base_url,
             timeout=self.timeout,
-            verify=verify_config
+            verify=self._resolve_verify_config()
         )
+
+    async def __aenter__(self):
+        self._client = self._build_http_client()
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
@@ -101,88 +106,105 @@ class StaffAPIClient:
     async def _make_request(
         self, method: str, endpoint: str,
         token: str = None, data: Dict = None,
-        params: Dict = None
+        params: Dict = None,
+        headers: Dict = None
     ) -> APIResponse:
         """Make HTTP request with retry logic and circuit breaker."""
         if not self._circuit_breaker.allow_request():
             return APIResponse(success=False, error="Service temporarily unavailable")
 
-        headers = {'Content-Type': 'application/json'}
+        request_headers = {'Content-Type': 'application/json'}
         if token:
-            headers['Authorization'] = f'Bearer {token}'
+            request_headers['Authorization'] = f'Bearer {token}'
+        if headers:
+            request_headers.update(headers)
 
-        for attempt in range(self.max_retries):
-            try:
-                response = await self._client.request(
-                    method=method,
-                    url=endpoint,
-                    json=data,
-                    params=params,
-                    headers=headers
-                )
+        total_attempts = max(1, self.max_retries)
+        client = self._client
+        owns_client = False
+        if client is None:
+            client = self._build_http_client()
+            owns_client = True
 
-                self._circuit_breaker.record_success()
-
+        try:
+            for attempt in range(total_attempts):
                 try:
-                    payload = response.json() if response.content else {}
-                except ValueError:
-                    payload = {}
-
-                if response.status_code in (200, 201):
-                    # Unwrap standardized API response shape: {success, data, ...}
-                    data = payload.get('data', payload) if isinstance(payload, dict) else payload
-                    return APIResponse(
-                        success=True,
-                        data=data,
-                        status_code=response.status_code
-                    )
-                elif response.status_code == 401:
-                    return APIResponse(
-                        success=False,
-                        error="Authentication failed",
-                        status_code=401
-                    )
-                elif response.status_code == 403:
-                    return APIResponse(
-                        success=False,
-                        error="Access denied",
-                        status_code=403
-                    )
-                elif response.status_code == 404:
-                    return APIResponse(
-                        success=False,
-                        error="Not found",
-                        status_code=404
-                    )
-                elif response.status_code == 409:
-                    error_data = payload if isinstance(payload, dict) else {}
-                    return APIResponse(
-                        success=False,
-                        error=error_data.get('message') or error_data.get('error', 'Conflict'),
-                        status_code=409,
-                        data=error_data
-                    )
-                else:
-                    error_data = payload if isinstance(payload, dict) else {}
-                    return APIResponse(
-                        success=False,
-                        error=error_data.get('message') or error_data.get('error', f'HTTP {response.status_code}'),
-                        status_code=response.status_code
+                    response = await client.request(
+                        method=method,
+                        url=endpoint,
+                        json=data,
+                        params=params,
+                        headers=request_headers
                     )
 
-            except httpx.TimeoutException:
-                logger.warning(f"Request timeout (attempt {attempt + 1}/{self.max_retries}): {endpoint}")
-                if attempt < self.max_retries - 1:
-                    await asyncio.sleep(self.retry_delay * (attempt + 1))
-            except httpx.ConnectError as e:
-                logger.error(f"Connection error: {e}")
-                self._circuit_breaker.record_failure()
-                if attempt < self.max_retries - 1:
-                    await asyncio.sleep(self.retry_delay * (attempt + 1))
-            except Exception as e:
-                logger.error(f"Request error: {e}")
-                self._circuit_breaker.record_failure()
-                break
+                    self._circuit_breaker.record_success()
+
+                    try:
+                        payload = response.json() if response.content else {}
+                    except ValueError:
+                        payload = {}
+
+                    if response.status_code in (200, 201):
+                        # Unwrap standardized API response shape: {success, data, ...}
+                        data = payload.get('data', payload) if isinstance(payload, dict) else payload
+                        return APIResponse(
+                            success=True,
+                            data=data,
+                            status_code=response.status_code
+                        )
+                    elif response.status_code == 401:
+                        return APIResponse(
+                            success=False,
+                            error="Authentication failed",
+                            status_code=401
+                        )
+                    elif response.status_code == 403:
+                        return APIResponse(
+                            success=False,
+                            error="Access denied",
+                            status_code=403
+                        )
+                    elif response.status_code == 404:
+                        return APIResponse(
+                            success=False,
+                            error="Not found",
+                            status_code=404
+                        )
+                    elif response.status_code == 409:
+                        error_data = payload if isinstance(payload, dict) else {}
+                        return APIResponse(
+                            success=False,
+                            error=error_data.get('message') or error_data.get('error', 'Conflict'),
+                            status_code=409,
+                            data=error_data
+                        )
+                    else:
+                        error_data = payload if isinstance(payload, dict) else {}
+                        return APIResponse(
+                            success=False,
+                            error=error_data.get('message') or error_data.get('error', f'HTTP {response.status_code}'),
+                            status_code=response.status_code
+                        )
+
+                except httpx.TimeoutException:
+                    logger.warning(f"Request timeout (attempt {attempt + 1}/{total_attempts}): {endpoint}")
+                    if attempt < total_attempts - 1:
+                        await asyncio.sleep(self.retry_delay * (attempt + 1))
+                except httpx.ConnectError as e:
+                    logger.error(f"Connection error: {e}")
+                    self._circuit_breaker.record_failure()
+                    if attempt < total_attempts - 1:
+                        await asyncio.sleep(self.retry_delay * (attempt + 1))
+                except Exception as e:
+                    logger.error(f"Request error: {e}")
+                    self._circuit_breaker.record_failure()
+                    break
+        finally:
+            if owns_client:
+                try:
+                    await client.aclose()
+                except Exception:
+                    logger.debug("Failed to close temporary API client", exc_info=True)
 
         return APIResponse(success=False, error="Request failed after retries")
 
@@ -204,6 +226,9 @@ class StaffAPIClient:
         response = await self._make_request(
             'POST',
             f'{config.business_api.auth_endpoint}/refresh',
+            # Staff refresh endpoint currently authorizes via refresh-token JWT.
+            token=refresh_token,
+            # Keep body for backwards compatibility with alternate backend implementations.
             data={'refresh_token': refresh_token}
         )
         return response.data if response.success else None

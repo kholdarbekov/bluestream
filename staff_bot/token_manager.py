@@ -173,9 +173,9 @@ class TokenManager:
             lock_key = f"staff_bot:refresh_lock:{telegram_id}"
             try:
                 lock_acquired = await self.redis.set(lock_key, "1", nx=True, ex=10)
-            except Exception:
-                if tokens.get('access_token'):
-                    return tokens['access_token']
+            except Exception as e:
+                logger.warning(f"Refresh lock acquisition failed for staff user {telegram_id}: {e}")
+                # Continue without lock as a last resort.
                 lock_acquired = True
 
             if not lock_acquired:
@@ -185,7 +185,13 @@ class TokenManager:
                     refreshed = await self.get_cached_tokens(telegram_id)
                     if refreshed and self.is_access_token_valid(refreshed):
                         return refreshed['access_token']
-                return tokens.get('access_token')
+                # Return existing token only if still valid.
+                if self.is_access_token_valid(tokens):
+                    return tokens.get('access_token')
+                logger.warning(
+                    f"Refresh lock contention exhausted and token expired for staff user {telegram_id}"
+                )
+                return None
 
             try:
                 new_tokens = await api_client.refresh_token(tokens['refresh_token'])

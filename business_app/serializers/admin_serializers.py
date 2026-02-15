@@ -791,12 +791,13 @@ def serialize_delivery_person_admin(person) -> Dict[str, Any]:
         Serialized delivery person data for admin
     """
     try:
+        vehicle_type = person.vehicle_type.value if hasattr(person.vehicle_type, 'value') else person.vehicle_type
         data = {
             'id': person.id,
             'full_name': person.full_name,
             'phone': person.phone,
             'email': getattr(person, 'email', None),
-            'vehicle_type': person.vehicle_type.value if person.vehicle_type else None,
+            'vehicle_type': vehicle_type,
             'vehicle_number': person.vehicle_number,
             'license_number': getattr(person, 'license_number', None),
             'is_active': person.is_active,
@@ -816,11 +817,12 @@ def serialize_delivery_person_admin(person) -> Dict[str, Any]:
         
     except Exception:
         # Fallback to basic serialization
+        vehicle_type = person.vehicle_type.value if hasattr(person.vehicle_type, 'value') else person.vehicle_type
         return {
             'id': person.id,
             'full_name': person.full_name,
             'phone': person.phone,
-            'vehicle_type': person.vehicle_type.value if person.vehicle_type else None,
+            'vehicle_type': vehicle_type,
             'is_active': person.is_active
         }
 

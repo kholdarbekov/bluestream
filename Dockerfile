@@ -65,6 +65,21 @@ ENV PYTHONPATH="/app:${PYTHONPATH}"
 # Start command
 CMD ["python", "bot.py"]
 
+# Staff Bot Stage
+FROM base AS staff_bot
+
+# Copy staff bot code
+COPY staff_bot/ ./staff_bot/
+
+# Set work directory to staff_bot for module imports
+WORKDIR /app/staff_bot
+
+# Add /app to Python path so shared module can be imported
+ENV PYTHONPATH="/app:${PYTHONPATH}"
+
+# Start command
+CMD ["python", "bot.py"]
+
 # Celery Worker Stage
 FROM base AS celery_worker
 

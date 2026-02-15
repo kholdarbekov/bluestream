@@ -24,6 +24,7 @@ import {
 } from 'antd';
 import {
   SearchOutlined,
+  UserOutlined,
   TruckOutlined,
   MoreOutlined,
   PlusOutlined,
@@ -41,6 +42,7 @@ import { useQuery, useMutation, useQueryClient } from 'react-query';
 import { useTranslation } from 'react-i18next';
 import { formatDate, formatDateTimeShort } from '../utils/dateUtils';
 import adminService from '../services/adminService';
+import AssignDeliveryModal from '../components/AssignDeliveryModal';
 
 const { Option } = Select;
 const { RangePicker } = DatePicker;
@@ -56,6 +58,7 @@ const Delivery = () => {
   const [isDetailModalVisible, setIsDetailModalVisible] = useState(false);
   const [isTrackingModalVisible, setIsTrackingModalVisible] = useState(false);
   const [isUpdateModalVisible, setIsUpdateModalVisible] = useState(false);
+  const [assignmentTarget, setAssignmentTarget] = useState(null);
   const [pagination, setPagination] = useState({ page: 1, per_page: 20 });
   const [form] = Form.useForm();
 
@@ -227,6 +230,14 @@ const Delivery = () => {
                 label: t('ui.delivery.update_status'),
                 icon: <EditOutlined />,
                 onClick: () => handleUpdateDelivery(record)
+              },
+              {
+                key: 'assign',
+                label: record.driver_id
+                  ? t('ui.delivery.reassign_driver', 'Reassign driver')
+                  : t('ui.delivery.assign_driver'),
+                icon: <UserOutlined />,
+                onClick: () => handleAssignDelivery(record)
               }
             ]
           }}
@@ -256,6 +267,10 @@ const Delivery = () => {
       notes: delivery.notes
     });
     setIsUpdateModalVisible(true);
+  };
+
+  const handleAssignDelivery = (delivery) => {
+    setAssignmentTarget(delivery);
   };
 
   const handleUpdateSubmit = (values) => {
@@ -515,6 +530,17 @@ const Delivery = () => {
                   {t('ui.delivery.track_delivery')}
                 </Button>
                 <Button
+                  icon={<UserOutlined />}
+                  onClick={() => {
+                    setIsDetailModalVisible(false);
+                    handleAssignDelivery(selectedDelivery);
+                  }}
+                >
+                  {selectedDelivery.driver_id
+                    ? t('ui.delivery.reassign_driver', 'Reassign driver')
+                    : t('ui.delivery.assign_driver')}
+                </Button>
+                <Button
                   icon={<EditOutlined />}
                   onClick={() => {
                     setIsDetailModalVisible(false);
@@ -646,6 +672,16 @@ const Delivery = () => {
           </Form.Item>
         </Form>
       </Modal>
+
+      <AssignDeliveryModal
+        open={!!assignmentTarget}
+        onCancel={() => setAssignmentTarget(null)}
+        deliveryId={assignmentTarget?.id}
+        currentPersonId={assignmentTarget?.driver_id || null}
+        onSuccess={() => {
+          queryClient.invalidateQueries('deliveries');
+        }}
+      />
     </div>
   );
 };

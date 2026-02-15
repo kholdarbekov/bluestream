@@ -1,6 +1,47 @@
 {% extends "frontend/base.html" %}
+{% if current_category %}
+    {% set meta_description = "Latest " ~ current_category|replace('_', ' ') ~ " articles and water insights from " ~ company_name ~ "." %}
+{% else %}
+    {% set meta_description = "Water benefits, health tips, and company updates from " ~ company_name ~ "." %}
+{% endif %}
 
-{% block title %}{{ 'Blog'|t }} - {{ company_name }}{% endblock %}
+{% block title %}
+{% if current_category %}
+{{ current_category|replace('_', ' ')|title }} - {{ 'Blog'|t }}{% if pagination.page > 1 %} - Page {{ pagination.page }}{% endif %} - {{ company_name }}
+{% elif current_tag %}
+{{ current_tag }} - {{ 'Blog'|t }}{% if pagination.page > 1 %} - Page {{ pagination.page }}{% endif %} - {{ company_name }}
+{% else %}
+{{ 'Blog'|t }}{% if pagination.page > 1 %} - Page {{ pagination.page }}{% endif %} - {{ company_name }}
+{% endif %}
+{% endblock %}
+
+{% block extra_meta %}
+{% if prev_page_url %}
+<link rel="prev" href="{{ prev_page_url }}">
+{% endif %}
+{% if next_page_url %}
+<link rel="next" href="{{ next_page_url }}">
+{% endif %}
+{% set blog_list_schema = namespace(items=[]) %}
+{% for post in posts %}
+    {% set _ = blog_list_schema.items.append({
+        "@type": "ListItem",
+        "position": loop.index,
+        "url": external_url_for_lang('frontend.blog_detail', slug=post.slug),
+        "name": post.get_translated('title', current_language)
+    }) %}
+{% endfor %}
+{% set blog_item_list_schema = {
+    "@context": "https://schema.org",
+    "@type": "ItemList",
+    "name": "Blog Posts",
+    "url": canonical_url if canonical_url is defined else request.url,
+    "numberOfItems": posts|length,
+    "itemListOrder": "https://schema.org/ItemListOrderDescending",
+    "itemListElement": blog_list_schema.items
+} %}
+<script type="application/ld+json">{{ blog_item_list_schema | tojson }}</script>
+{% endblock %}
 
 {% block content %}
     <!-- page-title -->

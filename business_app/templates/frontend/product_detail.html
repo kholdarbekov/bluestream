@@ -1,17 +1,62 @@
 {% extends "frontend/base.html" %}
+{% set meta_description = product.meta_description or product.short_description or product.description %}
 
 {% block title %}{{ product.name }} - {{ company_name }}{% endblock %}
 
 {% block extra_meta %}
-<meta name="description" content="{{ product.short_description or product.description }}">
 <meta property="og:title" content="{{ product.name }}">
-<meta property="og:description" content="{{ product.short_description or product.description }}">
+<meta property="og:description" content="{{ meta_description }}">
 <meta property="og:type" content="product">
-{% if product.images and product.images|length > 0 %}
-<meta property="og:image" content="{{ product.images[0] }}">
-{% endif %}
-<meta property="product:price:amount" content="{{ product.base_price }}">
+{% set product_url = canonical_url if canonical_url is defined and canonical_url else request.base_url %}
+{% set product_image = product.images[0] if product.images and product.images|length > 0 else url_for('static', filename='images/logo.png', _external=True) %}
+<meta property="og:url" content="{{ product_url }}">
+<meta property="og:image" content="{{ product_image }}">
+<meta property="product:price:amount" content="{{ product.discount_price if product.discount_price else product.base_price }}">
 <meta property="product:price:currency" content="UZS">
+{% set availability = 'https://schema.org/InStock' if product.stock_quantity > 0 else 'https://schema.org/OutOfStock' %}
+{% set product_schema = {
+  "@context": "https://schema.org",
+  "@type": "Product",
+  "name": product.name,
+  "description": meta_description,
+  "sku": product.sku,
+  "image": product.images if product.images else [product_image],
+  "category": product.category.name if product.category else None,
+  "url": product_url,
+  "offers": {
+    "@type": "Offer",
+    "priceCurrency": "UZS",
+    "price": product.discount_price if product.discount_price else product.base_price,
+    "availability": availability,
+    "url": product_url
+  }
+} %}
+{% set breadcrumb_schema = {
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    {
+      "@type": "ListItem",
+      "position": 1,
+      "name": "Home",
+      "item": url_for('frontend.index', _external=True)
+    },
+    {
+      "@type": "ListItem",
+      "position": 2,
+      "name": "Shop",
+      "item": url_for('frontend.shop', _external=True)
+    },
+    {
+      "@type": "ListItem",
+      "position": 3,
+      "name": product.name,
+      "item": product_url
+    }
+  ]
+} %}
+<script type="application/ld+json">{{ product_schema | tojson }}</script>
+<script type="application/ld+json">{{ breadcrumb_schema | tojson }}</script>
 {% endblock %}
 
 {% block extra_head %}
@@ -318,7 +363,7 @@
                                 <div class="lower-content">
                                     <div class="shape" style="background-image: url({{ url_for('static', filename='images/shape/shape-7.png') }});"></div>
                                     <span>{{ rel_product.volume }}{{ rel_product.volume_unit or 'L' }} - {{ rel_product.category.name if rel_product.category else 'Water' }}</span>
-                                    <h4><a href="{{ url_for('frontend.product_detail', product_id=rel_product.id) }}">{{ rel_product.name }}</a></h4>
+                                    <h4><a href="{% if rel_product.slug %}{{ url_for('frontend.product_detail_slug', slug=rel_product.slug) }}{% else %}{{ url_for('frontend.product_detail', product_id=rel_product.id) }}{% endif %}">{{ rel_product.name }}</a></h4>
                                     <div class="price">
                                         {% if rel_product.discount_price and rel_product.discount_price > 0 %}
                                         <span class="old-price">{{ rel_product.base_price|format_price }} UZS</span>
@@ -369,4 +414,3 @@ function addToWishlist(id) {
 }
 </script>
 {% endblock %}
-

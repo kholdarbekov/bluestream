@@ -6,6 +6,33 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0">
     
     <title>{% block title %}{{ company_name }}{% endblock %}</title>
+    {% set page_title = self.title()|striptags|trim %}
+    {% set page_description = meta_description|default(default_meta_description, true) %}
+    {% set robots_content = meta_robots|default(default_meta_robots, true)|default("index,follow,max-image-preview:large,max-snippet:-1,max-video-preview:-1", true) %}
+    {% set canonical_href = canonical_url|default(default_canonical_url, true) %}
+    {% set hreflang_codes = supported_languages|default([], true) %}
+    {% set x_default_lang = default_language|default(current_language|default('uz', true), true) %}
+    {% set default_og_image = url_for('static', filename='images/logo.png', _external=True) %}
+    <meta name="description" content="{{ page_description }}">
+    <meta name="robots" content="{{ robots_content }}">
+    <link rel="canonical" href="{{ canonical_href }}">
+    {% if localized_url_for_lang is defined %}
+        {% for lang_code in hreflang_codes %}
+        <link rel="alternate" hreflang="{{ lang_code }}" href="{{ localized_url_for_lang(lang_code) }}">
+        {% endfor %}
+        <link rel="alternate" hreflang="x-default" href="{{ localized_url_for_lang(x_default_lang) }}">
+    {% endif %}
+    <meta property="og:site_name" content="{{ company_name }}">
+    <meta property="og:title" content="{{ page_title }}">
+    <meta property="og:description" content="{{ page_description }}">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="{{ canonical_href }}">
+    <meta property="og:image" content="{{ default_og_image }}">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="{{ page_title }}">
+    <meta name="twitter:description" content="{{ page_description }}">
+    <meta name="twitter:image" content="{{ default_og_image }}">
+    {% block extra_meta %}{% endblock %}
     
     <!-- Fav Icon -->
     <link rel="icon" href="{{ url_for('static', filename='images/favicon.ico') }}" type="image/x-icon">
@@ -77,7 +104,7 @@
                                     <li class="{% if request.endpoint == 'frontend.index' %}current{% endif %}">
                                         <a href="{{ main_site_url }}/">{{ 'landing.nav.home'|t }}</a>
                                     </li>
-                                    <li class="dropdown {% if request.endpoint in ['frontend.shop', 'frontend.product_detail'] %}current{% endif %}">
+                                    <li class="dropdown {% if request.endpoint in ['frontend.shop', 'frontend.product_detail', 'frontend.product_detail_slug'] %}current{% endif %}">
                                         <a href="{{ main_site_url }}/shop">{{ 'landing.nav.shop'|t }}</a>
                                         {% if nav_categories %}
                                         <ul>

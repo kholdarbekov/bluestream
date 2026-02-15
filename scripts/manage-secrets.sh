@@ -70,6 +70,7 @@ Required secrets:
     - postgres_password
     - secret_key  
     - telegram_bot_token
+    - staff_bot_token
 
 Optional secrets:
     - payme_secret_key
@@ -135,6 +136,7 @@ Each file should contain only the secret value (no newlines or extra whitespace)
 - \`postgres_password\` - PostgreSQL database password
 - \`secret_key\` - Flask application secret key
 - \`telegram_bot_token\` - Telegram bot API token
+- \`staff_bot_token\` - Staff Telegram bot API token
 
 ### Optional Secrets:
 - \`payme_secret_key\` - PayMe payment gateway secret
@@ -288,7 +290,7 @@ list_secrets() {
 validate_secrets() {
     log "Validating required secrets..."
     
-    local required_secrets=("postgres_password" "secret_key" "telegram_bot_token")
+    local required_secrets=("postgres_password" "secret_key" "telegram_bot_token" "staff_bot_token")
     local missing_secrets=()
     
     for secret in "${required_secrets[@]}"; do
@@ -376,6 +378,7 @@ generate_all_secrets() {
         "postgres_password"
         "secret_key" 
         "telegram_bot_token"
+        "staff_bot_token"
         "payme_secret_key"
         "click_secret_key"
         "sendgrid_api_key"
@@ -401,6 +404,10 @@ generate_all_secrets() {
                     ;;
                 telegram_bot_token)
                     warn "Telegram bot token must be obtained from @BotFather. Skipping generation."
+                    continue
+                    ;;
+                staff_bot_token)
+                    warn "Staff bot token must be obtained from @BotFather. Skipping generation."
                     continue
                     ;;
                 *_api_key|*_token)

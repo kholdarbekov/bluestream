@@ -1,17 +1,33 @@
 {% extends "frontend/base.html" %}
-
-{% block title %}{{ post.get_translated('title', current_language) }} - {{ company_name }}{% endblock %}
-
-{% block extra_meta %}
 {% set meta_title = post.get_translated('meta_title', current_language) or post.get_translated('title', current_language) %}
 {% set meta_description = post.get_translated('meta_description', current_language) or post.get_translated('excerpt', current_language) %}
-<meta name="description" content="{{ meta_description }}">
+
+{% block title %}{{ meta_title }} - {{ company_name }}{% endblock %}
+
+{% block extra_meta %}
 <meta property="og:title" content="{{ meta_title }}">
 <meta property="og:description" content="{{ meta_description }}">
 <meta property="og:type" content="article">
-<meta property="og:image" content="{{ post.featured_image or url_for('static', filename='images/logo.png') }}">
+<meta property="og:image" content="{{ post.featured_image or url_for('static', filename='images/logo.png', _external=True) }}">
 <meta property="article:published_time" content="{{ post.published_at.isoformat() if post.published_at else '' }}">
 <meta property="article:author" content="{{ post.author_name or 'Admin' }}">
+{% set article_url = canonical_url if canonical_url is defined and canonical_url else request.base_url %}
+{% set article_schema = {
+  "@context": "https://schema.org",
+  "@type": "BlogPosting",
+  "headline": post.get_translated('title', current_language),
+  "description": meta_description,
+  "datePublished": post.published_at.isoformat() if post.published_at else None,
+  "dateModified": (post.updated_at.isoformat() if post.updated_at else (post.published_at.isoformat() if post.published_at else None)),
+  "author": {
+    "@type": "Person",
+    "name": post.author_name or "Admin"
+  },
+  "image": post.featured_image or url_for('static', filename='images/logo.png', _external=True),
+  "mainEntityOfPage": article_url,
+  "url": article_url
+} %}
+<script type="application/ld+json">{{ article_schema | tojson }}</script>
 {% endblock %}
 
 {% block content %}

@@ -4,7 +4,7 @@ This file should be placed in business_app/api/admin.py
 """
 from flask import Blueprint, request, jsonify, current_app, g
 from flask_jwt_extended import jwt_required, get_jwt_identity
-from sqlalchemy import and_, or_, desc, func, text
+from sqlalchemy import and_, or_, desc, func, text, cast, String
 from datetime import datetime, UTC, timedelta
 from shared.constants import DISPLAY_TIMEZONE
 
@@ -12,7 +12,7 @@ from business_app.models.user import User, UserAddress
 from business_app.models.order import Order, OrderItem
 from business_app.models.product import Product, ProductCategory, ProductSizeEnum
 from business_app.models.payment import Payment, PaymentTransaction
-from business_app.models.delivery import Delivery, DeliveryPerson, DeliveryRoute, DeliveryTimeSlot
+from business_app.models.delivery import Delivery, DeliveryPerson, DeliveryRoute, DeliveryTimeSlot, DeliveryStatusHistory
 from business_app.models.subscription import Subscription
 from business_app.models.loyalty import LoyaltyProgram, LoyaltyReward, LoyaltyPoints, LoyaltyTransaction
 from business_app.models.notification import NotificationTemplate
@@ -54,7 +54,7 @@ from business_app.utils.constants import UserRole, SubscriptionStatus, OrderStat
 from business_app import db
 from business_app.utils.helpers import get_current_language
 from business_app.utils.translations import get_translation
-from business_app.utils.exceptions import ValidationError, ConflictError
+from business_app.utils.exceptions import ValidationError, ConflictError, NotFoundError
 from business_app.utils.api_responses import (
     success_response, error_response, paginated_response, created_response,
     not_found_response, validation_error_response, internal_error_response,
@@ -63,6 +63,14 @@ from business_app.utils.api_responses import (
 from business_app.utils.bot_webhook import trigger_translation_reload
 
 admin_bp = Blueprint('admin', __name__)
+
+
+def _is_operator_staff_member():
+    """Return SQL filter for users that can operate via role or staff_roles."""
+    return or_(
+        User.role == UserRole.OPERATOR,
+        cast(User.staff_roles, String).ilike('%"operator"%')
+    )
 
 
 
@@ -10191,3 +10199,673 @@ def upload_file():
     except Exception as e:
         current_app.logger.error(f"Error uploading file: {str(e)}")
         return error_response(str(e), status_code=500)
+
+
+# ============================================================================
+# STAFF MANAGEMENT ENDPOINTS (Admin Panel - Phase 6)
+# ============================================================================
+
+def _serialize_staff_delivery_person_data(dp: DeliveryPerson) -> dict:
+    """Serialize delivery person with extra staff/admin fields."""
+    data = serialize_delivery_person_admin(dp)
+    data['user_id'] = dp.user_id
+    data['employee_id'] = dp.employee_id
+    data['vehicle_capacity_kg'] = dp.vehicle_capacity_kg
+    data['working_hours_start'] = dp.working_hours_start
+    data['working_hours_end'] = dp.working_hours_end
+    data['working_days'] = dp.working_days
+    data['max_concurrent_deliveries'] = dp.max_concurrent_deliveries
+    data['current_active_deliveries'] = dp.current_active_deliveries
+    data['total_cash_collected'] = float(dp.total_cash_collected or 0)
+    data['notifications_muted'] = dp.notifications_muted
+    data['hire_date'] = dp.hire_date.isoformat() if dp.hire_date else None
+    data['emergency_contact_name'] = dp.emergency_contact_name
+    data['emergency_contact_phone'] = dp.emergency_contact_phone
+    return data
+
+
+def _build_staff_order_info(delivery: Delivery) -> dict:
+    """Build compact order payload for staff assignment notifications."""
+    order = delivery.order
+    if not order:
+        return {'delivery_id': delivery.id, 'order_id': delivery.order_id}
+
+    address = order.delivery_address.full_address if order.delivery_address else None
+    return {
+        'delivery_id': delivery.id,
+        'order_id': order.id,
+        'order_number': order.order_number,
+        'status': order.status.value if hasattr(order.status, 'value') else order.status,
+        'total_amount': float(order.total_amount or 0),
+        'payment_method': order.payment_method.value if getattr(order, 'payment_method', None) else None,
+        'delivery_address': address,
+    }
+
+
+@admin_bp.route('/staff/delivery-persons', methods=['POST'])
+@jwt_required()
+@manager_or_higher_required
+def create_staff_delivery_person():
+    """Create a delivery person (user + delivery profile)."""
+    try:
+        from business_app.services.staff_service import StaffService
+
+        payload = request.get_json() or {}
+        actor_id = int(get_jwt_identity())
+        delivery_person = StaffService.create_delivery_person(payload, created_by=actor_id)
+
+        return created_response(
+            data={'delivery_person': _serialize_staff_delivery_person_data(delivery_person)},
+            message='Delivery person created successfully',
+        )
+    except (ValidationError, ConflictError, NotFoundError) as e:
+        return error_response(str(e), status_code=400)
+    except Exception as e:
+        current_app.logger.error(f"Create staff delivery person error: {e}")
+        return internal_error_response('Failed to create delivery person')
+
+
+@admin_bp.route('/staff/delivery-persons', methods=['GET'])
+@jwt_required()
+@manager_or_higher_required
+def get_staff_delivery_persons():
+    """List delivery persons with filtering and pagination"""
+    try:
+        page = int(request.args.get('page', 1))
+        per_page = min(int(request.args.get('per_page', 20)), 100)
+        search = request.args.get('search', '').strip()
+        status = request.args.get('status')  # 'active', 'inactive'
+        available = request.args.get('available')  # 'true', 'false'
+
+        query = DeliveryPerson.query.options(
+            db.joinedload(DeliveryPerson.user)
+        )
+
+        if search:
+            search_term = f"%{search}%"
+            query = query.filter(or_(
+                DeliveryPerson.full_name.ilike(search_term),
+                DeliveryPerson.phone.ilike(search_term),
+                DeliveryPerson.employee_id.ilike(search_term)
+            ))
+
+        if status == 'active':
+            query = query.filter(DeliveryPerson.is_active == True)
+        elif status == 'inactive':
+            query = query.filter(DeliveryPerson.is_active == False)
+
+        if available == 'true':
+            query = query.filter(DeliveryPerson.is_available == True)
+        elif available == 'false':
+            query = query.filter(DeliveryPerson.is_available == False)
+
+        query = query.order_by(DeliveryPerson.created_at.desc())
+        pagination = query.paginate(page=page, per_page=per_page, error_out=False)
+
+        persons_data = [_serialize_staff_delivery_person_data(dp) for dp in pagination.items]
+
+        # Summary stats
+        total_drivers = DeliveryPerson.query.count()
+        active_drivers = DeliveryPerson.query.filter_by(is_active=True).count()
+        available_drivers = DeliveryPerson.query.filter_by(is_active=True, is_available=True).count()
+
+        now = datetime.now(UTC)
+        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        deliveries_today = Delivery.query.filter(
+            Delivery.status == DeliveryStatus.DELIVERED.value,
+            Delivery.delivered_at >= today_start
+        ).count()
+
+        avg_rating = db.session.query(
+            func.avg(DeliveryPerson.average_rating)
+        ).filter(
+            DeliveryPerson.is_active == True,
+            DeliveryPerson.average_rating > 0
+        ).scalar()
+
+        return paginated_response(
+            items=persons_data,
+            page=page,
+            per_page=per_page,
+            total=pagination.total,
+            additional_meta={
+                'summary': {
+                    'total_drivers': total_drivers,
+                    'active_drivers': active_drivers,
+                    'available_drivers': available_drivers,
+                    'deliveries_today': deliveries_today,
+                    'avg_rating': round(float(avg_rating or 0), 2),
+                }
+            }
+        )
+
+    except Exception as e:
+        current_app.logger.error(f"Get staff delivery persons error: {e}")
+        return internal_error_response('Failed to get delivery persons')
+
+
+@admin_bp.route('/staff/delivery-persons/<int:person_id>', methods=['GET'])
+@jwt_required()
+@staff_or_higher_required
+def get_staff_delivery_person_details(person_id):
+    """Get detailed delivery person info with stats"""
+    try:
+        dp = DeliveryPerson.query.options(
+            db.joinedload(DeliveryPerson.user)
+        ).get(person_id)
+        if not dp:
+            return not_found_response(resource_type='DeliveryPerson')
+
+        data = _serialize_staff_delivery_person_data(dp)
+
+        # Get performance stats
+        from business_app.services.staff_service import StaffService
+        stats = StaffService.get_delivery_stats(dp.user_id, period='month')
+        data['stats'] = stats
+
+        return success_response(data={'delivery_person': data})
+
+    except Exception as e:
+        current_app.logger.error(f"Get delivery person details error: {e}")
+        return internal_error_response('Failed to get delivery person details')
+
+
+@admin_bp.route('/staff/delivery-persons/<int:person_id>', methods=['PUT'])
+@jwt_required()
+@manager_or_higher_required
+def update_staff_delivery_person(person_id):
+    """Edit delivery person profile fields."""
+    try:
+        from business_app.services.staff_service import StaffService
+
+        payload = request.get_json() or {}
+        actor_id = int(get_jwt_identity())
+        delivery_person = StaffService.update_delivery_person(person_id, payload, updated_by=actor_id)
+
+        return success_response(
+            data={'delivery_person': _serialize_staff_delivery_person_data(delivery_person)},
+            message='Delivery person updated successfully',
+        )
+    except (ValidationError, ConflictError, NotFoundError) as e:
+        return error_response(str(e), status_code=400)
+    except Exception as e:
+        current_app.logger.error(f"Update staff delivery person error: {e}")
+        return internal_error_response('Failed to update delivery person')
+
+
+@admin_bp.route('/staff/delivery-persons/<int:person_id>/mute', methods=['PUT'])
+@jwt_required()
+@manager_or_higher_required
+def toggle_staff_mute_notifications(person_id):
+    """Toggle notification muting for a delivery person"""
+    try:
+        data = request.get_json()
+        muted = data.get('muted', True)
+
+        dp = DeliveryPerson.query.get(person_id)
+        if not dp:
+            return not_found_response(resource_type='DeliveryPerson')
+
+        from business_app.services.staff_service import StaffService
+        StaffService.mute_notifications(dp.user_id, muted)
+
+        return success_response(
+            data={'muted': muted},
+            message=f"Notifications {'muted' if muted else 'unmuted'} successfully"
+        )
+
+    except Exception as e:
+        current_app.logger.error(f"Toggle mute notifications error: {e}")
+        return internal_error_response('Failed to toggle notifications')
+
+
+@admin_bp.route('/staff/operators', methods=['GET'])
+@jwt_required()
+@manager_or_higher_required
+def get_staff_operators():
+    """List operators with filtering and pagination"""
+    try:
+        page = int(request.args.get('page', 1))
+        per_page = min(int(request.args.get('per_page', 20)), 100)
+        search = request.args.get('search', '').strip()
+        status = request.args.get('status')  # 'active', 'inactive'
+
+        query = User.query.filter(_is_operator_staff_member())
+
+        if search:
+            search_term = f"%{search}%"
+            query = query.filter(or_(
+                User.first_name.ilike(search_term),
+                User.last_name.ilike(search_term),
+                User.phone.ilike(search_term)
+            ))
+
+        if status == 'active':
+            query = query.filter(User.status == UserStatus.ACTIVE.value)
+        elif status == 'inactive':
+            query = query.filter(User.status != UserStatus.ACTIVE.value)
+
+        query = query.order_by(User.created_at.desc())
+        pagination = query.paginate(page=page, per_page=per_page, error_out=False)
+
+        now = datetime.now(UTC)
+        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+        operators_data = []
+        for user in pagination.items:
+            # Count orders created by this operator today
+            orders_today = Order.query.filter(
+                Order.created_by_staff_id == user.id,
+                Order.created_at >= today_start
+            ).count()
+
+            total_orders = Order.query.filter(
+                Order.created_by_staff_id == user.id
+            ).count()
+
+            operators_data.append({
+                'id': user.id,
+                'full_name': user.full_name,
+                'first_name': user.first_name,
+                'last_name': user.last_name,
+                'phone': user.phone,
+                'email': user.email,
+                'status': user.status.value if hasattr(user.status, 'value') else user.status,
+                'role': user.role.value if hasattr(user.role, 'value') else user.role,
+                'staff_roles': user.staff_roles or [],
+                'last_login': user.last_login.isoformat() if user.last_login else None,
+                'created_at': user.created_at.isoformat() if user.created_at else None,
+                'orders_today': orders_today,
+                'total_orders_created': total_orders,
+            })
+
+        # Summary
+        total_operators = User.query.filter(_is_operator_staff_member()).count()
+
+        active_operators = User.query.filter(
+            _is_operator_staff_member(),
+            User.status == UserStatus.ACTIVE.value
+        ).count()
+
+        return paginated_response(
+            items=operators_data,
+            page=page,
+            per_page=per_page,
+            total=pagination.total,
+            additional_meta={
+                'summary': {
+                    'total_operators': total_operators,
+                    'active_operators': active_operators,
+                }
+            }
+        )
+
+    except Exception as e:
+        current_app.logger.error(f"Get staff operators error: {e}")
+        return internal_error_response('Failed to get operators')
+
+
+@admin_bp.route('/staff/operators', methods=['POST'])
+@jwt_required()
+@manager_or_higher_required
+def create_staff_operator():
+    """Create operator account or grant operator role to an existing user."""
+    try:
+        from business_app.services.staff_service import StaffService
+
+        payload = request.get_json() or {}
+        actor_id = int(get_jwt_identity())
+        user = StaffService.create_operator(payload, created_by=actor_id)
+
+        return created_response(
+            data={'operator': user.to_dict()},
+            message='Operator created successfully',
+        )
+    except (ValidationError, ConflictError, NotFoundError) as e:
+        return error_response(str(e), status_code=400)
+    except Exception as e:
+        current_app.logger.error(f"Create staff operator error: {e}")
+        return internal_error_response('Failed to create operator')
+
+
+@admin_bp.route('/staff/operators/<int:user_id>', methods=['PUT'])
+@jwt_required()
+@manager_or_higher_required
+def update_staff_operator(user_id):
+    """Edit operator profile fields and staff roles."""
+    try:
+        from business_app.services.staff_service import StaffService
+
+        payload = request.get_json() or {}
+        actor_id = int(get_jwt_identity())
+        user = StaffService.update_operator(user_id, payload, updated_by=actor_id)
+
+        return success_response(
+            data={'operator': user.to_dict()},
+            message='Operator updated successfully',
+        )
+    except (ValidationError, ConflictError, NotFoundError) as e:
+        return error_response(str(e), status_code=400)
+    except Exception as e:
+        current_app.logger.error(f"Update staff operator error: {e}")
+        return internal_error_response('Failed to update operator')
+
+
+@admin_bp.route('/staff/users/<int:user_id>/roles', methods=['PUT'])
+@jwt_required()
+@manager_or_higher_required
+@validate_json(['staff_roles'])
+def update_staff_user_roles(user_id):
+    """Update dual-role assignment for any staff user."""
+    try:
+        from business_app.services.staff_service import StaffService
+
+        payload = request.get_json() or {}
+        actor_id = int(get_jwt_identity())
+        user = StaffService.update_staff_roles(
+            user_id=user_id,
+            staff_roles=payload.get('staff_roles'),
+            updated_by=actor_id,
+        )
+
+        return success_response(
+            data={'user': user.to_dict()},
+            message='Staff roles updated successfully',
+        )
+    except (ValidationError, NotFoundError) as e:
+        return error_response(str(e), status_code=400)
+    except Exception as e:
+        current_app.logger.error(f"Update staff roles error: {e}")
+        return internal_error_response('Failed to update staff roles')
+
+
+@admin_bp.route('/staff/overview', methods=['GET'])
+@jwt_required()
+@manager_or_higher_required
+def get_admin_staff_overview():
+    """Get unified staff overview for admin panel"""
+    try:
+        from business_app.services.staff_service import StaffService
+        overview = StaffService.get_staff_overview()
+
+        # Add operator count
+        total_operators = User.query.filter(_is_operator_staff_member()).count()
+        overview['total_operators'] = total_operators
+
+        # All staff members (delivery + operators)
+        delivery_persons = DeliveryPerson.query.filter_by(is_active=True).count()
+        overview['total_delivery_persons'] = delivery_persons
+        overview['total_staff'] = delivery_persons + total_operators
+
+        return success_response(data={'overview': overview})
+
+    except Exception as e:
+        current_app.logger.error(f"Get admin staff overview error: {e}")
+        return internal_error_response('Failed to get staff overview')
+
+
+@admin_bp.route('/staff/delivery/assign/<int:delivery_id>', methods=['POST'])
+@jwt_required()
+@manager_or_higher_required
+@validate_json(['delivery_person_id'])
+def admin_assign_delivery(delivery_id):
+    """Assign a delivery to a delivery person (admin action)"""
+    try:
+        data = request.get_json()
+        delivery_person_id = data['delivery_person_id']
+
+        from business_app.services.staff_service import StaffService
+        delivery = StaffService.accept_order(delivery_id, delivery_person_id)
+
+        # Notify assigned delivery person via staff bot, if linked Telegram exists.
+        try:
+            assigned_user = User.query.get(delivery_person_id)
+            if assigned_user and assigned_user.telegram_id:
+                from business_app.tasks.staff_tasks import notify_staff_order_assigned
+                notify_staff_order_assigned.delay(
+                    assigned_user.telegram_id,
+                    _build_staff_order_info(delivery)
+                )
+        except Exception as notify_exc:
+            current_app.logger.warning(
+                "Failed to enqueue staff assignment notification for delivery %s: %s",
+                delivery_id,
+                notify_exc,
+            )
+
+        return success_response(
+            data={'delivery': delivery.to_dict()},
+            message='Delivery assigned successfully'
+        )
+
+    except (ValidationError, NotFoundError) as e:
+        return error_response(str(e), status_code=400)
+    except Exception as e:
+        current_app.logger.error(f"Admin assign delivery error: {e}")
+        return internal_error_response('Failed to assign delivery')
+
+
+@admin_bp.route('/staff/delivery/reassign/<int:delivery_id>', methods=['PUT'])
+@jwt_required()
+@manager_or_higher_required
+@validate_json(['new_delivery_person_id'])
+def admin_reassign_delivery(delivery_id):
+    """Reassign a delivery to a different delivery person"""
+    try:
+        data = request.get_json()
+        new_person_id = data['new_delivery_person_id']
+
+        delivery = Delivery.query.get(delivery_id)
+        if not delivery:
+            return not_found_response(resource_type='Delivery')
+
+        old_person_id = delivery.delivery_person_id
+
+        # Decrement old person's active count
+        if old_person_id:
+            old_dp = DeliveryPerson.query.filter_by(user_id=old_person_id).first()
+            if old_dp:
+                old_dp.current_active_deliveries = max(
+                    (old_dp.current_active_deliveries or 1) - 1, 0
+                )
+
+        # Assign new person
+        new_dp = DeliveryPerson.query.filter_by(user_id=new_person_id).first()
+        if not new_dp:
+            return not_found_response(resource_type='DeliveryPerson')
+
+        max_concurrent = new_dp.max_concurrent_deliveries or 3
+        if new_dp.current_active_deliveries >= max_concurrent:
+            return validation_error_response(
+                f'Delivery person has reached max concurrent deliveries ({max_concurrent})'
+            )
+
+        delivery.delivery_person_id = new_person_id
+        delivery.updated_at = datetime.now(UTC)
+        new_dp.current_active_deliveries = (new_dp.current_active_deliveries or 0) + 1
+
+        # Create status history entry
+        history = DeliveryStatusHistory(
+            delivery_id=delivery.id,
+            old_status=delivery.status,
+            new_status=delivery.status,
+            changed_by=int(get_jwt_identity()),
+            changed_at=datetime.now(UTC),
+            notes=f'Reassigned from user {old_person_id} to user {new_person_id} by admin'
+        )
+        db.session.add(history)
+        db.session.commit()
+
+        current_app.logger.info(
+            f"Delivery {delivery_id} reassigned from {old_person_id} to {new_person_id}"
+        )
+
+        try:
+            old_user = User.query.get(old_person_id) if old_person_id else None
+            new_user = User.query.get(new_person_id) if new_person_id else None
+            old_telegram_id = old_user.telegram_id if old_user else None
+            new_telegram_id = new_user.telegram_id if new_user else None
+            if old_telegram_id or new_telegram_id:
+                from business_app.tasks.staff_tasks import notify_staff_order_reassigned
+                notify_staff_order_reassigned.delay(
+                    old_telegram_id,
+                    new_telegram_id,
+                    _build_staff_order_info(delivery),
+                )
+        except Exception as notify_exc:
+            current_app.logger.warning(
+                "Failed to enqueue staff reassignment notification for delivery %s: %s",
+                delivery_id,
+                notify_exc,
+            )
+
+        return success_response(
+            data={'delivery': delivery.to_dict()},
+            message='Delivery reassigned successfully'
+        )
+
+    except Exception as e:
+        current_app.logger.error(f"Admin reassign delivery error: {e}")
+        return internal_error_response('Failed to reassign delivery')
+
+
+@admin_bp.route('/staff/cash-reconciliation', methods=['GET'])
+@jwt_required()
+@manager_or_higher_required
+def get_cash_reconciliation_report():
+    """Generate cash reconciliation report per driver/period"""
+    try:
+        period = request.args.get('period', 'day')  # day, week, month
+        driver_id = request.args.get('driver_id', type=int)
+
+        now = datetime.now(UTC)
+        if period == 'day':
+            start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        elif period == 'week':
+            start_date = now - timedelta(days=7)
+        else:
+            start_date = now - timedelta(days=30)
+
+        # Base query: delivered orders with cash collected
+        query = db.session.query(
+            DeliveryPerson.id,
+            DeliveryPerson.full_name,
+            DeliveryPerson.phone,
+            func.count(Delivery.id).label('delivery_count'),
+            func.coalesce(func.sum(Delivery.cash_collected), 0).label('total_cash'),
+        ).join(
+            Delivery,
+            Delivery.delivery_person_id == DeliveryPerson.user_id
+        ).filter(
+            Delivery.status == DeliveryStatus.DELIVERED.value,
+            Delivery.delivered_at >= start_date
+        ).group_by(
+            DeliveryPerson.id,
+            DeliveryPerson.full_name,
+            DeliveryPerson.phone
+        )
+
+        if driver_id:
+            query = query.filter(DeliveryPerson.id == driver_id)
+
+        results = query.all()
+
+        report_data = []
+        grand_total = 0
+
+        for row in results:
+            cash = float(row.total_cash or 0)
+            grand_total += cash
+            report_data.append({
+                'driver_id': row.id,
+                'driver_name': row.full_name,
+                'phone': row.phone,
+                'delivery_count': row.delivery_count,
+                'total_cash_collected': cash,
+            })
+
+        return success_response(data={
+            'report': report_data,
+            'period': period,
+            'start_date': start_date.isoformat(),
+            'end_date': now.isoformat(),
+            'grand_total_cash': grand_total,
+        })
+
+    except Exception as e:
+        current_app.logger.error(f"Cash reconciliation report error: {e}")
+        return internal_error_response('Failed to generate cash reconciliation report')
+
+
+@admin_bp.route('/staff/invite-link', methods=['POST'])
+@jwt_required()
+@manager_or_higher_required
+def generate_staff_invite_link():
+    """Generate a one-time staff bot invite link for first-time Telegram binding."""
+    try:
+        data = request.get_json() or {}
+        user_id = data.get('user_id')
+        role = data.get('role')
+
+        # Get bot username from config
+        bot_username = current_app.config.get('STAFF_BOT_USERNAME', 'blue_stream_group_staff_bot')
+        ttl_seconds = int(data.get('ttl_seconds', 900))
+
+        if not user_id:
+            return validation_error_response("user_id is required for one-time staff invite link")
+        try:
+            user_id = int(user_id)
+        except (TypeError, ValueError):
+            return validation_error_response("user_id must be an integer")
+
+        user = User.query.get(user_id)
+        if not user:
+            return not_found_response("Staff user not found")
+
+        staff_roles = user.staff_roles or []
+        if role and role not in staff_roles:
+            return validation_error_response("Requested role is not assigned to this user")
+        if not staff_roles:
+            return validation_error_response("User has no staff roles assigned")
+
+        import secrets
+        import json
+        import redis
+
+        redis_url = current_app.config.get('REDIS_URL')
+        if not redis_url:
+            return internal_error_response('REDIS_URL is not configured')
+
+        invite_token = secrets.token_urlsafe(24)
+        redis_client = redis.from_url(redis_url, decode_responses=True)
+
+        try:
+            redis_client.setex(
+                f"staff_bot:invite:{invite_token}",
+                ttl_seconds,
+                json.dumps({
+                    'user_id': user.id,
+                    'role': role,
+                    'staff_roles': staff_roles,
+                    'issued_by': get_jwt_identity(),
+                    'issued_at': datetime.now(UTC).isoformat(),
+                }),
+            )
+        finally:
+            redis_client.close()
+
+        invite_link = f"https://t.me/{bot_username}?start=staff_invite_{invite_token}"
+
+        return success_response(data={
+            'invite_link': invite_link,
+            'invite_token': invite_token,
+            'user_id': user.id,
+            'role': role,
+            'staff_roles': staff_roles,
+            'expires_in_seconds': ttl_seconds,
+            'bot_username': bot_username,
+        })
+
+    except Exception as e:
+        current_app.logger.error(f"Generate invite link error: {e}")
+        return internal_error_response('Failed to generate invite link')

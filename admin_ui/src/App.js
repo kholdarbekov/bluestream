@@ -17,6 +17,9 @@ import Translations from './pages/Translations';
 import Settings from './pages/Settings';
 import Blog from './pages/Blog';
 import TimeSlots from './pages/TimeSlots';
+import DeliveryPersons from './pages/DeliveryPersons';
+import Operators from './pages/Operators';
+import StaffManagement from './pages/StaffManagement';
 import { useAuthStore } from './stores/authStore';
 import ProtectedRoute from './components/common/ProtectedRoute';
 
@@ -51,6 +54,9 @@ function App() {
                   <Route path="/blog" element={<Blog />} />
                   <Route path="/translations" element={<Translations />} />
                   <Route path="/settings" element={<Settings />} />
+                  <Route path="/staff/delivery-persons" element={<DeliveryPersons />} />
+                  <Route path="/staff/operators" element={<Operators />} />
+                  <Route path="/staff/management" element={<StaffManagement />} />
                 </Routes>
               </AdminLayout>
             </ProtectedRoute>

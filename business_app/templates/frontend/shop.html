@@ -1,6 +1,94 @@
 {% extends "frontend/base.html" %}
+{% set selected_category = namespace(name='') %}
+{% if current_category %}
+    {% for category in categories %}
+        {% if category.id == current_category %}
+            {% set selected_category.name = category.name %}
+        {% endif %}
+    {% endfor %}
+{% endif %}
+{% if selected_category.name %}
+    {% set meta_description = selected_category.name ~ " products available for delivery from " ~ company_name ~ "." %}
+{% else %}
+    {% set meta_description = "Shop premium water products and delivery options from " ~ company_name ~ "." %}
+{% endif %}
+{% if current_language == 'ru' %}
+    {% set shop_faq_items = [
+        {'q': 'Как быстро осуществляется доставка воды?', 'a': 'В большинстве районов доставляем в тот же день в доступные временные интервалы.'},
+        {'q': 'Как выбрать подходящий объем воды?', 'a': 'Для дома обычно выбирают 5L или 10L, для офиса и семей чаще подходит формат 19L.'},
+        {'q': 'Есть ли скидки при подписке?', 'a': 'Да, подписка может снизить стоимость и упростить регулярные заказы.'}
+    ] %}
+{% elif current_language == 'en' %}
+    {% set shop_faq_items = [
+        {'q': 'How fast is water delivery?', 'a': 'Most areas are served the same day within available delivery windows.'},
+        {'q': 'How do I choose the right water size?', 'a': '5L or 10L is common for home use, while 19L is usually best for offices and larger households.'},
+        {'q': 'Do subscriptions reduce cost?', 'a': 'Yes, subscriptions can lower unit costs and make recurring deliveries easier to manage.'}
+    ] %}
+{% else %}
+    {% set shop_faq_items = [
+        {'q': 'Suv yetkazib berish qancha vaqtda amalga oshiriladi?', 'a': 'Ko‘p hududlarda buyurtmalar mavjud vaqt oralig‘ida shu kunning o‘zida yetkaziladi.'},
+        {'q': 'Qaysi hajmdagi suvni tanlagan ma’qul?', 'a': 'Uy uchun odatda 5L yoki 10L, ofis va katta oilalar uchun esa ko‘pincha 19L qulay bo‘ladi.'},
+        {'q': 'Obunada narx bo‘yicha foyda bormi?', 'a': 'Ha, obuna bir dona narxini tushirishi va muntazam buyurtmalarni osonlashtirishi mumkin.'}
+    ] %}
+{% endif %}
 
-{% block title %}{{ 'landing.nav.shop'|t }} - {{ company_name }}{% endblock %}
+{% block title %}
+{% if selected_category.name %}
+{{ selected_category.name }} - {{ 'landing.nav.shop'|t }}{% if products.page > 1 %} - Page {{ products.page }}{% endif %} - {{ company_name }}
+{% else %}
+{{ 'landing.nav.shop'|t }}{% if products.page > 1 %} - Page {{ products.page }}{% endif %} - {{ company_name }}
+{% endif %}
+{% endblock %}
+
+{% block extra_meta %}
+{% if prev_page_url %}
+<link rel="prev" href="{{ prev_page_url }}">
+{% endif %}
+{% if next_page_url %}
+<link rel="next" href="{{ next_page_url }}">
+{% endif %}
+{% set list_schema = namespace(items=[]) %}
+{% for product in products.items %}
+    {% if product.get('slug') %}
+        {% set product_url = external_url_for_lang('frontend.product_detail_slug', slug=product.get('slug')) %}
+    {% else %}
+        {% set product_url = external_url_for_lang('frontend.product_detail', product_id=product.id) %}
+    {% endif %}
+    {% set _ = list_schema.items.append({
+        "@type": "ListItem",
+        "position": loop.index,
+        "url": product_url,
+        "name": product.get('name', 'Product')
+    }) %}
+{% endfor %}
+{% set item_list_schema = {
+    "@context": "https://schema.org",
+    "@type": "ItemList",
+    "name": "Shop Products",
+    "url": canonical_url if canonical_url is defined else request.url,
+    "numberOfItems": products.items|length,
+    "itemListOrder": "https://schema.org/ItemListOrderAscending",
+    "itemListElement": list_schema.items
+} %}
+<script type="application/ld+json">{{ item_list_schema | tojson }}</script>
+{% set faq_schema = namespace(items=[]) %}
+{% for faq in shop_faq_items %}
+    {% set _ = faq_schema.items.append({
+        "@type": "Question",
+        "name": faq.q,
+        "acceptedAnswer": {
+            "@type": "Answer",
+            "text": faq.a
+        }
+    }) %}
+{% endfor %}
+{% set faq_page_schema = {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    "mainEntity": faq_schema.items
+} %}
+<script type="application/ld+json">{{ faq_page_schema | tojson }}</script>
+{% endblock %}
 
 {% block extra_head %}
 <style>
@@ -37,6 +125,46 @@
     color: #222;
     margin-bottom: 15px;
     text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.shop-seo-content {
+    padding: 80px 0 120px;
+}
+
+.shop-seo-content .seo-card {
+    background: #fff;
+    border-radius: 16px;
+    padding: 32px;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.06);
+}
+
+.shop-seo-content h2 {
+    font-size: 30px;
+    margin-bottom: 16px;
+}
+
+.shop-seo-content p {
+    margin-bottom: 18px;
+    color: #5b5b5b;
+}
+
+.shop-faq-list {
+    margin: 26px 0 0;
+    padding: 0;
+    list-style: none;
+}
+
+.shop-faq-list li + li {
+    margin-top: 18px;
+}
+
+.shop-faq-list h3 {
+    font-size: 19px;
+    margin-bottom: 8px;
+}
+
+.shop-faq-list p {
+    margin: 0;
 }
 </style>
 {% endblock %}
@@ -167,7 +295,7 @@
                                                 {% set volume_unit = product.get('specifications', {}).get('volume_unit', 'L') %}
                                                 {% set category_name = product.get('category', {}).get('name', 'Water') if product.get('category') else 'Water' %}
                                                 <span>{{ volume }}{{ volume_unit }} - {{ category_name }}</span>
-                                                <h4><a href="{{ url_for('frontend.product_detail', product_id=product.id) }}">{{ product.get('name', 'Product') }}</a></h4>
+                                                <h4><a href="{% if product.get('slug') %}{{ url_for('frontend.product_detail_slug', slug=product.get('slug')) }}{% else %}{{ url_for('frontend.product_detail', product_id=product.id) }}{% endif %}">{{ product.get('name', 'Product') }}</a></h4>
                                                 <div class="price">
                                                     {% set base_price = product.get('pricing', {}).get('base_price', product.get('base_price', 0)) %}
                                                     {% set discount_price = product.get('pricing', {}).get('discount_price', 0) %}
@@ -226,6 +354,35 @@
             </div>
         </section>
         <!-- shop-page-section end -->
+
+        <section class="shop-seo-content">
+            <div class="auto-container">
+                <div class="seo-card">
+                    <h2>
+                        {% if selected_category.name %}
+                            {{ selected_category.name }} - {{ 'landing.shop.page_title'|t }}
+                        {% else %}
+                            {{ 'landing.shop.page_title'|t }} - {{ company_name }}
+                        {% endif %}
+                    </h2>
+                    <p>
+                        {% if selected_category.name %}
+                            {{ selected_category.name }} {{ 'landing.shop.all_products'|t|lower }} {{ company_name }}.
+                        {% else %}
+                            {{ 'landing.shop.all_products'|t }} {{ company_name }}.
+                        {% endif %}
+                    </p>
+                    <ul class="shop-faq-list">
+                        {% for faq in shop_faq_items %}
+                        <li>
+                            <h3>{{ faq.q }}</h3>
+                            <p>{{ faq.a }}</p>
+                        </li>
+                        {% endfor %}
+                    </ul>
+                </div>
+            </div>
+        </section>
 {% endblock %}
 
 {% block extra_js %}

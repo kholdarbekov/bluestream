@@ -629,6 +629,7 @@
 // Configuration
 const API_BASE = '/api/v1';
 const PRODUCT_DETAIL_URL_TEMPLATE = '{{ url_for("frontend.product_detail", product_id=0) }}'.replace('/0', '/{id}');
+const PRODUCT_DETAIL_URL_SLUG_TEMPLATE = '{{ url_for("frontend.product_detail_slug", slug="__SLUG__") }}';
 
 // Cart state
 let cartItems = [];
@@ -732,6 +733,10 @@ function renderCart(products) {
         const productImages = (product.media && product.media.images) || product.images || [];
         const productImage = productImages.length > 0 ? productImages[0] : '{{ url_for("static", filename="images/resource/shop/shop-1.jpg") }}';
 
+        const productUrl = product.slug
+            ? PRODUCT_DETAIL_URL_SLUG_TEMPLATE.replace('__SLUG__', encodeURIComponent(product.slug))
+            : PRODUCT_DETAIL_URL_TEMPLATE.replace('{id}', product.id);
+
         cartHTML += `
             <div class="cart-item-card" data-product-id="${product.id}">
                 <div class="item-image">
@@ -739,7 +744,7 @@ function renderCart(products) {
                 </div>
                 <div class="item-details">
                     <div class="item-name">
-                        <a href="${PRODUCT_DETAIL_URL_TEMPLATE.replace('{id}', product.id)}">${product.name}</a>
+                        <a href="${productUrl}">${product.name}</a>
                     </div>
                     <div class="item-stock ${stockClass}">${stockStatus}</div>
                     <div class="item-price-row">

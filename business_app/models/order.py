@@ -52,9 +52,13 @@ class Order(db.Model, TimestampMixin):
     
     # Order source tracking
     order_source = Column(String(20), default='web')  # web, telegram, mobile, phone
-    
+
+    # Staff tracking (which operator/staff created the order, null for self-service)
+    created_by_staff_id = Column(Integer, ForeignKey('users.id'), nullable=True)
+
     # Relationships
-    user = relationship('User', back_populates='orders')
+    user = relationship('User', foreign_keys=[user_id], back_populates='orders')
+    created_by_staff = relationship('User', foreign_keys=[created_by_staff_id])
     delivery_address = relationship('UserAddress', back_populates='orders')
     order_items = relationship('OrderItem', back_populates='order', cascade='all, delete-orphan')
     payment = relationship('Payment', back_populates='order', uselist=False)

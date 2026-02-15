@@ -83,6 +83,7 @@ Secrets that will be generated:
     - postgres_password    - PostgreSQL password
     - secret_key          - Flask application secret key
     - telegram_bot_token  - Telegram bot token (must be provided)
+    - staff_bot_token     - Staff Telegram bot token (must be provided)
     - payme_secret_key    - PayMe secret key (optional)
     - click_secret_key    - Click secret key (optional)
     - sendgrid_api_key    - SendGrid API key (optional)
@@ -166,7 +167,7 @@ REDIS_PORT=6379
 REDIS_DB=0
 
 # Business Configuration
-COMPANY_NAME=Blue Stream Water Delivery
+COMPANY_NAME=Aqua Element
 COMPANY_PHONE=+998901234567
 COMPANY_EMAIL=info@bluestream.uz
 COMPANY_ADDRESS=Tashkent, Uzbekistan
@@ -220,19 +221,36 @@ setup_secrets() {
     # Prompt for mandatory secrets that need manual input
     log "Please provide the following mandatory secrets:"
     
-    # Telegram Bot Token
+    # Customer Telegram Bot Token
     if [[ ! -f "$SECRETS_DIR/telegram_bot_token" ]]; then
         while true; do
-            echo -n "Enter Telegram Bot Token (from @BotFather): "
+            echo -n "Enter Customer Telegram Bot Token (from @BotFather): "
             read -r -s bot_token
             echo
             if [[ -n "$bot_token" ]]; then
                 echo -n "$bot_token" > "$SECRETS_DIR/telegram_bot_token"
                 chmod 600 "$SECRETS_DIR/telegram_bot_token"
-                success "Telegram bot token saved"
+                success "Customer telegram bot token saved"
                 break
             else
                 error "Telegram bot token cannot be empty"
+            fi
+        done
+    fi
+
+    # Staff Telegram Bot Token
+    if [[ ! -f "$SECRETS_DIR/staff_bot_token" ]]; then
+        while true; do
+            echo -n "Enter Staff Telegram Bot Token (from @BotFather): "
+            read -r -s staff_bot_token
+            echo
+            if [[ -n "$staff_bot_token" ]]; then
+                echo -n "$staff_bot_token" > "$SECRETS_DIR/staff_bot_token"
+                chmod 600 "$SECRETS_DIR/staff_bot_token"
+                success "Staff telegram bot token saved"
+                break
+            else
+                error "Staff Telegram bot token cannot be empty"
             fi
         done
     fi

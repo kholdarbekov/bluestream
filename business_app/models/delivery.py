@@ -52,6 +52,9 @@ class Delivery(db.Model, TimestampMixin):
     # Delivery attempts
     delivery_attempts = Column(Integer, default=0)
     failed_delivery_reason = Column(String(255), nullable=True)
+
+    # Cash on delivery
+    cash_collected = Column(Numeric(precision=12, scale=2), nullable=True)
     
     order = relationship('Order', back_populates='delivery')
     delivery_person = relationship('User', foreign_keys=[delivery_person_id], back_populates='deliveries')
@@ -317,12 +320,20 @@ class DeliveryPerson(db.Model, TimestampMixin):
     is_active = Column(Boolean, default=True, index=True)
     is_available = Column(Boolean, default=True, index=True)  # Available for new deliveries
     
+    # Capacity and workload
+    max_concurrent_deliveries = Column(Integer, default=3)
+    current_active_deliveries = Column(Integer, default=0)
+
     # Performance metrics
     total_deliveries = Column(Integer, default=0)
     successful_deliveries = Column(Integer, default=0)
     average_rating = Column(Float, default=0.0)
     total_distance_km = Column(Float, default=0.0)
-    
+    total_cash_collected = Column(Numeric(precision=12, scale=2), default=Decimal('0.00'))
+
+    # Staff bot notification settings (managed by admins only)
+    notifications_muted = Column(Boolean, default=False)
+
     # Emergency contact
     emergency_contact_name = Column(String(100), nullable=True)
     emergency_contact_phone = Column(String(20), nullable=True)
@@ -411,6 +422,10 @@ class DeliveryPerson(db.Model, TimestampMixin):
             'success_rate': self.success_rate,
             'average_rating': self.average_rating,
             'total_distance_km': self.total_distance_km,
+            'total_cash_collected': float(self.total_cash_collected) if self.total_cash_collected else 0,
+            'max_concurrent_deliveries': self.max_concurrent_deliveries,
+            'current_active_deliveries': self.current_active_deliveries,
+            'notifications_muted': self.notifications_muted,
             'emergency_contact': {
                 'name': self.emergency_contact_name,
                 'phone': self.emergency_contact_phone

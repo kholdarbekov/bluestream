@@ -2,6 +2,35 @@
 
 {% block title %}{{ 'landing.nav.home'|t }} - {{ company_name }}{% endblock %}
 
+{% block extra_meta %}
+{% set organization_schema = {
+  "@context": "https://schema.org",
+  "@type": "Organization",
+  "name": company_name,
+  "url": url_for('frontend.index', _external=True),
+  "logo": url_for('static', filename='images/logo.png', _external=True),
+  "contactPoint": [{
+    "@type": "ContactPoint",
+    "telephone": company_phone,
+    "contactType": "customer service",
+    "email": company_email
+  }]
+} %}
+{% set website_schema = {
+  "@context": "https://schema.org",
+  "@type": "WebSite",
+  "name": company_name,
+  "url": url_for('frontend.index', _external=True),
+  "potentialAction": {
+    "@type": "SearchAction",
+    "target": url_for('frontend.shop', _external=True) ~ "?search={search_term_string}",
+    "query-input": "required name=search_term_string"
+  }
+} %}
+<script type="application/ld+json">{{ organization_schema | tojson }}</script>
+<script type="application/ld+json">{{ website_schema | tojson }}</script>
+{% endblock %}
+
 {% block content %}
         <!-- banner-section -->
         <section class="banner-style-two banner-style-three">
@@ -178,7 +207,7 @@
                                 <div class="lower-content">
                                     <div class="shape" style="background-image: url({{ url_for('static', filename='images/shape/shape-7.png') }});"></div>
                                     <span>{% if product.volume %}{{ product.volume }}{{ product.volume_unit }}{% endif %} {% if product.category %}{{ product.category.name }}{% endif %}</span>
-                                    <h4><a href="{{ url_for('frontend.product_detail', product_id=product.id) }}">{{ product.name }}</a></h4>
+                                    <h4><a href="{% if product.slug %}{{ url_for('frontend.product_detail_slug', slug=product.slug) }}{% else %}{{ url_for('frontend.product_detail', product_id=product.id) }}{% endif %}">{{ product.name }}</a></h4>
                                     <h6>{{ product.current_price|format_price }}</h6>
                                     <p>{{ product.short_description[:60] if product.short_description }}{% if product.short_description and product.short_description|length > 60 %}...{% endif %}</p>
                                     <div class="btn-box">

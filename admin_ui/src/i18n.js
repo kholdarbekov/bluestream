@@ -33,7 +33,7 @@ i18n
     },
 
     // Namespace configuration - each namespace maps to a ui_* category in the database
-    ns: ['common', 'navigation', 'dashboard', 'orders', 'products', 'users', 'settings', 'profile', 'analytics', 'blog', 'delivery', 'loyalty', 'login'],
+    ns: ['common', 'navigation', 'dashboard', 'orders', 'products', 'users', 'settings', 'profile', 'analytics', 'blog', 'delivery', 'loyalty', 'login', 'staff'],
     defaultNS: 'common',
 
     // Interpolation

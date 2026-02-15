@@ -1,0 +1,17 @@
+User-agent: *
+Allow: /
+
+# Private/authenticated areas
+Disallow: /api/
+Disallow: /login
+Disallow: /register
+Disallow: /checkout
+Disallow: /my-account
+Disallow: /my-orders
+Disallow: /my-subscriptions
+Disallow: /my-loyalty
+Disallow: /addresses
+Disallow: /profile-settings
+Disallow: /account-security
+
+Sitemap: https://bluestream.uz/sitemap.xml

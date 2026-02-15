@@ -1,7 +1,8 @@
-"""
-Frontend Routes for Blue Stream Water Business Platform
-"""
-from flask import render_template, request, session, current_app, jsonify, redirect, url_for, flash, g
+"""Frontend routes for Blue Stream Water Business Platform."""
+from urllib.parse import urlencode
+from xml.sax.saxutils import escape
+
+from flask import render_template, request, session, current_app, jsonify, redirect, url_for, flash, g, Response
 from flask_jwt_extended import jwt_required, get_jwt_identity, verify_jwt_in_request
 from sqlalchemy import desc
 
@@ -19,6 +20,137 @@ from business_app.utils.translations import get_translation
 from business_app.utils.helpers import get_current_language
 from business_app import db
 from datetime import datetime, UTC
+
+
+def _absolute_public_url(path):
+    """Build absolute URL respecting reverse-proxy scheme headers."""
+    if not path.startswith('/'):
+        path = f'/{path}'
+    scheme = request.headers.get('X-Forwarded-Proto', request.scheme)
+    return f"{scheme}://{request.host}{path}"
+
+
+def _current_lang_query_param():
+    """Return current valid `lang` query param if present."""
+    lang = request.args.get('lang')
+    supported_languages = current_app.config.get('LANGUAGES', {})
+    if lang and lang in supported_languages:
+        return lang
+    return None
+
+
+def _build_external_url(endpoint, **params):
+    """Build external URL preserving the current valid language query param."""
+    lang = _current_lang_query_param()
+    if lang and 'lang' not in params:
+        params['lang'] = lang
+    return url_for(endpoint, _external=True, **params)
+
+
+def _default_canonical_url():
+    """Build a default canonical URL for the current request path."""
+    canonical = _absolute_public_url(request.path)
+    lang = _current_lang_query_param()
+    if lang:
+        canonical = f"{canonical}?{urlencode({'lang': lang})}"
+    return canonical
+
+
+def _format_lastmod(value):
+    """Format datetime/date values for sitemap lastmod tags."""
+    if not value:
+        return None
+    try:
+        if hasattr(value, 'date'):
+            return value.date().isoformat()
+        return str(value)
+    except Exception:
+        return None
+
+
+def _as_absolute_url(url_value):
+    """Convert relative URLs to absolute public URLs."""
+    if not url_value:
+        return None
+    if url_value.startswith('http://') or url_value.startswith('https://'):
+        return url_value
+    path = url_value if url_value.startswith('/') else f'/{url_value}'
+    return _absolute_public_url(path)
+
+
+def _normalize_feed_gtin(value):
+    """Return GTIN if it matches allowed lengths, else None."""
+    if value is None:
+        return None
+    digits_only = ''.join(ch for ch in str(value) if ch.isdigit())
+    if len(digits_only) in {8, 12, 13, 14}:
+        return digits_only
+    return None
+
+
+def _format_feed_price(value):
+    """Return a Google feed-compatible price string with 2 decimals."""
+    try:
+        return f"{float(value):.2f}"
+    except (TypeError, ValueError):
+        return "0.00"
+
+
+def _render_sitemap_urlset(entries):
+    """Render a sitemap <urlset> response."""
+    lines = [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
+    ]
+    for entry in entries:
+        lines.append('<url>')
+        lines.append(f"<loc>{escape(entry['loc'])}</loc>")
+        if entry.get('lastmod'):
+            lines.append(f"<lastmod>{escape(entry['lastmod'])}</lastmod>")
+        if entry.get('changefreq'):
+            lines.append(f"<changefreq>{escape(entry['changefreq'])}</changefreq>")
+        if entry.get('priority') is not None:
+            lines.append(f"<priority>{entry['priority']}</priority>")
+        lines.append('</url>')
+    lines.append('</urlset>')
+
+    return Response('\n'.join(lines), mimetype='application/xml')
+
+
+def _render_sitemap_index(entries):
+    """Render a sitemap index response."""
+    lines = [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
+    ]
+    for entry in entries:
+        lines.append('<sitemap>')
+        lines.append(f"<loc>{escape(entry['loc'])}</loc>")
+        if entry.get('lastmod'):
+            lines.append(f"<lastmod>{escape(entry['lastmod'])}</lastmod>")
+        lines.append('</sitemap>')
+    lines.append('</sitemapindex>')
+
+    return Response('\n'.join(lines), mimetype='application/xml')
+
+
+def _render_product_detail_page(product, language):
+    """Render product detail template with consistent related products logic."""
+    related_products = Product.query.filter(
+        Product.category_id == product.category_id,
+        Product.id != product.id,
+        Product.is_active == True
+    ).limit(4).all()
+
+    canonical_endpoint = 'frontend.product_detail_slug' if product.slug else 'frontend.product_detail'
+    canonical_params = {'slug': product.slug} if product.slug else {'product_id': product.id}
+
+    return render_template(
+        'frontend/product_detail.html',
+        product=product.to_dict(language=language),
+        related_products=[rp.to_dict(language=language) for rp in related_products],
+        canonical_url=_build_external_url(canonical_endpoint, **canonical_params)
+    )
 
 
 @frontend_bp.route('/')
@@ -145,29 +277,59 @@ def shop():
     categories = ProductCategory.query.filter_by(is_active=True).all()
     categories = [c.to_dict(language=language) for c in categories]
     
-    return render_template('frontend/shop.html',
-                         products=products_pagination,
-                         categories=categories,
-                         current_category=category_id,
-                         search_query=search)
+    base_listing_params = {}
+    if category_id:
+        base_listing_params['category'] = category_id
+    if search:
+        base_listing_params['search'] = search
+
+    canonical_params = {}
+    if category_id:
+        canonical_params['category'] = category_id
+    if page > 1:
+        canonical_params['page'] = page
+
+    # Internal search result pages should generally not be indexed.
+    meta_robots = None
+    if search:
+        meta_robots = 'noindex,follow,max-image-preview:large,max-snippet:-1,max-video-preview:-1'
+
+    prev_page_url = None
+    next_page_url = None
+    if products_pagination.has_prev:
+        prev_page_url = _build_external_url('frontend.shop', page=products_pagination.prev_num, **base_listing_params)
+    if products_pagination.has_next:
+        next_page_url = _build_external_url('frontend.shop', page=products_pagination.next_num, **base_listing_params)
+
+    return render_template(
+        'frontend/shop.html',
+        products=products_pagination,
+        categories=categories,
+        current_category=category_id,
+        search_query=search,
+        canonical_url=_build_external_url('frontend.shop', **canonical_params),
+        meta_robots=meta_robots,
+        prev_page_url=prev_page_url,
+        next_page_url=next_page_url
+    )
 
 
 @frontend_bp.route('/product/<int:product_id>')
 def product_detail(product_id):
-    """Product detail page"""
+    """Legacy product detail route using ID, kept for backward compatibility."""
     language = get_current_language()
     product = Product.query.get_or_404(product_id)
-    
-    # Get related products
-    related_products = Product.query.filter(
-        Product.category_id == product.category_id,
-        Product.id != product.id,
-        Product.is_active == True
-    ).limit(4).all()
-    
-    return render_template('frontend/product_detail.html',
-                         product=product.to_dict(language=language),
-                         related_products=[rp.to_dict(language=language) for rp in related_products])
+    if product.slug:
+        return redirect(url_for('frontend.product_detail_slug', slug=product.slug), code=301)
+    return _render_product_detail_page(product, language)
+
+
+@frontend_bp.route('/product/<slug>')
+def product_detail_slug(slug):
+    """Primary SEO-friendly product detail route."""
+    language = get_current_language()
+    product = Product.query.filter_by(slug=slug).first_or_404()
+    return _render_product_detail_page(product, language)
 
 
 @frontend_bp.route('/cart')
@@ -743,12 +905,72 @@ def inject_global_vars():
         # In production, use absolute URLs for cross-subdomain navigation
         main_site_url = f"{scheme}://bluestream.uz"
         cabinet_site_url = f"{scheme}://cabinet.bluestream.uz"
+
+    supported_languages = list(current_app.config['LANGUAGES'].keys())
+    default_language = current_app.config.get('DEFAULT_LANGUAGE', 'uz')
+    default_meta_description = (
+        "Aqua Element - Premium drinking water delivery, subscriptions, and water products."
+    )
+    noindex_endpoints = {
+        'frontend.login',
+        'frontend.register',
+        'frontend.verify_email',
+        'frontend.verify_phone',
+        'frontend.forgot_password',
+        'frontend.reset_password',
+        'frontend.checkout',
+        'frontend.order_confirmation',
+        'frontend.payment_success',
+        'frontend.my_account',
+        'frontend.my_orders',
+        'frontend.my_subscriptions',
+        'frontend.my_loyalty',
+        'frontend.addresses',
+        'frontend.profile_settings',
+        'frontend.account_security',
+        'frontend.cart',
+    }
+    default_meta_robots = None
+    if request.endpoint in noindex_endpoints:
+        default_meta_robots = 'noindex,follow,max-image-preview:large,max-snippet:-1,max-video-preview:-1'
+
+    def localized_url_for_lang(language_code):
+        """Build current page URL with an explicit `lang` query param for hreflang tags."""
+        if language_code not in current_app.config['LANGUAGES']:
+            language_code = default_language
+
+        query_args = request.args.to_dict(flat=False)
+        query_args['lang'] = [language_code]
+
+        try:
+            if request.endpoint:
+                base_url = url_for(request.endpoint, _external=True, **(request.view_args or {}))
+            else:
+                base_url = _absolute_public_url(request.path)
+        except Exception:
+            base_url = _absolute_public_url(request.path)
+
+        query_string = urlencode(query_args, doseq=True)
+        if query_string:
+            return f"{base_url}?{query_string}"
+        return base_url
+
+    def external_url_for_lang(endpoint, **kwargs):
+        """Build external endpoint URL preserving current valid language query param."""
+        return _build_external_url(endpoint, **kwargs)
     
     return {
         'current_language': language,
+        'supported_languages': supported_languages,
+        'default_language': default_language,
+        'default_meta_description': default_meta_description,
+        'default_canonical_url': _default_canonical_url(),
+        'default_meta_robots': default_meta_robots,
+        'localized_url_for_lang': localized_url_for_lang,
+        'external_url_for_lang': external_url_for_lang,
         'nav_categories': categories,
         'current_user': user_info,
-        'company_name': 'Blue Stream Group',
+        'company_name': 'Aqua Element',
         'company_phone': '+998 94 524 4680',
         'company_email': 'info@bluestream.uz',
         'moment': lambda: MomentJS(),
@@ -760,6 +982,178 @@ def inject_global_vars():
         'is_cabinet_subdomain': is_cabinet_subdomain,
         'is_admin_subdomain': is_admin_subdomain
     }
+
+
+# Sitemap routes
+
+
+@frontend_bp.route('/sitemap.xml')
+def sitemap_index():
+    """Sitemap index that points to segmented sitemap files."""
+    now = _format_lastmod(datetime.now(UTC))
+    entries = [
+        {'loc': _absolute_public_url('/sitemap-static.xml'), 'lastmod': now},
+        {'loc': _absolute_public_url('/sitemap-products.xml'), 'lastmod': now},
+        {'loc': _absolute_public_url('/sitemap-blog.xml'), 'lastmod': now},
+    ]
+    return _render_sitemap_index(entries)
+
+
+@frontend_bp.route('/sitemap-static.xml')
+def sitemap_static():
+    """Sitemap for static/public marketing pages."""
+    now = _format_lastmod(datetime.now(UTC))
+    paths = [
+        '/',
+        '/shop',
+        '/subscriptions',
+        '/services',
+        '/about',
+        '/contact',
+        '/gallery',
+        '/blog',
+        '/terms',
+        '/privacy',
+    ]
+    entries = [
+        {
+            'loc': _absolute_public_url(path),
+            'lastmod': now,
+            'changefreq': 'weekly',
+            'priority': '0.8' if path == '/' else '0.6',
+        }
+        for path in paths
+    ]
+    return _render_sitemap_urlset(entries)
+
+
+@frontend_bp.route('/sitemap-products.xml')
+def sitemap_products():
+    """Sitemap for active product pages."""
+    products = Product.query.filter_by(is_active=True).all()
+    entries = []
+    for product in products:
+        if product.slug:
+            product_path = url_for('frontend.product_detail_slug', slug=product.slug)
+        else:
+            product_path = url_for('frontend.product_detail', product_id=product.id)
+
+        entries.append(
+            {
+                'loc': _absolute_public_url(product_path),
+                'lastmod': _format_lastmod(getattr(product, 'updated_at', None) or getattr(product, 'created_at', None)),
+                'changefreq': 'weekly',
+                'priority': '0.7',
+            }
+        )
+    return _render_sitemap_urlset(entries)
+
+
+@frontend_bp.route('/sitemap-blog.xml')
+def sitemap_blog():
+    """Sitemap for published blog pages."""
+    posts = BlogPost.query.filter(
+        BlogPost.status == BlogStatus.PUBLISHED,
+        BlogPost.published_at <= datetime.now(UTC)
+    ).order_by(desc(BlogPost.published_at)).all()
+
+    entries = [
+        {
+            'loc': _absolute_public_url(url_for('frontend.blog_detail', slug=post.slug)),
+            'lastmod': _format_lastmod(post.published_at or getattr(post, 'updated_at', None)),
+            'changefreq': 'monthly',
+            'priority': '0.6',
+        }
+        for post in posts
+    ]
+    return _render_sitemap_urlset(entries)
+
+
+@frontend_bp.route('/feeds/google-products.xml')
+def google_products_feed():
+    """Google Merchant-compatible product feed (XML RSS)."""
+    language = current_app.config.get('DEFAULT_LANGUAGE', 'uz')
+    products = Product.query.filter_by(is_active=True).all()
+
+    lines = [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<rss version="2.0" xmlns:g="http://base.google.com/ns/1.0">',
+        '<channel>',
+        f'<title>{escape("Aqua Element Product Feed")}</title>',
+        f'<link>{escape(_absolute_public_url("/shop"))}</link>',
+        f'<description>{escape("Aqua Element catalog for shopping discovery and product search.")}</description>',
+    ]
+
+    for product in products:
+        product_data = product.to_dict(language=language)
+        product_name = product_data.get('name') or f'Product {product.id}'
+        product_description = (
+            product_data.get('meta_description')
+            or product_data.get('short_description')
+            or product_data.get('description')
+            or product_name
+        )
+        base_price_raw = product_data.get('base_price') or 0
+        discount_price_raw = product_data.get('discount_price')
+        base_price_value = float(base_price_raw) if base_price_raw is not None else 0.0
+        discount_price_value = float(discount_price_raw) if discount_price_raw is not None else 0.0
+        if base_price_value <= 0 and discount_price_value > 0:
+            base_price_value = discount_price_value
+            discount_price_value = 0.0
+        use_sale_price = discount_price_value > 0 and discount_price_value < base_price_value
+        product_availability = 'in stock' if (product.stock_quantity or 0) > 0 else 'out of stock'
+
+        if product.slug:
+            product_link = _absolute_public_url(url_for('frontend.product_detail_slug', slug=product.slug))
+        else:
+            product_link = _absolute_public_url(url_for('frontend.product_detail', product_id=product.id))
+
+        images = product_data.get('images') or []
+        image_link = _as_absolute_url(images[0]) if images else _as_absolute_url(url_for('static', filename='images/logo.png'))
+        additional_images = []
+        for image in images[1:11]:
+            absolute_image = _as_absolute_url(image)
+            if absolute_image:
+                additional_images.append(absolute_image)
+        mpn = (product.sku or '').strip() if getattr(product, 'sku', None) else None
+        gtin = _normalize_feed_gtin(getattr(product, 'barcode', None))
+        identifier_exists = bool(mpn or gtin)
+
+        lines.extend([
+            '<item>',
+            f'<g:id>{product.id}</g:id>',
+            f'<title>{escape(str(product_name))}</title>',
+            f'<description>{escape(str(product_description))}</description>',
+            f'<link>{escape(product_link)}</link>',
+            f'<g:price>{_format_feed_price(base_price_value)} UZS</g:price>',
+            f'<g:availability>{product_availability}</g:availability>',
+            '<g:condition>new</g:condition>',
+            f'<g:brand>{escape("Aqua Element")}</g:brand>',
+            f'<g:google_product_category>{escape("Food, Beverages & Tobacco > Beverages > Water")}</g:google_product_category>',
+        ])
+
+        if use_sale_price:
+            lines.append(f'<g:sale_price>{_format_feed_price(discount_price_value)} UZS</g:sale_price>')
+
+        if image_link:
+            lines.append(f'<g:image_link>{escape(image_link)}</g:image_link>')
+
+        for additional_image in additional_images:
+            lines.append(f'<g:additional_image_link>{escape(additional_image)}</g:additional_image_link>')
+
+        if product_data.get('category') and product_data['category'].get('name'):
+            lines.append(f'<g:product_type>{escape(str(product_data["category"]["name"]))}</g:product_type>')
+
+        if mpn:
+            lines.append(f'<g:mpn>{escape(mpn)}</g:mpn>')
+        if gtin:
+            lines.append(f'<g:gtin>{escape(gtin)}</g:gtin>')
+        lines.append(f'<g:identifier_exists>{"yes" if identifier_exists else "no"}</g:identifier_exists>')
+
+        lines.append('</item>')
+
+    lines.extend(['</channel>', '</rss>'])
+    return Response('\n'.join(lines), mimetype='application/xml')
 
 
 # Custom template filters
@@ -833,11 +1227,37 @@ def blog_list():
     # Paginate
     pagination = query.paginate(page=page, per_page=per_page, error_out=False)
 
-    return render_template('frontend/blog_list.html',
-                         posts=pagination.items,
-                         pagination=pagination,
-                         current_category=category,
-                         current_tag=tag)
+    base_listing_params = {}
+    if category:
+        base_listing_params['category'] = category
+    if tag:
+        base_listing_params['tag'] = tag
+
+    canonical_params = {}
+    if category:
+        canonical_params['category'] = category
+    if tag:
+        canonical_params['tag'] = tag
+    if page > 1:
+        canonical_params['page'] = page
+
+    prev_page_url = None
+    next_page_url = None
+    if pagination.has_prev:
+        prev_page_url = _build_external_url('frontend.blog_list', page=pagination.prev_num, **base_listing_params)
+    if pagination.has_next:
+        next_page_url = _build_external_url('frontend.blog_list', page=pagination.next_num, **base_listing_params)
+
+    return render_template(
+        'frontend/blog_list.html',
+        posts=pagination.items,
+        pagination=pagination,
+        current_category=category,
+        current_tag=tag,
+        canonical_url=_build_external_url('frontend.blog_list', **canonical_params),
+        prev_page_url=prev_page_url,
+        next_page_url=next_page_url
+    )
 
 
 @frontend_bp.route('/blog/<slug>')
@@ -868,6 +1288,9 @@ def blog_detail(slug):
         BlogPost.category == post.category
     ).order_by(desc(BlogPost.published_at)).limit(5).all()
 
-    return render_template('frontend/blog_detail.html',
-                         post=post,
-                         recent_posts=recent_posts)
+    return render_template(
+        'frontend/blog_detail.html',
+        post=post,
+        recent_posts=recent_posts,
+        canonical_url=_build_external_url('frontend.blog_detail', slug=post.slug)
+    )

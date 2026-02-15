@@ -217,14 +217,20 @@ class NotificationService:
         delivery = Delivery.query.get(delivery_id)
         if not delivery:
             raise NotificationError(get_translation('error.not_found'))
-        
+
+        delivery_person = delivery.delivery_person
+
         template_data = {
-            'tracking_code': delivery.tracking_code,
-            'order_number': delivery.order.order_number,
+            'tracking_code': delivery.tracking_number,
+            'order_number': delivery.order.order_number if delivery.order else '',
             'delivery_status': delivery.status.value,
             'estimated_delivery': delivery.estimated_delivery_time.isoformat() if delivery.estimated_delivery_time else None,
-            'driver_name': f"{delivery.driver.first_name} {delivery.driver.last_name}" if delivery.driver else None,
-            'driver_phone': delivery.driver.phone if delivery.driver else None
+            'driver_name': (
+                f"{delivery_person.first_name} {delivery_person.last_name or ''}".strip()
+                if delivery_person else None
+            ),
+            'driver_phone': delivery_person.phone if delivery_person else None,
+            'event_type': event_type,
         }
         
         return self.send_notification(
@@ -475,7 +481,13 @@ class NotificationService:
     def _send_sms_notification(self, user: User, notification_type: NotificationType,
                               template_data: Dict[str, Any], language: str) -> Dict[str, Any]:
         """Send SMS notification using Eskiz"""
-        logger.info(f"_send_sms_notification started {user=}, {notification_type=}, {template_data=}, {language=}")
+        logger.info(
+            "_send_sms_notification started user=%s, notification_type=%s, template_data=%s, language=%s",
+            user,
+            notification_type,
+            template_data,
+            language,
+        )
         if not self.eskiz_client:
             logger.error(f"_send_sms_notification error Eskiz SMS not configured")
             raise ConfigurationError(get_translation('error.configuration.sms_not_configured'))

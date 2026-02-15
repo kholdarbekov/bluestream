@@ -1507,7 +1507,7 @@ function copyReferralCode() {
 function shareReferralCode() {
     if (navigator.share) {
         navigator.share({
-            title: '{{ "Join Blue Stream Water Delivery"|t }}',
+            title: '{{ "Join Aqua Element Water Delivery"|t }}',
             text: `{{ "Use my referral code"|t }}: ${currentUserReferralCode}`,
             url: `${window.location.origin}?ref=${currentUserReferralCode}`
         });

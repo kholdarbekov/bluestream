@@ -1,6 +1,6 @@
 import re
 from datetime import datetime, timedelta, timezone
-from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, Text, ForeignKey, Index, Enum
+from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, Text, ForeignKey, Index, Enum, JSON
 from sqlalchemy.orm import relationship, backref
 from flask_sqlalchemy import SQLAlchemy
 from business_app import db
@@ -61,12 +61,16 @@ class User(db.Model, TimestampMixin):
     bot_state = Column(Text, nullable=True)  # JSON string for bot conversation state
     last_bot_interaction = Column(DateTime(timezone=True), nullable=True)
 
+    # Staff bot fields
+    staff_roles = Column(JSON, default=list)  # e.g. ["delivery_driver", "operator"]
+    staff_bot_state = Column(JSON, default=dict)  # Conversation state for staff bot (separate from customer bot_state)
+
     # Cart
     cart = relationship("Cart", back_populates="user", uselist=False)
 
     # Relationships
     addresses = relationship('UserAddress', back_populates='user', cascade='all, delete-orphan')
-    orders = relationship('Order', back_populates='user')
+    orders = relationship('Order', foreign_keys='Order.user_id', back_populates='user')
     subscriptions = relationship('Subscription', back_populates='user')
     payments = relationship('Payment', back_populates='user')
     loyalty_transactions = relationship('LoyaltyTransaction', back_populates='user')
@@ -185,6 +189,7 @@ class User(db.Model, TimestampMixin):
             'is_bot_active': self.is_bot_active,
             'bot_state': self.bot_state,
             'last_bot_interaction': self.last_bot_interaction.isoformat() if self.last_bot_interaction else None,
+            'staff_roles': self.staff_roles or [],
             'created_at': self.created_at.isoformat() if self.created_at else None
         }
 

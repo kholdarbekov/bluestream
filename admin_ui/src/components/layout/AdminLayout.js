@@ -1,11 +1,11 @@
 import React, { useState, useCallback } from 'react';
-import { 
-  Layout, 
-  Menu, 
-  Avatar, 
-  Dropdown, 
-  Button, 
-  Typography, 
+import {
+  Layout,
+  Menu,
+  Avatar,
+  Dropdown,
+  Button,
+  Typography,
   Space,
   Drawer,
   Badge
@@ -25,7 +25,8 @@ import {
   LogoutOutlined,
   MenuOutlined,
   FileTextOutlined,
-  TagsOutlined
+  TagsOutlined,
+  TeamOutlined
 } from '@ant-design/icons';
 import { useAuthStore } from '../../stores/authStore';
 import { useRealTimeWithFallback } from '../../hooks/useRealTimeUpdates';
@@ -135,6 +136,25 @@ const AdminLayout = ({ children }) => {
       label: t('ui.nav.translations')
     },
     {
+      key: '/staff',
+      icon: <TeamOutlined />,
+      label: t('ui.nav.staff'),
+      children: [
+        {
+          key: '/staff/delivery-persons',
+          label: t('ui.nav.delivery_persons')
+        },
+        {
+          key: '/staff/operators',
+          label: t('ui.nav.operators')
+        },
+        {
+          key: '/staff/management',
+          label: t('ui.nav.staff_management')
+        }
+      ]
+    },
+    {
       key: '/settings',
       icon: <SettingOutlined />,
       label: t('ui.nav.settings')
@@ -226,7 +246,7 @@ const AdminLayout = ({ children }) => {
       selectedKeys={[location.pathname]}
       items={menuItems}
       onClick={handleMenuClick}
-      style={{ 
+      style={{
         border: 'none',
         fontSize: '14px'
       }}
@@ -273,11 +293,11 @@ const AdminLayout = ({ children }) => {
       {/* Main Layout */}
       <Layout>
         {/* Header - Responsive for all devices */}
-        <Header 
+        <Header
           className={`admin-header ${responsive.shouldUseDrawerNavigation ? 'mobile-header' : 'desktop-header'}`}
-          style={{ 
-            padding: responsive.shouldUseDrawerNavigation 
-              ? responsive.getContainerPadding() 
+          style={{
+            padding: responsive.shouldUseDrawerNavigation
+              ? responsive.getContainerPadding()
               : `0 ${responsive.getContainerPadding()}`,
             height: responsive.shouldUseDrawerNavigation ? 'auto' : '64px',
             minHeight: responsive.shouldUseDrawerNavigation ? '64px' : '64px',
@@ -301,17 +321,17 @@ const AdminLayout = ({ children }) => {
                 type="text"
                 icon={<MenuOutlined />}
                 onClick={responsive.shouldUseDrawerNavigation ? toggleMobileDrawer : toggleSidebar}
-                style={{ 
+                style={{
                   fontSize: '16px',
                   width: responsive.isTouchDevice ? '44px' : '40px',
                   height: responsive.isTouchDevice ? '44px' : '40px'
                 }}
               />
-              
+
               {/* Page Title - Always visible on desktop, conditional on mobile */}
-              <Title 
-                level={responsive.isMobileDevice ? 4 : 3} 
-                style={{ 
+              <Title
+                level={responsive.isMobileDevice ? 4 : 3}
+                style={{
                   margin: 0,
                   fontSize: responsive.getFontSize('16px', '18px', '20px'),
                   display: responsive.isMobile ? 'none' : 'block'
@@ -322,8 +342,8 @@ const AdminLayout = ({ children }) => {
             </Space>
 
             {/* Right side - Proper UX alignment */}
-            <div style={{ 
-              display: 'flex', 
+            <div style={{
+              display: 'flex',
               alignItems: 'center',
               gap: responsive.isMobileDevice ? '8px' : '16px',
               marginLeft: 'auto' // Ensures right alignment
@@ -346,8 +366,8 @@ const AdminLayout = ({ children }) => {
               {/* Notifications - Hidden on very small screens */}
               {!responsive.isMobile && (
                 <Badge count={0} size="small">
-                  <Button 
-                    type="text" 
+                  <Button
+                    type="text"
                     icon={<BellOutlined />}
                     style={{
                       width: responsive.isTouchDevice ? '44px' : '40px',
@@ -366,7 +386,7 @@ const AdminLayout = ({ children }) => {
                 placement="bottomRight"
                 trigger={['click']}
               >
-                <div style={{ 
+                <div style={{
                   cursor: 'pointer',
                   display: 'flex',
                   alignItems: 'center',
@@ -385,13 +405,13 @@ const AdminLayout = ({ children }) => {
                     style={{ backgroundColor: '#1890ff' }}
                   />
                   {!responsive.isMobileDevice && (
-                    <div style={{ 
+                    <div style={{
                       textAlign: 'left',
                       minWidth: '120px' // Prevents layout shift
                     }}>
-                      <Text 
-                        strong 
-                        style={{ 
+                      <Text
+                        strong
+                        style={{
                           fontSize: '14px',
                           display: 'block',
                           lineHeight: '1.2',
@@ -422,7 +442,7 @@ const AdminLayout = ({ children }) => {
 
           {/* Mobile page title below header - Only on very small screens */}
           {responsive.isMobile && (
-            <div style={{ 
+            <div style={{
               position: 'absolute',
               bottom: '-32px',
               left: '50%',
@@ -433,9 +453,9 @@ const AdminLayout = ({ children }) => {
               background: '#fff',
               borderBottom: '1px solid #f0f0f0'
             }}>
-              <Text 
-                strong 
-                style={{ 
+              <Text
+                strong
+                style={{
                   fontSize: '16px',
                   color: '#262626'
                 }}
@@ -447,9 +467,9 @@ const AdminLayout = ({ children }) => {
         </Header>
 
         {/* Content Area */}
-        <Content 
+        <Content
           className={`admin-content ${responsive.shouldUseDrawerNavigation ? 'mobile-content' : 'desktop-content'}`}
-          style={{ 
+          style={{
             padding: responsive.getContainerPadding(),
             marginTop: responsive.isMobile ? '32px' : '0', // Account for mobile title
             minHeight: `calc(100vh - 64px - ${responsive.isMobile ? '32px' : '0px'})`,

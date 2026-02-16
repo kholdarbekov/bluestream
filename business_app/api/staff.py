@@ -2,9 +2,8 @@
 Staff API endpoints for the Water Business Platform.
 Handles staff authentication, delivery operations, and operator actions.
 """
-from flask import Blueprint, request, jsonify
-from flask_jwt_extended import jwt_required, get_jwt_identity, create_access_token, create_refresh_token
-from datetime import timedelta
+from flask import Blueprint, request, current_app
+from flask_jwt_extended import jwt_required, get_jwt_identity
 
 from business_app.services.staff_service import StaffService
 from business_app.utils.error_handlers import handle_api_exception
@@ -63,25 +62,25 @@ def staff_login():
 @jwt_required(refresh=True)
 def staff_refresh_token():
     """Refresh JWT access token"""
-    current_user_id = get_jwt_identity()
-    from business_app.models.user import User
-    user = User.query.get(current_user_id)
+    auth_header = request.headers.get('Authorization', '')
+    refresh_token = None
+    if auth_header.startswith('Bearer '):
+        refresh_token = auth_header[7:].strip()
 
-    if not user:
-        raise NotFoundError("User not found")
+    if not refresh_token:
+        refresh_cookie_name = current_app.config.get('JWT_REFRESH_COOKIE_NAME', 'refresh_token_cookie')
+        refresh_token = request.cookies.get(refresh_cookie_name)
 
-    access_token = create_access_token(
-        identity=user.id,
-        additional_claims={
-            'role': user.role.value if hasattr(user.role, 'value') else user.role,
-            'staff_roles': user.staff_roles or [],
-        },
-        expires_delta=timedelta(hours=24)
-    )
+    if not refresh_token:
+        raise ValidationError("Refresh token is required")
+
+    from business_app.services.token_service import TokenService
+    token_service = TokenService()
+    refreshed = token_service.refresh_access_token(refresh_token)
 
     return success_response({
-        'access_token': access_token,
-        'expires_in': 86400,
+        'access_token': refreshed['access_token'],
+        'expires_in': refreshed.get('expires_in', 3600),
     })
 
 

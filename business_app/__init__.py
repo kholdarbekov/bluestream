@@ -291,6 +291,15 @@ def setup_request_handlers(app):
 def setup_jwt_handlers(app):
     """Setup JWT-related handlers"""
     
+    @jwt.user_identity_loader
+    def user_identity_lookup(identity):
+        """
+        Normalize JWT identity into a string for RFC-compliant `sub` claim.
+        """
+        if identity is None:
+            raise ValueError("JWT identity cannot be None")
+        return str(identity)
+    
     @jwt.expired_token_loader
     def expired_token_callback(jwt_header, jwt_payload):
         app.logger.warning(f'JWT Expired Token: user_id={jwt_payload.get("user_id")}, exp={jwt_payload.get("exp")}')
@@ -581,5 +590,4 @@ def create_app(config_class=None):
 
     print(f"!!! CREATE_APP FINISHED - app id: {id(app)}, app.config['DEBUG']: {app.config.get('DEBUG')}")
     return app
-
 

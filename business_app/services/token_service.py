@@ -205,6 +205,9 @@ class TokenService:
                 'issued_at': datetime.now(timezone.utc).isoformat(),
                 'session_id': session_id
             }
+            # Preserve staff context across refreshes for staff-bot tokens.
+            if getattr(user, 'staff_roles', None):
+                new_claims['staff_roles'] = user.staff_roles
             
             access_token = create_access_token(
                 identity=str(user.id),

@@ -209,6 +209,7 @@ def setup_request_handlers(app):
 
         # Set the language in request context
         g.language = lang
+        g.language_source = lang_source or "Unknown"
 
         # Persist resolved language for frontend requests so reloads remain stable
         # even when JWT/session source availability changes between requests.
@@ -227,6 +228,11 @@ def setup_request_handlers(app):
         # Echo request ID for distributed tracing
         if hasattr(g, 'request_id'):
             response.headers['X-Request-ID'] = g.request_id
+
+        # Optional diagnostics for production language behavior.
+        if app.config.get('LANGUAGE_DEBUG_HEADERS', False):
+            response.headers['X-App-Language'] = getattr(g, 'language', '')
+            response.headers['X-App-Language-Source'] = getattr(g, 'language_source', '')
 
         # Add performance monitoring
         if hasattr(g, 'start_time'):
@@ -448,15 +454,19 @@ def create_app(config_class=None):
         if not validation_passed and os.environ.get('FLASK_ENV') == 'production':
             raise RuntimeError("Environment validation failed in production")
     
-    # Jinja2 template caching: disable in development, enable in production
-    if app.debug:
+    # Jinja2 template behavior controls.
+    # Important: Jinja cache is compiled-template cache, not rendered HTML cache.
+    force_auto_reload = bool(app.config.get('JINJA_FORCE_AUTO_RELOAD', False))
+    disable_jinja_cache = bool(app.config.get('JINJA_DISABLE_CACHE', False))
+
+    app.config['TEMPLATES_AUTO_RELOAD'] = bool(app.debug or force_auto_reload)
+    app.jinja_env.auto_reload = app.config['TEMPLATES_AUTO_RELOAD']
+
+    if app.debug or disable_jinja_cache:
         app.jinja_env.cache = None
-        app.jinja_env.auto_reload = True
         app.jinja_env.cache_size = 0
         if hasattr(app.jinja_loader, '_mapping'):
             app.jinja_loader._mapping = {}
-    else:
-        app.jinja_env.auto_reload = False
     
     # Initialize extensions with app
     db.init_app(app)

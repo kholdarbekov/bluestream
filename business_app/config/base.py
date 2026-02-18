@@ -69,6 +69,14 @@ class BaseConfig:
             raise ValueError("Default SECRET_KEY must be changed")
     
     TESTING = False
+
+    # Template diagnostics
+    # NOTE: Jinja template caching stores compiled templates, not rendered output.
+    # These flags are for controlled production debugging when template reload/caching
+    # behavior needs to be ruled out explicitly.
+    JINJA_FORCE_AUTO_RELOAD = os.environ.get('JINJA_FORCE_AUTO_RELOAD', 'False').lower() == 'true'
+    JINJA_DISABLE_CACHE = os.environ.get('JINJA_DISABLE_CACHE', 'False').lower() == 'true'
+    LANGUAGE_DEBUG_HEADERS = os.environ.get('LANGUAGE_DEBUG_HEADERS', 'False').lower() == 'true'
     
     # Database Configuration
     @property

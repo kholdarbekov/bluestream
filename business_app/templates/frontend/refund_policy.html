@@ -1,0 +1,40 @@
+{% extends "frontend/base.html" %}
+{% set meta_description = "Refund and return policy for Blue Stream Group: eligibility, issue reporting timelines, and refund processing details." %}
+
+{% block title %}Refund Policy - {{ company_name }}{% endblock %}
+
+{% block content %}
+<section class="page-title centred" style="background-image: url({{ url_for('static', filename='images/background/page-title.jpg') }});">
+    <div class="shape" style="background-image: url({{ url_for('static', filename='images/shape/banner-shap.png') }});"></div>
+    <div class="auto-container">
+        <div class="content-box">
+            <h1>Refund Policy</h1>
+            <ul class="bread-crumb clearfix">
+                <li><a href="{{ url_for('frontend.index') }}">{{ 'landing.nav.home'|t }}</a></li>
+                <li>Refund Policy</li>
+            </ul>
+        </div>
+    </div>
+</section>
+
+<section class="service-details">
+    <div class="auto-container">
+        <div class="content-box">
+            <h2>Eligibility</h2>
+            <p>Refund requests may be reviewed for confirmed fulfillment issues such as damaged items, incorrect items, or undelivered orders with valid order records.</p>
+
+            <h2>How to Report an Issue</h2>
+            <p>Customers should report issues as soon as possible after delivery attempt, including order ID, issue details, and supporting photos when relevant.</p>
+
+            <h2>Review and Resolution</h2>
+            <p>Our support and operations teams review each case. Depending on the case, resolution may include replacement, partial refund, or full refund.</p>
+
+            <h2>Refund Timing</h2>
+            <p>Approved refunds are processed through the original payment channel where available. Processing times depend on payment providers and bank settlement timelines.</p>
+
+            <h2>Support Contact</h2>
+            <p>For refund and order support, contact <a href="tel:{{ company_phone }}">{{ company_phone }}</a> or email <a href="mailto:{{ company_email }}">{{ company_email }}</a>.</p>
+        </div>
+    </div>
+</section>
+{% endblock %}

@@ -1,0 +1,38 @@
+{% extends "frontend/base.html" %}
+{% set meta_description = "Delivery policy for Blue Stream Group: service area, scheduling windows, failed delivery handling, and support contacts." %}
+
+{% block title %}Delivery Policy - {{ company_name }}{% endblock %}
+
+{% block content %}
+<section class="page-title centred" style="background-image: url({{ url_for('static', filename='images/background/page-title.jpg') }});">
+    <div class="shape" style="background-image: url({{ url_for('static', filename='images/shape/banner-shap.png') }});"></div>
+    <div class="auto-container">
+        <div class="content-box">
+            <h1>Delivery Policy</h1>
+            <ul class="bread-crumb clearfix">
+                <li><a href="{{ url_for('frontend.index') }}">{{ 'landing.nav.home'|t }}</a></li>
+                <li>Delivery Policy</li>
+            </ul>
+        </div>
+    </div>
+</section>
+
+<section class="service-details">
+    <div class="auto-container">
+        <div class="content-box">
+            <h2>Service Coverage and Time Slots</h2>
+            <p>Blue Stream Group delivers orders within active service zones based on checkout address validation and available operational capacity.</p>
+            <p>Delivery windows are shown during checkout. Same-day delivery is available for many zones when slots remain open.</p>
+
+            <h2>Order Processing</h2>
+            <p>Orders are confirmed after successful placement and payment status verification. The delivery team receives assignment and routing details from the operations system.</p>
+
+            <h2>Failed Delivery and Reattempts</h2>
+            <p>If a recipient is unavailable at delivery time, our team may attempt contact using the provided phone number. Reattempt and rescheduling options depend on route capacity and product type.</p>
+
+            <h2>Contact for Delivery Support</h2>
+            <p>For delivery assistance, contact <a href="tel:{{ company_phone }}">{{ company_phone }}</a> or email <a href="mailto:{{ company_email }}">{{ company_email }}</a>.</p>
+        </div>
+    </div>
+</section>
+{% endblock %}

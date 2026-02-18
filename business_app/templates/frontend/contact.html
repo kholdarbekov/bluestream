@@ -1,6 +1,24 @@
 {% extends "frontend/base.html" %}
+{% set meta_description = "Contact Blue Stream Group for delivery questions, support requests, and service details." %}
 
 {% block title %}{{ 'landing.contact.title'|t }} - {{ company_name }}{% endblock %}
+
+{% block extra_meta %}
+{% set contact_page_schema = {
+    "@context": "https://schema.org",
+    "@type": "ContactPage",
+    "name": "Contact " ~ company_name,
+    "url": canonical_url if canonical_url is defined else request.url,
+    "mainEntity": {
+        "@type": "Organization",
+        "name": company_name,
+        "telephone": company_phone,
+        "email": company_email,
+        "url": url_for('frontend.index', _external=True)
+    }
+} %}
+<script type="application/ld+json">{{ contact_page_schema | tojson }}</script>
+{% endblock %}
 
 {% block extra_head %}
 <style>

@@ -1,0 +1,76 @@
+{% extends "frontend/base.html" %}
+{% set meta_description = "Quality standards at Blue Stream Group: sourcing, handling practices, and quality control approach for delivered water products." %}
+
+{% block title %}Quality Standards - {{ company_name }}{% endblock %}
+
+{% block extra_meta %}
+{% set quality_page_schema = {
+    "@context": "https://schema.org",
+    "@type": "WebPage",
+    "name": "Quality Standards",
+    "url": canonical_url if canonical_url is defined else request.url,
+    "description": meta_description,
+    "publisher": {
+        "@type": "Organization",
+        "name": company_name
+    }
+} %}
+<script type="application/ld+json">{{ quality_page_schema | tojson }}</script>
+{% endblock %}
+
+{% block content %}
+<section class="page-title centred" style="background-image: url({{ url_for('static', filename='images/background/page-title.jpg') }});">
+    <div class="shape" style="background-image: url({{ url_for('static', filename='images/shape/banner-shap.png') }});"></div>
+    <div class="auto-container">
+        <div class="content-box">
+            <h1>Quality Standards</h1>
+            <ul class="bread-crumb clearfix">
+                <li><a href="{{ url_for('frontend.index') }}">{{ 'landing.nav.home'|t }}</a></li>
+                <li>Quality Standards</li>
+            </ul>
+        </div>
+    </div>
+</section>
+
+<section class="service-details">
+    <div class="auto-container">
+        <div class="content-box">
+            <h2>Quality Focus</h2>
+            <p>Blue Stream Group prioritizes safe handling, consistent product quality, and transparent customer communication across all delivery workflows.</p>
+
+            <h2>Storage and Handling</h2>
+            <p>Products are stored and transported according to operational standards designed to maintain product integrity and delivery reliability.</p>
+
+            <h2>Operational Quality Control</h2>
+            <p>Order processing, dispatch, and delivery events are monitored through platform workflows to reduce delivery errors and improve consistency.</p>
+
+            <h2>Verifiable Quality Evidence</h2>
+            <p>Blue Stream Group maintains records that can be reviewed by support and operations teams for quality-related requests:</p>
+            <ul>
+                <li>Order-level timestamps for checkout, dispatch, and delivery completion</li>
+                <li>Product-level pricing and availability data shown on each product page</li>
+                <li>Policy documents that define delivery, pricing, and refund terms</li>
+                <li>Customer support communication history for issue investigation and resolution</li>
+            </ul>
+
+            <h2>Policy and Standards References</h2>
+            <p>The following pages define customer-facing standards and are used as source references for operational decisions:</p>
+            <ul>
+                <li><a href="{{ url_for('frontend.delivery_policy') }}">Delivery Policy</a></li>
+                <li><a href="{{ url_for('frontend.pricing_policy') }}">Pricing Policy</a></li>
+                <li><a href="{{ url_for('frontend.refund_policy') }}">Refund Policy</a></li>
+                <li><a href="{{ url_for('frontend.water_delivery_faq') }}">Water Delivery FAQ</a></li>
+            </ul>
+
+            <h2>Expert Review Workflow</h2>
+            <p>Operational procedures are reviewed periodically by responsible teams. Feedback from delivery incidents, customer reports, and process audits is incorporated into updated workflows.</p>
+
+            <h2>Continuous Improvement</h2>
+            <p>Customer feedback, service data, and incident reviews are used to improve fulfillment quality and customer outcomes over time.</p>
+
+            <h2>Contact</h2>
+            <p>Questions about quality standards can be directed to <a href="mailto:{{ company_email }}">{{ company_email }}</a>.</p>
+        </div>
+    </div>
+</section>
+{% endblock %}

@@ -209,6 +209,15 @@ def setup_request_handlers(app):
 
         # Set the language in request context
         g.language = lang
+
+        # Persist resolved language for frontend requests so reloads remain stable
+        # even when JWT/session source availability changes between requests.
+        endpoint = request.endpoint or ''
+        if endpoint.startswith('frontend.'):
+            if session.get('language') != lang:
+                session['language'] = lang
+                session.permanent = True
+                session.modified = True
     
     @app.after_request
     def after_request(response):
@@ -231,9 +240,14 @@ def setup_request_handlers(app):
             response.headers['Pragma'] = 'no-cache'
             response.headers['Expires'] = '0'
         
-        # Ensure Vary: Cookie is set so caches know content depends on cookies
-        if 'Components' not in response.headers.get('Vary', ''):
-            response.headers['Vary'] = 'Cookie'
+        # Ensure Vary includes all language-affecting request headers.
+        # This prevents proxy/CDN cache cross-talk between languages.
+        vary_value = response.headers.get('Vary', '')
+        vary_parts = {
+            part.strip() for part in vary_value.split(',') if part.strip()
+        }
+        vary_parts.update({'Cookie', 'Accept-Language'})
+        response.headers['Vary'] = ', '.join(sorted(vary_parts))
         
         # ===================================================================
         # JWT Implicit Token Refresh (Flask-JWT-Extended recommended approach)
@@ -590,4 +604,3 @@ def create_app(config_class=None):
 
     print(f"!!! CREATE_APP FINISHED - app id: {id(app)}, app.config['DEBUG']: {app.config.get('DEBUG')}")
     return app
-

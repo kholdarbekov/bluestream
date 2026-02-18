@@ -40,7 +40,7 @@
                     <div class="auto-container">
                         <div class="inner-box">
                             <div class="image-box">
-                                <figure class="image"><img src="{{ url_for('static', filename='images/banner/vector-5-elon-musk.png') }}" alt="{{ 'landing.image.water_delivery'|t }}"></figure>
+                                <figure class="image"><img src="{{ url_for('static', filename='images/banner/vector-5-elon-musk.png') }}" alt="{{ 'landing.image.water_delivery'|t }}" fetchpriority="high"></figure>
                             </div>
                             <div class="content-box">
                                 <h2>{{ 'landing.hero.title_1'|t }}</h2>
@@ -199,9 +199,9 @@
                             <div class="inner-box">
                                 <figure class="image-box">
                                     {% if product.images and product.images|length > 0 %}
-                                    <img src="{{ product.images[0] }}" alt="{{ product.name }}">
+                                    <img src="{{ product.images[0] }}" alt="{{ product.name }}" loading="lazy" decoding="async">
                                     {% else %}
-                                    <img src="{{ url_for('static', filename='images/resource/shop/shop-1.jpg') }}" alt="{{ product.name }}">
+                                    <img src="{{ url_for('static', filename='images/resource/shop/shop-1.jpg') }}" alt="{{ product.name }}" loading="lazy" decoding="async">
                                     {% endif %}
                                 </figure>
                                 <div class="lower-content">
@@ -381,9 +381,9 @@
                                         <figure class="image">
                                             <a href="{{ url_for('frontend.blog_detail', slug=post.slug) }}">
                                                 {% if post.featured_image %}
-                                                    <img src="{{ post.featured_image }}" alt="{{ post.image_alt_text or post.get_translated('title', current_language) }}">
+                                                    <img src="{{ post.featured_image }}" alt="{{ post.image_alt_text or post.get_translated('title', current_language) }}" loading="lazy" decoding="async">
                                                 {% else %}
-                                                    <img src="{{ url_for('static', filename='images/news/news-' ~ (loop.index + 3) ~ '.jpg') }}" alt="{{ post.get_translated('title', current_language) }}">
+                                                    <img src="{{ url_for('static', filename='images/news/news-' ~ (loop.index + 3) ~ '.jpg') }}" alt="{{ post.get_translated('title', current_language) }}" loading="lazy" decoding="async">
                                                 {% endif %}
                                             </a>
                                         </figure>

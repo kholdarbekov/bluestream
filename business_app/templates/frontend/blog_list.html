@@ -74,9 +74,9 @@
                                             <figure class="image-box">
                                                 <a href="{{ url_for('frontend.blog_detail', slug=post.slug) }}">
                                                     {% if post.featured_image %}
-                                                        <img src="{{ post.featured_image }}" alt="{{ post.image_alt_text or post.get_translated('title', current_language) }}">
+                                                        <img src="{{ post.featured_image }}" alt="{{ post.image_alt_text or post.get_translated('title', current_language) }}" loading="lazy" decoding="async">
                                                     {% else %}
-                                                        <img src="{{ url_for('static', filename='images/news/news-1.jpg') }}" alt="{{ post.get_translated('title', current_language) }}">
+                                                        <img src="{{ url_for('static', filename='images/news/news-1.jpg') }}" alt="{{ post.get_translated('title', current_language) }}" loading="lazy" decoding="async">
                                                     {% endif %}
                                                 </a>
                                             </figure>

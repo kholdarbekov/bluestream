@@ -1,0 +1,133 @@
+{% extends "frontend/base.html" %}
+{% set meta_description = "Water delivery FAQ from Blue Stream Group: delivery timing, order minimums, pricing, subscriptions, and support answers." %}
+
+{% if current_language == 'ru' %}
+    {% set faq_items = [
+        {'q': 'Как быстро вы доставляете воду?', 'a': 'В большинстве зон доставка доступна в тот же день при наличии свободного интервала.'},
+        {'q': 'Какие объемы бутылей доступны?', 'a': 'Обычно доступны форматы 5L, 10L и 19L. Наличие зависит от текущего каталога.'},
+        {'q': 'Есть ли минимальная сумма заказа?', 'a': 'Минимальные требования могут зависеть от района и времени. Точные условия показываются при оформлении заказа.'},
+        {'q': 'Можно ли оформить регулярную доставку?', 'a': 'Да, через страницу подписок можно настроить повторяющиеся поставки и изменить их в личном кабинете.'},
+        {'q': 'Как узнать точную цену?', 'a': 'Актуальная цена всегда отображается на карточке товара и в корзине до подтверждения заказа.'},
+        {'q': 'Что делать, если заказ задерживается?', 'a': 'Свяжитесь с поддержкой по телефону или email. Команда проверит статус и предложит решение.'}
+    ] %}
+{% elif current_language == 'en' %}
+    {% set faq_items = [
+        {'q': 'How fast is water delivery?', 'a': 'Most service zones support same-day delivery when an open time slot is available.'},
+        {'q': 'Which bottle sizes are available?', 'a': 'Common options include 5L, 10L, and 19L formats, depending on current catalog availability.'},
+        {'q': 'Is there a minimum order amount?', 'a': 'Minimum requirements can vary by location and schedule. Exact conditions are shown at checkout.'},
+        {'q': 'Can I set recurring deliveries?', 'a': 'Yes. Use the subscriptions page to configure recurring deliveries and adjust them in your account.'},
+        {'q': 'How do I confirm the exact price?', 'a': 'Current pricing is shown on product pages and in cart totals before order confirmation.'},
+        {'q': 'What if my order is delayed?', 'a': 'Contact support by phone or email and the team will verify delivery status and next steps.'}
+    ] %}
+{% else %}
+    {% set faq_items = [
+        {'q': 'Suv yetkazib berish qanchalik tez amalga oshiriladi?', 'a': 'Ko‘p hududlarda bo‘sh vaqt oralig‘i mavjud bo‘lsa, shu kunning o‘zida yetkazib berish mumkin.'},
+        {'q': 'Qaysi hajmdagi butilkalar mavjud?', 'a': 'Odatda 5L, 10L va 19L formatlar mavjud bo‘ladi. Mavjudlik katalogga qarab o‘zgaradi.'},
+        {'q': 'Minimal buyurtma summasi bormi?', 'a': 'Minimal talab hudud va vaqtga bog‘liq bo‘lishi mumkin. Aniq shartlar checkout sahifasida ko‘rsatiladi.'},
+        {'q': 'Muntazam yetkazib berish buyurtmasini sozlash mumkinmi?', 'a': 'Ha, obuna sahifasi orqali muntazam yetkazib berishni sozlab, kabinetda boshqarish mumkin.'},
+        {'q': 'Aniq narxni qanday bilaman?', 'a': 'Hozirgi narx mahsulot sahifasida va buyurtmani tasdiqlashdan oldin savatda ko‘rsatiladi.'},
+        {'q': 'Buyurtma kechiksa nima qilish kerak?', 'a': 'Telefon yoki email orqali qo‘llab-quvvatlashga murojaat qiling, jamoa holatni tekshiradi.'}
+    ] %}
+{% endif %}
+
+{% block title %}Water Delivery FAQ - {{ company_name }}{% endblock %}
+
+{% block extra_meta %}
+{% set faq_schema = namespace(items=[]) %}
+{% for faq in faq_items %}
+    {% set _ = faq_schema.items.append({
+        "@type": "Question",
+        "name": faq.q,
+        "acceptedAnswer": {
+            "@type": "Answer",
+            "text": faq.a
+        }
+    }) %}
+{% endfor %}
+{% set faq_page_schema = {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    "mainEntity": faq_schema.items
+} %}
+<script type="application/ld+json">{{ faq_page_schema | tojson }}</script>
+{% endblock %}
+
+{% block extra_head %}
+<style>
+.shop-seo-content {
+    padding: 80px 0 120px;
+}
+
+.shop-seo-content .seo-card {
+    background: #fff;
+    border-radius: 16px;
+    padding: 32px;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.06);
+}
+
+.shop-seo-content h2 {
+    font-size: 30px;
+    margin-bottom: 16px;
+}
+
+.shop-seo-content p {
+    margin-bottom: 18px;
+    color: #5b5b5b;
+}
+
+.shop-faq-list {
+    margin: 26px 0 0;
+    padding: 0;
+    list-style: none;
+}
+
+.shop-faq-list li + li {
+    margin-top: 18px;
+}
+
+.shop-faq-list h3 {
+    font-size: 19px;
+    margin-bottom: 8px;
+}
+
+.shop-faq-list p {
+    margin: 0;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<section class="page-title centred" style="background-image: url({{ url_for('static', filename='images/background/page-title.jpg') }});">
+    <div class="shape" style="background-image: url({{ url_for('static', filename='images/shape/banner-shap.png') }});"></div>
+    <div class="auto-container">
+        <div class="content-box">
+            <h1>Water Delivery FAQ</h1>
+            <ul class="bread-crumb clearfix">
+                <li><a href="{{ url_for('frontend.index') }}">{{ 'landing.nav.home'|t }}</a></li>
+                <li>FAQ</li>
+            </ul>
+        </div>
+    </div>
+</section>
+
+<section class="shop-seo-content">
+    <div class="auto-container">
+        <div class="seo-card">
+            <h2>Common Questions About Delivery and Orders</h2>
+            <p>These answers cover the most frequent delivery, pricing, and subscription questions customers ask before ordering.</p>
+            <ul class="shop-faq-list">
+                {% for faq in faq_items %}
+                <li>
+                    <h3>{{ faq.q }}</h3>
+                    <p>{{ faq.a }}</p>
+                </li>
+                {% endfor %}
+            </ul>
+            <p style="margin-top: 26px;">
+                Still need help? Contact us at <a href="tel:{{ company_phone }}">{{ company_phone }}</a> or
+                <a href="mailto:{{ company_email }}">{{ company_email }}</a>.
+            </p>
+        </div>
+    </div>
+</section>
+{% endblock %}

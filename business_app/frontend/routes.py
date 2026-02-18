@@ -1,10 +1,10 @@
 """Frontend routes for Blue Stream Water Business Platform."""
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit, urlunsplit, parse_qsl
 from xml.sax.saxutils import escape
 
 from flask import render_template, request, session, current_app, jsonify, redirect, url_for, flash, g, Response
 from flask_jwt_extended import jwt_required, get_jwt_identity, verify_jwt_in_request
-from sqlalchemy import desc
+from sqlalchemy import desc, or_
 
 from . import frontend_bp
 from business_app.models.product import Product, ProductCategory
@@ -40,8 +40,8 @@ def _current_lang_query_param():
 
 
 def _build_external_url(endpoint, **params):
-    """Build external URL preserving the current valid language query param."""
-    lang = _current_lang_query_param()
+    """Build external URL with a stable language query parameter."""
+    lang = _current_lang_query_param() or get_current_language()
     if lang and 'lang' not in params:
         params['lang'] = lang
     return url_for(endpoint, _external=True, **params)
@@ -678,6 +678,36 @@ def privacy():
     return render_template('frontend/privacy.html')
 
 
+@frontend_bp.route('/delivery-policy')
+def delivery_policy():
+    """Delivery policy page."""
+    return render_template('frontend/delivery_policy.html')
+
+
+@frontend_bp.route('/pricing-policy')
+def pricing_policy():
+    """Pricing policy page."""
+    return render_template('frontend/pricing_policy.html')
+
+
+@frontend_bp.route('/refund-policy')
+def refund_policy():
+    """Refund and return policy page."""
+    return render_template('frontend/refund_policy.html')
+
+
+@frontend_bp.route('/quality-standards')
+def quality_standards():
+    """Quality standards page."""
+    return render_template('frontend/quality_standards.html')
+
+
+@frontend_bp.route('/water-delivery-faq')
+def water_delivery_faq():
+    """Public FAQ page for delivery and product buying questions."""
+    return render_template('frontend/water_delivery_faq.html')
+
+
 @frontend_bp.route('/login')
 def login():
     """Login page"""
@@ -807,6 +837,23 @@ def set_language_route(language):
 
     redirect_url = request.referrer or url_for('frontend.index')
 
+    # Keep language explicit in URL to avoid language drift when session
+    # cookies are unavailable or inconsistent across hosts/proxies.
+    try:
+        parsed = urlsplit(redirect_url)
+        query = dict(parse_qsl(parsed.query, keep_blank_values=True))
+        query['lang'] = language
+        redirect_url = urlunsplit((
+            parsed.scheme,
+            parsed.netloc,
+            parsed.path,
+            urlencode(query),
+            parsed.fragment
+        ))
+    except Exception:
+        # Keep original fallback redirect URL if parsing fails for any reason.
+        pass
+
     resp = redirect(redirect_url)
     
     # Nuclear Option: Explicitly unset potential conflicting cookies
@@ -909,7 +956,7 @@ def inject_global_vars():
     supported_languages = list(current_app.config['LANGUAGES'].keys())
     default_language = current_app.config.get('DEFAULT_LANGUAGE', 'uz')
     default_meta_description = (
-        "Aqua Element - Premium drinking water delivery, subscriptions, and water products."
+        "Blue Stream Group - Premium drinking water delivery, subscriptions, and water products."
     )
     noindex_endpoints = {
         'frontend.login',
@@ -970,7 +1017,7 @@ def inject_global_vars():
         'external_url_for_lang': external_url_for_lang,
         'nav_categories': categories,
         'current_user': user_info,
-        'company_name': 'Aqua Element',
+        'company_name': 'Blue Stream Group',
         'company_phone': '+998 94 524 4680',
         'company_email': 'info@bluestream.uz',
         'moment': lambda: MomentJS(),
@@ -1014,6 +1061,11 @@ def sitemap_static():
         '/blog',
         '/terms',
         '/privacy',
+        '/delivery-policy',
+        '/pricing-policy',
+        '/refund-policy',
+        '/quality-standards',
+        '/water-delivery-faq',
     ]
     entries = [
         {
@@ -1079,9 +1131,9 @@ def google_products_feed():
         '<?xml version="1.0" encoding="UTF-8"?>',
         '<rss version="2.0" xmlns:g="http://base.google.com/ns/1.0">',
         '<channel>',
-        f'<title>{escape("Aqua Element Product Feed")}</title>',
+        f'<title>{escape("Blue Stream Group Product Feed")}</title>',
         f'<link>{escape(_absolute_public_url("/shop"))}</link>',
-        f'<description>{escape("Aqua Element catalog for shopping discovery and product search.")}</description>',
+        f'<description>{escape("Blue Stream catalog for shopping discovery and product search.")}</description>',
     ]
 
     for product in products:
@@ -1128,7 +1180,7 @@ def google_products_feed():
             f'<g:price>{_format_feed_price(base_price_value)} UZS</g:price>',
             f'<g:availability>{product_availability}</g:availability>',
             '<g:condition>new</g:condition>',
-            f'<g:brand>{escape("Aqua Element")}</g:brand>',
+            f'<g:brand>{escape("Blue Stream Group")}</g:brand>',
             f'<g:google_product_category>{escape("Food, Beverages & Tobacco > Beverages > Water")}</g:google_product_category>',
         ])
 
@@ -1288,9 +1340,40 @@ def blog_detail(slug):
         BlogPost.category == post.category
     ).order_by(desc(BlogPost.published_at)).limit(5).all()
 
+    # Add contextual product recommendations for stronger blog-to-product linking.
+    recommended_products = []
+    raw_tags = post.tags.split(',') if post.tags else []
+    normalized_tags = [tag.strip() for tag in raw_tags if tag.strip()]
+
+    if normalized_tags:
+        tag_conditions = []
+        for tag in normalized_tags[:6]:
+            pattern = f'%{tag}%'
+            tag_conditions.extend([
+                Product.name.ilike(pattern),
+                Product.short_description.ilike(pattern),
+                Product.description.ilike(pattern),
+            ])
+        if tag_conditions:
+            recommended_products = Product.query.filter(
+                Product.is_active == True,
+                or_(*tag_conditions)
+            ).order_by(desc(Product.is_featured), desc(Product.created_at)).limit(4).all()
+
+    if len(recommended_products) < 4:
+        existing_ids = {product.id for product in recommended_products}
+        fallback_query = Product.query.filter(Product.is_active == True)
+        if existing_ids:
+            fallback_query = fallback_query.filter(~Product.id.in_(existing_ids))
+        fallback_products = fallback_query.order_by(desc(Product.is_featured), desc(Product.created_at)).limit(
+            4 - len(recommended_products)
+        ).all()
+        recommended_products.extend(fallback_products)
+
     return render_template(
         'frontend/blog_detail.html',
         post=post,
         recent_posts=recent_posts,
+        recommended_products=[product.to_dict(language=language) for product in recommended_products],
         canonical_url=_build_external_url('frontend.blog_detail', slug=post.slug)
     )

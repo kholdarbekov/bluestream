@@ -57,7 +57,7 @@
                             <div class="inner-box">
                                 {% if post.featured_image %}
                                 <figure class="image-box">
-                                    <img src="{{ post.featured_image }}" alt="{{ post.image_alt_text or post.get_translated('title', current_language) }}">
+                                    <img src="{{ post.featured_image }}" alt="{{ post.image_alt_text or post.get_translated('title', current_language) }}" fetchpriority="high">
                                 </figure>
                                 {% endif %}
                                 <div class="lower-content">
@@ -132,15 +132,44 @@
                                 {% for recent_post in recent_posts %}
                                 <div class="recent-post">
                                     <div class="post-inner">
-                                        {% if recent_post.featured_image %}
+                                                {% if recent_post.featured_image %}
                                         <figure class="post-thumb">
                                             <a href="{{ url_for('frontend.blog_detail', slug=recent_post.slug) }}">
-                                                <img src="{{ recent_post.featured_image }}" alt="{{ recent_post.get_translated('title', current_language) }}">
+                                                <img src="{{ recent_post.featured_image }}" alt="{{ recent_post.get_translated('title', current_language) }}" loading="lazy" decoding="async">
                                             </a>
                                         </figure>
                                         {% endif %}
                                         <h5><a href="{{ url_for('frontend.blog_detail', slug=recent_post.slug) }}">{{ recent_post.get_translated('title', current_language) }}</a></h5>
                                         <span class="post-date">{{ recent_post.published_at.strftime('%B %d, %Y') if recent_post.published_at else '' }}</span>
+                                    </div>
+                                </div>
+                                {% endfor %}
+                            </div>
+                        </div>
+                        {% endif %}
+
+                        {% if recommended_products %}
+                        <div class="sidebar-widget recent-posts-widget">
+                            <div class="widget-title">
+                                <h4>{{ 'Recommended Products'|t }}</h4>
+                            </div>
+                            <div class="widget-content">
+                                {% for product in recommended_products %}
+                                <div class="recent-post">
+                                    <div class="post-inner">
+                                        {% if product.images and product.images|length > 0 %}
+                                        <figure class="post-thumb">
+                                            <a href="{% if product.slug %}{{ url_for('frontend.product_detail_slug', slug=product.slug) }}{% else %}{{ url_for('frontend.product_detail', product_id=product.id) }}{% endif %}">
+                                                <img src="{{ product.images[0] }}" alt="{{ product.name }}" loading="lazy" decoding="async">
+                                            </a>
+                                        </figure>
+                                        {% endif %}
+                                        <h5>
+                                            <a href="{% if product.slug %}{{ url_for('frontend.product_detail_slug', slug=product.slug) }}{% else %}{{ url_for('frontend.product_detail', product_id=product.id) }}{% endif %}">
+                                                {{ product.name }}
+                                            </a>
+                                        </h5>
+                                        <span class="post-date">{{ product.current_price|format_price }}</span>
                                     </div>
                                 </div>
                                 {% endfor %}

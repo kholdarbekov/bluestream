@@ -38,6 +38,8 @@
     <link rel="icon" href="{{ url_for('static', filename='images/favicon.ico') }}" type="image/x-icon">
     
     <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Spartan:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Open+Sans:ital,wght@0,300;0,400;0,600;0,700;0,800;1,300;1,400;1,600;1,700;1,800&display=swap" rel="stylesheet">
     
@@ -86,7 +88,7 @@
                 <div class="outer-box">
                     <div class="logo-box">
                         <figure class="logo">
-                        <a href="{{ main_site_url }}/">
+                        <a href="{{ external_url_for_lang('frontend.index') }}">
                             <img src="{{ url_for('static', filename='images/logo_aqua_element.svg') }}" alt="{{ company_name }}">
                         </a>
                         </figure>
@@ -102,30 +104,32 @@
                             <div class="collapse navbar-collapse show clearfix" id="navbarSupportedContent">
                                 <ul class="navigation clearfix">
                                     <li class="{% if request.endpoint == 'frontend.index' %}current{% endif %}">
-                                        <a href="{{ main_site_url }}/">{{ 'landing.nav.home'|t }}</a>
+                                        <a href="{{ external_url_for_lang('frontend.index') }}">{{ 'landing.nav.home'|t }}</a>
                                     </li>
                                     <li class="dropdown {% if request.endpoint in ['frontend.shop', 'frontend.product_detail', 'frontend.product_detail_slug'] %}current{% endif %}">
-                                        <a href="{{ main_site_url }}/shop">{{ 'landing.nav.shop'|t }}</a>
+                                        <a href="{{ external_url_for_lang('frontend.shop') }}">{{ 'landing.nav.shop'|t }}</a>
                                         {% if nav_categories %}
                                         <ul>
                                             {% for category in nav_categories[:6] %}
-                                            <li><a href="{{ url_for('frontend.shop', category=category.id) }}">{{ category.name }}</a></li>
+                                            <li><a href="{{ external_url_for_lang('frontend.shop', category=category.id) }}">{{ category.name }}</a></li>
                                             {% endfor %}
                                         </ul>
                                         {% endif %}
                                     </li>
                                     <li class="{% if request.endpoint == 'frontend.subscriptions' %}current{% endif %}">
-                                        <a href="{{ main_site_url }}/subscriptions">{{ 'landing.nav.subscriptions'|t }}</a>
+                                        <a href="{{ external_url_for_lang('frontend.subscriptions') }}">{{ 'landing.nav.subscriptions'|t }}</a>
                                     </li>
                                     <li class="{% if request.endpoint == 'frontend.services' %}current{% endif %}">
-                                        <a href="{{ main_site_url }}/services">{{ 'landing.nav.services'|t }}</a>
+                                        <a href="{{ external_url_for_lang('frontend.services') }}">{{ 'landing.nav.services'|t }}</a>
                                     </li>
                                     <li class="dropdown">
                                         <a href="#">{{ 'landing.nav.pages'|t }}</a>
                                         <ul>
-                                            <li><a href="{{ main_site_url }}/about">{{ 'landing.nav.about'|t }}</a></li>
-                                            <li><a href="{{ main_site_url }}/gallery">{{ 'landing.nav.gallery'|t }}</a></li>
-                                            <li><a href="{{ main_site_url }}/contact">{{ 'landing.nav.contact'|t }}</a></li>
+                                            <li><a href="{{ external_url_for_lang('frontend.about') }}">{{ 'landing.nav.about'|t }}</a></li>
+                                            <li><a href="{{ external_url_for_lang('frontend.gallery') }}">{{ 'landing.nav.gallery'|t }}</a></li>
+                                            <li><a href="{{ external_url_for_lang('frontend.blog_list') }}">Blog</a></li>
+                                            <li><a href="{{ external_url_for_lang('frontend.water_delivery_faq') }}">FAQ</a></li>
+                                            <li><a href="{{ external_url_for_lang('frontend.contact') }}">{{ 'landing.nav.contact'|t }}</a></li>
                                         </ul>
                                     </li>
                                 </ul>
@@ -142,6 +146,7 @@
                                     <div class="form-container">
                                         <form method="get" action="{{ url_for('frontend.shop') }}">
                                             <div class="form-group">
+                                                <input type="hidden" name="lang" value="{{ current_language }}">
                                                 <input type="search" name="search" placeholder="{{ 'landing.common.search_placeholder'|t }}" required>
                                                 <button type="submit" class="search-btn"><span class="fas fa-search"></span></button>
                                             </div>
@@ -167,7 +172,7 @@
                         
                         <!-- Shopping Cart -->
                         <li class="cart-box">
-                            <a href="{{ main_site_url }}/cart">
+                            <a href="{{ external_url_for_lang('frontend.cart') }}">
                                 <i class="fal fa-shopping-cart"></i>
                                 <span id="cart-count">0</span>
                             </a>
@@ -212,7 +217,7 @@
             <div class="sticky-header">
                 <div class="outer-box">
                     <div class="logo-box">
-                        <figure class="logo"><a href="{{ main_site_url }}/"><img src="{{ url_for('static', filename='images/logo_aqua_element.svg') }}" alt="{{ company_name }}"></a></figure>
+                        <figure class="logo"><a href="{{ external_url_for_lang('frontend.index') }}"><img src="{{ url_for('static', filename='images/logo_aqua_element.svg') }}" alt="{{ company_name }}"></a></figure>
                     </div>
                     <div class="menu-area clearfix">
                         <nav class="main-menu clearfix">
@@ -229,6 +234,7 @@
                                     <div class="form-container">
                                         <form method="get" action="{{ url_for('frontend.shop') }}">
                                             <div class="form-group">
+                                                <input type="hidden" name="lang" value="{{ current_language }}">
                                                 <input type="search" name="search" placeholder="{{ 'landing.common.search_placeholder'|t }}" required>
                                                 <button type="submit" class="search-btn"><span class="fas fa-search"></span></button>
                                             </div>
@@ -254,7 +260,7 @@
                         
                         <!-- Shopping Cart -->
                         <li class="cart-box">
-                            <a href="{{ main_site_url }}/cart">
+                            <a href="{{ external_url_for_lang('frontend.cart') }}">
                                 <i class="fal fa-shopping-cart"></i>
                                 <span id="cart-count-sticky">0</span>
                             </a>
@@ -303,7 +309,7 @@
             <div class="close-btn"><i class="fas fa-times"></i></div>
             
             <nav class="menu-box">
-                <div class="nav-logo"><a href="{{ main_site_url }}/"><img src="{{ url_for('static', filename='images/logo_aqua_element.svg') }}" alt="{{ company_name }}" title="{{ company_name }}"></a></div>
+                <div class="nav-logo"><a href="{{ external_url_for_lang('frontend.index') }}"><img src="{{ url_for('static', filename='images/logo_aqua_element.svg') }}" alt="{{ company_name }}" title="{{ company_name }}"></a></div>
                 <div class="menu-outer"><!--Here Menu Will Come Automatically Via Javascript / Same Menu as in Header--></div>
                 <div class="contact-info">
                     <h4>{{ 'landing.footer.contact_info'|t }}</h4>
@@ -316,7 +322,7 @@
                     <ul class="clearfix">
                         <li><a href="#"><span class="fab fa-facebook-square"></span></a></li>
                         <li><a href="#"><span class="fab fa-instagram"></span></a></li>
-                        <li><a href="https://t.me/aqua_element_bot"><span class="fab fa-telegram"></span></a></li>
+                        <li><a href="https://t.me/bluestream_bot"><span class="fab fa-telegram"></span></a></li>
                     </ul>
                 </div>
             </nav>
@@ -350,7 +356,7 @@
                     <div class="row clearfix">
                         <div class="col-lg-3 col-md-6 col-sm-12 footer-column">
                             <div class="footer-widget logo-widget">
-                                <figure class="footer-logo"><a href="{{ main_site_url }}/"><img src="{{ url_for('static', filename='images/logo_aqua_element_white.svg') }}" alt="{{ company_name }}"></a></figure>
+                                <figure class="footer-logo"><a href="{{ external_url_for_lang('frontend.index') }}"><img src="{{ url_for('static', filename='images/logo_aqua_element_white.svg') }}" alt="{{ company_name }}"></a></figure>
                                 <div class="text">
                                     <p>{{ 'landing.footer.tagline'|t }}</p>
                                 </div>
@@ -384,11 +390,16 @@
                                 </div>
                                 <div class="widget-content">
                                     <ul class="links-list clearfix">
-                                        <li><a href="{{ main_site_url }}/about">{{ 'landing.footer.about_company'|t }}</a></li>
-                                        <li><a href="{{ main_site_url }}/services">{{ 'landing.nav.services'|t }}</a></li>
-                                        <li><a href="{{ main_site_url }}/shop">{{ 'landing.shop.page_title'|t }}</a></li>
-                                        <li><a href="#">{{ 'landing.footer.our_blog'|t }}</a></li>
-                                        <li><a href="{{ main_site_url }}/contact">{{ 'landing.nav.contact'|t }}</a></li>
+                                        <li><a href="{{ external_url_for_lang('frontend.about') }}">{{ 'landing.footer.about_company'|t }}</a></li>
+                                        <li><a href="{{ external_url_for_lang('frontend.services') }}">{{ 'landing.nav.services'|t }}</a></li>
+                                        <li><a href="{{ external_url_for_lang('frontend.shop') }}">{{ 'landing.shop.page_title'|t }}</a></li>
+                                        <li><a href="{{ external_url_for_lang('frontend.blog_list') }}">{{ 'landing.footer.our_blog'|t }}</a></li>
+                                        <li><a href="{{ external_url_for_lang('frontend.delivery_policy') }}">Delivery Policy</a></li>
+                                        <li><a href="{{ external_url_for_lang('frontend.pricing_policy') }}">Pricing Policy</a></li>
+                                        <li><a href="{{ external_url_for_lang('frontend.refund_policy') }}">Refund Policy</a></li>
+                                        <li><a href="{{ external_url_for_lang('frontend.quality_standards') }}">Quality Standards</a></li>
+                                        <li><a href="{{ external_url_for_lang('frontend.water_delivery_faq') }}">Water Delivery FAQ</a></li>
+                                        <li><a href="{{ external_url_for_lang('frontend.contact') }}">{{ 'landing.nav.contact'|t }}</a></li>
                                     </ul>
                                 </div>
                             </div>
@@ -418,16 +429,16 @@
                 <div class="auto-container">
                     <div class="bottom-inner">
                         <div class="copyright">
-                            <p><a href="{{ main_site_url }}/">Blue Stream Group</a> &copy; 2026 {{ 'landing.footer.all_rights_reserved'|t }}</p>
+                            <p><a href="{{ external_url_for_lang('frontend.index') }}">Blue Stream Group</a> &copy; 2026 {{ 'landing.footer.all_rights_reserved'|t }}</p>
                         </div>
                         <ul class="social-links clearfix">
                             <li><a href="#"><i class="fab fa-facebook-f"></i></a></li>
                             <li><a href="#"><i class="fab fa-instagram"></i></a></li>
-                            <li><a href="https://t.me/aqua_element_bot"><i class="fab fa-telegram"></i></a></li>
+                            <li><a href="https://t.me/bluestream_bot"><i class="fab fa-telegram"></i></a></li>
                         </ul>
                         <ul class="footer-nav clearfix">
-                            <li><a href="#">{{ 'landing.footer.terms_of_service'|t }}</a></li>
-                            <li><a href="#">{{ 'landing.footer.privacy_policy'|t }}</a></li>
+                            <li><a href="{{ external_url_for_lang('frontend.terms') }}">{{ 'landing.footer.terms_of_service'|t }}</a></li>
+                            <li><a href="{{ external_url_for_lang('frontend.privacy') }}">{{ 'landing.footer.privacy_policy'|t }}</a></li>
                         </ul>
                     </div>
                 </div>
@@ -1032,9 +1043,40 @@
                 console.error('Error syncing cart from database:', error);
             }
         }
+
+        // Lightweight SEO performance pass:
+        // lazy-load non-critical images while keeping above-the-fold media eager.
+        function optimizeNonCriticalImages() {
+            const criticalSelectors = [
+                '.logo img',
+                '.footer-logo img',
+                '.nav-logo img',
+                '.banner-style-two img',
+                '.page-title img',
+                '.main-product-img'
+            ];
+            const criticalImages = new Set();
+            criticalSelectors.forEach((selector) => {
+                document.querySelectorAll(selector).forEach((img) => criticalImages.add(img));
+            });
+
+            document.querySelectorAll('img').forEach((img) => {
+                if (criticalImages.has(img)) {
+                    return;
+                }
+                if (!img.hasAttribute('loading')) {
+                    img.setAttribute('loading', 'lazy');
+                }
+                if (!img.hasAttribute('decoding')) {
+                    img.setAttribute('decoding', 'async');
+                }
+            });
+        }
         
         // Initialize on page load
         document.addEventListener('DOMContentLoaded', async function() {
+            optimizeNonCriticalImages();
+
             // For authenticated users, sync cart from database first
             // We expose this promise so other scripts (cart.html, checkout.html) can wait for it
             // to ensure they don't read stale localStorage data before we've synced correctly.

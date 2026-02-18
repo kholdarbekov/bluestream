@@ -1,5 +1,8 @@
 {% extends "frontend/base.html" %}
 {% set meta_description = product.meta_description or product.short_description or product.description %}
+{% set delivery_facts = "Delivery windows are shown at checkout and depend on service zone and available slots." %}
+{% set pricing_facts = "Final payable amount is shown in cart/checkout based on current listed product price and active discounts." %}
+{% set refund_facts = "Refund and replacement handling follows the published refund policy terms." %}
 
 {% block title %}{{ product.name }} - {{ company_name }}{% endblock %}
 
@@ -29,7 +32,24 @@
     "price": product.discount_price if product.discount_price else product.base_price,
     "availability": availability,
     "url": product_url
-  }
+  },
+  "additionalProperty": [
+    {
+      "@type": "PropertyValue",
+      "name": "Delivery Information",
+      "value": delivery_facts
+    },
+    {
+      "@type": "PropertyValue",
+      "name": "Pricing Information",
+      "value": pricing_facts
+    },
+    {
+      "@type": "PropertyValue",
+      "name": "Refund Information",
+      "value": refund_facts
+    }
+  ]
 } %}
 {% set breadcrumb_schema = {
   "@context": "https://schema.org",
@@ -55,8 +75,39 @@
     }
   ]
 } %}
+{% set product_faq_schema = {
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {
+      "@type": "Question",
+      "name": "How is delivery scheduled for this product?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": delivery_facts
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How is product pricing determined?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": pricing_facts
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What happens if there is a quality or fulfillment issue?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": refund_facts
+      }
+    }
+  ]
+} %}
 <script type="application/ld+json">{{ product_schema | tojson }}</script>
 <script type="application/ld+json">{{ breadcrumb_schema | tojson }}</script>
+<script type="application/ld+json">{{ product_faq_schema | tojson }}</script>
 {% endblock %}
 
 {% block extra_head %}
@@ -108,10 +159,10 @@
             <div class="content-box">
                 <h1>{{ product.name }}</h1>
                 <ul class="bread-crumb clearfix">
-                    <li><a href="{{ url_for('frontend.index') }}">{{ 'landing.nav.home'|t }}</a></li>
-                    <li><a href="{{ url_for('frontend.shop') }}">{{ 'landing.nav.shop'|t }}</a></li>
+                    <li><a href="{{ external_url_for_lang('frontend.index') }}">{{ 'landing.nav.home'|t }}</a></li>
+                    <li><a href="{{ external_url_for_lang('frontend.shop') }}">{{ 'landing.nav.shop'|t }}</a></li>
                     {% if product.category %}
-                    <li><a href="{{ url_for('frontend.shop', category=product.category.id) }}">{{ product.category.name }}</a></li>
+                    <li><a href="{{ external_url_for_lang('frontend.shop', category=product.category.id) }}">{{ product.category.name }}</a></li>
                     {% endif %}
                     <li>{{ product.name }}</li>
                 </ul>
@@ -129,20 +180,20 @@
                     <div class="product-image-box">
                         {% if product.images and product.images|length > 0 %}
                             <div class="main-image-wrapper">
-                                <img src="{{ product.images[0] }}" alt="{{ product.name }}" id="mainProductImage" class="main-product-img">
+                                <img src="{{ product.images[0] }}" alt="{{ product.name }}" id="mainProductImage" class="main-product-img" fetchpriority="high">
                             </div>
                             {% if product.images|length > 1 %}
                             <div class="thumb-gallery">
                                 {% for image in product.images[:4] %}
                                 <div class="thumb-item {% if loop.first %}active{% endif %}" onclick="changeImage('{{ image }}', this)">
-                                    <img src="{{ image }}" alt="{{ product.name }}">
+                                    <img src="{{ image }}" alt="{{ product.name }}" loading="lazy" decoding="async">
                                 </div>
                                 {% endfor %}
                             </div>
                             {% endif %}
                         {% else %}
                             <div class="main-image-wrapper">
-                                <img src="{{ url_for('static', filename='images/resource/shop/shop-1.jpg') }}" alt="{{ product.name }}" class="main-product-img">
+                                <img src="{{ url_for('static', filename='images/resource/shop/shop-1.jpg') }}" alt="{{ product.name }}" class="main-product-img" fetchpriority="high">
                             </div>
                         {% endif %}
                     </div>
@@ -241,8 +292,8 @@
                                     <i class="fas fa-shield-alt"></i>
                                 </div>
                                 <div class="feature-info">
-                                    <strong>{{ '100% Pure'|t }}</strong>
-                                    <span>{{ 'Quality'|t }}</span>
+                                    <strong>{{ 'Quality Focus'|t }}</strong>
+                                    <span>{{ 'Handled by policy'|t }}</span>
                                 </div>
                             </div>
                             <div class="feature-card">
@@ -250,8 +301,8 @@
                                     <i class="fas fa-certificate"></i>
                                 </div>
                                 <div class="feature-info">
-                                    <strong>{{ 'Certified'|t }}</strong>
-                                    <span>{{ 'Quality Assured'|t }}</span>
+                                    <strong>{{ 'Policy-backed'|t }}</strong>
+                                    <span>{{ 'Standards page available'|t }}</span>
                                 </div>
                             </div>
                         </div>
@@ -268,7 +319,7 @@
                             </div>
                             <button class="add-to-cart-btn theme-btn btn-one" onclick="addToCart({{ product.id }}, qty)" {% if product.stock_quantity <= 0 %}disabled{% endif %}>
                                 <i class="far fa-shopping-cart"></i>
-                                Savatga qo'shish
+                                {{ 'landing.button.add_to_cart'|t }}
                             </button>
                             
                             <button class="wishlist-btn" onclick="addToWishlist({{ product.id }})" title="{{ 'Add to Wishlist'|t }}">
@@ -289,8 +340,8 @@
                                 <div class="benefit-item">
                                     <i class="fas fa-undo-alt"></i>
                                     <div>
-                                        <strong>{{ 'Easy Returns'|t }}</strong>
-                                        <p>{{ '7 days return policy'|t }}</p>
+                                        <strong>{{ 'Refund Support'|t }}</strong>
+                                        <p>{{ 'Policy terms are published and reviewable'|t }}</p>
                                     </div>
                                 </div>
                                 <div class="benefit-item">
@@ -301,6 +352,32 @@
                                     </div>
                                 </div>
                             </div>
+                        </div>
+
+                        <div class="product-facts-section" style="margin-top: 24px;">
+                            <h3 style="font-size: 22px; margin-bottom: 14px;">{{ 'Verified Buying Facts'|t }}</h3>
+                            <ul style="margin: 0; padding-left: 18px;">
+                                <li style="margin-bottom: 10px;">
+                                    <strong>{{ 'Delivery:'|t }}</strong>
+                                    {{ delivery_facts }}
+                                    <a href="{{ external_url_for_lang('frontend.delivery_policy') }}">{{ 'Read delivery policy'|t }}</a>.
+                                </li>
+                                <li style="margin-bottom: 10px;">
+                                    <strong>{{ 'Pricing:'|t }}</strong>
+                                    {{ pricing_facts }}
+                                    <a href="{{ external_url_for_lang('frontend.pricing_policy') }}">{{ 'Read pricing policy'|t }}</a>.
+                                </li>
+                                <li>
+                                    <strong>{{ 'Refunds:'|t }}</strong>
+                                    {{ refund_facts }}
+                                    <a href="{{ external_url_for_lang('frontend.refund_policy') }}">{{ 'Read refund policy'|t }}</a>.
+                                </li>
+                                <li style="margin-top: 10px;">
+                                    <strong>{{ 'Quality standards:'|t }}</strong>
+                                    {{ 'Review our public quality workflow in the'|t }}
+                                    <a href="{{ external_url_for_lang('frontend.quality_standards') }}">{{ 'quality standards page'|t }}</a>.
+                                </li>
+                            </ul>
                         </div>
 
                     </div>
@@ -355,15 +432,15 @@
                             <div class="inner-box">
                                 <figure class="image-box">
                                     {% if rel_product.images and rel_product.images|length > 0 %}
-                                        <img src="{{ rel_product.images[0] }}" alt="{{ rel_product.name }}">
+                                        <img src="{{ rel_product.images[0] }}" alt="{{ rel_product.name }}" loading="lazy" decoding="async">
                                     {% else %}
-                                        <img src="{{ url_for('static', filename='images/resource/shop/shop-1.jpg') }}" alt="{{ rel_product.name }}">
+                                        <img src="{{ url_for('static', filename='images/resource/shop/shop-1.jpg') }}" alt="{{ rel_product.name }}" loading="lazy" decoding="async">
                                     {% endif %}
                                 </figure>
                                 <div class="lower-content">
                                     <div class="shape" style="background-image: url({{ url_for('static', filename='images/shape/shape-7.png') }});"></div>
                                     <span>{{ rel_product.volume }}{{ rel_product.volume_unit or 'L' }} - {{ rel_product.category.name if rel_product.category else 'Water' }}</span>
-                                    <h4><a href="{% if rel_product.slug %}{{ url_for('frontend.product_detail_slug', slug=rel_product.slug) }}{% else %}{{ url_for('frontend.product_detail', product_id=rel_product.id) }}{% endif %}">{{ rel_product.name }}</a></h4>
+                                    <h4><a href="{% if rel_product.slug %}{{ external_url_for_lang('frontend.product_detail_slug', slug=rel_product.slug) }}{% else %}{{ external_url_for_lang('frontend.product_detail', product_id=rel_product.id) }}{% endif %}">{{ rel_product.name }}</a></h4>
                                     <div class="price">
                                         {% if rel_product.discount_price and rel_product.discount_price > 0 %}
                                         <span class="old-price">{{ rel_product.base_price|format_price }} UZS</span>

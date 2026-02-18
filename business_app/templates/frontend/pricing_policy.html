@@ -1,0 +1,37 @@
+{% extends "frontend/base.html" %}
+{% set meta_description = "Pricing policy for Blue Stream Group: displayed prices, discounts, taxes, promotional terms, and update rules." %}
+
+{% block title %}Pricing Policy - {{ company_name }}{% endblock %}
+
+{% block content %}
+<section class="page-title centred" style="background-image: url({{ url_for('static', filename='images/background/page-title.jpg') }});">
+    <div class="shape" style="background-image: url({{ url_for('static', filename='images/shape/banner-shap.png') }});"></div>
+    <div class="auto-container">
+        <div class="content-box">
+            <h1>Pricing Policy</h1>
+            <ul class="bread-crumb clearfix">
+                <li><a href="{{ url_for('frontend.index') }}">{{ 'landing.nav.home'|t }}</a></li>
+                <li>Pricing Policy</li>
+            </ul>
+        </div>
+    </div>
+</section>
+
+<section class="service-details">
+    <div class="auto-container">
+        <div class="content-box">
+            <h2>Displayed Prices</h2>
+            <p>Product prices shown on Blue Stream Group channels are listed in UZS and reflect the current effective selling price at the time of order placement.</p>
+
+            <h2>Discounts and Promotions</h2>
+            <p>Where applicable, promotional pricing or discount pricing is displayed alongside the standard product price. Promotions may be time-limited or quantity-limited.</p>
+
+            <h2>Delivery and Additional Charges</h2>
+            <p>Delivery-related charges are calculated based on order details, address zone, and current delivery rules. Final payable totals are shown before checkout completion.</p>
+
+            <h2>Price Updates</h2>
+            <p>Blue Stream Group reserves the right to adjust prices in response to product, supply, or operational changes. Changes apply to new orders and do not retroactively alter completed purchases.</p>
+        </div>
+    </div>
+</section>
+{% endblock %}

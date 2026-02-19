@@ -135,6 +135,15 @@ class BotUserRepository:
         WHERE telegram_id = $2
         """
         await self.db.execute(query, phone, str(telegram_id))
+
+    async def set_user_phone_verified(self, telegram_id: int, phone: str):
+        """Set user's phone number and mark it as verified."""
+        query = """
+        UPDATE users
+        SET phone = $1, phone_verified_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+        WHERE telegram_id = $2
+        """
+        await self.db.execute(query, phone, str(telegram_id))
     
     async def clear_user_session(self, telegram_id: int):
         """Clear user session data and bot state"""

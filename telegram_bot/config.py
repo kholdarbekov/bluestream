@@ -76,6 +76,24 @@ class TelegramConfig:
     # Support settings
     support_chat_id: Optional[int] = None
 
+    # Polling/network resilience settings
+    polling_timeout: int = 30
+    poll_interval: float = 0.0
+    bootstrap_retries: int = -1
+    drop_pending_updates: bool = True
+
+    request_connection_pool_size: int = 8
+    request_connect_timeout: float = 10.0
+    request_read_timeout: float = 30.0
+    request_write_timeout: float = 30.0
+    request_pool_timeout: float = 5.0
+
+    get_updates_connection_pool_size: int = 4
+    get_updates_connect_timeout: float = 15.0
+    get_updates_read_timeout: float = 45.0
+    get_updates_write_timeout: float = 30.0
+    get_updates_pool_timeout: float = 5.0
+
 
 @dataclass
 class DatabaseConfig:
@@ -239,6 +257,20 @@ class BotConfig:
             bot_token=get_secret('telegram_bot_token', 'TELEGRAM_BOT_TOKEN', required=True),
             webhook_url=os.getenv('WEBHOOK_URL'),
             webhook_port=int(os.getenv('WEBHOOK_PORT', '8443')),
+            polling_timeout=int(os.getenv('TELEGRAM_POLLING_TIMEOUT', '30')),
+            poll_interval=float(os.getenv('TELEGRAM_POLL_INTERVAL', '0.0')),
+            bootstrap_retries=int(os.getenv('TELEGRAM_BOOTSTRAP_RETRIES', '-1')),
+            drop_pending_updates=os.getenv('TELEGRAM_DROP_PENDING_UPDATES', 'true').lower() == 'true',
+            request_connection_pool_size=int(os.getenv('TELEGRAM_REQUEST_CONNECTION_POOL_SIZE', '8')),
+            request_connect_timeout=float(os.getenv('TELEGRAM_REQUEST_CONNECT_TIMEOUT', '10')),
+            request_read_timeout=float(os.getenv('TELEGRAM_REQUEST_READ_TIMEOUT', '30')),
+            request_write_timeout=float(os.getenv('TELEGRAM_REQUEST_WRITE_TIMEOUT', '30')),
+            request_pool_timeout=float(os.getenv('TELEGRAM_REQUEST_POOL_TIMEOUT', '5')),
+            get_updates_connection_pool_size=int(os.getenv('TELEGRAM_GET_UPDATES_CONNECTION_POOL_SIZE', '4')),
+            get_updates_connect_timeout=float(os.getenv('TELEGRAM_GET_UPDATES_CONNECT_TIMEOUT', '15')),
+            get_updates_read_timeout=float(os.getenv('TELEGRAM_GET_UPDATES_READ_TIMEOUT', '45')),
+            get_updates_write_timeout=float(os.getenv('TELEGRAM_GET_UPDATES_WRITE_TIMEOUT', '30')),
+            get_updates_pool_timeout=float(os.getenv('TELEGRAM_GET_UPDATES_POOL_TIMEOUT', '5')),
         )
         
         self.database = DatabaseConfig(

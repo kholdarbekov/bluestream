@@ -38,6 +38,7 @@ from telegram.ext import (
     ConversationHandler, filters, ContextTypes, TypeHandler
 )
 from telegram.error import TelegramError
+from telegram.request import HTTPXRequest
 
 # Setup logging first
 from logging_config import setup_logging, log_bot_startup_info
@@ -106,9 +107,34 @@ class WaterBusinessBot:
             
             # Build Telegram application
             logger.info("Creating Telegram Application...")
+            request = HTTPXRequest(
+                connection_pool_size=config.telegram.request_connection_pool_size,
+                connect_timeout=config.telegram.request_connect_timeout,
+                read_timeout=config.telegram.request_read_timeout,
+                write_timeout=config.telegram.request_write_timeout,
+                pool_timeout=config.telegram.request_pool_timeout,
+                http_version='1.1',
+            )
+
+            # Keep read timeout above long-poll timeout to avoid client-side premature timeouts.
+            get_updates_read_timeout = max(
+                config.telegram.get_updates_read_timeout,
+                float(config.telegram.polling_timeout + 5),
+            )
+            get_updates_request = HTTPXRequest(
+                connection_pool_size=config.telegram.get_updates_connection_pool_size,
+                connect_timeout=config.telegram.get_updates_connect_timeout,
+                read_timeout=get_updates_read_timeout,
+                write_timeout=config.telegram.get_updates_write_timeout,
+                pool_timeout=config.telegram.get_updates_pool_timeout,
+                http_version='1.1',
+            )
+
             self.application = (
                 Application.builder()
                 .token(config.telegram.bot_token)
+                .request(request)
+                .get_updates_request(get_updates_request)
                 .build()
             )
             logger.info("Telegram Application created successfully!")
@@ -642,6 +668,12 @@ class WaterBusinessBot:
 
             # Check if user is awaiting OTP verification (stored in context)
             if context.user_data.get('awaiting_otp'):
+                prompted_update_id = context.user_data.get('otp_prompted_update_id')
+                if prompted_update_id == update.update_id:
+                    # OTP was just prompted from this same update (e.g. phone text).
+                    # Skip immediate re-processing of the same text as OTP.
+                    context.user_data.pop('otp_prompted_update_id', None)
+                    return
                 await self._handle_otp_verification(update, context, text, language)
                 return
 
@@ -682,6 +714,7 @@ class WaterBusinessBot:
                     )
                     context.user_data.pop('awaiting_otp', None)
                     context.user_data.pop('pending_phone_verification', None)
+                    context.user_data.pop('otp_prompted_update_id', None)
                     return
 
                 response = await client.verify_phone_otp(user_token, text)
@@ -697,6 +730,7 @@ class WaterBusinessBot:
                     # Clear OTP flags
                     context.user_data.pop('awaiting_otp', None)
                     context.user_data.pop('pending_phone_verification', None)
+                    context.user_data.pop('otp_prompted_update_id', None)
 
                     logger.info(f"Phone verification successful for user {user_id}")
                 else:
@@ -712,6 +746,7 @@ class WaterBusinessBot:
             )
             context.user_data.pop('awaiting_otp', None)
             context.user_data.pop('pending_phone_verification', None)
+            context.user_data.pop('otp_prompted_update_id', None)
 
     async def _handle_contextual_input(self, update: Update, context: ContextTypes.DEFAULT_TYPE,
                                      user_state: Dict, language: str):
@@ -867,10 +902,11 @@ class WaterBusinessBot:
                 
                 # Start polling with verbose logging
                 self.application.run_polling(
-                    timeout=10,  # Wait up to 10 seconds for updates
-                    bootstrap_retries=3,  # Retry bootstrap up to 3 times
+                    timeout=config.telegram.polling_timeout,
+                    poll_interval=config.telegram.poll_interval,
+                    bootstrap_retries=config.telegram.bootstrap_retries,
                     allowed_updates=None,  # Accept all update types
-                    drop_pending_updates=True  # Clear any pending updates
+                    drop_pending_updates=config.telegram.drop_pending_updates
                 )
                 
         except Exception as e:

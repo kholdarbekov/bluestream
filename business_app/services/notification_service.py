@@ -593,7 +593,8 @@ class NotificationService:
         from business_app.utils.translations import get_translation
 
         # Try to get SMS content from translation system with the specific key
-        content = get_translation(template_key, language=language, default=None)
+        # content = get_translation(template_key, language=language, default=None)
+        content = None
 
         if not content:
             # Fallback templates for phone registration

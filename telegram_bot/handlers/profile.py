@@ -53,6 +53,24 @@ class ProfileHandlers(BaseHandler):
                     return
                 
                 response = await client.get_user_profile(user_token)
+                if not response.success and response.status_code == 404:
+                    # Recover from stale cached token pointing to an old/deleted user.
+                    token_manager = context.bot_data.get('token_manager') if context.bot_data else None
+                    if token_manager:
+                        await token_manager.invalidate_tokens(user_id)
+
+                    user_token = await get_auth_token(
+                        update,
+                        context,
+                        client,
+                        force_refresh=True
+                    )
+                    if not user_token:
+                        await self._handle_auth_error(update, language)
+                        return
+
+                    response = await client.get_user_profile(user_token)
+
                 if not response.success:
                     await self._handle_api_error(update, response.error, language)
                     return
@@ -216,8 +234,8 @@ class ProfileHandlers(BaseHandler):
             # Store phone in context for later
             context.user_data['pending_phone'] = phone
 
-            # Update phone in database immediately
-            await self.user_repo.set_user_phone(user_id, phone)
+            # Contact sharing is trusted by Telegram, mark phone as verified
+            await self.user_repo.set_user_phone_verified(user_id, phone)
 
             # Also update via API
             async with api_client as client:
@@ -396,6 +414,7 @@ class ProfileHandlers(BaseHandler):
                         # Store awaiting OTP flag
                         context.user_data['awaiting_otp'] = True
                         context.user_data['pending_phone_verification'] = phone
+                        context.user_data['otp_prompted_update_id'] = update.update_id
 
                         logger.info(f"Verification SMS sent to {phone} for user {user_id}")
                     else:
@@ -517,6 +536,21 @@ class ProfileHandlers(BaseHandler):
                                 text="❌ Registration failed. Please try again with /start or contact support."
                             )
                             return ConversationHandler.END
+
+                        # Replace any stale cached token with the fresh token
+                        # returned for the newly created telegram user.
+                        response_payload = response.data.get('data', {}) if isinstance(response.data, dict) else {}
+                        tokens = response_payload.get('tokens', {}) if isinstance(response_payload, dict) else {}
+                        if tokens.get('access_token') and tokens.get('refresh_token'):
+                            token_manager = context.bot_data.get('token_manager') if context.bot_data else None
+                            if token_manager:
+                                await token_manager.store_tokens(
+                                    user_id,
+                                    tokens['access_token'],
+                                    tokens['refresh_token'],
+                                    tokens.get('expires_in', 3600)
+                                )
+                                logger.info(f"Cached fresh registration tokens for user {user_id}")
                 except Exception as e:
                     logger.error(f"Exception during telegram user registration: {e}")
                     import traceback
@@ -582,8 +616,8 @@ class ProfileHandlers(BaseHandler):
                     response_data = response.data.get('data', {}) if response.data else {}
                     
                     if response.success and response_data.get('available'):
-                        # Phone is available - save it normally
-                        await self.user_repo.set_user_phone(user_id, phone)
+                        # Contact sharing is trusted by Telegram, mark phone as verified
+                        await self.user_repo.set_user_phone_verified(user_id, phone)
                         
                         # Registration complete
                         complete_text = i18n.get('telegram.registration_complete', language)
@@ -649,7 +683,7 @@ class ProfileHandlers(BaseHandler):
             except Exception as api_error:
                 logger.error(f"API error checking phone: {api_error}")
                 # Fall back to direct save (will fail if duplicate, which is caught below)
-                await self.user_repo.set_user_phone(user_id, phone)
+                await self.user_repo.set_user_phone_verified(user_id, phone)
                 
                 complete_text = i18n.get('telegram.registration_complete', language)
                 keyboard = MenuKeyboards.main_menu(language)
@@ -703,25 +737,48 @@ class ProfileHandlers(BaseHandler):
                     response_data = response.data.get('data', {}) if response.data else {}
                     
                     if response.success and response_data.get('available'):
-                        # Phone is available - save it normally
-                        await self.user_repo.set_user_phone(user_id, phone)
-                        
-                        # Remove the share contact keyboard first
+                        # For text input, phone must be OTP-verified
+                        user_token = await get_auth_token(
+                            update,
+                            context,
+                            client,
+                            force_refresh=True
+                        )
+                        if not user_token:
+                            await update.message.reply_text(
+                                "❌ Authentication failed. Please try again.",
+                                reply_markup=ProfileKeyboards.phone_request(language)
+                            )
+                            return PHONE
+
+                        otp_response = await client.send_phone_verification(user_token, phone)
+                        if not otp_response.success:
+                            logger.error(f"Failed to send OTP during registration: {otp_response.error}")
+                            await update.message.reply_text(
+                                f"❌ Could not send verification code: {otp_response.error}\n\nPlease try again.",
+                                reply_markup=ProfileKeyboards.phone_request(language)
+                            )
+                            return PHONE
+
+                        # Remove contact keyboard and ask for OTP
                         await update.message.reply_text(
                             i18n.get('telegram.phone.phone_accepted', language) or "✅ Phone number accepted",
                             reply_markup=ReplyKeyboardRemove()
                         )
 
-                        # Registration complete
-                        complete_text = i18n.get('telegram.registration_complete', language)
-                        keyboard = MenuKeyboards.main_menu(language)
-                        
+                        otp_data = otp_response.data.get('data', {}) if isinstance(otp_response.data, dict) else {}
+                        phone_masked = otp_data.get('phone_masked', phone)
+
                         await update.message.reply_text(
-                            text=complete_text,
-                            reply_markup=keyboard
+                            f"📱 A verification code has been sent to {phone_masked}.\n\n"
+                            f"Please enter the 6-digit code:"
                         )
-                        
-                        logger.info(f"Registration completed for user {user_id}")
+
+                        context.user_data['awaiting_otp'] = True
+                        context.user_data['pending_phone_verification'] = phone
+                        context.user_data['otp_prompted_update_id'] = update.update_id
+
+                        logger.info(f"Registration OTP sent to {phone} for user {user_id}")
                         return ConversationHandler.END
                     
                     elif response.success and not response_data.get('available'):
@@ -781,25 +838,11 @@ class ProfileHandlers(BaseHandler):
                         
             except Exception as api_error:
                 logger.error(f"API error checking phone: {api_error}")
-                # Fall back to direct save (will fail if duplicate, which is caught below)
-                await self.user_repo.set_user_phone(user_id, phone)
-                
-                # Remove the share contact keyboard first
                 await update.message.reply_text(
-                    i18n.get('telegram.phone.phone_accepted', language) or "✅ Phone number accepted",
-                    reply_markup=ReplyKeyboardRemove()
+                    "❌ Unable to verify phone right now. Please try again.",
+                    reply_markup=ProfileKeyboards.phone_request(language)
                 )
-
-                complete_text = i18n.get('telegram.registration_complete', language)
-                keyboard = MenuKeyboards.main_menu(language)
-                
-                await update.message.reply_text(
-                    text=complete_text,
-                    reply_markup=keyboard
-                )
-                
-                logger.info(f"Registration completed for user {user_id}")
-                return ConversationHandler.END
+                return PHONE
 
         except Exception as e:
             logger.error(f"Error handling phone text: {e}")
@@ -1013,6 +1056,7 @@ class ProfileHandlers(BaseHandler):
                                 # Clear OTP flags
                                 context.user_data.pop('awaiting_otp', None)
                                 context.user_data.pop('pending_phone_verification', None)
+                                context.user_data.pop('otp_prompted_update_id', None)
 
                                 logger.info(f"Phone verification successful for user {user_id}")
 

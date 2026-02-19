@@ -233,17 +233,23 @@ class BusinessAPIClient:
         for attempt in range(self.max_retries + 1):
             try:
                 logger.debug(f"HTTP request attempt {attempt + 1}/{self.max_retries + 1}")
+                request_kwargs = {
+                    'headers': request_headers,
+                    'params': params,
+                    # Keep bot requests stateless and prevent any cookie-based auth bleed.
+                    'cookies': {}
+                }
                 
                 if method.upper() == 'GET':
-                    response = await self._client.get(url, headers=request_headers, params=params)
+                    response = await self._client.get(url, **request_kwargs)
                 elif method.upper() == 'POST':
-                    response = await self._client.post(url, headers=request_headers, json=data, params=params)
+                    response = await self._client.post(url, json=data, **request_kwargs)
                 elif method.upper() == 'PUT':
-                    response = await self._client.put(url, headers=request_headers, json=data, params=params)
+                    response = await self._client.put(url, json=data, **request_kwargs)
                 elif method.upper() == 'PATCH':
-                    response = await self._client.patch(url, headers=request_headers, json=data, params=params)
+                    response = await self._client.patch(url, json=data, **request_kwargs)
                 elif method.upper() == 'DELETE':
-                    response = await self._client.delete(url, headers=request_headers, params=params)
+                    response = await self._client.delete(url, **request_kwargs)
                 else:
                     raise ValueError(f"Unsupported HTTP method: {method}")
                 

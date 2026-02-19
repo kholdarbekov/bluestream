@@ -15,13 +15,47 @@ import redis.asyncio as aioredis
 import sentry_sdk
 from telegram import Update
 from telegram.ext import ContextTypes
-from telegram.error import TelegramError
+from telegram.error import TelegramError, NetworkError
 
 from database import db_manager, BotUserRepository
 from i18n import i18n
 from config import config
 
 logger = logging.getLogger('utils')
+
+_NETWORK_ERROR_LOG_COOLDOWN_SECONDS = 60
+_last_network_error_log_at: Optional[datetime] = None
+
+
+def _is_transient_polling_network_error(update: object, error: Exception) -> bool:
+    """Return True for expected polling transport disconnects that auto-retry."""
+    if isinstance(update, Update):
+        return False
+    if not isinstance(error, NetworkError):
+        return False
+
+    error_text = str(error)
+    transient_markers = (
+        'RemoteProtocolError',
+        'Server disconnected without sending a response',
+        'ReadTimeout',
+        'ConnectError',
+        'PoolTimeout',
+    )
+    return any(marker in error_text for marker in transient_markers)
+
+
+def _should_log_network_warning() -> bool:
+    """Rate-limit repeated transient polling warning logs."""
+    global _last_network_error_log_at
+    now = datetime.now(timezone.utc)
+    if _last_network_error_log_at is None:
+        _last_network_error_log_at = now
+        return True
+    if (now - _last_network_error_log_at).total_seconds() >= _NETWORK_ERROR_LOG_COOLDOWN_SECONDS:
+        _last_network_error_log_at = now
+        return True
+    return False
 
 
 class RateLimiter:
@@ -245,7 +279,12 @@ otp_rate_limiter = OTPRateLimiter()
 user_cache = UserCache()
 
 
-async def authenticate_telegram_user(update: Update, api_client_instance, token_manager=None) -> Optional[str]:
+async def authenticate_telegram_user(
+    update: Update,
+    api_client_instance,
+    token_manager=None,
+    force_refresh: bool = False
+) -> Optional[str]:
     """
     Authenticate telegram user with business API and return token.
     
@@ -266,8 +305,13 @@ async def authenticate_telegram_user(update: Update, api_client_instance, token_
         
         user_id = update.effective_user.id
         
+        # Force refresh can be used in sensitive flows (e.g. registration/linking)
+        # to avoid reusing stale cached tokens.
+        if token_manager and force_refresh:
+            await token_manager.invalidate_tokens(user_id)
+
         # Try to get cached token from TokenManager
-        if token_manager:
+        if token_manager and not force_refresh:
             cached_token = await token_manager.get_valid_token(user_id, api_client_instance)
             if cached_token:
                 logger.debug(f"Using cached token for user {user_id}")
@@ -315,7 +359,12 @@ async def authenticate_telegram_user(update: Update, api_client_instance, token_
         return None
 
 
-async def get_auth_token(update: Update, context, api_client_instance) -> Optional[str]:
+async def get_auth_token(
+    update: Update,
+    context,
+    api_client_instance,
+    force_refresh: bool = False
+) -> Optional[str]:
     """
     Get authentication token with TokenManager integration.
     
@@ -326,12 +375,18 @@ async def get_auth_token(update: Update, context, api_client_instance) -> Option
         update: Telegram Update object
         context: Telegram context with bot_data containing token_manager
         api_client_instance: Business API client
+        force_refresh: Skip cached JWT and force backend re-authentication
         
     Returns:
         Access token string or None if authentication failed
     """
     token_manager = context.bot_data.get('token_manager') if context.bot_data else None
-    return await authenticate_telegram_user(update, api_client_instance, token_manager)
+    return await authenticate_telegram_user(
+        update,
+        api_client_instance,
+        token_manager,
+        force_refresh=force_refresh
+    )
 
 
 async def user_middleware(update: Update) -> Optional[Dict[str, Any]]:
@@ -415,6 +470,17 @@ def truncate_text(text: str, max_length: int = 100, suffix: str = "...") -> str:
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Global error handler for the bot"""
+    if context.error and _is_transient_polling_network_error(update, context.error):
+        if _should_log_network_warning():
+            logger.warning(
+                "Transient polling network disconnect detected (%s). "
+                "python-telegram-bot will retry automatically.",
+                context.error,
+            )
+        else:
+            logger.debug("Suppressed repeated transient polling disconnect: %s", context.error)
+        return
+
     logger.error("Exception while handling an update:", exc_info=context.error)
 
     # Try to get user information

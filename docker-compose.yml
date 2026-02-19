@@ -151,13 +151,15 @@ services:
       - ./telegram_bot:/app/telegram_bot
       - ./shared:/app/shared
       - ./logs:/app/logs
+    ports:
+      - "5679:5679"
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
       business_app:
-        condition: service_healthy
+        condition: service_started
     healthcheck:
       test: [ "CMD", "python", "-c", "import requests; r = requests.get('http://business_app:80/health'); exit(0 if r.status_code == 200 else 1)" ]
       interval: 60s

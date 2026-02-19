@@ -1,12 +1,14 @@
 """
 Base handler class with shared error handling for Staff Bot handlers.
 """
+import asyncio
 import base64
 import json
 import logging
 from datetime import datetime, timezone
 from typing import Optional
 from telegram import Update
+from telegram.error import NetworkError, TelegramError, TimedOut
 from telegram.ext import ContextTypes
 
 from i18n import i18n
@@ -19,6 +21,8 @@ class BaseHandler:
     """Base class for staff bot handler groups with shared error handling."""
 
     MIN_TOKEN_TTL_SECONDS = 30
+    TELEGRAM_RETRY_ATTEMPTS = 2
+    TELEGRAM_RETRY_DELAY_SECONDS = 0.5
 
     def __init__(self):
         self.user_repo = StaffUserRepository(db_manager)
@@ -171,18 +175,12 @@ class BaseHandler:
     async def _handle_auth_error(self, update: Update, language: str):
         """Handle authentication error."""
         error_msg = i18n.get('staff.session_expired', language)
-        if update.callback_query:
-            await update.callback_query.answer(error_msg, show_alert=True)
-        elif update.message:
-            await update.message.reply_text(error_msg)
+        await self._notify_user(update, error_msg, show_alert=True)
 
     async def _handle_api_error(self, update: Update, error: str, language: str):
         """Handle API error."""
         error_msg = f"\u274c {error}"
-        if update.callback_query:
-            await update.callback_query.answer(error_msg, show_alert=True)
-        elif update.message:
-            await update.message.reply_text(error_msg)
+        await self._notify_user(update, error_msg, show_alert=True)
 
     async def _handle_error(self, update: Update, context: ContextTypes.DEFAULT_TYPE = None):
         """Handle general error with language fallback."""
@@ -192,7 +190,56 @@ class BaseHandler:
         except Exception:
             error_msg = "An error occurred. Please try again."
 
-        if update.callback_query:
-            await update.callback_query.answer(error_msg, show_alert=True)
-        elif update.message:
-            await update.message.reply_text(error_msg)
+        await self._notify_user(update, error_msg, show_alert=True)
+
+    async def _notify_user(self, update: Update, message: str, show_alert: bool = False):
+        """Send user feedback without propagating Telegram network exceptions."""
+        callback_query = update.callback_query
+        if callback_query:
+            if await self._safe_callback_answer(callback_query, message, show_alert=show_alert):
+                return
+
+            fallback_message = callback_query.message
+            if fallback_message:
+                await self._safe_reply_text(fallback_message, message)
+            return
+
+        if update.message:
+            await self._safe_reply_text(update.message, message)
+
+    async def _safe_callback_answer(self, callback_query, message: str, show_alert: bool) -> bool:
+        """Attempt callback query answer with retries on transient network failures."""
+        for attempt in range(1, self.TELEGRAM_RETRY_ATTEMPTS + 1):
+            try:
+                await callback_query.answer(message, show_alert=show_alert)
+                return True
+            except (TimedOut, NetworkError) as e:
+                if attempt < self.TELEGRAM_RETRY_ATTEMPTS:
+                    await asyncio.sleep(self.TELEGRAM_RETRY_DELAY_SECONDS * attempt)
+                    continue
+                logger.warning("Failed to answer callback query after retries: %s", e)
+            except TelegramError as e:
+                logger.warning("Telegram error while answering callback query: %s", e)
+                break
+            except Exception as e:
+                logger.error("Unexpected error while answering callback query: %s", e, exc_info=True)
+                break
+        return False
+
+    async def _safe_reply_text(self, target_message, message: str):
+        """Attempt reply_text with retries on transient network failures."""
+        for attempt in range(1, self.TELEGRAM_RETRY_ATTEMPTS + 1):
+            try:
+                await target_message.reply_text(message)
+                return
+            except (TimedOut, NetworkError) as e:
+                if attempt < self.TELEGRAM_RETRY_ATTEMPTS:
+                    await asyncio.sleep(self.TELEGRAM_RETRY_DELAY_SECONDS * attempt)
+                    continue
+                logger.warning("Failed to send reply message after retries: %s", e)
+            except TelegramError as e:
+                logger.warning("Telegram error while sending reply message: %s", e)
+                return
+            except Exception as e:
+                logger.error("Unexpected error while sending reply message: %s", e, exc_info=True)
+                return

@@ -64,6 +64,24 @@ class TelegramConfig:
     rate_limit_requests: int = 60
     rate_limit_window: int = 60  # seconds
 
+    # Polling/network resilience settings
+    polling_timeout: int = 30
+    poll_interval: float = 0.0
+    bootstrap_retries: int = -1
+    drop_pending_updates: bool = True
+
+    request_connection_pool_size: int = 8
+    request_connect_timeout: float = 15.0
+    request_read_timeout: float = 45.0
+    request_write_timeout: float = 30.0
+    request_pool_timeout: float = 10.0
+
+    get_updates_connection_pool_size: int = 4
+    get_updates_connect_timeout: float = 20.0
+    get_updates_read_timeout: float = 55.0
+    get_updates_write_timeout: float = 30.0
+    get_updates_pool_timeout: float = 10.0
+
 
 @dataclass
 class DatabaseConfig:
@@ -173,6 +191,88 @@ class StaffBotConfig:
             bot_token=staff_bot_token,
             webhook_url=os.getenv('WEBHOOK_URL'),
             webhook_port=int(os.getenv('WEBHOOK_PORT', '8443')),
+            polling_timeout=int(
+                os.getenv(
+                    'STAFF_TELEGRAM_POLLING_TIMEOUT',
+                    os.getenv('TELEGRAM_POLLING_TIMEOUT', '30')
+                )
+            ),
+            poll_interval=float(
+                os.getenv(
+                    'STAFF_TELEGRAM_POLL_INTERVAL',
+                    os.getenv('TELEGRAM_POLL_INTERVAL', '0')
+                )
+            ),
+            bootstrap_retries=int(
+                os.getenv(
+                    'STAFF_TELEGRAM_BOOTSTRAP_RETRIES',
+                    os.getenv('TELEGRAM_BOOTSTRAP_RETRIES', '-1')
+                )
+            ),
+            drop_pending_updates=os.getenv(
+                'STAFF_TELEGRAM_DROP_PENDING_UPDATES',
+                os.getenv('TELEGRAM_DROP_PENDING_UPDATES', 'true')
+            ).lower() == 'true',
+            request_connection_pool_size=int(
+                os.getenv(
+                    'STAFF_TELEGRAM_REQUEST_CONNECTION_POOL_SIZE',
+                    os.getenv('TELEGRAM_REQUEST_CONNECTION_POOL_SIZE', '8')
+                )
+            ),
+            request_connect_timeout=float(
+                os.getenv(
+                    'STAFF_TELEGRAM_REQUEST_CONNECT_TIMEOUT',
+                    os.getenv('TELEGRAM_REQUEST_CONNECT_TIMEOUT', '15')
+                )
+            ),
+            request_read_timeout=float(
+                os.getenv(
+                    'STAFF_TELEGRAM_REQUEST_READ_TIMEOUT',
+                    os.getenv('TELEGRAM_REQUEST_READ_TIMEOUT', '45')
+                )
+            ),
+            request_write_timeout=float(
+                os.getenv(
+                    'STAFF_TELEGRAM_REQUEST_WRITE_TIMEOUT',
+                    os.getenv('TELEGRAM_REQUEST_WRITE_TIMEOUT', '30')
+                )
+            ),
+            request_pool_timeout=float(
+                os.getenv(
+                    'STAFF_TELEGRAM_REQUEST_POOL_TIMEOUT',
+                    os.getenv('TELEGRAM_REQUEST_POOL_TIMEOUT', '10')
+                )
+            ),
+            get_updates_connection_pool_size=int(
+                os.getenv(
+                    'STAFF_TELEGRAM_GET_UPDATES_CONNECTION_POOL_SIZE',
+                    os.getenv('TELEGRAM_GET_UPDATES_CONNECTION_POOL_SIZE', '4')
+                )
+            ),
+            get_updates_connect_timeout=float(
+                os.getenv(
+                    'STAFF_TELEGRAM_GET_UPDATES_CONNECT_TIMEOUT',
+                    os.getenv('TELEGRAM_GET_UPDATES_CONNECT_TIMEOUT', '20')
+                )
+            ),
+            get_updates_read_timeout=float(
+                os.getenv(
+                    'STAFF_TELEGRAM_GET_UPDATES_READ_TIMEOUT',
+                    os.getenv('TELEGRAM_GET_UPDATES_READ_TIMEOUT', '55')
+                )
+            ),
+            get_updates_write_timeout=float(
+                os.getenv(
+                    'STAFF_TELEGRAM_GET_UPDATES_WRITE_TIMEOUT',
+                    os.getenv('TELEGRAM_GET_UPDATES_WRITE_TIMEOUT', '30')
+                )
+            ),
+            get_updates_pool_timeout=float(
+                os.getenv(
+                    'STAFF_TELEGRAM_GET_UPDATES_POOL_TIMEOUT',
+                    os.getenv('TELEGRAM_GET_UPDATES_POOL_TIMEOUT', '10')
+                )
+            ),
         )
 
         self.database = DatabaseConfig(

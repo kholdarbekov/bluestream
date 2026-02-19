@@ -31,6 +31,8 @@ from telegram.ext import (
     Application, CommandHandler, MessageHandler, CallbackQueryHandler,
     ConversationHandler, filters, ContextTypes, TypeHandler
 )
+from telegram.error import NetworkError, TimedOut
+from telegram.request import HTTPXRequest
 
 # Setup logging
 from logging_config import setup_logging, log_bot_startup_info
@@ -75,6 +77,13 @@ logger = logging.getLogger('staff_bot')
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
     """Global error handler"""
+    if isinstance(context.error, (TimedOut, NetworkError)):
+        logger.warning(
+            "Transient Telegram network error while handling update: %s",
+            context.error,
+        )
+        return
+
     logger.error(f"Error handling update: {context.error}", exc_info=context.error)
 
     if isinstance(update, Update) and update.effective_user:
@@ -118,9 +127,33 @@ class StaffBot:
                 logger.warning("TokenManager running without Redis - tokens will not be cached")
 
             # Build Telegram application
+            request = HTTPXRequest(
+                connection_pool_size=config.telegram.request_connection_pool_size,
+                connect_timeout=config.telegram.request_connect_timeout,
+                read_timeout=config.telegram.request_read_timeout,
+                write_timeout=config.telegram.request_write_timeout,
+                pool_timeout=config.telegram.request_pool_timeout,
+                http_version='1.1',
+            )
+
+            get_updates_read_timeout = max(
+                config.telegram.get_updates_read_timeout,
+                float(config.telegram.polling_timeout + 5),
+            )
+            get_updates_request = HTTPXRequest(
+                connection_pool_size=config.telegram.get_updates_connection_pool_size,
+                connect_timeout=config.telegram.get_updates_connect_timeout,
+                read_timeout=get_updates_read_timeout,
+                write_timeout=config.telegram.get_updates_write_timeout,
+                pool_timeout=config.telegram.get_updates_pool_timeout,
+                http_version='1.1',
+            )
+
             self.application = (
                 Application.builder()
                 .token(config.telegram.bot_token)
+                .request(request)
+                .get_updates_request(get_updates_request)
                 .build()
             )
 
@@ -508,10 +541,11 @@ class StaffBot:
                 logger.info("Starting staff bot with polling mode")
                 self.is_running = True
                 self.application.run_polling(
-                    timeout=10,
-                    bootstrap_retries=3,
+                    poll_interval=config.telegram.poll_interval,
+                    timeout=config.telegram.polling_timeout,
+                    bootstrap_retries=config.telegram.bootstrap_retries,
                     allowed_updates=None,
-                    drop_pending_updates=True
+                    drop_pending_updates=config.telegram.drop_pending_updates,
                 )
         except Exception as e:
             logger.error(f"Error running staff bot: {e}", exc_info=True)

@@ -38,7 +38,7 @@ from telegram.ext import (
     ConversationHandler, filters, ContextTypes, TypeHandler
 )
 from telegram.error import TelegramError
-from telegram.request import HTTPXRequest
+from shared.telegram_request import ResilientHTTPXRequest
 
 # Setup logging first
 from logging_config import setup_logging, log_bot_startup_info
@@ -107,12 +107,15 @@ class WaterBusinessBot:
             
             # Build Telegram application
             logger.info("Creating Telegram Application...")
-            request = HTTPXRequest(
+            request = ResilientHTTPXRequest(
                 connection_pool_size=config.telegram.request_connection_pool_size,
                 connect_timeout=config.telegram.request_connect_timeout,
                 read_timeout=config.telegram.request_read_timeout,
                 write_timeout=config.telegram.request_write_timeout,
                 pool_timeout=config.telegram.request_pool_timeout,
+                max_retries=config.telegram.request_max_retries,
+                retry_backoff_seconds=config.telegram.request_retry_backoff_seconds,
+                retry_max_backoff_seconds=config.telegram.request_retry_max_backoff_seconds,
                 http_version='1.1',
             )
 
@@ -121,12 +124,15 @@ class WaterBusinessBot:
                 config.telegram.get_updates_read_timeout,
                 float(config.telegram.polling_timeout + 5),
             )
-            get_updates_request = HTTPXRequest(
+            get_updates_request = ResilientHTTPXRequest(
                 connection_pool_size=config.telegram.get_updates_connection_pool_size,
                 connect_timeout=config.telegram.get_updates_connect_timeout,
                 read_timeout=get_updates_read_timeout,
                 write_timeout=config.telegram.get_updates_write_timeout,
                 pool_timeout=config.telegram.get_updates_pool_timeout,
+                max_retries=config.telegram.get_updates_max_retries,
+                retry_backoff_seconds=config.telegram.get_updates_retry_backoff_seconds,
+                retry_max_backoff_seconds=config.telegram.get_updates_retry_max_backoff_seconds,
                 http_version='1.1',
             )
 

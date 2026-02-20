@@ -15,7 +15,7 @@ import redis.asyncio as aioredis
 import sentry_sdk
 from telegram import Update
 from telegram.ext import ContextTypes
-from telegram.error import TelegramError, NetworkError
+from telegram.error import TelegramError, NetworkError, TimedOut
 
 from database import db_manager, BotUserRepository
 from i18n import i18n
@@ -41,6 +41,27 @@ def _is_transient_polling_network_error(update: object, error: Exception) -> boo
         'ReadTimeout',
         'ConnectError',
         'PoolTimeout',
+    )
+    return any(marker in error_text for marker in transient_markers)
+
+
+def _is_transient_telegram_request_error(error: Exception) -> bool:
+    """Return True for transient Telegram request transport failures."""
+    if isinstance(error, TimedOut):
+        return True
+    if not isinstance(error, NetworkError):
+        return False
+
+    error_text = str(error)
+    transient_markers = (
+        'Timed out',
+        'ConnectTimeout',
+        'ReadTimeout',
+        'WriteTimeout',
+        'PoolTimeout',
+        'ConnectError',
+        'RemoteProtocolError',
+        'Server disconnected without sending a response',
     )
     return any(marker in error_text for marker in transient_markers)
 
@@ -479,6 +500,16 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
             )
         else:
             logger.debug("Suppressed repeated transient polling disconnect: %s", context.error)
+        return
+
+    if context.error and _is_transient_telegram_request_error(context.error):
+        if _should_log_network_warning():
+            logger.warning(
+                "Transient Telegram request failure while handling update (%s).",
+                context.error,
+            )
+        else:
+            logger.debug("Suppressed repeated transient Telegram request failure: %s", context.error)
         return
 
     logger.error("Exception while handling an update:", exc_info=context.error)

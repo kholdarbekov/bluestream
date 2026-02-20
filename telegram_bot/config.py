@@ -87,12 +87,18 @@ class TelegramConfig:
     request_read_timeout: float = 30.0
     request_write_timeout: float = 30.0
     request_pool_timeout: float = 5.0
+    request_max_retries: int = 3
+    request_retry_backoff_seconds: float = 0.75
+    request_retry_max_backoff_seconds: float = 5.0
 
     get_updates_connection_pool_size: int = 4
     get_updates_connect_timeout: float = 15.0
     get_updates_read_timeout: float = 45.0
     get_updates_write_timeout: float = 30.0
     get_updates_pool_timeout: float = 5.0
+    get_updates_max_retries: int = 3
+    get_updates_retry_backoff_seconds: float = 0.75
+    get_updates_retry_max_backoff_seconds: float = 5.0
 
 
 @dataclass
@@ -266,11 +272,17 @@ class BotConfig:
             request_read_timeout=float(os.getenv('TELEGRAM_REQUEST_READ_TIMEOUT', '30')),
             request_write_timeout=float(os.getenv('TELEGRAM_REQUEST_WRITE_TIMEOUT', '30')),
             request_pool_timeout=float(os.getenv('TELEGRAM_REQUEST_POOL_TIMEOUT', '5')),
+            request_max_retries=int(os.getenv('TELEGRAM_REQUEST_MAX_RETRIES', '3')),
+            request_retry_backoff_seconds=float(os.getenv('TELEGRAM_REQUEST_RETRY_BACKOFF_SECONDS', '0.75')),
+            request_retry_max_backoff_seconds=float(os.getenv('TELEGRAM_REQUEST_RETRY_MAX_BACKOFF_SECONDS', '5')),
             get_updates_connection_pool_size=int(os.getenv('TELEGRAM_GET_UPDATES_CONNECTION_POOL_SIZE', '4')),
             get_updates_connect_timeout=float(os.getenv('TELEGRAM_GET_UPDATES_CONNECT_TIMEOUT', '15')),
             get_updates_read_timeout=float(os.getenv('TELEGRAM_GET_UPDATES_READ_TIMEOUT', '45')),
             get_updates_write_timeout=float(os.getenv('TELEGRAM_GET_UPDATES_WRITE_TIMEOUT', '30')),
             get_updates_pool_timeout=float(os.getenv('TELEGRAM_GET_UPDATES_POOL_TIMEOUT', '5')),
+            get_updates_max_retries=int(os.getenv('TELEGRAM_GET_UPDATES_MAX_RETRIES', '3')),
+            get_updates_retry_backoff_seconds=float(os.getenv('TELEGRAM_GET_UPDATES_RETRY_BACKOFF_SECONDS', '0.75')),
+            get_updates_retry_max_backoff_seconds=float(os.getenv('TELEGRAM_GET_UPDATES_RETRY_MAX_BACKOFF_SECONDS', '5')),
         )
         
         self.database = DatabaseConfig(

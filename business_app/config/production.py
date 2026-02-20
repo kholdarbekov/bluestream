@@ -60,7 +60,7 @@ class ProductionConfig(BaseConfig):
     def RATELIMIT_STORAGE_URL(self):
         return self.REDIS_URL
 
-    RATELIMIT_DEFAULT = os.environ.get('RATE_LIMIT_REQUESTS', '500/hour')  # Reasonable default for general endpoints
+    RATELIMIT_DEFAULT = os.environ.get('RATE_LIMIT_REQUESTS', '1000/hour')  # Reasonable default for general endpoints
     RATELIMIT_ENABLED = True
     
     # Celery Configuration

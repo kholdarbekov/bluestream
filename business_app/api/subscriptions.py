@@ -15,6 +15,7 @@ from business_app.utils.service_factory import (
     get_subscription_service, get_payment_service, get_notification_service
 )
 from business_app.utils.helpers import get_current_language
+from business_app.utils.translations import get_translation
 from business_app.serializers.subscription_serializers import (
     serialize_subscription, serialize_subscription_item, serialize_subscription_billing_info,
     serialize_subscription_statistics, serialize_subscription_preview, serialize_subscription_log,
@@ -64,7 +65,7 @@ def get_subscriptions():
                 sub_status = SubscriptionStatus(status)
                 query = query.filter_by(status=sub_status)
             except ValueError:
-                return error_response('Invalid status value', status_code=400)
+                return error_response(get_translation('api.subscriptions.error.invalid_status_value'), status_code=400)
 
         if billing_cycle:
             query = query.filter_by(billing_cycle=billing_cycle)
@@ -87,7 +88,7 @@ def get_subscriptions():
 
     except Exception as e:
         current_app.logger.error(f"Get subscriptions error: {e}")
-        return internal_error_response('Failed to get subscriptions')
+        return internal_error_response(get_translation('api.subscriptions.error.get_failed'))
 
 
 @subscriptions_bp.route('/<int:subscription_id>', methods=['GET'])
@@ -103,7 +104,7 @@ def get_subscription(subscription_id):
         ).first()
 
         if not subscription:
-            return not_found_response('Subscription not found')
+            return not_found_response(get_translation('api.subscriptions.error.not_found'))
 
         # Get subscription orders
         recent_orders = Order.query.filter_by(
@@ -132,7 +133,7 @@ def get_subscription(subscription_id):
 
     except Exception as e:
         current_app.logger.error(f"Get subscription error: {e}")
-        return internal_error_response('Failed to get subscription')
+        return internal_error_response(get_translation('api.subscriptions.error.get_failed'))
 
 
 @subscriptions_bp.route('/', methods=['POST'])
@@ -148,7 +149,7 @@ def create_subscription():
 
         user = User.query.get(current_user_id)
         if not user:
-            return not_found_response('User not found')
+            return not_found_response(get_translation('user_not_found'))
 
         # Validate delivery address exists and belongs to user
         delivery_address_id = validated_data.delivery_address_id
@@ -158,14 +159,14 @@ def create_subscription():
             user_id=current_user_id
         ).first()
         if not address:
-            return not_found_response('Invalid delivery address')
+            return not_found_response(get_translation('api.subscriptions.error.invalid_delivery_address'))
 
         # Validate delivery_time_slot_id if provided
         if validated_data.delivery_time_slot_id:
             from business_app.models.delivery import DeliveryTimeSlot
             time_slot = DeliveryTimeSlot.query.get(validated_data.delivery_time_slot_id)
             if not time_slot or not time_slot.is_active:
-                return not_found_response('Invalid or inactive delivery time slot')
+                return not_found_response(get_translation('api.subscriptions.error.invalid_or_inactive_time_slot'))
 
         # Create subscription using validated data
         language = get_current_language()
@@ -216,16 +217,17 @@ def create_subscription():
 
         return created_response(
             data={'subscription': subscription},
-            message='Subscription created successfully'
+            message=get_translation('api.subscriptions.created')
         )
 
     except ValueError as e:
         db.session.rollback()
-        return error_response(str(e), status_code=400)
+        current_app.logger.warning(f"Create subscription validation error: {e}")
+        return error_response(get_translation('api.subscriptions.error.validation_failed'), status_code=400)
     except Exception as e:
         db.session.rollback()
         current_app.logger.error(f"Create subscription error: {e}")
-        return internal_error_response('Failed to create subscription')
+        return internal_error_response(get_translation('api.subscriptions.error.create_failed'))
 
 
 @subscriptions_bp.route('/<int:subscription_id>', methods=['PUT'])
@@ -243,10 +245,10 @@ def update_subscription(subscription_id):
         ).first()
 
         if not subscription:
-            return not_found_response('Subscription not found')
+            return not_found_response(get_translation('api.subscriptions.error.not_found'))
 
         if subscription.status not in [SubscriptionStatus.ACTIVE, SubscriptionStatus.PAUSED]:
-            return error_response('Cannot update cancelled subscription', status_code=400)
+            return error_response(get_translation('api.subscriptions.error.cannot_update_cancelled'), status_code=400)
 
         # Update fields from validated data
         changes = {}
@@ -263,21 +265,21 @@ def update_subscription(subscription_id):
                         user_id=current_user_id
                     ).first()
                     if not address:
-                        return not_found_response('Invalid delivery address')
+                        return not_found_response(get_translation('api.subscriptions.error.invalid_delivery_address'))
 
                 # Special validation for delivery time slot
                 if field == 'delivery_time_slot_id' and new_value is not None:
                     from business_app.models.delivery import DeliveryTimeSlot
                     time_slot = DeliveryTimeSlot.query.get(new_value)
                     if not time_slot or not time_slot.is_active:
-                        return not_found_response('Invalid or inactive delivery time slot')
+                        return not_found_response(get_translation('api.subscriptions.error.invalid_or_inactive_time_slot'))
 
                 # Special handling for payment method
                 if field == 'payment_method':
                     try:
                         new_value = PaymentMethod(new_value)
                     except ValueError:
-                        return error_response('Invalid payment method', status_code=400)
+                        return error_response(get_translation('api.subscriptions.error.invalid_payment_method'), status_code=400)
 
                 setattr(subscription, field, new_value)
                 changes[field] = {'old': old_value, 'new': new_value}
@@ -289,7 +291,10 @@ def update_subscription(subscription_id):
             log = SubscriptionLog(
                 subscription_id=subscription_id,
                 action='updated',
-                details=f"Updated fields: {', '.join(changes.keys())}",
+                details=get_translation(
+                    'api.subscriptions.log.updated_fields',
+                    fields=', '.join(changes.keys())
+                ),
                 user_id=current_user_id,
                 extra_data={'changes': changes}
             )
@@ -302,13 +307,13 @@ def update_subscription(subscription_id):
 
         return success_response(
             data={'subscription': subscription_response},
-            message='Subscription updated successfully'
+            message=get_translation('api.subscriptions.updated')
         )
 
     except Exception as e:
         db.session.rollback()
         current_app.logger.error(f"Update subscription error: {e}")
-        return internal_error_response('Failed to update subscription')
+        return internal_error_response(get_translation('api.subscriptions.error.update_failed'))
 
 
 @subscriptions_bp.route('/<int:subscription_id>/pause', methods=['POST'])
@@ -326,24 +331,24 @@ def pause_subscription(subscription_id):
         ).first()
 
         if not subscription:
-            return not_found_response('Subscription not found')
+            return not_found_response(get_translation('api.subscriptions.error.not_found'))
 
         if subscription.status != SubscriptionStatus.ACTIVE:
-            return error_response('Only active subscriptions can be paused', status_code=400)
+            return error_response(get_translation('api.subscriptions.error.only_active_pause'), status_code=400)
 
-        reason = validated_data.reason or 'Customer request'
+        reason = validated_data.reason or get_translation('api.subscriptions.default_reason_customer_request')
         resume_date = validated_data.resume_date
 
         # Validate resume date if provided
         if resume_date and resume_date <= datetime.now(UTC):
-            return error_response('Resume date must be in the future', status_code=400)
+            return error_response(get_translation('api.subscriptions.error.resume_date_future'), status_code=400)
 
         # Pause the subscription
         subscription.pause(reason=reason, resume_date=resume_date)
         db.session.add(SubscriptionLog(
             subscription_id=subscription_id,
             action='paused',
-            details=f"Reason: {reason}" if reason else "Subscription paused"
+            details=get_translation('api.subscriptions.log.reason', reason=reason)
         ))
         db.session.commit()
 
@@ -355,7 +360,10 @@ def pause_subscription(subscription_id):
             template_data={
                 'subscription_name': subscription.get_translated('name', language),
                 'pause_reason': reason,
-                'resume_date': resume_date.strftime('%Y-%m-%d') if resume_date else 'Manual resume required'
+                'resume_date': (
+                    resume_date.strftime('%Y-%m-%d')
+                    if resume_date else get_translation('api.subscriptions.manual_resume_required')
+                )
             }
         )
 
@@ -372,13 +380,13 @@ def pause_subscription(subscription_id):
 
         return success_response(
             data={'subscription': subscription_response},
-            message='Subscription paused successfully'
+            message=get_translation('api.subscriptions.paused')
         )
 
     except Exception as e:
         db.session.rollback()
         current_app.logger.error(f"Pause subscription error: {e}")
-        return internal_error_response('Failed to pause subscription')
+        return internal_error_response(get_translation('api.subscriptions.error.pause_failed'))
 
 
 @subscriptions_bp.route('/<int:subscription_id>/resume', methods=['POST'])
@@ -394,17 +402,17 @@ def resume_subscription(subscription_id):
         ).first()
 
         if not subscription:
-            return not_found_response('Subscription not found')
+            return not_found_response(get_translation('api.subscriptions.error.not_found'))
 
         if subscription.status != SubscriptionStatus.PAUSED:
-            return error_response('Only paused subscriptions can be resumed', status_code=400)
+            return error_response(get_translation('api.subscriptions.error.only_paused_resume'), status_code=400)
 
         # Resume the subscription
         subscription.resume()
         db.session.add(SubscriptionLog(
             subscription_id=subscription_id,
             action='resumed',
-            details="Subscription resumed"
+            details=get_translation('api.subscriptions.log.resumed')
         ))
         db.session.commit()
 
@@ -423,13 +431,13 @@ def resume_subscription(subscription_id):
             data={
                 'subscription': serialize_subscription(subscription)
             },
-            message='Subscription resumed successfully'
+            message=get_translation('api.subscriptions.resumed')
         )
 
     except Exception as e:
         db.session.rollback()
         current_app.logger.error(f"Resume subscription error: {e}")
-        return internal_error_response('Failed to resume subscription')
+        return internal_error_response(get_translation('api.subscriptions.error.resume_failed'))
 
 
 @subscriptions_bp.route('/<int:subscription_id>/cancel', methods=['POST'])
@@ -447,12 +455,12 @@ def cancel_subscription(subscription_id):
         ).first()
 
         if not subscription:
-            return not_found_response('Subscription not found')
+            return not_found_response(get_translation('api.subscriptions.error.not_found'))
 
         if subscription.status == SubscriptionStatus.CANCELLED:
-            return error_response('Subscription is already cancelled', status_code=400)
+            return error_response(get_translation('api.subscriptions.error.already_cancelled'), status_code=400)
 
-        reason = validated_data.reason or 'Customer request'
+        reason = validated_data.reason or get_translation('api.subscriptions.default_reason_customer_request')
         immediate = validated_data.immediate
 
         # Cancel the subscription
@@ -461,7 +469,7 @@ def cancel_subscription(subscription_id):
             db.session.add(SubscriptionLog(
                 subscription_id=subscription_id,
                 action='cancelled',
-                details=f"Reason: {reason}" if reason else "Subscription cancelled"
+                details=get_translation('api.subscriptions.log.cancelled_with_reason', reason=reason)
             ))
         else:
             # Cancel at end of current billing period
@@ -471,7 +479,11 @@ def cancel_subscription(subscription_id):
             log = SubscriptionLog(
                 subscription_id=subscription_id,
                 action='cancellation_scheduled',
-                details=f"Subscription will be cancelled on {subscription.end_date.strftime('%Y-%m-%d')}. Reason: {reason}",
+                details=get_translation(
+                    'api.subscriptions.log.cancellation_scheduled',
+                    date=subscription.end_date.strftime('%Y-%m-%d'),
+                    reason=reason
+                ),
                 user_id=current_user_id
             )
             db.session.add(log)
@@ -487,7 +499,10 @@ def cancel_subscription(subscription_id):
             template_data={
                 'subscription_name': subscription.get_translated('name', language),
                 'cancellation_reason': reason,
-                'effective_date': subscription.end_date.strftime('%Y-%m-%d') if subscription.end_date else 'Immediate'
+                'effective_date': (
+                    subscription.end_date.strftime('%Y-%m-%d')
+                    if subscription.end_date else get_translation('api.subscriptions.immediate')
+                )
             }
         )
 
@@ -495,7 +510,11 @@ def cancel_subscription(subscription_id):
         subscription_response = serialize_database_model(subscription, SubscriptionSchema)
         current_app.logger.info(f"Cancel subscription: subscription_response: {subscription_response}, subscription.to_dict(): {subscription.to_dict()}")
 
-        message = 'Subscription cancelled successfully' if immediate else 'Subscription cancellation scheduled'
+        message = (
+            get_translation('api.subscriptions.cancelled')
+            if immediate
+            else get_translation('api.subscriptions.cancellation_scheduled')
+        )
         return success_response(
             data={'subscription': subscription.to_dict()},
             message=message
@@ -504,7 +523,7 @@ def cancel_subscription(subscription_id):
     except Exception as e:
         db.session.rollback()
         current_app.logger.error(f"Cancel subscription error: {e}")
-        return internal_error_response('Failed to cancel subscription')
+        return internal_error_response(get_translation('api.subscriptions.error.cancel_failed'))
 
 
 @subscriptions_bp.route('/<int:subscription_id>/items', methods=['GET'])
@@ -520,7 +539,7 @@ def get_subscription_items(subscription_id):
         ).first()
 
         if not subscription:
-            return not_found_response('Subscription not found')
+            return not_found_response(get_translation('api.subscriptions.error.not_found'))
 
         return success_response(
             data={
@@ -532,7 +551,7 @@ def get_subscription_items(subscription_id):
 
     except Exception as e:
         current_app.logger.error(f"Get subscription items error: {e}")
-        return internal_error_response('Failed to get subscription items')
+        return internal_error_response(get_translation('api.subscriptions.error.get_items_failed'))
 
 
 @subscriptions_bp.route('/<int:subscription_id>/items', methods=['POST'])
@@ -550,10 +569,10 @@ def add_subscription_item(subscription_id):
         ).first()
 
         if not subscription:
-            return not_found_response('Subscription not found')
+            return not_found_response(get_translation('api.subscriptions.error.not_found'))
 
         if subscription.status not in [SubscriptionStatus.ACTIVE, SubscriptionStatus.PAUSED]:
-            return error_response('Cannot modify cancelled subscription', status_code=400)
+            return error_response(get_translation('api.subscriptions.error.cannot_modify_cancelled'), status_code=400)
 
         product_id = validated_data.product_id
         quantity = validated_data.quantity
@@ -561,7 +580,7 @@ def add_subscription_item(subscription_id):
         # Validate product
         product: Product = Product.query.filter_by(id=product_id, is_active=True).first()
         if not product:
-            return not_found_response('Product not found')
+            return not_found_response(get_translation('api.subscriptions.error.product_not_found'))
 
         # Check if item already exists
         existing_item = SubscriptionItem.query.filter_by(
@@ -570,7 +589,7 @@ def add_subscription_item(subscription_id):
         ).first()
 
         if existing_item:
-            return conflict_response('Product already exists in subscription')
+            return conflict_response(get_translation('api.subscriptions.error.product_already_exists'))
 
         # Add new item
         language = get_current_language()
@@ -597,7 +616,11 @@ def add_subscription_item(subscription_id):
         log = SubscriptionLog(
             subscription_id=subscription_id,
             action='item_added',
-            details=f"Added {quantity}x {product_name}",
+            details=get_translation(
+                'api.subscriptions.log.item_added',
+                quantity=quantity,
+                product=product_name
+            ),
             user_id=current_user_id
         )
         db.session.add(log)
@@ -615,13 +638,13 @@ def add_subscription_item(subscription_id):
                 'item': item_response,
                 'new_billing_amount': float(subscription.billing_amount)
             },
-            message='Item added to subscription successfully'
+            message=get_translation('api.subscriptions.item_added')
         )
 
     except Exception as e:
         db.session.rollback()
         current_app.logger.error(f"Add subscription item error: {e}")
-        return internal_error_response('Failed to add item to subscription')
+        return internal_error_response(get_translation('api.subscriptions.error.add_item_failed'))
 
 
 @subscriptions_bp.route('/<int:subscription_id>/items/<int:item_id>', methods=['PUT'])
@@ -639,10 +662,10 @@ def update_subscription_item(subscription_id, item_id):
         ).first()
 
         if not subscription:
-            return not_found_response('Subscription not found')
+            return not_found_response(get_translation('api.subscriptions.error.not_found'))
 
         if subscription.status not in [SubscriptionStatus.ACTIVE, SubscriptionStatus.PAUSED]:
-            return error_response('Cannot modify cancelled subscription', status_code=400)
+            return error_response(get_translation('api.subscriptions.error.cannot_modify_cancelled'), status_code=400)
 
         item = SubscriptionItem.query.filter_by(
             id=item_id,
@@ -650,7 +673,7 @@ def update_subscription_item(subscription_id, item_id):
         ).first()
 
         if not item:
-            return not_found_response('Subscription item not found')
+            return not_found_response(get_translation('api.subscriptions.error.item_not_found'))
 
         new_quantity = validated_data.quantity
 
@@ -668,11 +691,20 @@ def update_subscription_item(subscription_id, item_id):
         subscription.updated_at = datetime.now(UTC)
 
         # Log the change
-        product_name = item.product.name if item.product else 'Unknown Product'
+        product_name = (
+            item.product.name
+            if item.product
+            else get_translation('api.subscriptions.unknown_product')
+        )
         log = SubscriptionLog(
             subscription_id=subscription_id,
             action='item_updated',
-            details=f"Updated {product_name} quantity from {old_quantity} to {new_quantity}",
+            details=get_translation(
+                'api.subscriptions.log.item_updated',
+                product=product_name,
+                old_quantity=old_quantity,
+                new_quantity=new_quantity
+            ),
             user_id=current_user_id
         )
         db.session.add(log)
@@ -687,13 +719,13 @@ def update_subscription_item(subscription_id, item_id):
                 'item': item_response,
                 'new_billing_amount': float(subscription.billing_amount)
             },
-            message='Subscription item updated successfully'
+            message=get_translation('api.subscriptions.item_updated')
         )
 
     except Exception as e:
         db.session.rollback()
         current_app.logger.error(f"Update subscription item error: {e}")
-        return internal_error_response('Failed to update subscription item')
+        return internal_error_response(get_translation('api.subscriptions.error.update_item_failed'))
 
 
 @subscriptions_bp.route('/<int:subscription_id>/items/<int:item_id>', methods=['DELETE'])
@@ -709,10 +741,10 @@ def remove_subscription_item(subscription_id, item_id):
         ).first()
 
         if not subscription:
-            return not_found_response('Subscription not found')
+            return not_found_response(get_translation('api.subscriptions.error.not_found'))
 
         if subscription.status not in [SubscriptionStatus.ACTIVE, SubscriptionStatus.PAUSED]:
-            return error_response('Cannot modify cancelled subscription', status_code=400)
+            return error_response(get_translation('api.subscriptions.error.cannot_modify_cancelled'), status_code=400)
 
         item = SubscriptionItem.query.filter_by(
             id=item_id,
@@ -720,7 +752,7 @@ def remove_subscription_item(subscription_id, item_id):
         ).first()
 
         if not item:
-            return not_found_response('Subscription item not found')
+            return not_found_response(get_translation('api.subscriptions.error.item_not_found'))
 
         # Check if this is the last item
         remaining_items = SubscriptionItem.query.filter_by(
@@ -728,7 +760,7 @@ def remove_subscription_item(subscription_id, item_id):
         ).filter(SubscriptionItem.id != item_id).count()
 
         if remaining_items == 0:
-            return error_response('Cannot remove the last item from subscription', status_code=400)
+            return error_response(get_translation('api.subscriptions.error.cannot_remove_last_item'), status_code=400)
 
         product_name = item.product.name
 
@@ -742,7 +774,7 @@ def remove_subscription_item(subscription_id, item_id):
         log = SubscriptionLog(
             subscription_id=subscription_id,
             action='item_removed',
-            details=f"Removed {product_name}",
+            details=get_translation('api.subscriptions.log.item_removed', product=product_name),
             user_id=current_user_id
         )
         db.session.add(log)
@@ -753,13 +785,13 @@ def remove_subscription_item(subscription_id, item_id):
             data={
                 'new_billing_amount': subscription.billing_amount
             },
-            message='Item removed from subscription successfully'
+            message=get_translation('api.subscriptions.item_removed')
         )
 
     except Exception as e:
         db.session.rollback()
         current_app.logger.error(f"Remove subscription item error: {e}")
-        return internal_error_response('Failed to remove subscription item')
+        return internal_error_response(get_translation('api.subscriptions.error.remove_item_failed'))
 
 
 @subscriptions_bp.route('/<int:subscription_id>/billing-history', methods=['GET'])
@@ -775,7 +807,7 @@ def get_billing_history(subscription_id):
         ).first()
 
         if not subscription:
-            return not_found_response('Subscription not found')
+            return not_found_response(get_translation('api.subscriptions.error.not_found'))
 
         # Get payment history
         from business_app.models.payment import Payment
@@ -812,7 +844,7 @@ def get_billing_history(subscription_id):
 
     except Exception as e:
         current_app.logger.error(f"Get billing history error: {e}")
-        return internal_error_response('Failed to get billing history')
+        return internal_error_response(get_translation('api.subscriptions.error.get_billing_history_failed'))
 
 
 @subscriptions_bp.route('/<int:subscription_id>/logs', methods=['GET'])
@@ -828,7 +860,7 @@ def get_subscription_logs(subscription_id):
         ).first()
 
         if not subscription:
-            return not_found_response('Subscription not found')
+            return not_found_response(get_translation('api.subscriptions.error.not_found'))
 
         # Get query parameters
         page = int(request.args.get('page', 1))
@@ -850,7 +882,7 @@ def get_subscription_logs(subscription_id):
 
     except Exception as e:
         current_app.logger.error(f"Get subscription logs error: {e}")
-        return internal_error_response('Failed to get subscription logs')
+        return internal_error_response(get_translation('api.subscriptions.error.get_logs_failed'))
 
 
 @subscriptions_bp.route('/templates', methods=['GET'])
@@ -861,8 +893,8 @@ def get_subscription_templates():
         templates = [
             {
                 'id': 'basic_weekly',
-                'name': 'Basic Weekly',
-                'description': 'Perfect for small families - weekly water delivery',
+                'name': get_translation('api.subscriptions.templates.basic_weekly.name'),
+                'description': get_translation('api.subscriptions.templates.basic_weekly.description'),
                 'billing_cycle': 'weekly',
                 'delivery_frequency': 'weekly',
                 'discount_percentage': 5.0,
@@ -873,8 +905,8 @@ def get_subscription_templates():
             },
             {
                 'id': 'family_monthly',
-                'name': 'Family Monthly',
-                'description': 'Great value for larger families - monthly bulk delivery',
+                'name': get_translation('api.subscriptions.templates.family_monthly.name'),
+                'description': get_translation('api.subscriptions.templates.family_monthly.description'),
                 'billing_cycle': 'monthly',
                 'delivery_frequency': 'monthly',
                 'discount_percentage': 10.0,
@@ -886,8 +918,8 @@ def get_subscription_templates():
             },
             {
                 'id': 'office_daily',
-                'name': 'Office Daily',
-                'description': 'Fresh water for your office every day',
+                'name': get_translation('api.subscriptions.templates.office_daily.name'),
+                'description': get_translation('api.subscriptions.templates.office_daily.description'),
                 'billing_cycle': 'monthly',
                 'delivery_frequency': 'daily',
                 'discount_percentage': 15.0,
@@ -903,7 +935,7 @@ def get_subscription_templates():
 
     except Exception as e:
         current_app.logger.error(f"Get subscription templates error: {e}")
-        return internal_error_response('Failed to get subscription templates')
+        return internal_error_response(get_translation('api.subscriptions.error.get_templates_failed'))
 
 
 @subscriptions_bp.route('/preview', methods=['POST'])
@@ -917,7 +949,7 @@ def preview_subscription():
 
         user = User.query.get(current_user_id)
         if not user:
-            return not_found_response('User not found')
+            return not_found_response(get_translation('user_not_found'))
 
         # Calculate subscription preview
         preview = get_subscription_service().calculate_subscription_preview(
@@ -933,14 +965,15 @@ def preview_subscription():
 
         return success_response(
             data={'preview': preview_response},
-            message='Subscription preview calculated successfully'
+            message=get_translation('api.subscriptions.preview_calculated')
         )
 
     except ValueError as e:
-        return error_response(str(e), status_code=400)
+        current_app.logger.warning(f"Preview subscription validation error: {e}")
+        return error_response(get_translation('api.subscriptions.error.validation_failed'), status_code=400)
     except Exception as e:
         current_app.logger.error(f"Preview subscription error: {e}")
-        return internal_error_response('Failed to preview subscription')
+        return internal_error_response(get_translation('api.subscriptions.error.preview_failed'))
 
 
 @subscriptions_bp.route('/statistics', methods=['GET'])
@@ -1065,7 +1098,7 @@ def get_subscription_statistics():
 
     except Exception as e:
         current_app.logger.error(f"Get subscription statistics error: {e}")
-        return internal_error_response('Failed to get subscription statistics')
+        return internal_error_response(get_translation('api.subscriptions.error.get_statistics_failed'))
 
 
 @subscriptions_bp.route('/<int:subscription_id>/skip-next-delivery', methods=['POST'])
@@ -1083,12 +1116,12 @@ def skip_next_delivery(subscription_id):
         ).first()
 
         if not subscription:
-            return not_found_response('Subscription not found')
+            return not_found_response(get_translation('api.subscriptions.error.not_found'))
 
         if subscription.status != SubscriptionStatus.ACTIVE:
-            return error_response('Only active subscriptions can skip deliveries', status_code=400)
+            return error_response(get_translation('api.subscriptions.error.only_active_skip'), status_code=400)
 
-        reason = validated_data.reason or 'Customer request'
+        reason = validated_data.reason or get_translation('api.subscriptions.default_reason_customer_request')
 
         # Calculate next delivery date after skip
         current_next_delivery = subscription.calculate_next_delivery_date()
@@ -1114,7 +1147,11 @@ def skip_next_delivery(subscription_id):
         log = SubscriptionLog(
             subscription_id=subscription_id,
             action='delivery_skipped',
-            details=f"Skipped delivery scheduled for {current_next_delivery.strftime('%Y-%m-%d')}. Reason: {reason}",
+            details=get_translation(
+                'api.subscriptions.log.delivery_skipped',
+                date=current_next_delivery.strftime('%Y-%m-%d'),
+                reason=reason
+            ),
             user_id=current_user_id,
             extra_data={
                 'original_delivery_date': current_next_delivery.isoformat(),
@@ -1143,13 +1180,13 @@ def skip_next_delivery(subscription_id):
                 'original_delivery_date': current_next_delivery.isoformat(),
                 'new_next_delivery_date': new_next_delivery.isoformat()
             },
-            message='Next delivery skipped successfully'
+            message=get_translation('api.subscriptions.next_delivery_skipped')
         )
 
     except Exception as e:
         db.session.rollback()
         current_app.logger.error(f"Skip next delivery error: {e}")
-        return internal_error_response('Failed to skip delivery')
+        return internal_error_response(get_translation('api.subscriptions.error.skip_failed'))
 
 
 @subscriptions_bp.route('/<int:subscription_id>/change-payment-method', methods=['POST'])
@@ -1167,15 +1204,15 @@ def change_payment_method(subscription_id):
         ).first()
 
         if not subscription:
-            return not_found_response('Subscription not found')
+            return not_found_response(get_translation('api.subscriptions.error.not_found'))
 
         if subscription.status not in [SubscriptionStatus.ACTIVE, SubscriptionStatus.PAUSED]:
-            return error_response('Cannot change payment method for cancelled subscription', status_code=400)
+            return error_response(get_translation('api.subscriptions.error.cannot_change_payment_cancelled'), status_code=400)
 
         try:
             new_payment_method = PaymentMethod(validated_data.payment_method)
         except ValueError:
-            return error_response('Invalid payment method', status_code=400)
+            return error_response(get_translation('api.subscriptions.error.invalid_payment_method'), status_code=400)
 
         old_payment_method = subscription.payment_method
         subscription.payment_method = new_payment_method
@@ -1185,7 +1222,11 @@ def change_payment_method(subscription_id):
         log = SubscriptionLog(
             subscription_id=subscription_id,
             action='payment_method_changed',
-            details=f"Payment method changed from {old_payment_method.value} to {new_payment_method.value}",
+            details=get_translation(
+                'api.subscriptions.log.payment_method_changed',
+                old_method=old_payment_method.value,
+                new_method=new_payment_method.value
+            ),
             user_id=current_user_id
         )
         db.session.add(log)
@@ -1207,13 +1248,13 @@ def change_payment_method(subscription_id):
 
         return success_response(
             data={'subscription': subscription_response},
-            message='Payment method updated successfully'
+            message=get_translation('api.subscriptions.payment_method_updated')
         )
 
     except Exception as e:
         db.session.rollback()
         current_app.logger.error(f"Change payment method error: {e}")
-        return internal_error_response('Failed to change payment method')
+        return internal_error_response(get_translation('api.subscriptions.error.change_payment_failed'))
 
 
 @subscriptions_bp.route('/<int:subscription_id>/retry-billing', methods=['POST'])
@@ -1229,22 +1270,22 @@ def retry_billing(subscription_id):
         ).first()
 
         if not subscription:
-            return not_found_response('Subscription not found')
+            return not_found_response(get_translation('api.subscriptions.error.not_found'))
 
         if subscription.status != SubscriptionStatus.ACTIVE:
-            return error_response('Only active subscriptions can retry billing', status_code=400)
+            return error_response(get_translation('api.subscriptions.error.only_active_retry'), status_code=400)
 
         # Check if there are failed billing attempts
         if subscription.failed_billing_attempts == 0:
-            return error_response('No failed billing attempts to retry', status_code=400)
+            return error_response(get_translation('api.subscriptions.error.no_failed_billing_to_retry'), status_code=400)
 
         # Process billing retry asynchronously
         process_subscription_billing.delay(subscription_id, retry=True)
 
         return success_response(
-            message='Billing retry initiated. You will be notified of the result.'
+            message=get_translation('api.subscriptions.billing_retry_initiated')
         )
 
     except Exception as e:
         current_app.logger.error(f"Retry billing error: {e}")
-        return internal_error_response('Failed to retry billing')
+        return internal_error_response(get_translation('api.subscriptions.error.retry_billing_failed'))

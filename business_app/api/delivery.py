@@ -15,6 +15,7 @@ from business_app.utils.service_factory import (
 )
 from business_app.utils.error_handlers import handle_api_exception
 from business_app.utils.api_responses import success_response, error_response
+from business_app.utils.translations import get_translation
 from business_app.utils.exceptions import (
     ValidationError, NotFoundError
 )
@@ -51,13 +52,15 @@ delivery_bp = Blueprint('delivery', __name__)
 def track_delivery_public(tracking_number):
     """Public endpoint to track delivery by tracking number"""
     if not tracking_number or not tracking_number.strip():
-        raise ValidationError("Tracking number is required")
+        raise ValidationError(get_translation('api.delivery.error.tracking_number_required'))
 
     delivery = Delivery.query.filter_by(tracking_number=tracking_number.strip()).first()
 
     if not delivery:
-        raise NotFoundError("Delivery not found",
-                          details={'tracking_number': tracking_number})
+        raise NotFoundError(
+            get_translation('api.delivery.error.not_found'),
+            details={'tracking_number': tracking_number}
+        )
 
     # Public tracking info (limited details)
     tracking_info = {
@@ -80,7 +83,7 @@ def track_delivery_public(tracking_number):
 
     return success_response(
         data={'delivery': tracking_info},
-        message='Delivery tracking information retrieved successfully'
+        message=get_translation('api.delivery.tracking_retrieved')
     )
 
 
@@ -138,7 +141,7 @@ def get_my_deliveries():
 
     return success_response(
         data={'deliveries': response_data['items'], 'pagination': response_data['pagination']},
-        message='Deliveries retrieved successfully'
+        message=get_translation('api.delivery.list_retrieved')
     )
 
 
@@ -156,11 +159,11 @@ def get_live_tracking(delivery_id):
         ).first()
 
         if not delivery:
-            return jsonify({'error': 'Delivery not found'}), 404
+            return jsonify({'error': get_translation('api.delivery.error.not_found')}), 404
 
         # Check if delivery is trackable
         if delivery.status not in [DeliveryStatus.ASSIGNED, DeliveryStatus.IN_TRANSIT, DeliveryStatus.ARRIVED]:
-            return jsonify({'error': 'Delivery is not currently trackable'}), 400
+            return jsonify({'error': get_translation('api.delivery.error.not_trackable')}), 400
 
         tracking_data = {
             'delivery_id': delivery.id,
@@ -197,7 +200,7 @@ def get_live_tracking(delivery_id):
 
     except Exception as e:
         current_app.logger.error(f"Get live tracking error: {e}")
-        return jsonify({'error': 'Failed to get live tracking'}), 500
+        return jsonify({'error': get_translation('api.delivery.error.get_live_tracking_failed')}), 500
 
 
 @delivery_bp.route('/time-slots', methods=['GET'])
@@ -207,16 +210,16 @@ def get_time_slots():
         target_date_str = request.args.get('date')
 
         if not target_date_str:
-            return jsonify({'error': 'date parameter is required'}), 400
+            return jsonify({'error': get_translation('api.delivery.error.date_required')}), 400
 
         try:
             target_date = datetime.fromisoformat(target_date_str).date()
         except ValueError:
-            return jsonify({'error': 'Invalid date format. Use YYYY-MM-DD'}), 400
+            return jsonify({'error': get_translation('api.delivery.error.invalid_date_format')}), 400
 
         # Cannot book for past dates
         if target_date < date.today():
-            return jsonify({'error': 'Cannot book delivery for past dates'}), 400
+            return jsonify({'error': get_translation('api.delivery.error.cannot_book_past_dates')}), 400
 
         # Get all active time slots from database
         all_slots = DeliveryTimeSlot.query.filter_by(is_active=True).all()
@@ -251,7 +254,7 @@ def get_time_slots():
 
     except Exception as e:
         current_app.logger.error(f"Get time slots error: {e}")
-        return jsonify({'error': 'Failed to get time slots'}), 500
+        return jsonify({'error': get_translation('api.delivery.error.get_time_slots_failed')}), 500
 
 
 @delivery_bp.route('/calculate-fee', methods=['POST'])
@@ -271,7 +274,7 @@ def calculate_delivery_fee():
     order_total = data.get('order_total', 0)
 
     if not address_id:
-        raise ValidationError("Address ID is required")
+        raise ValidationError(get_translation('api.delivery.error.address_id_required'))
 
     # Get the address
     address = UserAddress.query.filter_by(
@@ -280,7 +283,7 @@ def calculate_delivery_fee():
     ).first()
 
     if not address:
-        raise NotFoundError("Address not found")
+        raise NotFoundError(get_translation('api.delivery.error.address_not_found'))
 
     # Use the delivery service to calculate fee
     delivery_service = get_delivery_service()
@@ -306,7 +309,7 @@ def calculate_delivery_fee():
             'address_id': address_id,
             'order_total': order_total
         },
-        message='Delivery fee calculated successfully'
+        message=get_translation('api.delivery.fee_calculated')
     )
 
 
@@ -330,7 +333,7 @@ def get_delivery_zones():
 
     except Exception as e:
         current_app.logger.error(f"Get delivery zones error: {e}")
-        return jsonify({'error': 'Failed to get delivery zones'}), 500
+        return jsonify({'error': get_translation('api.delivery.error.get_zones_failed')}), 500
 
 
 @delivery_bp.route('/estimate-delivery', methods=['POST'])
@@ -357,10 +360,11 @@ def estimate_delivery():
         })
 
     except ValueError as e:
-        return jsonify({'error': str(e)}), 400
+        current_app.logger.warning(f"Estimate delivery validation error: {e}")
+        return jsonify({'error': get_translation('api.delivery.error.estimate_validation_failed')}), 400
     except Exception as e:
         current_app.logger.error(f"Estimate delivery error: {e}")
-        return jsonify({'error': 'Failed to estimate delivery'}), 500
+        return jsonify({'error': get_translation('api.delivery.error.estimate_failed')}), 500
 
 
 # Driver-specific endpoints (require driver role)
@@ -374,7 +378,7 @@ def get_driver_assignments():
 
         role_value = user.role.value if hasattr(user.role, 'value') else user.role
         if not user or role_value != UserRole.DELIVERY_DRIVER.value:
-            return jsonify({'error': 'Access denied. Driver role required.'}), 403
+            return jsonify({'error': get_translation('api.delivery.error.driver_role_required')}), 403
 
         # Get query parameters
         status = request.args.get('status', 'active')  # active, completed, all
@@ -437,7 +441,7 @@ def get_driver_assignments():
 
     except Exception as e:
         current_app.logger.error(f"Get driver assignments error: {e}")
-        return jsonify({'error': 'Failed to get assignments'}), 500
+        return jsonify({'error': get_translation('api.delivery.error.get_assignments_failed')}), 500
 
 
 @delivery_bp.route('/driver/update-location', methods=['POST'])
@@ -452,7 +456,7 @@ def update_driver_location():
 
         role_value = user.role.value if hasattr(user.role, 'value') else user.role
         if not user or role_value != UserRole.DELIVERY_DRIVER.value:
-            return jsonify({'error': 'Access denied. Driver role required.'}), 403
+            return jsonify({'error': get_translation('api.delivery.error.driver_role_required')}), 403
 
         data = request.get_json()
         lat = data.get('lat')
@@ -460,7 +464,7 @@ def update_driver_location():
 
         # Validate coordinates
         if not (-90 <= lat <= 90) or not (-180 <= lng <= 180):
-            return jsonify({'error': 'Invalid coordinates'}), 400
+            return jsonify({'error': get_translation('api.delivery.error.invalid_coordinates')}), 400
 
         # Get active deliveries for this driver
         active_deliveries = Delivery.query.filter_by(
@@ -476,11 +480,11 @@ def update_driver_location():
             # Calculate new ETA
             calculate_delivery_eta_task.delay(delivery.id)
 
-        return jsonify({'message': 'Location updated successfully'})
+        return jsonify({'message': get_translation('api.delivery.location_updated_successfully')})
 
     except Exception as e:
         current_app.logger.error(f"Update driver location error: {e}")
-        return jsonify({'error': 'Failed to update location'}), 500
+        return jsonify({'error': get_translation('api.delivery.error.update_location_failed')}), 500
 
 
 @delivery_bp.route('/driver/start-delivery/<int:delivery_id>', methods=['POST'])
@@ -493,7 +497,7 @@ def start_delivery(delivery_id):
 
         role_value = user.role.value if hasattr(user.role, 'value') else user.role
         if not user or role_value != UserRole.DELIVERY_DRIVER.value:
-            return jsonify({'error': 'Access denied. Driver role required.'}), 403
+            return jsonify({'error': get_translation('api.delivery.error.driver_role_required')}), 403
 
         delivery = Delivery.query.filter_by(
             id=delivery_id,
@@ -501,10 +505,10 @@ def start_delivery(delivery_id):
         ).first()
 
         if not delivery:
-            return jsonify({'error': 'Delivery not found or not assigned to you'}), 404
+            return jsonify({'error': get_translation('api.delivery.error.not_found_or_not_assigned')}), 404
 
         if delivery.status != DeliveryStatus.ASSIGNED:
-            return jsonify({'error': 'Delivery cannot be started at this stage'}), 400
+            return jsonify({'error': get_translation('api.delivery.error.cannot_start_at_stage')}), 400
 
         # Update delivery status
         delivery.status = DeliveryStatus.IN_TRANSIT
@@ -529,14 +533,14 @@ def start_delivery(delivery_id):
         )
 
         return jsonify({
-            'message': 'Delivery started successfully',
+            'message': get_translation('api.delivery.started_successfully'),
             'delivery': serialize_delivery(delivery, user_view=False)
         })
 
     except Exception as e:
         db.session.rollback()
         current_app.logger.error(f"Start delivery error: {e}")
-        return jsonify({'error': 'Failed to start delivery'}), 500
+        return jsonify({'error': get_translation('api.delivery.error.start_failed')}), 500
 
 
 @delivery_bp.route('/driver/arrive/<int:delivery_id>', methods=['POST'])
@@ -549,7 +553,7 @@ def mark_arrived(delivery_id):
 
         role_value = user.role.value if hasattr(user.role, 'value') else user.role
         if not user or role_value != UserRole.DELIVERY_DRIVER.value:
-            return jsonify({'error': 'Access denied. Driver role required.'}), 403
+            return jsonify({'error': get_translation('api.delivery.error.driver_role_required')}), 403
 
         delivery = Delivery.query.filter_by(
             id=delivery_id,
@@ -557,10 +561,10 @@ def mark_arrived(delivery_id):
         ).first()
 
         if not delivery:
-            return jsonify({'error': 'Delivery not found or not assigned to you'}), 404
+            return jsonify({'error': get_translation('api.delivery.error.not_found_or_not_assigned')}), 404
 
         if delivery.status != DeliveryStatus.IN_TRANSIT:
-            return jsonify({'error': 'Delivery must be in transit to mark as arrived'}), 400
+            return jsonify({'error': get_translation('api.delivery.error.must_be_in_transit_to_arrive')}), 400
 
         # Update delivery status
         delivery.status = DeliveryStatus.ARRIVED
@@ -585,14 +589,14 @@ def mark_arrived(delivery_id):
         )
 
         return jsonify({
-            'message': 'Marked as arrived successfully',
+            'message': get_translation('api.delivery.arrived_marked_successfully'),
             'delivery': serialize_delivery(delivery, user_view=False)
         })
 
     except Exception as e:
         db.session.rollback()
         current_app.logger.error(f"Mark arrived error: {e}")
-        return jsonify({'error': 'Failed to mark as arrived'}), 500
+        return jsonify({'error': get_translation('api.delivery.error.mark_arrived_failed')}), 500
 
 
 @delivery_bp.route('/driver/complete/<int:delivery_id>', methods=['POST'])
@@ -606,7 +610,7 @@ def complete_delivery(delivery_id):
 
         role_value = user.role.value if hasattr(user.role, 'value') else user.role
         if not user or role_value != UserRole.DELIVERY_DRIVER.value:
-            return jsonify({'error': 'Access denied. Driver role required.'}), 403
+            return jsonify({'error': get_translation('api.delivery.error.driver_role_required')}), 403
 
         delivery = Delivery.query.filter_by(
             id=delivery_id,
@@ -614,10 +618,10 @@ def complete_delivery(delivery_id):
         ).first()
 
         if not delivery:
-            return jsonify({'error': 'Delivery not found or not assigned to you'}), 404
+            return jsonify({'error': get_translation('api.delivery.error.not_found_or_not_assigned')}), 404
 
         if delivery.status != DeliveryStatus.ARRIVED:
-            return jsonify({'error': 'Delivery must be marked as arrived before completion'}), 400
+            return jsonify({'error': get_translation('api.delivery.error.must_be_arrived_before_completion')}), 400
 
         data = request.get_json()
 
@@ -633,13 +637,13 @@ def complete_delivery(delivery_id):
         process_delivery_confirmation_task.delay(delivery_id, confirmation_data)
 
         return jsonify({
-            'message': 'Delivery completion is being processed',
+            'message': get_translation('api.delivery.completion_processing'),
             'delivery_id': delivery_id
         })
 
     except Exception as e:
         current_app.logger.error(f"Complete delivery error: {e}")
-        return jsonify({'error': 'Failed to complete delivery'}), 500
+        return jsonify({'error': get_translation('api.delivery.error.complete_failed')}), 500
 
 
 @delivery_bp.route('/driver/report-issue/<int:delivery_id>', methods=['POST'])
@@ -653,7 +657,7 @@ def report_delivery_issue(delivery_id):
 
         role_value = user.role.value if hasattr(user.role, 'value') else user.role
         if not user or role_value != UserRole.DELIVERY_DRIVER.value:
-            return jsonify({'error': 'Access denied. Driver role required.'}), 403
+            return jsonify({'error': get_translation('api.delivery.error.driver_role_required')}), 403
 
         delivery = Delivery.query.filter_by(
             id=delivery_id,
@@ -661,7 +665,7 @@ def report_delivery_issue(delivery_id):
         ).first()
 
         if not delivery:
-            return jsonify({'error': 'Delivery not found or not assigned to you'}), 404
+            return jsonify({'error': get_translation('api.delivery.error.not_found_or_not_assigned')}), 404
 
         data = request.get_json()
         issue_type = data.get('issue_type')  # delay, failed_attempt, vehicle_breakdown, customer_issue
@@ -670,20 +674,20 @@ def report_delivery_issue(delivery_id):
         # Valid issue types
         valid_issues = ['delay', 'failed_attempt', 'vehicle_breakdown', 'customer_issue', 'address_issue']
         if issue_type not in valid_issues:
-            return jsonify({'error': 'Invalid issue type'}), 400
+            return jsonify({'error': get_translation('api.delivery.error.invalid_issue_type')}), 400
 
         # Handle delivery exception asynchronously
         handle_delivery_exception_task.delay(delivery_id, issue_type, details)
 
         return jsonify({
-            'message': 'Issue reported successfully. Our team will assist you shortly.',
+            'message': get_translation('api.delivery.issue_reported_successfully'),
             'issue_type': issue_type,
             'delivery_id': delivery_id
         })
 
     except Exception as e:
         current_app.logger.error(f"Report delivery issue error: {e}")
-        return jsonify({'error': 'Failed to report issue'}), 500
+        return jsonify({'error': get_translation('api.delivery.error.report_issue_failed')}), 500
 
 
 @delivery_bp.route('/driver/route-optimization', methods=['POST'])
@@ -696,19 +700,19 @@ def request_route_optimization():
 
         role_value = user.role.value if hasattr(user.role, 'value') else user.role
         if not user or role_value != UserRole.DELIVERY_DRIVER.value:
-            return jsonify({'error': 'Access denied. Driver role required.'}), 403
+            return jsonify({'error': get_translation('api.delivery.error.driver_role_required')}), 403
 
         # Trigger route optimization
         from business_app.tasks.delivery_tasks import optimize_driver_route_task
         optimize_driver_route_task.delay(current_user_id)
 
         return jsonify({
-            'message': 'Route optimization requested. You will be notified when complete.'
+            'message': get_translation('api.delivery.route_optimization_requested')
         })
 
     except Exception as e:
         current_app.logger.error(f"Request route optimization error: {e}")
-        return jsonify({'error': 'Failed to request route optimization'}), 500
+        return jsonify({'error': get_translation('api.delivery.error.route_optimization_failed')}), 500
 
 
 @delivery_bp.route('/upload-photo', methods=['POST'])
@@ -721,14 +725,14 @@ def upload_delivery_photo():
 
         role_value = user.role.value if hasattr(user.role, 'value') else user.role
         if not user or role_value != UserRole.DELIVERY_DRIVER.value:
-            return jsonify({'error': 'Access denied. Driver role required.'}), 403
+            return jsonify({'error': get_translation('api.delivery.error.driver_role_required')}), 403
 
         if 'photo' not in request.files:
-            return jsonify({'error': 'No photo file provided'}), 400
+            return jsonify({'error': get_translation('api.delivery.error.no_photo_provided')}), 400
 
         file = request.files['photo']
         if file.filename == '':
-            return jsonify({'error': 'No file selected'}), 400
+            return jsonify({'error': get_translation('api.delivery.error.no_file_selected')}), 400
 
         # Enhanced file validation and upload
         try:
@@ -747,7 +751,7 @@ def upload_delivery_photo():
             file_ext = validation_result['validation_results']['file_extension']
             if file_ext not in allowed_image_exts:
                 return jsonify({
-                    'error': f'Invalid file type for delivery photos. Only JPG, PNG allowed. Got: {file_ext}'
+                    'error': get_translation('api.delivery.error.invalid_photo_type', file_ext=file_ext)
                 }), 400
 
             # Check file size specifically for delivery photos (max 5MB)
@@ -755,7 +759,10 @@ def upload_delivery_photo():
             max_delivery_photo_size = 5 * 1024 * 1024  # 5MB
             if file_size > max_delivery_photo_size:
                 return jsonify({
-                    'error': f'File too large for delivery photo. Maximum: 5MB, Got: {file_size / (1024*1024):.1f}MB'
+                    'error': get_translation(
+                        'api.delivery.error.photo_too_large',
+                        size_mb=f"{file_size / (1024*1024):.1f}"
+                    )
                 }), 400
 
             # Upload using file storage service with validated data
@@ -771,15 +778,16 @@ def upload_delivery_photo():
             )
 
         except FileValidationError as e:
-            return jsonify({'error': f'File validation failed: {str(e)}'}), 400
+            current_app.logger.warning(f"File validation failed in delivery photo upload: {e}")
+            return jsonify({'error': get_translation('api.delivery.error.file_validation_failed')}), 400
         except Exception as e:
             current_app.logger.error(f"File validation error in delivery photo upload: {e}")
-            return jsonify({'error': 'File validation failed'}), 400
+            return jsonify({'error': get_translation('api.delivery.error.file_validation_failed')}), 400
 
         # The file storage service returns different format, adjust accordingly
         if upload_result:
             return jsonify({
-                'message': 'Photo uploaded successfully',
+                'message': get_translation('api.delivery.photo_uploaded_successfully'),
                 'photo_url': upload_result.get('url', ''),
                 'photo_path': upload_result.get('file_path', ''),
                 'file_info': {
@@ -790,8 +798,8 @@ def upload_delivery_photo():
                 }
             })
         else:
-            return jsonify({'error': 'Upload failed - no result returned'}), 500
+            return jsonify({'error': get_translation('api.delivery.error.upload_no_result')}), 500
 
     except Exception as e:
         current_app.logger.error(f"Upload delivery photo error: {e}")
-        return jsonify({'error': 'Failed to upload photo'}), 500
+        return jsonify({'error': get_translation('api.delivery.error.upload_failed')}), 500

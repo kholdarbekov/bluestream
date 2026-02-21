@@ -63,8 +63,8 @@ async def handle_auth_linking(update: Update, auth_code: str) -> bool:
                 logger.info(f"Successfully linked Telegram user {user_id} to web account")
                 return True
             else:
-                error_message = response.error or "Unknown error occurred"
                 language = await i18n.get_user_language(user_id)
+                error_message = response.error or i18n.get('telegram.error.unknown', language)
 
                 if 'already linked' in error_message.lower():
                     await update.message.reply_text(
@@ -190,5 +190,5 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             logger.warning(f"Failed to send localized error in start handler fallback: {e}")
             await update.message.reply_text(
-                "❌ Something went wrong. Please try again later."
+                i18n.get('telegram.error.generic', 'en')
             )

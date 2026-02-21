@@ -99,12 +99,14 @@ class SubscriptionHandlers(BaseHandler):
 
             # Build details text
             status_emoji = SUBSCRIPTION_STATUS_ICONS.get(subscription.get('status'), '❓')
+            status_key = f"subscription_status_{subscription.get('status')}"
+            frequency_key = f"frequency_{subscription.get('delivery_frequency')}"
 
             details_text = f"🔄 {i18n.get('telegram.subscription.details_title', language)}\n\n"
             details_text += f"{status_emoji} {i18n.get('telegram.subscription.status', language)}: "
-            details_text += f"{i18n.get(f'subscription_status_{subscription.get('status')}', language)}\n"
+            details_text += f"{i18n.get(status_key, language)}\n"
             details_text += f"📅 {i18n.get('telegram.subscription.frequency', language)}: "
-            details_text += f"{i18n.get(f'frequency_{subscription.get('delivery_frequency')}', language)}\n"
+            details_text += f"{i18n.get(frequency_key, language)}\n"
 
             if subscription.get('next_delivery_date'):
                 details_text += f"🚚 {i18n.get('telegram.subscription.next_delivery', language)}: "
@@ -117,7 +119,7 @@ class SubscriptionHandlers(BaseHandler):
             if items:
                 details_text += f"\n📦 {i18n.get('telegram.subscription.items', language)}:\n"
                 for item in items:
-                    product_name = item.get('product', {}).get('name', 'Unknown')
+                    product_name = item.get('product', {}).get('name', i18n.get('telegram.common.unknown', language))
                     quantity = item.get('quantity', 1)
                     details_text += f"  • {product_name} x{quantity}\n"
 
@@ -372,7 +374,8 @@ class SubscriptionHandlers(BaseHandler):
             for item in preview.get('items', []):
                 text += f"  • {item.get('product_name')} x{item.get('quantity')}\n"
             text += f"\n📅 {i18n.get('telegram.subscription.frequency', language)}: "
-            text += f"{i18n.get(f'frequency_{preview.get('delivery_frequency')}', language)}\n"
+            preview_frequency_key = f"frequency_{preview.get('delivery_frequency')}"
+            text += f"{i18n.get(preview_frequency_key, language)}\n"
             text += f"💰 {i18n.get('telegram.subscription.total', language)}: "
             text += f"{preview.get('total_amount')} {i18n.get('telegram.currency.uzs', language)}\n"
 
@@ -700,7 +703,7 @@ class SubscriptionHandlers(BaseHandler):
             if items:
                 text += f"{i18n.get('telegram.subscription.current_items', language)}:\n"
                 for item in items:
-                    product_name = item.get('product', {}).get('name', 'Unknown')
+                    product_name = item.get('product', {}).get('name', i18n.get('telegram.common.unknown', language))
                     quantity = item.get('quantity', 1)
                     price = item.get('unit_price', 0)
                     text += f"  • {product_name} x{quantity} - {price * quantity} {i18n.get('telegram.currency.uzs', language)}\n"
@@ -1075,10 +1078,10 @@ class SubscriptionHandlers(BaseHandler):
                 stats = response.data.get('statistics', {})
 
             text = f"📊 {i18n.get('telegram.subscription.statistics', language)}\n\n"
-            text += f"📦 {i18n.get('total_deliveries', language)}: {stats.get('total_deliveries', 0)}\n"
-            text += f"💰 {i18n.get('total_spent', language)}: {stats.get('total_spent', 0)} {i18n.get('telegram.currency.uzs', language)}\n"
+            text += f"📦 {i18n.get('telegram.subscription.total_deliveries', language)}: {stats.get('total_deliveries', 0)}\n"
+            text += f"💰 {i18n.get('telegram.subscription.total_spent', language)}: {stats.get('total_spent', 0)} {i18n.get('telegram.currency.uzs', language)}\n"
             text += f"💵 {i18n.get('telegram.subscription.average_order', language)}: {stats.get('average_order_value', 0)} {i18n.get('telegram.currency.uzs', language)}\n"
-            text += f"💚 {i18n.get('total_savings', language)}: {stats.get('total_savings', 0)} {i18n.get('telegram.currency.uzs', language)}\n"
+            text += f"💚 {i18n.get('telegram.subscription.total_savings', language)}: {stats.get('total_savings', 0)} {i18n.get('telegram.currency.uzs', language)}\n"
 
             if stats.get('most_ordered_product'):
                 text += f"\n⭐ {i18n.get('telegram.subscription.favorite_product', language)}: {stats['most_ordered_product']}\n"
@@ -1205,7 +1208,7 @@ class SubscriptionHandlers(BaseHandler):
             products = response.data.get('data', {}).get('items', [])
 
         # Build text
-        products_text = (i18n.get(header_key, language) or "Select a product") + "\n\n"
+        products_text = i18n.get(header_key, language) + "\n\n"
         for idx, product in enumerate(products[:10], 1):
             price = product.get('base_price', product.get('pricing', {}).get('base_price', 0))
             products_text += f"{idx}. {product['name']} - {price} UZS\n"
@@ -1246,7 +1249,7 @@ class SubscriptionHandlers(BaseHandler):
     async def _show_quantity_selector(self, update, language, text_key):
         """Shared helper: display quantity selection keyboard."""
         query = update.callback_query
-        text = i18n.get(text_key, language) or "Select quantity"
+        text = i18n.get(text_key, language)
         keyboard = SubscriptionKeyboards.quantity_selector(language)
         await query.edit_message_text(text=text, reply_markup=keyboard)
         await query.answer()
@@ -1254,8 +1257,9 @@ class SubscriptionHandlers(BaseHandler):
     def _build_address_keyboard(self, addresses, language):
         """Build keyboard for address selection"""
         keyboard = []
+        address_fallback = i18n.get('telegram.common.address', language)
         for addr in addresses:
-            button_text = f"{addr.get('address_line1', 'Address')} - {addr.get('city', '')}"
+            button_text = f"{addr.get('address_line1') or address_fallback} - {addr.get('city', '')}"
             if addr.get('is_default'):
                 button_text = f"⭐ {button_text}"
             keyboard.append([InlineKeyboardButton(

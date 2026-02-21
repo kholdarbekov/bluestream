@@ -123,7 +123,7 @@ def clear_cart():
     cart_service.clear_cart(user_id)
 
     return success_response(
-        data={'message': 'Cart cleared successfully'}
+        data={'message': get_translation('api.cart.cleared')}
     )
 
 
@@ -142,7 +142,7 @@ def sync_cart():
 
     if not isinstance(local_cart_items, list):
         return validation_error_response(
-            errors={'cart_items': 'Cart items must be a list'}
+            errors={'cart_items': get_translation('api.cart.error.items_must_be_list')}
         )
 
     cart_service = get_cart_service()
@@ -151,7 +151,7 @@ def sync_cart():
     return success_response(
         data={
             'cart': cart.to_dict() if cart else None,
-            'message': 'Cart synchronized successfully'
+            'message': get_translation('api.cart.synchronized')
         }
     )
 
@@ -223,4 +223,3 @@ def validate_cart():
             'warnings': validation_result.get('warnings', [])
         }
     )
-

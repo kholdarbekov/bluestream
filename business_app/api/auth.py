@@ -127,7 +127,7 @@ def register():
     # Validate: email is required for this endpoint (email-based registration)
     if not data.get('email'):
         return validation_error_response(
-            errors={'email': ['Email is required for email-based registration. Use /phone/register/init for phone registration.']}
+            errors={'email': [get_translation('api.auth.email_required_for_registration')]}
         )
 
     # Last name is optional but recommended
@@ -376,7 +376,7 @@ def phone_register_init():
 
         return success_response(
             data=result,
-            message=get_translation('api.auth.otp_sent', default='Verification code sent')
+            message=get_translation('api.auth.otp_sent')
         )
 
     except ValidationError as e:
@@ -627,7 +627,7 @@ def phone_resend_otp():
 
         return success_response(
             data=result,
-            message=get_translation('api.auth.otp_resent', default='Verification code resent')
+            message=get_translation('api.auth.otp_resent')
         )
 
     except ValidationError as e:
@@ -831,7 +831,7 @@ def refresh_with_cookie():
     # Create response and set new access token cookie
     response_data = success_response(
         data={'refreshed': True},
-        message='Token refreshed successfully'
+        message=get_translation('api.auth.token_refreshed_successfully')
     )
     
     # Handle tuple response
@@ -1558,7 +1558,7 @@ def update_user_address(address_id):
     # Find address belonging to current user
     address = UserAddress.query.filter_by(id=address_id, user_id=user_id).first()
     if not address:
-        return not_found_response(message='Address not found')
+        return not_found_response(message=get_translation('api.auth.address_not_found'))
 
     # Update address fields (partial update support)
     if 'title' in data:
@@ -1592,7 +1592,7 @@ def update_user_address(address_id):
         data={
             'address': address.to_dict()
         },
-        message='Address updated successfully'
+        message=get_translation('api.auth.address_updated_successfully')
     )
 
 
@@ -1628,7 +1628,7 @@ def delete_user_address(address_id):
     # Find address belonging to current user
     address = UserAddress.query.filter_by(id=address_id, user_id=user_id).first()
     if not address:
-        return not_found_response(message='Address not found')
+        return not_found_response(message=get_translation('api.auth.address_not_found'))
 
     # Check if trying to delete default address when other addresses exist
     if address.is_default:
@@ -1681,7 +1681,7 @@ def set_default_address(address_id):
     # Find address belonging to current user
     address = UserAddress.query.filter_by(id=address_id, user_id=user_id).first()
     if not address:
-        return not_found_response(message='Address not found')
+        return not_found_response(message=get_translation('api.auth.address_not_found'))
 
     # Unset all other addresses as default for this user
     UserAddress.query.filter_by(user_id=user_id, is_default=True).update({'is_default': False})
@@ -2252,7 +2252,7 @@ def telegram_register():
                     'linking_options': [
                         {
                             'action': 'link_with_existing',
-                            'description': 'Link Telegram with existing account',
+                            'description': get_translation('api.auth.link_with_existing_description'),
                             'endpoint': '/api/v1/auth/link-web-account'
                         }
                     ]
@@ -2544,7 +2544,7 @@ def check_phone_availability():
                 'can_link': False,
                 'existing_user_masked': None
             },
-            message='Phone number is available'
+            message=get_translation('api.auth.phone_available')
         )
     
     # Phone exists - check if it can be linked
@@ -2578,7 +2578,7 @@ def check_phone_availability():
                 'registration_source': existing_user.registration_source
             }
         },
-        message='Phone number already registered'
+        message=get_translation('api.auth.phone_already_registered')
     )
 
 
@@ -2626,17 +2626,17 @@ def link_phone_send_otp():
     # Verify telegram user exists
     telegram_user = User.query.filter_by(telegram_id=telegram_id).first()
     if not telegram_user:
-        return not_found_response(message='Telegram user not found')
+        return not_found_response(message=get_translation('api.auth.telegram_user_not_found'))
     
     # Verify web user exists with this phone
     web_user = User.query.filter_by(phone=phone).first()
     if not web_user:
-        return not_found_response(message='No account found with this phone')
+        return not_found_response(message=get_translation('api.auth.phone_account_not_found'))
     
     # Verify account can be linked
     if web_user.telegram_id:
         return error_response(
-            message='This phone is already linked to another Telegram account',
+            message=get_translation('api.auth.phone_already_linked_to_telegram'),
             status_code=409
         )
     
@@ -2645,7 +2645,7 @@ def link_phone_send_otp():
     web_user_status = web_user.status.value if isinstance(web_user.status, UserStatus) else web_user.status
     if web_user_status != 'active':
         return error_response(
-            message='The account with this phone is not active',
+            message=get_translation('api.auth.phone_account_inactive'),
             status_code=409
         )
     
@@ -2669,10 +2669,10 @@ def link_phone_send_otp():
             data={
                 'phone_masked': phone[:7] + '****' + phone[-2:] if len(phone) > 9 else '***'
             },
-            message='OTP sent successfully'
+            message=get_translation('api.auth.otp_sent_success')
         )
     else:
-        return internal_error_response(message='Failed to send OTP')
+        return internal_error_response(message=get_translation('api.auth.otp_send_failed'))
 
 
 @auth_bp.route('/link-phone-account/verify', methods=['POST'])
@@ -2719,7 +2719,7 @@ def link_phone_verify():
     link_data_raw = auth_service.redis_client.get(link_key)
     
     if not link_data_raw:
-        return not_found_response(message='No pending link request found. Please start again.')
+        return not_found_response(message=get_translation('api.auth.pending_link_not_found'))
     
     import json
     link_data = json.loads(link_data_raw.decode('utf-8'))
@@ -2730,20 +2730,20 @@ def link_phone_verify():
     # Verify OTP
     telegram_user = User.query.get(telegram_user_id)
     if not telegram_user:
-        return not_found_response(message='Telegram user not found')
+        return not_found_response(message=get_translation('api.auth.telegram_user_not_found'))
     
     success = auth_service.verify_phone(telegram_user_id, otp)
     
     if not success:
         return error_response(
-            message='Invalid OTP. Please try again.',
+            message=get_translation('api.auth.link_otp_invalid'),
             status_code=400
         )
 	
     # OTP verified - now merge accounts
     web_user = User.query.get(web_user_id)
     if not web_user:
-        return not_found_response(message='Web account not found')
+        return not_found_response(message=get_translation('api.auth.web_account_not_found'))
     
     # Set is_verified and phone_verified_at on web_user only
     # Note: telegram_user should NOT have phone set - web_user already owns this phone
@@ -2766,7 +2766,9 @@ def link_phone_verify():
     )
     
     if not result.get('success'):
-        return internal_error_response(message=result.get('error', 'Failed to link accounts'))
+        return internal_error_response(
+            message=result.get('error', get_translation('api.auth.accounts_linking_failed'))
+        )
     
     # Clean up Redis
     auth_service.redis_client.delete(link_key)
@@ -2784,7 +2786,7 @@ def link_phone_verify():
             'tokens': tokens,
             'linked': True
         },
-        message='Accounts linked successfully!'
+        message=get_translation('api.auth.accounts_linked_successfully')
     )
 
 
@@ -3817,9 +3819,13 @@ def generate_telegram_auth():
             'telegram_link': telegram_link,
             'expires_in': 300,  # 5 minutes
             'instructions': [
-                f"Click the link to open Telegram: {telegram_link}",
-                f"Or manually open @{bot_username} and send: /start auth_{auth_code}",
-                "Your accounts will be automatically linked"
+                get_translation('api.auth.telegram_auth_instruction_open', link=telegram_link),
+                get_translation(
+                    'api.auth.telegram_auth_instruction_manual',
+                    bot_username=bot_username,
+                    auth_code=auth_code
+                ),
+                get_translation('api.auth.telegram_auth_instruction_auto_link')
             ]
         },
         message=get_translation('success.saved')
@@ -3923,9 +3929,9 @@ def generate_web_auth():
             'web_auth_link': web_auth_link,
             'expires_in': 600,  # 10 minutes
             'instructions': [
-                f"Click this link to access the web app: {web_auth_link}",
-                "You'll be automatically logged in",
-                "Link expires in 10 minutes for security"
+                get_translation('api.auth.web_auth_instruction_open', link=web_auth_link),
+                get_translation('api.auth.web_auth_instruction_auto_login'),
+                get_translation('api.auth.web_auth_instruction_expiry', minutes=10)
             ]
         },
         message=get_translation('success.saved')

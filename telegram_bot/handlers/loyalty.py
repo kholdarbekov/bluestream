@@ -50,14 +50,18 @@ class LoyaltyHandlers(BaseHandler):
                     rewards = []
             
             # Build loyalty message
+            points_unit = i18n.get('telegram.loyalty.points_unit', language)
             loyalty_text = f"{i18n.get('telegram.menu.loyalty', language)}\n\n"
-            loyalty_text += f"🏆 {i18n.get('telegram.loyalty.current_balance', language)}: {current_points} points\n"
-            loyalty_text += f"📈 {i18n.get('telegram.loyalty.lifetime_earned', language)}: {lifetime_points} points\n\n"
+            loyalty_text += f"🏆 {i18n.get('telegram.loyalty.current_balance', language)}: {current_points} {points_unit}\n"
+            loyalty_text += f"📈 {i18n.get('telegram.loyalty.lifetime_earned', language)}: {lifetime_points} {points_unit}\n\n"
 
             if rewards:
                 loyalty_text += f"🎁 {i18n.get('telegram.loyalty.available_rewards', language)} ({len(rewards)}):\n"
                 for reward in rewards[:3]:  # Show first 3 rewards
-                    loyalty_text += f"• {reward.get('name', 'Reward')} - {reward.get('points_cost', 0)} points\n"
+                    loyalty_text += (
+                        f"• {reward.get('name', i18n.get('telegram.loyalty.reward_fallback', language))} - "
+                        f"{reward.get('points_cost', 0)} {points_unit}\n"
+                    )
 
                 if len(rewards) > 3:
                     loyalty_text += i18n.get('telegram.loyalty.and_more', language, count=len(rewards) - 3)
@@ -131,9 +135,13 @@ class LoyaltyHandlers(BaseHandler):
                     else:
                         icon = "🟡"
                         sign = ""
-                        type_label = transaction_type.title()
+                        type_label = i18n.get(
+                            'telegram.loyalty.transaction_other',
+                            language,
+                            transaction_type=transaction_type.title()
+                        )
 
-                    history_text += f"{icon} {sign}{points} points - {type_label}\n"
+                    history_text += f"{icon} {sign}{points} {points_unit} - {type_label}\n"
                     history_text += f"   {date}\n\n"
             
             keyboard = MenuKeyboards.back_button(language)

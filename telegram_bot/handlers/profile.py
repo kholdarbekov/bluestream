@@ -77,13 +77,14 @@ class ProfileHandlers(BaseHandler):
                 
                 profile = response.data['data']
             
-            full_name = (f"{profile.get('first_name', '')} {profile.get('last_name', '')}" or "Not set").strip()
+            not_set_label = i18n.get('telegram.common.not_set', language)
+            full_name = (f"{profile.get('first_name', '')} {profile.get('last_name', '')}" or not_set_label).strip()
             
             # Format profile information
             profile_text = f"{i18n.get('telegram.profile_title', language)}\n\n"
             profile_text += f"{i18n.get('telegram.profile_name', language)}: {full_name}\n"
-            profile_text += f"{i18n.get('telegram.profile_phone', language)}: {profile.get('phone', 'Not set')}\n"
-            profile_text += f"{i18n.get('telegram.profile_email', language)}: {profile.get('email', 'Not set')}\n"
+            profile_text += f"{i18n.get('telegram.profile_phone', language)}: {profile.get('phone', not_set_label)}\n"
+            profile_text += f"{i18n.get('telegram.profile_email', language)}: {profile.get('email', not_set_label)}\n"
             profile_text += f"{i18n.get('telegram.profile_language', language)}: {language}"
             
             keyboard = ProfileKeyboards.profile_menu(language)
@@ -144,13 +145,13 @@ class ProfileHandlers(BaseHandler):
                 status_text = i18n.get('telegram.phone.title', language) + f"\n\n{i18n.get('telegram.profile_phone', language)}: {phone}\n" + i18n.get('telegram.phone.phone_not_verified', language)
                 buttons = [
                     [{'text': i18n.get('telegram.phone.verification_prompt', language), 'callback_data': 'verify_phone_number'}],
-                    [{'text': '📝 Change Phone Number', 'callback_data': 'add_phone_number'}],
+                    [{'text': i18n.get('telegram.phone.change_number', language), 'callback_data': 'add_phone_number'}],
                     [{'text': i18n.get('telegram.back', language), 'callback_data': 'menu_profile'}]
                 ]
             else:
                 status_text = i18n.get('telegram.phone.title', language) + f"\n\n{i18n.get('telegram.profile_phone', language)}: {phone}\n" + i18n.get('telegram.phone.phone_verified', language)
                 buttons = [
-                    [{'text': '📝 Change Phone Number', 'callback_data': 'add_phone_number'}],
+                    [{'text': i18n.get('telegram.phone.change_number', language), 'callback_data': 'add_phone_number'}],
                     [{'text': i18n.get('telegram.back', language), 'callback_data': 'menu_profile'}]
                 ]
 
@@ -223,7 +224,7 @@ class ProfileHandlers(BaseHandler):
             # Verify the contact belongs to the user
             if contact.user_id != user_id:
                 await update.message.reply_text(
-                    "❌ Please share your own phone number.",
+                    i18n.get('telegram.phone.share_own_phone', language),
                     reply_markup=ProfileKeyboards.phone_request(language)
                 )
                 return PHONE_VERIFY_PHONE
@@ -248,14 +249,14 @@ class ProfileHandlers(BaseHandler):
                         logger.warning(f"Failed to update phone via API: {api_error}")
 
             # Remove the phone request keyboard and ask for name
-            success_text = i18n.get('telegram.phone.phone_accepted', language) or "✅ Telefon raqami qabul qilindi!"
+            success_text = i18n.get('telegram.phone.phone_accepted', language)
             await update.message.reply_text(
                 success_text,
                 reply_markup=ReplyKeyboardRemove()
             )
 
             # Ask for full name
-            name_prompt = i18n.get('telegram.enter_name', language) or "👤 Iltimos to'liq ismingizni kiriting:"
+            name_prompt = i18n.get('telegram.enter_name', language)
             await update.message.reply_text(name_prompt)
 
             logger.info(f"Phone accepted for user {user_id}, asking for name")
@@ -279,14 +280,14 @@ class ProfileHandlers(BaseHandler):
             # Validate name - must have at least 2 characters and contain letters
             if len(text) < 2:
                 await update.message.reply_text(
-                    i18n.get('telegram.name.too_short', language) or "❌ Ism juda qisqa. Kamida 2 ta belgi kiriting."
+                    i18n.get('telegram.name.too_short', language)
                 )
                 return PHONE_VERIFY_NAME
 
             # Check for valid name (letters and spaces only)
             if not any(c.isalpha() for c in text):
                 await update.message.reply_text(
-                    i18n.get('telegram.name.invalid', language) or "❌ Noto'g'ri ma'lumot. Qaytadan urinib ko'ring."
+                    i18n.get('telegram.name.invalid', language)
                 )
                 return PHONE_VERIFY_NAME
 
@@ -310,7 +311,7 @@ class ProfileHandlers(BaseHandler):
                         logger.warning(f"Failed to update name via API: {response.error}")
 
             # Show success and main menu
-            success_text = i18n.get('telegram.profile_updated', language) or "✅ Profil muvaffaqiyatli yangilandi!"
+            success_text = i18n.get('telegram.profile_updated', language)
             keyboard = MenuKeyboards.main_menu(language)
 
             await update.message.reply_text(
@@ -399,13 +400,15 @@ class ProfileHandlers(BaseHandler):
                 if user_token:
                     response = await client.send_phone_verification(user_token, phone)
                     if response.success:
-                        verification_msg = (
-                            "📱 *Phone Verification*\n\n"
-                            f"An SMS with a verification code has been sent to *{phone}*.\n\n"
-                            "Please reply with the 6-digit code to verify your phone number."
+                        verification_msg = i18n.get(
+                            'telegram.phone.verification_sms_sent',
+                            language,
+                            phone=phone
                         )
 
-                        await update.callback_query.answer("Verification code sent!")
+                        await update.callback_query.answer(
+                            i18n.get('telegram.phone.verification_code_sent_toast', language)
+                        )
                         await update.callback_query.message.reply_text(
                             verification_msg,
                             parse_mode='Markdown'
@@ -418,10 +421,15 @@ class ProfileHandlers(BaseHandler):
 
                         logger.info(f"Verification SMS sent to {phone} for user {user_id}")
                     else:
-                        await update.callback_query.answer("Failed to send code!")
+                        await update.callback_query.answer(
+                            i18n.get('telegram.phone.verification_code_send_failed_toast', language)
+                        )
                         await update.callback_query.message.reply_text(
-                            f"❌ Could not send verification SMS: {response.error}\n\n"
-                            "Please try again later."
+                            i18n.get(
+                                'telegram.phone.verification_sms_send_failed',
+                                language,
+                                error=response.error
+                            )
                         )
 
         except Exception as e:
@@ -484,7 +492,7 @@ class ProfileHandlers(BaseHandler):
                 await update.callback_query.answer()
                 # Send new message with keyboard
                 await update.callback_query.message.reply_text(
-                    text="Please share your contact:",
+                    text=i18n.get('telegram.registration.share_contact_prompt', language),
                     reply_markup=keyboard
                 )
             else:
@@ -510,7 +518,7 @@ class ProfileHandlers(BaseHandler):
             
             # Validate language code
             if language_code not in config.localization.supported_languages:
-                await query.answer("❌ Invalid language selection")
+                await query.answer(i18n.get('telegram.registration.invalid_language_selection', 'en'))
                 return SELECT_LANGUAGE  # Stay in language selection state
             
             user_repo = BotUserRepository(db_manager)
@@ -530,10 +538,10 @@ class ProfileHandlers(BaseHandler):
                         response = await client.register_telegram_user(user_id, registration_data)
                         if not response.success:
                             logger.error(f"Failed to register telegram user {user_id}: {response.error}")
-                            await query.answer("❌ Registration failed")
+                            await query.answer(i18n.get('telegram.registration.failed_toast', language_code))
                             await context.bot.send_message(
                                 chat_id=update.effective_chat.id,
-                                text="❌ Registration failed. Please try again with /start or contact support."
+                                text=i18n.get('telegram.registration.failed_contact_support', language_code)
                             )
                             return ConversationHandler.END
 
@@ -555,16 +563,16 @@ class ProfileHandlers(BaseHandler):
                     logger.error(f"Exception during telegram user registration: {e}")
                     import traceback
                     logger.error(f"Traceback: {traceback.format_exc()}")
-                    await query.answer("❌ Registration failed")
+                    await query.answer(i18n.get('telegram.registration.failed_toast', language_code))
                     await context.bot.send_message(
                         chat_id=update.effective_chat.id,
-                        text="❌ Registration failed. Please try again with /start."
+                        text=i18n.get('telegram.registration.failed_try_start', language_code)
                     )
                     return ConversationHandler.END
             else:
                 # Update user's preferred language
                 await self.user_repo.update_user_language(user_id, language_code)
-                await query.answer("✅ Language updated")
+                await query.answer(i18n.get('telegram.registration.language_updated_toast', language_code))
             
             # Proceed to phone number input
             phone_text = i18n.get('telegram.registration.enter_phone', language_code)
@@ -600,7 +608,7 @@ class ProfileHandlers(BaseHandler):
 
             if contact.user_id != user_id:
                 await update.message.reply_text(
-                    "❌ Please share your own contact information.",
+                    i18n.get('telegram.registration.share_own_contact', language),
                     reply_markup=ReplyKeyboardRemove()
                 )
                 return PHONE
@@ -645,16 +653,16 @@ class ProfileHandlers(BaseHandler):
                             
                             # Show linking option
                             masked_name = existing_user.get('name', '***') if existing_user else '***'
-                            
-                            link_text = (
-                                f"📱 This phone number is already registered to an account ({masked_name}).\n\n"
-                                f"Would you like to link your Telegram to this existing account?\n"
-                                f"This will merge your accounts."
+
+                            link_text = i18n.get(
+                                'telegram.phone.already_registered_link_prompt',
+                                language,
+                                masked_name=masked_name
                             )
-                            
+
                             keyboard = KeyboardBuilder.build_inline_keyboard([
-                                [{'text': "✅ Yes, link accounts", 'callback_data': "link_yes"}],
-                                [{'text': "❌ No, use different phone", 'callback_data': "link_no"}]
+                                [{'text': i18n.get('telegram.phone.link_yes_button', language), 'callback_data': "link_yes"}],
+                                [{'text': i18n.get('telegram.phone.link_no_button', language), 'callback_data': "link_no"}]
                             ])
                             
                             await update.message.reply_text(
@@ -666,8 +674,7 @@ class ProfileHandlers(BaseHandler):
                         else:
                             # Cannot link - phone belongs to another telegram user
                             await update.message.reply_text(
-                                "❌ This phone number is already linked to another Telegram account.\n"
-                                "Please use a different phone number.",
+                                i18n.get('telegram.phone.already_linked_other_account', language),
                                 reply_markup=ProfileKeyboards.phone_request(language)
                             )
                             return PHONE
@@ -675,7 +682,7 @@ class ProfileHandlers(BaseHandler):
                         # API error
                         logger.error(f"Failed to check phone availability: {response.error}")
                         await update.message.reply_text(
-                            "❌ Unable to verify phone. Please try again.",
+                            i18n.get('telegram.phone.verify_unavailable', language),
                             reply_markup=ProfileKeyboards.phone_request(language)
                         )
                         return PHONE
@@ -705,8 +712,7 @@ class ProfileHandlers(BaseHandler):
             if 'duplicate key' in str(e).lower() or 'unique constraint' in str(e).lower():
                 language = await i18n.get_user_language(update.effective_user.id)
                 await update.message.reply_text(
-                    "❌ This phone number is already registered.\n"
-                    "Please use a different phone number or contact support.",
+                    i18n.get('telegram.phone.already_registered_use_different', language),
                     reply_markup=ProfileKeyboards.phone_request(language)
                 )
                 return PHONE
@@ -746,7 +752,7 @@ class ProfileHandlers(BaseHandler):
                         )
                         if not user_token:
                             await update.message.reply_text(
-                                "❌ Authentication failed. Please try again.",
+                                i18n.get('telegram.auth.failed_try_again', language),
                                 reply_markup=ProfileKeyboards.phone_request(language)
                             )
                             return PHONE
@@ -755,14 +761,18 @@ class ProfileHandlers(BaseHandler):
                         if not otp_response.success:
                             logger.error(f"Failed to send OTP during registration: {otp_response.error}")
                             await update.message.reply_text(
-                                f"❌ Could not send verification code: {otp_response.error}\n\nPlease try again.",
+                                i18n.get(
+                                    'telegram.phone.verification_sms_send_failed',
+                                    language,
+                                    error=otp_response.error
+                                ),
                                 reply_markup=ProfileKeyboards.phone_request(language)
                             )
                             return PHONE
 
                         # Remove contact keyboard and ask for OTP
                         await update.message.reply_text(
-                            i18n.get('telegram.phone.phone_accepted', language) or "✅ Phone number accepted",
+                            i18n.get('telegram.phone.phone_accepted', language),
                             reply_markup=ReplyKeyboardRemove()
                         )
 
@@ -770,8 +780,11 @@ class ProfileHandlers(BaseHandler):
                         phone_masked = otp_data.get('phone_masked', phone)
 
                         await update.message.reply_text(
-                            f"📱 A verification code has been sent to {phone_masked}.\n\n"
-                            f"Please enter the 6-digit code:"
+                            i18n.get(
+                                'telegram.phone.verification_code_sent_to_phone_prompt',
+                                language,
+                                phone_masked=phone_masked
+                            )
                         )
 
                         context.user_data['awaiting_otp'] = True
@@ -795,22 +808,22 @@ class ProfileHandlers(BaseHandler):
                             
                             # Remove the share contact keyboard first
                             await update.message.reply_text(
-                                i18n.get('telegram.phone.phone_accepted', language) or "✅ Phone number accepted",
+                                i18n.get('telegram.phone.phone_accepted', language),
                                 reply_markup=ReplyKeyboardRemove()
                             )
 
                             # Show linking option
                             masked_name = existing_user.get('name', '***') if existing_user else '***'
-                            
-                            link_text = (
-                                f"📱 This phone number is already registered to an account ({masked_name}).\n\n"
-                                f"Would you like to link your Telegram to this existing account?\n"
-                                f"This will merge your accounts."
+
+                            link_text = i18n.get(
+                                'telegram.phone.already_registered_link_prompt',
+                                language,
+                                masked_name=masked_name
                             )
-                            
+
                             keyboard = KeyboardBuilder.build_inline_keyboard([
-                                [{'text': "✅ Yes, link accounts", 'callback_data': "link_yes"}],
-                                [{'text': "❌ No, use different phone", 'callback_data': "link_no"}]
+                                [{'text': i18n.get('telegram.phone.link_yes_button', language), 'callback_data': "link_yes"}],
+                                [{'text': i18n.get('telegram.phone.link_no_button', language), 'callback_data': "link_no"}]
                             ])
                             
                             await update.message.reply_text(
@@ -822,8 +835,7 @@ class ProfileHandlers(BaseHandler):
                         else:
                             # Cannot link - phone belongs to another telegram user
                             await update.message.reply_text(
-                                "❌ This phone number is already linked to another Telegram account.\n"
-                                "Please use a different phone number.",
+                                i18n.get('telegram.phone.already_linked_other_account', language),
                                 reply_markup=ProfileKeyboards.phone_request(language)
                             )
                             return PHONE
@@ -831,7 +843,7 @@ class ProfileHandlers(BaseHandler):
                         # API error
                         logger.error(f"Failed to check phone availability: {response.error}")
                         await update.message.reply_text(
-                            "❌ Unable to verify phone. Please try again.",
+                            i18n.get('telegram.phone.verify_unavailable', language),
                             reply_markup=ProfileKeyboards.phone_request(language)
                         )
                         return PHONE
@@ -839,7 +851,7 @@ class ProfileHandlers(BaseHandler):
             except Exception as api_error:
                 logger.error(f"API error checking phone: {api_error}")
                 await update.message.reply_text(
-                    "❌ Unable to verify phone right now. Please try again.",
+                    i18n.get('telegram.phone.verify_unavailable_now', language),
                     reply_markup=ProfileKeyboards.phone_request(language)
                 )
                 return PHONE
@@ -851,8 +863,7 @@ class ProfileHandlers(BaseHandler):
             if 'duplicate key' in str(e).lower() or 'unique constraint' in str(e).lower():
                 language = await i18n.get_user_language(update.effective_user.id)
                 await update.message.reply_text(
-                    "❌ This phone number is already registered.\n"
-                    "Please use a different phone number or contact support.",
+                    i18n.get('telegram.phone.already_registered_use_different', language),
                     reply_markup=ProfileKeyboards.phone_request(language)
                 )
                 return PHONE
@@ -875,7 +886,7 @@ class ProfileHandlers(BaseHandler):
                 
                 if not phone:
                     await query.edit_message_text(
-                        "❌ Session expired. Please share your phone number again.",
+                        i18n.get('telegram.phone.session_expired_share_again', language),
                         reply_markup=None
                     )
                     return PHONE
@@ -883,7 +894,7 @@ class ProfileHandlers(BaseHandler):
                 # Rate limit OTP requests
                 if not await otp_rate_limiter.allow_otp_request(user_id):
                     await query.edit_message_text(
-                        "⏳ Too many verification attempts. Please wait a few minutes and try again.",
+                        i18n.get('telegram.phone.too_many_verification_attempts', language),
                         reply_markup=None
                     )
                     return PHONE
@@ -896,15 +907,25 @@ class ProfileHandlers(BaseHandler):
                         if response.success:
                             phone_masked = response.data.get('phone_masked', phone)
                             await query.edit_message_text(
-                                f"📱 A verification code has been sent to {phone_masked}.\n\n"
-                                f"Please enter the 6-digit code:",
+                                i18n.get(
+                                    'telegram.phone.verification_code_sent_to_phone_prompt',
+                                    language,
+                                    phone_masked=phone_masked
+                                ),
                                 reply_markup=None
                             )
                             return LINK_ACCOUNT_OTP
                         else:
-                            error_msg = response.error or "Failed to send verification code"
+                            error_msg = response.error or i18n.get(
+                                'telegram.phone.verification_code_send_failed_default',
+                                language
+                            )
                             await query.edit_message_text(
-                                f"❌ {error_msg}\n\nPlease try again or use a different phone.",
+                                i18n.get(
+                                    'telegram.phone.verification_code_send_failed_retry_or_different',
+                                    language,
+                                    error=error_msg
+                                ),
                                 reply_markup=ProfileKeyboards.phone_request(language)
                             )
                             return PHONE
@@ -912,7 +933,7 @@ class ProfileHandlers(BaseHandler):
                 except Exception as api_error:
                     logger.error(f"API error sending OTP: {api_error}")
                     await query.edit_message_text(
-                        "❌ Failed to send verification code. Please try again.",
+                        i18n.get('telegram.phone.verification_code_send_failed_generic', language),
                         reply_markup=None
                     )
                     return PHONE
@@ -922,14 +943,14 @@ class ProfileHandlers(BaseHandler):
                 context.user_data.pop('pending_link_phone', None)
                 
                 await query.edit_message_text(
-                    "📱 Please share a different phone number:",
+                    i18n.get('telegram.phone.share_different_phone_prompt', language),
                     reply_markup=None
                 )
                 
                 # Send keyboard for phone sharing
                 await context.bot.send_message(
                     chat_id=update.effective_chat.id,
-                    text="Share your phone number using the button below:",
+                    text=i18n.get('telegram.phone.share_phone_using_button', language),
                     reply_markup=ProfileKeyboards.phone_request(language)
                 )
                 
@@ -953,14 +974,14 @@ class ProfileHandlers(BaseHandler):
             # Validate OTP format
             if not otp.isdigit() or len(otp) != 6:
                 await update.message.reply_text(
-                    "❌ Please enter a valid 6-digit code."
+                    i18n.get('telegram.phone.enter_valid_6_digit_code', language)
                 )
                 return LINK_ACCOUNT_OTP
             
             phone = context.user_data.get('pending_link_phone')
             if not phone:
                 await update.message.reply_text(
-                    "❌ Session expired. Please start again with /start"
+                    i18n.get('telegram.phone.session_expired_start_again', language)
                 )
                 return ConversationHandler.END
             
@@ -987,35 +1008,34 @@ class ProfileHandlers(BaseHandler):
                                 logger.info(f"Updated cached tokens after account merge for user {user_id}")
 
                         user_data = response.data.get('user', {})
-                        name = user_data.get('first_name', 'User')
+                        name = user_data.get('first_name', i18n.get('telegram.common.user_fallback', language))
 
                         await update.message.reply_text(
-                            f"✅ Accounts linked successfully!\n\n"
-                            f"Welcome back, {name}! Your Telegram is now connected to your existing account.",
+                            i18n.get('telegram.phone.accounts_linked_success', language, name=name),
                             reply_markup=MenuKeyboards.main_menu(language)
                         )
 
                         logger.info(f"Account linking completed for user {user_id}")
                         return ConversationHandler.END
                     else:
-                        error_msg = response.error or "Invalid verification code"
+                        error_msg = response.error or i18n.get('telegram.phone.invalid_verification_code_default', language)
                         
                         # Check if it's an expired/invalid OTP
                         if 'expired' in error_msg.lower() or 'not found' in error_msg.lower():
                             await update.message.reply_text(
-                                "❌ Verification code expired. Please start again with /start"
+                                i18n.get('telegram.phone.verification_code_expired_start_again', language)
                             )
                             return ConversationHandler.END
                         else:
                             await update.message.reply_text(
-                                f"❌ {error_msg}\n\nPlease try again:"
+                                i18n.get('telegram.phone.verification_failed_with_error_retry', language, error=error_msg)
                             )
                             return LINK_ACCOUNT_OTP
                         
             except Exception as api_error:
                 logger.error(f"API error verifying OTP: {api_error}")
                 await update.message.reply_text(
-                    "❌ Verification failed. Please try again:"
+                    i18n.get('telegram.phone.verification_failed_retry', language)
                 )
                 return LINK_ACCOUNT_OTP
             
@@ -1067,14 +1087,17 @@ class ProfileHandlers(BaseHandler):
                                 return NAME
                             else:
                                 await update.message.reply_text(
-                                    f"❌ Verification failed: {response.error}\n\n"
-                                    "Please enter the correct code or /cancel to skip:"
+                                    i18n.get(
+                                        'telegram.phone.verification_failed_with_error_skip',
+                                        language,
+                                        error=response.error
+                                    )
                                 )
                                 return NAME
                 except Exception as verify_error:
                     logger.error(f"Error verifying OTP: {verify_error}")
                     await update.message.reply_text(
-                        "❌ Verification failed. Please try again or /cancel to skip."
+                        i18n.get('telegram.phone.verification_failed_skip', language)
                     )
                     return NAME
 
@@ -1082,7 +1105,7 @@ class ProfileHandlers(BaseHandler):
             name = text
 
             if len(name) < 2:
-                await update.message.reply_text("❌ Name is too short. Please enter your full name.")
+                await update.message.reply_text(i18n.get('telegram.name.too_short', language))
                 return NAME
 
             # Update user profile
@@ -1159,7 +1182,7 @@ class ProfileHandlers(BaseHandler):
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
             
-            edit_text = f"{i18n.get('telegram.edit_profile', language)}\n\nWhat would you like to update?\n\nType the new information or use /cancel to go back."
+            edit_text = i18n.get('telegram.profile.edit_prompt', language)
             
             await query.edit_message_text(
                 text=edit_text,
@@ -1203,11 +1226,11 @@ class ProfileHandlers(BaseHandler):
                 keyboard = ProfileKeyboards.empty_addresses(language)
                 logger.info(f"No addresses found, showing empty addresses keyboard")
             else:
-                addresses_text = f"📍 Your Addresses ({len(addresses)}):\n\n"
+                addresses_text = i18n.get('telegram.address.list_header', language, count=len(addresses))
                 for i, addr in enumerate(addresses, 1):
                     status = "🏠" if addr.get('is_default') else "📍"
-                    addresses_text += f"{status} {addr.get('title', f'Address {i}')}\n"
-                    addresses_text += f"   {addr.get('full_address', 'No address')}\n\n"
+                    addresses_text += f"{status} {addr.get('title', i18n.get('telegram.address.title_fallback', language, index=i))}\n"
+                    addresses_text += f"   {addr.get('full_address', i18n.get('telegram.address.no_address_placeholder', language))}\n\n"
                 
                 # Create proper address management keyboard
                 keyboard = ProfileKeyboards.addresses_management(addresses, language)
@@ -1244,12 +1267,7 @@ class ProfileHandlers(BaseHandler):
             logger.info(f"Set conversation state to: address_location")
 
             # Use enhanced location request with skip option
-            location_text = i18n.get('telegram.address.location_prompt_enhanced', language) or (
-                "📍 *Add New Address*\n\n"
-                "Please share your location for accurate delivery, "
-                "or enter your address manually.\n\n"
-                "Sharing location is recommended for precise delivery."
-            )
+            location_text = i18n.get('telegram.address.location_prompt_enhanced', language)
             keyboard = ProfileKeyboards.location_request_with_skip(language)
 
             if update.callback_query:
@@ -1316,17 +1334,18 @@ class ProfileHandlers(BaseHandler):
 
             # Remove reply keyboard
             await update.message.reply_text(
-                "📍 Location received!",
+                i18n.get('telegram.address.location_received', language),
                 reply_markup=ReplyKeyboardRemove()
             )
 
             # Ask for address title with suggestions
-            title_prompt = i18n.get('telegram.address.title_prompt', language) or (
-                "Great! Now give this address a name.\n\n"
-                "You can choose from the suggestions below or type your own:"
-            )
+            title_prompt = i18n.get('telegram.address.title_prompt', language)
             if reverse_geocoded_address:
-                title_prompt = f"📍 *Detected location:*\n{reverse_geocoded_address}\n\n" + title_prompt
+                title_prompt = i18n.get(
+                    'telegram.address.detected_location_prefix',
+                    language,
+                    address=reverse_geocoded_address
+                ) + title_prompt
 
             keyboard = ProfileKeyboards.address_title_suggestions(language)
 
@@ -1384,11 +1403,7 @@ class ProfileHandlers(BaseHandler):
             addr_data = context.user_data['temp_address_data']
             if addr_data.get('latitude') and addr_data.get('longitude'):
                 # Location already set, ask for delivery instructions
-                instructions_prompt = i18n.get('telegram.address.enter_delivery_instructions', language) or (
-                    "Any special delivery instructions?\n"
-                    "(e.g., door code, call before arriving)\n\n"
-                    "Type your instructions or click Skip:"
-                )
+                instructions_prompt = i18n.get('telegram.address.enter_delivery_instructions', language)
                 keyboard = ProfileKeyboards.delivery_instructions_keyboard(language)
 
                 await update.message.reply_text(
@@ -1402,7 +1417,7 @@ class ProfileHandlers(BaseHandler):
                 # Prepare address data
                 address_data = {
                     'title': title,
-                    'full_address': context.user_data.get('temp_address', 'Location-based address')
+                    'full_address': context.user_data.get('temp_address', i18n.get('telegram.address.location_based_fallback', language))
                 }
 
                 # Add coordinates if available from old flow
@@ -1417,11 +1432,11 @@ class ProfileHandlers(BaseHandler):
                     if user_token:
                         response = await client.add_user_address(user_token, address_data)
                         if response.success:
-                            success_text = f"✅ Address '{title}' added successfully!"
+                            success_text = i18n.get('telegram.address.added_successfully', language, title=title)
                         else:
-                            success_text = "❌ Failed to add address. Please try again."
+                            success_text = i18n.get('telegram.address.add_failed', language)
                     else:
-                        success_text = "❌ Authentication failed."
+                        success_text = i18n.get('telegram.auth.failed', language)
 
                 keyboard = MenuKeyboards.main_menu(language)
                 await update.message.reply_text(
@@ -1485,7 +1500,7 @@ class ProfileHandlers(BaseHandler):
             
             # First remove the reply keyboard
             await update.message.reply_text(
-                "❌ Cancelled",
+                i18n.get('telegram.action_cancelled_short', language),
                 reply_markup=ReplyKeyboardRemove()
             )
             
@@ -1524,14 +1539,12 @@ class ProfileHandlers(BaseHandler):
 
             # Remove reply keyboard
             await update.message.reply_text(
-                "✏️ Manual address entry",
+                i18n.get('telegram.address.manual_entry_started', language),
                 reply_markup=ReplyKeyboardRemove()
             )
 
             # Show region selection (only Tashkent for now)
-            region_prompt = i18n.get('telegram.address.select_region', language) or (
-                "Please select your region:"
-            )
+            region_prompt = i18n.get('telegram.address.select_region', language)
             keyboard = ProfileKeyboards.region_selection(language)
 
             await update.message.reply_text(
@@ -1567,9 +1580,7 @@ class ProfileHandlers(BaseHandler):
             await query.answer()
 
             # Show district selection
-            district_prompt = i18n.get('telegram.address.select_district', language) or (
-                "Please select your district:"
-            )
+            district_prompt = i18n.get('telegram.address.select_district', language)
             districts = get_all_districts(language)
             keyboard = ProfileKeyboards.district_selection(districts, language)
 
@@ -1597,7 +1608,7 @@ class ProfileHandlers(BaseHandler):
             logger.info(f"User {user_id} going back to region selection")
 
             # Show region selection again
-            region_prompt = i18n.get('telegram.address.select_region', language) or "Please select your region:"
+            region_prompt = i18n.get('telegram.address.select_region', language)
             keyboard = ProfileKeyboards.region_selection(language)
 
             await query.edit_message_text(
@@ -1637,9 +1648,9 @@ class ProfileHandlers(BaseHandler):
             await query.answer()
 
             # Ask for street name (required, no skip option)
-            street_prompt = escape_markdown(i18n.get('telegram.address.enter_street_required', language), version=2) or (
-                f"📍 District: *{escape_markdown(district_name, version=2)}*\n\n"
-                "🛤️ Please enter your street name (required):"
+            street_prompt = escape_markdown(
+                i18n.get('telegram.address.enter_street_required', language, district_name=district_name),
+                version=2
             )
             # No skip keyboard - street is required
 
@@ -1667,9 +1678,7 @@ class ProfileHandlers(BaseHandler):
             context.user_data['temp_address_data']['street_address'] = street
 
             # Ask for building number
-            building_prompt = i18n.get('telegram.address.enter_building', language) or (
-                "Please enter your building/house number, or skip:"
-            )
+            building_prompt = i18n.get('telegram.address.enter_building', language)
             keyboard = ProfileKeyboards.optional_field_keyboard('building', language)
 
             await update.message.reply_text(
@@ -1694,9 +1703,7 @@ class ProfileHandlers(BaseHandler):
             context.user_data['temp_address_data']['building_number'] = building
 
             # Ask for apartment number
-            apartment_prompt = i18n.get('telegram.address.enter_apartment', language) or (
-                "Please enter your apartment number, or skip:"
-            )
+            apartment_prompt = i18n.get('telegram.address.enter_apartment', language)
             keyboard = ProfileKeyboards.optional_field_keyboard('apartment', language)
 
             await update.message.reply_text(
@@ -1721,9 +1728,7 @@ class ProfileHandlers(BaseHandler):
             context.user_data['temp_address_data']['apartment_number'] = apartment
 
             # Ask for floor number
-            floor_prompt = i18n.get('telegram.address.enter_floor', language) or (
-                "Please enter your floor number, or skip:"
-            )
+            floor_prompt = i18n.get('telegram.address.enter_floor', language)
             keyboard = ProfileKeyboards.optional_field_keyboard('floor', language)
 
             await update.message.reply_text(
@@ -1748,9 +1753,7 @@ class ProfileHandlers(BaseHandler):
             context.user_data['temp_address_data']['floor_number'] = floor
 
             # Ask for entrance number
-            entrance_prompt = i18n.get('telegram.address.enter_entrance', language) or (
-                "Please enter your entrance/podyezd number, or skip:"
-            )
+            entrance_prompt = i18n.get('telegram.address.enter_entrance', language)
             keyboard = ProfileKeyboards.optional_field_keyboard('entrance', language)
 
             await update.message.reply_text(
@@ -1775,11 +1778,7 @@ class ProfileHandlers(BaseHandler):
             context.user_data['temp_address_data']['entrance'] = entrance
 
             # Ask for delivery instructions
-            instructions_prompt = i18n.get('telegram.address.enter_delivery_instructions', language) or (
-                "Any special delivery instructions?\n"
-                "(e.g., door code, call before arriving, preferred delivery times)\n\n"
-                "Or skip if none:"
-            )
+            instructions_prompt = i18n.get('telegram.address.enter_delivery_instructions', language)
             keyboard = ProfileKeyboards.delivery_instructions_keyboard(language)
 
             await update.message.reply_text(
@@ -1836,42 +1835,32 @@ class ProfileHandlers(BaseHandler):
                 # This case should not happen anymore since street has no skip button
                 # But keep it here for safety - redirect to building
                 logger.warning(f"Street skip attempted but street is required")
-                building_prompt = i18n.get('telegram.address.enter_building', language) or (
-                    "Please enter your building/house number, or skip:"
-                )
+                building_prompt = i18n.get('telegram.address.enter_building', language)
                 keyboard = ProfileKeyboards.optional_field_keyboard('building', language)
                 await query.edit_message_text(building_prompt, reply_markup=keyboard)
                 return ADDRESS_BUILDING
 
             elif field_name == 'building':
                 # Skip to delivery instructions
-                instructions_prompt = i18n.get('telegram.address.enter_delivery_instructions', language) or (
-                    "Any special delivery instructions?\n"
-                    "(e.g., door code, call before arriving)\n\n"
-                    "Or skip if none:"
-                )
+                instructions_prompt = i18n.get('telegram.address.enter_delivery_instructions', language)
                 keyboard = ProfileKeyboards.delivery_instructions_keyboard(language)
                 await query.edit_message_text(instructions_prompt, reply_markup=keyboard)
                 return ADDRESS_DELIVERY_INSTRUCTIONS
 
             elif field_name == 'apartment':
-                floor_prompt = i18n.get('telegram.address.enter_floor', language) or "Please enter your floor number, or skip:"
+                floor_prompt = i18n.get('telegram.address.enter_floor', language)
                 keyboard = ProfileKeyboards.optional_field_keyboard('floor', language)
                 await query.edit_message_text(floor_prompt, reply_markup=keyboard)
                 return ADDRESS_FLOOR
 
             elif field_name == 'floor':
-                entrance_prompt = i18n.get('telegram.address.enter_entrance', language) or "Please enter your entrance number, or skip:"
+                entrance_prompt = i18n.get('telegram.address.enter_entrance', language)
                 keyboard = ProfileKeyboards.optional_field_keyboard('entrance', language)
                 await query.edit_message_text(entrance_prompt, reply_markup=keyboard)
                 return ADDRESS_ENTRANCE
 
             elif field_name == 'entrance':
-                instructions_prompt = i18n.get('telegram.address.enter_delivery_instructions', language) or (
-                    "Any special delivery instructions?\n"
-                    "(e.g., door code, call before arriving)\n\n"
-                    "Or skip if none:"
-                )
+                instructions_prompt = i18n.get('telegram.address.enter_delivery_instructions', language)
                 keyboard = ProfileKeyboards.delivery_instructions_keyboard(language)
                 await query.edit_message_text(instructions_prompt, reply_markup=keyboard)
                 return ADDRESS_DELIVERY_INSTRUCTIONS
@@ -1955,13 +1944,13 @@ class ProfileHandlers(BaseHandler):
             )
 
             # Show confirmation message
-            confirm_text = i18n.get('telegram.address.geocode_found', language) or (
-                "📍 *Location Found*\n\n"
-                f"Address: {addr_data.get('full_address', 'N/A')}\n\n"
-                "Is this location correct?"
+            confirm_text = i18n.get(
+                'telegram.address.geocode_found_with_address',
+                language,
+                address=addr_data.get('full_address', i18n.get('telegram.common.not_set', language))
             )
             if not geocode_success:
-                confirm_text += "\n\n⚠️ _Note: Exact location could not be determined. Using approximate district center._"
+                confirm_text += i18n.get('telegram.address.geocode_note_approximate_center', language)
 
             keyboard = ProfileKeyboards.geocode_confirmation(language, show_edit=False)
 
@@ -1987,7 +1976,7 @@ class ProfileHandlers(BaseHandler):
             language = await i18n.get_user_language(user_id)
             addr_data = context.user_data.get('temp_address_data', {})
 
-            await query.answer("Processing...")
+            await query.answer(i18n.get('telegram.common.processing', language))
 
             # Build address string
             address_parts = []
@@ -2039,13 +2028,13 @@ class ProfileHandlers(BaseHandler):
                 longitude=addr_data['longitude']
             )
 
-            confirm_text = i18n.get('telegram.address.geocode_found', language) or (
-                "📍 *Location Found*\n\n"
-                f"Address: {addr_data.get('full_address', 'N/A')}\n\n"
-                "Is this location correct?"
+            confirm_text = i18n.get(
+                'telegram.address.geocode_found_with_address',
+                language,
+                address=addr_data.get('full_address', i18n.get('telegram.common.not_set', language))
             )
             if not geocode_success:
-                confirm_text += "\n\n⚠️ _Note: Using approximate district center location._"
+                confirm_text += i18n.get('telegram.address.geocode_note_approximate_center', language)
 
             keyboard = ProfileKeyboards.geocode_confirmation(language, show_edit=False)
 
@@ -2070,14 +2059,11 @@ class ProfileHandlers(BaseHandler):
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
 
-            await query.answer("✅ Location confirmed!")
+            await query.answer(i18n.get('telegram.address.location_confirmed_toast', language))
             logger.info(f"User {user_id} confirmed geocoded location")
 
             # Ask for address title
-            title_prompt = i18n.get('telegram.address.title_prompt', language) or (
-                "Great! Now give this address a name.\n\n"
-                "You can choose from the suggestions below or type your own:"
-            )
+            title_prompt = i18n.get('telegram.address.title_prompt', language)
             keyboard = ProfileKeyboards.address_title_suggestions(language)
 
             await query.edit_message_text(
@@ -2098,7 +2084,7 @@ class ProfileHandlers(BaseHandler):
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
 
-            await query.answer("Let's fix the location!")
+            await query.answer(i18n.get('telegram.address.retry_location_toast', language))
             logger.info(f"User {user_id} says geocode is wrong, offering correction options")
 
             # Delete previous message with inline keyboard
@@ -2109,11 +2095,7 @@ class ProfileHandlers(BaseHandler):
                 context.user_data['temp_address_data']['location_source'] = 'retry'
 
             # Offer location sharing or manual re-entry
-            retry_text = i18n.get('telegram.address.retry_location', language) or (
-                "📍 Let's fix the location\n\n"
-                "Please share your exact location for accurate delivery,\n"
-                "or click 'Re-enter Address' to try again manually."
-            )
+            retry_text = i18n.get('telegram.address.retry_location', language)
             
             keyboard = ProfileKeyboards.location_request_with_retry(language)
 
@@ -2165,10 +2147,10 @@ class ProfileHandlers(BaseHandler):
 
             # Prepare address data for API
             address_payload = {
-                'title': addr_data.get('title', 'My Address'),
+                'title': addr_data.get('title', i18n.get('telegram.address.default_title', language)),
                 'full_address': addr_data.get('full_address', ''),
                 'street_address': addr_data.get('street_address'),
-                'city': addr_data.get('city', 'Tashkent'),
+                'city': addr_data.get('city', i18n.get('telegram.address.default_city', language)),
                 'district': addr_data.get('district'),
                 'latitude': addr_data.get('latitude'),
                 'longitude': addr_data.get('longitude'),
@@ -2200,11 +2182,9 @@ class ProfileHandlers(BaseHandler):
             context.user_data.pop('temp_address', None)
 
             if success:
-                success_text = i18n.get('telegram.address.saved_successfully', language) or (
-                    f"✅ Address '{addr_data.get('title', 'My Address')}' saved successfully!"
-                )
+                success_text = i18n.get('telegram.address.saved_successfully', language)
             else:
-                success_text = "❌ Failed to save address. Please try again."
+                success_text = i18n.get('telegram.address.save_failed', language)
 
             keyboard = MenuKeyboards.main_menu(language)
 
@@ -2257,29 +2237,37 @@ class ProfileHandlers(BaseHandler):
                 address = next((addr for addr in addresses if str(addr.get('id')) == address_id), None)
                 
                 if not address:
-                    await query.answer("Address not found")
+                    await query.answer(i18n.get('telegram.address.not_found', language))
                     return
             
             # Format address details
-            address_text = f"📍 **{address.get('title', 'Untitled Address')}**\n\n"
-            address_text += f"**Full Address:** {address.get('full_address', 'N/A')}\n"
+            address_text = i18n.get(
+                'telegram.address.details_title',
+                language,
+                title=address.get('title', i18n.get('telegram.address.untitled', language))
+            )
+            address_text += i18n.get(
+                'telegram.address.details_full_address',
+                language,
+                address=address.get('full_address', i18n.get('telegram.common.not_set', language))
+            )
             if address.get('street_address'):
-                address_text += f"**Street:** {address.get('street_address')}\n"
+                address_text += i18n.get('telegram.address.details_street', language, street=address.get('street_address'))
             if address.get('city'):
-                address_text += f"**City:** {address.get('city')}\n"
+                address_text += i18n.get('telegram.address.details_city', language, city=address.get('city'))
             if address.get('is_default'):
-                address_text += f"\n🏠 **Default Address**\n"
+                address_text += i18n.get('telegram.address.details_default_badge', language)
             
             # Create action buttons for this address
             buttons = [
                 [
-                    {'text': '✏️ Edit', 'callback_data': f'edit_address_{address_id}'},
-                    {'text': '🗑️ Delete', 'callback_data': f'delete_address_{address_id}'}
+                    {'text': i18n.get('telegram.address.edit', language), 'callback_data': f'edit_address_{address_id}'},
+                    {'text': i18n.get('telegram.address.delete', language), 'callback_data': f'delete_address_{address_id}'}
                 ]
             ]
             
             if not address.get('is_default'):
-                buttons.insert(0, [{'text': '🏠 Set as Default', 'callback_data': f'set_default_address_{address_id}'}])
+                buttons.insert(0, [{'text': i18n.get('telegram.address.set_default', language), 'callback_data': f'set_default_address_{address_id}'}])
             
             buttons.append([{'text': i18n.get('telegram.back', language), 'callback_data': 'manage_addresses'}])
             
@@ -2327,16 +2315,19 @@ class ProfileHandlers(BaseHandler):
                 addresses = response.data.get('data', {}).get('addresses', [])
             
             if not addresses:
-                await query.answer("No addresses to edit")
+                await query.answer(i18n.get('telegram.address.no_addresses_to_edit', language))
                 return
             
-            edit_text = "✏️ **Select address to edit:**\n\nClick on the address you want to modify:"
+            edit_text = i18n.get('telegram.address.select_edit_prompt', language)
             
             # Create selection buttons
             buttons = []
             for addr in addresses:
                 status = "🏠" if addr.get('is_default') else "📍"
-                addr_title = addr.get('title', f"Address {addr.get('id')}")
+                addr_title = addr.get(
+                    'title',
+                    i18n.get('telegram.address.title_fallback', language, index=addr.get('id'))
+                )
                 buttons.append([{
                     'text': f"{status} {addr_title}",
                     'callback_data': f"edit_address_{addr['id']}"
@@ -2380,16 +2371,19 @@ class ProfileHandlers(BaseHandler):
                 addresses = response.data.get('data', {}).get('addresses', [])
             
             if not addresses:
-                await query.answer("No addresses to delete")
+                await query.answer(i18n.get('telegram.address.no_addresses_to_delete', language))
                 return
             
-            delete_text = "🗑️ **Select address to delete:**\n\n⚠️ **Warning:** This action cannot be undone!"
+            delete_text = i18n.get('telegram.address.select_delete_prompt', language)
             
             # Create selection buttons
             buttons = []
             for addr in addresses:
                 status = "🏠" if addr.get('is_default') else "📍"
-                addr_title = addr.get('title', f"Address {addr.get('id')}")
+                addr_title = addr.get(
+                    'title',
+                    i18n.get('telegram.address.title_fallback', language, index=addr.get('id'))
+                )
                 buttons.append([{
                     'text': f"{status} {addr_title}",
                     'callback_data': f"confirm_delete_address_{addr['id']}"
@@ -2431,13 +2425,15 @@ class ProfileHandlers(BaseHandler):
                 # Call the API to set address as default
                 response = await client.set_default_address(user_token, int(address_id))
                 if response.success:
-                    await query.answer("✅ Address set as default!")
+                    await query.answer(i18n.get('telegram.address.set_default_success_toast', language))
                     logger.info(f"Address {address_id} successfully set as default")
                     
                     # Refresh the address view to show updated status
                     await self.view_address(update, context)
                 else:
-                    await query.answer(f"❌ Failed to set as default: {response.error}")
+                    await query.answer(
+                        i18n.get('telegram.address.set_default_failed_toast', language, error=response.error)
+                    )
                     logger.error(f"Failed to set address {address_id} as default: {response.error}")
             
         except Exception as e:
@@ -2458,22 +2454,20 @@ class ProfileHandlers(BaseHandler):
             address_id = query.data.split('_')[-1]
             
             # Show editing options for the address
-            edit_text = "✏️ **Edit Address Options:**\n\n"
-            edit_text += "Choose what you'd like to edit about this address:\n\n"
-            edit_text += "💡 **Quick tip:** For major changes, you can delete this address and add a new one."
+            edit_text = i18n.get('telegram.address.edit_options_text', language)
             
             # Create editing options buttons
             buttons = [
                 [
-                    {'text': '📝 Edit Title', 'callback_data': f'edit_title_{address_id}'},
-                    {'text': '📍 Edit Location', 'callback_data': f'edit_location_{address_id}'}
+                    {'text': i18n.get('telegram.address.edit_title_button', language), 'callback_data': f'edit_title_{address_id}'},
+                    {'text': i18n.get('telegram.address.edit_location_button', language), 'callback_data': f'edit_location_{address_id}'}
                 ],
                 [
-                    {'text': '📋 Edit Details', 'callback_data': f'edit_details_{address_id}'},
-                    {'text': '📞 Edit Instructions', 'callback_data': f'edit_instructions_{address_id}'}
+                    {'text': i18n.get('telegram.address.edit_details_button', language), 'callback_data': f'edit_details_{address_id}'},
+                    {'text': i18n.get('telegram.address.edit_instructions_button', language), 'callback_data': f'edit_instructions_{address_id}'}
                 ],
                 [
-                    {'text': '🗑️ Delete & Re-add', 'callback_data': f'delete_address_{address_id}'},
+                    {'text': i18n.get('telegram.address.delete_readd_button', language), 'callback_data': f'delete_address_{address_id}'},
                     {'text': i18n.get('telegram.back', language), 'callback_data': f'view_address_{address_id}'}
                 ]
             ]
@@ -2524,7 +2518,7 @@ class ProfileHandlers(BaseHandler):
                 address = next((addr for addr in addresses if str(addr.get('id')) == address_id), None)
                 
                 if not address:
-                    await query.answer("Address not found")
+                    await query.answer(i18n.get('telegram.address.not_found', language))
                     return
             
             # Show confirmation dialog
@@ -2532,8 +2526,8 @@ class ProfileHandlers(BaseHandler):
             
             buttons = [
                 [
-                    {'text': '✅ Yes, Delete', 'callback_data': f'confirm_delete_address_{address_id}'},
-                    {'text': '❌ Cancel', 'callback_data': f'view_address_{address_id}'}
+                    {'text': i18n.get('telegram.address.delete_confirm_yes', language), 'callback_data': f'confirm_delete_address_{address_id}'},
+                    {'text': i18n.get('telegram.cancel', language), 'callback_data': f'view_address_{address_id}'}
                 ]
             ]
             
@@ -2571,17 +2565,19 @@ class ProfileHandlers(BaseHandler):
                 # Call the API to delete the address
                 response = await client.delete_user_address(user_token, int(address_id))
                 if response.success:
-                    await query.answer("🗑️ Address deleted successfully!")
+                    await query.answer(i18n.get('telegram.address.deleted_success_toast', language))
                     logger.info(f"Address {address_id} successfully deleted")
                     
                     # Redirect back to address management
                     await self.manage_addresses(update, context)
                 else:
-                    await query.answer(f"❌ Failed to delete address: {response.error}")
+                    await query.answer(
+                        i18n.get('telegram.address.delete_failed_toast', language, error=response.error)
+                    )
                     logger.error(f"Failed to delete address {address_id}: {response.error}")
                     
                     # Show error and go back to address view
-                    error_text = f"❌ **Error deleting address:**\n\n{response.error}\n\nPlease try again."
+                    error_text = i18n.get('telegram.address.delete_failed_detail', language, error=response.error)
                     back_button = [[{'text': i18n.get('telegram.back', language), 'callback_data': f'view_address_{address_id}'}]]
                     
                     from keyboards import KeyboardBuilder
@@ -2628,12 +2624,10 @@ class ProfileHandlers(BaseHandler):
                     address = next((addr for addr in addresses if str(addr.get('id')) == address_id), None)
                     
                     if address:
-                        current_title = address.get('title', 'Untitled')
-                        edit_text = f"📝 **Edit Address Title**\n\n"
-                        edit_text += f"**Current title:** {current_title}\n\n"
-                        edit_text += f"Please type the new title for this address:"
+                        current_title = address.get('title', i18n.get('telegram.address.untitled', language))
+                        edit_text = i18n.get('telegram.address.edit_title_prompt', language, current_title=current_title)
                         
-                        cancel_button = [[{'text': '❌ Cancel', 'callback_data': f'view_address_{address_id}'}]]
+                        cancel_button = [[{'text': i18n.get('telegram.cancel', language), 'callback_data': f'view_address_{address_id}'}]]
                         from keyboards import KeyboardBuilder
                         keyboard = KeyboardBuilder.build_inline_keyboard(cancel_button)
                         
@@ -2652,7 +2646,7 @@ class ProfileHandlers(BaseHandler):
                         
                         return
             
-            await query.answer("❌ Address not found")
+            await query.answer(i18n.get('telegram.address.not_found', language))
             
         except Exception as e:
             logger.error(f"Error in edit title handler: {e}")
@@ -2662,9 +2656,10 @@ class ProfileHandlers(BaseHandler):
         """Handle editing address location"""
         try:
             query = update.callback_query
+            language = await i18n.get_user_language(update.effective_user.id)
             address_id = query.data.split('_')[-1]
             
-            await query.answer("📍 Location editing: Please delete and re-add the address with the new location for now.")
+            await query.answer(i18n.get('telegram.address.location_edit_not_supported', language))
             logger.info(f"Location edit requested for address {address_id} - redirecting to delete/add flow")
             
         except Exception as e:
@@ -2675,9 +2670,10 @@ class ProfileHandlers(BaseHandler):
         """Handle editing address details"""
         try:
             query = update.callback_query
+            language = await i18n.get_user_language(update.effective_user.id)
             address_id = query.data.split('_')[-1]
             
-            await query.answer("📋 Address details editing will be available in the next update!")
+            await query.answer(i18n.get('telegram.address.details_edit_coming_soon', language))
             logger.info(f"Details edit requested for address {address_id} - not yet implemented")
             
         except Exception as e:
@@ -2707,12 +2703,14 @@ class ProfileHandlers(BaseHandler):
                     address = next((addr for addr in addresses if str(addr.get('id')) == address_id), None)
                     
                     if address:
-                        current_instructions = address.get('delivery_instructions') or 'None'
-                        edit_text = f"📞 **Edit Delivery Instructions**\n\n"
-                        edit_text += f"**Current instructions:** {current_instructions}\n\n"
-                        edit_text += f"Please type the new delivery instructions for this address:"
+                        current_instructions = address.get('delivery_instructions') or i18n.get('telegram.address.none_value', language)
+                        edit_text = i18n.get(
+                            'telegram.address.edit_instructions_prompt',
+                            language,
+                            current_instructions=current_instructions
+                        )
                         
-                        cancel_button = [[{'text': '❌ Cancel', 'callback_data': f'view_address_{address_id}'}]]
+                        cancel_button = [[{'text': i18n.get('telegram.cancel', language), 'callback_data': f'view_address_{address_id}'}]]
                         from keyboards import KeyboardBuilder
                         keyboard = KeyboardBuilder.build_inline_keyboard(cancel_button)
                         
@@ -2731,7 +2729,7 @@ class ProfileHandlers(BaseHandler):
                         
                         return
             
-            await query.answer("❌ Address not found")
+            await query.answer(i18n.get('telegram.address.not_found', language))
             
         except Exception as e:
             logger.error(f"Error in edit instructions handler: {e}")
@@ -2746,17 +2744,17 @@ class ProfileHandlers(BaseHandler):
             address_id = user_state.get('edit_address_id')
             
             if not address_id:
-                await update.message.reply_text("❌ Address editing session expired. Please try again.")
+                await update.message.reply_text(i18n.get('telegram.address.edit_session_expired', language))
                 await self.user_repo.update_user_state(user_id, {})
                 return
             
             # Validate title input
             if len(text.strip()) < 2:
-                await update.message.reply_text("❌ Title is too short. Please enter at least 2 characters.")
+                await update.message.reply_text(i18n.get('telegram.address.title_too_short', language))
                 return
             
             if len(text.strip()) > 50:
-                await update.message.reply_text("❌ Title is too long. Please keep it under 50 characters.")
+                await update.message.reply_text(i18n.get('telegram.address.title_too_long', language))
                 return
             
             # Update address via API
@@ -2771,8 +2769,7 @@ class ProfileHandlers(BaseHandler):
                 
                 response = await client.update_user_address(user_token, int(address_id), update_data)
                 if response.success:
-                    success_text = f"✅ **Address title updated successfully!**\n\n"
-                    success_text += f"**New title:** {text.strip()}"
+                    success_text = i18n.get('telegram.address.title_updated_success', language, title=text.strip())
                     
                     back_button = [[{'text': i18n.get('telegram.back', language), 'callback_data': f'view_address_{address_id}'}]]
                     from keyboards import KeyboardBuilder
@@ -2789,13 +2786,13 @@ class ProfileHandlers(BaseHandler):
                     logger.info(f"Address {address_id} title updated to: {text.strip()}")
                     
                 else:
-                    error_text = f"❌ **Failed to update address title:**\n\n{response.error}\n\nPlease try again."
+                    error_text = i18n.get('telegram.address.title_update_failed', language, error=response.error)
                     await update.message.reply_text(error_text, parse_mode='Markdown')
                     logger.error(f"Failed to update address {address_id} title: {response.error}")
             
         except Exception as e:
             logger.error(f"Error handling address title edit: {e}")
-            await update.message.reply_text("❌ An error occurred while updating the address title. Please try again.")
+            await update.message.reply_text(i18n.get('telegram.address.title_update_error', language))
     
     async def handle_address_instructions_edit(self, update: Update, context: ContextTypes.DEFAULT_TYPE,
                                              text: str, user_state: Dict):
@@ -2806,13 +2803,13 @@ class ProfileHandlers(BaseHandler):
             address_id = user_state.get('edit_address_id')
             
             if not address_id:
-                await update.message.reply_text("❌ Address editing session expired. Please try again.")
+                await update.message.reply_text(i18n.get('telegram.address.edit_session_expired', language))
                 await self.user_repo.update_user_state(user_id, {})
                 return
             
             # Validate instructions input
             if len(text.strip()) > 200:
-                await update.message.reply_text("❌ Instructions are too long. Please keep them under 200 characters.")
+                await update.message.reply_text(i18n.get('telegram.address.instructions_too_long', language))
                 return
             
             # Update address via API
@@ -2827,11 +2824,11 @@ class ProfileHandlers(BaseHandler):
                 
                 response = await client.update_user_address(user_token, int(address_id), update_data)
                 if response.success:
-                    success_text = f"📞 **Delivery instructions updated successfully!**\n\n"
+                    success_text = i18n.get('telegram.address.instructions_updated_intro', language)
                     if text.strip():
-                        success_text += f"**New instructions:** {text.strip()}"
+                        success_text += i18n.get('telegram.address.instructions_new_value', language, value=text.strip())
                     else:
-                        success_text += f"**Instructions:** None (cleared)"
+                        success_text += i18n.get('telegram.address.instructions_cleared', language)
                     
                     back_button = [[{'text': i18n.get('telegram.back', language), 'callback_data': f'view_address_{address_id}'}]]
                     from keyboards import KeyboardBuilder
@@ -2848,13 +2845,13 @@ class ProfileHandlers(BaseHandler):
                     logger.info(f"Address {address_id} delivery instructions updated")
                     
                 else:
-                    error_text = f"❌ **Failed to update delivery instructions:**\n\n{response.error}\n\nPlease try again."
+                    error_text = i18n.get('telegram.address.instructions_update_failed', language, error=response.error)
                     await update.message.reply_text(error_text, parse_mode='Markdown')
                     logger.error(f"Failed to update address {address_id} instructions: {response.error}")
             
         except Exception as e:
             logger.error(f"Error handling address instructions edit: {e}")
-            await update.message.reply_text("❌ An error occurred while updating delivery instructions. Please try again.")
+            await update.message.reply_text(i18n.get('telegram.address.instructions_update_error', language))
     
     async def logout_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle user logout from all platforms"""
@@ -2863,14 +2860,12 @@ class ProfileHandlers(BaseHandler):
             language = await i18n.get_user_language(user_id)
             
             # Confirm logout action
-            logout_text = f"🚪 **{i18n.get('telegram.profile.logout_confirm', language, 'Are you sure you want to logout?')}**\n\n"
-            logout_text += f"This will log you out from both Telegram bot and web app.\n\n"
-            logout_text += f"You can always log back in by using /start"
+            logout_text = i18n.get('telegram.profile.logout_confirmation_text', language)
             
             buttons = [
                 [
-                    {'text': '✅ Yes, Logout', 'callback_data': 'confirm_logout'},
-                    {'text': '❌ Cancel', 'callback_data': 'profile_menu'}
+                    {'text': i18n.get('telegram.profile.logout_yes_button', language), 'callback_data': 'confirm_logout'},
+                    {'text': i18n.get('telegram.cancel', language), 'callback_data': 'profile_menu'}
                 ]
             ]
             
@@ -2920,16 +2915,14 @@ class ProfileHandlers(BaseHandler):
             await self.user_repo.clear_user_session(user_id)
             
             # Show logout success message
-            logout_success = f"🚪 **Logged out successfully!**\n\n"
-            logout_success += f"You have been logged out from all platforms.\n\n"
-            logout_success += f"To log back in, use the /start command."
+            logout_success = i18n.get('telegram.profile.logout_success_text', language)
             
             # Remove inline keyboard
             await query.edit_message_text(
                 text=logout_success,
                 parse_mode='Markdown'
             )
-            await query.answer("✅ Logged out successfully!")
+            await query.answer(i18n.get('telegram.profile.logout_success_toast', language))
             
             logger.info(f"User {user_id} successfully logged out")
             

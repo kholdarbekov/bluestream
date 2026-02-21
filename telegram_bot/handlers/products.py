@@ -502,7 +502,12 @@ class ProductHandlers(BaseHandler):
                 return
             
             # Show search results
-            search_text = f"🔍 Search results for '{search_term}':\n\n{self._format_products_list(products, language)}"
+            search_title = i18n.get(
+                'telegram.products.search_results_for',
+                language,
+                search_term=search_term
+            )
+            search_text = f"{search_title}\n\n{self._format_products_list(products, language)}"
             keyboard = ProductKeyboards.product_list(products, 1, 1, language)
             
             await update.message.reply_text(
@@ -552,7 +557,10 @@ class ProductHandlers(BaseHandler):
             details.append(f"📝 {escape_markdown(product['description'], version=2)}")
         
         if product.get('category'):
-            details.append(f"📂 Category: {escape_markdown(product['category'].get('name', 'N/A'), version=2)}")
+            details.append(
+                f"📂 {i18n.get('telegram.products.category_label', language)}: "
+                f"{escape_markdown(product['category'].get('name', 'N/A'), version=2)}"
+            )
 
         return "\n\n".join(details)
     
@@ -641,7 +649,7 @@ class ProductHandlers(BaseHandler):
                 await self._handle_api_error(update, response.error, language)
                 return
         
-        await update.callback_query.answer("🗑️ Cart cleared!")
+        await update.callback_query.answer(i18n.get('telegram.products.cart_cleared', language))
         await self.show_cart(update, context)
     
 

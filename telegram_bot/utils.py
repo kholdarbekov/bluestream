@@ -431,16 +431,17 @@ async def user_middleware(update: Update) -> Optional[Dict[str, Any]]:
             # User doesn't exist, redirect to start
             language = update.effective_user.language_code or 'en'
             welcome_msg = i18n.get('telegram.registration_welcome', language)
+            start_prompt = i18n.get('telegram.registration.start_command_prompt', language)
             
             try:
                 if update.callback_query:
                     await update.callback_query.edit_message_text(
-                        f"{welcome_msg}\n\nPlease start with /start command."
+                        f"{welcome_msg}\n\n{start_prompt}"
                     )
                     await update.callback_query.answer()
                 else:
                     await update.message.reply_text(
-                        f"{welcome_msg}\n\nPlease start with /start command."
+                        f"{welcome_msg}\n\n{start_prompt}"
                     )
             except Exception as e:
                 logger.error(f"Error sending registration message: {e}")

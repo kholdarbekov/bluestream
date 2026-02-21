@@ -144,8 +144,39 @@ class TestPipeline:
         
         # Ensure test reports directory exists
         self.reports_dir.mkdir(exist_ok=True)
+
+        # Pre-flight translation guardrail (missing keys + hardcoded user text checks)
+        self._run_translation_guardrail()
         
         print("✅ Test environment setup complete")
+
+    def _run_translation_guardrail(self):
+        """Run translation coverage validation before tests."""
+        print("🌐 Running translation coverage guardrail...")
+        cmd = ['python', 'scripts/validate_translation_coverage.py', '--check', 'all']
+
+        result = subprocess.run(
+            cmd,
+            cwd=self.project_root,
+            capture_output=True,
+            text=True
+        )
+
+        output = (result.stdout or "") + (("\n" + result.stderr) if result.stderr else "")
+        output = output.strip()
+
+        # Keep a persistent log for CI artifacts/debugging
+        log_path = self.reports_dir / 'translation_guardrail.log'
+        with open(log_path, 'w', encoding='utf-8') as log_file:
+            log_file.write(output + ("\n" if output else ""))
+
+        if result.returncode != 0:
+            print("❌ Translation coverage guardrail failed")
+            if output:
+                print(output)
+            raise RuntimeError("Translation coverage guardrail failed")
+
+        print("✅ Translation coverage guardrail passed")
     
     def run_test_suite(self, suite_name: str) -> TestResult:
         """Run a specific test suite"""
@@ -524,9 +555,10 @@ class TestPipeline:
 def main():
     """Main entry point for test pipeline"""
     import argparse
-    
+
+    available_suites = ['unit', 'integration', 'security', 'api', 'performance', 'security_scan', 'all']
     parser = argparse.ArgumentParser(description="BlueStream Automated Test Pipeline")
-    parser.add_argument('--suite', choices=list(TestPipeline({}).test_suites.keys()) + ['security_scan', 'all'], 
+    parser.add_argument('--suite', choices=available_suites,
                        default='all', help='Test suite to run')
     parser.add_argument('--config', help='Path to configuration file')
     parser.add_argument('--fail-fast', action='store_true', help='Stop on first failure')

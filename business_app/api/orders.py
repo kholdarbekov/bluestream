@@ -538,7 +538,11 @@ def create_order():
         return validation_error_response(e.errors())
     except ValueError as e:
         db.session.rollback()
-        return error_response(message=str(e), status_code=400)
+        current_app.logger.warning(f"Create order validation error: {e}")
+        return error_response(
+            message=get_translation('api.orders.error.invalid_request_data'),
+            status_code=400
+        )
     except Exception as e:
         db.session.rollback()
         current_app.logger.error(f"Create order error: {e}")
@@ -630,7 +634,11 @@ def estimate_cart():
     except ValidationError as e:
         return validation_error_response(errors=str(e))
     except ValueError as e:
-        return error_response(message=str(e), status_code=400)
+        current_app.logger.warning(f"Estimate cart validation error: {e}")
+        return error_response(
+            message=get_translation('api.orders.error.invalid_request_data'),
+            status_code=400
+        )
     except Exception as e:
         current_app.logger.error(f"Estimate cart error: {e}")
         return internal_error_response(message=get_translation('error.server_error'))
@@ -737,7 +745,11 @@ def repeat_order(order_id):
         )
 
     except ValueError as e:
-        return error_response(message=str(e), status_code=400)
+        current_app.logger.warning(f"Repeat order validation error: {e}")
+        return error_response(
+            message=get_translation('api.orders.error.invalid_request_data'),
+            status_code=400
+        )
     except Exception as e:
         db.session.rollback()
         current_app.logger.error(f"Repeat order error: {e}")
@@ -957,7 +969,11 @@ def create_subscription_order():
         )
 
     except ValueError as e:
-        return error_response(message=str(e), status_code=400)
+        current_app.logger.warning(f"Create subscription order validation error: {e}")
+        return error_response(
+            message=get_translation('api.orders.error.invalid_request_data'),
+            status_code=400
+        )
     except Exception as e:
         db.session.rollback()
         current_app.logger.error(f"Create subscription order error: {e}")
@@ -1025,7 +1041,11 @@ def schedule_order():
         )
 
     except ValueError as e:
-        return error_response(message=str(e), status_code=400)
+        current_app.logger.warning(f"Schedule order validation error: {e}")
+        return error_response(
+            message=get_translation('api.orders.error.invalid_request_data'),
+            status_code=400
+        )
     except Exception as e:
         db.session.rollback()
         current_app.logger.error(f"Schedule order error: {e}")
@@ -1051,5 +1071,5 @@ def get_order_statuses():
     
     return success_response(
         data={'statuses': statuses},
-        message='Order statuses retrieved successfully'
+        message=get_translation('api.orders.statuses_retrieved')
     )

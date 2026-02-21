@@ -48,7 +48,7 @@ def get_address(address_id):
     address = UserAddress.query.filter_by(id=address_id, user_id=user_id).first()
 
     if not address:
-        return not_found_response(message='Address not found')
+        return not_found_response(message=get_translation('api.addresses.error.not_found'))
 
     return success_response(data={'address': address.to_dict()})
 
@@ -84,7 +84,7 @@ def create_address():
     # Validate required field - at minimum need full_address OR latitude/longitude
     if not data.get('full_address') and not (data.get('latitude') and data.get('longitude')):
         return validation_error_response(
-            errors={'address': 'Either full_address or coordinates (latitude/longitude) are required'}
+            errors={'address': get_translation('api.addresses.error.full_address_or_coordinates_required')}
         )
 
     # Check if this should be default
@@ -128,7 +128,7 @@ def create_address():
 
     return created_response(
         data={'address': address.to_dict()},
-        message='Address created successfully'
+        message=get_translation('api.addresses.success.created')
     )
 
 
@@ -143,7 +143,7 @@ def update_address(address_id):
     address = UserAddress.query.filter_by(id=address_id, user_id=user_id).first()
 
     if not address:
-        return not_found_response(message='Address not found')
+        return not_found_response(message=get_translation('api.addresses.error.not_found'))
 
     # Update fields with correct mapping
     if 'title' in data:
@@ -189,7 +189,7 @@ def update_address(address_id):
 
     return success_response(
         data={'address': address.to_dict()},
-        message='Address updated successfully'
+        message=get_translation('api.addresses.success.updated')
     )
 
 
@@ -203,13 +203,13 @@ def delete_address(address_id):
     address = UserAddress.query.filter_by(id=address_id, user_id=user_id).first()
 
     if not address:
-        return not_found_response(message='Address not found')
+        return not_found_response(message=get_translation('api.addresses.error.not_found'))
 
     # Don't allow deleting if it's the only address
     address_count = UserAddress.query.filter_by(user_id=user_id).count()
     if address_count == 1:
         return validation_error_response(
-            errors={'address': 'Cannot delete your only address'}
+            errors={'address': get_translation('api.addresses.error.cannot_delete_only_address')}
         )
 
     # If deleting default address, set another as default
@@ -239,7 +239,7 @@ def set_default_address(address_id):
     address = UserAddress.query.filter_by(id=address_id, user_id=user_id).first()
 
     if not address:
-        return not_found_response(message='Address not found')
+        return not_found_response(message=get_translation('api.addresses.error.not_found'))
 
     # Unset other defaults
     UserAddress.query.filter_by(user_id=user_id, is_default=True).update(
@@ -254,7 +254,7 @@ def set_default_address(address_id):
 
     return success_response(
         data={'address': address.to_dict()},
-        message='Default address updated'
+        message=get_translation('api.addresses.success.default_updated')
     )
 
 
@@ -283,7 +283,9 @@ def geocode_address():
 
     address = data.get('address')
     if not address:
-        return validation_error_response(errors={'address': 'Address string is required'})
+        return validation_error_response(
+            errors={'address': get_translation('api.addresses.error.address_string_required')}
+        )
 
     from business_app.services.maps_service import MapsService
     maps_service = MapsService()
@@ -299,13 +301,13 @@ def geocode_address():
             })
         else:
             return error_response(
-                message='Could not geocode the address. Please try with more specific details.',
+                message=get_translation('api.addresses.error.geocode_not_found'),
                 status_code=404
             )
     except Exception as e:
         current_app.logger.error(f"Geocoding failed for user {user_id}: {e}")
         return error_response(
-            message='Geocoding service temporarily unavailable',
+            message=get_translation('api.addresses.error.geocoding_service_unavailable'),
             status_code=503
         )
 
@@ -334,13 +336,13 @@ def reverse_geocode():
 
     if latitude is None or longitude is None:
         return validation_error_response(
-            errors={'coordinates': 'Both latitude and longitude are required'}
+            errors={'coordinates': get_translation('api.addresses.error.coordinates_required')}
         )
 
     # Validate coordinates are within Tashkent bounds
     if not is_within_tashkent(latitude, longitude):
         return validation_error_response(
-            errors={'coordinates': 'Coordinates are outside the supported delivery area (Tashkent)'}
+            errors={'coordinates': get_translation('api.addresses.error.coordinates_outside_supported_area')}
         )
 
     from business_app.services.maps_service import MapsService
@@ -365,13 +367,13 @@ def reverse_geocode():
         return success_response(data={
             'formatted_address': formatted_address,
             'district': district,
-            'city': 'Tashkent',
-            'country': 'Uzbekistan'
+            'city': get_translation('api.addresses.city.tashkent'),
+            'country': get_translation('api.addresses.country.uzbekistan')
         })
     except Exception as e:
         current_app.logger.error(f"Reverse geocoding failed for user {user_id}: {e}")
         return error_response(
-            message='Geocoding service temporarily unavailable',
+            message=get_translation('api.addresses.error.geocoding_service_unavailable'),
             status_code=503
         )
 
@@ -400,11 +402,7 @@ def get_districts():
     return success_response(data={
         'districts': districts,
         'region': 'tashkent_city',
-        'region_name': {
-            'en': 'Tashkent City',
-            'uz': 'Toshkent shahri',
-            'ru': 'Город Ташкент'
-        }.get(language, 'Tashkent City')
+        'region_name': get_translation('api.addresses.region.tashkent_city')
     })
 
 
@@ -437,9 +435,5 @@ def get_geo_configuration():
         'polygon': config.get('polygon'),
         'districts': config['districts'],
         'region': 'tashkent_city',
-        'region_name': {
-            'en': 'Tashkent City',
-            'uz': 'Toshkent shahri',
-            'ru': 'Город Ташкент'
-        }.get(language, 'Tashkent City')
+        'region_name': get_translation('api.addresses.region.tashkent_city')
     })

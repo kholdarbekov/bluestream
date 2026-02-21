@@ -105,6 +105,7 @@ class OrderHandlers(BaseHandler):
             query = update.callback_query
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
+            unknown_text = i18n.get('telegram.common.unknown', language)
             
             # Extract order ID
             order_id = int(query.data.split('_')[1])
@@ -132,7 +133,7 @@ class OrderHandlers(BaseHandler):
             if order.get('order_items'):
                 details_text += f"\n\n📋 {i18n.get('telegram.orders.items_header', language)}:\n"
                 for item in order['order_items']:
-                    details_text += f"• {item.get('product_name', 'Unknown')} x{item.get('quantity', 1)}\n"
+                    details_text += f"• {item.get('product_name', unknown_text)} x{item.get('quantity', 1)}\n"
                     details_text += f"  💰 {format_price(item.get('total_price', 0))} UZS\n"
             
             details_text = escape_markdown(details_text, version=2)
@@ -140,7 +141,7 @@ class OrderHandlers(BaseHandler):
             # Add delivery info if available
             if order.get('delivery_address'):
                 # Make order delivery address title bold. 
-                details_text += f"\n{i18n.get('telegram.orders.delivery_info', language)}:\n*{escape_markdown(order['delivery_address'].get('title', 'Unknown'), version=2)}* \- {escape_markdown(order['delivery_address'].get('full_address', ''), version=2)}"
+                details_text += f"\n{i18n.get('telegram.orders.delivery_info', language)}:\n*{escape_markdown(order['delivery_address'].get('title', unknown_text), version=2)}* \- {escape_markdown(order['delivery_address'].get('full_address', ''), version=2)}"
             
             keyboard = OrderKeyboards.order_details(order_id, order.get('status', ''), language)
             
@@ -181,7 +182,7 @@ class OrderHandlers(BaseHandler):
                 context.user_data['cancelling_order_id'] = order_id
                 
                 await query.edit_message_text(
-                    text=i18n.get('telegram.orders.cancel_confirm', language) or "Are you sure you want to cancel this order?",
+                    text=i18n.get('telegram.orders.cancel_confirm', language),
                     reply_markup=confirm_keyboard
                 )
                 await query.answer()
@@ -214,7 +215,7 @@ class OrderHandlers(BaseHandler):
                 response = await client.cancel_order(user_token, order_id)
                 
                 if response.success:
-                    await query.answer(i18n.get('telegram.orders.cancel_success', language) or "Order cancelled successfully")
+                    await query.answer(i18n.get('telegram.orders.cancel_success', language))
                     # Clear context
                     context.user_data.pop('cancelling_order_id', None)
                     # Redirect to orders list
@@ -283,22 +284,22 @@ class OrderHandlers(BaseHandler):
             
             # Status labels mapping
             status_labels = {
-                'created': i18n.get('telegram.orders.status_created', language) or 'Order Placed',
-                'pending': i18n.get('telegram.orders.status_pending', language) or 'Pending Confirmation',
-                'confirmed': i18n.get('telegram.orders.status_confirmed', language) or 'Order Confirmed',
-                'preparing': i18n.get('telegram.orders.status_preparing', language) or 'Being Prepared',
-                'out_for_delivery': i18n.get('telegram.orders.status_out_for_delivery', language) or 'Out for Delivery',
-                'delivered': i18n.get('telegram.orders.status_delivered', language) or 'Delivered',
-                'cancelled': i18n.get('telegram.orders.status_cancelled', language) or 'Cancelled',
-                'returned': i18n.get('telegram.orders.status_returned', language) or 'Returned'
+                'created': i18n.get('telegram.orders.status_created', language),
+                'pending': i18n.get('telegram.orders.status_pending', language),
+                'confirmed': i18n.get('telegram.orders.status_confirmed', language),
+                'preparing': i18n.get('telegram.orders.status_preparing', language),
+                'out_for_delivery': i18n.get('telegram.orders.status_out_for_delivery', language),
+                'delivered': i18n.get('telegram.orders.status_delivered', language),
+                'cancelled': i18n.get('telegram.orders.status_cancelled', language),
+                'returned': i18n.get('telegram.orders.status_returned', language)
             }
             
             # Build tracking message header
-            tracking_text = f"📍 *{i18n.get('telegram.orders.tracking_title', language) or 'Order Tracking'}*\n\n"
-            tracking_text += f"🔢 Order #{order.get('order_number', order_id)}\n\n"
+            tracking_text = f"📍 *{i18n.get('telegram.orders.tracking_title', language)}*\n\n"
+            tracking_text += f"🔢 {i18n.get('telegram.order.number', language, order.get('order_number', order_id))}\n\n"
             
             # Build visual timeline
-            tracking_text += f"━━━ {i18n.get('telegram.orders.timeline', language) or 'Timeline'} ━━━\n"
+            tracking_text += f"━━━ {i18n.get('telegram.orders.timeline', language)} ━━━\n"
             
             if timeline:
                 for entry in timeline:
@@ -325,7 +326,7 @@ class OrderHandlers(BaseHandler):
                     
                     # Mark current status
                     if is_current:
-                        tracking_text += f"🔵 {formatted_time} - {label} ← Current\n"
+                        tracking_text += f"🔵 {formatted_time} - {label} ← {i18n.get('telegram.orders.current_status', language)}\n"
                     else:
                         tracking_text += f"✅ {formatted_time} - {label}\n"
                     
@@ -348,14 +349,14 @@ class OrderHandlers(BaseHandler):
                 mins = time_remaining.get('total_minutes', 0)
                 hours = time_remaining.get('hours', 0)
                 if hours > 0:
-                    tracking_text += f"⏰ {i18n.get('telegram.orders.estimated_remaining', language) or 'Estimated'}: {hours}h {mins % 60}m\n"
+                    tracking_text += f"⏰ {i18n.get('telegram.orders.estimated_remaining', language)}: {hours}h {mins % 60}m\n"
                 else:
-                    tracking_text += f"⏰ {i18n.get('telegram.orders.estimated_remaining', language) or 'Estimated'}: {mins} min\n"
+                    tracking_text += f"⏰ {i18n.get('telegram.orders.estimated_remaining', language)}: {mins}m\n"
             
             # Add delivery info if available
             if delivery:
                 if delivery.get('driver_name'):
-                    tracking_text += f"\n🚗 {i18n.get('telegram.orders.driver', language) or 'Driver'}: {delivery['driver_name']}\n"
+                    tracking_text += f"\n🚗 {i18n.get('telegram.orders.driver', language)}: {delivery['driver_name']}\n"
                 if delivery.get('driver_phone'):
                     tracking_text += f"📞 {delivery['driver_phone']}\n"
             
@@ -570,8 +571,7 @@ class OrderHandlers(BaseHandler):
 
                 if not invoice_sent:
                     # Invoice failed - show error with options
-                    error_text = i18n.get('telegram.payment.failed_message', language) or \
-                        "Failed to create payment. Please try again or choose a different method."
+                    error_text = i18n.get('telegram.payment.failed_message', language)
 
                     keyboard = PaymentKeyboards.payment_failed(order['id'], language)
 
@@ -596,10 +596,7 @@ class OrderHandlers(BaseHandler):
             success_text += MessageBuilder.build_order_summary(order, language)
 
             if payment_method == 'cash':
-                success_text += "\n\n" + (
-                    i18n.get('telegram.orders.cash_note', language) or
-                    "Please have the exact amount ready for the driver."
-                )
+                success_text += "\n\n" + i18n.get('telegram.orders.cash_note', language)
 
             keyboard = MenuKeyboards.main_menu(language)
 
@@ -622,6 +619,7 @@ class OrderHandlers(BaseHandler):
         """Show order confirmation screen"""
         user_id = update.effective_user.id
         language = await i18n.get_user_language(user_id)
+        unknown_text = i18n.get('telegram.common.unknown', language)
         
         # Build confirmation message
         confirmation_text = i18n.get('telegram.orders.confirmation_title', language) + "\n\n"
@@ -645,7 +643,7 @@ class OrderHandlers(BaseHandler):
                 return
             confirmation_text += f"{i18n.get('telegram.orders.items_header', language)}:\n"
             for item in cart.get('cart_items', []):
-                confirmation_text += f"• {item.get('product', {}).get('name', 'Unknown')} x{item.get('quantity', 1)}\n"
+                confirmation_text += f"• {item.get('product', {}).get('name', unknown_text)} x{item.get('quantity', 1)}\n"
                 item_subtotal_price = item.get('product', {}).get('current_price', 0) * item.get('quantity', 1)
                 cart_total_amount += item_subtotal_price
                 confirmation_text += f"  💰 {format_price(item_subtotal_price)} UZS\n\n"
@@ -653,12 +651,21 @@ class OrderHandlers(BaseHandler):
         # Add address info
         address_id = context.user_data.get('selected_address_id')
         if address_id:
-            confirmation_text += f"{i18n.get('telegram.delivery_address', language)}: Selected address #{address_id}\n\n"
+            confirmation_text += f"{i18n.get('telegram.delivery_address', language)}: {i18n.get('telegram.orders.selected_address', language, address_id=address_id)}\n\n"
 
         # Add payment method
         payment_method = context.user_data.get('selected_payment_method')
         if payment_method:
-            confirmation_text += f"{i18n.get('telegram.orders.payment_info', language)}: {payment_method.title()}\n\n"
+            payment_method_labels = {
+                'cash': i18n.get('telegram.payment_cash', language),
+                'card': i18n.get('telegram.payment_card', language),
+                'payme': i18n.get('telegram.payment_payme', language),
+            }
+            payment_method_label = payment_method_labels.get(
+                payment_method,
+                i18n.get('telegram.common.unknown', language)
+            )
+            confirmation_text += f"{i18n.get('telegram.orders.payment_info', language)}: {payment_method_label}\n\n"
 
         # Add total amount
         confirmation_text += f"💰 {i18n.get('telegram.total', language)}: {format_price(cart_total_amount)} UZS\n"

@@ -636,16 +636,32 @@ class WaterBusinessBot:
     
     async def _setup_bot_commands(self):
         """Set up bot command menu"""
-        commands = [
-            BotCommand("start", "Start the bot and show main menu"),
-            BotCommand("menu", "Show main menu"),
-            BotCommand("help", "Get help and support"),
-            BotCommand("language", "Change language settings"),
+        command_key_pairs = [
+            ("start", "telegram.bot.command.start_desc"),
+            ("menu", "telegram.bot.command.menu_desc"),
+            ("help", "telegram.bot.command.help_desc"),
+            ("language", "telegram.bot.command.language_desc"),
         ]
-        
+
         try:
-            # Set default commands for all users
-            await self.application.bot.set_my_commands(commands)
+            # Set localized commands per supported language.
+            supported_languages = getattr(config.localization, 'supported_languages', []) or ['en']
+            for language in supported_languages:
+                localized_commands = [
+                    BotCommand(command, i18n.get(key, language))
+                    for command, key in command_key_pairs
+                ]
+                await self.application.bot.set_my_commands(
+                    localized_commands,
+                    language_code=language
+                )
+
+            # Set default commands (fallback to English if locale is unknown).
+            default_commands = [
+                BotCommand(command, i18n.get(key, 'en'))
+                for command, key in command_key_pairs
+            ]
+            await self.application.bot.set_my_commands(default_commands)
             logger.info("Bot commands set successfully")
             
         except Exception as e:
@@ -662,7 +678,10 @@ class WaterBusinessBot:
 
             # Apply rate limiting
             if not await rate_limiter.allow_request(user_id):
-                await update.message.reply_text("⏳ Please slow down. Try again in a moment.")
+                language = await i18n.get_user_language(user_id)
+                await update.message.reply_text(
+                    i18n.get('telegram.bot.rate_limit_exceeded', language)
+                )
                 return
 
             # Apply user middleware
@@ -707,7 +726,7 @@ class WaterBusinessBot:
             # Validate OTP format (6 digits)
             if not text.isdigit() or len(text) != 6:
                 await update.message.reply_text(
-                    "❌ Invalid code format. Please enter the 6-digit verification code:"
+                    i18n.get('telegram.bot.otp.invalid_format', language)
                 )
                 return
 
@@ -716,7 +735,7 @@ class WaterBusinessBot:
                 user_token = await get_auth_token(update, context, client)
                 if not user_token:
                     await update.message.reply_text(
-                        "❌ Authentication error. Please try again later."
+                        i18n.get('telegram.bot.otp.auth_error', language)
                     )
                     context.user_data.pop('awaiting_otp', None)
                     context.user_data.pop('pending_phone_verification', None)
@@ -726,9 +745,7 @@ class WaterBusinessBot:
                 response = await client.verify_phone_otp(user_token, text)
                 if response.success:
                     await update.message.reply_text(
-                        "✅ *Phone verified successfully!*\n\n"
-                        "Your phone number has been verified. "
-                        "You can now place orders and receive notifications.",
+                        i18n.get('telegram.bot.otp.success_message', language),
                         parse_mode='Markdown',
                         reply_markup=MenuKeyboards.main_menu(language)
                     )
@@ -741,14 +758,17 @@ class WaterBusinessBot:
                     logger.info(f"Phone verification successful for user {user_id}")
                 else:
                     await update.message.reply_text(
-                        f"❌ Verification failed: {response.error}\n\n"
-                        "Please enter the correct code or click /cancel to stop:"
+                        i18n.get(
+                            'telegram.bot.otp.failed_with_reason',
+                            language,
+                            error=response.error
+                        )
                     )
 
         except Exception as e:
             logger.error(f"Error verifying OTP: {e}")
             await update.message.reply_text(
-                "❌ Verification failed. Please try again later."
+                i18n.get('telegram.bot.otp.failed_generic', language)
             )
             context.user_data.pop('awaiting_otp', None)
             context.user_data.pop('pending_phone_verification', None)
@@ -844,7 +864,7 @@ class WaterBusinessBot:
                 await self.user_repository.update_user_state(user_id, user_state)
                 
                 await update.message.reply_text(
-                    "📍 Location received! Please provide a title for this address:",
+                    i18n.get('telegram.bot.location.received_prompt', language),
                     reply_markup=ReplyKeyboardRemove()
                 )
                 
@@ -856,10 +876,12 @@ class WaterBusinessBot:
                 logger.info(f"Location shared outside of any specific flow, showing general response")
                 # Location shared outside of any specific flow
                 await update.message.reply_text(
-                    f"📍 Thanks for sharing your location!\n\n"
-                    f"Lat: {location.latitude}, Lng: {location.longitude}\n\n"
-                    f"If you want to add this as a delivery address, please go to:\n"
-                    f"Profile → Addresses → Add Address",
+                    i18n.get(
+                        'telegram.bot.location.shared_general',
+                        language,
+                        latitude=location.latitude,
+                        longitude=location.longitude
+                    ),
                     reply_markup=MenuKeyboards.main_menu(language)
                 )
             
@@ -877,8 +899,7 @@ class WaterBusinessBot:
             # For now, just acknowledge voice message
             # In the future, could integrate speech-to-text
             await update.message.reply_text(
-                "🎙️ Voice message received! Currently, I can only respond to text messages. "
-                "Please type your message or use the menu buttons.",
+                i18n.get('telegram.bot.voice.not_supported', language),
             )
             
         except Exception as e:

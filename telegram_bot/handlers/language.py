@@ -106,7 +106,15 @@ class LanguageHandler:
 
             # Build detailed confirmation message showing language change
             confirmation_text = f"{flag} {i18n.get('telegram.language.confirmation_title', language_code)}\n\n"
-            confirmation_text += f"✅ {i18n.get('telegram.language.now_using', language_code, language=language_name)}\n\n"
+            now_using_template = i18n.get('telegram.language.now_using', language_code)
+            try:
+                now_using_text = now_using_template.format(
+                    language=language_name,
+                    language_name=language_name,
+                )
+            except Exception:
+                now_using_text = f"{now_using_template} {language_name}"
+            confirmation_text += f"✅ {now_using_text}\n\n"
             confirmation_text += f"{i18n.get('telegram.language.confirmation_message', language_code)}"
 
             # Return to main menu with new language

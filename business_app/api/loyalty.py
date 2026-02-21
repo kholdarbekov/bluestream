@@ -26,6 +26,7 @@ from business_app.utils.api_responses import (
     success_response, error_response, paginated_response, created_response,
     not_found_response, validation_error_response, internal_error_response
 )
+from business_app.utils.translations import get_translation
 from business_app import db
 
 loyalty_bp = Blueprint('loyalty', __name__)
@@ -52,7 +53,7 @@ def get_membership_tiers():
         )
     except Exception as e:
         current_app.logger.error(f"Get membership tiers error: {e}")
-        return internal_error_response('Failed to get membership tiers')
+        return internal_error_response(get_translation('api.loyalty.error.get_membership_tiers_failed'))
 
 
 @loyalty_bp.route('/points', methods=['GET'])
@@ -78,7 +79,7 @@ def get_loyalty_points():
 
     except Exception as e:
         current_app.logger.error(f"Get loyalty points error: {e}")
-        return internal_error_response('Failed to get loyalty points')
+        return internal_error_response(get_translation('api.loyalty.error.get_points_failed'))
 
 
 @loyalty_bp.route('/account', methods=['GET'])
@@ -159,7 +160,7 @@ def get_loyalty_account():
 
     except Exception as e:
         current_app.logger.error(f"Get loyalty account error: {e}")
-        return internal_error_response('Failed to get loyalty account')
+        return internal_error_response(get_translation('api.loyalty.error.get_account_failed'))
 
 
 @loyalty_bp.route('/history', methods=['GET'])
@@ -190,7 +191,7 @@ def get_loyalty_points_history():
 
     except Exception as e:
         current_app.logger.error(f"Get loyalty history error: {e}")
-        return internal_error_response('Failed to get loyalty history')
+        return internal_error_response(get_translation('api.loyalty.error.get_history_failed'))
 
 
 
@@ -203,7 +204,7 @@ def get_loyalty_profile():
 
         user = User.query.get(current_user_id)
         if not user:
-            return not_found_response('User not found')
+            return not_found_response(get_translation('user_not_found'))
 
         # Get or create loyalty points record
         loyalty_points = LoyaltyPoints.query.filter_by(user_id=current_user_id).first()
@@ -244,7 +245,7 @@ def get_loyalty_profile():
 
     except Exception as e:
         current_app.logger.error(f"Get loyalty profile error: {e}")
-        return internal_error_response('Failed to get loyalty profile')
+        return internal_error_response(get_translation('api.loyalty.error.get_profile_failed'))
 
 
 @loyalty_bp.route('/points/history', methods=['GET'])
@@ -270,21 +271,21 @@ def get_points_history():
                 txn_type = LoyaltyTransactionType(transaction_type)
                 query = query.filter_by(transaction_type=txn_type)
             except ValueError:
-                return error_response('Invalid transaction type')
+                return error_response(get_translation('api.loyalty.error.invalid_transaction_type'))
 
         if start_date:
             try:
                 start_dt = datetime.fromisoformat(start_date)
                 query = query.filter(LoyaltyTransaction.created_at >= start_dt)
             except ValueError:
-                return error_response('Invalid start_date format')
+                return error_response(get_translation('api.loyalty.error.invalid_start_date_format'))
 
         if end_date:
             try:
                 end_dt = datetime.fromisoformat(end_date)
                 query = query.filter(LoyaltyTransaction.created_at <= end_dt)
             except ValueError:
-                return error_response('Invalid end_date format')
+                return error_response(get_translation('api.loyalty.error.invalid_end_date_format'))
 
         # Order by creation date (newest first)
         query = query.order_by(LoyaltyTransaction.created_at.desc())
@@ -305,7 +306,7 @@ def get_points_history():
 
     except Exception as e:
         current_app.logger.error(f"Get points history error: {e}")
-        return internal_error_response('Failed to get points history')
+        return internal_error_response(get_translation('api.loyalty.error.get_points_history_failed'))
 
 
 @loyalty_bp.route('/rewards', methods=['GET'])
@@ -357,7 +358,7 @@ def get_available_rewards():
 
     except Exception as e:
         current_app.logger.error(f"Get available rewards error: {e}")
-        return internal_error_response('Failed to get rewards')
+        return internal_error_response(get_translation('api.loyalty.error.get_rewards_failed'))
 
 
 @loyalty_bp.route('/rewards/<int:reward_id>', methods=['GET'])
@@ -373,7 +374,7 @@ def get_reward_details(reward_id):
         ).first()
 
         if not reward:
-            return not_found_response('Reward not found')
+            return not_found_response(get_translation('api.loyalty.error.reward_not_found'))
 
         # Get user's points balance
         loyalty_points = LoyaltyPoints.query.filter_by(user_id=current_user_id).first()
@@ -405,7 +406,7 @@ def get_reward_details(reward_id):
 
     except Exception as e:
         current_app.logger.error(f"Get reward details error: {e}")
-        return internal_error_response('Failed to get reward details')
+        return internal_error_response(get_translation('api.loyalty.error.get_reward_details_failed'))
 
 
 @loyalty_bp.route('/rewards/<int:reward_id>/redeem', methods=['POST'])
@@ -418,7 +419,7 @@ def redeem_reward(reward_id):
 
         user = User.query.get(current_user_id)
         if not user:
-            return not_found_response('User not found')
+            return not_found_response(get_translation('user_not_found'))
 
         reward = LoyaltyReward.query.filter_by(
             id=reward_id,
@@ -426,24 +427,24 @@ def redeem_reward(reward_id):
         ).first()
 
         if not reward:
-            return not_found_response('Reward not found')
+            return not_found_response(get_translation('api.loyalty.error.reward_not_found'))
 
         # System rewards cannot be manually redeemed - they are applied automatically by the system
         if reward.is_system_reward:
-            return error_response('This reward is automatically applied by the system and cannot be manually redeemed')
+            return error_response(get_translation('api.loyalty.error.reward_auto_applied'))
 
         # Check if reward is available (use correct model field names)
         if reward.max_redemptions and reward.redemptions_used >= reward.max_redemptions:
-            return error_response('Reward is no longer available')
+            return error_response(get_translation('api.loyalty.error.reward_no_longer_available'))
 
         # Check user's points balance
         loyalty_points = LoyaltyPoints.query.filter_by(user_id=current_user_id).first()
         if not loyalty_points or loyalty_points.current_balance < reward.points_cost:
-            return error_response('Insufficient points balance')
+            return error_response(get_translation('api.loyalty.error.insufficient_points'))
 
         # Check if user can redeem this reward (frequency limits)
         if not get_loyalty_service().can_redeem_reward(current_user_id, reward_id):
-            return error_response('You have reached the redemption limit for this reward')
+            return error_response(get_translation('api.loyalty.error.redemption_limit_reached'))
 
         # Process reward redemption
         redemption = get_loyalty_service().redeem_reward(
@@ -479,15 +480,16 @@ def redeem_reward(reward_id):
                     'expires_at': redemption['expires_at']
                 }
             },
-            message='Reward redeemed successfully'
+            message=get_translation('api.loyalty.reward_redeemed_successfully')
         )
 
     except ValueError as e:
-        return error_response(str(e))
+        current_app.logger.warning(f"Redeem reward validation error: {e}")
+        return error_response(get_translation('api.loyalty.error.validation_failed'))
     except Exception as e:
         db.session.rollback()
         current_app.logger.error(f"Redeem reward error: {e}")
-        return internal_error_response('Failed to redeem reward')
+        return internal_error_response(get_translation('api.loyalty.error.redeem_reward_failed'))
 
 
 @loyalty_bp.route('/rewards/history', methods=['GET'])
@@ -516,7 +518,7 @@ def get_redemption_history():
                 reward_status = RewardStatus(status)
                 query = query.join(LoyaltyReward).filter(LoyaltyReward.status == reward_status)
             except ValueError:
-                return error_response('Invalid status value')
+                return error_response(get_translation('api.loyalty.error.invalid_status_value'))
 
         # Order by creation date (newest first)
         query = query.order_by(LoyaltyTransaction.created_at.desc())
@@ -537,7 +539,7 @@ def get_redemption_history():
 
     except Exception as e:
         current_app.logger.error(f"Get redemption history error: {e}")
-        return internal_error_response('Failed to get redemption history')
+        return internal_error_response(get_translation('api.loyalty.error.get_redemption_history_failed'))
 
 
 @loyalty_bp.route('/programs', methods=['GET'])
@@ -559,7 +561,7 @@ def get_loyalty_programs():
 
     except Exception as e:
         current_app.logger.error(f"Get loyalty programs error: {e}")
-        return internal_error_response('Failed to get loyalty programs')
+        return internal_error_response(get_translation('api.loyalty.error.get_programs_failed'))
 
 
 @loyalty_bp.route('/earn-points', methods=['POST'])
@@ -587,7 +589,7 @@ def earn_points():
         ]
 
         if action not in valid_actions:
-            return error_response('Invalid action type')
+            return error_response(get_translation('api.loyalty.error.invalid_action_type'))
 
         # Award points
         transaction = get_loyalty_service().award_points(
@@ -603,14 +605,15 @@ def earn_points():
             data={
                 'transaction': serialize_loyalty_transaction(transaction)
             },
-            message='Points awarded successfully'
+            message=get_translation('api.loyalty.points_awarded_successfully')
         )
 
     except ValueError as e:
-        return error_response(str(e))
+        current_app.logger.warning(f"Earn points validation error: {e}")
+        return error_response(get_translation('api.loyalty.error.validation_failed'))
     except Exception as e:
         current_app.logger.error(f"Earn points error: {e}")
-        return internal_error_response('Failed to earn points')
+        return internal_error_response(get_translation('api.loyalty.error.earn_points_failed'))
 
 
 @loyalty_bp.route('/referral', methods=['GET'])
@@ -622,7 +625,7 @@ def get_referral_info():
 
         user = User.query.get(current_user_id)
         if not user:
-            return not_found_response('User not found')
+            return not_found_response(get_translation('user_not_found'))
 
         # Get or create referral code
         referral_code = get_loyalty_service().get_user_referral_code(current_user_id)
@@ -675,7 +678,7 @@ def get_referral_info():
 
     except Exception as e:
         current_app.logger.error(f"Get referral info error: {e}")
-        return internal_error_response('Failed to get referral info')
+        return internal_error_response(get_translation('api.loyalty.error.get_referral_info_failed'))
 
 
 @loyalty_bp.route('/statistics', methods=['GET'])
@@ -757,7 +760,7 @@ def get_loyalty_statistics():
 
     except Exception as e:
         current_app.logger.error(f"Get loyalty statistics error: {e}")
-        return internal_error_response('Failed to get loyalty statistics')
+        return internal_error_response(get_translation('api.loyalty.error.get_statistics_failed'))
 
 
 @loyalty_bp.route('/challenges', methods=['GET'])
@@ -778,7 +781,7 @@ def get_loyalty_challenges():
 
     except Exception as e:
         current_app.logger.error(f"Get loyalty challenges error: {e}")
-        return internal_error_response('Failed to get loyalty challenges')
+        return internal_error_response(get_translation('api.loyalty.error.get_challenges_failed'))
 
 
 @loyalty_bp.route('/tier-benefits', methods=['GET'])
@@ -808,7 +811,7 @@ def get_tier_benefits():
 
     except Exception as e:
         current_app.logger.error(f"Get tier benefits error: {e}")
-        return internal_error_response('Failed to get tier benefits')
+        return internal_error_response(get_translation('api.loyalty.error.get_tier_benefits_failed'))
 
 
 @loyalty_bp.route('/gift-points', methods=['POST'])
@@ -825,20 +828,20 @@ def gift_points():
         message = data.get('message', '')
 
         if points_amount <= 0:
-            return error_response('Points amount must be positive')
+            return error_response(get_translation('api.loyalty.error.points_amount_must_be_positive'))
 
         # Check sender's balance
         loyalty_points = LoyaltyPoints.query.filter_by(user_id=current_user_id).first()
         if not loyalty_points or loyalty_points.current_balance < points_amount:
-            return error_response('Insufficient points balance')
+            return error_response(get_translation('api.loyalty.error.insufficient_points'))
 
         # Find recipient
         recipient = User.query.filter_by(phone=recipient_phone).first()
         if not recipient:
-            return not_found_response('Recipient not found')
+            return not_found_response(get_translation('api.loyalty.error.recipient_not_found'))
 
         if recipient.id == current_user_id:
-            return error_response('Cannot gift points to yourself')
+            return error_response(get_translation('api.loyalty.error.cannot_gift_to_self'))
 
         # Process gift
         gift_transaction = get_loyalty_service().gift_points(
@@ -852,12 +855,13 @@ def gift_points():
             data={
                 'transaction': serialize_loyalty_transaction(gift_transaction)
             },
-            message='Points gifted successfully'
+            message=get_translation('api.loyalty.points_gifted_successfully')
         )
 
     except ValueError as e:
-        return error_response(str(e))
+        current_app.logger.warning(f"Gift points validation error: {e}")
+        return error_response(get_translation('api.loyalty.error.validation_failed'))
     except Exception as e:
         db.session.rollback()
         current_app.logger.error(f"Gift points error: {e}")
-        return internal_error_response('Failed to gift points')
+        return internal_error_response(get_translation('api.loyalty.error.gift_points_failed'))

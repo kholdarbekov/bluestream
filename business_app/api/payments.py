@@ -56,7 +56,7 @@ def get_payment_methods():
 
         user = User.query.get(current_user_id)
         if not user:
-            return not_found_response(message='User not found')
+            return not_found_response(message=get_translation('user_not_found'))
 
         # Get user's saved payment methods
         saved_cards = CreditCard.query.filter_by(
@@ -139,7 +139,7 @@ def create_payment():
         ).first()
 
         if not order:
-            return not_found_response(message='Order not found')
+            return not_found_response(message=get_translation('api.orders.not_found'))
 
         if order.is_paid:
             return error_response(message=get_translation('api.payments.error.already_paid'))
@@ -161,7 +161,7 @@ def create_payment():
                 return created_response(
                     data={
                         'payment': serialize_payment(existing_payment),
-                        'message': 'Cash payment created. Pay on delivery.'
+                        'message': get_translation('api.payments.cash_payment_created')
                     }
                 )
             # For card payments, generate a fresh payment link for the existing payment
@@ -210,7 +210,7 @@ def create_payment():
             return created_response(
                 data={
                     'payment': serialize_payment(payment),
-                    'message': 'Cash payment created. Pay on delivery.'
+                    'message': get_translation('api.payments.cash_payment_created')
                 }
             )
 
@@ -250,7 +250,7 @@ def create_subscription_payment():
         ).first()
 
         if not subscription:
-            return not_found_response(message='Subscription not found')
+            return not_found_response(message=get_translation('api.payments.error.subscription_not_found'))
 
         # Create subscription payment
         payment_data = {
@@ -299,7 +299,7 @@ def get_payment_status(payment_id):
         ).first()
 
         if not payment:
-            return not_found_response(message='Payment not found')
+            return not_found_response(message=get_translation('api.payments.error.payment_not_found'))
 
         # Update payment status from provider if pending
         if payment.status == PaymentStatus.PENDING:
@@ -364,7 +364,7 @@ def get_payments():
 
     return success_response(
         data={'payments': response_data['items'], 'pagination': response_data['pagination']},
-        message='Payments retrieved successfully'
+        message=get_translation('api.payments.retrieved')
     )
 
 
@@ -381,7 +381,7 @@ def cancel_payment(payment_id):
         ).first()
 
         if not payment:
-            return not_found_response(message='Payment not found')
+            return not_found_response(message=get_translation('api.payments.error.payment_not_found'))
 
         if payment.status != PaymentStatus.PENDING:
             return error_response(message=get_translation('api.payments.error.only_pending_cancellable'))
@@ -392,7 +392,7 @@ def cancel_payment(payment_id):
         if success:
             return success_response(
                 data={
-                    'message': 'Payment cancelled successfully',
+                    'message': get_translation('api.payments.cancelled'),
                     'payment': serialize_payment(payment)
                 }
             )
@@ -455,7 +455,7 @@ def tokenize_card():
         save = data.get('save', True)  # Default to saving card
 
         if len(expiry) != 4:
-            return error_response(message="Invalid expiry format. Use MM/YY")
+            return error_response(message=get_translation('error.validation.invalid_expiry_format_mm_yy'))
 
         payment_service = get_payment_service()
         token_data = payment_service.create_card_token_with_verification(
@@ -543,7 +543,7 @@ def save_card():
 
         return created_response(
             data={
-                'message': 'Card saved successfully',
+                'message': get_translation('api.payments.card_saved'),
                 'card': serialize_credit_card(card)
             }
         )
@@ -574,7 +574,7 @@ def delete_card(card_id):
         success = payment_service.delete_card(card_id, current_user_id)
 
         if success:
-            return success_response(data={'message': 'Card deleted successfully'})
+            return success_response(data={'message': get_translation('api.payments.card_deleted')})
         else:
             return internal_error_response(message=get_translation('api.payments.error.delete_card_failed'))
 
@@ -775,13 +775,13 @@ def verify_payment(payment_id):
         ).first()
 
         if not payment:
-            return not_found_response(message='Payment not found')
+            return not_found_response(message=get_translation('api.payments.error.payment_not_found'))
 
         # Trigger payment verification
         process_payment_verification.delay(payment_id)
 
         return success_response(data={
-            'message': 'Payment verification initiated',
+            'message': get_translation('api.payments.verification_initiated'),
             'payment_id': payment_id
         })
 
@@ -800,7 +800,7 @@ def request_refund():
         data = request.get_json()
 
         payment_id = data.get('payment_id')
-        reason = data.get('reason', 'Customer request')
+        reason = data.get('reason', get_translation('api.payments.refund_reason_customer_request'))
 
         payment = Payment.query.filter_by(
             id=payment_id,
@@ -808,7 +808,7 @@ def request_refund():
         ).first()
 
         if not payment:
-            return not_found_response(message='Payment not found')
+            return not_found_response(message=get_translation('api.payments.error.payment_not_found'))
 
         if payment.status != PaymentStatus.COMPLETED:
             return error_response(message=get_translation('api.payments.error.only_completed_refundable'))
@@ -818,7 +818,7 @@ def request_refund():
 
         return created_response(
             data={
-                'message': 'Refund request submitted',
+                'message': get_translation('api.payments.refund_requested'),
                 'refund_id': refund.id,
                 'status': refund.status.value
             }
@@ -893,7 +893,7 @@ def create_card_token():
         save = data.get('save', False)
 
         if len(expiry) != 4:
-            return error_response(message="Invalid expiry format. Use MM/YY or MMYY")
+            return error_response(message=get_translation('error.validation.invalid_expiry_format_mm_yy_or_mmyy'))
 
         payment_service = get_payment_service()
         token_data = payment_service.create_card_token_with_verification(
@@ -915,7 +915,7 @@ def create_card_token():
         return validation_error_response(errors=str(e))
     except Exception as e:
         current_app.logger.error(f"Create card token error: {e}")
-        return internal_error_response(message=str(e))
+        return internal_error_response(message=get_translation('api.payments.error.create_card_token_failed'))
 
 
 @payments_bp.route('/cards/send-verification', methods=['POST'])
@@ -947,16 +947,16 @@ def send_verification_code():
         order_id = data.get('order_id')
 
         if not token:
-            return error_response(message="Card token is required")
+            return error_response(message=get_translation('error.validation.card_token_required'))
 
         if not order_id:
-            return error_response(message="Order ID is required")
+            return error_response(message=get_translation('error.validation.order_id_required'))
 
         # Verify order exists and belongs to current user
         current_user_id = get_jwt_identity()
         order = Order.query.filter_by(id=order_id, user_id=current_user_id).first()
         if not order:
-            return not_found_response(message="Order not found")
+            return not_found_response(message=get_translation('api.orders.not_found'))
 
         payment_service = get_payment_service()
         result = payment_service.request_card_verification_code(token)
@@ -973,7 +973,7 @@ def send_verification_code():
         return validation_error_response(errors=str(e))
     except Exception as e:
         current_app.logger.error(f"Send verification code error: {e}")
-        return internal_error_response(message=str(e))
+        return internal_error_response(message=get_translation('api.payments.error.send_verification_failed'))
 
 
 @payments_bp.route('/cards/resend-code', methods=['POST'])
@@ -1000,7 +1000,7 @@ def resend_verification_code():
         token = data.get('token')
 
         if not token:
-            return error_response(message="Card token is required")
+            return error_response(message=get_translation('error.validation.card_token_required'))
 
         payment_service = get_payment_service()
         result = payment_service.request_card_verification_code(token)
@@ -1015,7 +1015,7 @@ def resend_verification_code():
         return validation_error_response(errors=str(e))
     except Exception as e:
         current_app.logger.error(f"Resend verification code error: {e}")
-        return internal_error_response(message=str(e))
+        return internal_error_response(message=get_translation('api.payments.error.resend_verification_failed'))
 
 
 @payments_bp.route('/cards/verify', methods=['POST'])
@@ -1054,9 +1054,9 @@ def verify_card_code():
         code = data.get('code')
 
         if not token:
-            return error_response(message="Card token is required")
+            return error_response(message=get_translation('error.validation.card_token_required'))
         if not code:
-            return error_response(message="Verification code is required")
+            return error_response(message=get_translation('error.validation.verification_code_required'))
 
         payment_service = get_payment_service()
 
@@ -1088,7 +1088,7 @@ def verify_card_code():
 
     except Exception as e:
         current_app.logger.error(f"Verify card error: {e}")
-        return internal_error_response(message=str(e))
+        return internal_error_response(message=get_translation('api.payments.error.verify_card_failed'))
 
 
 @payments_bp.route('/process-card-payment', methods=['POST'])
@@ -1133,9 +1133,9 @@ def process_card_payment():
         card_metadata = data.get('card_metadata', {})
 
         if not order_id:
-            return error_response(message="Order ID is required")
+            return error_response(message=get_translation('error.validation.order_id_required'))
         if not token:
-            return error_response(message="Card token is required")
+            return error_response(message=get_translation('error.validation.card_token_required'))
 
         payment_service = get_payment_service()
 
@@ -1170,11 +1170,10 @@ def process_card_payment():
     except Exception as e:
         current_app.logger.error(f"Process card payment error: {e}")
         return error_response(
-            message=str(e),
+            message=get_translation('api.payments.error.process_card_payment_failed'),
             status_code=500,
             data={
                 'order_id': data.get('order_id') if 'data' in dir() else None,
                 'redirect_url': f'/checkout?error=payment_failed'
             }
         )
-

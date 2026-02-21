@@ -66,8 +66,7 @@ class PaymentHandlers(BaseHandler):
                     logger.error("Failed to get auth token for Payme link generation")
                     await self._send_error_message(
                         update, context, 
-                        i18n.get('telegram.auth.login_required', language) or 
-                        "Authentication failed. Please try again."
+                        i18n.get('telegram.auth.login_required', language)
                     )
                     return False
                     
@@ -88,7 +87,7 @@ class PaymentHandlers(BaseHandler):
                     logger.error(f"Failed to create Payme link: {result.error}")
                     await self._send_error_message(
                         update, context, 
-                        f"Failed to create payment link: {result.error}"
+                        i18n.get('telegram.payment.create_link_failed_with_error', language, error=result.error)
                     )
                     return False
                 
@@ -109,17 +108,21 @@ class PaymentHandlers(BaseHandler):
                 
                 if not payment_url:
                      logger.error(f"No payment_url in response: {result.data}")
-                     await self._send_error_message(update, context, "Invalid payment link received.")
+                     await self._send_error_message(
+                         update,
+                         context,
+                         i18n.get('telegram.payment.invalid_link_received', language)
+                     )
                      return False
                      
             # 3. Send Message with Button
-            order_number_text = i18n.get('telegram.order.number', language, order_number)
-            amount_text = i18n.get('telegram.order.total', language, format_price(total_amount))
-            
-            msg_text = i18n.get('telegram.payment.pay_message', language, order_number_text, amount_text) \
-                       or f"Order #{order_number}\nAmount: {format_price(total_amount)} UZS\n\nPlease pay using the button below:"
-            
-            pay_btn_text = i18n.get('telegram.payment.pay_btn', language) or "Pay"
+            msg_text = i18n.get(
+                'telegram.payment.pay_message',
+                language,
+                order_number=order_number,
+                amount=format_price(total_amount)
+            )
+            pay_btn_text = i18n.get('telegram.payment.pay_btn', language)
             
             keyboard = InlineKeyboardMarkup([
                 [InlineKeyboardButton(
@@ -141,8 +144,7 @@ class PaymentHandlers(BaseHandler):
             language = await i18n.get_user_language(update.effective_user.id)
             await self._send_error_message(
                 update, context, 
-                i18n.get('telegram.payment.failed_message', language) or
-                "Failed to create payment. Please try again."
+                i18n.get('telegram.payment.failed_message', language)
             )
             return False
 
@@ -174,16 +176,14 @@ class PaymentHandlers(BaseHandler):
                 user_token = await get_auth_token(update, context, client)
                 if not user_token:
                     await query.edit_message_text(
-                        i18n.get('telegram.error.auth_failed', language) or
-                        "Authentication failed. Please try again."
+                        i18n.get('telegram.error.auth_failed', language)
                     )
                     return
 
                 response = await client.get_order(user_token, order_id)
                 if not response.success:
                     await query.edit_message_text(
-                        i18n.get('telegram.payment.error_order_not_found', language) or
-                        "Order not found. Please create a new order."
+                        i18n.get('telegram.payment.error_order_not_found', language)
                     )
                     return
 
@@ -192,8 +192,7 @@ class PaymentHandlers(BaseHandler):
             # Check if order can still be paid
             if order.get('is_paid'):
                 await query.edit_message_text(
-                    i18n.get('telegram.payment.error_already_paid', language) or
-                    "This order has already been paid."
+                    i18n.get('telegram.payment.error_already_paid', language)
                 )
                 return
 
@@ -232,13 +231,13 @@ class PaymentHandlers(BaseHandler):
             from handlers.orders import order_handlers
 
             payment_methods = [
-                {'type': 'cash', 'name': i18n.get('telegram.payment_cash', language) or 'Cash'},
-                {'type': 'card', 'name': i18n.get('telegram.payment_card', language) or 'Card'},
+                {'type': 'cash', 'name': i18n.get('telegram.payment_cash', language)},
+                {'type': 'card', 'name': i18n.get('telegram.payment_card', language)},
             ]
 
             from keyboards import OrderKeyboards
 
-            payment_text = i18n.get('telegram.orders.select_payment', language) or "Select payment method:"
+            payment_text = i18n.get('telegram.orders.select_payment', language)
             keyboard = OrderKeyboards.payment_methods(payment_methods, language)
 
             await query.edit_message_text(
@@ -272,8 +271,7 @@ class PaymentHandlers(BaseHandler):
             await query.answer()
 
             # Show cancellation options
-            cancelled_text = i18n.get('telegram.payment.cancelled_message', language) or \
-                "You cancelled the payment. Your order is still pending.\n\nWould you like to try again?"
+            cancelled_text = i18n.get('telegram.payment.cancelled_message', language)
 
             keyboard = PaymentKeyboards.payment_failed(order_id, language)
 

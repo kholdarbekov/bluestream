@@ -69,8 +69,7 @@ class StartHandler(BaseHandler):
             keyboard.append([f"{flag} {name}"])
 
         await update.message.reply_text(
-            "Welcome to BlueStream Staff Bot!\n\n"
-            "Please select your language / Tilni tanlang / Выберите язык:",
+            i18n.get('staff.welcome_intro', 'en'),
             reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
         )
         return SELECT_LANGUAGE
@@ -130,7 +129,12 @@ class StartHandler(BaseHandler):
 
             return await self._complete_login(update, context, user_data, staff_roles)
         else:
-            error = response.error or 'Unknown error'
+            error = self._resolve_api_error_message(
+                language,
+                response.error,
+                status_code=response.status_code,
+                error_code=getattr(response, 'error_code', None),
+            )
             if response.status_code in (403, 404):
                 await update.message.reply_text(
                     i18n.get('staff.not_staff', language),

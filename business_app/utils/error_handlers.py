@@ -43,6 +43,7 @@ class ErrorResponse:
         message: str,
         details: Optional[Dict[str, Any]] = None,
         request_id: Optional[str] = None,
+        error_code: Optional[str] = None,
         status_code: int = 500
     ) -> Tuple[Dict[str, Any], int]:
         """Build standardized error response"""
@@ -58,6 +59,9 @@ class ErrorResponse:
         
         if details:
             response['details'] = details
+
+        if error_code:
+            response['error_code'] = error_code
             
         if request_id:
             response['request_id'] = request_id
@@ -283,6 +287,7 @@ def handle_api_exception(f):
                 message=message,
                 details=details if details else None,
                 request_id=getattr(g, 'trace_id', None),
+                error_code=getattr(e, 'error_code', None),
                 status_code=status_code
             )
     
@@ -475,6 +480,7 @@ def register_error_handlers(app):
             error_type='VALIDATION_ERROR',
             message=error.message,
             details=error.details,
+            error_code=error.error_code,
             status_code=400
         )
     
@@ -484,6 +490,7 @@ def register_error_handlers(app):
             error_type='NOT_FOUND',
             message=error.message,
             details=error.details,
+            error_code=error.error_code,
             status_code=404
         )
     
@@ -493,6 +500,7 @@ def register_error_handlers(app):
             error_type='UNAUTHORIZED',
             message=error.message,
             details=error.details,
+            error_code=error.error_code,
             status_code=401
         )
     
@@ -502,6 +510,7 @@ def register_error_handlers(app):
             error_type='FORBIDDEN',
             message=error.message,
             details=error.details,
+            error_code=error.error_code,
             status_code=403
         )
     

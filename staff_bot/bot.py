@@ -435,14 +435,24 @@ class StaffBot:
 
     async def _setup_bot_commands(self):
         """Set up bot command menu"""
-        commands = [
-            BotCommand("start", "Start the bot and authenticate"),
-            BotCommand("menu", "Show main menu"),
-            BotCommand("help", "Get help"),
-            BotCommand("language", "Change language"),
-        ]
         try:
-            await self.application.bot.set_my_commands(commands)
+            for lang in ['en', 'uz', 'ru']:
+                commands = [
+                    BotCommand("start", i18n.get('staff.command.start', lang)),
+                    BotCommand("menu", i18n.get('staff.command.menu', lang)),
+                    BotCommand("help", i18n.get('staff.command.help', lang)),
+                    BotCommand("language", i18n.get('staff.command.language', lang)),
+                ]
+                await self.application.bot.set_my_commands(commands, language_code=lang)
+
+            # Global fallback commands when Telegram cannot resolve localized scope.
+            fallback_commands = [
+                BotCommand("start", i18n.get('staff.command.start', 'en')),
+                BotCommand("menu", i18n.get('staff.command.menu', 'en')),
+                BotCommand("help", i18n.get('staff.command.help', 'en')),
+                BotCommand("language", i18n.get('staff.command.language', 'en')),
+            ]
+            await self.application.bot.set_my_commands(fallback_commands)
             logger.info("Staff bot commands set successfully")
         except Exception as e:
             logger.error(f"Failed to set bot commands: {e}")

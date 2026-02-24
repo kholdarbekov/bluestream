@@ -138,9 +138,9 @@ class CreateUserHandler(BaseHandler):
         # Language selection
         keyboard = InlineKeyboardMarkup([
             [
-                InlineKeyboardButton("O'zbek", callback_data="staff_op_lang_uz"),
-                InlineKeyboardButton("Русский", callback_data="staff_op_lang_ru"),
-                InlineKeyboardButton("English", callback_data="staff_op_lang_en"),
+                InlineKeyboardButton(i18n.get_language_name('uz', 'uz'), callback_data="staff_op_lang_uz"),
+                InlineKeyboardButton(i18n.get_language_name('ru', 'ru'), callback_data="staff_op_lang_ru"),
+                InlineKeyboardButton(i18n.get_language_name('en', 'en'), callback_data="staff_op_lang_en"),
             ]
         ])
 
@@ -163,7 +163,7 @@ class CreateUserHandler(BaseHandler):
 
         # Show confirmation
         client_data = context.user_data['new_client']
-        lang_names = {'uz': "O'zbek", 'ru': 'Русский', 'en': 'English'}
+        lang_name = i18n.get_language_name(client_lang, language)
 
         text = (
             f"\U0001f464 <b>{i18n.get('staff.operator.confirm_create_user', language)}</b>\n\n"
@@ -172,7 +172,7 @@ class CreateUserHandler(BaseHandler):
         )
         if client_data.get('last_name'):
             text += f" {client_data['last_name']}"
-        text += f"\n\U0001f310 {lang_names.get(client_lang, client_lang)}"
+        text += f"\n\U0001f310 {lang_name}"
 
         keyboard = CommonKeyboards.confirm_cancel(
             language,
@@ -207,7 +207,7 @@ class CreateUserHandler(BaseHandler):
                         parse_mode='HTML'
                     )
                 else:
-                    await self._handle_api_error(update, response.error, language)
+                    await self._handle_api_response_error(update, response, language)
                 return ConversationHandler.END
 
             created_user = response.data or {}

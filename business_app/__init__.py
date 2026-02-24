@@ -577,7 +577,11 @@ def create_app(config_class=None):
         import os
         # Use the same upload path as FileStorageService
         upload_folder = app.config.get('UPLOAD_FOLDER', 'uploads/')
-        uploads_dir = os.path.join(app.root_path, upload_folder)
+        if os.path.isabs(upload_folder):
+            uploads_dir = os.path.abspath(upload_folder)
+        else:
+            project_root = os.path.abspath(os.path.join(app.root_path, os.pardir))
+            uploads_dir = os.path.abspath(os.path.join(project_root, upload_folder))
         return send_from_directory(uploads_dir, filename)
 
     # Warm translation cache on app startup (within app context)

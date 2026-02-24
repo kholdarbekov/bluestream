@@ -40,9 +40,10 @@ def _current_lang_query_param():
 
 
 def _build_external_url(endpoint, **params):
-    """Build external URL with a stable language query parameter."""
-    lang = _current_lang_query_param() or get_current_language()
-    if lang and 'lang' not in params:
+    """Build external URL preserving only explicit non-default lang query params."""
+    lang = _current_lang_query_param()
+    default_language = current_app.config.get('DEFAULT_LANGUAGE', 'uz')
+    if lang and lang != default_language and 'lang' not in params:
         params['lang'] = lang
     return url_for(endpoint, _external=True, **params)
 

@@ -411,4 +411,7 @@ For complete documentation, examples, and SDKs visit: [API Documentation](/docs/
         log_dir.mkdir(parents=True, exist_ok=True)
         
         upload_dir = pathlib.Path(cls.UPLOAD_FOLDER)
+        if not upload_dir.is_absolute():
+            upload_dir = pathlib.Path(app.root_path).parent / upload_dir
         upload_dir.mkdir(parents=True, exist_ok=True)
+        app.config['UPLOAD_FOLDER'] = str(upload_dir.resolve())

@@ -348,19 +348,25 @@ class StaffWebhookServer:
 
     def _format_new_order_message(self, order_info: dict, language: str) -> str:
         """Format new order notification message"""
-        number = order_info.get('order_number', 'N/A')
+        number = order_info.get('order_number') or i18n.get('staff.common.not_available', language)
         district = order_info.get('district', '')
         time_slot = order_info.get('time_slot', '')
         amount = order_info.get('total_amount', 0)
         payment = order_info.get('payment_method', '')
+        payment_label = i18n.get(f'staff.delivery.payment.{payment}', language) if payment else ''
         item_count = order_info.get('item_count', 0)
+        amount_text = format(amount, ',.0f')
+        if payment_label:
+            amount_text = f"{amount_text} {i18n.get('staff.currency.uzs', language)} ({payment_label})"
+        else:
+            amount_text = f"{amount_text} {i18n.get('staff.currency.uzs', language)}"
 
         return (
             f"\U0001f195 {i18n.get('staff.notification.new_order', language)}\n\n"
             f"\U0001f4e6 #{number}\n"
             f"\U0001f4cd {district}\n"
             f"\U0001f550 {time_slot}\n"
-            f"\U0001f4b0 {amount:,.0f} UZS ({payment})\n"
+            f"\U0001f4b0 {amount_text}\n"
             f"\U0001f4dd {item_count} {i18n.get('staff.items', language)}"
         )
 

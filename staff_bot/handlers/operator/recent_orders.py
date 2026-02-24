@@ -37,7 +37,7 @@ class RecentOrdersHandler(BaseHandler):
                 if response.status_code == 401:
                     await self._handle_auth_error(update, language)
                 else:
-                    await self._handle_api_error(update, response.error, language)
+                    await self._handle_api_response_error(update, response, language)
                 return
 
             orders = response.data if isinstance(response.data, list) else response.data.get('items', [])
@@ -66,16 +66,17 @@ class RecentOrdersHandler(BaseHandler):
 
             # Show each order
             for order in orders[:15]:
-                order_num = order.get('order_number', 'N/A')
+                order_num = order.get('order_number') or i18n.get('staff.common.not_available', language)
                 status = order.get('status', '')
+                status_label = i18n.get(f'staff.order.status.{status}', language) if status else ''
                 customer_name = order.get('customer_name', '')
-                total = format_currency(order.get('total_amount'))
+                total = format_currency(order.get('total_amount'), language=language)
                 created = order.get('created_at', '')
                 if created and isinstance(created, str) and len(created) > 16:
                     created = created[:16].replace('T', ' ')
 
                 lines = [
-                    f"\U0001f4e6 <b>#{order_num}</b> \u2014 {status}",
+                    f"\U0001f4e6 <b>#{order_num}</b> \u2014 {status_label or status}",
                 ]
                 if customer_name:
                     lines.append(f"\U0001f464 {customer_name}")

@@ -38,7 +38,7 @@ class ActiveDeliveryHandler(BaseHandler):
                 if response.status_code == 401:
                     await self._handle_auth_error(update, language)
                 else:
-                    await self._handle_api_error(update, response.error, language)
+                    await self._handle_api_response_error(update, response, language)
                 return
 
             deliveries = response.data if isinstance(response.data, list) else response.data.get('items', [])
@@ -72,7 +72,7 @@ class ActiveDeliveryHandler(BaseHandler):
             for delivery in deliveries:
                 status = delivery.get('status', '')
                 status_text = format_delivery_status(status, language)
-                order_num = delivery.get('order_number', 'N/A')
+                order_num = delivery.get('order_number') or i18n.get('staff.common.not_available', language)
 
                 lines = [
                     f"\U0001f69a <b>#{order_num}</b> \u2014 {status_text}",
@@ -89,9 +89,13 @@ class ActiveDeliveryHandler(BaseHandler):
                 if address:
                     lines.append(f"    {address}")
 
-                total = format_currency(delivery.get('total_amount'))
+                total = format_currency(delivery.get('total_amount'), language=language)
                 payment = delivery.get('payment_method', '')
-                lines.append(f"\U0001f4b0 {total} ({payment})")
+                payment_label = i18n.get(f'staff.delivery.payment.{payment}', language) if payment else ''
+                if payment_label:
+                    lines.append(f"\U0001f4b0 {total} ({payment_label})")
+                else:
+                    lines.append(f"\U0001f4b0 {total}")
 
                 text = '\n'.join(lines)
                 delivery_id = delivery.get('delivery_id') or delivery.get('id')
@@ -132,7 +136,7 @@ class ActiveDeliveryHandler(BaseHandler):
                 response = await client.get_active_deliveries(token)
 
             if not response.success:
-                await self._handle_api_error(update, response.error, language)
+                await self._handle_api_response_error(update, response, language)
                 return
 
             deliveries = response.data if isinstance(response.data, list) else response.data.get('items', [])
@@ -153,7 +157,7 @@ class ActiveDeliveryHandler(BaseHandler):
             # Build detailed view
             status = delivery.get('status', '')
             status_text = format_delivery_status(status, language)
-            order_num = delivery.get('order_number', 'N/A')
+            order_num = delivery.get('order_number') or i18n.get('staff.common.not_available', language)
 
             lines = [
                 f"\U0001f69a <b>#{order_num}</b>",
@@ -188,7 +192,7 @@ class ActiveDeliveryHandler(BaseHandler):
                 lines.append(f"    {address}")
 
             # Payment
-            total = format_currency(delivery.get('total_amount'))
+            total = format_currency(delivery.get('total_amount'), language=language)
             payment = delivery.get('payment_method', '')
             payment_info = f"\U0001f4b0 {total}"
             if payment:

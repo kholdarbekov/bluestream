@@ -92,7 +92,7 @@ class DevelopmentConfig(BaseConfig):
     
     # File Storage - Local storage for development
     STORAGE_TYPE = 'local'
-    UPLOAD_FOLDER = 'uploads/dev/'
+    UPLOAD_FOLDER = os.environ.get('UPLOAD_FOLDER', 'uploads/dev/')
     BASE_URL = os.environ.get('BASE_URL', 'http://localhost:5000')
     
     # Logging Configuration
@@ -175,7 +175,7 @@ class DevelopmentConfig(BaseConfig):
         import pathlib
         
         pathlib.Path('logs').mkdir(exist_ok=True)
-        pathlib.Path('uploads/dev').mkdir(parents=True, exist_ok=True)
+        pathlib.Path(app.config.get('UPLOAD_FOLDER', cls.UPLOAD_FOLDER)).mkdir(parents=True, exist_ok=True)
         pathlib.Path('logs/emails').mkdir(parents=True, exist_ok=True)
         
         if cls.MAIL_BACKEND == 'file':

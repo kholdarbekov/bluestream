@@ -64,7 +64,7 @@ class SearchUserHandler(BaseHandler):
                 if response.status_code == 401:
                     await self._handle_auth_error(update, language)
                     return ConversationHandler.END
-                await self._handle_api_error(update, response.error, language)
+                await self._handle_api_response_error(update, response, language)
                 return SEARCH_INPUT
 
             clients = response.data if isinstance(response.data, list) else response.data.get('items', [])

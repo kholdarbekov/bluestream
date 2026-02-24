@@ -40,7 +40,7 @@ class HistoryHandler(BaseHandler):
                 if response.status_code == 401:
                     await self._handle_auth_error(update, language)
                 else:
-                    await self._handle_api_error(update, response.error, language)
+                    await self._handle_api_response_error(update, response, language)
                 return
 
             data = response.data or {}
@@ -69,9 +69,9 @@ class HistoryHandler(BaseHandler):
             for delivery in deliveries:
                 status = delivery.get('status', '')
                 status_text = format_delivery_status(status, language)
-                order_num = delivery.get('order_number', 'N/A')
+                order_num = delivery.get('order_number') or i18n.get('staff.common.not_available', language)
                 district = delivery.get('district', '')
-                total = format_currency(delivery.get('total_amount'))
+                total = format_currency(delivery.get('total_amount'), language=language)
                 date = delivery.get('delivered_at') or delivery.get('updated_at', '')
                 if date and isinstance(date, str) and len(date) > 10:
                     date = date[:10]
@@ -151,7 +151,7 @@ class HistoryHandler(BaseHandler):
                 if response.status_code == 401:
                     await self._handle_auth_error(update, language)
                 else:
-                    await self._handle_api_error(update, response.error, language)
+                    await self._handle_api_response_error(update, response, language)
                 return
 
             stats = response.data or {}
@@ -214,7 +214,7 @@ class HistoryHandler(BaseHandler):
                 )
 
             if not response.success:
-                await self._handle_api_error(update, response.error, language)
+                await self._handle_api_response_error(update, response, language)
                 return
 
             stats = response.data or {}

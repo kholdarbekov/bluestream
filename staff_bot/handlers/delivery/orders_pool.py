@@ -39,7 +39,7 @@ class OrdersPoolHandler(BaseHandler):
                 if response.status_code == 401:
                     await self._handle_auth_error(update, language)
                 else:
-                    await self._handle_api_error(update, response.error, language)
+                    await self._handle_api_response_error(update, response, language)
                 return
 
             orders = response.data.get('items', [])
@@ -129,7 +129,7 @@ class OrdersPoolHandler(BaseHandler):
                 )
 
             if not response.success:
-                await self._handle_api_error(update, response.error, language)
+                await self._handle_api_response_error(update, response, language)
                 return
 
             # Find the specific order
@@ -144,7 +144,8 @@ class OrdersPoolHandler(BaseHandler):
                 return
 
             # Build detailed view
-            lines = [f"\U0001f4e6 <b>#{order.get('order_number', 'N/A')}</b>\n"]
+            order_number = order.get('order_number') or i18n.get('staff.common.not_available', language)
+            lines = [f"\U0001f4e6 <b>#{order_number}</b>\n"]
 
             # Items
             items = order.get('items', [])
@@ -153,7 +154,10 @@ class OrdersPoolHandler(BaseHandler):
                 for item in items:
                     name = item.get('product_name', item.get('name', ''))
                     qty = item.get('quantity', 1)
-                    price = format_currency(item.get('total_price', item.get('price', 0)))
+                    price = format_currency(
+                        item.get('total_price', item.get('price', 0)),
+                        language=language,
+                    )
                     lines.append(f"  \u2022 {name} x{qty} \u2014 {price}")
                 lines.append("")
 
@@ -180,7 +184,7 @@ class OrdersPoolHandler(BaseHandler):
                 lines.append(f"\U0001f550 {time_slot}")
 
             # Payment
-            total = format_currency(order.get('total_amount'))
+            total = format_currency(order.get('total_amount'), language=language)
             payment = order.get('payment_method', '')
             payment_info = f"\U0001f4b0 {total}"
             if payment:
@@ -258,7 +262,7 @@ class OrdersPoolHandler(BaseHandler):
                         reply_markup=CommonKeyboards.back_button(language, "staff_new_orders")
                     )
                 else:
-                    await self._handle_api_error(update, response.error, language)
+                    await self._handle_api_response_error(update, response, language)
                 return
 
             # Success

@@ -57,10 +57,10 @@ class OperatorKeyboards:
         """Product selection for order creation"""
         keyboard = []
         for product in products:
-            name = product.get('name', 'Unknown')
+            name = product.get('name') or i18n.get('staff.common.not_available', language)
             price = product.get('price', 0)
             keyboard.append([InlineKeyboardButton(
-                f"{name} - {price:,.0f} UZS",
+                f"{name} - {price:,.0f} {i18n.get('staff.currency.uzs', language)}",
                 callback_data=f"staff_op_product_{product['id']}"
             )])
 
@@ -100,7 +100,7 @@ class OperatorKeyboards:
         """Address selection for order"""
         keyboard = []
         for addr in addresses:
-            label = addr.get('label', addr.get('address_line_1', 'Address'))
+            label = addr.get('label') or addr.get('address_line_1') or i18n.get('staff.operator.address', language)
             keyboard.append([InlineKeyboardButton(
                 f"\U0001f4cd {label}",
                 callback_data=f"staff_op_addr_{addr['id']}"

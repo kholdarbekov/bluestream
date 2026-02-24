@@ -51,7 +51,7 @@ class FileStorageService:
     
     def _init_local_storage(self):
         """Initialize local storage"""
-        self.upload_path = os.path.join(current_app.root_path, self.upload_folder)
+        self.upload_path = self._resolve_upload_path()
         
         # Create upload directory if it doesn't exist
         os.makedirs(self.upload_path, exist_ok=True)
@@ -60,6 +60,15 @@ class FileStorageService:
         subdirs = ['images', 'documents', 'delivery_photos', 'user_avatars', 'temp']
         for subdir in subdirs:
             os.makedirs(os.path.join(self.upload_path, subdir), exist_ok=True)
+
+    def _resolve_upload_path(self) -> str:
+        """Resolve upload folder to an absolute path shared across app processes."""
+        if os.path.isabs(self.upload_folder):
+            return os.path.abspath(self.upload_folder)
+
+        # Keep relative paths anchored at project root (`.../business_app/..`), not module root.
+        project_root = os.path.abspath(os.path.join(current_app.root_path, os.pardir))
+        return os.path.abspath(os.path.join(project_root, self.upload_folder))
     
     def upload_file(self, file: BinaryIO, filename: str, folder: str = 'general',
                    user_id: int = None, skip_validation: bool = False, **metadata) -> Dict[str, Any]:

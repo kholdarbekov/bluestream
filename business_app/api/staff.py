@@ -30,8 +30,8 @@ def _address_line(address) -> str:
 def _address_label(address) -> str:
     """Return address label/title across schema variants."""
     if not address:
-        return 'Address'
-    return getattr(address, 'title', None) or getattr(address, 'label', None) or 'Address'
+        return ''
+    return getattr(address, 'title', None) or getattr(address, 'label', None) or ''
 
 
 # --- Staff Authentication ---
@@ -42,13 +42,13 @@ def staff_login():
     """Staff login: pre-bound telegram_id or one-time invite-token binding."""
     data = request.get_json()
     if not data:
-        raise ValidationError("Request body is required")
+        raise ValidationError("Request body is required", error_code='STAFF_REQUEST_BODY_REQUIRED')
 
     telegram_id = data.get('telegram_id')
     invite_token = data.get('invite_token')
 
     if not telegram_id:
-        raise ValidationError("telegram_id is required")
+        raise ValidationError("telegram_id is required", error_code='STAFF_TELEGRAM_ID_REQUIRED')
 
     result = StaffService.authenticate_and_link_staff(
         telegram_id=str(telegram_id),
@@ -72,7 +72,7 @@ def staff_refresh_token():
         refresh_token = request.cookies.get(refresh_cookie_name)
 
     if not refresh_token:
-        raise ValidationError("Refresh token is required")
+        raise ValidationError("Refresh token is required", error_code='STAFF_REFRESH_TOKEN_REQUIRED')
 
     from business_app.services.token_service import TokenService
     token_service = TokenService()
@@ -115,7 +115,7 @@ def get_order_pool():
         if order and order.order_items:
             for oi in order.order_items:
                 order_items.append({
-                    'product_name': oi.product.name if oi.product else 'Unknown',
+                    'product_name': oi.product.name if oi.product else '',
                     'quantity': oi.quantity,
                     'unit_price': float(oi.unit_price) if oi.unit_price else 0,
                     'total_price': float(oi.total_price) if oi.total_price else 0,
@@ -131,7 +131,7 @@ def get_order_pool():
         items.append({
             'delivery_id': delivery.id,
             'order_id': order.id if order else None,
-            'order_number': order.order_number if order else 'N/A',
+            'order_number': order.order_number if order else None,
             'status': order_status,
             'delivery_status': delivery_status,
             'customer_name': f"{order.user.first_name} {order.user.last_name or ''}".strip() if order and order.user else '',
@@ -184,7 +184,7 @@ def update_delivery_status(delivery_id):
     data = request.get_json()
 
     if not data or 'status' not in data:
-        raise ValidationError("status field is required")
+        raise ValidationError("status field is required", error_code='STAFF_STATUS_REQUIRED')
 
     metadata = data.get('metadata', {})
     delivery = StaffService.update_delivery_status(
@@ -205,13 +205,13 @@ def update_location(delivery_id):
     """Update delivery person's live location"""
     data = request.get_json()
     if not data:
-        raise ValidationError("Request body is required")
+        raise ValidationError("Request body is required", error_code='STAFF_REQUEST_BODY_REQUIRED')
 
     lat = data.get('latitude')
     lng = data.get('longitude')
 
     if lat is None or lng is None:
-        raise ValidationError("latitude and longitude are required")
+        raise ValidationError("latitude and longitude are required", error_code='STAFF_COORDINATES_REQUIRED')
 
     delivery = StaffService.update_delivery_location(delivery_id, lat, lng)
 
@@ -235,14 +235,14 @@ def get_active_deliveries():
         if order and order.order_items:
             for oi in order.order_items:
                 item_list.append({
-                    'product_name': oi.product.name if oi.product else 'Unknown',
+                    'product_name': oi.product.name if oi.product else '',
                     'quantity': oi.quantity,
                     'unit_price': float(oi.unit_price) if oi.unit_price else 0,
                 })
 
         items.append({
             'delivery_id': delivery.id,
-            'order_number': order.order_number if order else 'N/A',
+            'order_number': order.order_number if order else None,
             'status': delivery.status.value if hasattr(delivery.status, 'value') else delivery.status,
             'customer_name': f"{order.user.first_name} {order.user.last_name or ''}".strip() if order and order.user else '',
             'customer_phone': order.user.phone if order and order.user else '',
@@ -279,7 +279,7 @@ def get_delivery_history():
         order = delivery.order
         items.append({
             'delivery_id': delivery.id,
-            'order_number': order.order_number if order else 'N/A',
+            'order_number': order.order_number if order else None,
             'status': delivery.status.value if hasattr(delivery.status, 'value') else delivery.status,
             'customer_name': f"{order.user.first_name} {order.user.last_name or ''}".strip() if order and order.user else '',
             'total_amount': float(order.total_amount) if order and order.total_amount else 0,
@@ -316,7 +316,7 @@ def create_client_user():
     data = request.get_json()
 
     if not data:
-        raise ValidationError("Request body is required")
+        raise ValidationError("Request body is required", error_code='STAFF_REQUEST_BODY_REQUIRED')
 
     user = StaffService.create_client_user(current_user_id, data)
 
@@ -360,11 +360,11 @@ def create_order_for_client():
     data = request.get_json()
 
     if not data:
-        raise ValidationError("Request body is required")
+        raise ValidationError("Request body is required", error_code='STAFF_REQUEST_BODY_REQUIRED')
 
     client_id = data.get('client_id')
     if not client_id:
-        raise ValidationError("client_id is required")
+        raise ValidationError("client_id is required", error_code='STAFF_CLIENT_ID_REQUIRED')
 
     order = StaffService.create_phone_order(current_user_id, client_id, data)
 
@@ -409,14 +409,14 @@ def add_client_address(user_id):
     """Add address for a client"""
     data = request.get_json()
     if not data:
-        raise ValidationError("Request body is required")
+        raise ValidationError("Request body is required", error_code='STAFF_REQUEST_BODY_REQUIRED')
 
     from business_app.models.user import User, UserAddress
     from business_app import db
 
     user = User.query.get(user_id)
     if not user:
-        raise NotFoundError("User not found")
+        raise NotFoundError("User not found", error_code='STAFF_USER_NOT_FOUND')
 
     address = UserAddress(
         user_id=user_id,
@@ -449,7 +449,7 @@ def get_client_addresses(user_id):
 
     user = User.query.get(user_id)
     if not user:
-        raise NotFoundError("User not found")
+        raise NotFoundError("User not found", error_code='STAFF_USER_NOT_FOUND')
 
     addresses = UserAddress.query.filter_by(user_id=user_id).all()
 

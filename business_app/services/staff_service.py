@@ -96,7 +96,7 @@ class StaffService:
         phone = staff_data.get('phone')
 
         if not user_id and (not full_name or not phone):
-            raise ValidationError("full_name and phone are required when user_id is not provided")
+            raise ValidationError("full_name and phone are required when user_id is not provided", error_code='STAFF_FULL_NAME_PHONE_REQUIRED')
 
         user: Optional[User] = None
         creating_new_user = False
@@ -104,7 +104,7 @@ class StaffService:
         if user_id:
             user = User.query.get(user_id)
             if not user:
-                raise NotFoundError("User not found")
+                raise NotFoundError("User not found", error_code='STAFF_USER_NOT_FOUND')
         else:
             formatted_phone = format_phone_number(phone)
             user = User.query.filter_by(phone=formatted_phone).first()
@@ -124,7 +124,7 @@ class StaffService:
                 db.session.flush()
 
         if DeliveryPerson.query.filter_by(user_id=user.id).first():
-            raise ConflictError("Delivery person profile already exists for this user")
+            raise ConflictError("Delivery person profile already exists for this user", error_code='STAFF_DELIVERY_PERSON_EXISTS')
 
         if phone and user.phone:
             formatted_phone = format_phone_number(phone)
@@ -134,12 +134,12 @@ class StaffService:
                     User.id != user.id,
                 ).first()
                 if duplicate_phone:
-                    raise ConflictError("Phone is already used by another user")
+                    raise ConflictError("Phone is already used by another user", error_code='STAFF_PHONE_EXISTS')
                 user.phone = formatted_phone
 
         if not user.phone:
             if not phone:
-                raise ValidationError("phone is required")
+                raise ValidationError("phone is required", error_code='STAFF_PHONE_REQUIRED')
             user.phone = format_phone_number(phone)
 
         if full_name:
@@ -153,7 +153,7 @@ class StaffService:
                     User.id != user.id,
                 ).first()
                 if duplicate_email:
-                    raise ConflictError("Email is already used by another user")
+                    raise ConflictError("Email is already used by another user", error_code='STAFF_EMAIL_EXISTS')
             user.email = email_value
 
         roles = StaffService._extract_staff_roles(user)
@@ -216,16 +216,16 @@ class StaffService:
         updates = updates or {}
         delivery_person = DeliveryPerson.query.options(joinedload(DeliveryPerson.user)).get(person_id)
         if not delivery_person:
-            raise NotFoundError("Delivery person not found")
+            raise NotFoundError("Delivery person not found", error_code='STAFF_DELIVERY_PERSON_NOT_FOUND')
 
         user = delivery_person.user
         if not user:
-            raise ValidationError("Delivery person is missing linked user")
+            raise ValidationError("Delivery person is missing linked user", error_code='STAFF_DELIVERY_PERSON_LINK_MISSING')
 
         if 'full_name' in updates and isinstance(updates.get('full_name'), str):
             full_name = updates.get('full_name', '').strip()
             if not full_name:
-                raise ValidationError("full_name cannot be empty")
+                raise ValidationError("full_name cannot be empty", error_code='STAFF_FULL_NAME_EMPTY')
             delivery_person.full_name = full_name
             StaffService._set_name_from_full_name(user, full_name)
 
@@ -236,7 +236,7 @@ class StaffService:
                 User.id != user.id,
             ).first()
             if duplicate_phone:
-                raise ConflictError("Phone is already used by another user")
+                raise ConflictError("Phone is already used by another user", error_code='STAFF_PHONE_EXISTS')
             user.phone = formatted_phone
             delivery_person.phone = formatted_phone
 
@@ -248,7 +248,7 @@ class StaffService:
                     User.id != user.id,
                 ).first()
                 if duplicate_email:
-                    raise ConflictError("Email is already used by another user")
+                    raise ConflictError("Email is already used by another user", error_code='STAFF_EMAIL_EXISTS')
             user.email = email_value
             delivery_person.email = email_value
 
@@ -260,7 +260,7 @@ class StaffService:
                     DeliveryPerson.id != delivery_person.id,
                 ).first()
                 if duplicate_emp:
-                    raise ConflictError("Employee ID already exists")
+                    raise ConflictError("Employee ID already exists", error_code='STAFF_EMPLOYEE_ID_EXISTS')
             delivery_person.employee_id = employee_id
 
         if 'vehicle_type' in updates:
@@ -319,7 +319,7 @@ class StaffService:
         phone = staff_data.get('phone')
 
         if not user_id and not phone:
-            raise ValidationError("phone is required when user_id is not provided")
+            raise ValidationError("phone is required when user_id is not provided", error_code='STAFF_PHONE_REQUIRED')
 
         user: Optional[User] = None
         creating_new_user = False
@@ -327,7 +327,7 @@ class StaffService:
         if user_id:
             user = User.query.get(user_id)
             if not user:
-                raise NotFoundError("User not found")
+                raise NotFoundError("User not found", error_code='STAFF_USER_NOT_FOUND')
         else:
             formatted_phone = format_phone_number(phone)
             user = User.query.filter_by(phone=formatted_phone).first()
@@ -351,7 +351,7 @@ class StaffService:
                 User.id != user.id,
             ).first()
             if duplicate_phone:
-                raise ConflictError("Phone is already used by another user")
+                raise ConflictError("Phone is already used by another user", error_code='STAFF_PHONE_EXISTS')
             user.phone = formatted_phone
 
         if 'first_name' in staff_data and staff_data.get('first_name') is not None:
@@ -368,12 +368,12 @@ class StaffService:
                     User.id != user.id,
                 ).first()
                 if duplicate_email:
-                    raise ConflictError("Email is already used by another user")
+                    raise ConflictError("Email is already used by another user", error_code='STAFF_EMAIL_EXISTS')
             user.email = email_value
         if 'status' in staff_data and staff_data.get('status'):
             status_value = str(staff_data.get('status')).lower()
             if status_value not in [UserStatus.ACTIVE.value, UserStatus.INACTIVE.value, UserStatus.BANNED.value]:
-                raise ValidationError("Invalid status value")
+                raise ValidationError("Invalid status value", error_code='STAFF_INVALID_STATUS')
             user.status = UserStatus(status_value)
         elif creating_new_user:
             user.status = UserStatus.ACTIVE
@@ -413,11 +413,11 @@ class StaffService:
         updates = updates or {}
         user = User.query.get(user_id)
         if not user:
-            raise NotFoundError("User not found")
+            raise NotFoundError("User not found", error_code='STAFF_USER_NOT_FOUND')
 
         roles = StaffService._extract_staff_roles(user)
         if UserRole.OPERATOR.value not in roles:
-            raise ValidationError("User does not have operator role")
+            raise ValidationError("User does not have operator role", error_code='STAFF_OPERATOR_ROLE_REQUIRED')
 
         if 'first_name' in updates and updates.get('first_name') is not None:
             user.first_name = (updates.get('first_name') or '').strip() or None
@@ -432,7 +432,7 @@ class StaffService:
                 User.id != user.id,
             ).first()
             if duplicate_phone:
-                raise ConflictError("Phone is already used by another user")
+                raise ConflictError("Phone is already used by another user", error_code='STAFF_PHONE_EXISTS')
             user.phone = formatted_phone
         if 'email' in updates:
             email_value = (updates.get('email') or '').strip() or None
@@ -442,12 +442,12 @@ class StaffService:
                     User.id != user.id,
                 ).first()
                 if duplicate_email:
-                    raise ConflictError("Email is already used by another user")
+                    raise ConflictError("Email is already used by another user", error_code='STAFF_EMAIL_EXISTS')
             user.email = email_value
         if 'status' in updates and updates.get('status'):
             status_value = str(updates.get('status')).lower()
             if status_value not in [UserStatus.ACTIVE.value, UserStatus.INACTIVE.value, UserStatus.BANNED.value]:
-                raise ValidationError("Invalid status value")
+                raise ValidationError("Invalid status value", error_code='STAFF_INVALID_STATUS')
             user.status = UserStatus(status_value)
 
         provided_roles = updates.get('staff_roles')
@@ -480,11 +480,11 @@ class StaffService:
         """
         user = User.query.get(user_id)
         if not user:
-            raise NotFoundError("User not found")
+            raise NotFoundError("User not found", error_code='STAFF_USER_NOT_FOUND')
 
         normalized_roles = StaffService._normalize_staff_roles_input(staff_roles)
         if not normalized_roles:
-            raise ValidationError("At least one staff role is required")
+            raise ValidationError("At least one staff role is required", error_code='STAFF_ROLE_REQUIRED')
 
         has_delivery_profile = DeliveryPerson.query.filter_by(user_id=user.id).first() is not None
         if has_delivery_profile and UserRole.DELIVERY_DRIVER.value not in normalized_roles:
@@ -511,7 +511,7 @@ class StaffService:
         """
         redis_url = current_app.config.get('REDIS_URL')
         if not redis_url:
-            raise ValidationError("Invite token flow is unavailable: REDIS_URL is not configured")
+            raise ValidationError("Invite token flow is unavailable: REDIS_URL is not configured", error_code='STAFF_INVITE_REDIS_UNAVAILABLE')
 
         redis_client = redis.from_url(redis_url, decode_responses=True)
         key = f"staff_bot:invite:{invite_token}"
@@ -524,7 +524,7 @@ class StaffService:
                 if payload_json:
                     redis_client.delete(key)
         except redis.RedisError as exc:
-            raise ValidationError(f"Invite token store unavailable: {exc}")
+            raise ValidationError(f"Invite token store unavailable: {exc}", error_code='STAFF_INVITE_STORE_UNAVAILABLE')
         finally:
             try:
                 redis_client.close()
@@ -532,12 +532,12 @@ class StaffService:
                 pass
 
         if not payload_json:
-            raise ForbiddenError("Invite token is invalid, expired, or already used")
+            raise ForbiddenError("Invite token is invalid, expired, or already used", error_code='STAFF_INVALID_INVITE_TOKEN')
 
         try:
             payload = json.loads(payload_json)
         except (TypeError, ValueError):
-            raise ValidationError("Invite token payload is malformed")
+            raise ValidationError("Invite token payload is malformed", error_code='STAFF_INVITE_PAYLOAD_MALFORMED')
 
         return payload if isinstance(payload, dict) else {}
 
@@ -560,7 +560,7 @@ class StaffService:
             ConflictError: If telegram_id is linked to a different staff account
         """
         if not telegram_id:
-            raise ValidationError("telegram_id is required")
+            raise ValidationError("telegram_id is required", error_code='STAFF_TELEGRAM_ID_REQUIRED')
 
         telegram_id = str(telegram_id)
         auth_method = 'prebound'
@@ -571,31 +571,31 @@ class StaffService:
         # Path B: First-time binding using one-time invite token.
         if not user:
             if not invite_token:
-                raise ForbiddenError("This Telegram account is not approved for staff bot access")
+                raise ForbiddenError("This Telegram account is not approved for staff bot access", error_code='STAFF_TELEGRAM_NOT_APPROVED')
 
             auth_method = 'invite_token'
             payload = StaffService._consume_invite_payload(invite_token)
             invited_user_id = payload.get('user_id')
 
             if not invited_user_id:
-                raise ValidationError("Invite token payload must include user_id")
+                raise ValidationError("Invite token payload must include user_id", error_code='STAFF_INVITE_PAYLOAD_USER_ID_REQUIRED')
 
             user = User.query.get(invited_user_id)
             if not user:
-                raise NotFoundError("Staff account from invite token was not found")
+                raise NotFoundError("Staff account from invite token was not found", error_code='STAFF_USER_NOT_FOUND')
 
             existing = User.query.filter(
                 User.telegram_id == telegram_id,
                 User.id != user.id,
             ).first()
             if existing:
-                raise ConflictError("This Telegram account is already linked to another user")
+                raise ConflictError("This Telegram account is already linked to another user", error_code='STAFF_TELEGRAM_ALREADY_LINKED')
 
             user.telegram_id = telegram_id
 
         staff_roles_list = StaffService._extract_staff_roles(user)
         if not staff_roles_list:
-            raise ForbiddenError("User does not have a staff role")
+            raise ForbiddenError("User does not have a staff role", error_code='STAFF_NO_ROLE')
 
         # Keep normalized staff_roles persisted so staff bot can use it as role source.
         if user.staff_roles != staff_roles_list:
@@ -733,10 +733,10 @@ class StaffService:
         # Lock the delivery row to prevent concurrent assignment
         delivery = Delivery.query.with_for_update().get(delivery_id)
         if not delivery:
-            raise NotFoundError("Delivery not found")
+            raise NotFoundError("Delivery not found", error_code='STAFF_DELIVERY_NOT_FOUND')
 
         if delivery.delivery_person_id is not None:
-            raise ValidationError("This delivery has already been accepted by another driver")
+            raise ValidationError("This delivery has already been accepted by another driver", error_code='STAFF_DELIVERY_ALREADY_TAKEN')
 
         # Check delivery person's capacity
         dp = DeliveryPerson.query.filter_by(user_id=delivery_person_id).first()
@@ -744,7 +744,8 @@ class StaffService:
             max_concurrent = dp.max_concurrent_deliveries or 3
             if dp.current_active_deliveries >= max_concurrent:
                 raise ValidationError(
-                    f"Maximum concurrent deliveries ({max_concurrent}) reached"
+                    f"Maximum concurrent deliveries ({max_concurrent}) reached",
+                    error_code='STAFF_MAX_CONCURRENT_REACHED',
                 )
 
         # Assign the delivery person
@@ -822,7 +823,7 @@ class StaffService:
         metadata = metadata or {}
         delivery = Delivery.query.get(delivery_id)
         if not delivery:
-            raise NotFoundError("Delivery not found")
+            raise NotFoundError("Delivery not found", error_code='STAFF_DELIVERY_NOT_FOUND')
 
         old_status_value = delivery.status.value if hasattr(delivery.status, 'value') else delivery.status
 
@@ -831,7 +832,8 @@ class StaffService:
         if new_status not in allowed:
             raise ValidationError(
                 f"Cannot transition from '{old_status_value}' to '{new_status}'. "
-                f"Allowed transitions: {allowed}"
+                f"Allowed transitions: {allowed}",
+                error_code='STAFF_INVALID_STATUS_TRANSITION',
             )
 
         # Validate failed delivery reason
@@ -839,7 +841,8 @@ class StaffService:
             fail_reason = metadata.get('fail_reason')
             if fail_reason and fail_reason not in FAILED_DELIVERY_REASONS:
                 raise ValidationError(
-                    f"Invalid failure reason. Must be one of: {FAILED_DELIVERY_REASONS}"
+                    f"Invalid failure reason. Must be one of: {FAILED_DELIVERY_REASONS}",
+                    error_code='STAFF_INVALID_FAIL_REASON',
                 )
 
         # Map string to enum
@@ -973,11 +976,11 @@ class StaffService:
             ValidationError: If coordinates are invalid
         """
         if not (-90 <= lat <= 90) or not (-180 <= lng <= 180):
-            raise ValidationError("Invalid coordinates")
+            raise ValidationError("Invalid coordinates", error_code='STAFF_INVALID_COORDINATES')
 
         delivery = Delivery.query.get(delivery_id)
         if not delivery:
-            raise NotFoundError("Delivery not found")
+            raise NotFoundError("Delivery not found", error_code='STAFF_DELIVERY_NOT_FOUND')
 
         now = datetime.now(timezone.utc)
         delivery.current_location_lat = lat
@@ -1161,13 +1164,14 @@ class StaffService:
         """
         order = Order.query.get(order_id)
         if not order:
-            raise NotFoundError("Order not found")
+            raise NotFoundError("Order not found", error_code='STAFF_ORDER_NOT_FOUND')
 
         status_value = order.status.value if hasattr(order.status, 'value') else order.status
         if status_value != OrderStatus.CONFIRMED.value:
             raise ValidationError(
                 f"Order must be in 'confirmed' status to mark as preparing. "
-                f"Current status: {status_value}"
+                f"Current status: {status_value}",
+                error_code='STAFF_ORDER_STATUS_INVALID_FOR_PREPARING',
             )
 
         order.status = OrderStatus.PREPARING
@@ -1219,7 +1223,7 @@ class StaffService:
         first_name = user_data.get('first_name')
 
         if not phone or not first_name:
-            raise ValidationError("Phone and first_name are required")
+            raise ValidationError("Phone and first_name are required", error_code='STAFF_PHONE_FIRST_NAME_REQUIRED')
 
         # Check if phone already registered
         from business_app.utils.helpers import format_phone_number
@@ -1227,7 +1231,7 @@ class StaffService:
 
         existing = User.query.filter_by(phone=formatted_phone).first()
         if existing:
-            raise ConflictError("A user with this phone number already exists")
+            raise ConflictError("A user with this phone number already exists", error_code='STAFF_PHONE_EXISTS')
 
         # Create user with a random secure password (cannot login via password)
         import secrets
@@ -1289,11 +1293,11 @@ class StaffService:
         """
         client = User.query.get(client_id)
         if not client:
-            raise NotFoundError("Client user not found")
+            raise NotFoundError("Client user not found", error_code='STAFF_CLIENT_NOT_FOUND')
 
         items_data = order_data.get('items', [])
         if not items_data:
-            raise ValidationError("Order must contain at least one item")
+            raise ValidationError("Order must contain at least one item", error_code='STAFF_ORDER_ITEMS_REQUIRED')
 
         delivery_address_id = order_data.get('delivery_address_id')
 
@@ -1309,7 +1313,10 @@ class StaffService:
 
             product = Product.query.get(product_id)
             if not product:
-                raise NotFoundError(f"Product {product_id} not found")
+                raise NotFoundError(
+                    f"Product {product_id} not found",
+                    error_code='STAFF_PRODUCT_NOT_FOUND',
+                )
 
             unit_price = product.price
             item_total = unit_price * Decimal(str(quantity))
@@ -1407,7 +1414,7 @@ class StaffService:
             List of matching User objects (max 20 results)
         """
         if not query_text or len(query_text) < 2:
-            raise ValidationError("Search query must be at least 2 characters")
+            raise ValidationError("Search query must be at least 2 characters", error_code='STAFF_SEARCH_QUERY_TOO_SHORT')
 
         if search_type == 'phone':
             users = User.query.filter(
@@ -1423,7 +1430,7 @@ class StaffService:
                 User.role == UserRole.CUSTOMER
             ).limit(20).all()
         else:
-            raise ValidationError("search_type must be 'phone' or 'name'")
+            raise ValidationError("search_type must be 'phone' or 'name'", error_code='STAFF_SEARCH_TYPE_INVALID')
 
         return users
 
@@ -1506,7 +1513,7 @@ class StaffService:
         """
         dp = DeliveryPerson.query.filter_by(user_id=user_id).first()
         if not dp:
-            raise NotFoundError("Delivery person profile not found")
+            raise NotFoundError("Delivery person profile not found", error_code='STAFF_DELIVERY_PERSON_NOT_FOUND')
 
         dp.notifications_muted = muted
         db.session.commit()

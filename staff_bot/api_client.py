@@ -60,6 +60,7 @@ class APIResponse:
     data: Any = None
     error: Optional[str] = None
     status_code: Optional[int] = None
+    error_code: Optional[str] = None
 
 
 class StaffAPIClient:
@@ -156,34 +157,49 @@ class StaffAPIClient:
                         return APIResponse(
                             success=False,
                             error="Authentication failed",
-                            status_code=401
+                            status_code=401,
+                            error_code='STAFF_AUTH_REQUIRED',
                         )
                     elif response.status_code == 403:
+                        error_code = None
+                        if isinstance(payload, dict):
+                            details = payload.get('details') or {}
+                            error_code = payload.get('error_code') or details.get('error_code')
                         return APIResponse(
                             success=False,
                             error="Access denied",
-                            status_code=403
+                            status_code=403,
+                            error_code=error_code,
                         )
                     elif response.status_code == 404:
+                        error_code = None
+                        if isinstance(payload, dict):
+                            details = payload.get('details') or {}
+                            error_code = payload.get('error_code') or details.get('error_code')
                         return APIResponse(
                             success=False,
                             error="Not found",
-                            status_code=404
+                            status_code=404,
+                            error_code=error_code,
                         )
                     elif response.status_code == 409:
                         error_data = payload if isinstance(payload, dict) else {}
+                        details = error_data.get('details') or {}
                         return APIResponse(
                             success=False,
                             error=error_data.get('message') or error_data.get('error', 'Conflict'),
                             status_code=409,
-                            data=error_data
+                            data=error_data,
+                            error_code=error_data.get('error_code') or details.get('error_code'),
                         )
                     else:
                         error_data = payload if isinstance(payload, dict) else {}
+                        details = error_data.get('details') or {}
                         return APIResponse(
                             success=False,
                             error=error_data.get('message') or error_data.get('error', f'HTTP {response.status_code}'),
-                            status_code=response.status_code
+                            status_code=response.status_code,
+                            error_code=error_data.get('error_code') or details.get('error_code'),
                         )
 
                 except httpx.TimeoutException:

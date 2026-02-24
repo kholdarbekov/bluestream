@@ -67,7 +67,7 @@ class StatusUpdateHandler(BaseHandler):
                     )
                     await query.edit_message_text(
                         i18n.get('staff.delivery.cash_collection', language,
-                                 amount=format_currency(total_amount)),
+                                 amount=format_currency(total_amount, language=language)),
                         reply_markup=keyboard,
                         parse_mode='HTML'
                     )
@@ -115,7 +115,7 @@ class StatusUpdateHandler(BaseHandler):
                 )
 
             if not response.success:
-                await self._handle_api_error(update, response.error, language)
+                await self._handle_api_response_error(update, response, language)
                 return
 
             # Success message
@@ -170,7 +170,7 @@ class StatusUpdateHandler(BaseHandler):
                 )
 
             if not response.success:
-                await self._handle_api_error(update, response.error, language)
+                await self._handle_api_response_error(update, response, language)
                 return
 
             reason_text = i18n.get(f'staff.delivery.reason.{reason}', language)
@@ -210,12 +210,12 @@ class StatusUpdateHandler(BaseHandler):
                 )
 
             if not response.success:
-                await self._handle_api_error(update, response.error, language)
+                await self._handle_api_response_error(update, response, language)
                 return
 
             await query.edit_message_text(
                 f"\u2705 {i18n.get('staff.delivery.delivered_success', language)}\n"
-                f"\U0001f4b5 {i18n.get('staff.delivery.cash_recorded', language, amount=format_currency(cash_amount))}",
+                f"\U0001f4b5 {i18n.get('staff.delivery.cash_recorded', language, amount=format_currency(cash_amount, language=language))}",
                 reply_markup=CommonKeyboards.back_button(language, "staff_active_deliveries"),
                 parse_mode='HTML'
             )
@@ -283,12 +283,12 @@ class StatusUpdateHandler(BaseHandler):
                 )
 
             if not response.success:
-                await update.message.reply_text(f"\u274c {response.error}")
+                await self._handle_api_response_error(update, response, language)
                 return ConversationHandler.END
 
             await update.message.reply_text(
                 f"\u2705 {i18n.get('staff.delivery.delivered_success', language)}\n"
-                f"\U0001f4b5 {i18n.get('staff.delivery.cash_recorded', language, amount=format_currency(cash_amount))}",
+                f"\U0001f4b5 {i18n.get('staff.delivery.cash_recorded', language, amount=format_currency(cash_amount, language=language))}",
                 reply_markup=CommonKeyboards.back_button(language, "staff_active_deliveries"),
                 parse_mode='HTML'
             )
@@ -319,7 +319,7 @@ class StatusUpdateHandler(BaseHandler):
                 response = await client.mark_order_preparing(token, order_id)
 
             if not response.success:
-                await self._handle_api_error(update, response.error, language)
+                await self._handle_api_response_error(update, response, language)
                 return
 
             await query.edit_message_text(

@@ -67,7 +67,7 @@ class CreateOrderHandler(BaseHandler):
                 response = await client.get_user_addresses(token, client_id)
 
             if not response.success:
-                await self._handle_api_error(update, response.error, language)
+                await self._handle_api_response_error(update, response, language)
                 return
 
             addresses = response.data if isinstance(response.data, list) else response.data.get('items', [])
@@ -110,7 +110,7 @@ class CreateOrderHandler(BaseHandler):
                 response = await client.search_clients(token, query_text)
 
             if not response.success:
-                await self._handle_api_error(update, response.error, language)
+                await self._handle_api_response_error(update, response, language)
                 return SELECT_CLIENT
 
             clients = response.data if isinstance(response.data, list) else response.data.get('items', [])
@@ -159,7 +159,7 @@ class CreateOrderHandler(BaseHandler):
                 response = await client.get_products(token)
 
             if not response.success:
-                await self._handle_api_error(update, response.error, language)
+                await self._handle_api_response_error(update, response, language)
                 return
 
             products = response.data if isinstance(response.data, list) else response.data.get('items', [])
@@ -206,7 +206,7 @@ class CreateOrderHandler(BaseHandler):
 
             text = (
                 f"\U0001f4e6 <b>{product.get('name', '')}</b>\n"
-                f"\U0001f4b0 {format_currency(product.get('price', 0))}\n\n"
+                f"\U0001f4b0 {format_currency(product.get('price', 0), language=language)}\n\n"
                 f"{i18n.get('staff.operator.select_quantity', language)}"
             )
 
@@ -383,11 +383,11 @@ class CreateOrderHandler(BaseHandler):
                 response = await client.create_order_for_client(token, request_data)
 
             if not response.success:
-                await self._handle_api_error(update, response.error, language)
+                await self._handle_api_response_error(update, response, language)
                 return ConversationHandler.END
 
             result = response.data or {}
-            order_number = result.get('order_number', 'N/A')
+            order_number = result.get('order_number') or i18n.get('staff.common.not_available', language)
 
             await query.edit_message_text(
                 f"\u2705 {i18n.get('staff.operator.order_created', language, order_number=order_number)}",
@@ -420,9 +420,12 @@ class CreateOrderHandler(BaseHandler):
             price = item.get('price', 0)
             item_total = price * qty
             subtotal += item_total
-            lines.append(f"  \u2022 {name} x{qty} \u2014 {format_currency(item_total)}")
+            lines.append(f"  \u2022 {name} x{qty} \u2014 {format_currency(item_total, language=language)}")
 
-        lines.append(f"\n\U0001f4b0 {i18n.get('staff.operator.subtotal', language)}: {format_currency(subtotal)}")
+        lines.append(
+            f"\n\U0001f4b0 {i18n.get('staff.operator.subtotal', language)}: "
+            f"{format_currency(subtotal, language=language)}"
+        )
 
         return '\n'.join(lines)
 

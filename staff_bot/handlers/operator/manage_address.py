@@ -42,7 +42,7 @@ class ManageAddressHandler(BaseHandler):
                 response = await client.get_user_addresses(token, user_id)
 
             if not response.success:
-                await self._handle_api_error(update, response.error, language)
+                await self._handle_api_response_error(update, response, language)
                 return
 
             addresses = response.data if isinstance(response.data, list) else response.data.get('items', [])
@@ -227,7 +227,7 @@ class ManageAddressHandler(BaseHandler):
                 response = await client.add_client_address(token, user_id, addr_data)
 
             if not response.success:
-                await self._handle_api_error(update, response.error, language)
+                await self._handle_api_response_error(update, response, language)
                 return ConversationHandler.END
 
             await query.edit_message_text(

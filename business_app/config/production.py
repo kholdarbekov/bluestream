@@ -129,7 +129,7 @@ class ProductionConfig(BaseConfig):
     # File Storage - S3 production bucket
     STORAGE_TYPE = 'local'
     AWS_S3_BUCKET = os.environ.get('AWS_S3_BUCKET', 'bluestream-production')
-    UPLOAD_FOLDER = 'uploads/'
+    UPLOAD_FOLDER = os.environ.get('UPLOAD_FOLDER', 'uploads/')
     
     # Enhanced security for file uploads
     ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'pdf'}  # Restricted set

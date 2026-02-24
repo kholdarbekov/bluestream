@@ -39,7 +39,7 @@ class OperatorOrdersPoolViewHandler(BaseHandler):
                 if response.status_code == 401:
                     await self._handle_auth_error(update, language)
                 else:
-                    await self._handle_api_error(update, response.error, language)
+                    await self._handle_api_response_error(update, response, language)
                 return
 
             orders = response.data.get('items', [])
@@ -121,7 +121,7 @@ class OperatorOrdersPoolViewHandler(BaseHandler):
                 )
 
             if not response.success:
-                await self._handle_api_error(update, response.error, language)
+                await self._handle_api_response_error(update, response, language)
                 return
 
             items = response.data.get('items', [])
@@ -137,7 +137,8 @@ class OperatorOrdersPoolViewHandler(BaseHandler):
             status_label = i18n.get(f'staff.order.status.{status}', language) if status else ''
             delivery_person_name = order.get('delivery_person_name', '')
 
-            lines = [f"\U0001f4e6 <b>#{order.get('order_number', 'N/A')}</b>"]
+            order_number = order.get('order_number') or i18n.get('staff.common.not_available', language)
+            lines = [f"\U0001f4e6 <b>#{order_number}</b>"]
             if status_label:
                 lines.append(f"{i18n.get('staff.delivery.current_status', language)}: {status_label}")
             if delivery_person_name:
@@ -152,7 +153,7 @@ class OperatorOrdersPoolViewHandler(BaseHandler):
                 for item in pool_items:
                     name = item.get('product_name', '')
                     qty = item.get('quantity', 1)
-                    price = format_currency(item.get('total_price', 0))
+                    price = format_currency(item.get('total_price', 0), language=language)
                     lines.append(f"  \u2022 {name} x{qty} - {price}")
                 lines.append("")
 
@@ -171,7 +172,7 @@ class OperatorOrdersPoolViewHandler(BaseHandler):
             if address:
                 lines.append(f"    {address}")
 
-            total = format_currency(order.get('total_amount'))
+            total = format_currency(order.get('total_amount'), language=language)
             payment = order.get('payment_method', '')
             payment_text = f"\U0001f4b0 {total}"
             if payment:
@@ -221,7 +222,7 @@ class OperatorOrdersPoolViewHandler(BaseHandler):
                 response = await client.mark_order_preparing(token, order_id)
 
             if not response.success:
-                await self._handle_api_error(update, response.error, language)
+                await self._handle_api_response_error(update, response, language)
                 return
 
             await query.edit_message_text(

@@ -92,7 +92,7 @@ class StagingConfig(BaseConfig):
     # File Storage - S3 with staging bucket
     STORAGE_TYPE = os.environ.get('STORAGE_TYPE', 's3')
     AWS_S3_BUCKET = os.environ.get('AWS_S3_BUCKET', 'bluestream-staging')
-    UPLOAD_FOLDER = 'uploads/staging/'
+    UPLOAD_FOLDER = os.environ.get('UPLOAD_FOLDER', 'uploads/staging/')
     
     # Logging Configuration
     LOG_LEVEL = 'INFO'

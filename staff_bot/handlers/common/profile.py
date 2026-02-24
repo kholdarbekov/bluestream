@@ -26,7 +26,7 @@ class ProfileHandler(BaseHandler):
         try:
             first_name = context.user_data.get('first_name', '')
             last_name = context.user_data.get('last_name', '')
-            full_name = f"{first_name} {last_name}".strip() or 'N/A'
+            full_name = f"{first_name} {last_name}".strip() or i18n.get('staff.common.not_available', language)
             phone = context.user_data.get('phone', '')
             staff_roles = context.user_data.get('staff_roles', [])
 

@@ -4,6 +4,10 @@ Product browsing and shopping cart handlers
 import logging
 import json
 from typing import Dict, Any, List
+from urllib.parse import urlparse, urlunparse
+from io import BytesIO
+import os
+import httpx
 from telegram import Update, constants
 from telegram.ext import ContextTypes
 from telegram.helpers import escape_markdown
@@ -15,12 +19,98 @@ from api_client import api_client
 from database import db_manager, BotUserRepository
 from utils import user_middleware, format_price, get_auth_token
 from handlers.base import BaseHandler
+from config import config
 
 logger = logging.getLogger('handlers')
 
 
 class ProductHandlers(BaseHandler):
     """Product-related handlers"""
+
+    @staticmethod
+    def _extract_product_image_url(product: Dict[str, Any]) -> str | None:
+        """Extract primary product image URL across API schema variants."""
+        media = product.get('media') or {}
+        candidates = [
+            (media.get('images') or [None])[0],
+            (media.get('image_urls') or [None])[0],
+            (product.get('images') or [None])[0],
+            product.get('image_url'),
+            media.get('thumbnail_url'),
+        ]
+        for candidate in candidates:
+            if isinstance(candidate, str) and candidate.strip():
+                return candidate.strip()
+        return None
+
+    @staticmethod
+    def _is_private_image_url(url: str) -> bool:
+        """Return True when Telegram likely cannot fetch this URL directly."""
+        if not url:
+            return True
+        if url.startswith('/'):
+            return True
+        parsed = urlparse(url)
+        host = (parsed.hostname or '').lower()
+        return host in {'localhost', '127.0.0.1', '0.0.0.0', 'business_app'}
+
+    def _build_internal_fetch_url(self, url: str) -> str | None:
+        """
+        Build a bot-reachable URL for downloading image bytes.
+        This supports relative URLs and localhost URLs by remapping them to BUSINESS_APP_URL host.
+        """
+        if not url:
+            return None
+
+        base_url = (config.business_api.base_url or '').rstrip('/')
+        if not base_url:
+            return None
+
+        if url.startswith('//'):
+            return f"https:{url}"
+
+        if url.startswith('/'):
+            return f"{base_url}{url}"
+
+        parsed = urlparse(url)
+        if parsed.scheme in {'http', 'https'}:
+            if self._is_private_image_url(url):
+                base = urlparse(base_url)
+                return urlunparse((
+                    base.scheme,
+                    base.netloc,
+                    parsed.path,
+                    parsed.params,
+                    parsed.query,
+                    parsed.fragment
+                ))
+            return url
+
+        return f"{base_url}/{url.lstrip('/')}"
+
+    async def _download_image_bytes(self, url: str) -> BytesIO | None:
+        """Download image as bytes for Telegram upload."""
+        if not url:
+            return None
+
+        try:
+            async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+                response = await client.get(url)
+                response.raise_for_status()
+
+                content_type = response.headers.get('content-type', '')
+                if content_type and not content_type.lower().startswith('image/'):
+                    logger.warning(f"Downloaded non-image content-type for product image: {content_type}")
+                    return None
+
+                image_bytes = BytesIO(response.content)
+                extension = os.path.splitext(urlparse(url).path)[1] or '.jpg'
+                image_bytes.name = f"product{extension}"
+                image_bytes.seek(0)
+                return image_bytes
+        except Exception as e:
+            logger.warning(f"Failed to download product image from {url}: {e}")
+            return None
     
     async def products_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Show product categories"""
@@ -274,50 +364,73 @@ class ProductHandlers(BaseHandler):
             details_text = self._format_product_details(product, language)
             keyboard = ProductKeyboards.product_details(product_id, category_id, language)
             
-            # Get product image
-            image_url = None
-            if product.get('media', {}).get('images') and len(product.get('media', {})['images']) > 0:
-                image_url = product.get('media', {})['images'][0]
-                # Check for localhost
-                if image_url and 'localhost' in image_url:
-                    # Replace with business_app container alias if needed, 
-                    # but Telegram cannot access internal container URLs unless we download and send.
-                    # For now, just log warning and fallback to text to avoid "Wrong http url" error
-                    logger.warning(f"Skipping localhost image URL: {image_url}")
-                    image_url = None
+            # Get product image (supports media.images, media.image_urls, images, image_url)
+            image_url = self._extract_product_image_url(product)
             
             if image_url:
-                try:
-                    await query.message.delete()
-                    await context.bot.send_photo(
-                        chat_id=user_id,
-                        photo=image_url,
-                        caption=details_text,
-                        reply_markup=keyboard,
-                        parse_mode=constants.ParseMode.MARKDOWN_V2
-                    )
-                except Exception as img_error:
-                     logger.error(f"Failed to send product image: {img_error}")
-                     # Fallback to text
-                     try:
-                         # Use send_message since we deleted (or tried to)
-                         await context.bot.send_message(
-                             chat_id=user_id,
-                             text=details_text,
-                             reply_markup=keyboard,
-                             parse_mode=constants.ParseMode.MARKDOWN_V2
-                         )
-                     except Exception as e:
-                        logger.warning(f"Failed to send fallback product detail message: {e}")
+                should_send_direct_url = not self._is_private_image_url(image_url)
+                if should_send_direct_url:
+                    try:
+                        await query.message.delete()
+                        await context.bot.send_photo(
+                            chat_id=user_id,
+                            photo=image_url,
+                            caption=details_text,
+                            reply_markup=keyboard,
+                            parse_mode=constants.ParseMode.MARKDOWN_V2
+                        )
+                    except Exception as img_error:
+                        logger.warning(f"Failed to send product image by URL ({image_url}): {img_error}")
+                        should_send_direct_url = False
+
+                if not should_send_direct_url:
+                    # Download image via backend-accessible URL and upload bytes.
+                    # This covers localhost/internal/relative URLs that Telegram cannot fetch directly.
+                    fetch_url = self._build_internal_fetch_url(image_url)
+                    downloaded_image = await self._download_image_bytes(fetch_url) if fetch_url else None
+                    if downloaded_image:
+                        try:
+                            await query.message.delete()
+                        except Exception:
+                            pass
+                        try:
+                            await context.bot.send_photo(
+                                chat_id=user_id,
+                                photo=downloaded_image,
+                                caption=details_text,
+                                reply_markup=keyboard,
+                                parse_mode=constants.ParseMode.MARKDOWN_V2
+                            )
+                        except Exception as upload_error:
+                            logger.error(f"Failed to upload downloaded product image: {upload_error}")
+                            try:
+                                await context.bot.send_message(
+                                    chat_id=user_id,
+                                    text=details_text,
+                                    reply_markup=keyboard,
+                                    parse_mode=constants.ParseMode.MARKDOWN_V2
+                                )
+                            except Exception as e:
+                                logger.warning(f"Failed to send fallback product detail message: {e}")
+                    else:
+                        try:
+                            await context.bot.send_message(
+                                chat_id=user_id,
+                                text=details_text,
+                                reply_markup=keyboard,
+                                parse_mode=constants.ParseMode.MARKDOWN_V2
+                            )
+                        except Exception as e:
+                            logger.warning(f"Failed to send fallback product detail message: {e}")
             else:
-                 if query.message.photo:
+                if query.message.photo:
                     await query.message.delete()
                     await query.message.reply_text(
                         text=details_text,
                         reply_markup=keyboard,
                         parse_mode=constants.ParseMode.MARKDOWN_V2
                     )
-                 else:
+                else:
                     await query.edit_message_text(
                         text=details_text,
                         reply_markup=keyboard,

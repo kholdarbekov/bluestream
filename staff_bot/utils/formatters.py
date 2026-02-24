@@ -7,10 +7,12 @@ from datetime import datetime
 from i18n import i18n
 
 
-def format_currency(amount, currency: str = "UZS") -> str:
+def format_currency(amount, currency: Optional[str] = None, language: str = 'en') -> str:
     """Format currency amount"""
+    if currency is None:
+        currency = i18n.get('staff.currency.uzs', language)
     if amount is None:
-        return "0 UZS"
+        return f"0 {currency}"
     try:
         return f"{float(amount):,.0f} {currency}"
     except (ValueError, TypeError):
@@ -22,13 +24,13 @@ def format_order_card(order: Dict[str, Any], language: str) -> str:
     Format order details as a compact card for Telegram message.
     Used in order pool, active deliveries, and history.
     """
-    number = order.get('order_number', 'N/A')
+    number = order.get('order_number') or i18n.get('staff.common.not_available', language)
     customer_name = order.get('customer_name', '')
     customer_phone = order.get('customer_phone', '')
     district = order.get('district', '')
     address = order.get('address', '')
     time_slot = order.get('time_slot', '')
-    total = format_currency(order.get('total_amount'))
+    total = format_currency(order.get('total_amount'), language=language)
     payment = order.get('payment_method', '')
     item_count = order.get('item_count', 0)
     delivery_notes = order.get('delivery_notes', '')
@@ -48,7 +50,11 @@ def format_order_card(order: Dict[str, Any], language: str) -> str:
     if time_slot:
         lines.append(f"\U0001f550 {time_slot}")
 
-    lines.append(f"\U0001f4b0 {total} ({payment})")
+    payment_label = i18n.get(f'staff.delivery.payment.{payment}', language) if payment else ''
+    if payment_label:
+        lines.append(f"\U0001f4b0 {total} ({payment_label})")
+    else:
+        lines.append(f"\U0001f4b0 {total}")
     lines.append(f"\U0001f4dd {item_count} {i18n.get('staff.items', language)}")
 
     if delivery_notes:
@@ -88,7 +94,7 @@ def format_delivery_stats(stats: Dict[str, Any], language: str) -> str:
     avg_time_val = stats.get('avg_delivery_time_minutes')
     avg_time = _to_float(avg_time_val, 0.0)
     rating = _to_float(stats.get('avg_rating', 0), 0.0)
-    cash_collected = format_currency(stats.get('total_cash_collected', 0))
+    cash_collected = format_currency(stats.get('total_cash_collected', 0), language=language)
 
     lines = [
         f"\U0001f4ca <b>{i18n.get('staff.stats.title', language)}</b>",
@@ -96,7 +102,7 @@ def format_delivery_stats(stats: Dict[str, Any], language: str) -> str:
         f"\U0001f4e6 {i18n.get('staff.stats.total', language)}: {total}",
         f"\u2705 {i18n.get('staff.stats.completed', language)}: {completed}",
         f"\u274c {i18n.get('staff.stats.failed', language)}: {failed}",
-        f"\u23f1 {i18n.get('staff.stats.avg_time', language)}: {avg_time:.0f} min",
+        f"\u23f1 {i18n.get('staff.stats.avg_time', language)}: {avg_time:.0f} {i18n.get('staff.unit.minutes', language)}",
     ]
 
     if rating > 0:
@@ -110,6 +116,8 @@ def format_delivery_stats(stats: Dict[str, Any], language: str) -> str:
 def format_user_card(user: Dict[str, Any], language: str) -> str:
     """Format user details card (for operator)"""
     name = f"{user.get('first_name', '')} {user.get('last_name', '')}".strip()
+    if not name:
+        name = i18n.get('staff.common.not_available', language)
     phone = user.get('phone', '')
     address_count = user.get('address_count', 0)
     order_count = user.get('order_count', 0)

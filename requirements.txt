@@ -115,6 +115,7 @@ slowapi==0.1.9
 # Validation
 cerberus==1.3.7
 phonenumbers==9.0.12
+bleach==6.2.0
 
 # Scheduling
 APScheduler==3.11.0

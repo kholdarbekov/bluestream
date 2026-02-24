@@ -378,9 +378,13 @@ def get_notification_templates():
         query = NotificationTemplate.query.filter_by(is_active=True)
 
         if category:
-            query = query.filter_by(category=category)
+            # Historical query param name retained; map to notification_type.
+            query = query.filter_by(notification_type=category)
 
-        templates = query.order_by(NotificationTemplate.category, NotificationTemplate.name).all()
+        templates = query.order_by(
+            NotificationTemplate.notification_type,
+            NotificationTemplate.name
+        ).all()
 
         return success_response(
             data={

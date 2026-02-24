@@ -548,7 +548,7 @@ def get_loyalty_programs():
     """Get available loyalty programs"""
     try:
         programs = LoyaltyProgram.query.filter_by(is_active=True).order_by(
-            LoyaltyProgram.tier_level.asc()
+            LoyaltyProgram.created_at.desc()
         ).all()
 
         return success_response(

@@ -2450,10 +2450,14 @@ def link_web_account():
     # Merge accounts - keep web user as primary, update with telegram info
     web_user.telegram_id = telegram_id
     
-    # Update name from telegram if web user has no proper name
-    if telegram_user.first_name and telegram_user.first_name != 'Telegram User':
+    # Preserve original web profile names; only backfill missing values from Telegram
+    if (
+        telegram_user.first_name
+        and telegram_user.first_name != 'Telegram User'
+        and (not web_user.first_name or web_user.first_name == 'Telegram User')
+    ):
         web_user.first_name = telegram_user.first_name
-    if telegram_user.last_name:
+    if telegram_user.last_name and not web_user.last_name:
         web_user.last_name = telegram_user.last_name
     
     # Transfer any orders/data from telegram user to web user if needed

@@ -2,6 +2,7 @@
 User profile and registration handlers
 """
 import logging
+from datetime import datetime, timezone
 from typing import Dict, Any
 from telegram import constants, Update, ReplyKeyboardRemove
 from telegram.helpers import escape_markdown
@@ -31,6 +32,27 @@ logger = logging.getLogger('handlers')
 
 class ProfileHandlers(BaseHandler):
     """Profile management handlers"""
+
+    @staticmethod
+    def _is_callback_message_deletable(callback_query) -> bool:
+        """
+        Guard deletion attempts with Telegram constraints.
+        Bot API deleteMessage is time-limited (typically ~48h), so old callback
+        source messages should not be deleted.
+        """
+        message = getattr(callback_query, "message", None)
+        if not message:
+            return False
+
+        message_date = getattr(message, "date", None)
+        if not message_date:
+            return False
+
+        if message_date.tzinfo is None:
+            message_date = message_date.replace(tzinfo=timezone.utc)
+
+        age_seconds = (datetime.now(timezone.utc) - message_date.astimezone(timezone.utc)).total_seconds()
+        return age_seconds < 47 * 3600
     
     async def profile_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Show user profile menu"""
@@ -1272,14 +1294,31 @@ class ProfileHandlers(BaseHandler):
 
             if update.callback_query:
                 logger.info(f"Editing message via callback query")
-                await update.callback_query.delete_message()
-                await update.callback_query.answer()
+                query = update.callback_query
+                if self._is_callback_message_deletable(query):
+                    try:
+                        await query.delete_message()
+                    except BadRequest as delete_error:
+                        # Deletion is non-critical UI cleanup.
+                        logger.info(f"Skipping callback message deletion in add_address: {delete_error}")
+                else:
+                    logger.info("Skipping callback message deletion in add_address: message not deletable by policy")
+
+                await query.answer()
                 # Send keyboard in new message
-                await update.callback_query.message.reply_text(
-                    text=location_text,
-                    reply_markup=keyboard,
-                    parse_mode='Markdown'
-                )
+                if query.message:
+                    await query.message.reply_text(
+                        text=location_text,
+                        reply_markup=keyboard,
+                        parse_mode='Markdown'
+                    )
+                else:
+                    await context.bot.send_message(
+                        chat_id=user_id,
+                        text=location_text,
+                        reply_markup=keyboard,
+                        parse_mode='Markdown'
+                    )
                 logger.info(f"Callback query processed and keyboard sent")
             else:
                 logger.info(f"Replying to message directly")

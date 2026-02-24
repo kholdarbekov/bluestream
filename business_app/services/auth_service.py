@@ -1574,17 +1574,30 @@ class AuthService:
             # Update existing user information from Telegram if provided
             logger.info(f"Found existing user: ID={user.id}")
             updates_made = False
+            is_telegram_only_user = self._is_telegram_only_user(user)
             
             # Update basic user info
             if first_name and first_name != user.first_name:
-                logger.info(f"Updating first_name: {user.first_name} -> {first_name}")
-                user.first_name = first_name
-                updates_made = True
+                can_update_first_name = (
+                    is_telegram_only_user or
+                    not user.first_name or
+                    user.first_name == "Telegram User"
+                )
+                if can_update_first_name:
+                    logger.info(f"Updating first_name: {user.first_name} -> {first_name}")
+                    user.first_name = first_name
+                    updates_made = True
+                else:
+                    logger.info(f"Preserving existing first_name for merged user {user.id}")
                 
             if last_name and last_name != user.last_name:
-                logger.info(f"Updating last_name: {user.last_name} -> {last_name}")
-                user.last_name = last_name
-                updates_made = True
+                can_update_last_name = is_telegram_only_user or not user.last_name
+                if can_update_last_name:
+                    logger.info(f"Updating last_name: {user.last_name} -> {last_name}")
+                    user.last_name = last_name
+                    updates_made = True
+                else:
+                    logger.info(f"Preserving existing last_name for merged user {user.id}")
             
             # Update telegram-specific fields in unified table
             if username and username != user.telegram_username:

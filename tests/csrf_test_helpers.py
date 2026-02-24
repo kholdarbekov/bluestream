@@ -17,7 +17,7 @@ class CSRFTestClient:
     def get_csrf_token(self) -> str:
         """Get CSRF token from the server"""
         if not self._csrf_token:
-            response = self.client.get('/api/csrf-token')
+            response = self.client.get('/api/v1/csrf-token')
             if response.status_code == 200:
                 data = json.loads(response.data)
                 self._csrf_token = data.get('csrf_token')

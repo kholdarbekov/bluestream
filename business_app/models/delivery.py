@@ -168,7 +168,6 @@ class DeliveryTimeSlot(db.Model):
             'available_days': self.available_days
         }
 
-
 class DeliveryRoute(db.Model, TimestampMixin):
     """Optimized delivery routes"""
     __tablename__ = 'delivery_routes'

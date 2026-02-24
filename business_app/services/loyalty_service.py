@@ -402,8 +402,12 @@ class LoyaltyService:
         if reward.is_system_reward:
             raise ValidationError("This reward is automatically applied by the system and cannot be manually redeemed")
         
-        # Check expiry - use valid_until (the actual model field)
-        if reward.valid_until and reward.valid_until < datetime.now(timezone.utc):
+        # Check expiry - normalize naive datetimes to UTC for safe comparison.
+        valid_until = reward.valid_until
+        if valid_until and valid_until.tzinfo is None:
+            valid_until = valid_until.replace(tzinfo=timezone.utc)
+
+        if valid_until and valid_until < datetime.now(timezone.utc):
             raise ValidationError("Reward has expired")
         
         # Get points cost (actual model field name)
@@ -438,7 +442,7 @@ class LoyaltyService:
             'points_spent': points_cost,
             'status': 'pending',
             'redemption_code': reward_code,
-            'expires_at': reward.valid_until.isoformat() if reward.valid_until else None,
+            'expires_at': valid_until.isoformat() if valid_until else None,
             'transaction_id': transaction.id
         }
     

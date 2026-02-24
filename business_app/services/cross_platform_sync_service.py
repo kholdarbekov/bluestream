@@ -386,10 +386,10 @@ class CrossPlatformSyncService:
         telegram_user.password_hash = web_password_hash
         telegram_user.phone = web_phone or telegram_user.phone
         
-        # Update names with more complete web info
-        if web_first_name:
+        # Preserve primary telegram profile names; only backfill missing values
+        if web_first_name and (not telegram_user.first_name or telegram_user.first_name == 'Telegram User'):
             telegram_user.first_name = web_first_name
-        if web_last_name:
+        if web_last_name and not telegram_user.last_name:
             telegram_user.last_name = web_last_name
         
         # Transfer preferences

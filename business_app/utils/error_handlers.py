@@ -7,6 +7,19 @@ from functools import wraps
 from typing import Dict, Any, Optional, Tuple, Union
 from flask import current_app, request, jsonify, g
 from flask_jwt_extended import get_jwt_identity, verify_jwt_in_request
+from flask_jwt_extended.exceptions import (
+    CSRFError,
+    FreshTokenRequired,
+    InvalidHeaderError,
+    InvalidQueryParamError,
+    JWTDecodeError,
+    NoAuthorizationError,
+    RevokedTokenError,
+    UserClaimsVerificationError,
+    UserLookupError,
+    WrongTokenError,
+)
+from jwt.exceptions import DecodeError
 from datetime import datetime, timezone
 
 from .exceptions import (
@@ -73,6 +86,19 @@ class ExceptionMapper:
         ExternalServiceError: (503, 'SERVICE_UNAVAILABLE'),
         RateLimitError: (429, 'RATE_LIMIT_EXCEEDED'),
         ConfigurationError: (500, 'CONFIGURATION_ERROR'),
+
+        # Flask-JWT-Extended exceptions (should never be 500)
+        NoAuthorizationError: (401, 'UNAUTHORIZED'),
+        FreshTokenRequired: (401, 'UNAUTHORIZED'),
+        RevokedTokenError: (401, 'UNAUTHORIZED'),
+        UserLookupError: (401, 'UNAUTHORIZED'),
+        InvalidHeaderError: (401, 'UNAUTHORIZED'),
+        InvalidQueryParamError: (401, 'UNAUTHORIZED'),
+        JWTDecodeError: (401, 'UNAUTHORIZED'),
+        WrongTokenError: (401, 'UNAUTHORIZED'),
+        UserClaimsVerificationError: (403, 'FORBIDDEN'),
+        CSRFError: (401, 'UNAUTHORIZED'),
+        DecodeError: (401, 'UNAUTHORIZED'),
         
         # Standard Python exceptions
         ValueError: (400, 'INVALID_VALUE'),

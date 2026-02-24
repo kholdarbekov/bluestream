@@ -101,6 +101,7 @@ class LoyaltyHandlers(BaseHandler):
             query = update.callback_query
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
+            points_unit = i18n.get('telegram.loyalty.points_unit', language)
             
             async with api_client as client:
                 user_token = await get_auth_token(update, context, client)

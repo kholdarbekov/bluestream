@@ -816,14 +816,26 @@ def process_delivery_confirmation_task(self, delivery_id: int, confirmation_data
         signature = confirmation_data.get('signature')
         notes = confirmation_data.get('notes')
         customer_present = confirmation_data.get('customer_present', True)
-        
-        # Mark delivery as completed
-        delivery.mark_as_delivered(photos=photos, signature=signature, notes=notes)
-        
-        # Update order status
-        delivery.order.status = OrderStatus.DELIVERED
-        delivery.order.updated_at = datetime.now(timezone.utc)
-        
+
+        # Always transition through OrderService so cash-order inventory deduction
+        # and status history run consistently.
+        order_status = delivery.order.status.value if hasattr(delivery.order.status, 'value') else delivery.order.status
+        if order_status != OrderStatus.DELIVERED.value:
+            from business_app.services.order_service import OrderService
+            OrderService().update_order_status(delivery.order_id, OrderStatus.DELIVERED)
+            db.session.refresh(delivery)
+
+        # Persist delivery confirmation artifacts after status transition.
+        if photos:
+            delivery.delivery_confirmation_photos = photos
+        if signature:
+            delivery.recipient_signature = signature
+        if notes:
+            delivery.delivery_notes = notes
+        if not customer_present:
+            note_suffix = "Customer not present at handoff"
+            delivery.delivery_notes = f"{delivery.delivery_notes}; {note_suffix}" if delivery.delivery_notes else note_suffix
+
         db.session.commit()
         
         # Send completion notification to customer

@@ -77,11 +77,10 @@ def get_blog_posts():
         posts = [post.to_summary_dict(language) for post in pagination.items]
 
         return paginated_response(
-            data=posts,
+            items=posts,
             page=pagination.page,
             per_page=pagination.per_page,
-            total=pagination.total,
-            total_pages=pagination.pages
+            total=pagination.total
         )
 
     except Exception as e:

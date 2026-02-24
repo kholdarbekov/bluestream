@@ -399,38 +399,35 @@ def create_app(config_class=None):
     """
     app = Flask(__name__)
     print(f"!!! CREATE_APP CALLED - app id: {id(app)}, config_class: {config_class}")
-    
-    # Load configuration
+
+    def _apply_config_from_instance(config_instance):
+        """Copy readable non-callable attributes from config instance."""
+        for attr in dir(config_instance):
+            if attr.startswith('_'):
+                continue
+            try:
+                value = getattr(config_instance, attr)
+            except Exception:
+                # Skip attributes that can't be accessed during startup
+                continue
+            if callable(value):
+                continue
+            app.config[attr] = value
+
+    # Always load baseline environment config first so app has required defaults.
+    baseline_config_class = get_config()
+    _apply_config_from_instance(baseline_config_class())
+
+    # Overlay with provided config (class or dict)
     if config_class:
         if isinstance(config_class, type):
-            # Create instance to resolve properties
-            config_instance = config_class()
-            # Copy all non-private attributes to the Flask config
-            for attr in dir(config_instance):
-                if not attr.startswith('_') and not callable(getattr(config_instance, attr)):
-                    try:
-                        value = getattr(config_instance, attr)
-                        app.config[attr] = value
-                    except Exception:
-                        # Skip attributes that can't be accessed during startup
-                        pass
+            _apply_config_from_instance(config_class())
         else:
             # Handle dictionary-style config (for backward compatibility)
             app.config.update(config_class)
             config_class = type('Config', (), config_class)
     else:
-        config_class = get_config()
-        # Create instance to resolve properties
-        config_instance = config_class()
-        # Copy all non-private attributes to the Flask config
-        for attr in dir(config_instance):
-            if not attr.startswith('_') and not callable(getattr(config_instance, attr)):
-                try:
-                    value = getattr(config_instance, attr)
-                    app.config[attr] = value
-                except Exception:
-                    # Skip attributes that can't be accessed during startup
-                    pass
+        config_class = baseline_config_class
     
     # Initialize configuration with app-specific setup
     if hasattr(config_class, 'init_app'):

@@ -223,8 +223,17 @@ def get_product(product_id):
 def get_product_reviews(product_id):
     """Get product reviews with pagination"""
     try:
-        page = int(request.args.get('page', 1))
-        per_page = min(int(request.args.get('per_page', 10)), 50)
+        try:
+            page = int(request.args.get('page', 1))
+        except (TypeError, ValueError):
+            page = 1
+        page = max(page, 1)
+
+        try:
+            per_page = int(request.args.get('per_page', 10))
+        except (TypeError, ValueError):
+            per_page = 10
+        per_page = min(max(per_page, 1), 50)
         sort_by_param = request.args.get('sort_by', 'created_at')  # created_at, rating, helpful
 
         # Map API sort_by values to ReviewService values
@@ -345,7 +354,7 @@ def get_featured_products():
         product_service = get_product_service()
         products = product_service.get_featured_products(
             limit=limit,
-            current_user=current_user
+            language=language
         )
 
         return success_response(data={
@@ -520,20 +529,31 @@ def get_popular_products():
 
         # Use ProductService to get popular products
         product_service = get_product_service()
-        products = product_service.get_popular_products(
+        period_to_days = {
+            'week': 7,
+            'month': 30,
+            'all': 3650,
+        }
+        popular_rows = product_service.get_popular_products(
+            period_days=period_to_days.get(period, 7),
             limit=limit,
-            period=period,
-            current_user=current_user
+            language=language
         )
 
         return success_response(
             data={
                 'popular_products': [
-                    serialize_product(
-                        product,
-                        language,
-                        current_user
-                    ) for product in products
+                    {
+                        'product': serialize_product(
+                            row['product'],
+                            language,
+                            current_user
+                        ),
+                        'total_sold': row.get('total_sold', 0),
+                        'order_count': row.get('order_count', 0),
+                        'revenue': row.get('revenue', 0),
+                    }
+                    for row in popular_rows
                 ]
             },
             meta={'period': period}

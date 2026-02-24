@@ -594,6 +594,18 @@ class DeliveryService:
         )
         
         return round(total_distance, 2)
+
+    def get_delivery_zones(self) -> List[Dict[str, Any]]:
+        """Return configured delivery zones for API/UI consumption."""
+        zones = []
+        for zone_name, info in DELIVERY_ZONES.items():
+            zones.append({
+                'name': zone_name,
+                'max_distance_km': info.get('max_distance', 0),
+                'fee': info.get('fee', self.default_delivery_fee),
+                'estimated_time_minutes': info.get('estimated_time', 0),
+            })
+        return zones
     
     def _notify_delivery_cancellation(self, delivery: Delivery):
         """Notify about delivery cancellation"""

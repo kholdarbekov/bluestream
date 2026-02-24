@@ -194,7 +194,10 @@ class PaymentService:
         # Update payment
         payment.status = PaymentStatus.COMPLETED
         payment.paid_at = datetime.now(timezone.utc)
-        payment.provider_data['points_used'] = points_used
+        # Reassign provider_data to ensure JSON updates are persisted.
+        provider_data = dict(payment.provider_data or {})
+        provider_data['points_used'] = points_used
+        payment.provider_data = provider_data
 
         self._create_transaction(payment, 'payment_completed', {
             'points_used': points_used,

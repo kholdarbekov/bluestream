@@ -899,8 +899,27 @@ class StaffService:
         # Sync order status per DELIVERY_TO_ORDER_STATUS_SYNC
         order_status_str = DELIVERY_TO_ORDER_STATUS_SYNC.get(new_status)
         if order_status_str and delivery.order:
-            delivery.order.status = OrderStatus(order_status_str)
-            delivery.order.updated_at = now
+            if order_status_str == OrderStatus.DELIVERED.value:
+                current_order_status = (
+                    delivery.order.status.value
+                    if hasattr(delivery.order.status, 'value')
+                    else delivery.order.status
+                )
+                if current_order_status != OrderStatus.DELIVERED.value:
+                    # Flush delivery updates first so OrderService can apply
+                    # delivery-linked business logic (inventory, loyalty) safely.
+                    db.session.flush()
+                    from business_app.services.order_service import OrderService
+                    OrderService().update_order_status(
+                        order_id=delivery.order_id,
+                        new_status=OrderStatus.DELIVERED,
+                        updated_by=staff_user_id,
+                        notes=metadata.get('notes', 'Delivered via staff bot')
+                    )
+                    db.session.refresh(delivery)
+            else:
+                delivery.order.status = OrderStatus(order_status_str)
+                delivery.order.updated_at = now
 
         db.session.commit()
 

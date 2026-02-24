@@ -682,7 +682,9 @@ class OrderService:
             if order.delivery:
                 from .delivery_service import DeliveryService
                 delivery_service = DeliveryService()
-                delivery_service.complete_delivery(order.delivery.id, sync_order_status=False)
+                delivery_status = order.delivery.status.value if hasattr(order.delivery.status, 'value') else order.delivery.status
+                if delivery_status != DeliveryStatus.DELIVERED.value:
+                    delivery_service.complete_delivery(order.delivery.id, sync_order_status=False)
             
             # For cash orders, confirm inventory and award loyalty points on delivery
             is_cash_order = order.payment_method == PaymentMethod.CASH if order.payment_method else False

@@ -64,6 +64,7 @@ ENV PYTHONPATH="/app:${PYTHONPATH}"
 
 # Start command
 CMD ["python", "bot.py"]
+# CMD ["python", "-Xfrozen_modules=off", "-m", "debugpy", "--listen", "0.0.0.0:5679", "--wait-for-client", "bot.py"]
 
 # Staff Bot Stage
 FROM base AS staff_bot

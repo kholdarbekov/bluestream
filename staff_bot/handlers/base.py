@@ -100,10 +100,12 @@ class BaseHandler:
 
     async def _get_language(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
         """Get user language from context or database."""
-        lang = context.user_data.get('language')
-        if not lang:
+        raw_lang = context.user_data.get('language')
+        if raw_lang:
+            lang = i18n.normalize_language(raw_lang)
+        else:
             lang = await i18n.get_user_language(update.effective_user.id)
-            context.user_data['language'] = lang
+        context.user_data['language'] = lang
         return lang
 
     async def _get_auth_token(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:

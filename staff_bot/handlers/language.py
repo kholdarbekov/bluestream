@@ -55,10 +55,12 @@ class LanguageHandler(BaseHandler):
         query = update.callback_query
         await query.answer()
 
-        lang_code = query.data.replace('staff_set_language_', '')
+        raw_lang_code = query.data.replace('staff_set_language_', '').strip().lower().replace('_', '-')
+        candidate_code = raw_lang_code.split('-', 1)[0]
 
-        if lang_code not in ['en', 'uz', 'ru']:
+        if candidate_code not in i18n.supported_languages:
             return
+        lang_code = i18n.normalize_language(candidate_code)
 
         # Update in context and database
         context.user_data['language'] = lang_code
@@ -73,3 +75,11 @@ class LanguageHandler(BaseHandler):
             i18n.get('staff.language_changed', lang_code),
             reply_markup=MenuKeyboards.main_menu_inline(lang_code, staff_roles)
         )
+
+        # Inline keyboards do not replace the user's persistent reply keyboard.
+        # Send a fresh reply-keyboard menu so button labels immediately switch language.
+        if query.message:
+            await query.message.reply_text(
+                i18n.get('staff.menu.title', lang_code),
+                reply_markup=MenuKeyboards.main_menu(lang_code, staff_roles),
+            )

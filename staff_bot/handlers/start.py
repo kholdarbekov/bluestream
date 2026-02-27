@@ -31,7 +31,8 @@ class StartHandler(BaseHandler):
         if context.user_data.get('authenticated'):
             user = await self.user_repo.get_user_by_telegram_id(user_id)
             if user and user.get('staff_roles'):
-                language = context.user_data.get('language', 'en')
+                language = i18n.normalize_language(context.user_data.get('language'))
+                context.user_data['language'] = language
                 await update.message.reply_text(
                     i18n.get('staff.welcome_back', language, name=user.get('first_name', '')),
                     reply_markup=MenuKeyboards.main_menu(
@@ -50,7 +51,9 @@ class StartHandler(BaseHandler):
 
             if any(role in STAFF_BOT_ROLES for role in staff_roles):
                 # Already linked - authenticate via backend to issue fresh JWT.
-                context.user_data['language'] = user.get('preferred_language') or context.user_data.get('language', 'en')
+                context.user_data['language'] = i18n.normalize_language(
+                    user.get('preferred_language') or context.user_data.get('language')
+                )
                 return await self._authenticate_with_binding(update, context)
 
         # Capture optional invite token passed via deep link
@@ -87,14 +90,15 @@ class StartHandler(BaseHandler):
         elif 'English' in text or '\U0001f1fa\U0001f1f8' in text:
             language = 'en'
 
-        context.user_data['language'] = language
+        context.user_data['language'] = i18n.normalize_language(language)
         logger.info(f"Staff user {update.effective_user.id} selected language: {language}")
 
         return await self._authenticate_with_binding(update, context)
 
     async def _authenticate_with_binding(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Authenticate via pre-bound Telegram ID or one-time invite token."""
-        language = context.user_data.get('language', 'en')
+        language = i18n.normalize_language(context.user_data.get('language'))
+        context.user_data['language'] = language
         user_id = update.effective_user.id
         invite_token = context.user_data.get('invite_token')
 
@@ -150,7 +154,8 @@ class StartHandler(BaseHandler):
     async def _complete_login(self, update: Update, context: ContextTypes.DEFAULT_TYPE,
                                user_data: dict, staff_roles: list):
         """Complete login and show main menu"""
-        language = context.user_data.get('language', 'en')
+        language = i18n.normalize_language(context.user_data.get('language'))
+        context.user_data['language'] = language
         context.user_data.pop('invite_token', None)
 
         context.user_data['authenticated'] = True

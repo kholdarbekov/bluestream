@@ -18,7 +18,8 @@ _handler = BaseHandler()
 async def main_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show the main menu based on user's staff roles"""
     if not context.user_data.get('authenticated'):
-        language = context.user_data.get('language', 'en')
+        language = i18n.normalize_language(context.user_data.get('language'))
+        context.user_data['language'] = language
         if update.callback_query:
             await update.callback_query.answer(
                 i18n.get('staff.session_expired', language), show_alert=True

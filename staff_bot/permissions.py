@@ -22,7 +22,9 @@ def _get_user_staff_roles(context: ContextTypes.DEFAULT_TYPE) -> List[str]:
 
 def _get_user_language(context: ContextTypes.DEFAULT_TYPE) -> str:
     """Get user language from context."""
-    return context.user_data.get('language', 'en')
+    from i18n import i18n
+
+    return i18n.normalize_language(context.user_data.get('language'))
 
 
 async def _send_unauthorized(update: Update, message: str):

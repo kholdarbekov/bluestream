@@ -26,25 +26,55 @@ class Translation:
         self._missing_key_log_limit = 100
         self._required_keys_cache: Optional[Set[str]] = None
 
+    def normalize_language(self, language: Optional[str]) -> str:
+        """Normalize locale variants to one of the supported language codes."""
+        if not language:
+            return config.localization.default_language
+
+        value = str(language).strip().lower().replace("_", "-")
+        if not value:
+            return config.localization.default_language
+
+        if value in self.supported_languages:
+            return value
+
+        base = value.split("-", 1)[0]
+        if base in self.supported_languages:
+            return base
+
+        aliases = {
+            "english": "en",
+            "uzbek": "uz",
+            "russian": "ru",
+        }
+        return aliases.get(value, config.localization.default_language)
+
     async def load_translations(self):
-        """Load translations from database (staff_bot category)"""
+        """
+        Load staff translations from DB.
+
+        Primary source is `category='staff_bot'`, with `staff.*` key fallback
+        to tolerate rows that were created with a non-staff category.
+        """
         try:
             query = """
-            SELECT language, key, value
+            SELECT language, key, value, category
             FROM translations
-            WHERE is_active = TRUE AND category = 'staff_bot'
-            ORDER BY language, key
+            WHERE is_active = TRUE
+              AND (category = 'staff_bot' OR key LIKE 'staff.%')
+            ORDER BY key, language, CASE WHEN category = 'staff_bot' THEN 0 ELSE 1 END
             """
             rows = await db_manager.fetchall(query)
 
             for row in rows:
-                language = row['language']
+                language = self.normalize_language(row['language'])
                 key = row['key']
                 value = row['value']
 
                 if language not in self.translations:
                     self.translations[language] = {}
-                self.translations[language][key] = value
+                # Preserve highest-priority row for a language/key pair.
+                self.translations[language].setdefault(key, value)
 
             if self.translations:
                 logger.info(
@@ -72,15 +102,15 @@ class Translation:
 
     def get(self, key: str, language: str = None, *args, **kwargs) -> str:
         """Get translation for key in specified language"""
-        if not language:
-            language = config.localization.default_language
+        language = self.normalize_language(language)
+        fallback_language = self.normalize_language(self.fallback_language)
 
         # Try requested language
         if language in self.translations and key in self.translations[language]:
             translation = self.translations[language][key]
         # Fallback to default language
-        elif self.fallback_language in self.translations and key in self.translations[self.fallback_language]:
-            translation = self.translations[self.fallback_language][key]
+        elif fallback_language in self.translations and key in self.translations[fallback_language]:
+            translation = self.translations[fallback_language][key]
         # Derive readable fallback from key
         else:
             self._track_missing_key(key, language)
@@ -105,6 +135,7 @@ class Translation:
     def get_missing_keys(self, language: str = None) -> Dict[str, List[str]]:
         """Get list of missing translation keys"""
         if language:
+            language = self.normalize_language(language)
             return {language: sorted(list(self.missing_keys.get(language, set())))}
         return {lang: sorted(list(keys)) for lang, keys in self.missing_keys.items()}
 
@@ -162,6 +193,7 @@ class Translation:
 
         missing_by_language: Dict[str, List[str]] = {}
         for language in languages:
+            language = self.normalize_language(language)
             available = self.translations.get(language, {})
             missing = sorted(key for key in required_keys if key not in available)
             if missing:
@@ -173,17 +205,18 @@ class Translation:
         """Get user's preferred language"""
         query = "SELECT preferred_language FROM users WHERE telegram_id = $1"
         language = await db_manager.fetchval(query, str(telegram_id))
-        return language or config.localization.default_language
+        return self.normalize_language(language)
 
     def get_language_flag(self, language_code: str) -> str:
         """Get flag emoji for language"""
+        language_code = self.normalize_language(language_code)
         flags = {'en': '\U0001f1fa\U0001f1f8', 'uz': '\U0001f1fa\U0001f1ff', 'ru': '\U0001f1f7\U0001f1fa'}
         return flags.get(language_code, '\U0001f310')
 
     def get_language_name(self, language_code: str, display_language: str = None) -> str:
         """Get language name in specified display language"""
-        if not display_language:
-            display_language = language_code
+        language_code = self.normalize_language(language_code)
+        display_language = self.normalize_language(display_language or language_code)
         names = {
             'en': {'en': 'English', 'uz': 'Inglizcha', 'ru': '\u0410\u043d\u0433\u043b\u0438\u0439\u0441\u043a\u0438\u0439'},
             'uz': {'en': 'Uzbek', 'uz': "O'zbekcha", 'ru': '\u0423\u0437\u0431\u0435\u043a\u0441\u043a\u0438\u0439'},

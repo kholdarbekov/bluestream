@@ -96,7 +96,7 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
 
     if isinstance(update, Update) and update.effective_user:
         try:
-            language = context.user_data.get('language', 'en')
+            language = i18n.normalize_language(context.user_data.get('language'))
             error_msg = i18n.get('staff.error_occurred', language)
             if update.callback_query:
                 await update.callback_query.answer(error_msg, show_alert=True)
@@ -590,7 +590,7 @@ class StaffBot:
             return
 
         text = update.message.text.strip()
-        language = context.user_data.get('language', 'en')
+        language = await self._language_handler._get_language(update, context)
 
         # Map reply keyboard text to actions
         # These match the text in MenuKeyboards.main_menu()
@@ -643,7 +643,7 @@ class StaffBot:
 
     async def _help_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /help command"""
-        language = context.user_data.get('language', 'en')
+        language = await self._language_handler._get_language(update, context)
         staff_roles = context.user_data.get('staff_roles', [])
 
         help_text = i18n.get('staff.help.text', language)

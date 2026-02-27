@@ -1,16 +1,58 @@
 {% extends "frontend/base.html" %}
+{% set meta_description = "Terms and conditions for using Aqua Element website, ordering products, subscriptions, and related delivery services." %}
 
 {% block title %}Terms and Conditions - {{ company_name }}{% endblock %}
 
 {% block content %}
-<section class="page-title">
-    <div class="active-container">
-        <h1>Terms and Conditions</h1>
+<section class="page-title centred" style="background-image: url({{ url_for('static', filename='images/background/page-title.jpg') }});">
+    <div class="shape" style="background-image: url({{ url_for('static', filename='images/shape/banner-shap.png') }});"></div>
+    <div class="auto-container">
+        <div class="content-box">
+            <h1>Terms and Conditions</h1>
+            <ul class="bread-crumb clearfix">
+                <li><a href="{{ url_for('frontend.index') }}">{{ 'landing.nav.home'|t }}</a></li>
+                <li>Terms and Conditions</li>
+            </ul>
+        </div>
     </div>
 </section>
-<section class="content-section">
-    <div class="active-container">
-        <p>Terms and conditions content goes here...</p>
+
+<section class="service-details">
+    <div class="auto-container">
+        <div class="content-box">
+            <h2>1. Acceptance of Terms</h2>
+            <p>By using the Blue Stream Group website and placing orders, you agree to these terms. If you do not agree, please discontinue use of our services.</p>
+
+            <h2>2. Eligibility and Account Responsibilities</h2>
+            <p>You are responsible for providing accurate contact, delivery, and payment information. You are also responsible for activity performed through your account credentials.</p>
+
+            <h2>3. Products, Availability, and Orders</h2>
+            <p>Product listings, stock availability, and delivery windows can change. Order confirmation is subject to successful processing, operational availability, and verification checks where required.</p>
+
+            <h2>4. Pricing and Payments</h2>
+            <p>Prices are shown in UZS unless otherwise stated. Final payable totals are presented during checkout. Applicable promotions, delivery fees, or discounts are calculated based on active platform rules.</p>
+
+            <h2>5. Delivery and Fulfillment</h2>
+            <p>Delivery terms follow the current delivery policy and available service zones. Delays caused by force majeure, traffic, weather, or incorrect delivery details may affect estimated timelines.</p>
+
+            <h2>6. Refunds and Issue Resolution</h2>
+            <p>Refund and replacement handling follows the published refund policy. To resolve issues quickly, provide order details and relevant evidence (such as photos) when contacting support.</p>
+
+            <h2>7. Acceptable Use</h2>
+            <p>You agree not to misuse the platform, interfere with service operation, attempt unauthorized access, or submit fraudulent transactions.</p>
+
+            <h2>8. Intellectual Property</h2>
+            <p>Site content, branding, and materials are owned by Blue Stream Group or licensed for use. Unauthorized copying, redistribution, or commercial exploitation is prohibited.</p>
+
+            <h2>9. Limitation of Liability</h2>
+            <p>To the maximum extent permitted by law, Blue Stream Group is not liable for indirect, incidental, or consequential damages arising from platform use, except where such limitation is legally prohibited.</p>
+
+            <h2>10. Updates to Terms</h2>
+            <p>These terms may be updated as services evolve. Updated terms become effective when posted on this page.</p>
+
+            <h2>11. Contact</h2>
+            <p>For terms-related questions, contact <a href="tel:{{ company_phone }}">{{ company_phone }}</a> or <a href="mailto:{{ company_email }}">{{ company_email }}</a>.</p>
+        </div>
     </div>
 </section>
 {% endblock %}

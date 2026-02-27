@@ -6,8 +6,9 @@ import os
 import logging
 from logging.handlers import RotatingFileHandler
 from datetime import datetime, UTC
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from sqlalchemy import text
-from flask import Flask, jsonify, render_template, request, g, session
+from flask import Flask, jsonify, render_template, request, g, session, redirect
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
 from flask_jwt_extended import JWTManager, verify_jwt_in_request, get_jwt_identity
@@ -164,6 +165,30 @@ def setup_request_handlers(app):
         url_lang = request.args.get('lang', None)
         session_lang = session.get('language')
         browser_lang = request.headers.get('Accept-Language', '')[:10] if request.headers.get('Accept-Language') else None
+
+        # Keep default language URLs clean: /path (not /path?lang=<default>).
+        # This reduces duplicate URL variants for crawlers and canonical signals.
+        default_language = app.config.get('DEFAULT_LANGUAGE', 'uz')
+        if (
+            request.method in ('GET', 'HEAD')
+            and request.endpoint
+            and request.endpoint.startswith('frontend.')
+            and url_lang == default_language
+        ):
+            parsed_url = urlsplit(request.url)
+            filtered_query = [
+                (key, value)
+                for key, value in parse_qsl(parsed_url.query, keep_blank_values=True)
+                if not (key == 'lang' and value == default_language)
+            ]
+            cleaned_url = urlunsplit((
+                parsed_url.scheme,
+                parsed_url.netloc,
+                parsed_url.path,
+                urlencode(filtered_query, doseq=True),
+                parsed_url.fragment,
+            ))
+            return redirect(cleaned_url, code=301)
 
         # 1. Check URL parameter first (highest priority)
         if url_lang and url_lang in app.config['LANGUAGES']:

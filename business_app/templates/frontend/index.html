@@ -1,4 +1,5 @@
 {% extends "frontend/base.html" %}
+{% set meta_description = "Aqua Element provides premium drinking water delivery all across Tashkent, flexible subscriptions, and bottled water products for homes and businesses." %}
 
 {% block title %}{{ 'landing.nav.home'|t }} - {{ company_name }}{% endblock %}
 
@@ -32,6 +33,7 @@
 {% endblock %}
 
 {% block content %}
+        <h1 class="sr-only">{{ 'landing.hero.title_1'|t }} - {{ company_name }}</h1>
         <!-- banner-section -->
         <section class="banner-style-two banner-style-three">
             <div class="pattern-layer" style="background-image: url({{ url_for('static', filename='images/shape/shape-24.png') }});"></div>

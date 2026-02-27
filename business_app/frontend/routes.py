@@ -52,7 +52,8 @@ def _default_canonical_url():
     """Build a default canonical URL for the current request path."""
     canonical = _absolute_public_url(request.path)
     lang = _current_lang_query_param()
-    if lang:
+    default_language = current_app.config.get('DEFAULT_LANGUAGE', 'uz')
+    if lang and lang != default_language:
         canonical = f"{canonical}?{urlencode({'lang': lang})}"
     return canonical
 
@@ -969,6 +970,9 @@ def inject_global_vars():
         'frontend.checkout',
         'frontend.order_confirmation',
         'frontend.payment_success',
+        'frontend.payment_cancel',
+        'frontend.order_tracking',
+        'frontend.order_detail',
         'frontend.my_account',
         'frontend.my_orders',
         'frontend.my_subscriptions',

@@ -7538,6 +7538,10 @@ def format_entity_translation(translation):
     if entity_type and field_name and entity_id:
         return {
             'id': translation.id,
+            'key': translation.key,
+            'value': translation.value,
+            'category': translation.category,
+            'description': translation.description,
             'entity_type': entity_type,
             'entity_id': entity_id,
             'field_name': field_name,
@@ -7559,6 +7563,7 @@ def get_translations():
         # Get query parameters
         page = request.args.get('page', 1, type=int)
         per_page = min(request.args.get('per_page', 50, type=int), 100)
+        category = request.args.get('category')
         entity_type = request.args.get('entity_type')
         entity_id = request.args.get('entity_id', type=int)
         field_name = request.args.get('field_name')
@@ -7576,6 +7581,9 @@ def get_translations():
         elif translation_type == 'entity' or entity_type or entity_id or field_name:
             # Entity translations have category starting with 'entity_'
             query = query.filter(Translation.category.like('entity_%'))
+
+        if category:
+            query = query.filter(Translation.category == category)
         
         # Apply filters for entity translations
         if entity_type:
@@ -7587,7 +7595,15 @@ def get_translations():
         if language:
             query = query.filter(Translation.language == language)
         if search:
-            query = query.filter(Translation.value.ilike(f'%{search}%'))
+            search_term = f'%{search}%'
+            query = query.filter(
+                or_(
+                    Translation.key.ilike(search_term),
+                    Translation.value.ilike(search_term),
+                    Translation.category.ilike(search_term),
+                    Translation.description.ilike(search_term),
+                )
+            )
         
         # Order by key and language for consistency
         query = query.order_by(Translation.key, Translation.language)
@@ -7963,55 +7979,104 @@ def sync_entity_translations(entity_type):
 def export_translations():
     """Export translations in various formats (CSV, JSON)"""
     try:
+        import csv
+        import io
+        import json
+
         format_type = request.args.get('format', 'json').lower()
+        category = request.args.get('category')
         entity_type = request.args.get('entity_type')
         language = request.args.get('language')
-        
-        query = Translation.query.filter(Translation.key.like("%.%.%"))
+        search = request.args.get('search')
+        translation_type = request.args.get('type')
+
+        query = Translation.query
+
+        if translation_type == 'static':
+            query = query.filter(~Translation.category.like('entity_%'))
+        elif translation_type == 'entity':
+            query = query.filter(Translation.category.like('entity_%'))
+
         if entity_type:
-            query = query.filter(Translation.category == entity_type)
+            query = query.filter(Translation.category == f'entity_{entity_type.lower()}')
+        if category:
+            query = query.filter(Translation.category == category)
         if language:
             query = query.filter(Translation.language == language)
-        
-        translations = query.all()
-        
+        if search:
+            search_term = f'%{search}%'
+            query = query.filter(
+                or_(
+                    Translation.key.ilike(search_term),
+                    Translation.value.ilike(search_term),
+                    Translation.category.ilike(search_term),
+                    Translation.description.ilike(search_term),
+                )
+            )
+
+        translations = query.order_by(Translation.key, Translation.language).all()
+
         if format_type == 'csv':
-            import csv
-            import io
-            
             output = io.StringIO()
             writer = csv.writer(output)
-            writer.writerow(['entity_type', 'entity_id', 'field_name', 'language', 'content', 'is_active'])
-            
-            for t in translations:
-                writer.writerow([t.entity_type, t.entity_id, t.field_name, t.language, t.content, t.is_active])
-            
+            writer.writerow([
+                'id',
+                'key',
+                'language',
+                'value',
+                'category',
+                'description',
+                'is_active',
+                'entity_type',
+                'entity_id',
+                'field_name',
+            ])
+
+            for translation in translations:
+                parsed_entity_type, parsed_field_name, parsed_entity_id = parse_entity_key(translation.key)
+                writer.writerow([
+                    translation.id,
+                    translation.key,
+                    translation.language,
+                    translation.value,
+                    translation.category,
+                    translation.description,
+                    translation.is_active,
+                    parsed_entity_type,
+                    parsed_entity_id,
+                    parsed_field_name,
+                ])
+
             response = current_app.response_class(
                 output.getvalue(),
                 mimetype='text/csv',
                 headers={'Content-Disposition': 'attachment;filename=translations.csv'}
             )
             return response
-            
-        else:  # JSON format
-            data = []
-            for t in translations:
-                data.append({
-                    'entity_type': t.entity_type,
-                    'entity_id': t.entity_id,
-                    'field_name': t.field_name,
-                    'language': t.language,
-                    'content': t.content,
-                    'is_active': t.is_active,
-                    'version': t.version
-                })
 
-            return success_response(
-                data={
-                    'translations': data,
-                    'count': len(data)
-                }
-            )
+        exported_rows = []
+        for translation in translations:
+            parsed_entity_type, parsed_field_name, parsed_entity_id = parse_entity_key(translation.key)
+            exported_rows.append({
+                'id': translation.id,
+                'key': translation.key,
+                'language': translation.language,
+                'value': translation.value,
+                'content': translation.value,  # Backward compatible alias
+                'category': translation.category,
+                'description': translation.description,
+                'is_active': translation.is_active,
+                'entity_type': parsed_entity_type,
+                'entity_id': parsed_entity_id,
+                'field_name': parsed_field_name,
+            })
+
+        response = current_app.response_class(
+            json.dumps({'translations': exported_rows, 'count': len(exported_rows)}, ensure_ascii=False),
+            mimetype='application/json',
+            headers={'Content-Disposition': 'attachment;filename=translations.json'}
+        )
+        return response
 
     except Exception as e:
         current_app.logger.error(f"Export translations error: {e}")
@@ -8036,49 +8101,79 @@ def import_translations():
         updated_count = 0
         skipped_count = 0
         errors = []
-        
+        touched_telegram = False
+
         for item in translations_data:
             try:
-                # Validate required fields
-                required = ['entity_type', 'entity_id', 'field_name', 'language', 'content']
-                if not all(field in item for field in required):
-                    errors.append(f"Missing required fields in item: {item}")
+                raw_language = item.get('language')
+                if not raw_language:
+                    errors.append(f"Missing required field 'language' in item: {item}")
                     continue
-                
-                # Check if exists
-                existing = Translation.query.filter(Translation.key.like("%.%.%")).filter_by(
-                    entity_type=item['entity_type'],
-                    entity_id=item['entity_id'],
-                    field_name=item['field_name'],
-                    language=item['language']
+
+                key = item.get('key')
+                value = item.get('value', item.get('content'))
+                category = item.get('category')
+
+                if not key:
+                    entity_type_value = item.get('entity_type')
+                    entity_id_value = item.get('entity_id')
+                    field_name_value = item.get('field_name')
+                    if entity_type_value and entity_id_value is not None and field_name_value:
+                        key = f"{entity_type_value}.{field_name_value}.{entity_id_value}"
+                        category = category or f"entity_{str(entity_type_value).lower()}"
+
+                if not key:
+                    errors.append(f"Missing required key/entity fields in item: {item}")
+                    continue
+
+                if value is None:
+                    errors.append(f"Missing required value/content in item: {item}")
+                    continue
+
+                existing = Translation.query.filter_by(
+                    key=key,
+                    language=raw_language
                 ).first()
-                
+
                 if existing:
                     if update_existing:
-                        existing.content = item['content']
-                        existing.is_active = item.get('is_active', True)
-                        existing.version += 1
+                        existing.value = value
+                        if category:
+                            existing.category = category
+                        if 'description' in item:
+                            existing.description = item.get('description')
+                        if 'is_active' in item:
+                            existing.is_active = item['is_active']
+                        existing.updated_by = get_jwt_identity()
                         existing.updated_at = datetime.now(UTC)
                         updated_count += 1
+                        if existing.category == 'telegram':
+                            touched_telegram = True
                     else:
                         skipped_count += 1
                 else:
-                    # Use unified Translation model with entity key format
-                    success = Translation.set_entity_translation(
-                        entity_type=item['entity_type'],
-                        entity_id=item['entity_id'],
-                        field_name=item['field_name'],
-                        language=item['language'],
-                        value=item['content'],
-                        user_id=get_jwt_identity()
+                    translation = Translation(
+                        key=key,
+                        language=raw_language,
+                        value=value,
+                        category=category or 'general',
+                        description=item.get('description'),
+                        is_active=item.get('is_active', True),
+                        created_by=get_jwt_identity(),
+                        updated_by=get_jwt_identity()
                     )
-                    if success:
-                        created_count += 1
+                    db.session.add(translation)
+                    created_count += 1
+                    if translation.category == 'telegram':
+                        touched_telegram = True
                     
             except Exception as e:
                 errors.append(f"Error processing item {item}: {e}")
 
         db.session.commit()
+
+        if touched_telegram:
+            trigger_translation_reload()
 
         return success_response(
             data={
@@ -8108,10 +8203,25 @@ def get_translation_completion():
         # Get all languages from config
         languages = ['en', 'uz', 'ru']  # From config
         entity_type_filter = request.args.get('entity_type')
+        category_filter = request.args.get('category')
+
+        include_entity_completion = not category_filter or category_filter.startswith('entity_')
+        include_static_completion = not category_filter or not category_filter.startswith('entity_')
+        static_category_filter = None
+
+        if category_filter:
+            if category_filter.startswith('entity_'):
+                if not entity_type_filter:
+                    entity_type_filter = category_filter.replace('entity_', '')
+            else:
+                static_category_filter = category_filter
 
         # ========== ENTITY TRANSLATIONS ==========
         # Get all entity translations (category starts with 'entity_')
         entity_translations_query = Translation.query.filter(Translation.category.like('entity_%'))
+
+        if not include_entity_completion:
+            entity_translations_query = entity_translations_query.filter(text('1=0'))
 
         if entity_type_filter:
             entity_translations_query = entity_translations_query.filter(
@@ -8133,6 +8243,10 @@ def get_translation_completion():
         # ========== STATIC TRANSLATIONS ==========
         # Get all static translations (category does NOT start with 'entity_')
         static_translations_query = Translation.query.filter(~Translation.category.like('entity_%'))
+        if static_category_filter:
+            static_translations_query = static_translations_query.filter(
+                Translation.category == static_category_filter
+            )
         all_static_translations = static_translations_query.all()
 
         # Parse unique static keys (each unique key should have translations for all languages)
@@ -8174,14 +8288,18 @@ def get_translation_completion():
             }
 
         # ========== ENTITY TRANSLATION COMPLETION BY CATEGORY ==========
-        entity_categories = db.session.query(Translation.category).filter(
-            Translation.category.like('entity_%')
-        ).distinct().all()
+        entity_categories = []
+        if include_entity_completion:
+            entity_categories_query = db.session.query(Translation.category).filter(
+                Translation.category.like('entity_%')
+            )
+            if entity_type_filter:
+                entity_categories_query = entity_categories_query.filter(
+                    Translation.category == f'entity_{entity_type_filter.lower()}'
+                )
+            entity_categories = entity_categories_query.distinct().all()
 
         for (category_name,) in entity_categories:
-            if entity_type_filter and category_name != f'entity_{entity_type_filter.lower()}':
-                continue
-
             # Get all fields for this entity category
             entity_fields = [uf for uf in unique_entity_fields if uf[0] == category_name]
 
@@ -8224,9 +8342,14 @@ def get_translation_completion():
             })
 
         # ========== STATIC TRANSLATION COMPLETION BY CATEGORY ==========
-        static_categories = db.session.query(Translation.category).filter(
+        static_categories_query = db.session.query(Translation.category).filter(
             ~Translation.category.like('entity_%')
-        ).distinct().all()
+        )
+        if static_category_filter:
+            static_categories_query = static_categories_query.filter(
+                Translation.category == static_category_filter
+            )
+        static_categories = static_categories_query.distinct().all() if include_static_completion else []
 
         for (category_name,) in static_categories:
             # Get all keys for this static category
@@ -8303,6 +8426,7 @@ def get_missing_translations():
     try:
         languages = ['en', 'uz', 'ru']
         entity_type = request.args.get('entity_type')
+        category_filter = request.args.get('category')
         language = request.args.get('language')
         translation_type = request.args.get('type')  # 'entity', 'static', or None for all
         page = request.args.get('page', 1, type=int)
@@ -8310,8 +8434,19 @@ def get_missing_translations():
 
         missing_translations = []
 
+        include_entity = not translation_type or translation_type == 'entity'
+        include_static = not translation_type or translation_type == 'static'
+
+        # Category filter can force entity/static scope and derive entity_type.
+        if category_filter:
+            if category_filter.startswith('entity_'):
+                include_static = False
+                entity_type = category_filter.replace('entity_', '')
+            else:
+                include_entity = False
+
         # ========== CHECK MISSING ENTITY TRANSLATIONS ==========
-        if not translation_type or translation_type == 'entity':
+        if include_entity:
             # Get all entity translations (category starts with 'entity_')
             entity_translations_query = Translation.query.filter(Translation.category.like('entity_%'))
 
@@ -8357,6 +8492,7 @@ def get_missing_translations():
                         missing_translations.append({
                             'type': 'entity',
                             'category': entity_type_val,
+                            'entity_type': category.replace('entity_', ''),
                             'entity_id': entity_id,
                             'field_name': field_name,
                             'key': expected_key,
@@ -8365,9 +8501,13 @@ def get_missing_translations():
                         })
 
         # ========== CHECK MISSING STATIC TRANSLATIONS ==========
-        if not translation_type or translation_type == 'static':
+        if include_static:
             # Get all static translations (category does NOT start with 'entity_')
             static_translations_query = Translation.query.filter(~Translation.category.like('entity_%'))
+            if category_filter and not category_filter.startswith('entity_'):
+                static_translations_query = static_translations_query.filter(
+                    Translation.category == category_filter
+                )
             all_static_translations = static_translations_query.all()
 
             # Parse unique static keys (each unique key should have translations for all languages)

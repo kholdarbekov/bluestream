@@ -400,6 +400,9 @@ class AdminService {
   }
 
   async syncEntityTranslations({ entityType, data }) {
+    if (!entityType) {
+      throw new Error('Entity type is required');
+    }
     const response = await api.post(`/admin/translations/sync/${entityType}`, data);
     return response.data;
   }

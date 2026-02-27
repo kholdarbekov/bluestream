@@ -227,4 +227,39 @@ describe('AdminService', () => {
       expect(result).toEqual(mockResponse);
     });
   });
+
+  describe('translation management', () => {
+    it('fetches translations with query params', async () => {
+      const params = { page: 1, per_page: 50, search: 'telegram.welcome', category: 'telegram', language: 'en' };
+      const mockData = { success: true, data: { translations: [] }, meta: { total: 0 } };
+
+      api.get.mockResolvedValue({ data: mockData });
+
+      const result = await adminService.getTranslations(params);
+
+      expect(api.get).toHaveBeenCalledWith('/admin/translations', { params });
+      expect(result).toEqual(mockData);
+    });
+
+    it('syncs entity translations for selected entity type', async () => {
+      const payload = { entity_ids: [1, 2] };
+      const mockData = { success: true, message: 'Synced translations' };
+
+      api.post.mockResolvedValue({ data: mockData });
+
+      const result = await adminService.syncEntityTranslations({
+        entityType: 'Product',
+        data: payload
+      });
+
+      expect(api.post).toHaveBeenCalledWith('/admin/translations/sync/Product', payload);
+      expect(result).toEqual(mockData);
+    });
+
+    it('rejects sync request without entity type', async () => {
+      await expect(
+        adminService.syncEntityTranslations({ data: {} })
+      ).rejects.toThrow('Entity type is required');
+    });
+  });
 });

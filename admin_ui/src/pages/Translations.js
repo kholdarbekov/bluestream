@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Table,
   Card,
@@ -14,9 +14,7 @@ import {
   Col,
   Statistic,
   message,
-  Divider,
   Progress,
-  Upload,
   Tabs,
   Typography,
   Popconfirm,
@@ -31,16 +29,11 @@ import {
   PlusOutlined,
   EditOutlined,
   DeleteOutlined,
-  EyeOutlined,
-  ExportOutlined,
-  ImportOutlined,
   SyncOutlined,
   PercentageOutlined,
-  CheckCircleOutlined,
   ExclamationCircleOutlined,
   DownloadOutlined,
-  UploadOutlined,
-  GlobalOutlined
+  UploadOutlined
 } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from 'react-query';
 import adminService from '../services/adminService';
@@ -56,11 +49,30 @@ const LANGUAGES = {
   'ru': { name: 'Русский', flag: '🇷🇺', color: 'red' }
 };
 
+const getLanguageInfo = (languageCode) => {
+  if (languageCode === 'en') return LANGUAGES.en;
+  if (languageCode === 'uz') return LANGUAGES.uz;
+  if (languageCode === 'ru') return LANGUAGES.ru;
+
+  return { name: languageCode || 'Unknown', flag: '🌐', color: 'default' };
+};
+
+const DEFAULT_CATEGORIES = ['telegram', 'ui', 'email', 'sms', 'common', 'general'];
+
+const getEntityTypeFromCategory = (category = '') => {
+  if (!category || !category.startsWith('entity_')) {
+    return '';
+  }
+
+  const rawType = category.replace('entity_', '');
+  return rawType.charAt(0).toUpperCase() + rawType.slice(1);
+};
+
 const Translations = () => {
   // State management
   const [searchText, setSearchText] = useState('');
-  const [categoryFilter, setCategoryFilter] = useState('');
-  const [languageFilter, setLanguageFilter] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState();
+  const [languageFilter, setLanguageFilter] = useState();
   const [selectedTranslation, setSelectedTranslation] = useState(null);
   const [isEditModalVisible, setIsEditModalVisible] = useState(false);
   const [isCreateModalVisible, setIsCreateModalVisible] = useState(false);
@@ -68,15 +80,39 @@ const Translations = () => {
   const [isImportModalVisible, setIsImportModalVisible] = useState(false);
   const [activeTab, setActiveTab] = useState('translations');
   const [pagination, setPagination] = useState({ current: 1, pageSize: 50 });
+  const [missingPagination, setMissingPagination] = useState({ current: 1, pageSize: 50 });
 
   const [form] = Form.useForm();
   const [syncForm] = Form.useForm();
   const [importForm] = Form.useForm();
   const queryClient = useQueryClient();
 
+  // Reset pagination when filters change
+  useEffect(() => {
+    setPagination((prev) => (prev.current === 1 ? prev : { ...prev, current: 1 }));
+    setMissingPagination((prev) => (prev.current === 1 ? prev : { ...prev, current: 1 }));
+  }, [searchText, categoryFilter, languageFilter]);
+
+  // Fetch available entity types for sync and filtering
+  const { data: entitiesData } = useQuery(
+    ['translation-entities'],
+    () => adminService.getTranslatableEntities(),
+    { staleTime: 300000 }
+  );
+
+  const entityTypes = useMemo(
+    () => (entitiesData?.data?.entities?.map((entity) => entity.entity_type) || []),
+    [entitiesData]
+  );
+
+  const categoryOptions = useMemo(() => {
+    const entityCategories = entityTypes.map((entityType) => `entity_${entityType.toLowerCase()}`);
+    return Array.from(new Set([...DEFAULT_CATEGORIES, ...entityCategories]));
+  }, [entityTypes]);
+
   // Fetch translations
-  const { data: translationsData, isLoading: translationsLoading, refetch: refetchTranslations } = useQuery(
-    ['translations', searchText, categoryFilter, languageFilter, pagination],
+  const { data: translationsData, isLoading: translationsLoading } = useQuery(
+    ['translations', searchText, categoryFilter, languageFilter, pagination.current, pagination.pageSize],
     () => adminService.getTranslations({
       page: pagination.current,
       per_page: pagination.pageSize,
@@ -96,15 +132,14 @@ const Translations = () => {
 
   // Fetch missing translations
   const { data: missingData, isLoading: missingLoading } = useQuery(
-    ['translations-missing', categoryFilter, languageFilter],
+    ['translations-missing', categoryFilter, languageFilter, missingPagination.current, missingPagination.pageSize],
     () => adminService.getMissingTranslations({
+      page: missingPagination.current,
+      per_page: missingPagination.pageSize,
       category: categoryFilter || undefined,
       language: languageFilter || undefined
     })
   );
-
-  // Available categories
-  const CATEGORIES = ['telegram', 'ui', 'email', 'sms', 'common'];
 
   // Mutations
   const createTranslationMutation = useMutation(adminService.createTranslation, {
@@ -161,11 +196,19 @@ const Translations = () => {
 
   const importTranslationsMutation = useMutation(adminService.importTranslations, {
     onSuccess: (data) => {
-      message.success(`Import completed: ${data.results.created} created, ${data.results.updated} updated`);
+      const results = data?.data?.results;
+      if (results) {
+        message.success(
+          `Import completed: ${results.created} created, ${results.updated} updated, ${results.skipped} skipped`
+        );
+      } else {
+        message.success('Import completed successfully');
+      }
       setIsImportModalVisible(false);
       importForm.resetFields();
       queryClient.invalidateQueries('translations');
       queryClient.invalidateQueries('translations-completion');
+      queryClient.invalidateQueries('translations-missing');
     },
     onError: (error) => {
       message.error(error.message || 'Failed to import translations');
@@ -198,7 +241,7 @@ const Translations = () => {
       key: 'language',
       width: 100,
       render: (lang) => {
-        const langInfo = LANGUAGES[lang] || { name: lang, flag: '🌐', color: 'default' };
+        const langInfo = getLanguageInfo(lang);
         return (
           <Space>
             <span>{langInfo.flag}</span>
@@ -214,7 +257,7 @@ const Translations = () => {
       ellipsis: { showTitle: false },
       render: (value) => (
         <Tooltip placement="topLeft" title={value}>
-          {value && value.length > 100 ? `${value.substring(0, 100)}...` : value}
+          {value && value.length > 100 ? `${value.substring(0, 100)}...` : (value || '-')}
         </Tooltip>
       ),
     },
@@ -265,27 +308,42 @@ const Translations = () => {
   // Missing translations columns
   const missingColumns = [
     {
-      title: 'Entity',
-      key: 'entity',
-      render: (_, record) => (
-        <Space direction="vertical" size={0}>
-          <Text strong>{record.entity_type}</Text>
-          <Text type="secondary">ID: {record.entity_id}</Text>
-        </Space>
+      title: 'Type',
+      dataIndex: 'type',
+      key: 'type',
+      width: 90,
+      render: (type) => (
+        <Tag color={type === 'entity' ? 'purple' : 'blue'}>
+          {type === 'entity' ? 'Entity' : 'Static'}
+        </Tag>
       ),
     },
     {
-      title: 'Field',
-      dataIndex: 'field_name',
-      key: 'field_name',
-      render: (text) => <Tag color="geekblue">{text}</Tag>,
+      title: 'Category',
+      dataIndex: 'category',
+      key: 'category',
+      render: (category) => <Tag color="cyan">{category}</Tag>,
+    },
+    {
+      title: 'Key',
+      key: 'key',
+      render: (_, record) => (
+        <Space direction="vertical" size={0}>
+          <Text code>{record.key}</Text>
+          {record.type === 'entity' && (
+            <Text type="secondary">
+              {record.entity_type || getEntityTypeFromCategory(record.category)} #{record.entity_id} · {record.field_name}
+            </Text>
+          )}
+        </Space>
+      ),
     },
     {
       title: 'Missing Language',
       dataIndex: 'language',
       key: 'language',
       render: (lang) => {
-        const langInfo = LANGUAGES[lang] || { name: lang, flag: '🌐', color: 'default' };
+        const langInfo = getLanguageInfo(lang);
         return (
           <Space>
             <span>{langInfo.flag}</span>
@@ -307,6 +365,7 @@ const Translations = () => {
     {
       title: 'Actions',
       key: 'actions',
+      width: 160,
       render: (_, record) => (
         <Button
           type="primary"
@@ -321,22 +380,23 @@ const Translations = () => {
   ];
 
   // Handler functions
-  const handleEdit = (record) => {
+  function handleEdit(record) {
     setSelectedTranslation(record);
     form.setFieldsValue(record);
     setIsEditModalVisible(true);
-  };
+  }
 
-  const handleCreateFromMissing = (record) => {
+  function handleCreateFromMissing(record) {
     form.setFieldsValue({
-      entity_type: record.entity_type,
-      entity_id: record.entity_id,
-      field_name: record.field_name,
+      category: record.category || 'general',
+      key: record.key,
       language: record.language,
+      value: '',
       is_active: true
     });
+    setActiveTab('translations');
     setIsCreateModalVisible(true);
-  };
+  }
 
   const handleCreateSubmit = (values) => {
     createTranslationMutation.mutate(values);
@@ -351,7 +411,7 @@ const Translations = () => {
 
   const handleSyncSubmit = (values) => {
     syncTranslationsMutation.mutate({
-      category: values.category,
+      entityType: values.entity_type,
       data: {}
     });
   };
@@ -361,13 +421,14 @@ const Translations = () => {
       const blob = await adminService.exportTranslations({
         format,
         category: categoryFilter || undefined,
-        language: languageFilter || undefined
+        language: languageFilter || undefined,
+        search: searchText || undefined
       });
       
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `translations.${format}`;
+      a.download = `translations_${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.${format}`;
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);
@@ -386,11 +447,24 @@ const Translations = () => {
     });
   };
 
+  const handleMissingTableChange = (pag) => {
+    setMissingPagination({
+      current: pag.current,
+      pageSize: pag.pageSize,
+    });
+  };
+
+  const selectedLanguageInfo = getLanguageInfo(selectedTranslation?.language);
+
   // Render completion statistics
   const renderCompletionStats = () => {
     if (completionLoading || !completionData || !completionData.data) return null;
 
     const { overall_stats, completion_stats } = completionData.data;
+    const languageBreakdown = overall_stats?.language_breakdown || {};
+    const englishStats = languageBreakdown.en || { percentage: 0, translated: 0, total: 0 };
+    const uzbekStats = languageBreakdown.uz || { percentage: 0, translated: 0, total: 0 };
+    const russianStats = languageBreakdown.ru || { percentage: 0, translated: 0, total: 0 };
 
     return (
       <div>
@@ -415,48 +489,48 @@ const Translations = () => {
             <Card>
               <Statistic
                 title="English"
-                value={overall_stats.language_breakdown.en.percentage}
+                value={englishStats.percentage}
                 precision={1}
                 suffix="%"
                 valueStyle={{ color: '#1890ff' }}
               />
-              <Text type="secondary">{overall_stats.language_breakdown.en.translated} / {overall_stats.language_breakdown.en.total}</Text>
+              <Text type="secondary">{englishStats.translated} / {englishStats.total}</Text>
             </Card>
           </Col>
           <Col span={6}>
             <Card>
               <Statistic
                 title="Uzbek"
-                value={overall_stats.language_breakdown.uz.percentage}
+                value={uzbekStats.percentage}
                 precision={1}
                 suffix="%"
                 valueStyle={{ color: '#52c41a' }}
               />
-              <Text type="secondary">{overall_stats.language_breakdown.uz.translated} / {overall_stats.language_breakdown.uz.total}</Text>
+              <Text type="secondary">{uzbekStats.translated} / {uzbekStats.total}</Text>
             </Card>
           </Col>
           <Col span={6}>
             <Card>
               <Statistic
                 title="Russian"
-                value={overall_stats.language_breakdown.ru.percentage}
+                value={russianStats.percentage}
                 precision={1}
                 suffix="%"
                 valueStyle={{ color: '#f5222d' }}
               />
-              <Text type="secondary">{overall_stats.language_breakdown.ru.translated} / {overall_stats.language_breakdown.ru.total}</Text>
+              <Text type="secondary">{russianStats.translated} / {russianStats.total}</Text>
             </Card>
           </Col>
         </Row>
 
         {completion_stats && completion_stats.length > 0 && (
-          <Card title="Completion by Entity Type" style={{ marginBottom: 24 }}>
+          <Card title="Completion by Category" style={{ marginBottom: 24 }}>
             <Row gutter={[16, 16]}>
               {completion_stats.map((stat) => (
-                <Col span={8} key={stat.entity_type}>
+                <Col span={8} key={`${stat.type}-${stat.category}`}>
                   <Card size="small">
                     <Space direction="vertical" size={0} style={{ width: '100%' }}>
-                      <Text strong>{stat.entity_type}</Text>
+                      <Text strong>{stat.display_name || stat.category}</Text>
                       <Progress 
                         percent={stat.completion_percentage} 
                         size="small"
@@ -510,7 +584,7 @@ const Translations = () => {
                   style={{ width: 150 }}
                   allowClear
                 >
-                  {CATEGORIES.map(category => (
+                  {categoryOptions.map(category => (
                     <Option key={category} value={category}>
                       {category}
                     </Option>
@@ -537,7 +611,10 @@ const Translations = () => {
                   <Button
                     type="primary"
                     icon={<PlusOutlined />}
-                    onClick={() => setIsCreateModalVisible(true)}
+                    onClick={() => {
+                      form.resetFields();
+                      setIsCreateModalVisible(true);
+                    }}
                   >
                     Add Translation
                   </Button>
@@ -620,12 +697,16 @@ const Translations = () => {
               columns={missingColumns}
               dataSource={missingData?.data?.missing_translations || []}
               loading={missingLoading}
-              rowKey={(record) => `${record.entity_type}-${record.entity_id}-${record.field_name}-${record.language}`}
+              rowKey={(record) => `${record.type}-${record.key}-${record.language}`}
               pagination={{
+                current: missingPagination.current,
+                pageSize: missingPagination.pageSize,
                 total: missingData?.meta?.total || 0,
                 showSizeChanger: true,
+                showQuickJumper: true,
                 showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} missing`,
               }}
+              onChange={handleMissingTableChange}
             />
           </Card>
         </TabPane>
@@ -655,7 +736,7 @@ const Translations = () => {
                 rules={[{ required: true, message: 'Category is required' }]}
               >
                 <Select placeholder="Select category">
-                  {CATEGORIES.map(category => (
+                  {categoryOptions.map(category => (
                     <Option key={category} value={category}>
                       {category}
                     </Option>
@@ -748,7 +829,7 @@ const Translations = () => {
           onFinish={handleEditSubmit}
         >
           <Alert
-            message={`Editing: ${selectedTranslation?.key} (${LANGUAGES[selectedTranslation?.language]?.name})`}
+            message={`Editing: ${selectedTranslation?.key} (${selectedLanguageInfo.name})`}
             type="info"
             style={{ marginBottom: 16 }}
           />
@@ -811,24 +892,33 @@ const Translations = () => {
           onFinish={handleSyncSubmit}
         >
           <Alert
-            message="Sync will create baseline translations for categories that don't have them yet."
+            message="Sync creates baseline entity translations for records that do not have them yet."
             type="info"
             style={{ marginBottom: 16 }}
           />
 
           <Form.Item
-            label="Category"
-            name="category"
-            rules={[{ required: true, message: 'Category is required' }]}
+            label="Entity Type"
+            name="entity_type"
+            rules={[{ required: true, message: 'Entity type is required' }]}
           >
-            <Select placeholder="Select category to sync">
-              {CATEGORIES.map(category => (
-                <Option key={category} value={category}>
-                  {category}
+            <Select placeholder="Select entity type to sync" disabled={entityTypes.length === 0}>
+              {entityTypes.map(entityType => (
+                <Option key={entityType} value={entityType}>
+                  {entityType}
                 </Option>
               ))}
             </Select>
           </Form.Item>
+
+          {entityTypes.length === 0 && (
+            <Alert
+              message="No entity types found to sync."
+              type="warning"
+              showIcon
+              style={{ marginBottom: 16 }}
+            />
+          )}
 
           <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
             <Space>
@@ -841,6 +931,7 @@ const Translations = () => {
               <Button 
                 type="primary" 
                 htmlType="submit"
+                disabled={entityTypes.length === 0}
                 loading={syncTranslationsMutation.isLoading}
               >
                 Sync Translations
@@ -873,7 +964,14 @@ const Translations = () => {
           layout="vertical"
           onFinish={(values) => {
             try {
-              const translations = JSON.parse(values.translations_json);
+              const parsed = JSON.parse(values.translations_json);
+              const translations = Array.isArray(parsed) ? parsed : parsed?.translations;
+
+              if (!Array.isArray(translations)) {
+                message.error('JSON must be an array or an object with a "translations" array');
+                return;
+              }
+
               importTranslationsMutation.mutate({
                 translations,
                 update_existing: values.update_existing

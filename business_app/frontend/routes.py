@@ -1091,7 +1091,7 @@ def inject_global_vars():
         'company_email': 'info@bluestream.uz',
         'company_instagram_url': current_app.config.get('COMPANY_INSTAGRAM_URL', 'https://www.instagram.com/aqua_element.uz'),
         'company_instagram_handle': current_app.config.get('COMPANY_INSTAGRAM_HANDLE', '@aqua_element.uz'),
-        'company_telegram_channel_url': current_app.config.get('COMPANY_TELEGRAM_CHANNEL_URL', 'https://t.me/@aqua_element_uz'),
+        'company_telegram_channel_url': current_app.config.get('COMPANY_TELEGRAM_CHANNEL_URL', 'https://t.me/aqua_element_uz'),
         'company_telegram_channel_handle': current_app.config.get('COMPANY_TELEGRAM_CHANNEL_HANDLE', '@aqua_element_uz'),
         'company_telegram_bot_url': current_app.config.get('COMPANY_TELEGRAM_BOT_URL', 'https://t.me/aqua_element_bot'),
         'company_telegram_bot_handle': current_app.config.get('COMPANY_TELEGRAM_BOT_HANDLE', '@aqua_element_bot'),

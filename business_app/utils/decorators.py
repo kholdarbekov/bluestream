@@ -2,6 +2,8 @@
 Custom decorators for the Water Business Platform
 """
 import json
+import hmac
+import hashlib
 from functools import wraps
 from flask import request, jsonify, g, current_app
 from flask_jwt_extended import verify_jwt_in_request, get_jwt_identity, get_jwt
@@ -9,7 +11,7 @@ import time
 from typing import List, Optional, Callable, Any
 import redis
 
-from .exceptions import UnauthorizedError, ForbiddenError, RateLimitError
+from .exceptions import UnauthorizedError, ForbiddenError, RateLimitError, NotFoundError
 from .constants import UserRole, UserStatus
 from .rbac import (
     rbac, require_permission, require_role, require_admin, require_manager_or_admin,
@@ -230,6 +232,81 @@ def manager_or_admin_required(f):
 def staff_required(f):
     """Require staff role (admin, manager, or operator)"""
     return require_roles([UserRole.ADMIN, UserRole.MANAGER, UserRole.OPERATOR])(f)
+
+
+def require_staff_roles(*required_roles: str):
+    """Require active staff account with at least one of the required staff roles."""
+    def decorator(f):
+        @wraps(f)
+        def decorated_function(*args, **kwargs):
+            current_user_id = get_jwt_identity()
+            from business_app.models.user import User
+            from business_app.services.staff_service import StaffService
+
+            user = User.query.get(current_user_id)
+            if not user:
+                raise NotFoundError("User not found", error_code='STAFF_USER_NOT_FOUND')
+
+            status_value = user.status.value if hasattr(user.status, 'value') else user.status
+            if status_value != UserStatus.ACTIVE.value:
+                raise ForbiddenError("Staff account is not active", error_code='STAFF_NO_ROLE')
+
+            staff_roles = StaffService._extract_staff_roles(user)
+            if required_roles and not any(role in staff_roles for role in required_roles):
+                raise ForbiddenError("User does not have a staff role", error_code='STAFF_NO_ROLE')
+
+            g.current_user_id = current_user_id
+            g.current_user = user
+            g.current_staff_roles = staff_roles
+            return f(*args, **kwargs)
+        return decorated_function
+    return decorator
+
+
+def verify_webhook_signature(
+    header_name: str = 'X-Bot-Webhook-Signature',
+    secret_config_key: str = 'BOT_WEBHOOK_SECRET',
+):
+    """Verify HMAC-SHA256 webhook signature for internal bot webhooks."""
+    def decorator(f):
+        @wraps(f)
+        def decorated_function(*args, **kwargs):
+            signature = request.headers.get(header_name)
+            if not signature:
+                current_app.logger.warning("Webhook called without signature")
+                return jsonify({
+                    'success': False,
+                    'message': 'Missing webhook signature'
+                }), 401
+
+            webhook_secret = current_app.config.get(secret_config_key)
+            if not webhook_secret:
+                current_app.logger.error("%s not configured", secret_config_key)
+                return jsonify({
+                    'success': False,
+                    'message': 'Webhook not properly configured'
+                }), 500
+
+            body = request.get_data()
+            expected_signature = hmac.new(
+                str(webhook_secret).encode('utf-8'),
+                body,
+                hashlib.sha256
+            ).hexdigest()
+
+            if not hmac.compare_digest(signature, expected_signature):
+                current_app.logger.warning(
+                    "Invalid webhook signature from %s",
+                    request.remote_addr,
+                )
+                return jsonify({
+                    'success': False,
+                    'message': 'Invalid signature'
+                }), 401
+
+            return f(*args, **kwargs)
+        return decorated_function
+    return decorator
 
 
 def rate_limit(max_requests: int, window_seconds: int, per: str = 'ip'):

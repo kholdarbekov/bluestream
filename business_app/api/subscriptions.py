@@ -2,40 +2,30 @@
 Subscriptions API endpoints
 This file should be placed in business_app/api/subscriptions.py
 """
-from flask import Blueprint, request, current_app, g
+from flask import Blueprint, request, current_app
 from flask_jwt_extended import jwt_required, get_jwt_identity
-from sqlalchemy import and_, or_, desc, func
-from datetime import datetime, UTC, timedelta
-
-from business_app.models.subscription import Subscription, SubscriptionItem, SubscriptionLog
-from business_app.models.product import Product
-from business_app.models.user import User, UserAddress
-from business_app.models.order import Order
 from business_app.utils.service_factory import (
-    get_subscription_service, get_payment_service, get_notification_service
+    get_subscription_service, get_notification_service
 )
 from business_app.utils.helpers import get_current_language
 from business_app.utils.translations import get_translation
 from business_app.serializers.subscription_serializers import (
-    serialize_subscription, serialize_subscription_item, serialize_subscription_billing_info,
-    serialize_subscription_statistics, serialize_subscription_preview, serialize_subscription_log,
+    serialize_subscription, serialize_subscription_item, serialize_subscription_log,
     SubscriptionSchema, SubscriptionItemSchema, CreateSubscriptionRequest, UpdateSubscriptionRequest,
     PauseSubscriptionRequest, CancelSubscriptionRequest, AddSubscriptionItemRequest,
     UpdateSubscriptionItemRequest, SubscriptionPreviewRequest, SubscriptionPreviewResponse,
     ChangePaymentMethodRequest, SkipDeliveryRequest
 )
-from business_app.utils.constants import (
-    SubscriptionStatus, PaymentMethod, NotificationType, NotificationChannel, SubscriptionFrequency
-)
+from business_app.utils.constants import NotificationType
+from business_app.utils.exceptions import NotFoundError, ValidationError, ConflictError
 from business_app.utils.pydantic_helpers import (
     validate_json_with_model, serialize_database_model, serialize_response
 )
 from business_app.utils.api_responses import (
     success_response, error_response, paginated_response, created_response,
-    not_found_response, validation_error_response, forbidden_response,
-    conflict_response, internal_error_response
+    not_found_response, conflict_response, internal_error_response
 )
-from business_app.tasks.subscription_tasks import process_subscription_billing, send_subscription_reminder
+from business_app.tasks.subscription_tasks import process_subscription_billing
 from business_app import db
 
 subscriptions_bp = Blueprint('subscriptions', __name__)
@@ -56,26 +46,12 @@ def get_subscriptions():
         status = request.args.get('status')
         billing_cycle = request.args.get('billing_cycle')
 
-        # Build query
-        query = Subscription.query.filter_by(user_id=current_user_id)
-
-        # Apply filters
-        if status:
-            try:
-                sub_status = SubscriptionStatus(status)
-                query = query.filter_by(status=sub_status)
-            except ValueError:
-                return error_response(get_translation('api.subscriptions.error.invalid_status_value'), status_code=400)
-
-        if billing_cycle:
-            query = query.filter_by(billing_cycle=billing_cycle)
-
-        # Order by creation date (newest first)
-        query = query.order_by(Subscription.created_at.desc())
-
-        # Paginate
-        pagination = query.paginate(
-            page=page, per_page=per_page, error_out=False
+        pagination = get_subscription_service().get_user_subscriptions_paginated(
+            user_id=current_user_id,
+            page=page,
+            per_page=per_page,
+            status=status,
+            billing_cycle=billing_cycle,
         )
 
         return paginated_response(
@@ -86,6 +62,8 @@ def get_subscriptions():
             additional_meta={'subscriptions_key': 'items'}
         )
 
+    except ValidationError as e:
+        return error_response(get_translation(e.message), status_code=400)
     except Exception as e:
         current_app.logger.error(f"Get subscriptions error: {e}")
         return internal_error_response(get_translation('api.subscriptions.error.get_failed'))
@@ -97,22 +75,13 @@ def get_subscription(subscription_id):
     """Get specific subscription details"""
     try:
         current_user_id = get_jwt_identity()
-
-        subscription = Subscription.query.filter_by(
-            id=subscription_id,
-            user_id=current_user_id
-        ).first()
-
-        if not subscription:
-            return not_found_response(get_translation('api.subscriptions.error.not_found'))
-
-        # Get subscription orders
-        recent_orders = Order.query.filter_by(
-            subscription_id=subscription_id
-        ).order_by(Order.created_at.desc()).limit(10).all()
-
-        # Get upcoming billing info
-        billing_info = get_subscription_service().get_billing_info(subscription_id)
+        details = get_subscription_service().get_subscription_details_for_user(
+            subscription_id=subscription_id,
+            user_id=current_user_id,
+        )
+        subscription = details['subscription']
+        recent_orders = details['recent_orders']
+        billing_info = details['billing_info']
 
         return success_response(
             data={
@@ -131,6 +100,8 @@ def get_subscription(subscription_id):
             }
         )
 
+    except NotFoundError as e:
+        return not_found_response(get_translation(e.message))
     except Exception as e:
         current_app.logger.error(f"Get subscription error: {e}")
         return internal_error_response(get_translation('api.subscriptions.error.get_failed'))
@@ -146,53 +117,14 @@ def create_subscription():
 
         # Get validated data from the decorator
         validated_data = request.validated_json
-
-        user = User.query.get(current_user_id)
-        if not user:
-            return not_found_response(get_translation('user_not_found'))
-
-        # Validate delivery address exists and belongs to user
-        delivery_address_id = validated_data.delivery_address_id
-
-        address = UserAddress.query.filter_by(
-            id=delivery_address_id,
-            user_id=current_user_id
-        ).first()
-        if not address:
-            return not_found_response(get_translation('api.subscriptions.error.invalid_delivery_address'))
-
-        # Validate delivery_time_slot_id if provided
-        if validated_data.delivery_time_slot_id:
-            from business_app.models.delivery import DeliveryTimeSlot
-            time_slot = DeliveryTimeSlot.query.get(validated_data.delivery_time_slot_id)
-            if not time_slot or not time_slot.is_active:
-                return not_found_response(get_translation('api.subscriptions.error.invalid_or_inactive_time_slot'))
-
-        # Create subscription using validated data
-        language = get_current_language()
-        subscription_data = {
-            'user_id': current_user_id,
-            'name': validated_data.name,
-            'description': validated_data.description or '',
-            'billing_cycle': validated_data.billing_cycle,  # Now a string
-            'delivery_frequency': validated_data.delivery_frequency,  # Now a string
-            'delivery_day_of_week': validated_data.delivery_day_of_week,
-            'delivery_day_of_month': validated_data.delivery_day_of_month,
-            'delivery_time_slot_id': validated_data.delivery_time_slot_id,
-            'delivery_address_id': delivery_address_id,
-            'payment_method': PaymentMethod(validated_data.payment_method),
-            'auto_payment': validated_data.auto_payment,
-            'auto_renew': validated_data.auto_renew,
-            'discount_percentage': validated_data.discount_percentage,
-            'start_date': validated_data.start_date or datetime.now(UTC),
-            'end_date': validated_data.end_date
-        }
-
-        subscription = get_subscription_service().create_subscription(subscription_data, validated_data.items)
+        subscription = get_subscription_service().create_subscription_for_user(
+            user_id=current_user_id,
+            validated_data=validated_data,
+        )
         current_app.logger.info(f"Create subscription: SUCCESSFULL get_subscription_service().create_subscription, subscription: {subscription}")
         # Send confirmation notification
         get_notification_service().send_notification(
-            user.id,
+            current_user_id,
             NotificationType.SUBSCRIPTION_CREATED,
             template_data={
                 'subscription_name': subscription.get('name'),
@@ -220,6 +152,13 @@ def create_subscription():
             message=get_translation('api.subscriptions.created')
         )
 
+    except NotFoundError as e:
+        db.session.rollback()
+        return not_found_response(get_translation(e.message))
+    except ValidationError as e:
+        db.session.rollback()
+        current_app.logger.warning(f"Create subscription validation error: {e}")
+        return error_response(get_translation(e.message), status_code=400)
     except ValueError as e:
         db.session.rollback()
         current_app.logger.warning(f"Create subscription validation error: {e}")
@@ -238,69 +177,11 @@ def update_subscription(subscription_id):
     try:
         current_user_id = get_jwt_identity()
         validated_data = request.validated_json
-
-        subscription = Subscription.query.filter_by(
-            id=subscription_id,
-            user_id=current_user_id
-        ).first()
-
-        if not subscription:
-            return not_found_response(get_translation('api.subscriptions.error.not_found'))
-
-        if subscription.status not in [SubscriptionStatus.ACTIVE, SubscriptionStatus.PAUSED]:
-            return error_response(get_translation('api.subscriptions.error.cannot_update_cancelled'), status_code=400)
-
-        # Update fields from validated data
-        changes = {}
-        update_data = validated_data.model_dump(exclude_none=True)
-
-        for field, new_value in update_data.items():
-            if hasattr(subscription, field):
-                old_value = getattr(subscription, field)
-
-                # Special validation for delivery address
-                if field == 'delivery_address_id':
-                    address = UserAddress.query.filter_by(
-                        id=new_value,
-                        user_id=current_user_id
-                    ).first()
-                    if not address:
-                        return not_found_response(get_translation('api.subscriptions.error.invalid_delivery_address'))
-
-                # Special validation for delivery time slot
-                if field == 'delivery_time_slot_id' and new_value is not None:
-                    from business_app.models.delivery import DeliveryTimeSlot
-                    time_slot = DeliveryTimeSlot.query.get(new_value)
-                    if not time_slot or not time_slot.is_active:
-                        return not_found_response(get_translation('api.subscriptions.error.invalid_or_inactive_time_slot'))
-
-                # Special handling for payment method
-                if field == 'payment_method':
-                    try:
-                        new_value = PaymentMethod(new_value)
-                    except ValueError:
-                        return error_response(get_translation('api.subscriptions.error.invalid_payment_method'), status_code=400)
-
-                setattr(subscription, field, new_value)
-                changes[field] = {'old': old_value, 'new': new_value}
-
-        subscription.updated_at = datetime.now(UTC)
-
-        # Log the changes
-        if changes:
-            log = SubscriptionLog(
-                subscription_id=subscription_id,
-                action='updated',
-                details=get_translation(
-                    'api.subscriptions.log.updated_fields',
-                    fields=', '.join(changes.keys())
-                ),
-                user_id=current_user_id,
-                extra_data={'changes': changes}
-            )
-            db.session.add(log)
-
-        db.session.commit()
+        subscription = get_subscription_service().update_subscription_for_user(
+            subscription_id=subscription_id,
+            user_id=current_user_id,
+            update_data=validated_data.model_dump(exclude_none=True),
+        )
 
         # Use Pydantic schema for response
         subscription_response = serialize_database_model(subscription, SubscriptionSchema)
@@ -310,6 +191,12 @@ def update_subscription(subscription_id):
             message=get_translation('api.subscriptions.updated')
         )
 
+    except NotFoundError as e:
+        db.session.rollback()
+        return not_found_response(get_translation(e.message))
+    except ValidationError as e:
+        db.session.rollback()
+        return error_response(get_translation(e.message), status_code=400)
     except Exception as e:
         db.session.rollback()
         current_app.logger.error(f"Update subscription error: {e}")
@@ -324,33 +211,14 @@ def pause_subscription(subscription_id):
     try:
         current_user_id = get_jwt_identity()
         validated_data = request.validated_json
-
-        subscription = Subscription.query.filter_by(
-            id=subscription_id,
-            user_id=current_user_id
-        ).first()
-
-        if not subscription:
-            return not_found_response(get_translation('api.subscriptions.error.not_found'))
-
-        if subscription.status != SubscriptionStatus.ACTIVE:
-            return error_response(get_translation('api.subscriptions.error.only_active_pause'), status_code=400)
-
         reason = validated_data.reason or get_translation('api.subscriptions.default_reason_customer_request')
         resume_date = validated_data.resume_date
-
-        # Validate resume date if provided
-        if resume_date and resume_date <= datetime.now(UTC):
-            return error_response(get_translation('api.subscriptions.error.resume_date_future'), status_code=400)
-
-        # Pause the subscription
-        subscription.pause(reason=reason, resume_date=resume_date)
-        db.session.add(SubscriptionLog(
+        subscription = get_subscription_service().pause_subscription_for_user(
             subscription_id=subscription_id,
-            action='paused',
-            details=get_translation('api.subscriptions.log.reason', reason=reason)
-        ))
-        db.session.commit()
+            user_id=current_user_id,
+            reason=reason,
+            resume_date=resume_date,
+        )
 
         # Send notification
         language = get_current_language()
@@ -383,6 +251,12 @@ def pause_subscription(subscription_id):
             message=get_translation('api.subscriptions.paused')
         )
 
+    except NotFoundError as e:
+        db.session.rollback()
+        return not_found_response(get_translation(e.message))
+    except ValidationError as e:
+        db.session.rollback()
+        return error_response(get_translation(e.message), status_code=400)
     except Exception as e:
         db.session.rollback()
         current_app.logger.error(f"Pause subscription error: {e}")
@@ -395,26 +269,10 @@ def resume_subscription(subscription_id):
     """Resume a paused subscription"""
     try:
         current_user_id = get_jwt_identity()
-
-        subscription = Subscription.query.filter_by(
-            id=subscription_id,
-            user_id=current_user_id
-        ).first()
-
-        if not subscription:
-            return not_found_response(get_translation('api.subscriptions.error.not_found'))
-
-        if subscription.status != SubscriptionStatus.PAUSED:
-            return error_response(get_translation('api.subscriptions.error.only_paused_resume'), status_code=400)
-
-        # Resume the subscription
-        subscription.resume()
-        db.session.add(SubscriptionLog(
+        subscription = get_subscription_service().resume_subscription_for_user(
             subscription_id=subscription_id,
-            action='resumed',
-            details=get_translation('api.subscriptions.log.resumed')
-        ))
-        db.session.commit()
+            user_id=current_user_id,
+        )
 
         # Send notification
         language = get_current_language()
@@ -434,6 +292,12 @@ def resume_subscription(subscription_id):
             message=get_translation('api.subscriptions.resumed')
         )
 
+    except NotFoundError as e:
+        db.session.rollback()
+        return not_found_response(get_translation(e.message))
+    except ValidationError as e:
+        db.session.rollback()
+        return error_response(get_translation(e.message), status_code=400)
     except Exception as e:
         db.session.rollback()
         current_app.logger.error(f"Resume subscription error: {e}")
@@ -449,46 +313,14 @@ def cancel_subscription(subscription_id):
         current_user_id = get_jwt_identity()
         validated_data = request.validated_json
 
-        subscription: Subscription = Subscription.query.filter_by(
-            id=subscription_id,
-            user_id=current_user_id
-        ).first()
-
-        if not subscription:
-            return not_found_response(get_translation('api.subscriptions.error.not_found'))
-
-        if subscription.status == SubscriptionStatus.CANCELLED:
-            return error_response(get_translation('api.subscriptions.error.already_cancelled'), status_code=400)
-
         reason = validated_data.reason or get_translation('api.subscriptions.default_reason_customer_request')
         immediate = validated_data.immediate
-
-        # Cancel the subscription
-        if immediate:
-            subscription.cancel(reason=reason)
-            db.session.add(SubscriptionLog(
-                subscription_id=subscription_id,
-                action='cancelled',
-                details=get_translation('api.subscriptions.log.cancelled_with_reason', reason=reason)
-            ))
-        else:
-            # Cancel at end of current billing period
-            subscription.auto_renew = False
-            subscription.end_date = subscription.next_billing_date
-
-            log = SubscriptionLog(
-                subscription_id=subscription_id,
-                action='cancellation_scheduled',
-                details=get_translation(
-                    'api.subscriptions.log.cancellation_scheduled',
-                    date=subscription.end_date.strftime('%Y-%m-%d'),
-                    reason=reason
-                ),
-                user_id=current_user_id
-            )
-            db.session.add(log)
-
-        db.session.commit()
+        subscription = get_subscription_service().cancel_subscription_for_user(
+            subscription_id=subscription_id,
+            user_id=current_user_id,
+            reason=reason,
+            immediate=immediate,
+        )
 
         # Send notification
         notification_type = NotificationType.SUBSCRIPTION_CANCELLED if immediate else NotificationType.SUBSCRIPTION_CANCELLATION_SCHEDULED
@@ -520,6 +352,12 @@ def cancel_subscription(subscription_id):
             message=message
         )
 
+    except NotFoundError as e:
+        db.session.rollback()
+        return not_found_response(get_translation(e.message))
+    except ValidationError as e:
+        db.session.rollback()
+        return error_response(get_translation(e.message), status_code=400)
     except Exception as e:
         db.session.rollback()
         current_app.logger.error(f"Cancel subscription error: {e}")
@@ -532,23 +370,21 @@ def get_subscription_items(subscription_id):
     """Get subscription items"""
     try:
         current_user_id = get_jwt_identity()
-
-        subscription = Subscription.query.filter_by(
-            id=subscription_id,
-            user_id=current_user_id
-        ).first()
-
-        if not subscription:
-            return not_found_response(get_translation('api.subscriptions.error.not_found'))
+        items = get_subscription_service().get_subscription_items_for_user(
+            subscription_id=subscription_id,
+            user_id=current_user_id,
+        )
 
         return success_response(
             data={
                 'items': [
-                    serialize_subscription_item(item) for item in subscription.subscription_items
+                    serialize_subscription_item(item) for item in items
                 ]
             }
         )
 
+    except NotFoundError as e:
+        return not_found_response(get_translation(e.message))
     except Exception as e:
         current_app.logger.error(f"Get subscription items error: {e}")
         return internal_error_response(get_translation('api.subscriptions.error.get_items_failed'))
@@ -562,71 +398,17 @@ def add_subscription_item(subscription_id):
     try:
         current_user_id = get_jwt_identity()
         validated_data = request.validated_json
-
-        subscription = Subscription.query.filter_by(
-            id=subscription_id,
-            user_id=current_user_id
-        ).first()
-
-        if not subscription:
-            return not_found_response(get_translation('api.subscriptions.error.not_found'))
-
-        if subscription.status not in [SubscriptionStatus.ACTIVE, SubscriptionStatus.PAUSED]:
-            return error_response(get_translation('api.subscriptions.error.cannot_modify_cancelled'), status_code=400)
-
-        product_id = validated_data.product_id
-        quantity = validated_data.quantity
-
-        # Validate product
-        product: Product = Product.query.filter_by(id=product_id, is_active=True).first()
-        if not product:
-            return not_found_response(get_translation('api.subscriptions.error.product_not_found'))
-
-        # Check if item already exists
-        existing_item = SubscriptionItem.query.filter_by(
-            subscription_id=subscription_id,
-            product_id=product_id
-        ).first()
-
-        if existing_item:
-            return conflict_response(get_translation('api.subscriptions.error.product_already_exists'))
-
-        # Add new item
         language = get_current_language()
-        item = SubscriptionItem(
+        item_result = get_subscription_service().add_subscription_item_for_user(
             subscription_id=subscription_id,
-            product_id=product_id,
-            quantity=quantity,
-            unit_price=product.calculate_price(),
-            special_instructions=validated_data.special_instructions
+            user_id=current_user_id,
+            product_id=validated_data.product_id,
+            quantity=validated_data.quantity,
+            special_instructions=validated_data.special_instructions,
+            language=language,
         )
-        item.calculate_total()
-        current_app.logger.info(f"Add subscription item SUCCESS: {item}")
-
-        db.session.add(item)
-        current_app.logger.info(f"Add subscription item SUCCESS after session.add: {item}")
-
-        # Recalculate subscription billing amount
-        subscription.billing_amount = subscription.get_total_value()
-        subscription.updated_at = datetime.now(UTC)
-        current_app.logger.info(f"Add subscription item subscription.get_total_value() SUCCESS: subscription.billing_amount: {subscription.billing_amount}")
-
-        # Log the change
-        product_name = product.get_translated('name', language)
-        log = SubscriptionLog(
-            subscription_id=subscription_id,
-            action='item_added',
-            details=get_translation(
-                'api.subscriptions.log.item_added',
-                quantity=quantity,
-                product=product_name
-            ),
-            user_id=current_user_id
-        )
-        db.session.add(log)
-        current_app.logger.info(f"Add subscription item SubscriptionLog SUCCESS: log: {log}")
-
-        db.session.commit()
+        item = item_result['item']
+        billing_amount = item_result['billing_amount']
 
         # Use Pydantic schema for response
         # item_response = serialize_database_model(item, SubscriptionItemSchema)
@@ -636,11 +418,20 @@ def add_subscription_item(subscription_id):
         return created_response(
             data={
                 'item': item_response,
-                'new_billing_amount': float(subscription.billing_amount)
+                'new_billing_amount': float(billing_amount)
             },
             message=get_translation('api.subscriptions.item_added')
         )
 
+    except NotFoundError as e:
+        db.session.rollback()
+        return not_found_response(get_translation(e.message))
+    except ValidationError as e:
+        db.session.rollback()
+        return error_response(get_translation(e.message), status_code=400)
+    except ConflictError as e:
+        db.session.rollback()
+        return conflict_response(get_translation(e.message))
     except Exception as e:
         db.session.rollback()
         current_app.logger.error(f"Add subscription item error: {e}")
@@ -655,61 +446,15 @@ def update_subscription_item(subscription_id, item_id):
     try:
         current_user_id = get_jwt_identity()
         validated_data = request.validated_json
-
-        subscription = Subscription.query.filter_by(
-            id=subscription_id,
-            user_id=current_user_id
-        ).first()
-
-        if not subscription:
-            return not_found_response(get_translation('api.subscriptions.error.not_found'))
-
-        if subscription.status not in [SubscriptionStatus.ACTIVE, SubscriptionStatus.PAUSED]:
-            return error_response(get_translation('api.subscriptions.error.cannot_modify_cancelled'), status_code=400)
-
-        item = SubscriptionItem.query.filter_by(
-            id=item_id,
-            subscription_id=subscription_id
-        ).first()
-
-        if not item:
-            return not_found_response(get_translation('api.subscriptions.error.item_not_found'))
-
-        new_quantity = validated_data.quantity
-
-        old_quantity = item.quantity
-        item.quantity = new_quantity
-
-        # Update special instructions if provided
-        if validated_data.special_instructions is not None:
-            item.special_instructions = validated_data.special_instructions
-
-        item.calculate_total()
-
-        # Recalculate subscription billing amount
-        subscription.billing_amount = subscription.get_total_value()
-        subscription.updated_at = datetime.now(UTC)
-
-        # Log the change
-        product_name = (
-            item.product.name
-            if item.product
-            else get_translation('api.subscriptions.unknown_product')
-        )
-        log = SubscriptionLog(
+        update_result = get_subscription_service().update_subscription_item_for_user(
             subscription_id=subscription_id,
-            action='item_updated',
-            details=get_translation(
-                'api.subscriptions.log.item_updated',
-                product=product_name,
-                old_quantity=old_quantity,
-                new_quantity=new_quantity
-            ),
-            user_id=current_user_id
+            item_id=item_id,
+            user_id=current_user_id,
+            quantity=validated_data.quantity,
+            special_instructions=validated_data.special_instructions,
         )
-        db.session.add(log)
-
-        db.session.commit()
+        item = update_result['item']
+        billing_amount = update_result['billing_amount']
 
         # Use Pydantic schema for response
         item_response = serialize_database_model(item, SubscriptionItemSchema)
@@ -717,11 +462,17 @@ def update_subscription_item(subscription_id, item_id):
         return success_response(
             data={
                 'item': item_response,
-                'new_billing_amount': float(subscription.billing_amount)
+                'new_billing_amount': float(billing_amount)
             },
             message=get_translation('api.subscriptions.item_updated')
         )
 
+    except NotFoundError as e:
+        db.session.rollback()
+        return not_found_response(get_translation(e.message))
+    except ValidationError as e:
+        db.session.rollback()
+        return error_response(get_translation(e.message), status_code=400)
     except Exception as e:
         db.session.rollback()
         current_app.logger.error(f"Update subscription item error: {e}")
@@ -734,52 +485,11 @@ def remove_subscription_item(subscription_id, item_id):
     """Remove item from subscription"""
     try:
         current_user_id = get_jwt_identity()
-
-        subscription = Subscription.query.filter_by(
-            id=subscription_id,
-            user_id=current_user_id
-        ).first()
-
-        if not subscription:
-            return not_found_response(get_translation('api.subscriptions.error.not_found'))
-
-        if subscription.status not in [SubscriptionStatus.ACTIVE, SubscriptionStatus.PAUSED]:
-            return error_response(get_translation('api.subscriptions.error.cannot_modify_cancelled'), status_code=400)
-
-        item = SubscriptionItem.query.filter_by(
-            id=item_id,
-            subscription_id=subscription_id
-        ).first()
-
-        if not item:
-            return not_found_response(get_translation('api.subscriptions.error.item_not_found'))
-
-        # Check if this is the last item
-        remaining_items = SubscriptionItem.query.filter_by(
-            subscription_id=subscription_id
-        ).filter(SubscriptionItem.id != item_id).count()
-
-        if remaining_items == 0:
-            return error_response(get_translation('api.subscriptions.error.cannot_remove_last_item'), status_code=400)
-
-        product_name = item.product.name
-
-        db.session.delete(item)
-
-        # Recalculate subscription billing amount
-        subscription.billing_amount = subscription.get_total_value()
-        subscription.updated_at = datetime.now(UTC)
-
-        # Log the change
-        log = SubscriptionLog(
+        subscription = get_subscription_service().remove_subscription_item_for_user(
             subscription_id=subscription_id,
-            action='item_removed',
-            details=get_translation('api.subscriptions.log.item_removed', product=product_name),
-            user_id=current_user_id
+            item_id=item_id,
+            user_id=current_user_id,
         )
-        db.session.add(log)
-
-        db.session.commit()
 
         return success_response(
             data={
@@ -788,6 +498,12 @@ def remove_subscription_item(subscription_id, item_id):
             message=get_translation('api.subscriptions.item_removed')
         )
 
+    except NotFoundError as e:
+        db.session.rollback()
+        return not_found_response(get_translation(e.message))
+    except ValidationError as e:
+        db.session.rollback()
+        return error_response(get_translation(e.message), status_code=400)
     except Exception as e:
         db.session.rollback()
         current_app.logger.error(f"Remove subscription item error: {e}")
@@ -800,48 +516,17 @@ def get_billing_history(subscription_id):
     """Get subscription billing history"""
     try:
         current_user_id = get_jwt_identity()
-
-        subscription = Subscription.query.filter_by(
-            id=subscription_id,
-            user_id=current_user_id
-        ).first()
-
-        if not subscription:
-            return not_found_response(get_translation('api.subscriptions.error.not_found'))
-
-        # Get payment history
-        from business_app.models.payment import Payment
-        payments = Payment.query.filter_by(
-            subscription_id=subscription_id
-        ).order_by(Payment.created_at.desc()).all()
-
-        # Get billing summary
-        total_paid = sum(p.amount for p in payments if p.status.value == 'completed')
-        failed_payments = len([p for p in payments if p.status.value == 'failed'])
-
-        return success_response(
-            data={
-                'billing_history': [
-                    {
-                        'payment_id': p.payment_id,
-                        'amount': p.amount,
-                        'status': p.status.value,
-                        'payment_method': p.payment_method.value,
-                        'created_at': p.created_at.isoformat() if p.created_at else None,
-                        'failure_reason': p.failure_reason
-                    }
-                    for p in payments
-                ],
-                'summary': {
-                    'total_paid': total_paid,
-                    'total_payments': len(payments),
-                    'failed_payments': failed_payments,
-                    'next_billing_date': subscription.next_billing_date.isoformat() if subscription.next_billing_date else None,
-                    'next_billing_amount': subscription.billing_amount
-                }
-            }
+        billing_data = get_subscription_service().get_subscription_billing_history_for_user(
+            subscription_id=subscription_id,
+            user_id=current_user_id,
         )
 
+        return success_response(
+            data=billing_data
+        )
+
+    except NotFoundError as e:
+        return not_found_response(get_translation(e.message))
     except Exception as e:
         current_app.logger.error(f"Get billing history error: {e}")
         return internal_error_response(get_translation('api.subscriptions.error.get_billing_history_failed'))
@@ -853,24 +538,14 @@ def get_subscription_logs(subscription_id):
     """Get subscription activity logs"""
     try:
         current_user_id = get_jwt_identity()
-
-        subscription = Subscription.query.filter_by(
-            id=subscription_id,
-            user_id=current_user_id
-        ).first()
-
-        if not subscription:
-            return not_found_response(get_translation('api.subscriptions.error.not_found'))
-
-        # Get query parameters
         page = int(request.args.get('page', 1))
         per_page = min(int(request.args.get('per_page', 20)), 50)
 
-        # Get logs
-        pagination = SubscriptionLog.query.filter_by(
-            subscription_id=subscription_id
-        ).order_by(SubscriptionLog.created_at.desc()).paginate(
-            page=page, per_page=per_page, error_out=False
+        pagination = get_subscription_service().get_subscription_logs_paginated_for_user(
+            subscription_id=subscription_id,
+            user_id=current_user_id,
+            page=page,
+            per_page=per_page,
         )
 
         return paginated_response(
@@ -880,6 +555,8 @@ def get_subscription_logs(subscription_id):
             total=pagination.total
         )
 
+    except NotFoundError as e:
+        return not_found_response(get_translation(e.message))
     except Exception as e:
         current_app.logger.error(f"Get subscription logs error: {e}")
         return internal_error_response(get_translation('api.subscriptions.error.get_logs_failed'))
@@ -947,15 +624,11 @@ def preview_subscription():
         current_user_id = get_jwt_identity()
         validated_data = request.validated_json
 
-        user = User.query.get(current_user_id)
-        if not user:
-            return not_found_response(get_translation('user_not_found'))
-
         # Calculate subscription preview
         preview = get_subscription_service().calculate_subscription_preview(
             user_id=current_user_id,
-            billing_cycle=validated_data.billing_cycle.value,
-            delivery_frequency=validated_data.delivery_frequency.value,
+            billing_cycle=validated_data.billing_cycle,
+            delivery_frequency=validated_data.delivery_frequency,
             items=validated_data.items,
             discount_percentage=validated_data.discount_percentage
         )
@@ -968,6 +641,8 @@ def preview_subscription():
             message=get_translation('api.subscriptions.preview_calculated')
         )
 
+    except NotFoundError as e:
+        return not_found_response(get_translation(e.message))
     except ValueError as e:
         current_app.logger.warning(f"Preview subscription validation error: {e}")
         return error_response(get_translation('api.subscriptions.error.validation_failed'), status_code=400)
@@ -982,117 +657,15 @@ def get_subscription_statistics():
     """Get user's subscription statistics"""
     try:
         current_user_id = get_jwt_identity()
-
-        # Get all user subscriptions
-        subscriptions = Subscription.query.filter_by(user_id=current_user_id).all()
-
-        # Calculate statistics
-        total_subscriptions = len(subscriptions)
-        active_subscriptions = len([s for s in subscriptions if s.status == SubscriptionStatus.ACTIVE])
-        paused_subscriptions = len([s for s in subscriptions if s.status == SubscriptionStatus.PAUSED])
-        cancelled_subscriptions = len([s for s in subscriptions if s.status == SubscriptionStatus.CANCELLED])
-
-        # Calculate total spent on subscriptions
-        total_spent = sum((s.total_amount_billed or 0) for s in subscriptions)
-
-        # Calculate savings from subscriptions
-        total_savings = sum(
-            (s.total_amount_billed or 0) * (s.discount_percentage / 100)
-            for s in subscriptions if s.discount_percentage and s.discount_percentage > 0
+        language = get_current_language()
+        statistics = get_subscription_service().get_subscription_statistics_for_user(
+            user_id=current_user_id,
+            language=language,
         )
-        
-        # Calculate total deliveries (sum of all orders generated from these subscriptions)
-        total_deliveries = sum((s.total_orders_generated or 0) for s in subscriptions)
-        
-        # Calculate average order value
-        average_order_value = 0
-        if total_deliveries > 0:
-            average_order_value = round(float(total_spent) / total_deliveries, 2)
-            
-        # Find most ordered product
-        product_counts = {}
-        for sub in subscriptions:
-            for item in sub.subscription_items:
-                if item.product:
-                    # Use English name as fallback or key, ideally we'd use ID but for display name is needed
-                    # If we want the translated name, we'd need the language here.
-                    # The endpoint does not seem to get language explicitly, but `get_current_language()` helper exists.
-                    # However, strictly aggregating by name might be risky if names change, but simplest for now.
-                    # Better to aggregate by ID and then get the name of the winner.
-                    product_id = item.product_id
-                    product_counts[product_id] = product_counts.get(product_id, 0) + item.quantity
-        
-        most_ordered_product = None
-        if product_counts:
-            most_popular_product_id = max(product_counts, key=product_counts.get)
-            # Find the product instance to get the name
-            # We can find it in the already loaded items to avoid a query
-            for sub in subscriptions:
-                for item in sub.subscription_items:
-                    if item.product_id == most_popular_product_id and item.product:
-                         # Use helpers.get_current_language() if we imported it, or just use .name
-                         # From lines 17, `get_current_language` is imported.
-                         language = get_current_language()
-                         most_ordered_product = item.product.get_translated('name', language)
-                         break
-                if most_ordered_product:
-                    break
-
-        # Get upcoming deliveries count
-        from datetime import date
-        upcoming_deliveries = 0
-        for subscription in subscriptions:
-            if subscription.status == SubscriptionStatus.ACTIVE:
-                next_delivery = subscription.calculate_next_delivery_date()
-                if next_delivery >= date.today():
-                    upcoming_deliveries += 1
-
-        # Monthly spending trend
-        monthly_spending = {}
-        for i in range(12):
-            month_start = (datetime.now(UTC).replace(day=1) - timedelta(days=32*i)).replace(day=1)
-            month_key = month_start.strftime('%Y-%m')
-
-            # Calculate subscription billings for this month
-            month_total = 0
-            for subscription in subscriptions:
-                # This is simplified - in reality you'd query actual payments
-                if (subscription.created_at.date() <= month_start.date() and
-                    (not subscription.end_date or subscription.end_date.date() >= month_start.date())):
-                    
-                    billing_amount = subscription.billing_amount or 0
-
-                    if subscription.billing_cycle == SubscriptionFrequency.MONTHLY: # Updated to use enum comparison safely if needed or ensure string consistency
-                         month_total += billing_amount
-                    elif subscription.billing_cycle == SubscriptionFrequency.WEEKLY:
-                         month_total += billing_amount * 4
-                    elif subscription.billing_cycle == SubscriptionFrequency.DAILY:
-                         month_total += billing_amount * 30
-                    # Fallback for string values if Enum comparison fails due to mixed types (though model uses Enum)
-                    elif str(subscription.billing_cycle) == 'monthly':
-                        month_total += billing_amount
-                    elif str(subscription.billing_cycle) == 'weekly':
-                        month_total += billing_amount * 4
-                    elif str(subscription.billing_cycle) == 'daily':
-                        month_total += billing_amount * 30
-
-            monthly_spending[month_key] = float(month_total)
 
         return success_response(
             data={
-                'statistics': {
-                    'total_subscriptions': total_subscriptions,
-                    'active_subscriptions': active_subscriptions,
-                    'paused_subscriptions': paused_subscriptions,
-                    'cancelled_subscriptions': cancelled_subscriptions,
-                    'total_spent': float(total_spent),
-                    'total_savings': float(total_savings),
-                    'total_deliveries': total_deliveries,
-                    'average_order_value': float(average_order_value),
-                    'most_ordered_product': most_ordered_product,
-                    'upcoming_deliveries': upcoming_deliveries,
-                    'monthly_spending_trend': monthly_spending
-                }
+                'statistics': statistics
             }
         )
 
@@ -1109,58 +682,15 @@ def skip_next_delivery(subscription_id):
     try:
         current_user_id = get_jwt_identity()
         validated_data = request.validated_json
-
-        subscription = Subscription.query.filter_by(
-            id=subscription_id,
-            user_id=current_user_id
-        ).first()
-
-        if not subscription:
-            return not_found_response(get_translation('api.subscriptions.error.not_found'))
-
-        if subscription.status != SubscriptionStatus.ACTIVE:
-            return error_response(get_translation('api.subscriptions.error.only_active_skip'), status_code=400)
-
         reason = validated_data.reason or get_translation('api.subscriptions.default_reason_customer_request')
-
-        # Calculate next delivery date after skip
-        current_next_delivery = subscription.calculate_next_delivery_date()
-
-        if subscription.delivery_frequency == 'daily':
-            new_next_delivery = current_next_delivery + timedelta(days=1)
-        elif subscription.delivery_frequency == 'weekly':
-            new_next_delivery = current_next_delivery + timedelta(weeks=1)
-        elif subscription.delivery_frequency == 'monthly':
-            # Add one month
-            if current_next_delivery.month == 12:
-                new_next_delivery = current_next_delivery.replace(
-                    year=current_next_delivery.year + 1, month=1
-                )
-            else:
-                new_next_delivery = current_next_delivery.replace(
-                    month=current_next_delivery.month + 1
-                )
-        else:
-            new_next_delivery = current_next_delivery + timedelta(days=7)  # Default to weekly
-
-        # Log the skip
-        log = SubscriptionLog(
+        skip_result = get_subscription_service().skip_next_delivery_for_user(
             subscription_id=subscription_id,
-            action='delivery_skipped',
-            details=get_translation(
-                'api.subscriptions.log.delivery_skipped',
-                date=current_next_delivery.strftime('%Y-%m-%d'),
-                reason=reason
-            ),
             user_id=current_user_id,
-            extra_data={
-                'original_delivery_date': current_next_delivery.isoformat(),
-                'new_delivery_date': new_next_delivery.isoformat(),
-                'reason': reason
-            }
+            reason=reason,
         )
-        db.session.add(log)
-        db.session.commit()
+        subscription = skip_result['subscription']
+        current_next_delivery = skip_result['original_delivery_date']
+        new_next_delivery = skip_result['new_next_delivery_date']
 
         # Send notification
         language = get_current_language()
@@ -1183,6 +713,12 @@ def skip_next_delivery(subscription_id):
             message=get_translation('api.subscriptions.next_delivery_skipped')
         )
 
+    except NotFoundError as e:
+        db.session.rollback()
+        return not_found_response(get_translation(e.message))
+    except ValidationError as e:
+        db.session.rollback()
+        return error_response(get_translation(e.message), status_code=400)
     except Exception as e:
         db.session.rollback()
         current_app.logger.error(f"Skip next delivery error: {e}")
@@ -1197,40 +733,14 @@ def change_payment_method(subscription_id):
     try:
         current_user_id = get_jwt_identity()
         validated_data = request.validated_json
-
-        subscription = Subscription.query.filter_by(
-            id=subscription_id,
-            user_id=current_user_id
-        ).first()
-
-        if not subscription:
-            return not_found_response(get_translation('api.subscriptions.error.not_found'))
-
-        if subscription.status not in [SubscriptionStatus.ACTIVE, SubscriptionStatus.PAUSED]:
-            return error_response(get_translation('api.subscriptions.error.cannot_change_payment_cancelled'), status_code=400)
-
-        try:
-            new_payment_method = PaymentMethod(validated_data.payment_method)
-        except ValueError:
-            return error_response(get_translation('api.subscriptions.error.invalid_payment_method'), status_code=400)
-
-        old_payment_method = subscription.payment_method
-        subscription.payment_method = new_payment_method
-        subscription.updated_at = datetime.now(UTC)
-
-        # Log the change
-        log = SubscriptionLog(
+        payment_change = get_subscription_service().change_payment_method_for_user(
             subscription_id=subscription_id,
-            action='payment_method_changed',
-            details=get_translation(
-                'api.subscriptions.log.payment_method_changed',
-                old_method=old_payment_method.value,
-                new_method=new_payment_method.value
-            ),
-            user_id=current_user_id
+            user_id=current_user_id,
+            payment_method=validated_data.payment_method,
         )
-        db.session.add(log)
-        db.session.commit()
+        subscription = payment_change['subscription']
+        old_payment_method = payment_change['old_payment_method']
+        new_payment_method = payment_change['new_payment_method']
 
         # Send notification
         language = get_current_language()
@@ -1251,6 +761,12 @@ def change_payment_method(subscription_id):
             message=get_translation('api.subscriptions.payment_method_updated')
         )
 
+    except NotFoundError as e:
+        db.session.rollback()
+        return not_found_response(get_translation(e.message))
+    except ValidationError as e:
+        db.session.rollback()
+        return error_response(get_translation(e.message), status_code=400)
     except Exception as e:
         db.session.rollback()
         current_app.logger.error(f"Change payment method error: {e}")
@@ -1263,21 +779,10 @@ def retry_billing(subscription_id):
     """Retry failed billing for subscription"""
     try:
         current_user_id = get_jwt_identity()
-
-        subscription = Subscription.query.filter_by(
-            id=subscription_id,
-            user_id=current_user_id
-        ).first()
-
-        if not subscription:
-            return not_found_response(get_translation('api.subscriptions.error.not_found'))
-
-        if subscription.status != SubscriptionStatus.ACTIVE:
-            return error_response(get_translation('api.subscriptions.error.only_active_retry'), status_code=400)
-
-        # Check if there are failed billing attempts
-        if subscription.failed_billing_attempts == 0:
-            return error_response(get_translation('api.subscriptions.error.no_failed_billing_to_retry'), status_code=400)
+        get_subscription_service().validate_retry_billing_for_user(
+            subscription_id=subscription_id,
+            user_id=current_user_id,
+        )
 
         # Process billing retry asynchronously
         process_subscription_billing.delay(subscription_id, retry=True)
@@ -1286,6 +791,10 @@ def retry_billing(subscription_id):
             message=get_translation('api.subscriptions.billing_retry_initiated')
         )
 
+    except NotFoundError as e:
+        return not_found_response(get_translation(e.message))
+    except ValidationError as e:
+        return error_response(get_translation(e.message), status_code=400)
     except Exception as e:
         current_app.logger.error(f"Retry billing error: {e}")
         return internal_error_response(get_translation('api.subscriptions.error.retry_billing_failed'))

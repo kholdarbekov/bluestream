@@ -64,7 +64,31 @@ async def health_handler(_request):
 
     try:
         translation_count = sum(len(keys) for keys in i18n.translations.values())
-        checks['translations'] = {'status': 'ok', 'total_count': translation_count}
+        if translation_count > 0:
+            missing = i18n.get_missing_translation_keys()
+            if not missing:
+                checks['translations'] = {'status': 'ok', 'total_count': translation_count}
+            else:
+                missing_summary = {
+                    lang: {
+                        'missing_count': len(keys),
+                        'sample': keys[:5],
+                    }
+                    for lang, keys in missing.items()
+                }
+                checks['translations'] = {
+                    'status': 'error',
+                    'total_count': translation_count,
+                    'missing_by_language': missing_summary,
+                }
+                overall_healthy = False
+        else:
+            checks['translations'] = {
+                'status': 'error',
+                'error': 'No translations loaded',
+                'total_count': 0
+            }
+            overall_healthy = False
     except Exception as e:
         checks['translations'] = {'status': 'error', 'error': str(e)}
         overall_healthy = False

@@ -10,6 +10,7 @@ from handlers.base import BaseHandler
 from keyboards.common import CommonKeyboards
 from permissions import require_auth, require_any_staff_role
 from i18n import i18n
+from utils.formatters import escape_html
 
 logger = logging.getLogger(__name__)
 
@@ -26,8 +27,12 @@ class ProfileHandler(BaseHandler):
         try:
             first_name = context.user_data.get('first_name', '')
             last_name = context.user_data.get('last_name', '')
-            full_name = f"{first_name} {last_name}".strip() or i18n.get('staff.common.not_available', language)
-            phone = context.user_data.get('phone', '')
+            full_name = escape_html(
+                f"{first_name} {last_name}".strip() or i18n.get('staff.common.not_available', language)
+            )
+            phone = escape_html(
+                context.user_data.get('phone') or i18n.get('staff.common.not_available', language)
+            )
             staff_roles = context.user_data.get('staff_roles', [])
 
             role_labels = []

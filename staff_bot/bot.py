@@ -7,6 +7,7 @@ import logging
 import signal
 import sys
 import os
+import re
 from typing import Optional
 
 # Initialize Sentry before any other imports
@@ -60,7 +61,14 @@ from handlers.operator.create_user import SELECT_LANGUAGE as CREATE_USER_LANG
 from handlers.operator.create_user import CONFIRM_CREATE
 from handlers.operator.search_user import SearchUserHandler, SEARCH_INPUT
 from handlers.operator.create_order import (
-    CreateOrderHandler, SELECT_CLIENT, ENTER_NOTES as ORDER_ENTER_NOTES, CONFIRM_ORDER
+    CreateOrderHandler,
+    SELECT_CLIENT as ORDER_SELECT_CLIENT,
+    SELECT_ADDRESS as ORDER_SELECT_ADDRESS,
+    SELECT_PRODUCTS as ORDER_SELECT_PRODUCTS,
+    SELECT_QUANTITY as ORDER_SELECT_QUANTITY,
+    SELECT_PAYMENT as ORDER_SELECT_PAYMENT,
+    ENTER_NOTES as ORDER_ENTER_NOTES,
+    CONFIRM_ORDER as ORDER_CONFIRM_ORDER,
 )
 from handlers.operator.manage_address import (
     ManageAddressHandler,
@@ -115,6 +123,7 @@ class StaffBot:
 
             # Initialize database connection
             await db_manager.connect()
+            await self._validate_database_schema()
 
             # Load translations
             await i18n.load_translations()
@@ -199,10 +208,66 @@ class StaffBot:
             logger.error(f"Failed to initialize staff bot: {e}", exc_info=True)
             raise
 
+    async def _validate_database_schema(self):
+        """Validate required DB schema for staff bot startup."""
+        skip_schema_check = os.environ.get(
+            'STAFF_SKIP_SCHEMA_CHECK', 'false'
+        ).lower() == 'true'
+        if skip_schema_check:
+            logger.warning("Skipping staff schema validation due to STAFF_SKIP_SCHEMA_CHECK=true")
+            return
+
+        required_user_columns = {'staff_roles', 'staff_bot_state'}
+        rows = await db_manager.fetchall(
+            """
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = 'users'
+              AND column_name = ANY($1::text[])
+            """,
+            list(required_user_columns),
+        )
+        existing_columns = {row['column_name'] for row in rows}
+        missing_columns = sorted(required_user_columns - existing_columns)
+        if missing_columns:
+            raise RuntimeError(
+                "Missing required users table columns for staff bot: "
+                f"{', '.join(missing_columns)}. "
+                "Apply database migrations before starting staff bot."
+            )
+
+        staff_activity_table = await db_manager.fetchval(
+            "SELECT to_regclass('public.staff_activity_log')"
+        )
+        if not staff_activity_table:
+            raise RuntimeError(
+                "Missing required table `staff_activity_log`. "
+                "Apply database migrations before starting staff bot."
+            )
+
+    @staticmethod
+    def _menu_text_pattern(translation_key: str) -> str:
+        """Regex pattern to match reply-keyboard label with or without emoji prefix."""
+        labels = []
+        for lang_code in i18n.supported_languages:
+            label = i18n.get(translation_key, lang_code).strip()
+            if label:
+                labels.append(re.escape(label))
+
+        unique_labels = sorted(set(labels), key=len, reverse=True)
+        if not unique_labels:
+            # Never match if label list is empty.
+            return r"$a"
+
+        alternatives = "|".join(unique_labels)
+        return r"^\s*(?:\S+\s+)?(?:%s)\s*$" % alternatives
+
     async def _setup_handlers(self):
         """Set up all bot handlers"""
         start_handler = StartHandler()
         language_handler = LanguageHandler()
+        self._language_handler = language_handler
 
         # Delivery handlers
         orders_pool_handler = OrdersPoolHandler()
@@ -268,9 +333,6 @@ class StaffBot:
 
         # Callback query handlers
         callback_handlers = [
-            # Main menu
-            CallbackQueryHandler(main_menu_handler, pattern="^staff_back_to_main$"),
-
             # Language / Settings
             CallbackQueryHandler(language_handler.language_menu, pattern="^staff_settings$"),
             CallbackQueryHandler(language_handler.set_language, pattern="^staff_set_language_"),
@@ -307,15 +369,7 @@ class StaffBot:
             CallbackQueryHandler(operator_orders_pool_view_handler.view_order_details, pattern=r"^staff_op_view_order_\d+$"),
             CallbackQueryHandler(operator_orders_pool_view_handler.mark_preparing, pattern=r"^staff_op_mark_preparing_\d+$"),
             CallbackQueryHandler(operator_orders_pool_view_handler.pool_pagination, pattern=r"^staff_op_pool_page_\d+$"),
-            CallbackQueryHandler(create_order_handler.start_order_for_client, pattern=r"^staff_op_order_\d+$"),
             CallbackQueryHandler(manage_address_handler.show_addresses, pattern=r"^staff_op_addresses_\d+$"),
-            CallbackQueryHandler(create_order_handler.select_address, pattern=r"^staff_op_addr_\d+$"),
-            CallbackQueryHandler(create_order_handler.select_product, pattern=r"^staff_op_product_\d+$"),
-            CallbackQueryHandler(create_order_handler.select_quantity, pattern=r"^staff_op_qty_\d+_\d+$"),
-            CallbackQueryHandler(create_order_handler.products_done, pattern="^staff_op_products_done$"),
-            CallbackQueryHandler(create_order_handler.select_payment, pattern=r"^staff_op_pay_"),
-            CallbackQueryHandler(create_order_handler.skip_notes, pattern="^staff_op_skip_notes$"),
-            CallbackQueryHandler(create_order_handler.confirm_order, pattern="^staff_op_confirm_order$"),
             CallbackQueryHandler(recent_orders_handler.show_recent_orders, pattern="^staff_recent_orders$"),
 
             # --- Common handlers ---
@@ -330,11 +384,19 @@ class StaffBot:
             self.application.add_handler(handler)
 
         # --- Operator conversation handlers ---
+        create_client_text_pattern = self._menu_text_pattern('staff.menu.create_client')
+        search_client_text_pattern = self._menu_text_pattern('staff.menu.search_client')
+        create_order_text_pattern = self._menu_text_pattern('staff.menu.create_order')
+
         # Create User conversation
         create_user_conv = ConversationHandler(
             entry_points=[
                 CallbackQueryHandler(create_user_handler.start_create_user, pattern="^staff_create_client$"),
                 CallbackQueryHandler(create_user_handler.start_create_user, pattern="^staff_op_create_user$"),
+                MessageHandler(
+                    filters.Regex(create_client_text_pattern) & ~filters.COMMAND,
+                    create_user_handler.start_create_user
+                ),
             ],
             states={
                 ENTER_PHONE: [
@@ -369,6 +431,10 @@ class StaffBot:
         search_user_conv = ConversationHandler(
             entry_points=[
                 CallbackQueryHandler(search_user_handler.start_search, pattern="^staff_search_client$"),
+                MessageHandler(
+                    filters.Regex(search_client_text_pattern) & ~filters.COMMAND,
+                    search_user_handler.start_search
+                ),
             ],
             states={
                 SEARCH_INPUT: [
@@ -386,6 +452,53 @@ class StaffBot:
             allow_reentry=True
         )
         self.application.add_handler(search_user_conv)
+
+        # Create Order conversation
+        create_order_conv = ConversationHandler(
+            entry_points=[
+                CallbackQueryHandler(create_order_handler.start_create_order, pattern="^staff_create_order$"),
+                CallbackQueryHandler(create_order_handler.start_order_for_client, pattern=r"^staff_op_order_\d+$"),
+                MessageHandler(
+                    filters.Regex(create_order_text_pattern) & ~filters.COMMAND,
+                    create_order_handler.start_create_order
+                ),
+            ],
+            states={
+                ORDER_SELECT_CLIENT: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, create_order_handler.receive_client_search)
+                ],
+                ORDER_SELECT_ADDRESS: [
+                    CallbackQueryHandler(create_order_handler.select_address, pattern=r"^staff_op_addr_\d+$"),
+                ],
+                ORDER_SELECT_PRODUCTS: [
+                    CallbackQueryHandler(create_order_handler.select_product, pattern=r"^staff_op_product_\d+$"),
+                    CallbackQueryHandler(create_order_handler.products_done, pattern="^staff_op_products_done$"),
+                ],
+                ORDER_SELECT_QUANTITY: [
+                    CallbackQueryHandler(create_order_handler.select_quantity, pattern=r"^staff_op_qty_\d+_\d+$"),
+                ],
+                ORDER_SELECT_PAYMENT: [
+                    CallbackQueryHandler(create_order_handler.select_payment, pattern=r"^staff_op_pay_"),
+                ],
+                ORDER_ENTER_NOTES: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, create_order_handler.receive_notes),
+                    CallbackQueryHandler(create_order_handler.skip_notes, pattern="^staff_op_skip_notes$"),
+                ],
+                ORDER_CONFIRM_ORDER: [
+                    CallbackQueryHandler(create_order_handler.confirm_order, pattern="^staff_op_confirm_order$"),
+                ],
+            },
+            fallbacks=[
+                CommandHandler("cancel", create_order_handler.cancel),
+                CallbackQueryHandler(create_order_handler.cancel, pattern="^staff_back_to_main$"),
+            ],
+            per_chat=True,
+            per_user=True,
+            name="staff_create_order",
+            conversation_timeout=300,
+            allow_reentry=True
+        )
+        self.application.add_handler(create_order_conv)
 
         # Add Address conversation
         add_address_conv = ConversationHandler(
@@ -420,6 +533,12 @@ class StaffBot:
             allow_reentry=True
         )
         self.application.add_handler(add_address_conv)
+
+        # Keep main-menu back handler after conversations so their fallbacks can run.
+        self.application.add_handler(
+            CallbackQueryHandler(main_menu_handler, pattern="^staff_back_to_main$"),
+            group=1
+        )
 
         # Location handler for live location updates
         self.application.add_handler(
@@ -481,9 +600,6 @@ class StaffBot:
             i18n.get('staff.menu.active_deliveries', language): 'staff_active_deliveries',
             i18n.get('staff.menu.delivery_history', language): 'staff_delivery_history',
             i18n.get('staff.menu.my_stats', language): 'staff_my_stats',
-            i18n.get('staff.menu.create_client', language): 'staff_create_client',
-            i18n.get('staff.menu.create_order', language): 'staff_create_order',
-            i18n.get('staff.menu.search_client', language): 'staff_search_client',
             i18n.get('staff.menu.recent_orders', language): 'staff_recent_orders',
             i18n.get('staff.menu.profile', language): 'staff_profile',
             i18n.get('staff.menu.settings', language): 'staff_settings',
@@ -509,9 +625,6 @@ class StaffBot:
                 'staff_my_stats': self._delivery_handlers['history'].show_stats,
                 # Operator
                 'staff_op_new_orders': self._operator_handlers['orders_pool_view'].show_pool,
-                'staff_create_client': self._operator_handlers['create_user'].start_create_user,
-                'staff_create_order': self._operator_handlers['create_order'].start_create_order,
-                'staff_search_client': self._operator_handlers['search_user'].start_search,
                 'staff_recent_orders': self._operator_handlers['recent_orders'].show_recent_orders,
                 # Common
                 'staff_profile': self._common_handlers['profile'].show_profile,
@@ -523,8 +636,7 @@ class StaffBot:
             if handler_func:
                 await handler_func(update, context)
             elif action == 'staff_settings':
-                # Settings is handled via callback queries, prompt user to use inline menu
-                await main_menu_handler(update, context)
+                await self._language_handler.language_menu(update, context)
         else:
             # Unknown text input
             await main_menu_handler(update, context)

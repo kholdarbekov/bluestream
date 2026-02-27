@@ -10,8 +10,8 @@ from handlers.base import BaseHandler
 from api_client import api_client
 from keyboards.operator import OperatorKeyboards
 from keyboards.common import CommonKeyboards
-from utils.formatters import format_currency
-from utils.validators import validate_quantity
+from utils.formatters import format_currency, escape_html
+from utils.search import detect_search_type
 from permissions import require_auth, require_operator
 from i18n import i18n
 
@@ -90,10 +90,12 @@ class CreateOrderHandler(BaseHandler):
             text = i18n.get('staff.operator.select_address', language)
             keyboard = OperatorKeyboards.address_list(language, addresses, client_id)
             await query.edit_message_text(text, reply_markup=keyboard, parse_mode='HTML')
+            return SELECT_ADDRESS
 
         except Exception as e:
             logger.error(f"Error starting order for client: {e}", exc_info=True)
             await self._handle_error(update, context)
+            return ConversationHandler.END
 
     async def receive_client_search(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Search for client by phone/name"""
@@ -106,8 +108,11 @@ class CreateOrderHandler(BaseHandler):
         query_text = update.message.text.strip()
 
         try:
+            search_type = detect_search_type(query_text)
             async with api_client as client:
-                response = await client.search_clients(token, query_text)
+                response = await client.search_clients(
+                    token, query_text, search_type=search_type
+                )
 
             if not response.success:
                 await self._handle_api_response_error(update, response, language)
@@ -116,7 +121,11 @@ class CreateOrderHandler(BaseHandler):
             clients = response.data if isinstance(response.data, list) else response.data.get('items', [])
 
             if not clients:
-                text = i18n.get('staff.operator.no_results', language, query=query_text)
+                text = i18n.get(
+                    'staff.operator.no_results',
+                    language,
+                    query=escape_html(query_text),
+                )
                 keyboard = OperatorKeyboards.user_not_found(language)
                 await update.message.reply_text(
                     text, reply_markup=keyboard, parse_mode='HTML'
@@ -181,10 +190,12 @@ class CreateOrderHandler(BaseHandler):
 
             keyboard = OperatorKeyboards.product_list(language, products)
             await query.edit_message_text(text, reply_markup=keyboard, parse_mode='HTML')
+            return SELECT_PRODUCTS
 
         except Exception as e:
             logger.error(f"Error selecting address: {e}", exc_info=True)
             await self._handle_error(update, context)
+            return ConversationHandler.END
 
     async def select_product(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle product selection - show quantity picker"""
@@ -205,24 +216,25 @@ class CreateOrderHandler(BaseHandler):
             context.user_data['selecting_product_id'] = product_id
 
             text = (
-                f"\U0001f4e6 <b>{product.get('name', '')}</b>\n"
+                f"\U0001f4e6 <b>{escape_html(product.get('name', ''))}</b>\n"
                 f"\U0001f4b0 {format_currency(product.get('price', 0), language=language)}\n\n"
                 f"{i18n.get('staff.operator.select_quantity', language)}"
             )
 
             keyboard = OperatorKeyboards.quantity_selection(language, product_id)
             await query.edit_message_text(text, reply_markup=keyboard, parse_mode='HTML')
+            return SELECT_QUANTITY
 
         except Exception as e:
             logger.error(f"Error selecting product: {e}", exc_info=True)
             await self._handle_error(update, context)
+            return ConversationHandler.END
 
     async def select_quantity(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle quantity selection - add to cart"""
         query = update.callback_query
         await query.answer()
         language = await self._get_language(update, context)
-        token = await self._get_auth_token(update, context)
 
         try:
             # Parse: staff_op_qty_{product_id}_{qty}
@@ -253,10 +265,12 @@ class CreateOrderHandler(BaseHandler):
             all_products = list(products.values())
             keyboard = OperatorKeyboards.product_list(language, all_products)
             await query.edit_message_text(text, reply_markup=keyboard, parse_mode='HTML')
+            return SELECT_PRODUCTS
 
         except Exception as e:
             logger.error(f"Error selecting quantity: {e}", exc_info=True)
             await self._handle_error(update, context)
+            return ConversationHandler.END
 
     async def products_done(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Done selecting products - move to payment selection"""
@@ -279,6 +293,7 @@ class CreateOrderHandler(BaseHandler):
 
         keyboard = OperatorKeyboards.payment_methods(language)
         await query.edit_message_text(text, reply_markup=keyboard, parse_mode='HTML')
+        return SELECT_PAYMENT
 
     async def select_payment(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle payment method selection"""
@@ -337,7 +352,7 @@ class CreateOrderHandler(BaseHandler):
 
         notes = order_data.get('delivery_notes')
         if notes:
-            text += f"\n\U0001f4ac {notes}"
+            text += f"\n\U0001f4ac {escape_html(notes)}"
 
         text += f"\n\n{i18n.get('staff.operator.confirm_order_prompt', language)}"
 
@@ -384,7 +399,7 @@ class CreateOrderHandler(BaseHandler):
 
             if not response.success:
                 await self._handle_api_response_error(update, response, language)
-                return ConversationHandler.END
+                return CONFIRM_ORDER
 
             result = response.data or {}
             order_number = result.get('order_number') or i18n.get('staff.common.not_available', language)
@@ -398,6 +413,7 @@ class CreateOrderHandler(BaseHandler):
         except Exception as e:
             logger.error(f"Error creating order: {e}", exc_info=True)
             await self._handle_error(update, context)
+            return CONFIRM_ORDER
 
         context.user_data.pop('new_order', None)
         context.user_data.pop('available_products', None)
@@ -415,7 +431,7 @@ class CreateOrderHandler(BaseHandler):
         subtotal = 0
 
         for item in items:
-            name = item.get('name', '')
+            name = escape_html(item.get('name', ''))
             qty = item.get('quantity', 1)
             price = item.get('price', 0)
             item_total = price * qty

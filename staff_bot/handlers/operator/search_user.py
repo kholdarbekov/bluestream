@@ -10,7 +10,8 @@ from handlers.base import BaseHandler
 from api_client import api_client
 from keyboards.operator import OperatorKeyboards
 from keyboards.common import CommonKeyboards
-from utils.formatters import format_user_card
+from utils.formatters import format_user_card, escape_html
+from utils.search import detect_search_type
 from permissions import require_auth, require_operator
 from i18n import i18n
 
@@ -57,8 +58,11 @@ class SearchUserHandler(BaseHandler):
             return SEARCH_INPUT
 
         try:
+            search_type = detect_search_type(query_text)
             async with api_client as client:
-                response = await client.search_clients(token, query_text)
+                response = await client.search_clients(
+                    token, query_text, search_type=search_type
+                )
 
             if not response.success:
                 if response.status_code == 401:
@@ -70,7 +74,11 @@ class SearchUserHandler(BaseHandler):
             clients = response.data if isinstance(response.data, list) else response.data.get('items', [])
 
             if not clients:
-                text = i18n.get('staff.operator.no_results', language, query=query_text)
+                text = i18n.get(
+                    'staff.operator.no_results',
+                    language,
+                    query=escape_html(query_text),
+                )
                 keyboard = OperatorKeyboards.user_not_found(language)
                 await update.message.reply_text(
                     text, reply_markup=keyboard, parse_mode='HTML'

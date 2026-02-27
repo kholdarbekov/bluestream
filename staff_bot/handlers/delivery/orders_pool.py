@@ -10,7 +10,7 @@ from handlers.base import BaseHandler
 from api_client import api_client
 from keyboards.delivery import DeliveryKeyboards
 from keyboards.common import CommonKeyboards
-from utils.formatters import format_order_card, format_currency
+from utils.formatters import format_order_card, format_currency, escape_html
 from permissions import require_auth, require_delivery_driver
 from i18n import i18n
 
@@ -144,7 +144,7 @@ class OrdersPoolHandler(BaseHandler):
                 return
 
             # Build detailed view
-            order_number = order.get('order_number') or i18n.get('staff.common.not_available', language)
+            order_number = escape_html(order.get('order_number') or i18n.get('staff.common.not_available', language))
             lines = [f"\U0001f4e6 <b>#{order_number}</b>\n"]
 
             # Items
@@ -152,7 +152,7 @@ class OrdersPoolHandler(BaseHandler):
             if items:
                 lines.append(f"<b>{i18n.get('staff.delivery.items', language)}:</b>")
                 for item in items:
-                    name = item.get('product_name', item.get('name', ''))
+                    name = escape_html(item.get('product_name', item.get('name', '')))
                     qty = item.get('quantity', 1)
                     price = format_currency(
                         item.get('total_price', item.get('price', 0)),
@@ -162,8 +162,8 @@ class OrdersPoolHandler(BaseHandler):
                 lines.append("")
 
             # Customer info
-            customer_name = order.get('customer_name', '')
-            customer_phone = order.get('customer_phone', '')
+            customer_name = escape_html(order.get('customer_name', ''))
+            customer_phone = escape_html(order.get('customer_phone', ''))
             if customer_name or customer_phone:
                 contact = f"\U0001f464 {customer_name}"
                 if customer_phone:
@@ -171,15 +171,15 @@ class OrdersPoolHandler(BaseHandler):
                 lines.append(contact)
 
             # Address
-            district = order.get('district', '')
-            address = order.get('address', '')
+            district = escape_html(order.get('district', ''))
+            address = escape_html(order.get('address', ''))
             if district:
                 lines.append(f"\U0001f4cd {district}")
             if address:
                 lines.append(f"    {address}")
 
             # Delivery time
-            time_slot = order.get('time_slot', '')
+            time_slot = escape_html(order.get('time_slot', ''))
             if time_slot:
                 lines.append(f"\U0001f550 {time_slot}")
 
@@ -195,7 +195,7 @@ class OrdersPoolHandler(BaseHandler):
             # Delivery notes
             notes = order.get('delivery_notes', '')
             if notes:
-                lines.append(f"\U0001f4ac {notes}")
+                lines.append(f"\U0001f4ac {escape_html(notes)}")
 
             text = '\n'.join(lines)
             order_id = order.get('order_id')

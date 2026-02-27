@@ -2,16 +2,20 @@
 Subscription service for the Water Business Platform
 Handles recurring water delivery subscriptions
 """
-from datetime import datetime, timezone, timedelta, time
+from datetime import UTC, date, datetime, timezone, timedelta, time
 from typing import List, Dict, Any, Optional
 from flask import current_app
 from dateutil.relativedelta import relativedelta
 
-from business_app.models.subscription import Subscription, SubscriptionItem
-from business_app.models.user import User
+from business_app.models.subscription import Subscription, SubscriptionItem, SubscriptionLog
+from business_app.models.user import User, UserAddress
 from business_app.models.product import Product
+from business_app.models.order import Order
+from business_app.models.payment import Payment
+from business_app.models.delivery import DeliveryTimeSlot
 from business_app.utils.exceptions import ValidationError, NotFoundError, ConflictError
 from business_app.utils.constants import SubscriptionStatus, SubscriptionFrequency, PaymentMethod
+from business_app.utils.translations import get_translation
 from sqlalchemy.orm import joinedload
 from business_app import db
 
@@ -460,6 +464,667 @@ class SubscriptionService:
             'average_subscription_value': round(avg_subscription_value, 2),
             'frequency_breakdown': self._get_frequency_breakdown(subscriptions)
         }
+
+    def get_user_subscriptions_paginated(
+        self,
+        user_id: int,
+        page: int,
+        per_page: int,
+        status: Optional[str] = None,
+        billing_cycle: Optional[str] = None,
+    ):
+        """Get user subscriptions with filtering and pagination."""
+        query = Subscription.query.filter_by(user_id=user_id)
+
+        if status:
+            try:
+                query = query.filter_by(status=SubscriptionStatus(status))
+            except ValueError as exc:
+                raise ValidationError("api.subscriptions.error.invalid_status_value") from exc
+
+        if billing_cycle:
+            query = query.filter_by(billing_cycle=billing_cycle)
+
+        return query.order_by(Subscription.created_at.desc()).paginate(
+            page=page,
+            per_page=per_page,
+            error_out=False,
+        )
+
+    def get_subscription_details_for_user(self, subscription_id: int, user_id: int) -> Dict[str, Any]:
+        """Get full subscription details for a specific user-owned subscription."""
+        subscription = self._get_user_subscription_or_raise(subscription_id, user_id)
+        recent_orders = (
+            Order.query.filter_by(subscription_id=subscription_id)
+            .order_by(Order.created_at.desc())
+            .limit(10)
+            .all()
+        )
+        billing_info = self.get_billing_info(subscription_id)
+
+        return {
+            "subscription": subscription,
+            "recent_orders": recent_orders,
+            "billing_info": billing_info,
+        }
+
+    def create_subscription_for_user(self, user_id: int, validated_data: Any) -> Dict[str, Any]:
+        """Validate ownership/dependencies and create a subscription for a user."""
+        user = User.query.get(user_id)
+        if not user:
+            raise NotFoundError("user_not_found")
+
+        address = UserAddress.query.filter_by(
+            id=validated_data.delivery_address_id,
+            user_id=user_id,
+        ).first()
+        if not address:
+            raise NotFoundError("api.subscriptions.error.invalid_delivery_address")
+
+        if validated_data.delivery_time_slot_id:
+            time_slot = DeliveryTimeSlot.query.get(validated_data.delivery_time_slot_id)
+            if not time_slot or not time_slot.is_active:
+                raise NotFoundError("api.subscriptions.error.invalid_or_inactive_time_slot")
+
+        try:
+            payment_method = PaymentMethod(validated_data.payment_method)
+        except ValueError as exc:
+            raise ValidationError("api.subscriptions.error.invalid_payment_method") from exc
+
+        subscription_data = {
+            "user_id": user_id,
+            "name": validated_data.name,
+            "description": validated_data.description or "",
+            "billing_cycle": validated_data.billing_cycle,
+            "delivery_frequency": validated_data.delivery_frequency,
+            "delivery_day_of_week": validated_data.delivery_day_of_week,
+            "delivery_day_of_month": validated_data.delivery_day_of_month,
+            "delivery_time_slot_id": validated_data.delivery_time_slot_id,
+            "delivery_address_id": validated_data.delivery_address_id,
+            "payment_method": payment_method,
+            "auto_payment": validated_data.auto_payment,
+            "auto_renew": validated_data.auto_renew,
+            "discount_percentage": validated_data.discount_percentage,
+            "start_date": validated_data.start_date or datetime.now(UTC),
+            "end_date": validated_data.end_date,
+        }
+
+        return self.create_subscription(subscription_data, validated_data.items)
+
+    def update_subscription_for_user(
+        self,
+        subscription_id: int,
+        user_id: int,
+        update_data: Dict[str, Any],
+    ) -> Subscription:
+        """Update a user-owned subscription."""
+        subscription = self._get_user_subscription_or_raise(subscription_id, user_id)
+
+        if subscription.status not in [SubscriptionStatus.ACTIVE, SubscriptionStatus.PAUSED]:
+            raise ValidationError("api.subscriptions.error.cannot_update_cancelled")
+
+        changes = {}
+        for field, new_value in update_data.items():
+            if not hasattr(subscription, field):
+                continue
+
+            old_value = getattr(subscription, field)
+            if field == "delivery_address_id":
+                address = UserAddress.query.filter_by(id=new_value, user_id=user_id).first()
+                if not address:
+                    raise NotFoundError("api.subscriptions.error.invalid_delivery_address")
+
+            if field == "delivery_time_slot_id" and new_value is not None:
+                time_slot = DeliveryTimeSlot.query.get(new_value)
+                if not time_slot or not time_slot.is_active:
+                    raise NotFoundError("api.subscriptions.error.invalid_or_inactive_time_slot")
+
+            if field == "payment_method":
+                try:
+                    new_value = PaymentMethod(new_value)
+                except ValueError as exc:
+                    raise ValidationError("api.subscriptions.error.invalid_payment_method") from exc
+
+            setattr(subscription, field, new_value)
+            changes[field] = {
+                "old": self._serialize_for_log(old_value),
+                "new": self._serialize_for_log(new_value),
+            }
+
+        subscription.updated_at = datetime.now(UTC)
+        if changes:
+            log = SubscriptionLog(
+                subscription_id=subscription_id,
+                action="updated",
+                details=get_translation(
+                    "api.subscriptions.log.updated_fields",
+                    fields=", ".join(changes.keys()),
+                ),
+                user_id=user_id,
+                extra_data={"changes": changes},
+            )
+            db.session.add(log)
+
+        db.session.commit()
+        return subscription
+
+    def pause_subscription_for_user(
+        self,
+        subscription_id: int,
+        user_id: int,
+        reason: str,
+        resume_date: Optional[datetime] = None,
+    ) -> Subscription:
+        """Pause a user-owned subscription."""
+        subscription = self._get_user_subscription_or_raise(subscription_id, user_id)
+        if subscription.status != SubscriptionStatus.ACTIVE:
+            raise ValidationError("api.subscriptions.error.only_active_pause")
+
+        if resume_date and resume_date <= datetime.now(UTC):
+            raise ValidationError("api.subscriptions.error.resume_date_future")
+
+        subscription.pause(reason=reason, resume_date=resume_date)
+        db.session.add(
+            SubscriptionLog(
+                subscription_id=subscription_id,
+                action="paused",
+                details=get_translation("api.subscriptions.log.reason", reason=reason),
+            )
+        )
+        db.session.commit()
+        return subscription
+
+    def resume_subscription_for_user(self, subscription_id: int, user_id: int) -> Subscription:
+        """Resume a paused user-owned subscription."""
+        subscription = self._get_user_subscription_or_raise(subscription_id, user_id)
+        if subscription.status != SubscriptionStatus.PAUSED:
+            raise ValidationError("api.subscriptions.error.only_paused_resume")
+
+        subscription.resume()
+        db.session.add(
+            SubscriptionLog(
+                subscription_id=subscription_id,
+                action="resumed",
+                details=get_translation("api.subscriptions.log.resumed"),
+            )
+        )
+        db.session.commit()
+        return subscription
+
+    def cancel_subscription_for_user(
+        self,
+        subscription_id: int,
+        user_id: int,
+        reason: str,
+        immediate: bool,
+    ) -> Subscription:
+        """Cancel a user-owned subscription."""
+        subscription = self._get_user_subscription_or_raise(subscription_id, user_id)
+        if subscription.status == SubscriptionStatus.CANCELLED:
+            raise ValidationError("api.subscriptions.error.already_cancelled")
+
+        if immediate:
+            subscription.cancel(reason=reason)
+            db.session.add(
+                SubscriptionLog(
+                    subscription_id=subscription_id,
+                    action="cancelled",
+                    details=get_translation(
+                        "api.subscriptions.log.cancelled_with_reason",
+                        reason=reason,
+                    ),
+                )
+            )
+        else:
+            subscription.auto_renew = False
+            subscription.end_date = subscription.next_billing_date
+            db.session.add(
+                SubscriptionLog(
+                    subscription_id=subscription_id,
+                    action="cancellation_scheduled",
+                    details=get_translation(
+                        "api.subscriptions.log.cancellation_scheduled",
+                        date=subscription.end_date.strftime("%Y-%m-%d"),
+                        reason=reason,
+                    ),
+                    user_id=user_id,
+                )
+            )
+
+        db.session.commit()
+        return subscription
+
+    def get_subscription_items_for_user(self, subscription_id: int, user_id: int) -> List[SubscriptionItem]:
+        """Get subscription items for a user-owned subscription."""
+        subscription = self._get_user_subscription_or_raise(subscription_id, user_id)
+        return subscription.subscription_items
+
+    def add_subscription_item_for_user(
+        self,
+        subscription_id: int,
+        user_id: int,
+        product_id: int,
+        quantity: int,
+        special_instructions: Optional[str] = None,
+        language: str = "en",
+    ) -> Dict[str, Any]:
+        """Add an item to a user-owned subscription."""
+        subscription = self._get_user_subscription_or_raise(subscription_id, user_id)
+        if subscription.status not in [SubscriptionStatus.ACTIVE, SubscriptionStatus.PAUSED]:
+            raise ValidationError("api.subscriptions.error.cannot_modify_cancelled")
+
+        product = Product.query.filter_by(id=product_id, is_active=True).first()
+        if not product:
+            raise NotFoundError("api.subscriptions.error.product_not_found")
+
+        existing_item = SubscriptionItem.query.filter_by(
+            subscription_id=subscription_id,
+            product_id=product_id,
+        ).first()
+        if existing_item:
+            raise ConflictError("api.subscriptions.error.product_already_exists")
+
+        item = SubscriptionItem(
+            subscription_id=subscription_id,
+            product_id=product_id,
+            quantity=quantity,
+            unit_price=product.calculate_price(),
+            special_instructions=special_instructions,
+        )
+        item.calculate_total()
+        db.session.add(item)
+        db.session.flush()
+
+        subscription.billing_amount = subscription.get_total_value()
+        subscription.updated_at = datetime.now(UTC)
+
+        product_name = product.get_translated("name", language)
+        db.session.add(
+            SubscriptionLog(
+                subscription_id=subscription_id,
+                action="item_added",
+                details=get_translation(
+                    "api.subscriptions.log.item_added",
+                    quantity=quantity,
+                    product=product_name,
+                ),
+                user_id=user_id,
+            )
+        )
+        db.session.commit()
+
+        return {
+            "item": item,
+            "billing_amount": subscription.billing_amount,
+        }
+
+    def update_subscription_item_for_user(
+        self,
+        subscription_id: int,
+        item_id: int,
+        user_id: int,
+        quantity: int,
+        special_instructions: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Update a subscription item for a user-owned subscription."""
+        subscription = self._get_user_subscription_or_raise(subscription_id, user_id)
+        if subscription.status not in [SubscriptionStatus.ACTIVE, SubscriptionStatus.PAUSED]:
+            raise ValidationError("api.subscriptions.error.cannot_modify_cancelled")
+
+        item = SubscriptionItem.query.filter_by(
+            id=item_id,
+            subscription_id=subscription_id,
+        ).first()
+        if not item:
+            raise NotFoundError("api.subscriptions.error.item_not_found")
+
+        old_quantity = item.quantity
+        item.quantity = quantity
+        if special_instructions is not None:
+            item.special_instructions = special_instructions
+
+        item.calculate_total()
+        db.session.flush()
+
+        subscription.billing_amount = subscription.get_total_value()
+        subscription.updated_at = datetime.now(UTC)
+
+        product_name = (
+            item.product.name if item.product else get_translation("api.subscriptions.unknown_product")
+        )
+        db.session.add(
+            SubscriptionLog(
+                subscription_id=subscription_id,
+                action="item_updated",
+                details=get_translation(
+                    "api.subscriptions.log.item_updated",
+                    product=product_name,
+                    old_quantity=old_quantity,
+                    new_quantity=quantity,
+                ),
+                user_id=user_id,
+            )
+        )
+        db.session.commit()
+
+        return {
+            "item": item,
+            "billing_amount": subscription.billing_amount,
+        }
+
+    def remove_subscription_item_for_user(
+        self,
+        subscription_id: int,
+        item_id: int,
+        user_id: int,
+    ) -> Subscription:
+        """Remove an item from a user-owned subscription."""
+        subscription = self._get_user_subscription_or_raise(subscription_id, user_id)
+        if subscription.status not in [SubscriptionStatus.ACTIVE, SubscriptionStatus.PAUSED]:
+            raise ValidationError("api.subscriptions.error.cannot_modify_cancelled")
+
+        item = SubscriptionItem.query.filter_by(
+            id=item_id,
+            subscription_id=subscription_id,
+        ).first()
+        if not item:
+            raise NotFoundError("api.subscriptions.error.item_not_found")
+
+        remaining_items = (
+            SubscriptionItem.query.filter_by(subscription_id=subscription_id)
+            .filter(SubscriptionItem.id != item_id)
+            .count()
+        )
+        if remaining_items == 0:
+            raise ValidationError("api.subscriptions.error.cannot_remove_last_item")
+
+        product_name = item.product.name if item.product else get_translation("api.subscriptions.unknown_product")
+        db.session.delete(item)
+        db.session.flush()
+
+        subscription.billing_amount = subscription.get_total_value()
+        subscription.updated_at = datetime.now(UTC)
+        db.session.add(
+            SubscriptionLog(
+                subscription_id=subscription_id,
+                action="item_removed",
+                details=get_translation("api.subscriptions.log.item_removed", product=product_name),
+                user_id=user_id,
+            )
+        )
+        db.session.commit()
+        return subscription
+
+    def get_subscription_billing_history_for_user(self, subscription_id: int, user_id: int) -> Dict[str, Any]:
+        """Get billing history payload for a user-owned subscription."""
+        subscription = self._get_user_subscription_or_raise(subscription_id, user_id)
+        payments = (
+            Payment.query.filter_by(subscription_id=subscription_id)
+            .order_by(Payment.created_at.desc())
+            .all()
+        )
+
+        total_paid = sum(
+            float(payment.amount)
+            for payment in payments
+            if getattr(payment.status, "value", payment.status) == "completed"
+        )
+        failed_payments = len(
+            [
+                payment
+                for payment in payments
+                if getattr(payment.status, "value", payment.status) == "failed"
+            ]
+        )
+
+        return {
+            "billing_history": [
+                {
+                    "payment_id": payment.payment_id,
+                    "amount": payment.amount,
+                    "status": payment.status.value,
+                    "payment_method": payment.payment_method.value,
+                    "created_at": payment.created_at.isoformat() if payment.created_at else None,
+                    "failure_reason": payment.failure_reason,
+                }
+                for payment in payments
+            ],
+            "summary": {
+                "total_paid": total_paid,
+                "total_payments": len(payments),
+                "failed_payments": failed_payments,
+                "next_billing_date": (
+                    subscription.next_billing_date.isoformat()
+                    if subscription.next_billing_date
+                    else None
+                ),
+                "next_billing_amount": subscription.billing_amount,
+            },
+        }
+
+    def get_subscription_logs_paginated_for_user(
+        self,
+        subscription_id: int,
+        user_id: int,
+        page: int,
+        per_page: int,
+    ):
+        """Get paginated logs for a user-owned subscription."""
+        self._get_user_subscription_or_raise(subscription_id, user_id)
+        return (
+            SubscriptionLog.query.filter_by(subscription_id=subscription_id)
+            .order_by(SubscriptionLog.created_at.desc())
+            .paginate(page=page, per_page=per_page, error_out=False)
+        )
+
+    def get_subscription_statistics_for_user(self, user_id: int, language: str = "en") -> Dict[str, Any]:
+        """Calculate subscription statistics for a user."""
+        subscriptions = Subscription.query.filter_by(user_id=user_id).all()
+
+        total_subscriptions = len(subscriptions)
+        active_subscriptions = len(
+            [subscription for subscription in subscriptions if subscription.status == SubscriptionStatus.ACTIVE]
+        )
+        paused_subscriptions = len(
+            [subscription for subscription in subscriptions if subscription.status == SubscriptionStatus.PAUSED]
+        )
+        cancelled_subscriptions = len(
+            [subscription for subscription in subscriptions if subscription.status == SubscriptionStatus.CANCELLED]
+        )
+
+        total_spent = sum((subscription.total_amount_billed or 0) for subscription in subscriptions)
+        total_savings = sum(
+            (subscription.total_amount_billed or 0) * (subscription.discount_percentage / 100)
+            for subscription in subscriptions
+            if subscription.discount_percentage and subscription.discount_percentage > 0
+        )
+        total_deliveries = sum((subscription.total_orders_generated or 0) for subscription in subscriptions)
+
+        average_order_value = 0.0
+        if total_deliveries > 0:
+            average_order_value = round(float(total_spent) / total_deliveries, 2)
+
+        product_counts = {}
+        for subscription in subscriptions:
+            for item in subscription.subscription_items:
+                if item.product:
+                    product_counts[item.product_id] = product_counts.get(item.product_id, 0) + item.quantity
+
+        most_ordered_product = None
+        if product_counts:
+            most_popular_product_id = max(product_counts, key=product_counts.get)
+            for subscription in subscriptions:
+                for item in subscription.subscription_items:
+                    if item.product_id == most_popular_product_id and item.product:
+                        most_ordered_product = item.product.get_translated("name", language)
+                        break
+                if most_ordered_product:
+                    break
+
+        upcoming_deliveries = 0
+        today = date.today()
+        for subscription in subscriptions:
+            if subscription.status == SubscriptionStatus.ACTIVE:
+                next_delivery = subscription.calculate_next_delivery_date()
+                if next_delivery >= today:
+                    upcoming_deliveries += 1
+
+        monthly_spending = {}
+        for i in range(12):
+            month_start = (datetime.now(UTC).replace(day=1) - timedelta(days=32 * i)).replace(day=1)
+            month_key = month_start.strftime("%Y-%m")
+
+            month_total = 0
+            for subscription in subscriptions:
+                if (
+                    subscription.created_at.date() <= month_start.date()
+                    and (not subscription.end_date or subscription.end_date.date() >= month_start.date())
+                ):
+                    billing_amount = subscription.billing_amount or 0
+                    if subscription.billing_cycle == SubscriptionFrequency.MONTHLY:
+                        month_total += billing_amount
+                    elif subscription.billing_cycle == SubscriptionFrequency.WEEKLY:
+                        month_total += billing_amount * 4
+                    elif subscription.billing_cycle == SubscriptionFrequency.DAILY:
+                        month_total += billing_amount * 30
+                    elif str(subscription.billing_cycle) == SubscriptionFrequency.MONTHLY.value:
+                        month_total += billing_amount
+                    elif str(subscription.billing_cycle) == SubscriptionFrequency.WEEKLY.value:
+                        month_total += billing_amount * 4
+                    elif str(subscription.billing_cycle) == SubscriptionFrequency.DAILY.value:
+                        month_total += billing_amount * 30
+
+            monthly_spending[month_key] = float(month_total)
+
+        return {
+            "total_subscriptions": total_subscriptions,
+            "active_subscriptions": active_subscriptions,
+            "paused_subscriptions": paused_subscriptions,
+            "cancelled_subscriptions": cancelled_subscriptions,
+            "total_spent": float(total_spent),
+            "total_savings": float(total_savings),
+            "total_deliveries": total_deliveries,
+            "average_order_value": float(average_order_value),
+            "most_ordered_product": most_ordered_product,
+            "upcoming_deliveries": upcoming_deliveries,
+            "monthly_spending_trend": monthly_spending,
+        }
+
+    def skip_next_delivery_for_user(
+        self,
+        subscription_id: int,
+        user_id: int,
+        reason: str,
+    ) -> Dict[str, Any]:
+        """Log skip-next-delivery and calculate adjusted next date."""
+        subscription = self._get_user_subscription_or_raise(subscription_id, user_id)
+        if subscription.status != SubscriptionStatus.ACTIVE:
+            raise ValidationError("api.subscriptions.error.only_active_skip")
+
+        current_next_delivery = subscription.calculate_next_delivery_date()
+        frequency = (
+            subscription.delivery_frequency.value
+            if hasattr(subscription.delivery_frequency, "value")
+            else str(subscription.delivery_frequency)
+        )
+        if frequency == SubscriptionFrequency.DAILY.value:
+            new_next_delivery = current_next_delivery + timedelta(days=1)
+        elif frequency == SubscriptionFrequency.WEEKLY.value:
+            new_next_delivery = current_next_delivery + timedelta(weeks=1)
+        elif frequency == SubscriptionFrequency.MONTHLY.value:
+            new_next_delivery = current_next_delivery + relativedelta(months=1)
+        else:
+            new_next_delivery = current_next_delivery + timedelta(days=7)
+
+        db.session.add(
+            SubscriptionLog(
+                subscription_id=subscription_id,
+                action="delivery_skipped",
+                details=get_translation(
+                    "api.subscriptions.log.delivery_skipped",
+                    date=current_next_delivery.strftime("%Y-%m-%d"),
+                    reason=reason,
+                ),
+                user_id=user_id,
+                extra_data={
+                    "original_delivery_date": current_next_delivery.isoformat(),
+                    "new_delivery_date": new_next_delivery.isoformat(),
+                    "reason": reason,
+                },
+            )
+        )
+        db.session.commit()
+
+        return {
+            "subscription": subscription,
+            "original_delivery_date": current_next_delivery,
+            "new_next_delivery_date": new_next_delivery,
+        }
+
+    def change_payment_method_for_user(
+        self,
+        subscription_id: int,
+        user_id: int,
+        payment_method: str,
+    ) -> Dict[str, Any]:
+        """Change payment method for a user-owned subscription."""
+        subscription = self._get_user_subscription_or_raise(subscription_id, user_id)
+        if subscription.status not in [SubscriptionStatus.ACTIVE, SubscriptionStatus.PAUSED]:
+            raise ValidationError("api.subscriptions.error.cannot_change_payment_cancelled")
+
+        try:
+            new_payment_method = PaymentMethod(payment_method)
+        except ValueError as exc:
+            raise ValidationError("api.subscriptions.error.invalid_payment_method") from exc
+
+        old_payment_method = subscription.payment_method
+        subscription.payment_method = new_payment_method
+        subscription.updated_at = datetime.now(UTC)
+
+        db.session.add(
+            SubscriptionLog(
+                subscription_id=subscription_id,
+                action="payment_method_changed",
+                details=get_translation(
+                    "api.subscriptions.log.payment_method_changed",
+                    old_method=old_payment_method.value,
+                    new_method=new_payment_method.value,
+                ),
+                user_id=user_id,
+            )
+        )
+        db.session.commit()
+
+        return {
+            "subscription": subscription,
+            "old_payment_method": old_payment_method,
+            "new_payment_method": new_payment_method,
+        }
+
+    def validate_retry_billing_for_user(self, subscription_id: int, user_id: int) -> Subscription:
+        """Validate whether billing retry can be initiated."""
+        subscription = self._get_user_subscription_or_raise(subscription_id, user_id)
+        if subscription.status != SubscriptionStatus.ACTIVE:
+            raise ValidationError("api.subscriptions.error.only_active_retry")
+        if subscription.failed_billing_attempts == 0:
+            raise ValidationError("api.subscriptions.error.no_failed_billing_to_retry")
+        return subscription
+
+    def _get_user_subscription_or_raise(self, subscription_id: int, user_id: int) -> Subscription:
+        """Fetch a subscription scoped to a user or raise not found."""
+        subscription = Subscription.query.filter_by(id=subscription_id, user_id=user_id).first()
+        if not subscription:
+            raise NotFoundError("api.subscriptions.error.not_found")
+        return subscription
+
+    @staticmethod
+    def _serialize_for_log(value: Any) -> Any:
+        """Convert non-JSON values to storage-friendly representations."""
+        if hasattr(value, "value"):
+            return value.value
+        if isinstance(value, (datetime, date)):
+            return value.isoformat()
+        return value
     
     # create_subscription_plan removed - users create custom subscriptions instead
 

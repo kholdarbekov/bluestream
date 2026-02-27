@@ -58,6 +58,28 @@ def auto_confirm_order_task(self, order_id: int):
         raise self.retry(exc=exc)
 
 
+@shared_task(bind=True, max_retries=3, default_retry_delay=300, time_limit=600, soft_time_limit=540)
+def process_scheduled_order_task(self, order_id: int):
+    """Prepare a scheduled order shortly before the requested delivery time."""
+    try:
+        logger.info(f"Processing scheduled order {order_id}")
+
+        order = Order.query.get(order_id)
+        if not order:
+            logger.error(f"Scheduled order {order_id} not found")
+            return {'success': False, 'error': 'Order not found'}
+
+        # Ensure delivery exists before the slot opens.
+        if not order.delivery:
+            from business_app.services.delivery_service import DeliveryService
+            DeliveryService().create_delivery(order.id)
+
+        return {'success': True, 'order_id': order_id}
+    except Exception as exc:
+        logger.error(f"Failed to process scheduled order {order_id}: {exc}")
+        raise self.retry(exc=exc)
+
+
 @shared_task(time_limit=600, soft_time_limit=540)
 def auto_confirm_pending_orders():
     """Auto-confirm orders that have been pending for too long"""

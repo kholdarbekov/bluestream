@@ -2,9 +2,22 @@
 Message formatters for Staff Bot
 Format order details, delivery status, addresses, etc. for Telegram messages.
 """
+import html
 from typing import Dict, Any, Optional
 from datetime import datetime
 from i18n import i18n
+
+
+def escape_html(value: Any) -> str:
+    """Escape dynamic text inserted into Telegram HTML-formatted messages."""
+    if value is None:
+        return ''
+    return html.escape(str(value), quote=False)
+
+
+# Backward-compatible internal alias.
+def _escape(value: Any) -> str:
+    return escape_html(value)
 
 
 def format_currency(amount, currency: Optional[str] = None, language: str = 'en') -> str:
@@ -25,15 +38,15 @@ def format_order_card(order: Dict[str, Any], language: str) -> str:
     Used in order pool, active deliveries, and history.
     """
     number = order.get('order_number') or i18n.get('staff.common.not_available', language)
-    customer_name = order.get('customer_name', '')
-    customer_phone = order.get('customer_phone', '')
-    district = order.get('district', '')
-    address = order.get('address', '')
-    time_slot = order.get('time_slot', '')
+    customer_name = _escape(order.get('customer_name', ''))
+    customer_phone = _escape(order.get('customer_phone', ''))
+    district = _escape(order.get('district', ''))
+    address = _escape(order.get('address', ''))
+    time_slot = _escape(order.get('time_slot', ''))
     total = format_currency(order.get('total_amount'), language=language)
     payment = order.get('payment_method', '')
     item_count = order.get('item_count', 0)
-    delivery_notes = order.get('delivery_notes', '')
+    delivery_notes = _escape(order.get('delivery_notes', ''))
 
     lines = [
         f"\U0001f4e6 <b>#{number}</b>",
@@ -115,10 +128,10 @@ def format_delivery_stats(stats: Dict[str, Any], language: str) -> str:
 
 def format_user_card(user: Dict[str, Any], language: str) -> str:
     """Format user details card (for operator)"""
-    name = f"{user.get('first_name', '')} {user.get('last_name', '')}".strip()
+    name = _escape(f"{user.get('first_name', '')} {user.get('last_name', '')}".strip())
     if not name:
         name = i18n.get('staff.common.not_available', language)
-    phone = user.get('phone', '')
+    phone = _escape(user.get('phone', ''))
     address_count = user.get('address_count', 0)
     order_count = user.get('order_count', 0)
 

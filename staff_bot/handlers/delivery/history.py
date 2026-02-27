@@ -9,7 +9,12 @@ from telegram.ext import ContextTypes
 from handlers.base import BaseHandler
 from api_client import api_client
 from keyboards.common import CommonKeyboards
-from utils.formatters import format_delivery_status, format_delivery_stats, format_currency
+from utils.formatters import (
+    format_delivery_status,
+    format_delivery_stats,
+    format_currency,
+    escape_html,
+)
 from permissions import require_auth, require_delivery_driver
 from i18n import i18n
 
@@ -69,10 +74,10 @@ class HistoryHandler(BaseHandler):
             for delivery in deliveries:
                 status = delivery.get('status', '')
                 status_text = format_delivery_status(status, language)
-                order_num = delivery.get('order_number') or i18n.get('staff.common.not_available', language)
-                district = delivery.get('district', '')
+                order_num = escape_html(delivery.get('order_number') or i18n.get('staff.common.not_available', language))
+                district = escape_html(delivery.get('district', ''))
                 total = format_currency(delivery.get('total_amount'), language=language)
-                date = delivery.get('delivered_at') or delivery.get('updated_at', '')
+                date = escape_html(delivery.get('delivered_at') or delivery.get('updated_at', ''))
                 if date and isinstance(date, str) and len(date) > 10:
                     date = date[:10]
 

@@ -3,13 +3,10 @@ Bot Management API
 Endpoints for managing Telegram bot operations
 """
 import logging
-import hmac
-import hashlib
 from flask import Blueprint, request, jsonify
-from functools import wraps
 
 from business_app.config import get_config
-from business_app.utils.decorators import require_auth, require_admin
+from business_app.utils.decorators import require_auth, require_admin, verify_webhook_signature
 
 logger = logging.getLogger(__name__)
 
@@ -18,51 +15,8 @@ bot_bp = Blueprint('bot', __name__)
 config = get_config()
 
 
-def verify_webhook_signature(f):
-    """Decorator to verify webhook signatures for security"""
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        # Get signature from header
-        signature = request.headers.get('X-Bot-Webhook-Signature')
-        if not signature:
-            logger.warning("Webhook called without signature")
-            return jsonify({
-                'success': False,
-                'message': 'Missing webhook signature'
-            }), 401
-
-        # Get webhook secret from config
-        webhook_secret = config.BOT_WEBHOOK_SECRET
-        if not webhook_secret:
-            logger.error("BOT_WEBHOOK_SECRET not configured")
-            return jsonify({
-                'success': False,
-                'message': 'Webhook not properly configured'
-            }), 500
-
-        # Calculate expected signature
-        body = request.get_data()
-        expected_signature = hmac.new(
-            webhook_secret.encode('utf-8'),
-            body,
-            hashlib.sha256
-        ).hexdigest()
-
-        # Compare signatures (constant-time comparison)
-        if not hmac.compare_digest(signature, expected_signature):
-            logger.warning(f"Invalid webhook signature from {request.remote_addr}")
-            return jsonify({
-                'success': False,
-                'message': 'Invalid signature'
-            }), 401
-
-        return f(*args, **kwargs)
-
-    return decorated_function
-
-
 @bot_bp.route('/reload-translations', methods=['POST'])
-@verify_webhook_signature
+@verify_webhook_signature()
 def reload_translations():
     """
     Trigger bot to reload translations from database

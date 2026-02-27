@@ -9,8 +9,10 @@ from telegram.ext import ContextTypes, ConversationHandler
 from handlers.base import BaseHandler
 from api_client import api_client
 from keyboards.common import CommonKeyboards
+from keyboards.operator import OperatorKeyboards
 from permissions import require_auth, require_operator
 from i18n import i18n
+from utils.formatters import escape_html
 
 logger = logging.getLogger(__name__)
 
@@ -65,9 +67,9 @@ class ManageAddressHandler(BaseHandler):
             lines = [f"\U0001f4cd <b>{i18n.get('staff.operator.addresses_title', language)}</b>\n"]
 
             for addr in addresses:
-                label = addr.get('label', '')
-                address_line = addr.get('address_line_1', '')
-                district = addr.get('district', '')
+                label = escape_html(addr.get('label', ''))
+                address_line = escape_html(addr.get('address_line_1', ''))
+                district = escape_html(addr.get('district', ''))
 
                 lines.append(f"\U0001f4cd <b>{label}</b>")
                 if district:
@@ -187,13 +189,13 @@ class ManageAddressHandler(BaseHandler):
         addr = context.user_data['new_address']
         lines = [
             f"\U0001f4cd <b>{i18n.get('staff.operator.confirm_address', language)}</b>\n",
-            f"\U0001f3f7 {addr.get('label', '')}",
-            f"\U0001f4cd {addr.get('address_line_1', '')}",
+            f"\U0001f3f7 {escape_html(addr.get('label', ''))}",
+            f"\U0001f4cd {escape_html(addr.get('address_line_1', ''))}",
         ]
         if addr.get('district'):
-            lines.append(f"\U0001f3d8 {addr['district']}")
+            lines.append(f"\U0001f3d8 {escape_html(addr['district'])}")
         if addr.get('delivery_notes'):
-            lines.append(f"\U0001f4ac {addr['delivery_notes']}")
+            lines.append(f"\U0001f4ac {escape_html(addr['delivery_notes'])}")
 
         text = '\n'.join(lines)
         keyboard = CommonKeyboards.confirm_cancel(
@@ -230,11 +232,33 @@ class ManageAddressHandler(BaseHandler):
                 await self._handle_api_response_error(update, response, language)
                 return ConversationHandler.END
 
-            await query.edit_message_text(
-                f"\u2705 {i18n.get('staff.operator.address_saved', language)}",
-                reply_markup=CommonKeyboards.back_button(language),
-                parse_mode='HTML'
-            )
+            active_order = context.user_data.get('new_order') or {}
+            if active_order.get('client_id') == user_id:
+                # Continue operator order flow: return directly to address selection.
+                list_response = await client.get_user_addresses(token, user_id)
+                if list_response.success:
+                    addresses = (
+                        list_response.data
+                        if isinstance(list_response.data, list)
+                        else list_response.data.get('items', [])
+                    )
+                    await query.edit_message_text(
+                        i18n.get('staff.operator.select_address', language),
+                        reply_markup=OperatorKeyboards.address_list(language, addresses, user_id),
+                        parse_mode='HTML'
+                    )
+                else:
+                    await query.edit_message_text(
+                        f"\u2705 {i18n.get('staff.operator.address_saved', language)}",
+                        reply_markup=CommonKeyboards.back_button(language),
+                        parse_mode='HTML'
+                    )
+            else:
+                await query.edit_message_text(
+                    f"\u2705 {i18n.get('staff.operator.address_saved', language)}",
+                    reply_markup=CommonKeyboards.back_button(language),
+                    parse_mode='HTML'
+                )
 
         except Exception as e:
             logger.error(f"Error saving address: {e}", exc_info=True)

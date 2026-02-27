@@ -157,6 +157,8 @@ class StartHandler(BaseHandler):
         context.user_data['user_id'] = user_data.get('id')
         context.user_data['staff_roles'] = staff_roles
         context.user_data['first_name'] = user_data.get('first_name', '')
+        context.user_data['last_name'] = user_data.get('last_name', '')
+        context.user_data['phone'] = user_data.get('phone', '')
         context.user_data['delivery_person_id'] = user_data.get('delivery_person_id')
 
         # Log activity

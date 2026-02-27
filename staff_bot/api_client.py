@@ -332,13 +332,13 @@ class StaffAPIClient:
             data=user_data
         )
 
-    async def search_clients(self, token: str, query: str) -> APIResponse:
+    async def search_clients(self, token: str, query: str, search_type: str = 'phone') -> APIResponse:
         """Search for clients"""
         return await self._make_request(
             'GET',
             f'{config.business_api.operator_endpoint}/users/search',
             token=token,
-            params={'q': query}
+            params={'q': query, 'type': search_type}
         )
 
     async def create_order_for_client(self, token: str, order_data: Dict) -> APIResponse:

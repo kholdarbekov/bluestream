@@ -5,13 +5,13 @@ import secrets
 import string
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Optional, Dict, Any, Tuple
+from typing import Optional, Dict, Any, Tuple, List
 from flask import current_app, request
 from flask_jwt_extended import get_jwt_identity
 import redis
 
-from business_app.models.user import User, UserSession
-from business_app.utils.exceptions import ValidationError, UnauthorizedError, ConflictError
+from business_app.models.user import User, UserAddress, UserSession
+from business_app.utils.exceptions import ValidationError, UnauthorizedError, ConflictError, NotFoundError
 from business_app.utils.validators import EmailValidator, PhoneValidator, PasswordValidator
 from business_app.utils.helpers import generate_otp, format_phone_number, generate_random_string
 from business_app.utils.password_security import hash_password, verify_password, needs_password_rehash
@@ -1064,6 +1064,353 @@ class AuthService:
             })
         
         return permissions
+
+    def get_user_profile_data(self, user_id: int) -> Dict[str, Any]:
+        """Get profile payload for a user."""
+        user = User.query.get(user_id)
+        if not user:
+            raise NotFoundError(get_translation('error.not_found'))
+
+        return {
+            'id': user.id,
+            'email': user.email,
+            'phone': user.phone,
+            'first_name': user.first_name,
+            'last_name': user.last_name,
+            'date_of_birth': user.date_of_birth.isoformat() if user.date_of_birth else None,
+            'gender': user.gender.value if hasattr(user.gender, 'value') else user.gender,
+            'role': user.role.value if hasattr(user.role, 'value') else user.role,
+            'status': user.status.value if hasattr(user.status, 'value') else user.status,
+            'email_verified': user.email_verified_at is not None,
+            'phone_verified': user.phone_verified_at is not None,
+            'created_at': user.created_at.isoformat(),
+            'last_login': user.last_login.isoformat() if user.last_login else None,
+            'preferred_language': getattr(user, 'preferred_language', 'en'),
+            'permissions': self.get_user_permissions(user_id),
+        }
+
+    def get_user_addresses(self, user_id: int) -> List[UserAddress]:
+        """Get all addresses for a user."""
+        return UserAddress.query.filter_by(user_id=user_id).all()
+
+    def add_user_address(self, user_id: int, data: Dict[str, Any]) -> UserAddress:
+        """Create address for a user."""
+        if data.get('is_default', False):
+            UserAddress.query.filter_by(user_id=user_id, is_default=True).update({'is_default': False})
+
+        address = UserAddress(
+            user_id=user_id,
+            title=data['title'],
+            full_address=data.get('full_address', data.get('address_line_1', '')),
+            street_address=data.get('street_address', data.get('address_line_1')),
+            city=data.get('city', 'Tashkent'),
+            district=data.get('district'),
+            postal_code=data.get('postal_code'),
+            country=data.get('country', 'Uzbekistan'),
+            latitude=data.get('latitude'),
+            longitude=data.get('longitude'),
+            is_default=data.get('is_default', False),
+            is_business=data.get('is_business', False),
+            delivery_instructions=data.get('delivery_instructions', data.get('delivery_notes')),
+            landmark=data.get('landmark'),
+            floor_number=data.get('floor_number'),
+            apartment_number=data.get('apartment_number'),
+        )
+        db.session.add(address)
+        db.session.commit()
+        return address
+
+    def update_user_address(self, user_id: int, address_id: int, data: Dict[str, Any]) -> UserAddress:
+        """Update address fields for a user-owned address."""
+        address = UserAddress.query.filter_by(id=address_id, user_id=user_id).first()
+        if not address:
+            raise NotFoundError(get_translation('api.auth.address_not_found'))
+
+        updatable_fields = (
+            'title',
+            'full_address',
+            'street_address',
+            'city',
+            'district',
+            'postal_code',
+            'latitude',
+            'longitude',
+            'delivery_instructions',
+            'landmark',
+            'floor_number',
+            'apartment_number',
+        )
+        for field in updatable_fields:
+            if field in data:
+                setattr(address, field, data[field])
+
+        db.session.commit()
+        return address
+
+    def delete_user_address(self, user_id: int, address_id: int) -> None:
+        """Delete a user-owned address."""
+        address = UserAddress.query.filter_by(id=address_id, user_id=user_id).first()
+        if not address:
+            raise NotFoundError(get_translation('api.auth.address_not_found'))
+
+        if address.is_default:
+            other_addresses_count = UserAddress.query.filter(
+                UserAddress.user_id == user_id,
+                UserAddress.id != address_id,
+            ).count()
+            if other_addresses_count > 0:
+                raise ValidationError(get_translation('error.forbidden'))
+
+        db.session.delete(address)
+        db.session.commit()
+
+    def set_default_user_address(self, user_id: int, address_id: int) -> UserAddress:
+        """Set a specific user-owned address as default."""
+        address = UserAddress.query.filter_by(id=address_id, user_id=user_id).first()
+        if not address:
+            raise NotFoundError(get_translation('api.auth.address_not_found'))
+
+        UserAddress.query.filter_by(user_id=user_id, is_default=True).update({'is_default': False})
+        address.is_default = True
+        db.session.commit()
+        return address
+
+    def update_user_profile_data(self, user_id: int, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Update allowed profile fields and return standardized payload."""
+        user = User.query.get(user_id)
+        if not user:
+            raise NotFoundError(get_translation('user_not_found'))
+
+        phone_update_attempted = False
+
+        if 'first_name' in data:
+            user.first_name = data['first_name']
+        if 'last_name' in data:
+            user.last_name = data['last_name']
+        if 'phone' in data:
+            phone_update_attempted = True
+        if 'date_of_birth' in data:
+            date_value = data['date_of_birth']
+            if date_value:
+                try:
+                    user.date_of_birth = datetime.fromisoformat(date_value)
+                except (ValueError, TypeError):
+                    pass
+            else:
+                user.date_of_birth = None
+        if 'gender' in data:
+            user.gender = data['gender']
+        if 'preferred_language' in data:
+            user.preferred_language = data['preferred_language']
+
+        user.updated_at = datetime.now(timezone.utc)
+        db.session.commit()
+
+        user_data = {
+            'id': user.id,
+            'email': user.email,
+            'phone': user.phone,
+            'first_name': user.first_name,
+            'last_name': user.last_name,
+            'full_name': user.full_name,
+            'date_of_birth': user.date_of_birth.isoformat() if user.date_of_birth else None,
+            'gender': user.gender.value if hasattr(user.gender, 'value') else user.gender,
+            'role': user.role.value if hasattr(user.role, 'value') else user.role,
+            'status': user.status.value if hasattr(user.status, 'value') else user.status,
+            'preferred_language': user.preferred_language,
+            'updated_at': user.updated_at.isoformat(),
+        }
+
+        return {
+            'user': user_data,
+            'phone_update_attempted': phone_update_attempted,
+        }
+
+    def link_telegram_account(self, current_user_id: int, data: Dict[str, Any]) -> User:
+        """Link telegram account to an existing authenticated web user."""
+        telegram_id = str(data['telegram_id'])
+
+        existing_user = User.query.filter(
+            User.telegram_id == telegram_id,
+            User.id != current_user_id,
+        ).first()
+        if existing_user:
+            raise ConflictError(get_translation('api.auth.email_already_exists'))
+
+        user = User.query.get(current_user_id)
+        if not user:
+            raise NotFoundError(get_translation('error.not_found'))
+
+        user.telegram_id = telegram_id
+
+        if data.get('first_name') and (not user.first_name or user.first_name == 'Telegram User'):
+            user.first_name = data.get('first_name')
+        if data.get('last_name') and not user.last_name:
+            user.last_name = data.get('last_name')
+
+        db.session.commit()
+        return user
+
+    def link_web_account(self, telegram_id: str, email: str, password: str) -> Dict[str, Any]:
+        """Link a telegram user with an existing web account and return fresh tokens."""
+        telegram_id_str = str(telegram_id)
+        normalized_email = email.lower().strip()
+
+        telegram_user = User.query.filter_by(telegram_id=telegram_id_str).first()
+        if not telegram_user:
+            raise NotFoundError(get_translation('error.not_found'))
+
+        web_user = User.query.filter_by(email=normalized_email).first()
+        if not web_user or not self._verify_password(password, web_user.password_hash):
+            raise UnauthorizedError(get_translation('api.auth.invalid_credentials'))
+
+        expected_placeholders = {
+            f"telegram_{telegram_id_str}@bluestream.local",
+            f"telegram_{telegram_id_str}@bot.internal",
+        }
+        if web_user.telegram_id or telegram_user.email not in expected_placeholders:
+            raise ConflictError(get_translation('api.auth.email_already_exists'))
+
+        from business_app.services.cross_platform_sync_service import cross_platform_sync_service
+
+        result = cross_platform_sync_service.auto_link_accounts(
+            primary_user=web_user,
+            secondary_user=telegram_user,
+            link_type='merge',
+        )
+        if not result.get('success'):
+            raise ValidationError(result.get('error', get_translation('api.auth.accounts_linking_failed')))
+
+        tokens = self._generate_tokens(web_user)
+        return {
+            'user': web_user,
+            'tokens': tokens,
+        }
+
+    def check_phone_availability_for_telegram(self, phone: str, telegram_id: str) -> Dict[str, Any]:
+        """Check whether a phone can be linked from a telegram flow."""
+        from business_app.utils.validators import normalize_phone_number
+
+        normalized_phone = normalize_phone_number(phone)
+        existing_user = User.query.filter_by(phone=normalized_phone).first()
+
+        if not existing_user:
+            return {
+                'available': True,
+                'can_link': False,
+                'existing_user_masked': None,
+            }
+
+        user_status = existing_user.status.value if isinstance(existing_user.status, UserStatus) else existing_user.status
+        can_link = (
+            existing_user.telegram_id is None
+            and user_status == UserStatus.ACTIVE.value
+            and existing_user.registration_source in ['web', 'email', 'phone', 'admin_created']
+        )
+
+        masked_name = existing_user.first_name[:1] + '***' if existing_user.first_name else '***'
+        if existing_user.last_name:
+            masked_name += ' ' + existing_user.last_name[:1] + '***'
+
+        masked_email = None
+        if existing_user.email and not existing_user.email.endswith('@bluestream.local'):
+            parts = existing_user.email.split('@')
+            if len(parts) == 2:
+                masked_email = parts[0][:2] + '***@' + parts[1]
+
+        return {
+            'available': False,
+            'can_link': can_link,
+            'existing_user_masked': {
+                'name': masked_name,
+                'email': masked_email,
+                'registration_source': existing_user.registration_source,
+            },
+        }
+
+    def send_phone_link_otp(self, phone: str, telegram_id: str) -> Dict[str, Any]:
+        """Store linking intent and send OTP for phone-account linking."""
+        from business_app.utils.validators import normalize_phone_number
+        import json
+
+        normalized_phone = normalize_phone_number(phone)
+        telegram_user = User.query.filter_by(telegram_id=str(telegram_id)).first()
+        if not telegram_user:
+            raise NotFoundError(get_translation('api.auth.telegram_user_not_found'))
+
+        web_user = User.query.filter_by(phone=normalized_phone).first()
+        if not web_user:
+            raise NotFoundError(get_translation('api.auth.phone_account_not_found'))
+
+        if web_user.telegram_id:
+            raise ConflictError(get_translation('api.auth.phone_already_linked_to_telegram'))
+
+        web_user_status = web_user.status.value if isinstance(web_user.status, UserStatus) else web_user.status
+        if web_user_status != UserStatus.ACTIVE.value:
+            raise ConflictError(get_translation('api.auth.phone_account_inactive'))
+
+        link_key = f"phone_link:{telegram_id}"
+        link_data = {
+            'phone': normalized_phone,
+            'web_user_id': web_user.id,
+            'telegram_user_id': telegram_user.id,
+        }
+        self.redis_client.setex(link_key, 600, json.dumps(link_data))
+
+        success = self.send_verification_sms(telegram_user.id, normalized_phone, update_phone=False)
+        if not success:
+            raise ValidationError(get_translation('api.auth.otp_send_failed'))
+
+        return {
+            'phone_masked': normalized_phone[:7] + '****' + normalized_phone[-2:] if len(normalized_phone) > 9 else '***'
+        }
+
+    def verify_phone_link_and_merge_accounts(self, telegram_id: str, otp: str) -> Dict[str, Any]:
+        """Verify OTP for linking and merge telegram account into web account."""
+        import json
+        from business_app.services.cross_platform_sync_service import cross_platform_sync_service
+
+        link_key = f"phone_link:{telegram_id}"
+        link_data_raw = self.redis_client.get(link_key)
+        if not link_data_raw:
+            raise NotFoundError(get_translation('api.auth.pending_link_not_found'))
+
+        link_data = json.loads(link_data_raw.decode('utf-8'))
+        web_user_id = link_data['web_user_id']
+        telegram_user_id = link_data['telegram_user_id']
+
+        telegram_user = User.query.get(telegram_user_id)
+        if not telegram_user:
+            raise NotFoundError(get_translation('api.auth.telegram_user_not_found'))
+
+        success = self.verify_phone(telegram_user_id, otp)
+        if not success:
+            raise ValidationError(get_translation('api.auth.link_otp_invalid'))
+
+        web_user = User.query.get(web_user_id)
+        if not web_user:
+            raise NotFoundError(get_translation('api.auth.web_account_not_found'))
+
+        now_utc = datetime.now(timezone.utc)
+        telegram_user.is_verified = True
+        web_user.is_verified = True
+        web_user.phone_verified_at = now_utc
+        db.session.commit()
+
+        result = cross_platform_sync_service.auto_link_accounts(
+            primary_user=web_user,
+            secondary_user=telegram_user,
+            link_type='merge',
+        )
+        if not result.get('success'):
+            raise ValidationError(result.get('error', get_translation('api.auth.accounts_linking_failed')))
+
+        self.redis_client.delete(link_key)
+        return {
+            'user': web_user,
+            'tokens': self._generate_tokens(web_user),
+            'linked': True,
+        }
     
     # Private methods
     def _validate_registration_data(self, email: Optional[str], password: str,

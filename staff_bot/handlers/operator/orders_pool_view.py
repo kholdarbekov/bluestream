@@ -12,7 +12,7 @@ from handlers.base import BaseHandler
 from i18n import i18n
 from keyboards.common import CommonKeyboards
 from permissions import require_auth, require_operator
-from utils.formatters import format_currency, format_order_card
+from utils.formatters import format_currency, format_order_card, escape_html
 
 logger = logging.getLogger(__name__)
 
@@ -137,13 +137,15 @@ class OperatorOrdersPoolViewHandler(BaseHandler):
             status_label = i18n.get(f'staff.order.status.{status}', language) if status else ''
             delivery_person_name = order.get('delivery_person_name', '')
 
-            order_number = order.get('order_number') or i18n.get('staff.common.not_available', language)
+            order_number = escape_html(order.get('order_number') or i18n.get('staff.common.not_available', language))
             lines = [f"\U0001f4e6 <b>#{order_number}</b>"]
             if status_label:
-                lines.append(f"{i18n.get('staff.delivery.current_status', language)}: {status_label}")
+                lines.append(
+                    f"{i18n.get('staff.delivery.current_status', language)}: {escape_html(status_label)}"
+                )
             if delivery_person_name:
                 lines.append(
-                    f"\U0001f464 {i18n.get('staff.operator.assigned_to', language)}: {delivery_person_name}"
+                    f"\U0001f464 {i18n.get('staff.operator.assigned_to', language)}: {escape_html(delivery_person_name)}"
                 )
             lines.append("")
 
@@ -154,19 +156,19 @@ class OperatorOrdersPoolViewHandler(BaseHandler):
                     name = item.get('product_name', '')
                     qty = item.get('quantity', 1)
                     price = format_currency(item.get('total_price', 0), language=language)
-                    lines.append(f"  \u2022 {name} x{qty} - {price}")
+                    lines.append(f"  \u2022 {escape_html(name)} x{qty} - {price}")
                 lines.append("")
 
-            customer_name = order.get('customer_name', '')
-            customer_phone = order.get('customer_phone', '')
+            customer_name = escape_html(order.get('customer_name', ''))
+            customer_phone = escape_html(order.get('customer_phone', ''))
             if customer_name or customer_phone:
                 contact = f"\U0001f464 {customer_name}"
                 if customer_phone:
                     contact += f" | {customer_phone}"
                 lines.append(contact)
 
-            district = order.get('district', '')
-            address = order.get('address', '')
+            district = escape_html(order.get('district', ''))
+            address = escape_html(order.get('address', ''))
             if district:
                 lines.append(f"\U0001f4cd {district}")
             if address:
@@ -182,7 +184,7 @@ class OperatorOrdersPoolViewHandler(BaseHandler):
 
             notes = order.get('delivery_notes', '')
             if notes:
-                lines.append(f"\U0001f4ac {notes}")
+                lines.append(f"\U0001f4ac {escape_html(notes)}")
 
             keyboard_rows = []
             if status == 'confirmed':

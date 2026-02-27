@@ -1279,33 +1279,8 @@ def get_profile():
               $ref: '#/definitions/UserProfile'
     """
     user_id = get_jwt_identity()
-    
-    from business_app.models.user import User
-    user = User.query.get(user_id)
-
-    if not user:
-        return not_found_response(
-            message=get_translation('error.not_found')
-        )
-
     return success_response(
-        data={
-            'id': user.id,
-            'email': user.email,
-            'phone': user.phone,
-            'first_name': user.first_name,
-            'last_name': user.last_name,
-            'date_of_birth': user.date_of_birth.isoformat() if user.date_of_birth else None,
-            'gender': user.gender.value if hasattr(user.gender, 'value') else user.gender,
-            'role': user.role.value if hasattr(user.role, 'value') else user.role,
-            'status': user.status.value if hasattr(user.status, 'value') else user.status,
-            'email_verified': user.email_verified_at is not None,
-            'phone_verified': user.phone_verified_at is not None,
-            'created_at': user.created_at.isoformat(),
-            'last_login': user.last_login.isoformat() if user.last_login else None,
-            'preferred_language': getattr(user, 'preferred_language', 'en'),
-            'permissions': get_auth_service().get_user_permissions(user_id)
-        }
+        data=get_auth_service().get_user_profile_data(user_id)
     )
 
 
@@ -1371,9 +1346,7 @@ def get_user_addresses():
                     type: object
     """
     user_id = get_jwt_identity()
-    
-    from business_app.models.user import UserAddress
-    addresses = UserAddress.query.filter_by(user_id=user_id).all()
+    addresses = get_auth_service().get_user_addresses(user_id)
 
     return success_response(
         data={
@@ -1441,34 +1414,7 @@ def add_user_address():
     """
     user_id = get_jwt_identity()
     data = request.get_json()
-    
-    from business_app.models.user import UserAddress
-    
-    # If this is set as default, unset others
-    if data.get('is_default', False):
-        UserAddress.query.filter_by(user_id=user_id, is_default=True).update({'is_default': False})
-    
-    address = UserAddress(
-        user_id=user_id,
-        title=data['title'],
-        full_address=data.get('full_address', data.get('address_line_1', '')),
-        street_address=data.get('street_address', data.get('address_line_1')),
-        city=data.get('city', 'Tashkent'),
-        district=data.get('district'),
-        postal_code=data.get('postal_code'),
-        country=data.get('country', 'Uzbekistan'),
-        latitude=data.get('latitude'),
-        longitude=data.get('longitude'),
-        is_default=data.get('is_default', False),
-        is_business=data.get('is_business', False),
-        delivery_instructions=data.get('delivery_instructions', data.get('delivery_notes')),
-        landmark=data.get('landmark'),
-        floor_number=data.get('floor_number'),
-        apartment_number=data.get('apartment_number')
-    )
-    
-    db.session.add(address)
-    db.session.commit()
+    address = get_auth_service().add_user_address(user_id, data)
 
     return created_response(
         data={
@@ -1550,43 +1496,8 @@ def update_user_address(address_id):
     user_id = get_jwt_identity()
     data = request.get_json()
 
-    logger.info(f"TEST API update_user_address: {data=}")
-    
-    
-    from business_app.models.user import UserAddress
-    
-    # Find address belonging to current user
-    address = UserAddress.query.filter_by(id=address_id, user_id=user_id).first()
-    if not address:
-        return not_found_response(message=get_translation('api.auth.address_not_found'))
-
-    # Update address fields (partial update support)
-    if 'title' in data:
-        address.title = data['title']
-    if 'full_address' in data:
-        address.full_address = data['full_address']
-    if 'street_address' in data:
-        address.street_address = data['street_address']
-    if 'city' in data:
-        address.city = data['city']
-    if 'district' in data:
-        address.district = data['district']
-    if 'postal_code' in data:
-        address.postal_code = data['postal_code']
-    if 'latitude' in data:
-        address.latitude = data['latitude']
-    if 'longitude' in data:
-        address.longitude = data['longitude']
-    if 'delivery_instructions' in data:
-        address.delivery_instructions = data['delivery_instructions']
-    if 'landmark' in data:
-        address.landmark = data['landmark']
-    if 'floor_number' in data:
-        address.floor_number = data['floor_number']
-    if 'apartment_number' in data:
-        address.apartment_number = data['apartment_number']
-
-    db.session.commit()
+    logger.info("TEST API update_user_address: data=%s", data)
+    address = get_auth_service().update_user_address(user_id, address_id, data)
 
     return success_response(
         data={
@@ -1622,29 +1533,7 @@ def delete_user_address(address_id):
         description: Cannot delete default address with other addresses present
     """
     user_id = get_jwt_identity()
-    
-    from business_app.models.user import UserAddress
-    
-    # Find address belonging to current user
-    address = UserAddress.query.filter_by(id=address_id, user_id=user_id).first()
-    if not address:
-        return not_found_response(message=get_translation('api.auth.address_not_found'))
-
-    # Check if trying to delete default address when other addresses exist
-    if address.is_default:
-        other_addresses_count = UserAddress.query.filter(
-            UserAddress.user_id == user_id,
-            UserAddress.id != address_id
-        ).count()
-
-        if other_addresses_count > 0:
-            return error_response(
-                message=get_translation('error.forbidden'),
-                status_code=400
-            )
-
-    db.session.delete(address)
-    db.session.commit()
+    get_auth_service().delete_user_address(user_id, address_id)
 
     return success_response(
         message=get_translation('success.deleted')
@@ -1675,20 +1564,7 @@ def set_default_address(address_id):
         description: Address not found
     """
     user_id = get_jwt_identity()
-    
-    from business_app.models.user import UserAddress
-    
-    # Find address belonging to current user
-    address = UserAddress.query.filter_by(id=address_id, user_id=user_id).first()
-    if not address:
-        return not_found_response(message=get_translation('api.auth.address_not_found'))
-
-    # Unset all other addresses as default for this user
-    UserAddress.query.filter_by(user_id=user_id, is_default=True).update({'is_default': False})
-
-    # Set this address as default
-    address.is_default = True
-    db.session.commit()
+    address = get_auth_service().set_default_user_address(user_id, address_id)
 
     return success_response(
         data={
@@ -1746,19 +1622,12 @@ def update_profile():
     """
     user_id = get_jwt_identity()
     data = request.get_json() or {}
-    
-    from business_app.models.user import User
-    user = User.query.get(user_id)
+    result = get_auth_service().update_user_profile_data(user_id, data)
+    user_data = result['user']
 
-    if not user:
-        return not_found_response(message=get_translation('user_not_found'))
-    
-    # Update fields if provided
-    if 'first_name' in data:
-        user.first_name = data['first_name']
-    if 'last_name' in data:
-        user.last_name = data['last_name']
-    if 'phone' in data:
+    # Add warning if phone update was attempted
+    if result['phone_update_attempted']:
+        current_phone = user_data.get('phone')
         # Log attempt to update phone through profile endpoint
         from business_app.utils.audit_logger import audit_logger, AuditEventType, AuditSeverity
         audit_logger.log_event(
@@ -1768,48 +1637,11 @@ def update_profile():
             resource_type="user_phone",
             resource_id=str(user_id),
             description="Blocked attempt to update phone number through profile endpoint",
-            additional_data={'attempted_phone': data['phone'], 'current_phone': user.phone},
+            additional_data={'attempted_phone': data.get('phone'), 'current_phone': current_phone},
             success=False,
             error_message="Phone number updates must be done through verification process"
         )
-        # Skip phone update - must be done through verification process
         logger.warning(f"User {user_id} attempted to update phone directly through profile endpoint")
-    if 'date_of_birth' in data:
-        date_value = data['date_of_birth']
-        if date_value:  # Only update if not None or empty string
-            try:
-                from datetime import datetime
-                user.date_of_birth = datetime.fromisoformat(date_value)
-            except (ValueError, TypeError):
-                pass  # Invalid date format, skip update
-        else:
-            user.date_of_birth = None  # Clear the date if empty string is sent
-    if 'gender' in data:
-        user.gender = data['gender']
-    if 'preferred_language' in data:
-        user.preferred_language = data['preferred_language']
-    
-    from datetime import datetime, timezone
-    user.updated_at = datetime.now(timezone.utc)
-    db.session.commit()
-
-    user_data = {
-        'id': user.id,
-        'email': user.email,
-        'phone': user.phone,
-        'first_name': user.first_name,
-        'last_name': user.last_name,
-        'full_name': user.full_name,
-        'date_of_birth': user.date_of_birth.isoformat() if user.date_of_birth else None,
-        'gender': user.gender.value if hasattr(user.gender, 'value') else user.gender,
-        'role': user.role.value if hasattr(user.role, 'value') else user.role,
-        'status': user.status.value if hasattr(user.status, 'value') else user.status,
-        'preferred_language': user.preferred_language,
-        'updated_at': user.updated_at.isoformat()
-    }
-
-    # Add warning if phone update was attempted
-    if 'phone' in data:
         user_data['phone_change_instructions'] = get_translation('use_change_phone_endpoint')
         return success_response(
             data={
@@ -2351,28 +2183,7 @@ def link_telegram():
     """
     current_user_id = get_jwt_identity()
     data = request.get_json()
-    telegram_id = str(data['telegram_id'])
-    
-    # Check if this telegram_id is already linked to another user
-    existing_user = User.query.filter(
-        User.telegram_id == telegram_id,
-        User.id != current_user_id
-    ).first()
-    
-    if existing_user:
-        return conflict_response(message=get_translation('api.auth.email_already_exists'))
-    
-    # Update current user with telegram info
-    user = User.query.get(current_user_id)
-    user.telegram_id = telegram_id
-    
-    # Update name if provided and current name is empty/placeholder
-    if data.get('first_name') and (not user.first_name or user.first_name == 'Telegram User'):
-        user.first_name = data.get('first_name')
-    if data.get('last_name') and not user.last_name:
-        user.last_name = data.get('last_name')
-    
-    db.session.commit()
+    user = get_auth_service().link_telegram_account(current_user_id, data)
 
     return success_response(
         data={
@@ -2429,48 +2240,13 @@ def link_web_account():
         description: Account already linked
     """
     data = request.get_json()
-    telegram_id = str(data['telegram_id'])
-    email = data['email'].lower().strip()
-    password = data['password']
-    
-    # Find telegram user
-    telegram_user = User.query.filter_by(telegram_id=telegram_id).first()
-    if not telegram_user:
-        return not_found_response(message=get_translation('error.not_found'))
-    
-    # Find web user and verify password
-    web_user = User.query.filter_by(email=email).first()
-    if not web_user or not web_user.check_password(password):
-        return unauthorized_response(message=get_translation('api.auth.invalid_credentials'))
-    
-    # Check if accounts are already linked
-    if web_user.telegram_id or telegram_user.email != f"telegram_{telegram_id}@bluestream.local":
-        return conflict_response(message=get_translation('api.auth.email_already_exists'))
-    
-    # Merge accounts - keep web user as primary, update with telegram info
-    web_user.telegram_id = telegram_id
-    
-    # Preserve original web profile names; only backfill missing values from Telegram
-    if (
-        telegram_user.first_name
-        and telegram_user.first_name != 'Telegram User'
-        and (not web_user.first_name or web_user.first_name == 'Telegram User')
-    ):
-        web_user.first_name = telegram_user.first_name
-    if telegram_user.last_name and not web_user.last_name:
-        web_user.last_name = telegram_user.last_name
-    
-    # Transfer any orders/data from telegram user to web user if needed
-    # (This would need more complex logic based on your business rules)
-    
-    # Mark telegram user as merged (or delete it)
-    telegram_user.status = 'merged'
-    telegram_user.telegram_id = None  # Remove telegram_id from old record
-    
-    db.session.commit()
-    
-    # Generate tokens for the merged account
-    tokens = get_auth_service()._generate_tokens(web_user)
+    link_result = get_auth_service().link_web_account(
+        telegram_id=str(data['telegram_id']),
+        email=data['email'],
+        password=data['password'],
+    )
+    web_user = link_result['user']
+    tokens = link_result['tokens']
 
     return success_response(
         data={
@@ -2531,57 +2307,19 @@ def check_phone_availability():
               type: string
     """
     data = request.get_json()
-    phone = data['phone']
-    telegram_id = str(data['telegram_id'])
-    
-    # Normalize phone number
-    from business_app.utils.validators import normalize_phone_number
-    phone = normalize_phone_number(phone)
-    
-    # Check if phone exists
-    existing_user = User.query.filter_by(phone=phone).first()
-    
-    if not existing_user:
+    availability = get_auth_service().check_phone_availability_for_telegram(
+        phone=data['phone'],
+        telegram_id=str(data['telegram_id']),
+    )
+
+    if availability['available']:
         return success_response(
-            data={
-                'available': True,
-                'can_link': False,
-                'existing_user_masked': None
-            },
+            data=availability,
             message=get_translation('api.auth.phone_available')
         )
-    
-    # Phone exists - check if it can be linked
-    # Cannot link if: user already has telegram_id, or user is inactive/merged
-    # Note: status can be enum or string depending on how SQLAlchemy returns it
-    from business_app.utils.constants import UserStatus
-    user_status = existing_user.status.value if isinstance(existing_user.status, UserStatus) else existing_user.status
-    can_link = (
-        existing_user.telegram_id is None and 
-        user_status == 'active' and
-        existing_user.registration_source in ['web', 'email', 'phone', 'admin_created']
-    )
-    
-    # Mask the user info for privacy
-    masked_name = existing_user.first_name[:1] + '***' if existing_user.first_name else '***'
-    if existing_user.last_name:
-        masked_name += ' ' + existing_user.last_name[:1] + '***'
-    masked_email = None
-    if existing_user.email and not existing_user.email.endswith('@bluestream.local'):
-        parts = existing_user.email.split('@')
-        if len(parts) == 2:
-            masked_email = parts[0][:2] + '***@' + parts[1]
-    
+
     return success_response(
-        data={
-            'available': False,
-            'can_link': can_link,
-            'existing_user_masked': {
-                'name': masked_name,
-                'email': masked_email,
-                'registration_source': existing_user.registration_source
-            }
-        },
+        data=availability,
         message=get_translation('api.auth.phone_already_registered')
     )
 
@@ -2620,63 +2358,19 @@ def link_phone_send_otp():
         description: Cannot link - phone not found or already linked
     """
     data = request.get_json()
-    phone = data['phone']
-    telegram_id = str(data['telegram_id'])
-    
-    # Normalize phone number
-    from business_app.utils.validators import normalize_phone_number
-    phone = normalize_phone_number(phone)
-    
-    # Verify telegram user exists
-    telegram_user = User.query.filter_by(telegram_id=telegram_id).first()
-    if not telegram_user:
-        return not_found_response(message=get_translation('api.auth.telegram_user_not_found'))
-    
-    # Verify web user exists with this phone
-    web_user = User.query.filter_by(phone=phone).first()
-    if not web_user:
-        return not_found_response(message=get_translation('api.auth.phone_account_not_found'))
-    
-    # Verify account can be linked
-    if web_user.telegram_id:
-        return error_response(
-            message=get_translation('api.auth.phone_already_linked_to_telegram'),
-            status_code=409
-        )
-    
-    # Check status (handle enum or string)
-    from business_app.utils.constants import UserStatus
-    web_user_status = web_user.status.value if isinstance(web_user.status, UserStatus) else web_user.status
-    if web_user_status != 'active':
-        return error_response(
-            message=get_translation('api.auth.phone_account_inactive'),
-            status_code=409
-        )
-    
-    # Store linking intent in Redis
-    auth_service = get_auth_service()
-    link_key = f"phone_link:{telegram_id}"
-    link_data = {
-        'phone': phone,
-        'web_user_id': web_user.id,
-        'telegram_user_id': telegram_user.id
-    }
-    import json
-    auth_service.redis_client.setex(link_key, 600, json.dumps(link_data))  # 10 minutes expiry
-    
-    # Send OTP to the phone (don't update telegram user's phone - it belongs to web user)
-    success = auth_service.send_verification_sms(telegram_user.id, phone, update_phone=False)
-    
-    if success:
-        logger.info(f"OTP sent for account linking: telegram_user={telegram_id}, phone={phone}")
-        return success_response(
-            data={
-                'phone_masked': phone[:7] + '****' + phone[-2:] if len(phone) > 9 else '***'
-            },
-            message=get_translation('api.auth.otp_sent_success')
-        )
-    else:
-        return internal_error_response(message=get_translation('api.auth.otp_send_failed'))
+    otp_result = get_auth_service().send_phone_link_otp(
+        phone=data['phone'],
+        telegram_id=str(data['telegram_id']),
+    )
+    logger.info(
+        "OTP sent for account linking: telegram_user=%s, phone=%s",
+        data.get('telegram_id'),
+        data.get('phone'),
+    )
+    return success_response(
+        data=otp_result,
+        message=get_translation('api.auth.otp_sent_success')
+    )
 
 
 @auth_bp.route('/link-phone-account/verify', methods=['POST'])
@@ -2713,82 +2407,17 @@ def link_phone_verify():
         description: Invalid OTP or no pending link request
     """
     data = request.get_json()
-    telegram_id = str(data['telegram_id'])
-    otp = data['otp']
-    
-    auth_service = get_auth_service()
-    
-    # Get stored linking intent
-    link_key = f"phone_link:{telegram_id}"
-    link_data_raw = auth_service.redis_client.get(link_key)
-    
-    if not link_data_raw:
-        return not_found_response(message=get_translation('api.auth.pending_link_not_found'))
-    
-    import json
-    link_data = json.loads(link_data_raw.decode('utf-8'))
-    phone = link_data['phone']
-    web_user_id = link_data['web_user_id']
-    telegram_user_id = link_data['telegram_user_id']
-    
-    # Verify OTP
-    telegram_user = User.query.get(telegram_user_id)
-    if not telegram_user:
-        return not_found_response(message=get_translation('api.auth.telegram_user_not_found'))
-    
-    success = auth_service.verify_phone(telegram_user_id, otp)
-    
-    if not success:
-        return error_response(
-            message=get_translation('api.auth.link_otp_invalid'),
-            status_code=400
-        )
-	
-    # OTP verified - now merge accounts
-    web_user = User.query.get(web_user_id)
-    if not web_user:
-        return not_found_response(message=get_translation('api.auth.web_account_not_found'))
-    
-    # Set is_verified and phone_verified_at on web_user only
-    # Note: telegram_user should NOT have phone set - web_user already owns this phone
-    # and the unique constraint would be violated if we try to set it on both users.
-    # The telegram_user will be marked as 'merged' by cross_platform_sync_service anyway.
-    now_utc = datetime.now(timezone.utc)
-    telegram_user.is_verified = True
-    web_user.is_verified = True
-    web_user.phone_verified_at = now_utc
-    
-    db.session.commit()
-	
-    # Use cross-platform sync service to link accounts
-    from business_app.services.cross_platform_sync_service import cross_platform_sync_service
-    
-    result = cross_platform_sync_service.auto_link_accounts(
-        primary_user=web_user,  # Keep web account as primary (has real email/phone)
-        secondary_user=telegram_user,
-        link_type='merge'
+    link_result = get_auth_service().verify_phone_link_and_merge_accounts(
+        telegram_id=str(data['telegram_id']),
+        otp=data['otp'],
     )
-    
-    if not result.get('success'):
-        return internal_error_response(
-            message=result.get('error', get_translation('api.auth.accounts_linking_failed'))
-        )
-    
-    # Clean up Redis
-    auth_service.redis_client.delete(link_key)
-    
-    # Generate new tokens for the merged account
-    from business_app.services.token_service import TokenService
-    token_service = TokenService()
-    tokens = token_service.generate_tokens(web_user)
-    
-    logger.info(f"Successfully linked accounts: telegram_id={telegram_id} -> web_user_id={web_user_id}")
+    logger.info("Successfully linked accounts: telegram_id=%s", data.get('telegram_id'))
     
     return success_response(
         data={
-            'user': web_user.to_dict(),
-            'tokens': tokens,
-            'linked': True
+            'user': link_result['user'].to_dict(),
+            'tokens': link_result['tokens'],
+            'linked': link_result['linked']
         },
         message=get_translation('api.auth.accounts_linked_successfully')
     )

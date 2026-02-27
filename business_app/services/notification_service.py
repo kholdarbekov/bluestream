@@ -5,23 +5,41 @@ Handles SMS, Email, Telegram, and Push notifications
 import json
 import logging
 from celery.utils.log import get_task_logger
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+from types import SimpleNamespace
 from typing import Dict, Any, List, Optional
 from flask import current_app
 import requests
 from eskiz_sms import EskizSMS
 
-from business_app.models.notification import Notification, NotificationTemplate, NotificationPreference
+from business_app.models.notification import (
+    Notification,
+    NotificationTemplate,
+    NotificationPreference,
+    PushNotificationToken,
+)
 from business_app.models.user import User
 from business_app.models.order import Order
 from business_app.models.delivery import Delivery
 from business_app.models.payment import Payment
 from business_app.models.subscription import Subscription
-from business_app.utils.exceptions import NotificationError, ConfigurationError
-from business_app.utils.constants import NotificationType, NotificationChannel
+from business_app.utils.exceptions import (
+    NotificationError,
+    ConfigurationError,
+    ValidationError,
+    NotFoundError,
+    ForbiddenError,
+    ConflictError,
+)
+from business_app.utils.constants import (
+    NotificationType,
+    NotificationChannel,
+    NotificationStatus,
+)
 from business_app.utils.translations import get_translation
 from business_app.services.email_template_service import get_email_template_service
 from business_app import db
+from sqlalchemy import func
 
 # Use standard logging that works in both Flask and Celery contexts
 # logger = logging.getLogger(__name__)
@@ -40,6 +58,39 @@ logger = get_task_logger(__name__)
 
 class NotificationService:
     """Service for handling notifications across multiple channels"""
+
+    NOTIFICATION_TYPE_GROUPS = {
+        'order': [
+            NotificationType.ORDER_CONFIRMATION.value,
+            NotificationType.ORDER_STATUS_UPDATE.value,
+            NotificationType.ORDER_UPDATE.value,
+        ],
+        'delivery': [
+            NotificationType.DELIVERY_UPDATE.value,
+            NotificationType.DELIVERY_REMINDER.value,
+        ],
+        'payment': [NotificationType.PAYMENT_CONFIRMATION.value],
+        'promotion': [NotificationType.PROMOTIONAL.value],
+        'system': [
+            NotificationType.SYSTEM.value,
+            NotificationType.SYSTEM_ALERT.value,
+            NotificationType.EMAIL_VERIFICATION.value,
+            NotificationType.PASSWORD_RESET.value,
+        ],
+        'loyalty': [
+            NotificationType.LOYALTY_REWARD.value,
+            NotificationType.REWARD_REDEEMED.value,
+        ],
+        'security': [NotificationType.SECURITY.value],
+        'reminder': [NotificationType.SUBSCRIPTION_REMINDER.value],
+        'subscription': [
+            NotificationType.SUBSCRIPTION_CREATED.value,
+            NotificationType.SUBSCRIPTION_RENEWAL.value,
+            NotificationType.SUBSCRIPTION_CANCELLED.value,
+            NotificationType.SUBSCRIPTION_CANCELLATION_SCHEDULED.value,
+            NotificationType.SUBSCRIPTION_REMINDER.value,
+        ],
+    }
     
     def __init__(self):
         # Email configuration (Brevo)
@@ -382,6 +433,632 @@ class NotificationService:
         db.session.commit()
         
         return template
+
+    def get_user_notifications_paginated(
+        self,
+        user_id: int,
+        page: int,
+        per_page: int,
+        status: Optional[str] = None,
+        notification_type: Optional[str] = None,
+        channel: Optional[str] = None,
+        unread_only: bool = False,
+    ) -> Dict[str, Any]:
+        """Get paginated notifications for a user with filters."""
+        query = Notification.query.filter_by(user_id=user_id)
+
+        if status:
+            try:
+                query = query.filter_by(delivery_status=NotificationStatus(status))
+            except ValueError as exc:
+                raise ValidationError("Invalid status value") from exc
+
+        if notification_type:
+            try:
+                NotificationType(notification_type)
+            except ValueError as exc:
+                raise ValidationError("Invalid notification type") from exc
+            query = query.filter_by(notification_type=notification_type)
+
+        if channel:
+            try:
+                query = query.filter_by(channel=NotificationChannel(channel))
+            except ValueError as exc:
+                raise ValidationError("Invalid channel value") from exc
+
+        if unread_only:
+            query = query.filter(Notification.delivery_status != NotificationStatus.READ)
+
+        query = query.order_by(Notification.created_at.desc())
+        pagination = query.paginate(page=page, per_page=per_page, error_out=False)
+        unread_count = (
+            Notification.query.filter_by(user_id=user_id)
+            .filter(Notification.delivery_status != NotificationStatus.READ)
+            .count()
+        )
+
+        return {
+            'items': pagination.items,
+            'page': page,
+            'per_page': per_page,
+            'total': pagination.total,
+            'unread_count': unread_count,
+        }
+
+    def get_notification_for_user(
+        self,
+        notification_id: int,
+        user_id: int,
+        mark_as_read: bool = False,
+    ) -> Notification:
+        """Get a user-owned notification and optionally mark it as read."""
+        notification = Notification.query.filter_by(
+            id=notification_id,
+            user_id=user_id,
+        ).first()
+        if not notification:
+            raise NotFoundError("Notification not found")
+
+        if mark_as_read and notification.delivery_status != NotificationStatus.READ:
+            self._mark_notification_read(notification)
+            db.session.commit()
+
+        return notification
+
+    def mark_notification_read(self, notification_id: int, user_id: int) -> None:
+        """Mark one notification as read."""
+        notification = self.get_notification_for_user(notification_id, user_id, mark_as_read=False)
+        if notification.delivery_status != NotificationStatus.READ:
+            self._mark_notification_read(notification)
+            db.session.commit()
+
+    def mark_all_notifications_read(self, user_id: int) -> int:
+        """Mark all unread notifications for a user as read and return count."""
+        unread_notifications = (
+            Notification.query.filter_by(user_id=user_id)
+            .filter(Notification.delivery_status != NotificationStatus.READ)
+            .all()
+        )
+
+        for notification in unread_notifications:
+            self._mark_notification_read(notification)
+
+        db.session.commit()
+        return len(unread_notifications)
+
+    def delete_notification_for_user(self, notification_id: int, user_id: int) -> None:
+        """Delete a user-owned notification."""
+        notification = Notification.query.filter_by(
+            id=notification_id,
+            user_id=user_id,
+        ).first()
+        if not notification:
+            raise NotFoundError("Notification not found")
+
+        db.session.delete(notification)
+        db.session.commit()
+
+    def create_default_preferences(self, user_id: int):
+        """Ensure user has default notification preference rows and return a view object."""
+        existing_count = NotificationPreference.query.filter_by(user_id=user_id).count()
+        if existing_count == 0:
+            for group_types in self.NOTIFICATION_TYPE_GROUPS.values():
+                for type_value in group_types:
+                    for channel in self._default_channels_for_type(type_value):
+                        self._ensure_preference_row(user_id, type_value, channel)
+            db.session.commit()
+
+        return self.get_notification_preferences_view(user_id)
+
+    def get_notification_preferences_view(self, user_id: int):
+        """Return notification preferences as a serializer-friendly object."""
+        rows = NotificationPreference.query.filter_by(user_id=user_id, is_enabled=True).all()
+        mapped = self._map_preferences(rows)
+        all_types = self._all_managed_types()
+
+        channel_enabled = {
+            NotificationChannel.EMAIL.value: False,
+            NotificationChannel.SMS.value: False,
+            NotificationChannel.PUSH.value: False,
+            NotificationChannel.IN_APP.value: False,
+            NotificationChannel.TELEGRAM.value: False,
+        }
+        for channels in mapped.values():
+            for channel_value in channels:
+                channel_enabled[channel_value] = True
+
+        def _group_enabled(group_name: str) -> bool:
+            group_types = self.NOTIFICATION_TYPE_GROUPS[group_name]
+            for type_value in group_types:
+                if mapped.get(type_value):
+                    return True
+            return False
+
+        return SimpleNamespace(
+            user_id=user_id,
+            email_enabled=channel_enabled[NotificationChannel.EMAIL.value],
+            sms_enabled=channel_enabled[NotificationChannel.SMS.value],
+            push_enabled=channel_enabled[NotificationChannel.PUSH.value],
+            in_app_enabled=channel_enabled[NotificationChannel.IN_APP.value],
+            telegram_enabled=channel_enabled[NotificationChannel.TELEGRAM.value],
+            order_notifications=_group_enabled('order'),
+            delivery_notifications=_group_enabled('delivery'),
+            payment_notifications=_group_enabled('payment'),
+            promotion_notifications=_group_enabled('promotion'),
+            system_notifications=_group_enabled('system'),
+            loyalty_notifications=_group_enabled('loyalty'),
+            security_notifications=_group_enabled('security'),
+            reminder_notifications=_group_enabled('reminder'),
+            quiet_hours_enabled=False,
+            quiet_hours_start=None,
+            quiet_hours_end=None,
+            digest_enabled=False,
+            digest_frequency='weekly',
+            updated_at=datetime.now(timezone.utc),
+            _mapped_preferences=mapped,
+            _all_types=all_types,
+        )
+
+    def update_notification_preferences_for_user(self, user_id: int, payload: Dict[str, Any]):
+        """Update notification preferences from API payload and return current view."""
+        mapped = self._map_preferences(
+            NotificationPreference.query.filter_by(user_id=user_id, is_enabled=True).all()
+        )
+        all_types = self._all_managed_types()
+
+        channel_flags = {
+            NotificationChannel.EMAIL: payload.get('email_enabled'),
+            NotificationChannel.SMS: payload.get('sms_enabled'),
+            NotificationChannel.PUSH: payload.get('push_enabled'),
+            NotificationChannel.IN_APP: payload.get('in_app_enabled'),
+            NotificationChannel.TELEGRAM: payload.get('telegram_enabled'),
+        }
+        for channel, enabled in channel_flags.items():
+            if enabled is None:
+                continue
+            for type_value in all_types:
+                if enabled:
+                    self._ensure_preference_row(user_id, type_value, channel)
+                else:
+                    NotificationPreference.query.filter_by(
+                        user_id=user_id,
+                        notification_type=type_value,
+                        channel=channel,
+                    ).delete()
+
+        category_flag_map = {
+            'order_notifications': 'order',
+            'order_updates': 'order',
+            'delivery_notifications': 'delivery',
+            'delivery_updates': 'delivery',
+            'payment_notifications': 'payment',
+            'payment_updates': 'payment',
+            'promotion_notifications': 'promotion',
+            'marketing_emails': 'promotion',
+            'promotional_sms': 'promotion',
+            'system_notifications': 'system',
+            'system_alerts': 'system',
+            'loyalty_notifications': 'loyalty',
+            'loyalty_updates': 'loyalty',
+            'security_notifications': 'security',
+            'reminder_notifications': 'reminder',
+            'subscription_updates': 'subscription',
+        }
+        for flag_key, group_name in category_flag_map.items():
+            enabled = payload.get(flag_key)
+            if enabled is None:
+                continue
+
+            group_types = self.NOTIFICATION_TYPE_GROUPS[group_name]
+            if not enabled:
+                NotificationPreference.query.filter(
+                    NotificationPreference.user_id == user_id,
+                    NotificationPreference.notification_type.in_(group_types),
+                ).delete(synchronize_session=False)
+                continue
+
+            preferred_channels = self._enabled_channels_from_payload(payload)
+            if not preferred_channels:
+                preferred_channels = None
+            for type_value in group_types:
+                channels_to_apply = preferred_channels or self._default_channels_for_type(type_value)
+                for channel in channels_to_apply:
+                    self._ensure_preference_row(user_id, type_value, channel)
+
+        db.session.commit()
+        return self.get_notification_preferences_view(user_id)
+
+    def register_push_token_for_user(
+        self,
+        user_id: int,
+        token: str,
+        platform: str,
+        device_id: Optional[str] = None,
+    ) -> None:
+        """Register or update a push token for a user."""
+        if platform not in ['ios', 'android', 'web']:
+            raise ValidationError("Invalid platform")
+
+        existing = PushNotificationToken.query.filter_by(token=token).first()
+        if existing:
+            existing.user_id = user_id
+            existing.is_active = True
+            existing.updated_at = datetime.now(timezone.utc)
+        else:
+            db.session.add(
+                PushNotificationToken(
+                    user_id=user_id,
+                    token=token,
+                    platform=platform,
+                    device_id=device_id,
+                    is_active=True,
+                )
+            )
+        db.session.commit()
+
+    def unregister_push_token_for_user(self, user_id: int, token: str) -> None:
+        """Deactivate a push token for a user."""
+        push_token = PushNotificationToken.query.filter_by(user_id=user_id, token=token).first()
+        if push_token:
+            push_token.is_active = False
+            push_token.updated_at = datetime.now(timezone.utc)
+            db.session.commit()
+
+    def get_active_templates(self, category: Optional[str] = None) -> List[NotificationTemplate]:
+        """Get active notification templates, optionally filtered by type/category."""
+        query = NotificationTemplate.query.filter_by(is_active=True)
+        if category:
+            query = query.filter_by(notification_type=category)
+        return query.order_by(NotificationTemplate.notification_type, NotificationTemplate.name).all()
+
+    def send_test_notification_from_template(
+        self,
+        user_id: int,
+        template_id: int,
+        channel: str,
+        test_data: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Send test notification based on template and return latest notification id."""
+        template = NotificationTemplate.query.filter_by(id=template_id, is_active=True).first()
+        if not template:
+            raise NotFoundError("Template not found")
+
+        try:
+            notification_type = NotificationType(template.notification_type)
+        except ValueError as exc:
+            raise ValidationError("Template has invalid notification type") from exc
+
+        try:
+            channel_enum = NotificationChannel(channel)
+        except ValueError as exc:
+            raise ValidationError("Invalid channel value") from exc
+
+        self.send_notification(
+            user_id=user_id,
+            notification_type=notification_type,
+            channels=[channel_enum],
+            template_data=test_data or {},
+        )
+
+        created = (
+            Notification.query.filter_by(
+                user_id=user_id,
+                notification_type=notification_type.value,
+                channel=channel_enum,
+            )
+            .order_by(Notification.created_at.desc())
+            .first()
+        )
+        return {'notification_id': created.id if created else None}
+
+    def get_notification_statistics_for_user(self, user_id: int, period: str = 'month') -> Dict[str, Any]:
+        """Get notification statistics for a user over a period."""
+        now = datetime.now(timezone.utc)
+        if period == 'week':
+            start_date = now - timedelta(weeks=1)
+        elif period == 'month':
+            start_date = now - timedelta(days=30)
+        elif period == 'quarter':
+            start_date = now - timedelta(days=90)
+        elif period == 'year':
+            start_date = now - timedelta(days=365)
+        else:
+            start_date = now - timedelta(days=30)
+
+        base_query = Notification.query.filter_by(user_id=user_id).filter(
+            Notification.created_at >= start_date
+        )
+
+        total_notifications = base_query.count()
+        read_notifications = base_query.filter_by(delivery_status=NotificationStatus.READ).count()
+        unread_notifications = total_notifications - read_notifications
+
+        notifications_by_type = {}
+        type_stats = (
+            db.session.query(Notification.notification_type, func.count(Notification.id))
+            .filter_by(user_id=user_id)
+            .filter(Notification.created_at >= start_date)
+            .group_by(Notification.notification_type)
+            .all()
+        )
+        for type_value, count in type_stats:
+            notifications_by_type[type_value] = count
+
+        notifications_by_channel = {}
+        channel_stats = (
+            db.session.query(Notification.channel, func.count(Notification.id))
+            .filter_by(user_id=user_id)
+            .filter(Notification.created_at >= start_date)
+            .group_by(Notification.channel)
+            .all()
+        )
+        for channel_value, count in channel_stats:
+            key = channel_value.value if hasattr(channel_value, 'value') else str(channel_value)
+            notifications_by_channel[key] = count
+
+        daily_stats = (
+            db.session.query(
+                func.date(Notification.created_at).label('date'),
+                func.count(Notification.id).label('count'),
+            )
+            .filter_by(user_id=user_id)
+            .filter(Notification.created_at >= start_date)
+            .group_by(func.date(Notification.created_at))
+            .all()
+        )
+        daily_notifications = {date_obj.isoformat(): count for date_obj, count in daily_stats}
+
+        return {
+            'period': period,
+            'statistics': {
+                'total_notifications': total_notifications,
+                'read_notifications': read_notifications,
+                'unread_notifications': unread_notifications,
+                'read_rate': round((read_notifications / total_notifications * 100), 2) if total_notifications > 0 else 0,
+                'notifications_by_type': notifications_by_type,
+                'notifications_by_channel': notifications_by_channel,
+                'daily_trend': daily_notifications,
+            },
+        }
+
+    def get_user_notification_channels(self, user_id: int) -> Dict[str, Any]:
+        """Get available channels for a user."""
+        user = User.query.get(user_id)
+        if not user:
+            raise NotFoundError("User not found")
+
+        push_tokens = PushNotificationToken.query.filter_by(user_id=user_id, is_active=True).all()
+
+        return {
+            'email': {
+                'available': bool(user.email and user.email_verified),
+                'address': user.email if user.email_verified else None,
+                'verified': user.email_verified,
+            },
+            'sms': {
+                'available': bool(user.phone and user.phone_verified),
+                'number': user.phone if user.phone_verified else None,
+                'verified': user.phone_verified,
+            },
+            'push': {
+                'available': len(push_tokens) > 0,
+                'devices': [
+                    {
+                        'platform': token.platform,
+                        'device_id': token.device_id,
+                        'registered_at': token.created_at.isoformat(),
+                    }
+                    for token in push_tokens
+                ],
+            },
+            'telegram': {
+                'available': bool(getattr(user, 'telegram_id', None)),
+                'chat_id': getattr(user, 'telegram_id', None),
+            },
+        }
+
+    def queue_bulk_notification(
+        self,
+        sender_id: int,
+        user_ids: List[int],
+        template_code: str,
+        template_data: Optional[Dict[str, Any]],
+        channels: List[str],
+    ) -> Dict[str, Any]:
+        """Validate and queue bulk notifications (admin-only)."""
+        sender = User.query.get(sender_id)
+        if not sender or not sender.is_admin:
+            raise ForbiddenError("Admin access required")
+
+        if not isinstance(user_ids, list) or len(user_ids) > 1000:
+            raise ValidationError("Invalid user_ids or too many recipients (max 1000)")
+        if not isinstance(channels, list) or len(channels) == 0:
+            raise ValidationError("channels must be a non-empty list")
+
+        template = NotificationTemplate.query.filter_by(
+            name=template_code,
+            is_active=True,
+        ).first()
+        if not template:
+            raise NotFoundError("Template not found")
+
+        normalized_channels: List[str] = []
+        for channel in channels:
+            try:
+                normalized_channels.append(NotificationChannel(channel).value)
+            except ValueError as exc:
+                raise ValidationError("Invalid channel value") from exc
+
+        from business_app.tasks.notification_tasks import send_bulk_notification_task
+
+        task = send_bulk_notification_task.delay(
+            notification_type=template.notification_type,
+            recipient_ids=user_ids,
+            template_data=template_data or {},
+            channels=normalized_channels,
+        )
+        return {'task_id': task.id, 'recipient_count': len(user_ids)}
+
+    def get_delivery_reports_paginated(
+        self,
+        requester_id: int,
+        page: int,
+        per_page: int,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        channel: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Get paginated delivery reports for notifications (admin-only)."""
+        requester = User.query.get(requester_id)
+        if not requester or not requester.is_admin:
+            raise ForbiddenError("Admin access required")
+
+        query = Notification.query
+
+        if start_date:
+            try:
+                query = query.filter(Notification.created_at >= datetime.fromisoformat(start_date))
+            except ValueError as exc:
+                raise ValidationError("Invalid start_date format") from exc
+
+        if end_date:
+            try:
+                query = query.filter(Notification.created_at <= datetime.fromisoformat(end_date))
+            except ValueError as exc:
+                raise ValidationError("Invalid end_date format") from exc
+
+        if channel:
+            try:
+                query = query.filter_by(channel=NotificationChannel(channel))
+            except ValueError as exc:
+                raise ValidationError("Invalid channel value") from exc
+
+        query = query.order_by(Notification.created_at.desc())
+        pagination = query.paginate(page=page, per_page=per_page, error_out=False)
+
+        total_sent = query.count()
+        delivered = query.filter_by(delivery_status=NotificationStatus.DELIVERED).count()
+        failed = query.filter_by(delivery_status=NotificationStatus.FAILED).count()
+        pending = query.filter_by(delivery_status=NotificationStatus.PENDING).count()
+
+        reports = []
+        for notif in pagination.items:
+            delivered_at = None
+            if isinstance(notif.extra_data, dict):
+                delivered_at = notif.extra_data.get('delivered_at')
+            reports.append(
+                {
+                    'id': notif.id,
+                    'user_id': notif.user_id,
+                    'channel': notif.channel.value if hasattr(notif.channel, 'value') else notif.channel,
+                    'status': notif.delivery_status.value if hasattr(notif.delivery_status, 'value') else notif.delivery_status,
+                    'created_at': notif.created_at.isoformat(),
+                    'sent_at': notif.sent_at.isoformat() if notif.sent_at else None,
+                    'delivered_at': delivered_at,
+                    'error_message': notif.failure_reason,
+                }
+            )
+
+        return {
+            'items': reports,
+            'page': page,
+            'per_page': per_page,
+            'total': pagination.total,
+            'summary': {
+                'total_sent': total_sent,
+                'delivered': delivered,
+                'failed': failed,
+                'pending': pending,
+                'delivery_rate': round((delivered / total_sent * 100), 2) if total_sent > 0 else 0,
+            },
+        }
+
+    def _mark_notification_read(self, notification: Notification) -> None:
+        """Mark a notification as read using delivery status and metadata."""
+        notification.delivery_status = NotificationStatus.READ
+        # JSON columns are not always mutation-tracked; assign a copied dict.
+        source = notification.extra_data if isinstance(notification.extra_data, dict) else {}
+        extra_data = dict(source)
+        extra_data['read_at'] = datetime.now(timezone.utc).isoformat()
+        notification.extra_data = extra_data
+
+    def _all_managed_types(self) -> List[str]:
+        """Get a de-duplicated list of managed notification types."""
+        all_types = []
+        for values in self.NOTIFICATION_TYPE_GROUPS.values():
+            all_types.extend(values)
+        return sorted(set(all_types))
+
+    def _map_preferences(self, rows: List[NotificationPreference]) -> Dict[str, set]:
+        """Map preference rows to type->set(channel_value)."""
+        mapped: Dict[str, set] = {}
+        for row in rows:
+            type_key = row.notification_type
+            if type_key not in mapped:
+                mapped[type_key] = set()
+            channel_value = row.channel.value if hasattr(row.channel, 'value') else str(row.channel)
+            mapped[type_key].add(channel_value)
+        return mapped
+
+    def _ensure_preference_row(self, user_id: int, notification_type: str, channel: NotificationChannel) -> None:
+        """Ensure one enabled preference row exists for user/type/channel."""
+        existing = NotificationPreference.query.filter_by(
+            user_id=user_id,
+            notification_type=notification_type,
+            channel=channel,
+        ).first()
+        if existing:
+            existing.is_enabled = True
+            return
+
+        db.session.add(
+            NotificationPreference(
+                user_id=user_id,
+                notification_type=notification_type,
+                channel=channel,
+                is_enabled=True,
+            )
+        )
+
+    def _enabled_channels_from_payload(self, payload: Dict[str, Any]) -> List[NotificationChannel]:
+        """Extract globally enabled channels from update payload."""
+        mapping = {
+            'email_enabled': NotificationChannel.EMAIL,
+            'sms_enabled': NotificationChannel.SMS,
+            'push_enabled': NotificationChannel.PUSH,
+            'in_app_enabled': NotificationChannel.IN_APP,
+            'telegram_enabled': NotificationChannel.TELEGRAM,
+        }
+        result = []
+        for key, channel in mapping.items():
+            if payload.get(key) is True:
+                result.append(channel)
+        return result
+
+    def _default_channels_for_type(self, notification_type: str) -> List[NotificationChannel]:
+        """Default channels for a notification type."""
+        defaults = {
+            NotificationType.ORDER_CONFIRMATION.value: [NotificationChannel.EMAIL, NotificationChannel.SMS],
+            NotificationType.ORDER_STATUS_UPDATE.value: [NotificationChannel.SMS, NotificationChannel.TELEGRAM],
+            NotificationType.ORDER_UPDATE.value: [NotificationChannel.SMS, NotificationChannel.TELEGRAM],
+            NotificationType.DELIVERY_UPDATE.value: [NotificationChannel.SMS, NotificationChannel.TELEGRAM],
+            NotificationType.DELIVERY_REMINDER.value: [NotificationChannel.SMS, NotificationChannel.TELEGRAM],
+            NotificationType.PAYMENT_CONFIRMATION.value: [NotificationChannel.EMAIL],
+            NotificationType.SUBSCRIPTION_REMINDER.value: [NotificationChannel.EMAIL],
+            NotificationType.SUBSCRIPTION_CREATED.value: [NotificationChannel.EMAIL, NotificationChannel.TELEGRAM],
+            NotificationType.SUBSCRIPTION_RENEWAL.value: [NotificationChannel.EMAIL],
+            NotificationType.SUBSCRIPTION_CANCELLED.value: [NotificationChannel.EMAIL],
+            NotificationType.SUBSCRIPTION_CANCELLATION_SCHEDULED.value: [NotificationChannel.EMAIL],
+            NotificationType.PROMOTIONAL.value: [NotificationChannel.EMAIL],
+            NotificationType.SYSTEM.value: [NotificationChannel.EMAIL, NotificationChannel.SMS],
+            NotificationType.SYSTEM_ALERT.value: [NotificationChannel.EMAIL, NotificationChannel.SMS],
+            NotificationType.SECURITY.value: [NotificationChannel.EMAIL, NotificationChannel.SMS],
+            NotificationType.EMAIL_VERIFICATION.value: [NotificationChannel.EMAIL],
+            NotificationType.PASSWORD_RESET.value: [NotificationChannel.EMAIL, NotificationChannel.SMS],
+            NotificationType.LOYALTY_REWARD.value: [NotificationChannel.EMAIL, NotificationChannel.TELEGRAM],
+            NotificationType.REWARD_REDEEMED.value: [NotificationChannel.EMAIL],
+        }
+        return defaults.get(notification_type, [NotificationChannel.EMAIL])
     
     # Private methods for different channels
     def _send_email_notification(self, user: User, notification_type: NotificationType,

@@ -10,7 +10,7 @@ from handlers.base import BaseHandler
 from api_client import api_client
 from keyboards.delivery import DeliveryKeyboards
 from keyboards.common import CommonKeyboards
-from utils.formatters import format_order_card, format_delivery_status, format_currency
+from utils.formatters import format_delivery_status, format_currency, escape_html
 from permissions import require_auth, require_delivery_driver
 from i18n import i18n
 
@@ -72,18 +72,18 @@ class ActiveDeliveryHandler(BaseHandler):
             for delivery in deliveries:
                 status = delivery.get('status', '')
                 status_text = format_delivery_status(status, language)
-                order_num = delivery.get('order_number') or i18n.get('staff.common.not_available', language)
+                order_num = escape_html(delivery.get('order_number') or i18n.get('staff.common.not_available', language))
 
                 lines = [
                     f"\U0001f69a <b>#{order_num}</b> \u2014 {status_text}",
                 ]
 
-                customer_name = delivery.get('customer_name', '')
+                customer_name = escape_html(delivery.get('customer_name', ''))
                 if customer_name:
                     lines.append(f"\U0001f464 {customer_name}")
 
-                address = delivery.get('address', '')
-                district = delivery.get('district', '')
+                address = escape_html(delivery.get('address', ''))
+                district = escape_html(delivery.get('district', ''))
                 if district:
                     lines.append(f"\U0001f4cd {district}")
                 if address:
@@ -157,7 +157,7 @@ class ActiveDeliveryHandler(BaseHandler):
             # Build detailed view
             status = delivery.get('status', '')
             status_text = format_delivery_status(status, language)
-            order_num = delivery.get('order_number') or i18n.get('staff.common.not_available', language)
+            order_num = escape_html(delivery.get('order_number') or i18n.get('staff.common.not_available', language))
 
             lines = [
                 f"\U0001f69a <b>#{order_num}</b>",
@@ -170,22 +170,22 @@ class ActiveDeliveryHandler(BaseHandler):
             if items:
                 lines.append(f"<b>{i18n.get('staff.delivery.items', language)}:</b>")
                 for item in items:
-                    name = item.get('product_name', item.get('name', ''))
+                    name = escape_html(item.get('product_name', item.get('name', '')))
                     qty = item.get('quantity', 1)
                     lines.append(f"  \u2022 {name} x{qty}")
                 lines.append("")
 
             # Customer
-            customer_name = delivery.get('customer_name', '')
-            customer_phone = delivery.get('customer_phone', '')
+            customer_name = escape_html(delivery.get('customer_name', ''))
+            customer_phone = escape_html(delivery.get('customer_phone', ''))
             if customer_name:
                 lines.append(f"\U0001f464 {customer_name}")
             if customer_phone:
                 lines.append(f"\U0001f4de {customer_phone}")
 
             # Address
-            address = delivery.get('address', '')
-            district = delivery.get('district', '')
+            address = escape_html(delivery.get('address', ''))
+            district = escape_html(delivery.get('district', ''))
             if district:
                 lines.append(f"\U0001f4cd {district}")
             if address:
@@ -203,7 +203,7 @@ class ActiveDeliveryHandler(BaseHandler):
             # Delivery notes
             notes = delivery.get('delivery_notes', '')
             if notes:
-                lines.append(f"\U0001f4ac {notes}")
+                lines.append(f"\U0001f4ac {escape_html(notes)}")
 
             # Store delivery info in context for status updates/navigation
             context.user_data['current_delivery'] = {
@@ -240,7 +240,7 @@ class ActiveDeliveryHandler(BaseHandler):
 
         try:
             delivery_info = context.user_data.get('current_delivery', {})
-            address = delivery_info.get('address', '')
+            address = escape_html(delivery_info.get('address', ''))
             destination_lat = delivery_info.get('destination_lat')
             destination_lng = delivery_info.get('destination_lng')
             origin_lat = delivery_info.get('origin_lat')

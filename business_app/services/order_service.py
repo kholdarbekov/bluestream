@@ -5,7 +5,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Any, Optional, Tuple
 from flask import current_app
-from sqlalchemy import and_, or_
+from sqlalchemy import and_, desc, func, or_
 from sqlalchemy.orm import joinedload
 
 from business_app.utils.service_logging import (
@@ -16,10 +16,10 @@ logger = logging.getLogger(__name__)
 
 from business_app.models.order import Order, OrderItem
 from business_app.models.product import Product
-from business_app.models.user import User
+from business_app.models.user import User, UserAddress
 from business_app.models.delivery import Delivery
-from business_app.utils.exceptions import ValidationError, NotFoundError, ConflictError
-from business_app.utils.constants import OrderStatus, PaymentStatus, DeliveryStatus
+from business_app.utils.exceptions import ValidationError, NotFoundError, ConflictError, ForbiddenError
+from business_app.utils.constants import OrderStatus, PaymentStatus, DeliveryStatus, PaymentMethod, SubscriptionFrequency, UserRole
 from business_app.models.order import OrderStatusHistory
 from business_app.utils.helpers import calculate_delivery_fee
 from business_app.utils.audit_logger import audit_logger, AuditEventType, AuditSeverity
@@ -110,7 +110,11 @@ class OrderService:
             total_amount=total_amount,
             delivery_address_id=delivery_address['delivery_address_id'],
             payment_method=payment_method,
+            delivery_date=order_data.get('delivery_date'),
+            delivery_time_slot=order_data.get('delivery_time_slot'),
             delivery_notes=order_data.get('delivery_notes'),
+            is_urgent=bool(order_data.get('is_urgent', False)),
+            loyalty_points_used=int(order_data.get('loyalty_points_used') or 0),
             order_source=order_source
         )
         
@@ -265,6 +269,437 @@ class OrderService:
             'has_next': pagination.has_next,
             'has_prev': pagination.has_prev
         }
+
+    def get_user_orders_paginated(
+        self,
+        user_id: int,
+        page: int,
+        per_page: int,
+        status: Optional[str] = None,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None,
+    ) -> Dict[str, Any]:
+        """Get paginated user orders with optional status/date filters."""
+        query = Order.query.options(
+            joinedload(Order.order_items).joinedload(OrderItem.product),
+            joinedload(Order.payment),
+            joinedload(Order.delivery_address),
+            joinedload(Order.delivery),
+        ).filter_by(user_id=user_id)
+
+        if status:
+            try:
+                query = query.filter(Order.status == OrderStatus(status))
+            except ValueError as exc:
+                raise ValidationError("Invalid status value") from exc
+
+        if start_date:
+            query = query.filter(Order.created_at >= start_date)
+        if end_date:
+            query = query.filter(Order.created_at <= end_date)
+
+        pagination = query.order_by(Order.created_at.desc()).paginate(
+            page=page,
+            per_page=per_page,
+            error_out=False,
+        )
+        return {
+            'items': pagination.items,
+            'total': pagination.total,
+            'page': page,
+            'per_page': per_page,
+        }
+
+    def get_order_details_for_user(self, order_id: int, user_id: int) -> Dict[str, Any]:
+        """Return full order details for a user-owned order."""
+        order = self.get_order(order_id, user_id=user_id)
+        return {
+            'order': order,
+            'delivery': order.delivery,
+            'timeline': self.get_order_timeline(order_id),
+        }
+
+    def get_user_and_address_for_order(
+        self,
+        user_id: int,
+        delivery_address_id: Optional[int],
+    ) -> Tuple[User, Optional[UserAddress]]:
+        """Resolve and validate user and optional delivery address ownership."""
+        user = User.query.get(user_id)
+        if not user:
+            raise NotFoundError("User not found")
+
+        if delivery_address_id is None:
+            return user, None
+
+        address = UserAddress.query.filter_by(
+            id=delivery_address_id,
+            user_id=user_id,
+        ).first()
+        if not address:
+            raise ValidationError("Invalid delivery address")
+        return user, address
+
+    def get_user_or_raise(self, user_id: int) -> User:
+        """Return user by id or raise not-found error."""
+        user = User.query.get(user_id)
+        if not user:
+            raise NotFoundError("User not found")
+        return user
+
+    def validate_user_emergency_order_access(
+        self,
+        user_id: int,
+        daily_limit: int = 3,
+    ) -> Dict[str, Any]:
+        """Validate emergency-order permissions and per-day rate limit."""
+        user = User.query.get(user_id)
+        if not user:
+            raise NotFoundError("User not found")
+
+        role_value = user.role.value if hasattr(user.role, 'value') else user.role
+        staff_roles = {UserRole.ADMIN.value, UserRole.MANAGER.value, UserRole.OPERATOR.value}
+        if not user.is_premium and role_value not in staff_roles:
+            raise ForbiddenError("Emergency orders require premium or staff access")
+
+        today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+        today_count = Order.query.filter(
+            Order.user_id == user_id,
+            Order.is_urgent.is_(True),
+            Order.created_at >= today_start,
+        ).count()
+        if today_count >= daily_limit:
+            raise ConflictError("Emergency order daily limit exceeded")
+
+        return {'user': user, 'today_count': today_count}
+
+    def get_user_order_statistics(self, user_id: int, period: str = 'year') -> Dict[str, Any]:
+        """Get aggregated order statistics for a user."""
+        now = datetime.now(timezone.utc)
+        start_date: Optional[datetime]
+        if period == 'month':
+            start_date = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        elif period == 'quarter':
+            quarter_start_month = ((now.month - 1) // 3) * 3 + 1
+            start_date = now.replace(
+                month=quarter_start_month,
+                day=1,
+                hour=0,
+                minute=0,
+                second=0,
+                microsecond=0,
+            )
+        elif period == 'year':
+            start_date = now.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+        elif period == 'all':
+            start_date = None
+        else:
+            raise ValidationError("Invalid period value")
+
+        query = Order.query.filter_by(user_id=user_id)
+        if start_date:
+            query = query.filter(Order.created_at >= start_date)
+
+        total_orders, total_spent = query.with_entities(
+            func.count(Order.id),
+            func.coalesce(func.sum(Order.total_amount), 0),
+        ).first()
+        total_spent_value = float(total_spent or 0)
+
+        status_rows = query.with_entities(
+            Order.status,
+            func.count(Order.id),
+        ).group_by(Order.status).all()
+        status_counts = {}
+        for status_value, count in status_rows:
+            key = status_value.value if hasattr(status_value, 'value') else str(status_value)
+            status_counts[key] = count
+        for enum_status in OrderStatus:
+            status_counts.setdefault(enum_status.value, 0)
+
+        top_products_query = db.session.query(
+            Product.name,
+            func.sum(OrderItem.quantity).label('total_qty'),
+        ).join(OrderItem, OrderItem.product_id == Product.id).join(
+            Order, Order.id == OrderItem.order_id,
+        ).filter(Order.user_id == user_id)
+        if start_date:
+            top_products_query = top_products_query.filter(Order.created_at >= start_date)
+        top_products_rows = top_products_query.group_by(
+            Product.id, Product.name,
+        ).order_by(desc('total_qty')).limit(5).all()
+        top_products = [{'name': name, 'quantity': int(qty)} for name, qty in top_products_rows]
+
+        monthly_spending: Dict[str, float] = {}
+        monthly_samples = db.session.query(
+            Order.created_at,
+            Order.total_amount,
+        ).filter(Order.user_id == user_id).all()
+        for created_at, total_amount in monthly_samples:
+            if not created_at:
+                continue
+            month_key = created_at.strftime('%Y-%m')
+            monthly_spending[month_key] = monthly_spending.get(month_key, 0.0) + float(total_amount or 0)
+
+        # Keep only most recent 12 months to stabilize payload size.
+        monthly_spending = dict(sorted(monthly_spending.items(), reverse=True)[:12])
+
+        return {
+            'period': period,
+            'statistics': {
+                'total_orders': int(total_orders or 0),
+                'total_spent': total_spent_value,
+                'average_order_value': round(total_spent_value / total_orders, 2) if total_orders else 0,
+                'orders_by_status': status_counts,
+                'top_products': top_products,
+                'monthly_spending_trend': monthly_spending,
+            },
+        }
+
+    def submit_order_feedback_for_user(
+        self,
+        order_id: int,
+        user_id: int,
+        rating: int,
+        comment: Optional[str] = None,
+    ) -> Order:
+        """Persist feedback for a delivered user order."""
+        order = self.get_order(order_id, user_id=user_id)
+        if order.status != OrderStatus.DELIVERED:
+            raise ConflictError("Feedback can be submitted only for delivered orders")
+        if not order.delivery:
+            raise ValidationError("Order has no delivery record")
+
+        order.delivery.customer_rating = rating
+        order.delivery.customer_feedback = comment
+        db.session.commit()
+        return order
+
+    def repeat_order_for_user(self, order_id: int, user_id: int) -> Order:
+        """Create a new order from an existing user-owned order."""
+        original_order = self.get_order(order_id, user_id=user_id)
+        if not original_order.order_items:
+            raise ValidationError("Original order has no items")
+        if not original_order.delivery_address:
+            raise ValidationError("Original order has no delivery address")
+
+        order_data = {
+            'items': [
+                {'product_id': item.product_id, 'quantity': item.quantity}
+                for item in original_order.order_items
+            ],
+            'delivery_address': {
+                'delivery_address_id': original_order.delivery_address.id,
+                'street': original_order.delivery_address.street_address,
+                'latitude': original_order.delivery_address.latitude,
+                'longitude': original_order.delivery_address.longitude,
+            },
+            'delivery_notes': original_order.delivery_notes,
+            'payment_method': (
+                original_order.payment_method.value
+                if hasattr(original_order.payment_method, 'value')
+                else original_order.payment_method
+            ),
+            'order_source': 'web',
+        }
+        return self.create_order(user_id, order_data)
+
+    def get_order_tracking_for_user(self, order_id: int, user_id: int) -> Dict[str, Any]:
+        """Get tracking payload for a user-owned order."""
+        order = self.get_order(order_id, user_id=user_id)
+        timeline = self.get_order_timeline(order_id)
+
+        time_remaining = None
+        if order.delivery and order.delivery.estimated_delivery_time:
+            estimated_time = order.delivery.estimated_delivery_time
+            if estimated_time.tzinfo is None:
+                estimated_time = estimated_time.replace(tzinfo=timezone.utc)
+            remaining = estimated_time - datetime.now(timezone.utc)
+            if remaining.total_seconds() > 0:
+                total_minutes = int(remaining.total_seconds() // 60)
+                time_remaining = {
+                    'hours': total_minutes // 60,
+                    'minutes': total_minutes % 60,
+                    'total_minutes': total_minutes,
+                }
+
+        return {
+            'order': order,
+            'delivery': order.delivery,
+            'timeline': timeline,
+            'estimated_time_remaining': time_remaining,
+        }
+
+    def perform_bulk_action(self, action: str, order_ids: List[int], actor_user_id: int) -> List[Dict[str, Any]]:
+        """Perform bulk actions for admin users on selected orders."""
+        actor = User.query.get(actor_user_id)
+        if not actor or not actor.is_admin:
+            raise ForbiddenError("Admin access required")
+
+        valid_actions = {'confirm', 'cancel', 'mark_priority', 'assign_delivery'}
+        if action not in valid_actions:
+            raise ValidationError("Invalid action")
+
+        results: List[Dict[str, Any]] = []
+        for order_id in order_ids:
+            order = Order.query.get(order_id)
+            if not order:
+                results.append({'order_id': order_id, 'success': False, 'error': 'Order not found'})
+                continue
+
+            try:
+                if action == 'confirm':
+                    self.update_order_status(order.id, OrderStatus.CONFIRMED, updated_by=actor_user_id)
+                elif action == 'cancel':
+                    self.cancel_order(order.id, user_id=actor_user_id, reason='Bulk cancellation')
+                elif action == 'mark_priority':
+                    order.is_urgent = True
+                    order.updated_at = datetime.now(timezone.utc)
+                    db.session.commit()
+                elif action == 'assign_delivery':
+                    if not order.delivery:
+                        from business_app.services.delivery_service import DeliveryService
+                        DeliveryService().create_delivery(order.id)
+
+                results.append({'order_id': order_id, 'success': True})
+            except Exception as exc:
+                db.session.rollback()
+                results.append({'order_id': order_id, 'success': False, 'error': str(exc)})
+
+        return results
+
+    def export_orders(
+        self,
+        format_type: str,
+        filters: Dict[str, Any],
+        start_date: Optional[str],
+        end_date: Optional[str],
+        user_id: int,
+    ) -> Dict[str, Any]:
+        """Build order export file and return metadata."""
+        if format_type not in {'csv', 'excel'}:
+            raise ValidationError("Invalid format")
+
+        query = Order.query.options(
+            joinedload(Order.order_items).joinedload(OrderItem.product),
+            joinedload(Order.delivery_address),
+        )
+        if filters.get('user_id') is not None:
+            query = query.filter(Order.user_id == filters['user_id'])
+        if filters.get('status'):
+            try:
+                query = query.filter(Order.status == OrderStatus(filters['status']))
+            except ValueError as exc:
+                raise ValidationError("Invalid status value") from exc
+
+        if start_date:
+            try:
+                query = query.filter(Order.created_at >= datetime.fromisoformat(start_date))
+            except ValueError as exc:
+                raise ValidationError("Invalid start_date format") from exc
+        if end_date:
+            try:
+                query = query.filter(Order.created_at <= datetime.fromisoformat(end_date))
+            except ValueError as exc:
+                raise ValidationError("Invalid end_date format") from exc
+
+        orders = query.order_by(Order.created_at.desc()).all()
+
+        import csv
+        import os
+        import uuid
+
+        extension = 'xlsx' if format_type == 'excel' else 'csv'
+        filename = f"orders_export_{user_id}_{uuid.uuid4().hex[:8]}.{extension}"
+        filepath = os.path.join('/tmp', filename)
+
+        with open(filepath, 'w', newline='', encoding='utf-8') as csv_file:
+            writer = csv.writer(csv_file)
+            writer.writerow(['order_id', 'order_number', 'status', 'total_amount', 'created_at'])
+            for order in orders:
+                status_value = order.status.value if hasattr(order.status, 'value') else order.status
+                writer.writerow([
+                    order.id,
+                    order.order_number,
+                    status_value,
+                    float(order.total_amount),
+                    order.created_at.isoformat() if order.created_at else '',
+                ])
+
+        file_size = os.path.getsize(filepath)
+        expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
+        return {
+            'download_url': f'/tmp/{filename}',
+            'file_size': file_size,
+            'expires_at': expires_at,
+        }
+
+    def create_subscription_order(
+        self,
+        subscription_data: Dict[str, Any],
+        items_data: List[Dict[str, Any]],
+    ) -> Any:
+        """Create recurring subscription via subscription service."""
+        frequency_value = subscription_data.get('frequency')
+        try:
+            frequency = SubscriptionFrequency(frequency_value)
+        except ValueError as exc:
+            raise ValidationError("Invalid subscription frequency") from exc
+
+        payment_method_raw = subscription_data.get('payment_method') or PaymentMethod.CASH.value
+        try:
+            payment_method = PaymentMethod(payment_method_raw)
+        except ValueError as exc:
+            raise ValidationError("Invalid payment method") from exc
+
+        from business_app.utils.service_factory import get_subscription_service
+
+        payload = {
+            'user_id': subscription_data['user_id'],
+            'name': 'Recurring water delivery',
+            'description': subscription_data.get('delivery_notes') or '',
+            'billing_cycle': frequency.value,
+            'delivery_frequency': frequency.value,
+            'delivery_address_id': subscription_data.get('delivery_address_id'),
+            'payment_method': payment_method,
+            'auto_payment': bool(subscription_data.get('auto_pay', True)),
+            'auto_renew': True,
+            'start_date': datetime.fromisoformat(subscription_data['start_date']) if subscription_data.get('start_date') else datetime.now(timezone.utc),
+        }
+
+        return get_subscription_service().create_subscription(payload, items_data)
+
+    def create_scheduled_order(self, order_data: Dict[str, Any], items_data: List[Dict[str, Any]]) -> Order:
+        """Create an order scheduled for future processing."""
+        user_id = order_data['user_id']
+        _, address = self.get_user_and_address_for_order(user_id, order_data.get('delivery_address_id'))
+        if not address:
+            raise ValidationError("Delivery address is required")
+
+        scheduled_date = order_data.get('scheduled_date')
+        if isinstance(scheduled_date, str):
+            scheduled_date = datetime.fromisoformat(scheduled_date)
+        if scheduled_date and scheduled_date.tzinfo is None:
+            scheduled_date = scheduled_date.replace(tzinfo=timezone.utc)
+        if scheduled_date and scheduled_date <= datetime.now(timezone.utc):
+            raise ValidationError("Scheduled date must be in the future")
+
+        create_payload = {
+            'items': items_data,
+            'delivery_address': {
+                'delivery_address_id': address.id,
+                'street': address.street_address,
+                'latitude': address.latitude,
+                'longitude': address.longitude,
+            },
+            'delivery_date': order_data.get('delivery_date') or (scheduled_date.date() if scheduled_date else None),
+            'delivery_time_slot': order_data.get('delivery_time_slot'),
+            'delivery_notes': order_data.get('delivery_notes'),
+            'payment_method': order_data.get('payment_method'),
+            'order_source': order_data.get('order_source', 'web'),
+            'is_urgent': bool(order_data.get('is_urgent', False)),
+        }
+        return self.create_order(user_id, create_payload)
     
     def update_order_status(self, order_id: int, new_status: OrderStatus, 
                            updated_by: int = None, notes: str = None) -> Order:

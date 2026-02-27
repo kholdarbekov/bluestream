@@ -634,6 +634,23 @@ def _add_dynamic_keys(keys: Set[str]) -> None:
         keys.add(f"staff.order.status.{status.value}")
 
 
+def _add_curated_keys(keys: Set[str]) -> None:
+    """
+    Add all curated key catalogs.
+
+    This makes seeding deterministic even when staff_bot source files are not
+    available in the current runtime (e.g. business_app container).
+    """
+    keys.update(STAFF_TRANSLATIONS.keys())
+    keys.update(EXTRA_TRANSLATIONS.keys())
+
+    for suffix in DELIVERY_TEXT_TRANSLATIONS.keys():
+        keys.add(f"staff.delivery.{suffix}")
+
+    for suffix in OPERATOR_TEXT_TRANSLATIONS.keys():
+        keys.add(f"staff.operator.{suffix}")
+
+
 def _auto_family_translation(key: str, language: str) -> Optional[str]:
     """Resolve known dynamic key families."""
     extra = EXTRA_TRANSLATIONS.get(key, {})
@@ -751,6 +768,7 @@ def main() -> int:
     with app.app_context():
         keys = _extract_literal_keys(repo_root)
         _add_dynamic_keys(keys)
+        _add_curated_keys(keys)
         _validate_russian_translations(keys)
 
         total_keys = len(keys)

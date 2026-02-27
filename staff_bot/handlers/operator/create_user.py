@@ -11,7 +11,7 @@ from api_client import api_client
 from keyboards.common import CommonKeyboards
 from keyboards.operator import OperatorKeyboards
 from utils.validators import validate_phone, validate_name
-from utils.formatters import format_user_card
+from utils.formatters import format_user_card, escape_html
 from permissions import require_auth, require_operator
 from i18n import i18n
 
@@ -67,7 +67,7 @@ class CreateUserHandler(BaseHandler):
         # Check if user already exists
         try:
             async with api_client as client:
-                response = await client.search_clients(token, normalized_phone)
+                response = await client.search_clients(token, normalized_phone, search_type='phone')
 
             if response.success:
                 clients = response.data if isinstance(response.data, list) else response.data.get('items', [])
@@ -167,11 +167,11 @@ class CreateUserHandler(BaseHandler):
 
         text = (
             f"\U0001f464 <b>{i18n.get('staff.operator.confirm_create_user', language)}</b>\n\n"
-            f"\U0001f4de {client_data['phone']}\n"
-            f"\U0001f464 {client_data['first_name']}"
+            f"\U0001f4de {escape_html(client_data['phone'])}\n"
+            f"\U0001f464 {escape_html(client_data['first_name'])}"
         )
         if client_data.get('last_name'):
-            text += f" {client_data['last_name']}"
+            text += f" {escape_html(client_data['last_name'])}"
         text += f"\n\U0001f310 {lang_name}"
 
         keyboard = CommonKeyboards.confirm_cancel(
@@ -215,8 +215,8 @@ class CreateUserHandler(BaseHandler):
 
             text = (
                 f"\u2705 {i18n.get('staff.operator.user_created', language)}\n\n"
-                f"\U0001f464 {user_name}\n"
-                f"\U0001f4de {client_data.get('phone', '')}"
+                f"\U0001f464 {escape_html(user_name)}\n"
+                f"\U0001f4de {escape_html(client_data.get('phone', ''))}"
             )
 
             # Offer to create order for the new user

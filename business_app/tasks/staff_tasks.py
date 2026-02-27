@@ -41,6 +41,14 @@ def _send_staff_webhook(endpoint: str, data: dict, timeout: int = 10) -> bool:
 
         body = json.dumps(payload).encode('utf-8')
         secret = WEBHOOK_SECRET or os.environ.get('JWT_SECRET_KEY', '')
+        if not secret:
+            logger.error(
+                "Staff webhook secret is not configured; refusing to send unsigned webhook "
+                "for endpoint %s",
+                endpoint,
+            )
+            return False
+
         signature = hmac.new(
             secret.encode('utf-8'),
             body,

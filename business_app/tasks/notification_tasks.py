@@ -850,6 +850,7 @@ def send_subscription_notification_task(self, subscription_id: int, event_type: 
 @shared_task(bind=True, max_retries=3, default_retry_delay=60, time_limit=1800, soft_time_limit=1700)
 def send_bulk_notification_task(self, notification_type: str, recipient_ids: List[int],
                                 template_data: Dict[str, Any] = None, channel: str = 'email',
+                                channels: List[str] = None,
                                 batch_size: int = 50):
     """Send bulk notifications to multiple recipients in batches"""
     import time as _time
@@ -860,6 +861,22 @@ def send_bulk_notification_task(self, notification_type: str, recipient_ids: Lis
         template_data = template_data or {}
 
         notification_service = NotificationService()
+        try:
+            notification_type_enum = NotificationType(notification_type)
+        except ValueError as exc:
+            raise ValueError(f"Unsupported notification_type: {notification_type}") from exc
+
+        channel_values = channels or [channel]
+        if not channel_values:
+            channel_values = [channel]
+
+        channel_enums = []
+        for channel_value in channel_values:
+            try:
+                channel_enums.append(NotificationChannel(channel_value))
+            except ValueError as exc:
+                raise ValueError(f"Unsupported channel: {channel_value}") from exc
+
         results = []
 
         for batch_start in range(0, len(recipient_ids), batch_size):
@@ -871,14 +888,18 @@ def send_bulk_notification_task(self, notification_type: str, recipient_ids: Lis
                 try:
                     result = notification_service.send_notification(
                         recipient_id,
-                        notification_type,
-                        channel=channel,
+                        notification_type_enum,
+                        channels=channel_enums,
                         template_data=template_data
                     )
+                    successful_channels = [
+                        ch.value for ch in channel_enums
+                        if isinstance(result.get(ch.value), dict) and result[ch.value].get('success')
+                    ]
                     results.append({
                         'recipient_id': recipient_id,
-                        'success': result.get('success', False),
-                        'notification_id': result.get('notification_id')
+                        'success': bool(successful_channels),
+                        'channels': successful_channels,
                     })
                 except Exception as e:
                     logger.error(f"Failed to send notification to recipient {recipient_id}: {e}")

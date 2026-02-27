@@ -11,7 +11,11 @@ from business_app.models.loyalty import LoyaltyPoints, LoyaltyTransaction, Loyal
 from business_app.models.user import User
 from business_app.models.order import Order
 from business_app.utils.exceptions import ValidationError, NotFoundError, ConflictError
-from business_app.utils.constants import LoyaltyActionType, LoyaltyTransactionType
+from business_app.utils.constants import (
+    LoyaltyActionType,
+    LoyaltyTransactionType,
+    RewardStatus,
+)
 from business_app.utils.helpers import generate_referral_code, calculate_loyalty_points, calculate_discount_from_points
 from business_app import db
 
@@ -151,6 +155,468 @@ class LoyaltyService:
             db.session.commit()
         
         return account
+
+    def get_points_summary_for_user(self, user_id: int) -> Dict[str, Any]:
+        """Get points summary payload for API."""
+        account = self.get_or_create_loyalty_account(user_id)
+        return {
+            'points_balance': account.current_balance or 0,
+            'lifetime_points': account.total_earned or 0,
+            'tier': account.current_tier,
+            'next_tier_threshold': account.points_to_next_tier or 0,
+        }
+
+    def get_account_dashboard_for_user(self, user_id: int) -> Dict[str, Any]:
+        """Get account dashboard metrics for API."""
+        account = self.get_or_create_loyalty_account(user_id)
+        now = datetime.now(timezone.utc)
+        month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+        points_this_month = db.session.query(func.sum(LoyaltyTransaction.points)).filter(
+            LoyaltyTransaction.user_id == user_id,
+            LoyaltyTransaction.points > 0,
+            LoyaltyTransaction.created_at >= month_start,
+        ).scalar() or 0
+
+        current_tier = account.current_tier or 'Bronze'
+        current_balance = account.current_balance or 0
+        program_id = account.program_id
+
+        current_tier_config = LoyaltyTierConfig.query.filter_by(
+            name=current_tier,
+            program_id=program_id,
+            is_active=True,
+        ).first()
+        current_tier_points = current_tier_config.min_points if current_tier_config else 0
+        current_tier_order = current_tier_config.display_order if current_tier_config else -1
+
+        next_tier_config = LoyaltyTierConfig.query.filter(
+            LoyaltyTierConfig.program_id == program_id,
+            LoyaltyTierConfig.is_active == True,
+            LoyaltyTierConfig.display_order > current_tier_order,
+        ).order_by(LoyaltyTierConfig.display_order.asc()).first()
+
+        if next_tier_config:
+            next_tier_points = next_tier_config.min_points
+            points_needed = max(0, next_tier_points - current_balance)
+            current_progress = current_balance - current_tier_points
+            next_tier_progress_target = next_tier_points - current_tier_points
+        else:
+            next_tier_points = current_tier_points
+            points_needed = 0
+            current_progress = current_balance
+            next_tier_progress_target = 0
+
+        available_rewards_count = LoyaltyReward.query.filter(
+            LoyaltyReward.is_active == True,
+            LoyaltyReward.points_cost <= current_balance,
+        ).count()
+
+        return {
+            'current_balance': current_balance,
+            'current_tier': current_tier,
+            'points_this_month': points_this_month,
+            'tier_progress': {
+                'current': current_progress,
+                'next_tier_points': next_tier_progress_target,
+                'points_needed': points_needed,
+            },
+            'available_rewards_count': available_rewards_count,
+            'total_earned': account.total_earned or 0,
+            'total_redeemed': account.total_redeemed or 0,
+        }
+
+    def get_loyalty_history_for_user(self, user_id: int, page: int, per_page: int) -> Dict[str, Any]:
+        """Get paginated loyalty history for API."""
+        pagination = LoyaltyTransaction.query.filter_by(
+            user_id=user_id,
+        ).order_by(LoyaltyTransaction.created_at.desc()).paginate(
+            page=page,
+            per_page=per_page,
+            error_out=False,
+        )
+        return {
+            'items': pagination.items,
+            'total': pagination.total,
+            'page': page,
+            'per_page': per_page,
+        }
+
+    def get_profile_for_user(self, user_id: int) -> Dict[str, Any]:
+        """Get full loyalty profile payload for API."""
+        user = User.query.get(user_id)
+        if not user:
+            raise NotFoundError("User not found")
+
+        account = self.get_or_create_loyalty_account(user_id)
+        active_program = LoyaltyProgram.query.filter_by(
+            is_active=True,
+            is_default=True,
+        ).first()
+        recent_transactions = LoyaltyTransaction.query.filter_by(
+            user_id=user_id,
+        ).order_by(LoyaltyTransaction.created_at.desc()).limit(10).all()
+        tier_progress = self.calculate_tier_progress(user_id)
+
+        return {
+            'loyalty_profile': {
+                'points_balance': account.current_balance,
+                'total_earned': account.total_earned,
+                'total_redeemed': account.total_redeemed,
+                'current_tier': account.current_tier,
+                'tier_progress': tier_progress,
+                'member_since': account.created_at.isoformat(),
+                'expires_at': (
+                    account.expires_at.isoformat()
+                    if getattr(account, 'expires_at', None) else None
+                ),
+            },
+            'active_program': active_program,
+            'recent_transactions': recent_transactions,
+        }
+
+    def get_filtered_points_history_for_user(
+        self,
+        user_id: int,
+        page: int,
+        per_page: int,
+        transaction_type: Optional[str] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Get filtered points history for API."""
+        query = LoyaltyTransaction.query.filter_by(user_id=user_id)
+
+        if transaction_type:
+            try:
+                txn_type = LoyaltyTransactionType(transaction_type)
+            except ValueError as exc:
+                raise ValidationError("Invalid transaction type") from exc
+            query = query.filter_by(transaction_type=txn_type)
+
+        if start_date:
+            try:
+                start_dt = datetime.fromisoformat(start_date)
+            except ValueError as exc:
+                raise ValidationError("Invalid start date format") from exc
+            query = query.filter(LoyaltyTransaction.created_at >= start_dt)
+
+        if end_date:
+            try:
+                end_dt = datetime.fromisoformat(end_date)
+            except ValueError as exc:
+                raise ValidationError("Invalid end date format") from exc
+            query = query.filter(LoyaltyTransaction.created_at <= end_dt)
+
+        pagination = query.order_by(LoyaltyTransaction.created_at.desc()).paginate(
+            page=page,
+            per_page=per_page,
+            error_out=False,
+        )
+        return {
+            'items': pagination.items,
+            'total': pagination.total,
+            'page': page,
+            'per_page': per_page,
+        }
+
+    def get_rewards_for_user(
+        self,
+        user_id: int,
+        category: Optional[str] = None,
+        min_points: Optional[int] = None,
+        max_points: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Get rewards list payload for API."""
+        account = LoyaltyPoints.query.filter_by(user_id=user_id).first()
+        user_points = account.current_balance if account else 0
+
+        query = LoyaltyReward.query.filter_by(is_active=True)
+        if category:
+            query = query.filter_by(reward_type=category)
+        if min_points is not None:
+            query = query.filter(LoyaltyReward.points_cost >= min_points)
+        if max_points is not None:
+            query = query.filter(LoyaltyReward.points_cost <= max_points)
+
+        rewards = query.order_by(LoyaltyReward.points_cost.asc()).all()
+        return {
+            'rewards': rewards,
+            'user_points_balance': user_points,
+            'categories': self.get_reward_categories(),
+        }
+
+    def get_reward_details_for_user(self, user_id: int, reward_id: int) -> Dict[str, Any]:
+        """Get single reward details payload for API."""
+        reward = LoyaltyReward.query.filter_by(
+            id=reward_id,
+            is_active=True,
+        ).first()
+        if not reward:
+            raise NotFoundError("Reward not found")
+
+        account = LoyaltyPoints.query.filter_by(user_id=user_id).first()
+        user_points = account.current_balance if account else 0
+        return {
+            'reward': reward,
+            'user_points_balance': user_points,
+            'can_redeem': user_points >= reward.points_cost,
+            'points_needed': max(0, reward.points_cost - user_points),
+        }
+
+    def redeem_reward_for_user(
+        self,
+        user_id: int,
+        reward_id: int,
+        delivery_address_id: Optional[int] = None,
+        notes: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Validate and redeem reward for API."""
+        user = User.query.get(user_id)
+        if not user:
+            raise NotFoundError("User not found")
+
+        reward = LoyaltyReward.query.filter_by(
+            id=reward_id,
+            is_active=True,
+        ).first()
+        if not reward:
+            raise NotFoundError("Reward not found")
+
+        if reward.is_system_reward:
+            raise ValidationError("Reward is auto-applied")
+
+        if reward.max_redemptions and reward.redemptions_used >= reward.max_redemptions:
+            raise ValidationError("Reward is no longer available")
+
+        account = LoyaltyPoints.query.filter_by(user_id=user_id).first()
+        if not account or account.current_balance < reward.points_cost:
+            raise ValidationError("Insufficient points")
+
+        if not self.can_redeem_reward(user_id, reward_id):
+            raise ValidationError("Redemption limit reached")
+
+        redemption = self.redeem_reward(
+            user_id=user_id,
+            reward_id=reward_id,
+            delivery_address_id=delivery_address_id,
+            notes=notes,
+        )
+        refreshed_account = LoyaltyPoints.query.filter_by(user_id=user_id).first()
+
+        return {
+            'reward': reward,
+            'redemption': redemption,
+            'remaining_points': refreshed_account.current_balance if refreshed_account else 0,
+        }
+
+    def get_redemption_history_for_user(
+        self,
+        user_id: int,
+        page: int,
+        per_page: int,
+        status: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Get user's reward redemption history for API."""
+        base_query = LoyaltyTransaction.query.filter(
+            and_(
+                LoyaltyTransaction.user_id == user_id,
+                LoyaltyTransaction.transaction_type == LoyaltyTransactionType.REDEEMED,
+            )
+        ).order_by(LoyaltyTransaction.created_at.desc())
+
+        if not status:
+            pagination = base_query.paginate(page=page, per_page=per_page, error_out=False)
+            return {
+                'items': pagination.items,
+                'total': pagination.total,
+                'page': page,
+                'per_page': per_page,
+            }
+
+        try:
+            reward_status = RewardStatus(status)
+        except ValueError as exc:
+            raise ValidationError("Invalid status value") from exc
+
+        # Reward status is not persisted as a first-class reward field in current schema;
+        # filter using transaction metadata when present.
+        filtered_transactions = [
+            txn for txn in base_query.all()
+            if ((txn.extra_data or {}).get('reward_status') == reward_status.value)
+        ]
+        total = len(filtered_transactions)
+        offset = max(0, (page - 1) * per_page)
+        page_items = filtered_transactions[offset:offset + per_page]
+        return {
+            'items': page_items,
+            'total': total,
+            'page': page,
+            'per_page': per_page,
+        }
+
+    def get_active_programs(self) -> List[LoyaltyProgram]:
+        """Get active loyalty programs for API."""
+        return LoyaltyProgram.query.filter_by(is_active=True).order_by(
+            LoyaltyProgram.created_at.desc(),
+        ).all()
+
+    def get_referral_info_for_user(self, user_id: int, host_url: str) -> Dict[str, Any]:
+        """Get referral payload for API."""
+        user = User.query.get(user_id)
+        if not user:
+            raise NotFoundError("User not found")
+
+        referral_code = self.get_user_referral_code(user_id)
+        try:
+            referral_stats = self.get_referral_statistics(user_id)
+        except Exception:
+            referral_stats = {
+                'total_referrals': 0,
+                'pending_referrals': 0,
+                'points_earned_from_referrals': 0,
+            }
+
+        recent_referrals = ReferralProgram.query.filter_by(
+            referrer_id=user_id,
+            status='completed',
+        ).order_by(ReferralProgram.completed_at.desc()).limit(10).all()
+
+        recent_referrals_data = []
+        for referral in recent_referrals:
+            referee = User.query.get(referral.referee_id) if referral.referee_id else None
+            if not referee:
+                continue
+            recent_referrals_data.append({
+                'id': referral.id,
+                'name': f"{referee.first_name or ''} {referee.last_name or ''}".strip() or 'Anonymous',
+                'joined_at': (
+                    referral.completed_at.isoformat()
+                    if referral.completed_at else referral.created_at.isoformat()
+                ),
+                'points_earned': referral.referrer_bonus_points or 0,
+            })
+
+        return {
+            'referral_code': referral_code,
+            'referral_link': f"{host_url}register?ref={referral_code}",
+            'statistics': referral_stats,
+            'recent_referrals': recent_referrals_data,
+            'rewards': {
+                'referrer_points': self.get_referrer_bonus_points(),
+                'referee_points': self.get_referee_bonus_points(),
+            },
+        }
+
+    def get_statistics_for_user(self, user_id: int, period: str) -> Dict[str, Any]:
+        """Get loyalty statistics payload for API."""
+        now = datetime.now(timezone.utc)
+        if period == 'month':
+            start_date = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        elif period == 'quarter':
+            quarter_start_month = ((now.month - 1) // 3) * 3 + 1
+            start_date = now.replace(
+                month=quarter_start_month,
+                day=1,
+                hour=0,
+                minute=0,
+                second=0,
+                microsecond=0,
+            )
+        elif period == 'year':
+            start_date = now.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+        else:
+            start_date = None
+
+        account = LoyaltyPoints.query.filter_by(user_id=user_id).first()
+        query = LoyaltyTransaction.query.filter_by(user_id=user_id)
+        if start_date:
+            query = query.filter(LoyaltyTransaction.created_at >= start_date)
+        transactions = query.all()
+
+        total_earned = sum(
+            t.points for t in transactions if t.transaction_type == LoyaltyTransactionType.EARNED
+        )
+        total_redeemed = sum(
+            abs(t.points) for t in transactions if t.transaction_type == LoyaltyTransactionType.REDEEMED
+        )
+        points_by_source: Dict[str, int] = {}
+        for txn in transactions:
+            if txn.transaction_type == LoyaltyTransactionType.EARNED:
+                source = (txn.extra_data or {}).get('action_type') or 'purchase'
+                points_by_source[source] = points_by_source.get(source, 0) + txn.points
+
+        monthly_points: Dict[str, int] = {}
+        current_month_anchor = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        for _ in range(12):
+            month_start = current_month_anchor
+            if month_start.month == 12:
+                month_end = month_start.replace(year=month_start.year + 1, month=1)
+            else:
+                month_end = month_start.replace(month=month_start.month + 1)
+            month_key = month_start.strftime('%Y-%m')
+            monthly_points[month_key] = sum(
+                txn.points for txn in transactions
+                if (
+                    txn.transaction_type == LoyaltyTransactionType.EARNED
+                    and month_start <= txn.created_at < month_end
+                )
+            )
+            previous_month_anchor = month_start - timedelta(days=1)
+            current_month_anchor = previous_month_anchor.replace(day=1)
+
+        return {
+            'period': period,
+            'statistics': {
+                'current_balance': account.current_balance if account else 0,
+                'total_earned': total_earned,
+                'total_redeemed': total_redeemed,
+                'net_points': total_earned - total_redeemed,
+                'transaction_count': len(transactions),
+                'current_tier': account.current_tier if account else 'Bronze',
+                'points_by_source': points_by_source,
+                'monthly_points_trend': monthly_points,
+                'tier_history': self.get_tier_history(user_id),
+            },
+        }
+
+    def get_tier_benefits_for_user(self, user_id: int) -> Dict[str, Any]:
+        """Get tier benefits payload for API."""
+        account = LoyaltyPoints.query.filter_by(user_id=user_id).first()
+        current_tier = account.current_tier if account else 'Bronze'
+        return {
+            'current_tier': current_tier,
+            'benefits': self.get_tier_benefits(current_tier),
+            'upgrade_info': self.get_tier_upgrade_requirements(user_id),
+        }
+
+    def gift_points_by_phone(
+        self,
+        sender_id: int,
+        recipient_phone: str,
+        points_amount: int,
+        message: str = '',
+    ) -> LoyaltyTransaction:
+        """Gift points to a recipient resolved by phone number."""
+        if points_amount <= 0:
+            raise ValidationError("Points amount must be positive")
+
+        sender_account = LoyaltyPoints.query.filter_by(user_id=sender_id).first()
+        if not sender_account or sender_account.current_balance < points_amount:
+            raise ValidationError("Insufficient points")
+
+        recipient = User.query.filter_by(phone=recipient_phone).first()
+        if not recipient:
+            raise NotFoundError("Recipient not found")
+        if recipient.id == sender_id:
+            raise ValidationError("Cannot gift to self")
+
+        return self.gift_points(
+            sender_id=sender_id,
+            recipient_id=recipient.id,
+            points_amount=points_amount,
+            message=message,
+        )
     
     def award_points(self, user_id: int, points: int, description: str,
                     action_type: LoyaltyActionType = LoyaltyActionType.PURCHASE,

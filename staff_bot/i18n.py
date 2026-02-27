@@ -3,10 +3,14 @@ Internationalization (i18n) support for the Staff Bot
 Multi-language support with translation management using 'staff_bot' category
 """
 import logging
-from typing import Dict, Any, Optional, List
+import re
+from pathlib import Path
+from typing import Dict, Any, Optional, List, Set
 
 from config import config
 from database import db_manager
+from shared.staff_constants import FAILED_DELIVERY_REASONS, STAFF_BOT_ROLES
+from shared.enums import OrderStatus, PaymentMethod
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +24,7 @@ class Translation:
         self.supported_languages = config.localization.supported_languages
         self.missing_keys: Dict[str, set] = {}
         self._missing_key_log_limit = 100
+        self._required_keys_cache: Optional[Set[str]] = None
 
     async def load_translations(self):
         """Load translations from database (staff_bot category)"""
@@ -102,6 +107,67 @@ class Translation:
         if language:
             return {language: sorted(list(self.missing_keys.get(language, set())))}
         return {lang: sorted(list(keys)) for lang, keys in self.missing_keys.items()}
+
+    @staticmethod
+    def _extract_literal_staff_keys(staff_root: Path) -> Set[str]:
+        """Extract literal i18n keys used in staff bot source files."""
+        pattern = re.compile(r"""i18n\.get\(\s*(['"])(staff\.[^'"]+)\1\s*[,)]""")
+        keys: Set[str] = set()
+
+        for path in staff_root.rglob("*.py"):
+            try:
+                text = path.read_text(encoding="utf-8")
+            except OSError:
+                continue
+
+            for _, key in pattern.findall(text):
+                keys.add(key)
+
+        return keys
+
+    @staticmethod
+    def _add_dynamic_family_keys(keys: Set[str]):
+        """Add dynamic key families that are built via f-strings in handlers."""
+        for role in STAFF_BOT_ROLES:
+            keys.add(f"staff.role.{role}")
+
+        for status in ("assigned", "picked_up", "in_transit", "arrived", "delivered", "failed"):
+            keys.add(f"staff.delivery.status.{status}")
+
+        for reason in FAILED_DELIVERY_REASONS:
+            keys.add(f"staff.delivery.reason.{reason}")
+
+        for payment in PaymentMethod:
+            keys.add(f"staff.delivery.payment.{payment.value}")
+            keys.add(f"staff.operator.payment_{payment.value}")
+
+        for status in OrderStatus:
+            keys.add(f"staff.order.status.{status.value}")
+
+    def get_required_staff_keys(self, force_refresh: bool = False) -> Set[str]:
+        """Return the full set of translation keys required by staff bot."""
+        if self._required_keys_cache is not None and not force_refresh:
+            return set(self._required_keys_cache)
+
+        staff_root = Path(__file__).resolve().parent
+        keys = self._extract_literal_staff_keys(staff_root)
+        self._add_dynamic_family_keys(keys)
+        self._required_keys_cache = set(keys)
+        return keys
+
+    def get_missing_translation_keys(self, languages: Optional[List[str]] = None) -> Dict[str, List[str]]:
+        """Return required translation keys missing from loaded catalog per language."""
+        languages = languages or list(self.supported_languages)
+        required_keys = self.get_required_staff_keys()
+
+        missing_by_language: Dict[str, List[str]] = {}
+        for language in languages:
+            available = self.translations.get(language, {})
+            missing = sorted(key for key in required_keys if key not in available)
+            if missing:
+                missing_by_language[language] = missing
+
+        return missing_by_language
 
     async def get_user_language(self, telegram_id: int) -> str:
         """Get user's preferred language"""

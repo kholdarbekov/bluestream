@@ -12,7 +12,7 @@ from sqlalchemy import or_, and_, func
 from sqlalchemy.orm import joinedload
 from decimal import Decimal
 
-from business_app.models.user import User
+from business_app.models.user import User, UserAddress
 from business_app.models.order import Order, OrderItem
 from business_app.models.delivery import Delivery, DeliveryPerson, DeliveryStatusHistory
 from business_app.models.staff import StaffActivityLog
@@ -1400,6 +1400,75 @@ class StaffService:
         )
 
         return order
+
+    @staticmethod
+    def get_recent_operator_orders(operator_id: int, limit: int = 20) -> List[Order]:
+        """
+        Get recent orders created by an operator.
+
+        Args:
+            operator_id: Staff operator user id
+            limit: Max orders to return
+
+        Returns:
+            List of Order models ordered by newest first
+        """
+        return Order.query.options(
+            joinedload(Order.user),
+        ).filter_by(
+            created_by_staff_id=operator_id
+        ).order_by(
+            Order.created_at.desc()
+        ).limit(limit).all()
+
+    @staticmethod
+    def add_client_address(user_id: int, address_data: Dict[str, Any]) -> UserAddress:
+        """
+        Add an address for a customer user.
+
+        Args:
+            user_id: Target customer user id
+            address_data: Address payload from staff bot/API
+
+        Returns:
+            Created UserAddress model
+        """
+        user = User.query.get(user_id)
+        if not user:
+            raise NotFoundError("User not found", error_code='STAFF_USER_NOT_FOUND')
+
+        address = UserAddress(
+            user_id=user_id,
+            title=address_data.get('label', address_data.get('title', 'Home')),
+            full_address=address_data.get('full_address', address_data.get('address_line_1', '')),
+            street_address=address_data.get('street_address', address_data.get('address_line_1')),
+            city=address_data.get('city', 'Tashkent'),
+            district=address_data.get('district'),
+            latitude=address_data.get('latitude'),
+            longitude=address_data.get('longitude'),
+            delivery_instructions=address_data.get('delivery_notes', address_data.get('delivery_instructions')),
+        )
+
+        db.session.add(address)
+        db.session.commit()
+        return address
+
+    @staticmethod
+    def get_client_addresses(user_id: int) -> List[UserAddress]:
+        """
+        Return all addresses for a customer user.
+
+        Args:
+            user_id: Target customer user id
+
+        Returns:
+            List of address models
+        """
+        user = User.query.get(user_id)
+        if not user:
+            raise NotFoundError("User not found", error_code='STAFF_USER_NOT_FOUND')
+
+        return UserAddress.query.filter_by(user_id=user_id).all()
 
     @staticmethod
     def search_users(query_text: str, search_type: str = 'phone') -> List[User]:

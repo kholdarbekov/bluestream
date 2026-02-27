@@ -226,6 +226,10 @@ class BaseHandler:
             context.user_data['user_id'] = user_data.get('id')
         if user_data.get('first_name') is not None:
             context.user_data['first_name'] = user_data.get('first_name') or ''
+        if user_data.get('last_name') is not None:
+            context.user_data['last_name'] = user_data.get('last_name') or ''
+        if user_data.get('phone') is not None:
+            context.user_data['phone'] = user_data.get('phone') or ''
         if user_data.get('delivery_person_id') is not None:
             context.user_data['delivery_person_id'] = user_data.get('delivery_person_id')
         context.user_data['staff_roles'] = staff_roles

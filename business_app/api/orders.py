@@ -2,41 +2,30 @@
 Orders API endpoints
 This file should be placed in business_app/api/orders.py
 """
-from flask import Blueprint, request, jsonify, current_app, g
+from flask import Blueprint, request, current_app
 from flask_jwt_extended import jwt_required, get_jwt_identity
-from sqlalchemy import and_, or_, desc, func
-from sqlalchemy.orm import joinedload
 from datetime import datetime, UTC, timedelta
 
-from business_app.models.order import Order, OrderItem
-from business_app.models.product import Product
-from business_app.models.user import User, UserAddress
-from business_app.models.delivery import Delivery, DeliveryTimeSlot
-from business_app.models.analytics import PromotionalCampaign
 from business_app.utils.service_factory import (
-    get_order_service, get_payment_service, get_delivery_service,
+    get_order_service, get_delivery_service,
     get_notification_service, get_analytics_service, get_cart_service
 )
-from business_app.utils.helpers import get_current_language
 from business_app.utils.translations import get_translation
 from business_app.serializers.order_serializers import (
-    serialize_order, serialize_order_item, serialize_order_delivery, serialize_order_payment,
-    serialize_order_statistics, serialize_cart_estimate, serialize_delivery_slot,
-    OrderSchema, OrderItemSchema, CreateOrderRequest, UpdateOrderRequest,
-    OrderFeedbackRequest, CartEstimateRequest, DeliverySlotSchema
+    serialize_order, serialize_order_delivery, serialize_delivery_slot,
+    CreateOrderRequest, OrderFeedbackRequest, CartEstimateRequest
 )
-from business_app.utils.decorators import validate_json, validate_order_input, validate_query_params, rate_limit, require_verification
-from business_app.utils.constants import OrderStatus, PaymentMethod, DeliveryStatus, UserRole
-from business_app.utils.validation_helpers import (
-    validate_list_request_params, FilterValidator, PaginationHelper,
-    DateValidator, StatusValidator, RequestDataValidator
-)
+from business_app.utils.decorators import validate_json, rate_limit, require_verification
+from business_app.utils.constants import OrderStatus, PaymentMethod, NotificationType
+from business_app.utils.validation_helpers import validate_list_request_params
 from business_app.utils.error_handlers import handle_api_exception
-from business_app.utils.exceptions import ValidationError
+from business_app.utils.exceptions import (
+    ValidationError, NotFoundError, ForbiddenError, ConflictError
+)
 from business_app.utils.api_responses import (
-    success_response, error_response, paginated_response, created_response,
+    success_response, error_response, created_response,
     not_found_response, validation_error_response, forbidden_response,
-    conflict_response, internal_error_response
+    internal_error_response
 )
 from business_app.tasks.delivery_tasks import auto_assign_delivery_task
 from business_app import db
@@ -50,7 +39,6 @@ orders_bp = Blueprint('orders', __name__)
 @handle_api_exception
 def get_orders():
     """Get user orders with pagination and filtering"""
-    # Validate request parameters using centralized validation
     params = validate_list_request_params(
         default_per_page=20,
         max_per_page=50,
@@ -59,38 +47,35 @@ def get_orders():
         allow_date_filter=True,
         allow_future_dates=True
     )
-    
-    # Build query with eager loading to prevent N+1 queries
-    query = Order.query.options(
-        joinedload(Order.order_items).joinedload(OrderItem.product),
-        joinedload(Order.payment),
-        joinedload(Order.delivery_address)
-    ).filter_by(user_id=params['user_id'])
-    
-    # Apply filters using centralized filter builders
-    query = FilterValidator.build_status_filter_query(
-        query, Order.status, params.get('status')
+
+    status_value = params.get('status')
+    if hasattr(status_value, 'value'):
+        status_value = status_value.value
+
+    paginated = get_order_service().get_user_orders_paginated(
+        user_id=params['user_id'],
+        page=params['page'],
+        per_page=params['per_page'],
+        status=status_value,
+        start_date=params.get('start_date'),
+        end_date=params.get('end_date'),
     )
-    
-    query = FilterValidator.build_date_filter_query(
-        query, Order.created_at, params.get('start_date'), params.get('end_date')
-    )
-    
-    # Order by creation date (newest first)
-    query = query.order_by(Order.created_at.desc())
-    
-    # Paginate
-    pagination = query.paginate(
-        page=params['page'], per_page=params['per_page'], error_out=False
-    )
-    
-    # Build standardized pagination response with order items included
-    response_data = PaginationHelper.build_pagination_response(
-        pagination.items, pagination, lambda order: serialize_order(order, include_items=True)
-    )
+
+    pages = (paginated['total'] + params['per_page'] - 1) // params['per_page'] if params['per_page'] else 0
+    pagination_data = {
+        'page': params['page'],
+        'pages': pages,
+        'per_page': params['per_page'],
+        'total': paginated['total'],
+        'has_next': params['page'] < pages,
+        'has_prev': params['page'] > 1,
+    }
     
     return success_response(
-        data={'orders': response_data['items'], 'pagination': response_data['pagination']},
+        data={
+            'orders': [serialize_order(order, include_items=True) for order in paginated['items']],
+            'pagination': pagination_data,
+        },
         message=get_translation('api.orders.list_retrieved')
     )
 
@@ -101,37 +86,21 @@ def get_order(order_id):
     """Get specific order details"""
     try:
         current_user_id = get_jwt_identity()
-
-        order = Order.query.options(
-            joinedload(Order.order_items).joinedload(OrderItem.product),
-            joinedload(Order.payment),
-            joinedload(Order.delivery_address),
-            joinedload(Order.delivery)
-        ).filter_by(
-            id=order_id,
-            user_id=current_user_id
-        ).first()
-
-        if not order:
-            return not_found_response(message=get_translation('api.orders.not_found'))
-
-        # Get delivery information
-        delivery_info = None
-        if order.delivery:
-            delivery_info = serialize_order_delivery(order.delivery)
-
-        # Get order timeline
-        timeline = get_order_service().get_order_timeline(order_id)
+        details = get_order_service().get_order_details_for_user(order_id, current_user_id)
+        order = details['order']
+        delivery_info = serialize_order_delivery(details['delivery']) if details['delivery'] else None
 
         return success_response(
             data={
                 'order': serialize_order(order, include_items=True, include_delivery=True),
                 'delivery': delivery_info,
-                'timeline': timeline
+                'timeline': details['timeline']
             },
             message=get_translation('api.orders.retrieved')
         )
 
+    except NotFoundError:
+        return not_found_response(message=get_translation('api.orders.not_found'))
     except Exception as e:
         current_app.logger.error(f"Get order error: {e}")
         return internal_error_response(message=get_translation('error.server_error'))
@@ -151,51 +120,35 @@ def create_emergency_order():
         except PydanticValidationError as e:
             return validation_error_response(e.errors())
 
-        user = User.query.get(current_user_id)
-        if not user:
-            return not_found_response(message=get_translation('error.not_found'))
-
-        # Authorization check: Emergency orders are only available to premium users
-        # or users with special authorization
-        if not user.is_premium and user.role not in [UserRole.ADMIN, UserRole.MANAGER, UserRole.OPERATOR]:
-            current_app.logger.warning(
-                f"Unauthorized emergency order attempt by user {user.id} ({user.email}). "
-                f"User role: {user.role}, is_premium: {user.is_premium}"
-            )
-            return forbidden_response(
-                message=get_translation('error.forbidden')
-            )
-        
-        # Additional rate limiting for emergency orders - max 3 per day per user
-        today_start = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
-        today_emergency_orders = Order.query.filter(
-            Order.user_id == current_user_id,
-            Order.is_urgent == True,
-            Order.created_at >= today_start
-        ).count()
-        
-        if today_emergency_orders >= 3:
-            current_app.logger.warning(
-                f"Emergency order rate limit exceeded by user {user.id} ({user.email}). "
-                f"Orders today: {today_emergency_orders}"
-            )
+        context = get_order_service().validate_user_emergency_order_access(current_user_id)
+        user = context['user']
+        _, address = get_order_service().get_user_and_address_for_order(
+            current_user_id,
+            request_data.delivery_address_id,
+        )
+        if not address:
             return error_response(
-                message=get_translation('error.forbidden'),
-                status_code=429
+                message=get_translation('api.addresses.not_found'),
+                status_code=400,
             )
 
         # Emergency orders have additional fee
         emergency_fee = 10000  # 10,000 UZS emergency fee
 
-        # Create order with emergency flag
+        # Create order with emergency flag.
         order_data = {
-            'user_id': current_user_id,
-            'delivery_address_id': request_data.delivery_address_id,
+            'items': request_data.items,
+            'delivery_address': {
+                'delivery_address_id': address.id,
+                'street': address.street_address,
+                'latitude': address.latitude,
+                'longitude': address.longitude,
+            },
             'delivery_notes': request_data.delivery_notes,
             'is_urgent': True,
             'payment_method': request_data.payment_method,
             'order_source': request_data.source,
-            'emergency_fee': emergency_fee
+            'emergency_fee': emergency_fee,
         }
 
         # Set delivery for within 2 hours
@@ -203,7 +156,7 @@ def create_emergency_order():
         order_data['delivery_date'] = emergency_delivery_time.date()
         order_data['delivery_time_slot'] = 'emergency'
 
-        order = get_order_service().create_order(order_data, request_data.items)
+        order = get_order_service().create_order(current_user_id, order_data)
 
         # Create priority delivery
         delivery = get_delivery_service().create_emergency_delivery(order)
@@ -211,27 +164,18 @@ def create_emergency_order():
         # Immediate driver assignment
         auto_assign_delivery_task.apply_async(args=[delivery.id], countdown=30)
 
-        # Send emergency notifications
-        get_notification_service().send_notification(
-            user.id,
-            'emergency_order_created',
-            template_data={
-                'order_number': order.order_number,
-                'estimated_delivery': emergency_delivery_time.strftime('%H:%M')
-            }
-        )
-
-        # Notify operations team
-        get_notification_service().send_notification(
-            None,  # Send to all managers
-            'emergency_order_alert',
-            template_data={
-                'order_number': order.order_number,
-                'customer_name': user.full_name,
-                'customer_phone': user.phone
-            },
-            channels=['sms', 'telegram']
-        )
+        # Notification failures should not fail order creation.
+        try:
+            get_notification_service().send_notification(
+                user.id,
+                NotificationType.ORDER_UPDATE,
+                template_data={
+                    'order_number': order.order_number,
+                    'estimated_delivery': emergency_delivery_time.strftime('%H:%M'),
+                },
+            )
+        except Exception as notification_error:
+            current_app.logger.error(f"Emergency order notification failed: {notification_error}")
 
         return created_response(
             data={
@@ -242,6 +186,14 @@ def create_emergency_order():
             message=get_translation('api.orders.created')
         )
 
+    except NotFoundError:
+        return not_found_response(message=get_translation('error.not_found'))
+    except ForbiddenError:
+        return forbidden_response(message=get_translation('error.forbidden'))
+    except ConflictError:
+        return error_response(message=get_translation('error.forbidden'), status_code=429)
+    except ValidationError as e:
+        return error_response(message=e.message, status_code=400)
     except PydanticValidationError as e:
         return validation_error_response(e.errors())
     except Exception as e:
@@ -284,99 +236,11 @@ def get_order_statistics():
     try:
         current_user_id = get_jwt_identity()
         period = request.args.get('period', 'year')  # month, quarter, year, all
-        
-        # Calculate date range
-        now = datetime.now(UTC)
-        if period == 'month':
-            start_date = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-        elif period == 'quarter':
-            quarter_start_month = ((now.month - 1) // 3) * 3 + 1
-            start_date = now.replace(month=quarter_start_month, day=1, hour=0, minute=0, second=0, microsecond=0)
-        elif period == 'year':
-            start_date = now.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
-        else:  # all time
-            start_date = None
-        
-        # Base query
-        query = Order.query.filter_by(user_id=current_user_id)
-        if start_date:
-            query = query.filter(Order.created_at >= start_date)
-        
-        # Calculate statistics using SQL aggregation
-        stats = query.with_entities(
-            func.count(Order.id),
-            func.coalesce(func.sum(Order.total_amount), 0)
-        ).first()
-        total_orders = stats[0]
-        total_spent = float(stats[1])
+        result = get_order_service().get_user_order_statistics(current_user_id, period=period)
+        return success_response(data=result, message=get_translation('success.saved'))
 
-        # Orders by status using SQL GROUP BY
-        status_rows = query.with_entities(
-            Order.status, func.count(Order.id)
-        ).group_by(Order.status).all()
-        status_counts = {status.value: count for status, count in status_rows}
-        for status in OrderStatus:
-            status_counts.setdefault(status.value, 0)
-
-        # Average order value
-        avg_order_value = total_spent / total_orders if total_orders > 0 else 0
-
-        # Most ordered products using SQL aggregation with JOIN
-        from business_app import db
-        top_products_query = db.session.query(
-            Product.name, func.sum(OrderItem.quantity).label('total_qty')
-        ).join(
-            OrderItem, OrderItem.product_id == Product.id
-        ).join(
-            Order, Order.id == OrderItem.order_id
-        ).filter(
-            Order.user_id == current_user_id
-        )
-        if start_date:
-            top_products_query = top_products_query.filter(Order.created_at >= start_date)
-        top_products_rows = top_products_query.group_by(
-            Product.id, Product.name
-        ).order_by(desc('total_qty')).limit(5).all()
-
-        top_products = [
-            {'name': name, 'quantity': int(qty)}
-            for name, qty in top_products_rows
-        ]
-        
-        # Monthly spending trend (last 12 months)
-        monthly_spending = {}
-        for i in range(12):
-            month_start = (now.replace(day=1) - timedelta(days=32*i)).replace(day=1)
-            month_end = (month_start.replace(month=month_start.month % 12 + 1) 
-                        if month_start.month < 12 
-                        else month_start.replace(year=month_start.year + 1, month=1))
-            
-            month_orders = []
-            for o in orders:
-                created_at = o.created_at
-                if created_at.tzinfo is None:
-                    created_at = created_at.replace(tzinfo=UTC)
-                
-                if month_start <= created_at < month_end:
-                    month_orders.append(o)
-            month_total = sum(o.total_amount for o in month_orders)
-            
-            monthly_spending[month_start.strftime('%Y-%m')] = month_total
-        
-        statistics = {
-            'total_orders': total_orders,
-            'total_spent': total_spent,
-            'average_order_value': round(avg_order_value, 2),
-            'orders_by_status': status_counts,
-            'top_products': top_products,
-            'monthly_spending_trend': monthly_spending
-        }
-
-        return success_response(
-            data={'period': period, 'statistics': statistics},
-            message=get_translation('success.saved')
-        )
-
+    except ValidationError as e:
+        return error_response(message=e.message, status_code=400)
     except Exception as e:
         current_app.logger.error(f"Get order statistics error: {e}")
         return internal_error_response(message=get_translation('error.server_error'))
@@ -395,25 +259,12 @@ def submit_order_feedback(order_id):
         except PydanticValidationError as e:
             return validation_error_response(e.errors())
 
-        order = Order.query.filter_by(
-            id=order_id,
-            user_id=current_user_id
-        ).first()
-
-        if not order:
-            return not_found_response(message=get_translation('api.orders.not_found'))
-
-        if order.status != OrderStatus.DELIVERED:
-            return error_response(
-                message=get_translation('error.forbidden'),
-                status_code=400
-            )
-
-        # Update delivery with customer feedback
-        if order.delivery:
-            order.delivery.customer_rating = feedback_data.rating
-            order.delivery.customer_feedback = feedback_data.comment
-            db.session.commit()
+        order = get_order_service().submit_order_feedback_for_user(
+            order_id=order_id,
+            user_id=current_user_id,
+            rating=feedback_data.rating,
+            comment=feedback_data.comment,
+        )
 
         # Track feedback for analytics
         get_analytics_service().track_order_feedback(order_id, feedback_data.rating, feedback_data.comment)
@@ -422,6 +273,10 @@ def submit_order_feedback(order_id):
 
     except PydanticValidationError as e:
         return validation_error_response(e.errors())
+    except NotFoundError:
+        return not_found_response(message=get_translation('api.orders.not_found'))
+    except (ValidationError, ConflictError) as e:
+        return error_response(message=e.message, status_code=400)
     except Exception as e:
         db.session.rollback()
         current_app.logger.error(f"Submit order feedback error: {e}")
@@ -442,21 +297,15 @@ def create_order():
         except PydanticValidationError as e:
             return validation_error_response(e.errors())
 
-        user = User.query.get(current_user_id)
-        if not user:
-            return not_found_response(message=get_translation('error.not_found'))
-
-        # Get user address if delivery_address_id provided
-        if order_request.delivery_address_id:
-            address: UserAddress = UserAddress.query.filter_by(
-                id=order_request.delivery_address_id,
-                user_id=current_user_id
-            ).first()
-            if not address:
-                return error_response(
-                    message=get_translation('api.addresses.not_found'),
-                    status_code=400
-                )
+        _, address = get_order_service().get_user_and_address_for_order(
+            current_user_id,
+            order_request.delivery_address_id,
+        )
+        if not address:
+            return error_response(
+                message=get_translation('api.addresses.not_found'),
+                status_code=400
+            )
 
         # Create order using service
         order_data = {
@@ -533,6 +382,11 @@ def create_order():
             message=get_translation('api.orders.created')
         )
 
+    except NotFoundError:
+        return not_found_response(message=get_translation('error.not_found'))
+    except ValidationError as e:
+        db.session.rollback()
+        return error_response(message=e.message, status_code=400)
     except PydanticValidationError as e:
         db.session.rollback()
         return validation_error_response(e.errors())
@@ -557,27 +411,16 @@ def cancel_order(order_id):
         current_user_id = get_jwt_identity()
         data = request.get_json(silent=True) or {}
 
-        order = Order.query.filter_by(
-            id=order_id,
-            user_id=current_user_id
-        ).first()
-
-        if not order:
-            return not_found_response(message=get_translation('api.orders.not_found'))
-
-        if not order.can_be_cancelled():
-            return error_response(
-                message=get_translation('api.orders.cannot_cancel'),
-                status_code=400
-            )
-
-        # Cancel the order
-        get_order_service().cancel_order(order_id, reason=data.get('reason'))
+        order = get_order_service().cancel_order(
+            order_id=order_id,
+            user_id=current_user_id,
+            reason=data.get('reason'),
+        )
 
         # Send cancellation notification
         get_notification_service().send_notification(
             current_user_id,
-            'order_cancelled',
+            NotificationType.ORDER_UPDATE,
             template_data={
                 'order_number': order.order_number,
                 'cancellation_reason': data.get('reason', 'Customer request')
@@ -589,6 +432,10 @@ def cancel_order(order_id):
             message=get_translation('api.orders.cancelled')
         )
 
+    except NotFoundError:
+        return not_found_response(message=get_translation('api.orders.not_found'))
+    except ConflictError:
+        return error_response(message=get_translation('api.orders.cannot_cancel'), status_code=400)
     except Exception as e:
         db.session.rollback()
         current_app.logger.error(f"Cancel order error: {e}")
@@ -607,10 +454,6 @@ def estimate_cart():
             cart_request = CartEstimateRequest(**request.get_json())
         except PydanticValidationError as e:
             return validation_error_response(e.errors())
-
-        user = User.query.get(current_user_id)
-        if not user:
-            return not_found_response(message=get_translation('error.not_found'))
 
         # Use CartService to calculate cart estimate
         cart_service = get_cart_service()
@@ -631,6 +474,8 @@ def estimate_cart():
 
     except PydanticValidationError as e:
         return validation_error_response(e.errors())
+    except NotFoundError:
+        return not_found_response(message=get_translation('error.not_found'))
     except ValidationError as e:
         return validation_error_response(errors=str(e))
     except ValueError as e:
@@ -727,23 +572,21 @@ def repeat_order(order_id):
     """Repeat a previous order"""
     try:
         current_user_id = get_jwt_identity()
-
-        original_order = Order.query.filter_by(
-            id=order_id,
-            user_id=current_user_id
-        ).first()
-
-        if not original_order:
-            return not_found_response(message=get_translation('api.orders.not_found'))
-
-        # Create new order based on original
-        new_order = get_order_service().repeat_order(original_order)
+        new_order = get_order_service().repeat_order_for_user(order_id, current_user_id)
 
         return created_response(
             data={'order': serialize_order(new_order, include_items=True)},
             message=get_translation('api.orders.created')
         )
 
+    except NotFoundError:
+        return not_found_response(message=get_translation('api.orders.not_found'))
+    except ValidationError as e:
+        current_app.logger.warning(f"Repeat order validation error: {e.message}")
+        return error_response(
+            message=e.message,
+            status_code=400
+        )
     except ValueError as e:
         current_app.logger.warning(f"Repeat order validation error: {e}")
         return error_response(
@@ -762,37 +605,9 @@ def track_order(order_id):
     """Track order status and delivery"""
     try:
         current_user_id = get_jwt_identity()
-        
-        order = Order.query.filter_by(
-            id=order_id, 
-            user_id=current_user_id
-        ).first()
-        
-        if not order:
-            return not_found_response(message=get_translation('api.orders.not_found'))
-
-        # Get delivery tracking information
-        delivery_info = None
-        if order.delivery:
-            delivery_info = serialize_order_delivery(order.delivery)
-
-        # Get order timeline
-        timeline = get_order_service().get_order_timeline(order_id)
-
-        # Calculate estimated time remaining
-        time_remaining = None
-        if order.delivery and order.delivery.estimated_delivery_time:
-            estimated_time = order.delivery.estimated_delivery_time
-            if estimated_time.tzinfo is None:
-                estimated_time = estimated_time.replace(tzinfo=UTC)
-            
-            remaining = estimated_time - datetime.now(UTC)
-            if remaining.total_seconds() > 0:
-                time_remaining = {
-                    'hours': remaining.seconds // 3600,
-                    'minutes': (remaining.seconds % 3600) // 60,
-                    'total_minutes': remaining.seconds // 60
-                }
+        tracking = get_order_service().get_order_tracking_for_user(order_id, current_user_id)
+        order = tracking['order']
+        delivery_info = serialize_order_delivery(tracking['delivery']) if tracking['delivery'] else None
 
         return success_response(
             data={
@@ -804,12 +619,14 @@ def track_order(order_id):
                     'created_at': order.created_at.isoformat()
                 },
                 'delivery': delivery_info,
-                'timeline': timeline,
-                'estimated_time_remaining': time_remaining
+                'timeline': tracking['timeline'],
+                'estimated_time_remaining': tracking['estimated_time_remaining']
             },
             message=get_translation('api.orders.retrieved')
         )
 
+    except NotFoundError:
+        return not_found_response(message=get_translation('api.orders.not_found'))
     except Exception as e:
         current_app.logger.error(f"Track order error: {e}")
         return internal_error_response(message=get_translation('error.server_error'))
@@ -823,10 +640,6 @@ def bulk_order_action():
     try:
         current_user_id = get_jwt_identity()
         data = request.get_json()
-
-        user = User.query.get(current_user_id)
-        if not user or not user.is_admin:
-            return forbidden_response(message=get_translation('error.forbidden'))
 
         action = data.get('action')
         order_ids = data.get('order_ids')
@@ -852,6 +665,10 @@ def bulk_order_action():
             message=get_translation('success.updated')
         )
 
+    except ForbiddenError:
+        return forbidden_response(message=get_translation('error.forbidden'))
+    except ValidationError as e:
+        return error_response(message=e.message, status_code=400)
     except Exception as e:
         current_app.logger.error(f"Bulk order action error: {e}")
         return internal_error_response(message=get_translation('error.server_error'))
@@ -866,9 +683,7 @@ def export_orders():
         current_user_id = get_jwt_identity()
         data = request.get_json()
 
-        user = User.query.get(current_user_id)
-        if not user:
-            return not_found_response(message=get_translation('error.not_found'))
+        user = get_order_service().get_user_or_raise(current_user_id)
 
         # Regular users can only export their own orders
         if not user.is_admin:
@@ -904,6 +719,10 @@ def export_orders():
             message=get_translation('success.saved')
         )
 
+    except NotFoundError:
+        return not_found_response(message=get_translation('error.not_found'))
+    except ValidationError as e:
+        return error_response(message=e.message, status_code=400)
     except Exception as e:
         current_app.logger.error(f"Export orders error: {e}")
         return internal_error_response(message=get_translation('error.server_error'))
@@ -917,9 +736,7 @@ def create_subscription_order():
         current_user_id = get_jwt_identity()
         data = request.get_json()
 
-        user = User.query.get(current_user_id)
-        if not user:
-            return not_found_response(message=get_translation('error.not_found'))
+        user = get_order_service().get_user_or_raise(current_user_id)
 
         items_data = data.get('items', [])
         frequency = data.get('frequency')  # weekly, biweekly, monthly
@@ -943,31 +760,47 @@ def create_subscription_order():
         }
 
         subscription = get_order_service().create_subscription_order(subscription_data, items_data)
+        subscription_id = subscription.get('id') if isinstance(subscription, dict) else subscription.id
+        next_delivery = (
+            subscription.get('next_delivery_date')
+            if isinstance(subscription, dict)
+            else (subscription.next_delivery_date.isoformat() if subscription.next_delivery_date else None)
+        )
+        status_value = subscription.get('status') if isinstance(subscription, dict) else subscription.status
+        frequency_value = (
+            subscription.get('delivery_frequency')
+            if isinstance(subscription, dict)
+            else subscription.delivery_frequency
+        )
 
         # Send confirmation notification
         get_notification_service().send_notification(
             user.id,
-            'subscription_created',
+            NotificationType.SUBSCRIPTION_CREATED,
             template_data={
-                'subscription_id': subscription.id,
+                'subscription_id': subscription_id,
                 'frequency': frequency,
-                'next_delivery': subscription.next_delivery_date.isoformat() if subscription.next_delivery_date else None
+                'next_delivery': next_delivery
             }
         )
 
         return created_response(
             data={
                 'subscription': {
-                    'id': subscription.id,
-                    'frequency': subscription.frequency,
-                    'status': subscription.status,
-                    'next_delivery_date': subscription.next_delivery_date.isoformat() if subscription.next_delivery_date else None,
-                    'created_at': subscription.created_at.isoformat()
+                    'id': subscription_id,
+                    'frequency': frequency_value.value if hasattr(frequency_value, 'value') else frequency_value,
+                    'status': status_value.value if hasattr(status_value, 'value') else status_value,
+                    'next_delivery_date': next_delivery,
+                    'created_at': subscription.get('created_at') if isinstance(subscription, dict) else subscription.created_at.isoformat()
                 }
             },
             message=get_translation('api.subscriptions.created')
         )
 
+    except NotFoundError:
+        return not_found_response(message=get_translation('error.not_found'))
+    except ValidationError as e:
+        return error_response(message=e.message, status_code=400)
     except ValueError as e:
         current_app.logger.warning(f"Create subscription order validation error: {e}")
         return error_response(
@@ -988,9 +821,7 @@ def schedule_order():
         current_user_id = get_jwt_identity()
         data = request.get_json()
 
-        user = User.query.get(current_user_id)
-        if not user:
-            return not_found_response(message=get_translation('error.not_found'))
+        get_order_service().get_user_or_raise(current_user_id)
 
         scheduled_date = data.get('scheduled_date')
         try:
@@ -1040,6 +871,10 @@ def schedule_order():
             message=get_translation('api.orders.created')
         )
 
+    except NotFoundError:
+        return not_found_response(message=get_translation('error.not_found'))
+    except ValidationError as e:
+        return error_response(message=e.message, status_code=400)
     except ValueError as e:
         current_app.logger.warning(f"Schedule order validation error: {e}")
         return error_response(

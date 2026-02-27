@@ -91,6 +91,84 @@
     font-size: 13px;
 }
 
+/* Floating social shortcuts */
+.social-float-links {
+    position: fixed;
+    right: 18px;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 998;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.social-float-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px;
+    border-radius: 999px;
+    background: #ffffff;
+    color: #0b2a56;
+    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.16);
+    font-size: 13px;
+    font-weight: 700;
+    line-height: 1;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.social-float-link i {
+    font-size: 16px;
+}
+
+.social-float-link:hover {
+    color: #0b2a56;
+    text-decoration: none;
+    transform: translateX(-3px);
+    box-shadow: 0 14px 26px rgba(0, 0, 0, 0.2);
+}
+
+.social-float-link.instagram i {
+    color: #e4405f;
+}
+
+.social-float-link.telegram-channel i,
+.social-float-link.telegram-bot i {
+    color: #1c99dc;
+}
+
+.footer-bottom .social-links li a {
+    width: 44px;
+    height: 44px;
+    line-height: 44px;
+    font-size: 18px;
+}
+
+@media (max-width: 767px) {
+    .social-float-links {
+        top: auto;
+        right: 12px;
+        left: 12px;
+        bottom: 14px;
+        transform: none;
+        flex-direction: row;
+    }
+
+    .social-float-link {
+        flex: 1;
+        justify-content: center;
+        border-radius: 12px;
+        padding: 10px 8px;
+        font-size: 12px;
+    }
+
+    .scroll-top.open {
+        bottom: 84px;
+        right: 16px;
+    }
+}
+
 /* ============================================
    SHOP PAGE ENHANCEMENTS
    ============================================ */

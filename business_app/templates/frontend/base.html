@@ -320,9 +320,9 @@
                 </div>
                 <div class="social-links">
                     <ul class="clearfix">
-                        <li><a href="#"><span class="fab fa-facebook-square"></span></a></li>
-                        <li><a href="#"><span class="fab fa-instagram"></span></a></li>
-                        <li><a href="https://t.me/bluestream_bot"><span class="fab fa-telegram"></span></a></li>
+                        <li><a href="{{ company_instagram_url }}" target="_blank" rel="noopener noreferrer" aria-label="Instagram"><span class="fab fa-instagram"></span></a></li>
+                        <li><a href="{{ company_telegram_channel_url }}" target="_blank" rel="noopener noreferrer" aria-label="Telegram Channel"><span class="fab fa-telegram-plane"></span></a></li>
+                        <li><a href="{{ company_telegram_bot_url }}" target="_blank" rel="noopener noreferrer" aria-label="Telegram Bot"><span class="fab fa-telegram-plane"></span></a></li>
                     </ul>
                 </div>
             </nav>
@@ -330,6 +330,22 @@
 
         <!-- Page Content -->
         {% block content %}{% endblock %}
+
+        <!-- floating social shortcuts -->
+        <aside class="social-float-links" aria-label="Social links">
+            <a href="{{ company_instagram_url }}" class="social-float-link instagram" target="_blank" rel="noopener noreferrer" aria-label="Open Instagram account">
+                <i class="fab fa-instagram"></i>
+                <span>Instagram</span>
+            </a>
+            <a href="{{ company_telegram_channel_url }}" class="social-float-link telegram-channel" target="_blank" rel="noopener noreferrer" aria-label="Open Telegram channel">
+                <i class="fab fa-telegram-plane"></i>
+                <span>Telegram Channel</span>
+            </a>
+            <a href="{{ company_telegram_bot_url }}" class="social-float-link telegram-bot" target="_blank" rel="noopener noreferrer" aria-label="Open Telegram bot">
+                <i class="fas fa-robot"></i>
+                <span>Telegram Bot</span>
+            </a>
+        </aside>
 
         <!-- main-footer -->
         <footer class="main-footer">
@@ -432,9 +448,9 @@
                             <p><a href="{{ external_url_for_lang('frontend.index') }}">Blue Stream Group</a> &copy; 2026 {{ 'landing.footer.all_rights_reserved'|t }}</p>
                         </div>
                         <ul class="social-links clearfix">
-                            <li><a href="#"><i class="fab fa-facebook-f"></i></a></li>
-                            <li><a href="#"><i class="fab fa-instagram"></i></a></li>
-                            <li><a href="https://t.me/bluestream_bot"><i class="fab fa-telegram"></i></a></li>
+                            <li><a href="{{ company_instagram_url }}" target="_blank" rel="noopener noreferrer" aria-label="Instagram"><i class="fab fa-instagram"></i></a></li>
+                            <li><a href="{{ company_telegram_channel_url }}" target="_blank" rel="noopener noreferrer" aria-label="Telegram Channel"><i class="fab fa-telegram-plane"></i></a></li>
+                            <li><a href="{{ company_telegram_bot_url }}" target="_blank" rel="noopener noreferrer" aria-label="Telegram Bot"><i class="fab fa-telegram-plane"></i></a></li>
                         </ul>
                         <ul class="footer-nav clearfix">
                             <li><a href="{{ external_url_for_lang('frontend.terms') }}">{{ 'landing.footer.terms_of_service'|t }}</a></li>

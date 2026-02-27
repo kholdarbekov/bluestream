@@ -1,7 +1,11 @@
 {% extends "frontend/base.html" %}
-{% set meta_description = "Water delivery FAQ from Aqua Element: delivery timing, order minimums, pricing, subscriptions, and support answers." %}
 
 {% if current_language == 'ru' %}
+    {% set meta_description = "FAQ по доставке воды Aqua Element: сроки, минимальный заказ, цены, подписки и поддержка." %}
+    {% set faq_page_title = "FAQ по доставке воды" %}
+    {% set faq_heading = "Частые вопросы о доставке и заказах" %}
+    {% set faq_intro = "Здесь собраны ответы на частые вопросы по доставке, ценам и подпискам перед оформлением заказа." %}
+    {% set faq_help_prefix = "Нужна помощь? Свяжитесь с нами:" %}
     {% set faq_items = [
         {'q': 'Как быстро вы доставляете воду?', 'a': 'В большинстве зон доставка доступна в тот же день при наличии свободного интервала.'},
         {'q': 'Какие объемы бутылей доступны?', 'a': 'Обычно доступны форматы 5L, 10L и 19L. Наличие зависит от текущего каталога.'},
@@ -11,6 +15,11 @@
         {'q': 'Что делать, если заказ задерживается?', 'a': 'Свяжитесь с поддержкой по телефону или email. Команда проверит статус и предложит решение.'}
     ] %}
 {% elif current_language == 'en' %}
+    {% set meta_description = "Water delivery FAQ from Aqua Element: delivery timing, order minimums, pricing, subscriptions, and support answers." %}
+    {% set faq_page_title = "Water Delivery FAQ" %}
+    {% set faq_heading = "Common Questions About Delivery and Orders" %}
+    {% set faq_intro = "These answers cover the most frequent delivery, pricing, and subscription questions customers ask before ordering." %}
+    {% set faq_help_prefix = "Still need help? Contact us at" %}
     {% set faq_items = [
         {'q': 'How fast is water delivery?', 'a': 'Most service zones support same-day delivery when an open time slot is available.'},
         {'q': 'Which bottle sizes are available?', 'a': 'Common options include 5L, 10L, and 19L formats, depending on current catalog availability.'},
@@ -20,6 +29,11 @@
         {'q': 'What if my order is delayed?', 'a': 'Contact support by phone or email and the team will verify delivery status and next steps.'}
     ] %}
 {% else %}
+    {% set meta_description = "Aqua Element suv yetkazib berish FAQ: muddatlar, minimal buyurtma, narxlar, obunalar va yordam javoblari." %}
+    {% set faq_page_title = "Suv Yetkazib Berish FAQ" %}
+    {% set faq_heading = "Yetkazib berish va buyurtmalar bo'yicha ko'p so'raladigan savollar" %}
+    {% set faq_intro = "Quyida buyurtma berishdan oldin mijozlar eng ko'p so'raydigan yetkazib berish, narx va obuna savollariga javoblar jamlangan." %}
+    {% set faq_help_prefix = "Yordam kerakmi? Biz bilan bog'laning:" %}
     {% set faq_items = [
         {'q': 'Suv yetkazib berish qanchalik tez amalga oshiriladi?', 'a': 'Ko‘p hududlarda bo‘sh vaqt oralig‘i mavjud bo‘lsa, shu kunning o‘zida yetkazib berish mumkin.'},
         {'q': 'Qaysi hajmdagi butilkalar mavjud?', 'a': 'Odatda 5L, 10L va 19L formatlar mavjud bo‘ladi. Mavjudlik katalogga qarab o‘zgaradi.'},
@@ -30,7 +44,7 @@
     ] %}
 {% endif %}
 
-{% block title %}Water Delivery FAQ - {{ company_name }}{% endblock %}
+{% block title %}{{ faq_page_title }} - {{ company_name }}{% endblock %}
 
 {% block extra_meta %}
 {% set faq_schema = namespace(items=[]) %}
@@ -101,10 +115,10 @@
     <div class="shape" style="background-image: url({{ url_for('static', filename='images/shape/banner-shap.png') }});"></div>
     <div class="auto-container">
         <div class="content-box">
-            <h1>Water Delivery FAQ</h1>
+            <h1>{{ faq_page_title }}</h1>
             <ul class="bread-crumb clearfix">
-                <li><a href="{{ url_for('frontend.index') }}">{{ 'landing.nav.home'|t }}</a></li>
-                <li>FAQ</li>
+                <li><a href="{{ external_url_for_lang('frontend.index') }}">{{ 'landing.nav.home'|t }}</a></li>
+                <li>{{ faq_page_title }}</li>
             </ul>
         </div>
     </div>
@@ -113,8 +127,8 @@
 <section class="shop-seo-content">
     <div class="auto-container">
         <div class="seo-card">
-            <h2>Common Questions About Delivery and Orders</h2>
-            <p>These answers cover the most frequent delivery, pricing, and subscription questions customers ask before ordering.</p>
+            <h2>{{ faq_heading }}</h2>
+            <p>{{ faq_intro }}</p>
             <ul class="shop-faq-list">
                 {% for faq in faq_items %}
                 <li>
@@ -124,7 +138,7 @@
                 {% endfor %}
             </ul>
             <p style="margin-top: 26px;">
-                Still need help? Contact us at <a href="tel:{{ company_phone }}">{{ company_phone }}</a> or
+                {{ faq_help_prefix }} <a href="tel:{{ company_phone }}">{{ company_phone }}</a> or
                 <a href="mailto:{{ company_email }}">{{ company_email }}</a>.
             </p>
         </div>

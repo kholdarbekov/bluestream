@@ -1,10 +1,11 @@
 """Frontend routes for Blue Stream Water Business Platform."""
+from pathlib import Path
 from urllib.parse import urlencode, urlsplit, urlunsplit, parse_qsl
 from xml.sax.saxutils import escape
 
 from flask import render_template, request, session, current_app, jsonify, redirect, url_for, flash, g, Response
 from flask_jwt_extended import jwt_required, get_jwt_identity, verify_jwt_in_request
-from sqlalchemy import desc, or_
+from sqlalchemy import desc, or_, func
 
 from . import frontend_bp
 from business_app.models.product import Product, ProductCategory
@@ -39,19 +40,35 @@ def _current_lang_query_param():
     return None
 
 
+def _resolved_url_language():
+    """Resolve language for URL generation without relying on Accept-Language."""
+    lang_from_query = _current_lang_query_param()
+    if lang_from_query:
+        return lang_from_query
+
+    supported_languages = current_app.config.get('LANGUAGES', {})
+    lang_from_session = session.get('language')
+    if lang_from_session and lang_from_session in supported_languages:
+        return lang_from_session
+
+    return current_app.config.get('DEFAULT_LANGUAGE', 'uz')
+
+
 def _build_external_url(endpoint, **params):
-    """Build external URL preserving only explicit non-default lang query params."""
-    lang = _current_lang_query_param()
+    """Build external URL preserving active non-default language."""
+    lang = _resolved_url_language()
     default_language = current_app.config.get('DEFAULT_LANGUAGE', 'uz')
     if lang and lang != default_language and 'lang' not in params:
         params['lang'] = lang
+    if params.get('lang') == default_language:
+        params.pop('lang', None)
     return url_for(endpoint, _external=True, **params)
 
 
 def _default_canonical_url():
     """Build a default canonical URL for the current request path."""
     canonical = _absolute_public_url(request.path)
-    lang = _current_lang_query_param()
+    lang = _resolved_url_language()
     default_language = current_app.config.get('DEFAULT_LANGUAGE', 'uz')
     if lang and lang != default_language:
         canonical = f"{canonical}?{urlencode({'lang': lang})}"
@@ -78,6 +95,44 @@ def _as_absolute_url(url_value):
         return url_value
     path = url_value if url_value.startswith('/') else f'/{url_value}'
     return _absolute_public_url(path)
+
+
+def _static_content_lastmod():
+    """Best-effort lastmod for static sitemap entries."""
+    configured_lastmod = current_app.config.get('SEO_STATIC_SITEMAP_LASTMOD')
+    if configured_lastmod:
+        return str(configured_lastmod)
+
+    templates_root = Path(current_app.root_path) / 'templates' / 'frontend'
+    template_candidates = [
+        'index.html',
+        'shop.html',
+        'subscriptions.html',
+        'services.html',
+        'about.html',
+        'contact.html',
+        'gallery.html',
+        'blog_list.html',
+        'terms.html',
+        'privacy.html',
+        'delivery_policy.html',
+        'pricing_policy.html',
+        'refund_policy.html',
+        'quality_standards.html',
+        'water_delivery_faq.html',
+    ]
+
+    latest_timestamp = None
+    for template_name in template_candidates:
+        template_path = templates_root / template_name
+        try:
+            template_mtime = datetime.fromtimestamp(template_path.stat().st_mtime, UTC)
+        except OSError:
+            continue
+        if latest_timestamp is None or template_mtime > latest_timestamp:
+            latest_timestamp = template_mtime
+
+    return _format_lastmod(latest_timestamp or datetime.now(UTC))
 
 
 def _normalize_feed_gtin(value):
@@ -146,10 +201,14 @@ def _render_product_detail_page(product, language):
 
     canonical_endpoint = 'frontend.product_detail_slug' if product.slug else 'frontend.product_detail'
     canonical_params = {'slug': product.slug} if product.slug else {'product_id': product.id}
+    product_payload = product.to_dict(language=language)
+    product_images = product_payload.get('images') or []
+    if isinstance(product_images, list):
+        product_payload['images'] = [(_as_absolute_url(image) or image) for image in product_images]
 
     return render_template(
         'frontend/product_detail.html',
-        product=product.to_dict(language=language),
+        product=product_payload,
         related_products=[rp.to_dict(language=language) for rp in related_products],
         canonical_url=_build_external_url(canonical_endpoint, **canonical_params)
     )
@@ -811,11 +870,10 @@ def set_language_route(language):
     3. Persists to user's DB profile if logged in (for cross-session persistence)
     4. Redirects back to the referring page
     """
-    import os
-
     # Validate language
+    default_language = current_app.config.get('DEFAULT_LANGUAGE', 'uz')
     if language not in current_app.config['LANGUAGES']:
-        language = current_app.config['DEFAULT_LANGUAGE']
+        language = default_language
 
     # Store in session (this is checked BEFORE DB preference in before_request)
     session['language'] = language
@@ -844,7 +902,10 @@ def set_language_route(language):
     try:
         parsed = urlsplit(redirect_url)
         query = dict(parse_qsl(parsed.query, keep_blank_values=True))
-        query['lang'] = language
+        if language == default_language:
+            query.pop('lang', None)
+        else:
+            query['lang'] = language
         redirect_url = urlunsplit((
             parsed.scheme,
             parsed.netloc,
@@ -992,7 +1053,10 @@ def inject_global_vars():
             language_code = default_language
 
         query_args = request.args.to_dict(flat=False)
-        query_args['lang'] = [language_code]
+        if language_code == default_language:
+            query_args.pop('lang', None)
+        else:
+            query_args['lang'] = [language_code]
 
         try:
             if request.endpoint:
@@ -1042,11 +1106,27 @@ def inject_global_vars():
 @frontend_bp.route('/sitemap.xml')
 def sitemap_index():
     """Sitemap index that points to segmented sitemap files."""
-    now = _format_lastmod(datetime.now(UTC))
+    static_lastmod = _static_content_lastmod()
+    try:
+        product_lastmod_raw = db.session.query(
+            func.max(func.coalesce(Product.updated_at, Product.created_at))
+        ).scalar()
+        blog_lastmod_raw = db.session.query(
+            func.max(BlogPost.published_at)
+        ).filter(
+            BlogPost.status == BlogStatus.PUBLISHED,
+            BlogPost.published_at <= datetime.now(UTC)
+        ).scalar()
+    except Exception:
+        product_lastmod_raw = None
+        blog_lastmod_raw = None
+
+    product_lastmod = _format_lastmod(product_lastmod_raw) or static_lastmod
+    blog_lastmod = _format_lastmod(blog_lastmod_raw) or static_lastmod
     entries = [
-        {'loc': _absolute_public_url('/sitemap-static.xml'), 'lastmod': now},
-        {'loc': _absolute_public_url('/sitemap-products.xml'), 'lastmod': now},
-        {'loc': _absolute_public_url('/sitemap-blog.xml'), 'lastmod': now},
+        {'loc': _absolute_public_url('/sitemap-static.xml'), 'lastmod': static_lastmod},
+        {'loc': _absolute_public_url('/sitemap-products.xml'), 'lastmod': product_lastmod},
+        {'loc': _absolute_public_url('/sitemap-blog.xml'), 'lastmod': blog_lastmod},
     ]
     return _render_sitemap_index(entries)
 
@@ -1054,7 +1134,7 @@ def sitemap_index():
 @frontend_bp.route('/sitemap-static.xml')
 def sitemap_static():
     """Sitemap for static/public marketing pages."""
-    now = _format_lastmod(datetime.now(UTC))
+    static_lastmod = _static_content_lastmod()
     paths = [
         '/',
         '/shop',
@@ -1075,7 +1155,7 @@ def sitemap_static():
     entries = [
         {
             'loc': _absolute_public_url(path),
-            'lastmod': now,
+            'lastmod': static_lastmod,
             'changefreq': 'weekly',
             'priority': '0.8' if path == '/' else '0.6',
         }

@@ -3,6 +3,10 @@ Allow: /
 
 # Private/authenticated areas
 Disallow: /api/
+Disallow: /metrics
+Disallow: /health
+Disallow: /health/detailed
+Disallow: /docs/api
 Disallow: /login
 Disallow: /register
 Disallow: /checkout

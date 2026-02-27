@@ -1,5 +1,11 @@
 {% extends "frontend/base.html" %}
+{% if current_language == 'ru' %}
+{% set meta_description = "Политика конфиденциальности Aqua Element: сбор, обработка, хранение данных, безопасность и права клиентов." %}
+{% elif current_language == 'en' %}
 {% set meta_description = "Privacy policy for Aqua Element covering data collection, processing, retention, security, and customer rights." %}
+{% else %}
+{% set meta_description = "Aqua Element maxfiylik siyosati: malumot yigish, qayta ishlash, saqlash, xavfsizlik va mijoz huquqlari." %}
+{% endif %}
 
 {% block title %}Privacy Policy - {{ company_name }}{% endblock %}
 

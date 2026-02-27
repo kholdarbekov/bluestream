@@ -234,6 +234,10 @@ class SecurityHeadersMiddleware:
                 response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, proxy-revalidate'
                 response.headers['Pragma'] = 'no-cache'
                 response.headers['Expires'] = '0'
+
+            # Operational and diagnostic endpoints should never be indexed.
+            if request.path in {'/metrics', '/health/detailed', '/docs/api'}:
+                response.headers['X-Robots-Tag'] = 'noindex, nofollow'
             
         except Exception as e:
             # Log error but don't break the response

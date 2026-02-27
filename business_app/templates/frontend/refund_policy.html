@@ -1,5 +1,11 @@
 {% extends "frontend/base.html" %}
+{% if current_language == 'ru' %}
+{% set meta_description = "Политика возврата Aqua Element: условия, сроки обращения по проблемам и порядок обработки возврата." %}
+{% elif current_language == 'en' %}
 {% set meta_description = "Refund and return policy for Aqua Element: eligibility, issue reporting timelines, and refund processing details." %}
+{% else %}
+{% set meta_description = "Aqua Element refund siyosati: moslik talablari, murojaat muddatlari va qaytarimni korib chiqish tartibi." %}
+{% endif %}
 
 {% block title %}Refund Policy - {{ company_name }}{% endblock %}
 

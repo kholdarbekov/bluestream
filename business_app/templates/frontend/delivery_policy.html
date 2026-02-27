@@ -1,5 +1,11 @@
 {% extends "frontend/base.html" %}
+{% if current_language == 'ru' %}
+{% set meta_description = "Политика доставки Aqua Element: зона обслуживания, временные окна, повторная доставка и контакты поддержки." %}
+{% elif current_language == 'en' %}
 {% set meta_description = "Delivery policy for Aqua Element: service area, scheduling windows, failed delivery handling, and support contacts." %}
+{% else %}
+{% set meta_description = "Aqua Element yetkazib berish siyosati: xizmat hududi, vaqt oraligi, qayta yetkazish va yordam kontaktlari." %}
+{% endif %}
 
 {% block title %}Delivery Policy - {{ company_name }}{% endblock %}
 

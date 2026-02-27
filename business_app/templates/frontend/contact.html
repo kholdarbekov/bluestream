@@ -1,5 +1,11 @@
 {% extends "frontend/base.html" %}
+{% if current_language == 'ru' %}
+{% set meta_description = "Свяжитесь с Aqua Element по вопросам доставки воды, поддержки и условий обслуживания." %}
+{% elif current_language == 'en' %}
 {% set meta_description = "Contact Aqua Element for delivery questions, support requests, and service details." %}
+{% else %}
+{% set meta_description = "Aqua Element bilan boglaning: yetkazib berish savollari, qollab-quvvatlash va xizmat tafsilotlari." %}
+{% endif %}
 
 {% block title %}{{ 'landing.contact.title'|t }} - {{ company_name }}{% endblock %}
 

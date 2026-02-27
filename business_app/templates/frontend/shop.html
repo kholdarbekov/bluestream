@@ -8,9 +8,21 @@
     {% endfor %}
 {% endif %}
 {% if selected_category.name %}
-    {% set meta_description = selected_category.name ~ " products available for delivery from " ~ company_name ~ "." %}
+    {% if current_language == 'ru' %}
+        {% set meta_description = "Товары категории " ~ selected_category.name ~ " доступны с доставкой от " ~ company_name ~ "." %}
+    {% elif current_language == 'en' %}
+        {% set meta_description = selected_category.name ~ " products available for delivery from " ~ company_name ~ "." %}
+    {% else %}
+        {% set meta_description = selected_category.name ~ " toifasidagi mahsulotlar " ~ company_name ~ " tomonidan yetkazib beriladi." %}
+    {% endif %}
 {% else %}
-    {% set meta_description = "Shop premium water products and delivery options from " ~ company_name ~ "." %}
+    {% if current_language == 'ru' %}
+        {% set meta_description = "Покупайте премиальную воду и варианты доставки от " ~ company_name ~ "." %}
+    {% elif current_language == 'en' %}
+        {% set meta_description = "Shop premium water products and delivery options from " ~ company_name ~ "." %}
+    {% else %}
+        {% set meta_description = company_name ~ " dan premium suv mahsulotlari va yetkazib berish variantlarini tanlang." %}
+    {% endif %}
 {% endif %}
 {% if current_language == 'ru' %}
     {% set shop_faq_items = [

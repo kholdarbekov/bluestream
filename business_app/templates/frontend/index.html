@@ -1,5 +1,11 @@
 {% extends "frontend/base.html" %}
+{% if current_language == 'ru' %}
+{% set meta_description = "Aqua Element доставляет премиальную питьевую воду по всему Ташкенту: гибкие подписки и бутилированную воду для дома и бизнеса." %}
+{% elif current_language == 'en' %}
 {% set meta_description = "Aqua Element provides premium drinking water delivery all across Tashkent, flexible subscriptions, and bottled water products for homes and businesses." %}
+{% else %}
+{% set meta_description = "Aqua Element Toshkent boylab premium ichimlik suvi yetkazib beradi: moslashuvchan obunalar va uy hamda biznes uchun toza suv mahsulotlari." %}
+{% endif %}
 
 {% block title %}{{ 'landing.nav.home'|t }} - {{ company_name }}{% endblock %}
 

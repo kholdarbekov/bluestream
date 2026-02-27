@@ -1,5 +1,11 @@
 {% extends "frontend/base.html" %}
+{% if current_language == 'ru' %}
+{% set meta_description = "О компании Aqua Element: опыт доставки воды, ценности сервиса и ориентация на клиента." %}
+{% elif current_language == 'en' %}
 {% set meta_description = "About Aqua Element: water delivery background, service values, and customer-focused operations." %}
+{% else %}
+{% set meta_description = "Aqua Element haqida: suv yetkazib berish tajribasi, xizmat qadriyatlari va mijozga yonaltirilgan yondashuv." %}
+{% endif %}
 
 {% block title %}{{ 'landing.footer.about_us'|t }} - {{ company_name }}{% endblock %}
 

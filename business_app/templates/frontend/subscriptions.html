@@ -1,5 +1,11 @@
 {% extends "frontend/base.html" %}
+{% if current_language == 'ru' %}
+{% set meta_description = "Соберите индивидуальную подписку Aqua Element на воду с гибким объемом, графиком доставки и выбором товаров." %}
+{% elif current_language == 'en' %}
 {% set meta_description = "Build a custom Aqua Element water subscription with flexible quantities, delivery cadence, and product options." %}
+{% else %}
+{% set meta_description = "Aqua Element uchun shaxsiy suv obunasini yarating: moslashuvchan hajm, yetkazish jadvali va mahsulot tanlovi." %}
+{% endif %}
 
 {% block title %}{{ 'Water Subscriptions - '|t }}{{ super() }}{% endblock %}
 

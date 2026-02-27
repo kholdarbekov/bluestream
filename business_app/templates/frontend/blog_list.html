@@ -1,8 +1,20 @@
 {% extends "frontend/base.html" %}
 {% if current_category %}
-    {% set meta_description = "Latest " ~ current_category|replace('_', ' ') ~ " articles and water insights from " ~ company_name ~ "." %}
+    {% if current_language == 'ru' %}
+        {% set meta_description = "Последние статьи по теме " ~ current_category|replace('_', ' ') ~ " и полезные материалы о воде от " ~ company_name ~ "." %}
+    {% elif current_language == 'en' %}
+        {% set meta_description = "Latest " ~ current_category|replace('_', ' ') ~ " articles and water insights from " ~ company_name ~ "." %}
+    {% else %}
+        {% set meta_description = company_name ~ " blogida " ~ current_category|replace('_', ' ') ~ " mavzusi boyicha songgi maqolalar va foydali suv maslahatlari." %}
+    {% endif %}
 {% else %}
-    {% set meta_description = "Water benefits, health tips, and company updates from " ~ company_name ~ "." %}
+    {% if current_language == 'ru' %}
+        {% set meta_description = "Польза воды, советы по здоровью и обновления компании от " ~ company_name ~ "." %}
+    {% elif current_language == 'en' %}
+        {% set meta_description = "Water benefits, health tips, and company updates from " ~ company_name ~ "." %}
+    {% else %}
+        {% set meta_description = "Suv foydasi, sogliq boyicha maslahatlar va " ~ company_name ~ " yangiliklari." %}
+    {% endif %}
 {% endif %}
 
 {% block title %}

@@ -1,5 +1,11 @@
 {% extends "frontend/base.html" %}
+{% if current_language == 'ru' %}
+{% set meta_description = "Стандарты качества Aqua Element: источники, обработка и подход к контролю качества доставляемой воды." %}
+{% elif current_language == 'en' %}
 {% set meta_description = "Quality standards at Aqua Element: sourcing, handling practices, and quality control approach for delivered water products." %}
+{% else %}
+{% set meta_description = "Aqua Element sifat standartlari: manbalar, saqlash-amaliyotlari va yetkaziladigan suv mahsulotlari sifat nazorati." %}
+{% endif %}
 
 {% block title %}Quality Standards - {{ company_name }}{% endblock %}
 

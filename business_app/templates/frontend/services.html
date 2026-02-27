@@ -1,5 +1,11 @@
 {% extends "frontend/base.html" %}
+{% if current_language == 'ru' %}
+{% set meta_description = "Услуги Aqua Element: доставка воды для дома и офиса, регулярные поставки и надежная поддержка." %}
+{% elif current_language == 'en' %}
 {% set meta_description = "Explore Aqua Element services including home and office water delivery, recurring plans, and dependable support." %}
+{% else %}
+{% set meta_description = "Aqua Element xizmatlari: uy va ofis uchun suv yetkazib berish, muntazam rejalar va ishonchli yordam." %}
+{% endif %}
 
 {% block title %}{{ 'landing.nav.services'|t }} - {{ company_name }}{% endblock %}
 

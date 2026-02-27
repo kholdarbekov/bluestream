@@ -1,5 +1,11 @@
 {% extends "frontend/base.html" %}
+{% if current_language == 'ru' %}
+{% set meta_description = "Условия использования Aqua Element: сайт, заказы товаров, подписки и связанные услуги доставки." %}
+{% elif current_language == 'en' %}
 {% set meta_description = "Terms and conditions for using Aqua Element website, ordering products, subscriptions, and related delivery services." %}
+{% else %}
+{% set meta_description = "Aqua Element foydalanish shartlari: sayt, buyurtmalar, obunalar va tegishli yetkazib berish xizmatlari." %}
+{% endif %}
 
 {% block title %}Terms and Conditions - {{ company_name }}{% endblock %}
 

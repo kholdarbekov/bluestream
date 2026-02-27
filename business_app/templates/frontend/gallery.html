@@ -1,5 +1,11 @@
 {% extends "frontend/base.html" %}
+{% if current_language == 'ru' %}
+{% set meta_description = "Галерея Aqua Element: контроль качества воды, процессы доставки и фотографии продукции." %}
+{% elif current_language == 'en' %}
 {% set meta_description = "Browse Aqua Element gallery highlights featuring water quality processes, delivery operations, and product photos." %}
+{% else %}
+{% set meta_description = "Aqua Element galereyasi: suv sifati jarayonlari, yetkazib berish amaliyoti va mahsulot fotosuratlari." %}
+{% endif %}
 
 {% block title %}{{ 'landing.gallery.page_title'|t }} - {{ company_name }}{% endblock %}
 

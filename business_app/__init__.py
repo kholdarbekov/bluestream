@@ -232,6 +232,37 @@ def setup_request_handlers(app):
             lang = app.config['DEFAULT_LANGUAGE']
             lang_source = "Default"
 
+        # Keep non-default language URLs explicit to avoid cookie-only language variants.
+        # Use temporary redirects because this is session/user-preference dependent.
+        frontend_lang_redirect_exclusions = {
+            'frontend.set_language_route',
+            'frontend.sitemap_index',
+            'frontend.sitemap_static',
+            'frontend.sitemap_products',
+            'frontend.sitemap_blog',
+            'frontend.google_products_feed',
+        }
+        if (
+            request.method in ('GET', 'HEAD')
+            and request.endpoint
+            and request.endpoint.startswith('frontend.')
+            and request.endpoint not in frontend_lang_redirect_exclusions
+            and not url_lang
+            and lang != default_language
+            and lang_source in {'Session', 'User DB preference', 'Accept-Language header'}
+        ):
+            parsed_url = urlsplit(request.url)
+            existing_query = parse_qsl(parsed_url.query, keep_blank_values=True)
+            localized_query = existing_query + [('lang', lang)]
+            localized_url = urlunsplit((
+                parsed_url.scheme,
+                parsed_url.netloc,
+                parsed_url.path,
+                urlencode(localized_query, doseq=True),
+                parsed_url.fragment,
+            ))
+            return redirect(localized_url, code=302)
+
         # Set the language in request context
         g.language = lang
         g.language_source = lang_source or "Unknown"

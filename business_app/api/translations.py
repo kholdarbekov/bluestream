@@ -2,8 +2,8 @@
 Translations API endpoints for admin UI i18n support
 Serves translations from database in i18next-compatible format
 """
-from flask import Blueprint, jsonify, request
-from business_app.models.translation import Translation
+from flask import Blueprint, jsonify
+from business_app.services.admin_ui_translation_service import AdminUiTranslationService
 from business_app.utils.rate_limiting import exempt_from_rate_limit
 import logging
 
@@ -33,45 +33,7 @@ def get_translations(language, namespace):
         JSON object with key-value pairs
     """
     try:
-        # Map i18next namespaces to our translation categories
-        # For admin UI, we use 'ui' category with subcategories
-        namespace_mapping = {
-            'common': 'ui',
-            'navigation': 'ui_navigation',
-            'dashboard': 'ui_dashboard',
-            'orders': 'ui_orders',
-            'products': 'ui_products',
-            'users': 'ui_users',
-            'settings': 'ui_settings',
-            'profile': 'ui_profile',
-            'analytics': 'ui_analytics',
-            'blog': 'ui_blog',
-            'delivery': 'ui_delivery',
-            'loyalty': 'ui_loyalty',
-            'login': 'ui_login'
-        }
-
-        category = namespace_mapping.get(namespace, f'ui_{namespace}')
-
-        # Query translations from database
-        translations = Translation.query.filter_by(
-            language=language,
-            category=category,
-            is_active=True
-        ).all()
-
-        # Convert to i18next format (flat key-value object)
-        result = {}
-        for translation in translations:
-            # Remove category prefix from key for cleaner usage
-            # e.g., "ui.common.welcome" -> "welcome"
-            key = translation.key
-            if '.' in key:
-                # Keep the full key structure for now
-                # We'll use the full key in the frontend
-                result[key] = translation.value
-            else:
-                result[key] = translation.value
+        result = AdminUiTranslationService.get_translations(language, namespace)
 
         # Log for debugging
         logger.info(f"Served {len(result)} translations for {language}/{namespace}")
@@ -123,22 +85,7 @@ def get_namespaces():
         List of namespace names
     """
     try:
-        # Get all unique UI categories from database
-        from sqlalchemy import distinct
-        from business_app import db
-
-        categories = db.session.query(distinct(Translation.category)).filter(
-            Translation.category.like('ui%'),
-            Translation.is_active == True
-        ).all()
-
-        # Map back to namespace names
-        namespaces = []
-        for (category,) in categories:
-            if category == 'ui':
-                namespaces.append('common')
-            elif category.startswith('ui_'):
-                namespaces.append(category[3:])  # Remove 'ui_' prefix
+        namespaces = AdminUiTranslationService.get_namespaces()
 
         return jsonify({
             'success': True,

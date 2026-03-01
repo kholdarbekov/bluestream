@@ -29,6 +29,7 @@ from business_app.services.payment_service import PaymentService
 from business_app.services.review_service import ReviewService
 from business_app.services.admin_report_service import AdminReportService
 from business_app.services.admin_bulk_action_service import AdminBulkActionService
+from business_app.services.admin_delivery_service import AdminDeliveryService
 from business_app.serializers.admin_serializers import (
     serialize_user_admin, serialize_order_admin, serialize_product_admin,
     serialize_delivery_person_admin, serialize_category_admin,
@@ -2714,6 +2715,60 @@ def delete_time_slot(slot_id):
         db.session.rollback()
         current_app.logger.error(f"Delete time slot error: {e}")
         return internal_error_response('Failed to delete time slot')
+
+
+@admin_bp.route('/deliveries', methods=['GET'])
+@jwt_required()
+@validate_admin_action(['view_delivery', 'manage_delivery'])
+def get_admin_deliveries():
+    """List deliveries for the admin deliveries management UI."""
+    try:
+        result = AdminDeliveryService.list_deliveries(
+            page=int(request.args.get('page', 1)),
+            per_page=int(request.args.get('per_page', 20)),
+            search=request.args.get('search', ''),
+            status=request.args.get('status'),
+            start_date=request.args.get('start_date'),
+            end_date=request.args.get('end_date'),
+        )
+
+        return paginated_response(
+            items=result['items'],
+            page=result['page'],
+            per_page=result['per_page'],
+            total=result['total'],
+            additional_meta={'summary': result['summary']},
+        )
+    except ValidationError as e:
+        return validation_error_response(str(e))
+    except Exception as e:
+        current_app.logger.error(f"Get admin deliveries error: {e}")
+        return internal_error_response('Failed to get deliveries')
+
+
+@admin_bp.route('/deliveries/<int:delivery_id>', methods=['PUT'])
+@jwt_required()
+@validate_admin_action(['manage_delivery'])
+@validate_json()
+def update_admin_delivery(delivery_id):
+    """Update delivery notes/status from the admin deliveries page."""
+    try:
+        delivery = AdminDeliveryService.update_delivery(
+            delivery_id,
+            request.get_json() or {},
+            int(get_jwt_identity()),
+        )
+        return success_response(
+            data={'delivery': delivery},
+            message='Delivery updated successfully',
+        )
+    except NotFoundError as e:
+        return not_found_response(str(e))
+    except ValidationError as e:
+        return validation_error_response(str(e))
+    except Exception as e:
+        current_app.logger.error(f"Update admin delivery error: {e}")
+        return internal_error_response('Failed to update delivery')
 
 
 @admin_bp.route('/delivery-personnel', methods=['GET'])

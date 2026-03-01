@@ -29,10 +29,72 @@ from business_app.serializers.analytics_serializers import (
 )
 # from business_app.services.prediction_service import PredictionService
 from business_app.utils.decorators import validate_json, cache_response, rate_limit
-from business_app.utils.constants import OrderStatus, PaymentStatus, UserRole
+from business_app.utils.constants import OrderStatus, PaymentStatus, UserRole, UserStatus
 from business_app import db
 
 analytics_bp = Blueprint('analytics', __name__)
+
+
+_TIMEFRAME_TO_PERIOD = {
+    '7d': 'week',
+    '30d': 'month',
+    '90d': 'quarter',
+    '1y': 'year',
+}
+
+
+def _parse_request_datetime(value: str, *, end_of_day: bool = False):
+    if not value:
+        return None
+
+    try:
+        if 'T' in value:
+            parsed = datetime.fromisoformat(value)
+        else:
+            parsed_date = date.fromisoformat(value)
+            parsed = datetime.combine(
+                parsed_date,
+                datetime.max.time() if end_of_day else datetime.min.time(),
+            )
+    except ValueError:
+        return None
+
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed
+
+
+def _resolve_analytics_range(default_period: str = 'month'):
+    timeframe = request.args.get('timeframe')
+    period = request.args.get('period') or _TIMEFRAME_TO_PERIOD.get(timeframe, default_period)
+    start_date = _parse_request_datetime(request.args.get('start_date'))
+    end_date = _parse_request_datetime(request.args.get('end_date'), end_of_day=True)
+
+    if start_date and end_date:
+        return start_date, end_date, 'custom'
+
+    now = datetime.now(UTC)
+    if period == 'week':
+        start_date = now - timedelta(weeks=1)
+    elif period == 'quarter':
+        start_date = now - timedelta(days=90)
+    elif period == 'year':
+        start_date = now - timedelta(days=365)
+    else:
+        period = 'month'
+        start_date = now - timedelta(days=30)
+
+    return start_date, now, period
+
+
+def _get_analytics_user():
+    current_user_id = get_jwt_identity()
+    user = User.query.get(current_user_id)
+    return current_user_id, user
+
+
+def _user_lacks_analytics_access(user) -> bool:
+    return not user or user.role not in [UserRole.ADMIN, UserRole.MANAGER]
 
 
 
@@ -41,32 +103,16 @@ analytics_bp = Blueprint('analytics', __name__)
 def get_analytics_dashboard():
     """Get analytics dashboard data"""
     try:
-        current_user_id = get_jwt_identity()
-        period = request.args.get('period', 'month')  # week, month, quarter, year
-        
-        user = User.query.get(current_user_id)
+        _, user = _get_analytics_user()
         if not user:
             return jsonify({'error': 'User not found'}), 404
-        
-        # Check if user has analytics access
-        if user.role not in [UserRole.ADMIN, UserRole.MANAGER]:
+
+        if _user_lacks_analytics_access(user):
             return jsonify({'error': 'Analytics access required'}), 403
-        
-        # Calculate date range
-        now = datetime.now(UTC)
-        if period == 'week':
-            start_date = now - timedelta(weeks=1)
-        elif period == 'month':
-            start_date = now - timedelta(days=30)
-        elif period == 'quarter':
-            start_date = now - timedelta(days=90)
-        elif period == 'year':
-            start_date = now - timedelta(days=365)
-        else:
-            start_date = now - timedelta(days=30)  # Default to month
-        
-        dashboard_data = get_analytics_service().get_dashboard_metrics(start_date, now)
-        
+
+        start_date, end_date, period = _resolve_analytics_range()
+        dashboard_data = get_analytics_service().get_dashboard_metrics(start_date, end_date)
+
         return jsonify({
             'period': period,
             'dashboard': dashboard_data
@@ -82,39 +128,23 @@ def get_analytics_dashboard():
 def get_revenue_analytics():
     """Get revenue analytics"""
     try:
-        current_user_id = get_jwt_identity()
-        period = request.args.get('period', 'month')
+        _, user = _get_analytics_user()
         granularity = request.args.get('granularity', 'day')  # hour, day, week, month
-        
-        user = User.query.get(current_user_id)
-        if not user or user.role not in [UserRole.ADMIN, UserRole.MANAGER]:
+
+        if _user_lacks_analytics_access(user):
             return jsonify({'error': 'Analytics access required'}), 403
-        
-        # Calculate date range
-        now = datetime.now(UTC)
-        if period == 'week':
-            start_date = now - timedelta(weeks=1)
-        elif period == 'month':
-            start_date = now - timedelta(days=30)
-        elif period == 'quarter':
-            start_date = now - timedelta(days=90)
-        elif period == 'year':
-            start_date = now - timedelta(days=365)
-        else:
-            start_date = now - timedelta(days=30)
-        
-        # Get revenue metrics
-        revenue_data = get_analytics_service().get_revenue_analytics(start_date, now, granularity)
-        
-        # Calculate growth rates
-        previous_period_start = start_date - (now - start_date)
+
+        start_date, end_date, period = _resolve_analytics_range()
+        revenue_data = get_analytics_service().get_revenue_analytics(start_date, end_date, granularity)
+
+        previous_period_start = start_date - (end_date - start_date)
         previous_revenue = get_analytics_service().get_total_revenue(previous_period_start, start_date)
         current_revenue = revenue_data.get('total_revenue', 0)
-        
+
         revenue_growth = 0
         if previous_revenue > 0:
             revenue_growth = ((current_revenue - previous_revenue) / previous_revenue) * 100
-        
+
         return jsonify({
             'period': period,
             'revenue_analytics': {
@@ -134,28 +164,13 @@ def get_revenue_analytics():
 def get_customer_analytics():
     """Get customer analytics"""
     try:
-        current_user_id = get_jwt_identity()
-        period = request.args.get('period', 'month')
-        
-        user = User.query.get(current_user_id)
-        if not user or user.role not in [UserRole.ADMIN, UserRole.MANAGER]:
+        _, user = _get_analytics_user()
+        if _user_lacks_analytics_access(user):
             return jsonify({'error': 'Analytics access required'}), 403
-        
-        # Calculate date range
-        now = datetime.now(UTC)
-        if period == 'week':
-            start_date = now - timedelta(weeks=1)
-        elif period == 'month':
-            start_date = now - timedelta(days=30)
-        elif period == 'quarter':
-            start_date = now - timedelta(days=90)
-        elif period == 'year':
-            start_date = now - timedelta(days=365)
-        else:
-            start_date = now - timedelta(days=30)
-        
-        customer_data = get_analytics_service().get_customer_analytics(start_date, now)
-        
+
+        start_date, end_date, period = _resolve_analytics_range()
+        customer_data = get_analytics_service().get_customer_analytics(start_date, end_date)
+
         return jsonify({
             'period': period,
             'customer_analytics': customer_data
@@ -171,29 +186,15 @@ def get_customer_analytics():
 def get_product_analytics():
     """Get product performance analytics"""
     try:
-        current_user_id = get_jwt_identity()
-        period = request.args.get('period', 'month')
+        _, user = _get_analytics_user()
         limit = min(int(request.args.get('limit', 20)), 100)
-        
-        user = User.query.get(current_user_id)
-        if not user or user.role not in [UserRole.ADMIN, UserRole.MANAGER]:
+
+        if _user_lacks_analytics_access(user):
             return jsonify({'error': 'Analytics access required'}), 403
-        
-        # Calculate date range
-        now = datetime.now(UTC)
-        if period == 'week':
-            start_date = now - timedelta(weeks=1)
-        elif period == 'month':
-            start_date = now - timedelta(days=30)
-        elif period == 'quarter':
-            start_date = now - timedelta(days=90)
-        elif period == 'year':
-            start_date = now - timedelta(days=365)
-        else:
-            start_date = now - timedelta(days=30)
-        
-        product_data = get_analytics_service().get_product_analytics(start_date, now, limit)
-        
+
+        start_date, end_date, period = _resolve_analytics_range()
+        product_data = get_analytics_service().get_product_analytics(start_date, end_date, limit)
+
         return jsonify({
             'period': period,
             'product_analytics': product_data
@@ -246,28 +247,13 @@ def get_order_analytics():
 def get_delivery_analytics():
     """Get delivery performance analytics"""
     try:
-        current_user_id = get_jwt_identity()
-        period = request.args.get('period', 'month')
-        
-        user = User.query.get(current_user_id)
-        if not user or user.role not in [UserRole.ADMIN, UserRole.MANAGER]:
+        _, user = _get_analytics_user()
+        if _user_lacks_analytics_access(user):
             return jsonify({'error': 'Analytics access required'}), 403
-        
-        # Calculate date range
-        now = datetime.now(UTC)
-        if period == 'week':
-            start_date = now - timedelta(weeks=1)
-        elif period == 'month':
-            start_date = now - timedelta(days=30)
-        elif period == 'quarter':
-            start_date = now - timedelta(days=90)
-        elif period == 'year':
-            start_date = now - timedelta(days=365)
-        else:
-            start_date = now - timedelta(days=30)
-        
-        delivery_data = get_analytics_service().get_delivery_analytics(start_date, now)
-        
+
+        start_date, end_date, period = _resolve_analytics_range()
+        delivery_data = get_analytics_service().get_delivery_analytics(start_date, end_date)
+
         return jsonify({
             'period': period,
             'delivery_analytics': delivery_data
@@ -320,28 +306,13 @@ def get_user_behavior_analytics():
 def get_conversion_funnel():
     """Get conversion funnel analytics"""
     try:
-        current_user_id = get_jwt_identity()
-        period = request.args.get('period', 'month')
-        
-        user = User.query.get(current_user_id)
-        if not user or user.role not in [UserRole.ADMIN, UserRole.MANAGER]:
+        _, user = _get_analytics_user()
+        if _user_lacks_analytics_access(user):
             return jsonify({'error': 'Analytics access required'}), 403
-        
-        # Calculate date range
-        now = datetime.now(UTC)
-        if period == 'week':
-            start_date = now - timedelta(weeks=1)
-        elif period == 'month':
-            start_date = now - timedelta(days=30)
-        elif period == 'quarter':
-            start_date = now - timedelta(days=90)
-        elif period == 'year':
-            start_date = now - timedelta(days=365)
-        else:
-            start_date = now - timedelta(days=30)
-        
-        funnel_data = get_analytics_service().get_conversion_funnel(start_date, now)
-        
+
+        start_date, end_date, period = _resolve_analytics_range()
+        funnel_data = get_analytics_service().get_conversion_funnel(start_date, end_date)
+
         return jsonify({
             'period': period,
             'conversion_funnel': funnel_data
@@ -415,24 +386,46 @@ def get_user_segments():
 def get_predictions():
     """Get AI-powered predictions"""
     try:
-        current_user_id = get_jwt_identity()
+        _, user = _get_analytics_user()
         prediction_type = request.args.get('type', 'revenue')  # revenue, demand, churn
         horizon = int(request.args.get('horizon', 30))  # Days to predict
-        
-        user = User.query.get(current_user_id)
-        if not user or user.role not in [UserRole.ADMIN, UserRole.MANAGER]:
+
+        if _user_lacks_analytics_access(user):
             return jsonify({'error': 'Analytics access required'}), 403
-        
-        # Temporarily return placeholder data until prediction service is implemented
+
         if prediction_type == 'revenue':
-            predictions = {'message': 'Revenue prediction service not yet implemented'}
+            predictions = get_analytics_service().predict_revenue(max(horizon, 90))
         elif prediction_type == 'demand':
-            predictions = {'message': 'Demand prediction service not yet implemented'}
+            predictions = get_analytics_service().predict_demand(horizon)
         elif prediction_type == 'churn':
-            predictions = {'message': 'Churn prediction service not yet implemented'}
+            churn_predictions = get_analytics_service().predict_customer_churn()
+            at_risk_count = (
+                churn_predictions.get('high_risk_customers', 0)
+                + churn_predictions.get('medium_risk_customers', 0)
+            )
+            total_active_customers = User.query.filter(
+                User.status == UserStatus.ACTIVE
+            ).count()
+            predictions = {
+                'churn_rate': round((at_risk_count / max(1, total_active_customers)) * 100, 2),
+                'at_risk_count': at_risk_count,
+                'high_risk_count': churn_predictions.get('high_risk_customers', 0),
+                'customers': [
+                    {
+                        'id': customer['user_id'],
+                        'customer_name': customer.get('user_name'),
+                        'customer_email': customer.get('email'),
+                        'risk_score': round(float(customer.get('churn_probability', 0)) * 100, 1),
+                        'risk_level': customer.get('risk_level'),
+                        'last_order_date': None,
+                        'total_spent': 0,
+                    }
+                    for customer in churn_predictions.get('predictions', [])
+                ],
+            }
         else:
             return jsonify({'error': 'Invalid prediction type'}), 400
-        
+
         return jsonify({
             'prediction_type': prediction_type,
             'horizon_days': horizon,

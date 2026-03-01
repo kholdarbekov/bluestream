@@ -3,6 +3,7 @@
 import pytest
 
 from business_app.services.admin_bulk_action_service import AdminBulkActionService
+from business_app.services.admin_delivery_service import AdminDeliveryService
 from business_app.services.admin_report_service import AdminReportService
 from business_app.utils.exceptions import ValidationError
 
@@ -35,3 +36,8 @@ def test_admin_bulk_action_service_is_valid_action_helper():
     assert AdminBulkActionService.is_valid_action("user", "activate") is True
     assert AdminBulkActionService.is_valid_action("user", "invalid") is False
     assert AdminBulkActionService.is_valid_action("invalid", "activate") is False
+
+
+def test_admin_delivery_service_rejects_unknown_status_value():
+    with pytest.raises(ValidationError):
+        AdminDeliveryService._normalize_status("bad-status")

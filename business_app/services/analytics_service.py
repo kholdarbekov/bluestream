@@ -12,6 +12,7 @@ from sklearn.linear_model import LinearRegression
 from sklearn.preprocessing import StandardScaler
 
 from business_app.models.user import User
+from business_app.models.user import UserAddress
 from business_app.models.order import Order
 from business_app.models.delivery import Delivery
 from business_app.models.subscription import Subscription
@@ -19,7 +20,7 @@ from business_app.models.product import Product
 from business_app.models.payment import Payment
 from business_app.models.analytics import AnalyticsReport, UserBehavior, SalesMetric
 from business_app.models.order import OrderItem
-from business_app.utils.constants import OrderStatus, DeliveryStatus, SubscriptionStatus
+from business_app.utils.constants import OrderStatus, DeliveryStatus, SubscriptionStatus, UserStatus
 from business_app import db
 
 
@@ -249,6 +250,85 @@ class AnalyticsService:
         except Exception as e:
             current_app.logger.error(f"Churn prediction failed: {e}")
             return {'error': f'Churn prediction failed: {str(e)}'}
+
+    def predict_revenue(self, forecast_days: int = 90) -> Dict[str, Any]:
+        """Predict revenue for the upcoming period using recent daily revenue trends."""
+        try:
+            historical_data = self._get_historical_demand_data()
+
+            if len(historical_data) < 30:
+                return {
+                    'error': 'Insufficient historical data for prediction',
+                    'min_days_required': 30,
+                    'available_days': len(historical_data),
+                }
+
+            df = pd.DataFrame(historical_data)
+            df['date'] = pd.to_datetime(df['date'])
+            df = df.sort_values('date').reset_index(drop=True)
+            df['sequence'] = np.arange(len(df))
+            df['day_of_week'] = df['date'].dt.dayofweek
+            df['month'] = df['date'].dt.month
+            df['is_weekend'] = df['day_of_week'].isin([5, 6]).astype(int)
+
+            features = ['sequence', 'day_of_week', 'month', 'is_weekend']
+            X = df[features].values
+            y = df['revenue'].fillna(0).astype(float).values
+
+            scaler = StandardScaler()
+            X_scaled = scaler.fit_transform(X)
+
+            model = LinearRegression()
+            model.fit(X_scaled, y)
+
+            last_date = df['date'].iloc[-1]
+            predictions = []
+            historical_points = [
+                {
+                    'date': row['date'].date().isoformat(),
+                    'revenue': round(float(row['revenue']), 2),
+                }
+                for _, row in df.tail(30).iterrows()
+            ]
+
+            for offset in range(1, forecast_days + 1):
+                future_date = last_date + timedelta(days=offset)
+                future_features = [
+                    len(df) + offset - 1,
+                    future_date.dayofweek,
+                    future_date.month,
+                    1 if future_date.dayofweek in [5, 6] else 0,
+                ]
+                predicted_revenue = model.predict(scaler.transform([future_features]))[0]
+                predictions.append({
+                    'date': future_date.date().isoformat(),
+                    'predicted_revenue': round(max(0, float(predicted_revenue)), 2),
+                })
+
+            y_pred = model.predict(X_scaled)
+            baseline = np.mean(np.abs(y)) or 1
+            mean_abs_error = float(np.mean(np.abs(y - y_pred)))
+            confidence_level = max(0.0, min(100.0, 100.0 - ((mean_abs_error / baseline) * 100.0)))
+
+            next_month_total = round(sum(item['predicted_revenue'] for item in predictions[:30]), 2)
+            next_quarter_total = round(sum(item['predicted_revenue'] for item in predictions[:90]), 2)
+
+            return {
+                'historical': historical_points,
+                'predictions': predictions,
+                'next_month_revenue': next_month_total,
+                'next_quarter_revenue': next_quarter_total,
+                'confidence_level': round(confidence_level, 2),
+                'drivers': [
+                    {'factor': 'Historical trend', 'impact': 'Revenue trajectory over recent periods', 'trend': 'positive', 'weight': 45},
+                    {'factor': 'Weekly seasonality', 'impact': 'Day-of-week purchasing behavior', 'trend': 'neutral', 'weight': 30},
+                    {'factor': 'Calendar mix', 'impact': 'Month and weekend effects', 'trend': 'neutral', 'weight': 25},
+                ],
+            }
+
+        except Exception as e:
+            current_app.logger.error(f"Revenue prediction failed: {e}")
+            return {'error': f'Revenue prediction failed: {str(e)}'}
     
     def generate_business_report(self, report_type: str, start_date: datetime = None,
                                end_date: datetime = None) -> Dict[str, Any]:
@@ -462,7 +542,9 @@ class AnalyticsService:
         # Get all active users
         active_users = db.session.query(
             User.id, User.first_name, User.last_name, User.email, User.created_at
-        ).filter_by(is_active=True).all()
+        ).filter(
+            User.status == UserStatus.ACTIVE
+        ).all()
         
         if not active_users:
             return {'predictions': [], 'high_risk_customers': 0, 'medium_risk_customers': 0}
@@ -519,13 +601,21 @@ class AnalyticsService:
             Order.user_id,
             func.count(Delivery.id).label('total_deliveries'),
             func.sum(case((Delivery.status == DeliveryStatus.FAILED, 1), else_=0)).label('failed_deliveries')
-        ).join(Delivery).filter(Order.user_id.in_(user_ids)).group_by(Order.user_id).all()
+        ).outerjoin(
+            Delivery,
+            Delivery.order_id == Order.id,
+        ).filter(
+            Order.user_id.in_(user_ids)
+        ).group_by(Order.user_id).all()
         
         # Combine all statistics
         user_stats = {}
         
         # Initialize with last order dates
-        last_order_data = db.session.query(last_orders_subquery).all()
+        last_order_data = db.session.query(
+            last_orders_subquery.c.user_id,
+            last_orders_subquery.c.last_order_date,
+        ).all()
         for user_id, last_order_date in last_order_data:
             user_stats[user_id] = {
                 'last_order_date': last_order_date,
@@ -658,7 +748,13 @@ class AnalyticsService:
             func.sum(OrderItem.quantity).label('total_quantity'),
             func.sum(OrderItem.total_price).label('total_revenue'),
             func.count(func.distinct(Order.id)).label('order_count')
-        ).join(OrderItem).join(Order).filter(
+        ).join(
+            OrderItem,
+            OrderItem.product_id == Product.id,
+        ).join(
+            Order,
+            OrderItem.order_id == Order.id,
+        ).filter(
             Order.created_at.between(start_date, end_date),
             Order.status != OrderStatus.CANCELLED
         ).group_by(Product.id, Product.name).order_by(func.sum(OrderItem.total_price).desc()).all()
@@ -667,8 +763,8 @@ class AnalyticsService:
             {
                 'product_id': product_id,
                 'product_name': name,
-                'quantity_sold': int(quantity),
-                'revenue': float(revenue),
+                'quantity_sold': int(quantity or 0),
+                'revenue': float(revenue or 0),
                 'order_count': orders
             }
             for product_id, name, quantity, revenue, orders in product_sales
@@ -719,14 +815,33 @@ class AnalyticsService:
     
     def _get_geographic_sales_distribution(self, start_date: datetime, end_date: datetime) -> List[Dict[str, Any]]:
         """Get sales distribution by geographic area"""
-        geographic_sales = db.session.query(
-            Order.delivery_address_city,
-            func.count(Order.id).label('orders'),
-            func.sum(Order.total_amount).label('revenue')
-        ).filter(
-            Order.created_at.between(start_date, end_date),
-            Order.status != OrderStatus.CANCELLED
-        ).group_by(Order.delivery_address_city).order_by(func.sum(Order.total_amount).desc()).all()
+        if hasattr(Order, 'delivery_address_city'):
+            city_column = Order.delivery_address_city
+            query = db.session.query(
+                city_column.label('city'),
+                func.count(Order.id).label('orders'),
+                func.sum(Order.total_amount).label('revenue')
+            ).filter(
+                Order.created_at.between(start_date, end_date),
+                Order.status != OrderStatus.CANCELLED
+            )
+        else:
+            city_column = func.coalesce(UserAddress.city, 'Unknown')
+            query = db.session.query(
+                city_column.label('city'),
+                func.count(Order.id).label('orders'),
+                func.sum(Order.total_amount).label('revenue')
+            ).outerjoin(
+                UserAddress,
+                Order.delivery_address_id == UserAddress.id,
+            ).filter(
+                Order.created_at.between(start_date, end_date),
+                Order.status != OrderStatus.CANCELLED
+            )
+
+        geographic_sales = query.group_by(city_column).order_by(
+            func.sum(Order.total_amount).desc()
+        ).all()
         
         return [
             {
@@ -774,12 +889,14 @@ class AnalyticsService:
         new_customers = User.query.filter(
             User.created_at.between(start_date, end_date)
         ).count()
-        
-        # Acquisition channels (based on referrals, etc.)
-        referred_customers = User.query.filter(
-            User.created_at.between(start_date, end_date),
-            User.referred_by.isnot(None)
-        ).count()
+
+        referred_by_column = getattr(User, 'referred_by', None)
+        referred_customers = 0
+        if referred_by_column is not None:
+            referred_customers = User.query.filter(
+                User.created_at.between(start_date, end_date),
+                referred_by_column.isnot(None)
+            ).count()
         
         organic_customers = new_customers - referred_customers
         
@@ -850,7 +967,9 @@ class AnalyticsService:
         # Customers who haven't ordered in the last 30 days
         inactive_threshold = datetime.now(UTC) - timedelta(days=30)
         
-        total_customers = User.query.filter_by(is_active=True).count()
+        total_customers = User.query.filter(
+            User.status == UserStatus.ACTIVE
+        ).count()
         
         # Customers with recent orders
         active_customers = db.session.query(func.count(func.distinct(Order.user_id))).filter(
@@ -1225,6 +1344,10 @@ class AnalyticsService:
     def _build_delivery_performance_metrics(self, start_date: datetime, end_date: datetime) -> Dict[str, Any]:
         """Get delivery performance metrics - placeholder for future implementation"""
         return self._get_delivery_metrics(start_date, end_date)
+
+    def _get_delivery_performance_metrics(self, start_date: datetime, end_date: datetime) -> Dict[str, Any]:
+        """Backward-compatible alias used by delivery analytics aggregation."""
+        return self._build_delivery_performance_metrics(start_date, end_date)
 
     def _get_route_efficiency_metrics(self, start_date: datetime, end_date: datetime) -> Dict[str, Any]:
         """Get route efficiency metrics - placeholder"""

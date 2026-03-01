@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   Card,
   Row,
@@ -14,6 +14,7 @@ import {
   Tag,
   List,
   Avatar,
+  message
 } from 'antd';
 import {
   BarChartOutlined,
@@ -35,102 +36,179 @@ import LineChart from '../components/charts/LineChart';
 import BarChart from '../components/charts/BarChart';
 import PieChart from '../components/charts/PieChart';
 import adminService from '../services/adminService';
+import exportUtils from '../utils/exportUtils';
 
 const { Option } = Select;
 const { RangePicker } = DatePicker;
 
+const getTimeframeDateRange = (timeframe) => {
+  const end = moment();
+  const start = moment();
+
+  if (timeframe === '7d') {
+    return [start.subtract(7, 'days'), end];
+  }
+  if (timeframe === '90d') {
+    return [start.subtract(90, 'days'), end];
+  }
+  if (timeframe === '1y') {
+    return [start.subtract(1, 'year'), end];
+  }
+
+  return [start.subtract(30, 'days'), end];
+};
+
+const buildExportRows = (activeTab, overviewData, salesTrends, churnData, deliveryHeatmap, revenueForecast) => {
+  if (activeTab === 'sales') {
+    return (salesTrends?.labels || []).map((label, index) => ({
+      Period: label,
+      Revenue: salesTrends?.revenue?.at(index) || 0,
+      Orders: salesTrends?.orders?.at(index) || 0
+    }));
+  }
+
+  if (activeTab === 'churn') {
+    return (churnData?.customers || []).map((customer) => ({
+      Customer: customer.customer_name,
+      Email: customer.customer_email,
+      'Risk Score': customer.risk_score,
+      'Risk Level': customer.risk_level,
+      'Last Order': customer.last_order_date || 'Never',
+      'Total Spent': customer.total_spent || 0
+    }));
+  }
+
+  if (activeTab === 'delivery') {
+    return (deliveryHeatmap?.regions || []).map((region) => ({
+      Region: region.region,
+      Deliveries: region.total_deliveries,
+      'On Time Rate': region.on_time_rate,
+      'Avg Delivery Time (hrs)': region.avg_delivery_time,
+      Performance: region.performance
+    }));
+  }
+
+  if (activeTab === 'forecast') {
+    return (revenueForecast?.labels || []).map((label, index) => ({
+      Period: label,
+      Historical: revenueForecast?.historical?.at(index) ?? '',
+      Forecast: revenueForecast?.forecast?.at(index) ?? ''
+    }));
+  }
+
+  return [
+    {
+      Metric: 'Total Revenue',
+      Value: overviewData.total_revenue || 0
+    },
+    {
+      Metric: 'Total Orders',
+      Value: overviewData.total_orders || 0
+    },
+    {
+      Metric: 'Active Customers',
+      Value: overviewData.active_customers || 0
+    },
+    {
+      Metric: 'Growth Rate',
+      Value: `${overviewData.growth_rate || 0}%`
+    }
+  ];
+};
+
 const Analytics = () => {
-  // Load analytics namespace for ui.analytics.* keys
   const { t } = useTranslation('analytics');
   const [activeTab, setActiveTab] = useState('overview');
-  const [dateRange, setDateRange] = useState([
-    moment().subtract(30, 'days'),
-    moment()
-  ]);
   const [timeframe, setTimeframe] = useState('30d');
+  const [dateRange, setDateRange] = useState(getTimeframeDateRange('30d'));
 
-  // Fetch analytics data
-  const { data: analyticsData, isLoading } = useQuery(
-    ['analytics', timeframe, dateRange],
-    () => adminService.getAnalytics({
-      timeframe,
-      start_date: dateRange[0]?.format('YYYY-MM-DD'),
-      end_date: dateRange[1]?.format('YYYY-MM-DD')
-    }),
+  const startDate = dateRange?.[0]?.format('YYYY-MM-DD');
+  const endDate = dateRange?.[1]?.format('YYYY-MM-DD');
+  const analyticsParams = {
+    timeframe,
+    start_date: startDate,
+    end_date: endDate
+  };
+
+  const { data: analyticsData = {}, isLoading } = useQuery(
+    ['analytics', timeframe, startDate, endDate],
+    () => adminService.getAnalytics(analyticsParams),
     {
       keepPreviousData: true
     }
   );
 
-  // Fetch sales trends
   const { data: salesTrends } = useQuery(
-    ['sales-trends', timeframe],
-    () => adminService.getSalesTrends({ timeframe }),
+    ['sales-trends', timeframe, startDate, endDate],
+    () => adminService.getSalesTrends(analyticsParams),
     {
       keepPreviousData: true,
       enabled: activeTab === 'sales'
     }
   );
 
-  // Fetch churn prediction data
   const { data: churnData } = useQuery(
-    ['customer-churn', timeframe],
-    () => adminService.getChurnPrediction({ timeframe }),
+    ['customer-churn', timeframe, startDate, endDate],
+    () => adminService.getChurnPrediction(analyticsParams),
     {
       keepPreviousData: true,
       enabled: activeTab === 'churn'
     }
   );
 
-  // Fetch delivery heatmap data
   const { data: deliveryHeatmap } = useQuery(
-    ['delivery-heatmap', timeframe],
-    () => adminService.getDeliveryHeatmap({ timeframe }),
+    ['delivery-heatmap', timeframe, startDate, endDate],
+    () => adminService.getDeliveryHeatmap(analyticsParams),
     {
       keepPreviousData: true,
       enabled: activeTab === 'delivery'
     }
   );
 
-  // Fetch revenue forecast
   const { data: revenueForecast } = useQuery(
-    ['revenue-forecast'],
-    () => adminService.getRevenueForecast(),
+    ['revenue-forecast', timeframe, startDate, endDate],
+    () => adminService.getRevenueForecast(analyticsParams),
     {
       keepPreviousData: true,
       enabled: activeTab === 'forecast'
     }
   );
 
-  const overviewData = analyticsData || {};
+  const overviewTrendChartData = {
+    labels: analyticsData.revenue_trend?.map((item) => item.label) || [],
+    datasets: [
+      {
+        label: t('ui.analytics.revenue'),
+        data: analyticsData.revenue_trend?.map((item) => item.value) || []
+      },
+      {
+        label: t('ui.analytics.orders'),
+        data: analyticsData.order_trend?.map((item) => item.value) || [],
+        yAxisID: 'y1'
+      }
+    ]
+  };
 
   const salesTrendChartData = {
     labels: salesTrends?.labels || [],
     datasets: [
       {
         label: t('ui.analytics.revenue'),
-        data: salesTrends?.revenue || [],
-        borderColor: '#1890ff',
-        backgroundColor: 'rgba(24, 144, 255, 0.1)',
-        tension: 0.4
+        data: salesTrends?.revenue || []
       },
       {
         label: t('ui.analytics.orders'),
         data: salesTrends?.orders || [],
-        borderColor: '#52c41a',
-        backgroundColor: 'rgba(82, 196, 26, 0.1)',
-        tension: 0.4,
         yAxisID: 'y1'
       }
     ]
   };
 
   const productPerformanceData = {
-    labels: overviewData.top_products?.map(p => p.name) || [],
+    labels: analyticsData.top_products?.map((product) => product.name) || [],
     datasets: [{
       label: t('ui.analytics.sales'),
-      data: overviewData.top_products?.map(p => p.sales) || [],
-      backgroundColor: ['#1890ff', '#52c41a', '#faad14', '#f5222d', '#722ed1']
+      data: analyticsData.top_products?.map((product) => product.sales) || []
     }]
   };
 
@@ -142,16 +220,74 @@ const Analytics = () => {
       t('ui.analytics.segment_at_risk'),
       t('ui.analytics.segment_inactive')
     ],
-    datasets: [{
-      data: [
-        overviewData.customer_segments?.new || 0,
-        overviewData.customer_segments?.active || 0,
-        overviewData.customer_segments?.loyal || 0,
-        overviewData.customer_segments?.at_risk || 0,
-        overviewData.customer_segments?.inactive || 0
-      ],
-      backgroundColor: ['#52c41a', '#1890ff', '#722ed1', '#faad14', '#f5222d']
-    }]
+    values: [
+      analyticsData.customer_segments?.new || 0,
+      analyticsData.customer_segments?.active || 0,
+      analyticsData.customer_segments?.loyal || 0,
+      analyticsData.customer_segments?.at_risk || 0,
+      analyticsData.customer_segments?.inactive || 0
+    ]
+  };
+
+  const overviewInsights = useMemo(() => {
+    const topProduct = analyticsData.top_products?.[0];
+    const items = [];
+
+    if (topProduct) {
+      items.push({
+        title: t('ui.analytics.top_products'),
+        description: `${topProduct.name} generated ${topProduct.sales.toFixed(2)} in revenue.`
+      });
+    }
+
+    items.push({
+      title: t('ui.analytics.growth_rate'),
+      description: `${(analyticsData.growth_rate || 0).toFixed(1)}% revenue growth for the selected range.`
+    });
+
+    items.push({
+      title: t('ui.analytics.customer_segments'),
+      description: `${analyticsData.customer_segments?.at_risk || 0} customers currently look at risk.`
+    });
+
+    items.push({
+      title: t('ui.analytics.delivery_performance'),
+      description: `${(analyticsData.delivery_success_rate || 0).toFixed(1)}% delivery success rate across the selected period.`
+    });
+
+    return items;
+  }, [analyticsData, t]);
+
+  const handleTimeframeChange = (value) => {
+    setTimeframe(value);
+    setDateRange(getTimeframeDateRange(value));
+  };
+
+  const handleDateRangeChange = (dates) => {
+    if (dates?.[0] && dates?.[1]) {
+      setDateRange(dates);
+    }
+  };
+
+  const handleExport = () => {
+    const rows = buildExportRows(
+      activeTab,
+      analyticsData,
+      salesTrends,
+      churnData,
+      deliveryHeatmap,
+      revenueForecast
+    );
+
+    const exportResult = exportUtils.exportToExcel(
+      rows,
+      `analytics_${activeTab}_${endDate || moment().format('YYYY-MM-DD')}`,
+      'Analytics'
+    );
+
+    if (!exportResult.success) {
+      message.error(exportResult.message);
+    }
   };
 
   const churnColumns = [
@@ -189,7 +325,7 @@ const Analytics = () => {
       width: 100,
       render: (level) => (
         <Tag color={level === 'high' ? 'red' : level === 'medium' ? 'orange' : 'green'}>
-          {t(`ui.analytics.risk_${level}`).toUpperCase()}
+          {t(`ui.analytics.risk_${level || 'low'}`).toUpperCase()}
         </Tag>
       )
     },
@@ -251,7 +387,7 @@ const Analytics = () => {
       width: 100,
       render: (performance) => (
         <Tag color={performance === 'excellent' ? 'green' : performance === 'good' ? 'blue' : performance === 'average' ? 'orange' : 'red'}>
-          {t(`ui.analytics.performance_${performance}`).toUpperCase()}
+          {t(`ui.analytics.performance_${performance || 'average'}`).toUpperCase()}
         </Tag>
       )
     }
@@ -263,13 +399,12 @@ const Analytics = () => {
       label: t('ui.analytics.overview'),
       children: (
         <div>
-          {/* Key Metrics */}
           <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
             <Col xs={24} sm={6}>
               <Card>
                 <Statistic
                   title={t('ui.analytics.total_revenue')}
-                  value={overviewData.total_revenue || 0}
+                  value={analyticsData.total_revenue || 0}
                   precision={2}
                   prefix={<DollarOutlined />}
                   valueStyle={{ color: '#52c41a' }}
@@ -280,7 +415,7 @@ const Analytics = () => {
               <Card>
                 <Statistic
                   title={t('ui.analytics.total_orders')}
-                  value={overviewData.total_orders || 0}
+                  value={analyticsData.total_orders || 0}
                   prefix={<ShoppingCartOutlined />}
                 />
               </Card>
@@ -289,7 +424,7 @@ const Analytics = () => {
               <Card>
                 <Statistic
                   title={t('ui.analytics.active_customers')}
-                  value={overviewData.active_customers || 0}
+                  value={analyticsData.active_customers || 0}
                   prefix={<UserOutlined />}
                 />
               </Card>
@@ -298,21 +433,20 @@ const Analytics = () => {
               <Card>
                 <Statistic
                   title={t('ui.analytics.growth_rate')}
-                  value={overviewData.growth_rate || 0}
+                  value={analyticsData.growth_rate || 0}
                   precision={1}
                   suffix="%"
                   prefix={<RiseOutlined />}
-                  valueStyle={{ color: (overviewData.growth_rate || 0) > 0 ? '#52c41a' : '#f5222d' }}
+                  valueStyle={{ color: (analyticsData.growth_rate || 0) > 0 ? '#52c41a' : '#f5222d' }}
                 />
               </Card>
             </Col>
           </Row>
 
-          {/* Charts */}
           <Row gutter={[16, 16]}>
             <Col xs={24} lg={16}>
               <Card title={t('ui.analytics.revenue_trend')} loading={isLoading}>
-                <LineChart data={salesTrendChartData} height={300} />
+                <LineChart data={overviewTrendChartData} height={300} />
               </Card>
             </Col>
             <Col xs={24} lg={8}>
@@ -332,8 +466,8 @@ const Analytics = () => {
               <Card title={t('ui.analytics.recent_insights')} loading={isLoading}>
                 <List
                   size="small"
-                  dataSource={overviewData.insights || []}
-                  renderItem={item => (
+                  dataSource={overviewInsights}
+                  renderItem={(item) => (
                     <List.Item>
                       <List.Item.Meta
                         avatar={<Avatar icon={<BarChartOutlined />} />}
@@ -555,16 +689,11 @@ const Analytics = () => {
                 datasets: [
                   {
                     label: t('ui.analytics.historical_revenue'),
-                    data: revenueForecast?.historical || [],
-                    borderColor: '#1890ff',
-                    backgroundColor: 'rgba(24, 144, 255, 0.1)'
+                    data: revenueForecast?.historical || []
                   },
                   {
                     label: t('ui.analytics.forecasted_revenue'),
-                    data: revenueForecast?.forecast || [],
-                    borderColor: '#52c41a',
-                    backgroundColor: 'rgba(82, 196, 26, 0.1)',
-                    borderDash: [5, 5]
+                    data: revenueForecast?.forecast || []
                   }
                 ]
               }}
@@ -576,7 +705,7 @@ const Analytics = () => {
             <List
               size="small"
               dataSource={revenueForecast?.factors || []}
-              renderItem={item => (
+              renderItem={(item) => (
                 <List.Item>
                   <List.Item.Meta
                     avatar={<Avatar icon={<LineChartOutlined />} />}
@@ -599,14 +728,13 @@ const Analytics = () => {
 
   return (
     <div>
-      {/* Control Bar */}
       <Card style={{ marginBottom: 16 }}>
         <Row justify="space-between" align="middle">
           <Col>
             <Space>
               <Select
                 value={timeframe}
-                onChange={setTimeframe}
+                onChange={handleTimeframeChange}
                 style={{ width: 150 }}
               >
                 <Option value="7d">{t('ui.analytics.last_7_days')}</Option>
@@ -615,21 +743,21 @@ const Analytics = () => {
                 <Option value="1y">{t('ui.analytics.last_year')}</Option>
               </Select>
               <RangePicker
+                allowClear={false}
                 value={dateRange}
-                onChange={setDateRange}
+                onChange={handleDateRangeChange}
                 format="YYYY-MM-DD"
               />
             </Space>
           </Col>
           <Col>
-            <Button type="primary" icon={<ExportOutlined />}>
+            <Button type="primary" icon={<ExportOutlined />} onClick={handleExport}>
               {t('ui.analytics.export_report')}
             </Button>
           </Col>
         </Row>
       </Card>
 
-      {/* Analytics Tabs */}
       <Tabs
         activeKey={activeTab}
         onChange={setActiveTab}

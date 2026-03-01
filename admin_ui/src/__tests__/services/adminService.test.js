@@ -2,7 +2,16 @@ import adminService from '../../services/adminService';
 import api from '../../services/api';
 
 // Mock the API
-jest.mock('../../services/api');
+jest.mock('../../services/api', () => ({
+  __esModule: true,
+  default: {
+    get: jest.fn(),
+    post: jest.fn(),
+    put: jest.fn(),
+    delete: jest.fn()
+  },
+  getCookie: jest.fn()
+}));
 
 describe('AdminService', () => {
   beforeEach(() => {
@@ -21,7 +30,7 @@ describe('AdminService', () => {
 
       const result = await adminService.getDashboardData();
 
-      expect(api.get).toHaveBeenCalledWith('/admin/dashboard');
+      expect(api.get).toHaveBeenCalledWith('/admin/dashboard', { params: {} });
       expect(result).toEqual(mockData);
     });
 
@@ -247,21 +256,145 @@ describe('AdminService', () => {
 
   describe('getAnalytics', () => {
     it('fetches analytics data successfully', async () => {
-      const mockData = {
-        total_revenue: 150000,
-        total_orders: 1200,
-        active_customers: 800,
-        growth_rate: 15.5
-      };
-
-      api.get.mockResolvedValue({ data: mockData });
+      api.get
+        .mockResolvedValueOnce({
+          data: {
+            dashboard: {
+              revenue: { total_revenue: 150000, growth_rate: 15.5, average_order_value: 125 },
+              orders: { total_orders: 1200, completion_rate: 92 },
+              customers: { active_customers: 800, repeat_rate: 34 },
+              delivery: { success_rate: 96 },
+              growth: {
+                daily_revenue: [{ date: '2026-02-01', revenue: 5000 }],
+                daily_orders: [{ date: '2026-02-01', count: 40 }]
+              }
+            }
+          }
+        })
+        .mockResolvedValueOnce({
+          data: {
+            product_analytics: [
+              { product_id: 1, product_name: 'Water', revenue: 80000, quantity_sold: 120, order_count: 80 }
+            ]
+          }
+        })
+        .mockResolvedValueOnce({
+          data: {
+            customer_analytics: {
+              acquisition: { total_new_customers: 40 },
+              retention: { current_period_customers: 120, retained_customers: 75 },
+              churn: { churned_customers: 15, total_customers: 200, active_customers: 185 }
+            }
+          }
+        });
 
       const result = await adminService.getAnalytics({ timeframe: '30d' });
 
-      expect(api.get).toHaveBeenCalledWith('/admin/analytics/overview', {
-        params: { timeframe: '30d' }
+      expect(api.get).toHaveBeenNthCalledWith(1, '/analytics/dashboard', {
+        params: { period: 'month' }
       });
-      expect(result).toEqual(mockData);
+      expect(api.get).toHaveBeenNthCalledWith(2, '/analytics/products', {
+        params: { period: 'month' }
+      });
+      expect(api.get).toHaveBeenNthCalledWith(3, '/analytics/customers', {
+        params: { period: 'month' }
+      });
+      expect(result).toMatchObject({
+        total_revenue: 150000,
+        total_orders: 1200,
+        active_customers: 800,
+        growth_rate: 15.5,
+        top_products: [{ id: 1, name: 'Water', sales: 80000 }]
+      });
+    });
+  });
+
+  describe('analytics detail methods', () => {
+    it('normalizes sales trends from analytics endpoints', async () => {
+      api.get
+        .mockResolvedValueOnce({
+          data: {
+            revenue_analytics: {
+              total_revenue: 250000,
+              average_order_value: 125,
+              trend: [{ date: '2026-02-01', revenue: 8000, orders: 64 }]
+            }
+          }
+        })
+        .mockResolvedValueOnce({
+          data: {
+            conversion_funnel: {
+              conversion_rates: { overall: 8.5 }
+            }
+          }
+        });
+
+      const result = await adminService.getSalesTrends({ timeframe: '7d' });
+
+      expect(api.get).toHaveBeenNthCalledWith(1, '/analytics/revenue', {
+        params: { period: 'week', granularity: 'daily' }
+      });
+      expect(api.get).toHaveBeenNthCalledWith(2, '/analytics/conversion-funnel', {
+        params: { period: 'week' }
+      });
+      expect(result).toMatchObject({
+        monthly_revenue: 250000,
+        monthly_orders: 64,
+        avg_order_value: 125,
+        conversion_rate: 8.5
+      });
+    });
+
+    it('normalizes churn predictions for the analytics page', async () => {
+      api.get.mockResolvedValue({
+        data: {
+          predictions: {
+            churn_rate: 12.4,
+            at_risk_count: 18,
+            high_risk_count: 6,
+            customers: [{ id: 4, customer_name: 'Jane Doe', risk_score: 88.5, total_spent: 120000 }]
+          }
+        }
+      });
+
+      const result = await adminService.getChurnPrediction({ timeframe: '30d' });
+
+      expect(api.get).toHaveBeenCalledWith('/analytics/predictions', {
+        params: { period: 'month', type: 'churn' }
+      });
+      expect(result).toMatchObject({
+        churn_rate: 12.4,
+        at_risk_count: 18,
+        high_risk_count: 6
+      });
+      expect(result.customers[0].risk_score).toBe(88.5);
+    });
+
+    it('normalizes revenue forecast analytics', async () => {
+      api.get.mockResolvedValue({
+        data: {
+          predictions: {
+            next_month_revenue: 100000,
+            next_quarter_revenue: 320000,
+            confidence_level: 81,
+            historical: [{ date: '2026-02-01', revenue: 3000 }],
+            predictions: [{ date: '2026-03-01', predicted_revenue: 3500 }],
+            drivers: [{ factor: 'Historical trend', impact: 'Steady growth', trend: 'positive', weight: 45 }]
+          }
+        }
+      });
+
+      const result = await adminService.getRevenueForecast({ timeframe: '90d' });
+
+      expect(api.get).toHaveBeenCalledWith('/analytics/predictions', {
+        params: { period: 'quarter', type: 'revenue', horizon: 90 }
+      });
+      expect(result).toMatchObject({
+        next_month: 100000,
+        next_quarter: 320000,
+        confidence_level: 81
+      });
+      expect(result.forecast).toEqual([null, 3500]);
     });
   });
 

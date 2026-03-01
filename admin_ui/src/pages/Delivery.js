@@ -15,7 +15,6 @@ import {
   Col,
   Statistic,
   message,
-  Timeline,
   Steps,
   Progress,
   Badge,
@@ -35,7 +34,6 @@ import {
   CheckCircleOutlined,
   ExclamationCircleOutlined,
   ExportOutlined,
-  FilterOutlined,
   CalendarOutlined
 } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from 'react-query';
@@ -61,8 +59,32 @@ const Delivery = () => {
   const [assignmentTarget, setAssignmentTarget] = useState(null);
   const [pagination, setPagination] = useState({ page: 1, per_page: 20 });
   const [form] = Form.useForm();
+  const selectedStatus = Form.useWatch('status', form);
 
   const queryClient = useQueryClient();
+
+  const statusOptions = [
+    { value: 'scheduled', label: t('ui.delivery.status_scheduled', 'Scheduled') },
+    { value: 'pending', label: t('ui.delivery.status_pending') },
+    { value: 'assigned', label: t('ui.delivery.status_assigned') },
+    { value: 'picked_up', label: t('ui.delivery.status_picked_up') },
+    { value: 'in_transit', label: t('ui.delivery.status_in_transit') },
+    { value: 'arrived', label: t('ui.delivery.status_arrived', 'Arrived') },
+    { value: 'delivered', label: t('ui.delivery.status_delivered') },
+    { value: 'failed', label: t('ui.delivery.status_failed') },
+    { value: 'returned', label: t('ui.delivery.status_returned') }
+  ];
+  const statusTransitions = {
+    scheduled: ['scheduled', 'pending', 'returned'],
+    pending: ['pending', 'assigned', 'returned'],
+    assigned: ['assigned', 'picked_up', 'returned'],
+    picked_up: ['picked_up', 'in_transit', 'failed', 'returned'],
+    in_transit: ['in_transit', 'arrived', 'failed', 'returned'],
+    arrived: ['arrived', 'delivered', 'failed', 'returned'],
+    delivered: ['delivered'],
+    failed: ['failed'],
+    returned: ['returned']
+  };
 
   // Fetch deliveries
   const { data, isLoading } = useQuery(
@@ -70,8 +92,8 @@ const Delivery = () => {
     () => adminService.getDeliveries({
       page: pagination.page,
       per_page: pagination.per_page,
-      search: searchText,
-      status: statusFilter,
+      search: searchText || undefined,
+      status: statusFilter || undefined,
       start_date: dateRange?.[0]?.format('YYYY-MM-DD'),
       end_date: dateRange?.[1]?.format('YYYY-MM-DD')
     }),
@@ -84,23 +106,25 @@ const Delivery = () => {
   const updateDeliveryMutation = useMutation(
     ({ deliveryId, data }) => adminService.updateDelivery(deliveryId, data),
     {
-      onSuccess: () => {
-        message.success(t('ui.delivery.updated_success'));
-        queryClient.invalidateQueries('deliveries');
+      onSuccess: (response) => {
+        message.success(response?.message || t('ui.delivery.updated_success'));
+        queryClient.invalidateQueries(['deliveries']);
         setIsUpdateModalVisible(false);
         form.resetFields();
       },
       onError: (error) => {
-        message.error(t('ui.delivery.update_failed'));
+        message.error(error?.response?.data?.message || t('ui.delivery.update_failed'));
       }
     }
   );
 
   const deliveryStatusColors = {
+    scheduled: 'gold',
     pending: 'orange',
     assigned: 'blue',
     picked_up: 'cyan',
     in_transit: 'purple',
+    arrived: 'geekblue',
     delivered: 'green',
     failed: 'red',
     returned: 'volcano'
@@ -108,10 +132,12 @@ const Delivery = () => {
 
   const getStatusIcon = (status) => {
     switch (status) {
+      case 'scheduled': return <CalendarOutlined />;
       case 'pending': return <ClockCircleOutlined />;
       case 'assigned': return <TruckOutlined />;
       case 'picked_up': return <EnvironmentOutlined />;
       case 'in_transit': return <TruckOutlined />;
+      case 'arrived': return <EnvironmentOutlined />;
       case 'delivered': return <CheckCircleOutlined />;
       case 'failed': return <ExclamationCircleOutlined />;
       case 'returned': return <ExclamationCircleOutlined />;
@@ -182,7 +208,7 @@ const Delivery = () => {
       width: 120,
       render: (status) => (
         <Tag color={deliveryStatusColors[status] || 'default'} icon={getStatusIcon(status)}>
-          {t(`ui.delivery.status_${status}`)}
+          {t(`ui.delivery.status_${status}`, status)}
         </Tag>
       )
     },
@@ -194,7 +220,7 @@ const Delivery = () => {
       render: (priority) => (
         <Badge
           color={priority === 'high' ? 'red' : priority === 'medium' ? 'orange' : 'green'}
-          text={t(`ui.delivery.priority_${priority}`)}
+          text={t(`ui.delivery.priority_${priority}`, priority)}
         />
       )
     },
@@ -263,8 +289,8 @@ const Delivery = () => {
     setSelectedDelivery(delivery);
     form.setFieldsValue({
       status: delivery.status,
-      driver_id: delivery.driver_id,
-      notes: delivery.notes
+      notes: delivery.notes,
+      fail_reason: delivery.failed_delivery_reason || undefined
     });
     setIsUpdateModalVisible(true);
   };
@@ -274,9 +300,16 @@ const Delivery = () => {
   };
 
   const handleUpdateSubmit = (values) => {
+    const payload = {
+      status: values.status,
+      notes: values.notes
+    };
+    if (values.status === 'failed' && values.fail_reason) {
+      payload.fail_reason = values.fail_reason;
+    }
     updateDeliveryMutation.mutate({
       deliveryId: selectedDelivery.id,
-      data: values
+      data: payload
     });
   };
 
@@ -302,52 +335,159 @@ const Delivery = () => {
     setPagination({ ...pagination, page: 1 });
   };
 
+  const handleExportReport = () => {
+    if (!deliveries.length) {
+      message.info(t('ui.delivery.no_data_to_export', 'No deliveries to export'));
+      return;
+    }
+
+    const rows = [
+      [
+        'delivery_id',
+        'tracking_number',
+        'order_number',
+        'status',
+        'customer_name',
+        'customer_phone',
+        'driver_name',
+        'driver_phone',
+        'scheduled_date',
+        'address',
+        'total_amount'
+      ],
+      ...deliveries.map((delivery) => ([
+        delivery.delivery_id,
+        delivery.tracking_number || '',
+        delivery.order_number || '',
+        delivery.status || '',
+        delivery.customer_name || '',
+        delivery.customer_phone || '',
+        delivery.driver_name || '',
+        delivery.driver_phone || '',
+        delivery.scheduled_date || '',
+        delivery.delivery_address || '',
+        delivery.order_total_amount ?? ''
+      ]))
+    ];
+
+    const csv = rows
+      .map((row) => row.map((value) => `"${String(value).replace(/"/g, '""')}"`).join(','))
+      .join('\n');
+
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `deliveries-page-${pagination.page}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(url);
+  };
+
   // Calculate summary statistics
   const deliveries = data?.data?.items || [];
-  const totalDeliveries = data?.meta?.total || 0;
-  const pendingDeliveries = deliveries.filter(d => d.status === 'pending').length;
-  const inTransitDeliveries = deliveries.filter(d => d.status === 'in_transit').length;
-  const completedDeliveries = deliveries.filter(d => d.status === 'delivered').length;
-  const onTimeRate = deliveries.length > 0 ? ((completedDeliveries / deliveries.length) * 100).toFixed(1) : 0;
+  const summary = data?.meta?.summary || {};
+  const totalDeliveries = data?.meta?.total || summary.total_deliveries || 0;
+  const pendingDeliveries = (summary.scheduled_deliveries || 0) + (summary.pending_deliveries || 0);
+  const activeDeliveries = summary.active_deliveries || 0;
+  const completionRate = Number(summary.completion_rate || 0);
 
   const getDeliveryProgress = (status) => {
-    const statusOrder = ['pending', 'assigned', 'picked_up', 'in_transit', 'delivered'];
+    const statusOrder = ['scheduled', 'pending', 'assigned', 'picked_up', 'in_transit', 'arrived', 'delivered'];
     const currentIndex = statusOrder.indexOf(status);
     return currentIndex >= 0 ? ((currentIndex + 1) / statusOrder.length) * 100 : 0;
   };
 
-  const getTrackingSteps = (delivery) => [
-    {
-      title: t('ui.delivery.order_created'),
-      description: t('ui.delivery.delivery_request_created'),
-      status: 'finish',
-      icon: <CheckCircleOutlined />
-    },
-    {
-      title: t('ui.delivery.driver_assigned'),
-      description: delivery.driver_name || t('ui.delivery.waiting_for_assignment'),
-      status: ['assigned', 'picked_up', 'in_transit', 'delivered'].includes(delivery.status) ? 'finish' : 'wait',
-      icon: delivery.driver_name ? <CheckCircleOutlined /> : <ClockCircleOutlined />
-    },
-    {
-      title: t('ui.delivery.package_picked_up'),
-      description: t('ui.delivery.driver_collected_package'),
-      status: ['picked_up', 'in_transit', 'delivered'].includes(delivery.status) ? 'finish' : 'wait',
-      icon: ['picked_up', 'in_transit', 'delivered'].includes(delivery.status) ? <CheckCircleOutlined /> : <ClockCircleOutlined />
-    },
-    {
-      title: t('ui.delivery.in_transit'),
-      description: t('ui.delivery.package_on_way'),
-      status: ['in_transit', 'delivered'].includes(delivery.status) ? 'finish' : delivery.status === 'failed' ? 'error' : 'wait',
-      icon: delivery.status === 'in_transit' ? <TruckOutlined /> : ['delivered'].includes(delivery.status) ? <CheckCircleOutlined /> : <ClockCircleOutlined />
-    },
-    {
-      title: t('ui.delivery.delivered'),
-      description: delivery.status === 'delivered' ? t('ui.delivery.package_delivered_success') : delivery.status === 'failed' ? t('ui.delivery.delivery_failed') : t('ui.delivery.waiting_for_delivery'),
-      status: delivery.status === 'delivered' ? 'finish' : delivery.status === 'failed' ? 'error' : 'wait',
-      icon: delivery.status === 'delivered' ? <CheckCircleOutlined /> : delivery.status === 'failed' ? <ExclamationCircleOutlined /> : <ClockCircleOutlined />
+  const getStatusTimestampMap = (delivery) => {
+    const timestamps = {
+      created: delivery.created_at || null
+    };
+
+    (delivery.status_history || []).forEach((item) => {
+      if (item.new_status && item.changed_at && !timestamps[item.new_status]) {
+        timestamps[item.new_status] = item.changed_at;
+      }
+    });
+
+    if (delivery.actual_delivery_time) {
+      timestamps.delivered = delivery.actual_delivery_time;
     }
-  ];
+
+    return timestamps;
+  };
+
+  const renderStepDescription = (messageText, timestamp) => (
+    <div>
+      <div>{messageText}</div>
+      <small style={{ color: '#8c8c8c' }}>
+        {timestamp ? formatDateTimeShort(timestamp) : t('ui.delivery.no_timestamp_available', 'No time recorded')}
+      </small>
+    </div>
+  );
+
+  const getTrackingSteps = (delivery) => {
+    const timestamps = getStatusTimestampMap(delivery);
+
+    return [
+      {
+        title: t('ui.delivery.order_created'),
+        description: renderStepDescription(
+          t('ui.delivery.delivery_request_created'),
+          timestamps.created
+        ),
+        status: 'finish',
+        icon: <CheckCircleOutlined />
+      },
+      {
+        title: t('ui.delivery.driver_assigned'),
+        description: renderStepDescription(
+          delivery.driver_name
+            ? `${t('ui.delivery.assigned_to_driver', 'Assigned to')}: ${delivery.driver_name}`
+            : t('ui.delivery.waiting_for_assignment'),
+          timestamps.assigned
+        ),
+        status: ['assigned', 'picked_up', 'in_transit', 'arrived', 'delivered'].includes(delivery.status) ? 'finish' : 'wait',
+        icon: delivery.driver_name ? <CheckCircleOutlined /> : <ClockCircleOutlined />
+      },
+      {
+        title: t('ui.delivery.package_picked_up'),
+        description: renderStepDescription(
+          t('ui.delivery.driver_collected_package'),
+          timestamps.picked_up
+        ),
+        status: ['picked_up', 'in_transit', 'arrived', 'delivered'].includes(delivery.status) ? 'finish' : 'wait',
+        icon: ['picked_up', 'in_transit', 'arrived', 'delivered'].includes(delivery.status) ? <CheckCircleOutlined /> : <ClockCircleOutlined />
+      },
+      {
+        title: t('ui.delivery.in_transit'),
+        description: renderStepDescription(
+          t('ui.delivery.package_on_way'),
+          timestamps.in_transit || timestamps.arrived
+        ),
+        status: ['in_transit', 'arrived', 'delivered'].includes(delivery.status) ? 'finish' : delivery.status === 'failed' ? 'error' : 'wait',
+        icon: ['in_transit', 'arrived'].includes(delivery.status) ? <TruckOutlined /> : ['delivered'].includes(delivery.status) ? <CheckCircleOutlined /> : <ClockCircleOutlined />
+      },
+      {
+        title: t('ui.delivery.delivered'),
+        description: renderStepDescription(
+          delivery.status === 'delivered'
+            ? t('ui.delivery.package_delivered_success')
+            : delivery.status === 'failed'
+              ? t('ui.delivery.delivery_failed')
+              : t('ui.delivery.waiting_for_delivery'),
+          timestamps.delivered || timestamps.failed
+        ),
+        status: delivery.status === 'delivered' ? 'finish' : delivery.status === 'failed' ? 'error' : 'wait',
+        icon: delivery.status === 'delivered' ? <CheckCircleOutlined /> : delivery.status === 'failed' ? <ExclamationCircleOutlined /> : <ClockCircleOutlined />
+      }
+    ];
+  };
+
+  const getUpdateStatusOptions = (currentStatus) => {
+    const allowedValues = statusTransitions[currentStatus] || [currentStatus];
+    return statusOptions.filter((option) => allowedValues.includes(option.value));
+  };
 
   return (
     <div>
@@ -375,8 +515,8 @@ const Delivery = () => {
         <Col xs={24} sm={6}>
           <Card>
             <Statistic
-              title={t('ui.delivery.in_transit')}
-              value={inTransitDeliveries}
+              title={t('ui.delivery.active_deliveries', 'Active deliveries')}
+              value={activeDeliveries}
               valueStyle={{ color: '#1890ff' }}
               prefix={<TruckOutlined />}
             />
@@ -386,7 +526,7 @@ const Delivery = () => {
           <Card>
             <Statistic
               title={t('ui.delivery.completion_rate')}
-              value={onTimeRate}
+              value={completionRate}
               precision={1}
               suffix="%"
               valueStyle={{ color: '#52c41a' }}
@@ -412,13 +552,11 @@ const Delivery = () => {
               onChange={handleStatusFilter}
               style={{ width: 150 }}
             >
-              <Option value="pending">{t('ui.delivery.status_pending')}</Option>
-              <Option value="assigned">{t('ui.delivery.status_assigned')}</Option>
-              <Option value="picked_up">{t('ui.delivery.status_picked_up')}</Option>
-              <Option value="in_transit">{t('ui.delivery.status_in_transit')}</Option>
-              <Option value="delivered">{t('ui.delivery.status_delivered')}</Option>
-              <Option value="failed">{t('ui.delivery.status_failed')}</Option>
-              <Option value="returned">{t('ui.delivery.status_returned')}</Option>
+              {statusOptions.map((option) => (
+                <Option key={option.value} value={option.value}>
+                  {option.label}
+                </Option>
+              ))}
             </Select>
             <RangePicker
               onChange={handleDateRangeChange}
@@ -435,7 +573,7 @@ const Delivery = () => {
             >
               {t('ui.delivery.schedule_delivery')}
             </Button>
-            <Button icon={<ExportOutlined />}>
+            <Button icon={<ExportOutlined />} onClick={handleExportReport}>
               {t('ui.delivery.export_report')}
             </Button>
           </Space>
@@ -481,13 +619,13 @@ const Delivery = () => {
               </Descriptions.Item>
               <Descriptions.Item label={t('ui.delivery.status')}>
                 <Tag color={deliveryStatusColors[selectedDelivery.status]} icon={getStatusIcon(selectedDelivery.status)}>
-                  {t(`ui.delivery.status_${selectedDelivery.status}`)}
+                  {t(`ui.delivery.status_${selectedDelivery.status}`, selectedDelivery.status)}
                 </Tag>
               </Descriptions.Item>
               <Descriptions.Item label={t('ui.delivery.priority')}>
                 <Badge
                   color={selectedDelivery.priority === 'high' ? 'red' : selectedDelivery.priority === 'medium' ? 'orange' : 'green'}
-                  text={t(`ui.delivery.priority_${selectedDelivery.priority}`)}
+                  text={t(`ui.delivery.priority_${selectedDelivery.priority}`, selectedDelivery.priority)}
                 />
               </Descriptions.Item>
               <Descriptions.Item label={t('ui.delivery.customer')}>
@@ -505,9 +643,26 @@ const Delivery = () => {
               <Descriptions.Item label={t('ui.delivery.scheduled_date')} span={2}>
                 {formatDateTimeShort(selectedDelivery.scheduled_date)}
               </Descriptions.Item>
+              <Descriptions.Item label={t('ui.delivery.tracking_number', 'Tracking number')} span={2}>
+                {selectedDelivery.tracking_number || t('ui.delivery.na')}
+              </Descriptions.Item>
+              <Descriptions.Item label={t('ui.delivery.time_slot', 'Time slot')}>
+                {selectedDelivery.scheduled_time_slot || t('ui.delivery.na')}
+              </Descriptions.Item>
+              <Descriptions.Item label={t('ui.delivery.total_amount', 'Total amount')}>
+                {selectedDelivery.order_total_amount || 0}
+              </Descriptions.Item>
               <Descriptions.Item label={t('ui.delivery.delivery_address')} span={2}>
                 {selectedDelivery.delivery_address}
               </Descriptions.Item>
+              <Descriptions.Item label={t('ui.delivery.items', 'Items')} span={2}>
+                {selectedDelivery.items_summary || t('ui.delivery.na')}
+              </Descriptions.Item>
+              {selectedDelivery.failed_delivery_reason && (
+                <Descriptions.Item label={t('ui.delivery.failure_reason', 'Failure reason')} span={2}>
+                  {selectedDelivery.failed_delivery_reason}
+                </Descriptions.Item>
+              )}
             </Descriptions>
 
             <Divider>{t('ui.delivery.delivery_progress')}</Divider>
@@ -570,9 +725,29 @@ const Delivery = () => {
           <div>
             <div style={{ marginBottom: 24 }}>
               <h4>{t('ui.delivery.current_status')}: <Tag color={deliveryStatusColors[selectedDelivery.status]}>
-                {t(`ui.delivery.status_${selectedDelivery.status}`)}
+                {t(`ui.delivery.status_${selectedDelivery.status}`, selectedDelivery.status)}
               </Tag></h4>
-              <p><strong>{t('ui.delivery.estimated_delivery')}:</strong> {formatDateTimeShort(selectedDelivery.scheduled_date)}</p>
+              <p>
+                <strong>{t('ui.delivery.scheduled_date')}:</strong> {formatDateTimeShort(selectedDelivery.scheduled_date)}
+              </p>
+              {selectedDelivery.status === 'delivered' && selectedDelivery.actual_delivery_time ? (
+                <p>
+                  <strong>{t('ui.delivery.delivered_at', 'Delivered at')}:</strong> {formatDateTimeShort(selectedDelivery.actual_delivery_time)}
+                </p>
+              ) : selectedDelivery.status === 'failed' && selectedDelivery.updated_at ? (
+                <p>
+                  <strong>{t('ui.delivery.failed_at', 'Failed at')}:</strong> {formatDateTimeShort(selectedDelivery.updated_at)}
+                </p>
+              ) : (
+                <p>
+                  <strong>{t('ui.delivery.estimated_delivery')}:</strong> {formatDateTimeShort(selectedDelivery.estimated_delivery_time || selectedDelivery.scheduled_date)}
+                </p>
+              )}
+              {selectedDelivery.driver_name && (
+                <p>
+                  <strong>{t('ui.delivery.driver')}:</strong> {selectedDelivery.driver_name}
+                </p>
+              )}
             </div>
 
             <Steps
@@ -625,26 +800,29 @@ const Delivery = () => {
             rules={[{ required: true, message: t('ui.delivery.select_status_required') }]}
           >
             <Select>
-              <Option value="pending">{t('ui.delivery.status_pending')}</Option>
-              <Option value="assigned">{t('ui.delivery.status_assigned')}</Option>
-              <Option value="picked_up">{t('ui.delivery.status_picked_up')}</Option>
-              <Option value="in_transit">{t('ui.delivery.status_in_transit')}</Option>
-              <Option value="delivered">{t('ui.delivery.status_delivered')}</Option>
-              <Option value="failed">{t('ui.delivery.status_failed')}</Option>
-              <Option value="returned">{t('ui.delivery.status_returned')}</Option>
+              {getUpdateStatusOptions(selectedDelivery?.status).map((option) => (
+                <Option key={option.value} value={option.value}>
+                  {option.label}
+                </Option>
+              ))}
             </Select>
           </Form.Item>
 
-          <Form.Item
-            name="driver_id"
-            label={t('ui.delivery.assign_driver')}
-          >
-            <Select placeholder={t('ui.delivery.select_driver')} allowClear>
-              <Option value="1">John Doe</Option>
-              <Option value="2">Jane Smith</Option>
-              <Option value="3">Mike Johnson</Option>
-            </Select>
-          </Form.Item>
+          {selectedStatus === 'failed' && (
+            <Form.Item
+              name="fail_reason"
+              label={t('ui.delivery.failure_reason', 'Failure reason')}
+              rules={[{ required: true, message: t('ui.delivery.select_failure_reason', 'Select a failure reason') }]}
+            >
+              <Select>
+                <Option value="customer_unavailable">{t('ui.delivery.failure_customer_unavailable', 'Customer unavailable')}</Option>
+                <Option value="wrong_address">{t('ui.delivery.failure_wrong_address', 'Wrong address')}</Option>
+                <Option value="customer_refused">{t('ui.delivery.failure_customer_refused', 'Customer refused')}</Option>
+                <Option value="product_damaged">{t('ui.delivery.failure_product_damaged', 'Product damaged')}</Option>
+                <Option value="other">{t('ui.delivery.failure_other', 'Other')}</Option>
+              </Select>
+            </Form.Item>
+          )}
 
           <Form.Item
             name="notes"
@@ -679,7 +857,7 @@ const Delivery = () => {
         deliveryId={assignmentTarget?.id}
         currentPersonId={assignmentTarget?.driver_id || null}
         onSuccess={() => {
-          queryClient.invalidateQueries('deliveries');
+          queryClient.invalidateQueries(['deliveries']);
         }}
       />
     </div>

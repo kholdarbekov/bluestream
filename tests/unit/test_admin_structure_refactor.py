@@ -7,6 +7,7 @@ ROOT = Path(__file__).resolve().parents[2]
 ADMIN_API_FILE = ROOT / "business_app" / "api" / "admin.py"
 REPORT_SERVICE_FILE = ROOT / "business_app" / "services" / "admin_report_service.py"
 BULK_SERVICE_FILE = ROOT / "business_app" / "services" / "admin_bulk_action_service.py"
+DELIVERY_SERVICE_FILE = ROOT / "business_app" / "services" / "admin_delivery_service.py"
 
 
 def test_admin_api_delegates_report_generation_to_service_layer():
@@ -44,9 +45,20 @@ def test_admin_api_delegates_bulk_actions_to_service_layer():
     assert "def _bulk_action_deliveries(" not in text
 
 
+def test_admin_api_delegates_delivery_management_to_service_layer():
+    text = ADMIN_API_FILE.read_text(encoding="utf-8")
+
+    assert "from business_app.services.admin_delivery_service import AdminDeliveryService" in text
+    assert "AdminDeliveryService.list_deliveries(" in text
+    assert "AdminDeliveryService.update_delivery(" in text
+    assert "def _serialize_admin_delivery(" not in text
+    assert "def _get_admin_delivery_summary(" not in text
+
+
 def test_admin_service_modules_exist_with_expected_entrypoints():
     report_text = REPORT_SERVICE_FILE.read_text(encoding="utf-8")
     bulk_text = BULK_SERVICE_FILE.read_text(encoding="utf-8")
+    delivery_text = DELIVERY_SERVICE_FILE.read_text(encoding="utf-8")
 
     assert "class AdminReportService:" in report_text
     assert "def generate(" in report_text
@@ -55,3 +67,8 @@ def test_admin_service_modules_exist_with_expected_entrypoints():
     assert "class AdminBulkActionService:" in bulk_text
     assert "def get_valid_actions(" in bulk_text
     assert "def perform(" in bulk_text
+
+    assert "class AdminDeliveryService:" in delivery_text
+    assert "def list_deliveries(" in delivery_text
+    assert "def update_delivery(" in delivery_text
+    assert "def serialize_delivery(" in delivery_text

@@ -1,9 +1,178 @@
 import api, { getCookie } from './api';
 
+const TIMEFRAME_TO_PERIOD = {
+  '7d': 'week',
+  '30d': 'month',
+  '90d': 'quarter',
+  '1y': 'year'
+};
+
+const buildAnalyticsParams = (params = {}) => {
+  const queryParams = { ...params };
+  if (!queryParams.period) {
+    queryParams.period = TIMEFRAME_TO_PERIOD[queryParams.timeframe] || 'month';
+  }
+  delete queryParams.timeframe;
+  return queryParams;
+};
+
+const formatChartLabel = (value) => {
+  if (!value) {
+    return '';
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+};
+
+const toNumber = (value, fallback = 0) => {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : fallback;
+};
+
+const normalizeOverviewAnalytics = (dashboardPayload, productsPayload, customersPayload) => {
+  const dashboard = dashboardPayload?.dashboard || {};
+  const revenue = dashboard.revenue || {};
+  const orders = dashboard.orders || {};
+  const customers = dashboard.customers || {};
+  const delivery = dashboard.delivery || {};
+  const growth = dashboard.growth || {};
+  const customerAnalytics = customersPayload?.customer_analytics || {};
+  const churn = customerAnalytics.churn || {};
+  const retention = customerAnalytics.retention || {};
+  const acquisition = customerAnalytics.acquisition || {};
+
+  return {
+    total_revenue: toNumber(revenue.total_revenue),
+    total_orders: toNumber(orders.total_orders),
+    active_customers: toNumber(customers.active_customers),
+    growth_rate: toNumber(revenue.growth_rate),
+    revenue_trend: (growth.daily_revenue || []).map((item) => ({
+      label: formatChartLabel(item.date),
+      value: toNumber(item.revenue)
+    })),
+    order_trend: (growth.daily_orders || []).map((item) => ({
+      label: formatChartLabel(item.date),
+      value: toNumber(item.count)
+    })),
+    top_products: (productsPayload?.product_analytics || []).slice(0, 5).map((product) => ({
+      id: product.product_id,
+      name: product.product_name,
+      sales: toNumber(product.revenue),
+      quantity_sold: toNumber(product.quantity_sold),
+      order_count: toNumber(product.order_count)
+    })),
+    customer_segments: {
+      new: toNumber(acquisition.total_new_customers),
+      active: toNumber(retention.current_period_customers),
+      loyal: toNumber(retention.retained_customers),
+      at_risk: toNumber(churn.churned_customers),
+      inactive: Math.max(
+        0,
+        toNumber(churn.total_customers) - toNumber(churn.active_customers)
+      )
+    },
+    average_order_value: toNumber(revenue.average_order_value),
+    completion_rate: toNumber(orders.completion_rate),
+    repeat_rate: toNumber(customers.repeat_rate),
+    delivery_success_rate: toNumber(delivery.success_rate)
+  };
+};
+
+const normalizeSalesAnalytics = (revenuePayload, conversionPayload) => {
+  const revenueAnalytics = revenuePayload?.revenue_analytics || {};
+  const trend = revenueAnalytics.trend || [];
+  const conversionRates = conversionPayload?.conversion_funnel?.conversion_rates || {};
+
+  return {
+    monthly_revenue: toNumber(revenueAnalytics.total_revenue),
+    monthly_orders: trend.reduce((sum, item) => sum + toNumber(item.orders), 0),
+    avg_order_value: toNumber(revenueAnalytics.average_order_value),
+    conversion_rate: toNumber(conversionRates.overall),
+    labels: trend.map((item) => formatChartLabel(item.date || item.hour || item.day_name)),
+    revenue: trend.map((item) => toNumber(item.revenue)),
+    orders: trend.map((item) => toNumber(item.orders))
+  };
+};
+
+const normalizeChurnPrediction = (predictionPayload) => {
+  const predictions = predictionPayload?.predictions || {};
+  return {
+    churn_rate: toNumber(predictions.churn_rate),
+    at_risk_count: toNumber(predictions.at_risk_count),
+    high_risk_count: toNumber(predictions.high_risk_count),
+    customers: (predictions.customers || []).map((customer) => ({
+      ...customer,
+      total_spent: toNumber(customer.total_spent),
+      risk_score: toNumber(customer.risk_score)
+    }))
+  };
+};
+
+const normalizeDeliveryAnalytics = (deliveryPayload) => {
+  const deliveryAnalytics = deliveryPayload?.delivery_analytics || {};
+  const performance = deliveryAnalytics.performance || {};
+  const regions = deliveryAnalytics.geographic_patterns?.by_city || [];
+
+  return {
+    overall_on_time_rate: toNumber(performance.success_rate),
+    avg_delivery_time: toNumber(performance.average_delivery_time_hours),
+    failed_deliveries: Math.max(
+      0,
+      toNumber(performance.total_deliveries) - toNumber(performance.successful_deliveries)
+    ),
+    regions: regions.map((region) => ({
+      region: region.city || 'Unknown',
+      total_deliveries: toNumber(region.orders),
+      on_time_rate: toNumber(performance.success_rate),
+      avg_delivery_time: toNumber(performance.average_delivery_time_hours),
+      performance:
+        toNumber(performance.success_rate) >= 95
+          ? 'excellent'
+          : toNumber(performance.success_rate) >= 85
+            ? 'good'
+            : toNumber(performance.success_rate) >= 70
+              ? 'average'
+              : 'poor'
+    }))
+  };
+};
+
+const normalizeRevenueForecast = (predictionPayload) => {
+  const predictions = predictionPayload?.predictions || {};
+  const historical = predictions.historical || [];
+  const forecast = predictions.predictions || [];
+
+  return {
+    next_month: toNumber(predictions.next_month_revenue),
+    next_quarter: toNumber(predictions.next_quarter_revenue),
+    confidence_level: toNumber(predictions.confidence_level),
+    labels: [
+      ...historical.map((item) => formatChartLabel(item.date)),
+      ...forecast.map((item) => formatChartLabel(item.date))
+    ],
+    historical: historical.map((item) => toNumber(item.revenue)),
+    forecast: [
+      ...new Array(historical.length).fill(null),
+      ...forecast.map((item) => toNumber(item.predicted_revenue))
+    ],
+    factors: (predictions.drivers || []).map((driver) => ({
+      factor: driver.factor,
+      impact: driver.impact,
+      trend: driver.trend,
+      weight: toNumber(driver.weight)
+    }))
+  };
+};
+
 class AdminService {
   // Dashboard API calls
-  async getDashboardData() {
-    const response = await api.get('/admin/dashboard');
+  async getDashboardData(params = {}) {
+    const response = await api.get('/admin/dashboard', { params });
     return response.data;
   }
 
@@ -303,28 +472,61 @@ class AdminService {
 
   // Advanced Analytics
   async getAnalytics(params = {}) {
-    const response = await api.get('/admin/analytics/overview', { params });
-    return response.data;
+    const queryParams = buildAnalyticsParams(params);
+    const [dashboardResponse, productsResponse, customersResponse] = await Promise.all([
+      api.get('/analytics/dashboard', { params: queryParams }),
+      api.get('/analytics/products', { params: queryParams }),
+      api.get('/analytics/customers', { params: queryParams })
+    ]);
+
+    return normalizeOverviewAnalytics(
+      dashboardResponse.data,
+      productsResponse.data,
+      customersResponse.data
+    );
   }
 
   async getSalesTrends(params = {}) {
-    const response = await api.get('/admin/analytics/sales-trends', { params });
-    return response.data;
+    const queryParams = buildAnalyticsParams(params);
+    const [revenueResponse, conversionResponse] = await Promise.all([
+      api.get('/analytics/revenue', {
+        params: {
+          ...queryParams,
+          granularity: 'daily'
+        }
+      }),
+      api.get('/analytics/conversion-funnel', { params: queryParams })
+    ]);
+
+    return normalizeSalesAnalytics(revenueResponse.data, conversionResponse.data);
   }
 
   async getChurnPrediction(params = {}) {
-    const response = await api.get('/admin/analytics/customer-churn', { params });
-    return response.data;
+    const response = await api.get('/analytics/predictions', {
+      params: {
+        ...buildAnalyticsParams(params),
+        type: 'churn'
+      }
+    });
+    return normalizeChurnPrediction(response.data);
   }
 
   async getDeliveryHeatmap(params = {}) {
-    const response = await api.get('/admin/analytics/delivery-heatmap', { params });
-    return response.data;
+    const response = await api.get('/analytics/delivery', {
+      params: buildAnalyticsParams(params)
+    });
+    return normalizeDeliveryAnalytics(response.data);
   }
 
   async getRevenueForecast(params = {}) {
-    const response = await api.get('/admin/analytics/revenue-forecast', { params });
-    return response.data;
+    const response = await api.get('/analytics/predictions', {
+      params: {
+        ...buildAnalyticsParams(params),
+        type: 'revenue',
+        horizon: 90
+      }
+    });
+    return normalizeRevenueForecast(response.data);
   }
 
   // Export functionality
@@ -555,4 +757,6 @@ class AdminService {
   }
 }
 
-export default new AdminService();
+const adminService = new AdminService();
+
+export default adminService;

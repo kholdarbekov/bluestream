@@ -788,7 +788,7 @@ def serialize_product_admin(product: Product) -> Dict[str, Any]:
         }
 
 
-def serialize_delivery_person_admin(person) -> Dict[str, Any]:
+def serialize_delivery_person_admin(person, current_active_deliveries: Optional[int] = None) -> Dict[str, Any]:
     """
     Serialize delivery person for admin view
     
@@ -820,6 +820,11 @@ def serialize_delivery_person_admin(person) -> Dict[str, Any]:
         data['successful_deliveries'] = getattr(person, 'successful_deliveries', 0)
         data['success_rate'] = float(getattr(person, 'success_rate', 0))
         data['average_rating'] = float(getattr(person, 'average_rating', 0))
+        data['current_active_deliveries'] = (
+            current_active_deliveries
+            if current_active_deliveries is not None
+            else getattr(person, 'current_active_deliveries', 0)
+        )
         
         return data
         
@@ -831,7 +836,12 @@ def serialize_delivery_person_admin(person) -> Dict[str, Any]:
             'full_name': person.full_name,
             'phone': person.phone,
             'vehicle_type': vehicle_type,
-            'is_active': person.is_active
+            'is_active': person.is_active,
+            'current_active_deliveries': (
+                current_active_deliveries
+                if current_active_deliveries is not None
+                else getattr(person, 'current_active_deliveries', 0)
+            ),
         }
 
 

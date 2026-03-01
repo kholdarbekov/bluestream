@@ -344,19 +344,41 @@ class DeliveryService:
         delivery = Delivery.query.get(delivery_id)
         if not delivery:
             raise NotFoundError("Delivery not found")
-        
-        if delivery.status in [DeliveryStatus.DELIVERED, DeliveryStatus.FAILED]:
-            raise ValidationError("Cannot cancel completed or failed delivery")
-        
-        delivery.status = DeliveryStatus.FAILED
-        delivery.cancelled_at = datetime.now(timezone.utc)
-        delivery.cancellation_reason = reason
-        
-        db.session.commit()
-        
+
+        if delivery.status in [
+            DeliveryStatus.PICKED_UP,
+            DeliveryStatus.IN_TRANSIT,
+            DeliveryStatus.ARRIVED,
+            DeliveryStatus.DELIVERED,
+            DeliveryStatus.FAILED,
+            DeliveryStatus.CANCELLED,
+            DeliveryStatus.RETURNED,
+        ]:
+            raise ValidationError("Cannot cancel delivery once it is in progress or completed")
+
+        delivery = self.update_delivery_status(
+            delivery_id,
+            DeliveryStatus.CANCELLED,
+            notes=reason or "Delivery cancelled because the order was cancelled",
+            sync_order_status=False,
+        )
+        pending_commit = False
+        if reason:
+            delivery.delivery_notes = reason
+            pending_commit = True
+
+        if delivery.delivery_person_id:
+            from business_app.services.staff_service import StaffService
+
+            StaffService.sync_active_delivery_counters([delivery.delivery_person_id])
+            pending_commit = True
+
+        if pending_commit:
+            db.session.commit()
+
         # Notify customer and driver
         self._notify_delivery_cancellation(delivery)
-        
+
         return delivery
     
     # Private helper methods
@@ -397,14 +419,15 @@ class DeliveryService:
     def _is_valid_delivery_status_transition(self, current: DeliveryStatus, new: DeliveryStatus) -> bool:
         """Check if delivery status transition is valid"""
         valid_transitions = {
-            DeliveryStatus.PENDING: [DeliveryStatus.ASSIGNED, DeliveryStatus.FAILED],
-            DeliveryStatus.SCHEDULED: [DeliveryStatus.ASSIGNED, DeliveryStatus.PICKED_UP, DeliveryStatus.IN_TRANSIT, DeliveryStatus.ARRIVED, DeliveryStatus.DELIVERED, DeliveryStatus.FAILED],
-            DeliveryStatus.ASSIGNED: [DeliveryStatus.PICKED_UP, DeliveryStatus.FAILED],
+            DeliveryStatus.PENDING: [DeliveryStatus.ASSIGNED, DeliveryStatus.FAILED, DeliveryStatus.CANCELLED],
+            DeliveryStatus.SCHEDULED: [DeliveryStatus.ASSIGNED, DeliveryStatus.PICKED_UP, DeliveryStatus.IN_TRANSIT, DeliveryStatus.ARRIVED, DeliveryStatus.DELIVERED, DeliveryStatus.FAILED, DeliveryStatus.CANCELLED],
+            DeliveryStatus.ASSIGNED: [DeliveryStatus.PICKED_UP, DeliveryStatus.FAILED, DeliveryStatus.CANCELLED],
             DeliveryStatus.PICKED_UP: [DeliveryStatus.IN_TRANSIT, DeliveryStatus.FAILED],
             DeliveryStatus.IN_TRANSIT: [DeliveryStatus.ARRIVED, DeliveryStatus.FAILED],
             DeliveryStatus.ARRIVED: [DeliveryStatus.DELIVERED, DeliveryStatus.FAILED],
             DeliveryStatus.DELIVERED: [],
             DeliveryStatus.FAILED: [],
+            DeliveryStatus.CANCELLED: [],
             DeliveryStatus.RETURNED: []
         }
         
@@ -498,7 +521,7 @@ class DeliveryService:
         slot_deliveries = Delivery.query.filter(
             Delivery.scheduled_time_slot == time_slot,
             Delivery.created_at.between(start_of_day, end_of_day),
-            Delivery.status != DeliveryStatus.FAILED
+            Delivery.status.notin_([DeliveryStatus.FAILED, DeliveryStatus.CANCELLED])
         ).count()
 
         # Allow up to 20 deliveries per time slot

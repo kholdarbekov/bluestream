@@ -5,9 +5,9 @@ from unittest.mock import patch
 
 import pytest
 
-from business_app.models.payment import Payment
+from business_app.models.payment import Payment, PaymentTransaction
 from business_app.services.payment_service import PaymentService
-from business_app.utils.constants import OrderStatus, PaymentMethod, PaymentStatus
+from business_app.utils.constants import OrderStatus, PaymentMethod, PaymentStatus, PaymeState
 from business_app.utils.exceptions import ValidationError
 
 
@@ -156,3 +156,35 @@ class TestPaymentLifecycleRules:
 
         order_service_cls.return_value.update_order_status.assert_not_called()
         notify_delay.assert_called_once_with(sample_payment.id)
+
+    def test_payme_cancel_transaction_uses_order_service_cancellation(self, payment_service, sample_payment, db):
+        sample_payment.status = PaymentStatus.COMPLETED
+        sample_payment.order.status = OrderStatus.CONFIRMED
+        transaction = PaymentTransaction(
+            payment_id=sample_payment.id,
+            transaction_type="charge",
+            amount=sample_payment.amount,
+            currency="UZS",
+            status="completed",
+            provider_transaction_id="payme-tx-1",
+            success=True,
+        )
+        db.session.add(transaction)
+        db.session.commit()
+
+        with patch("business_app.services.order_service.OrderService") as order_service_cls, patch.object(
+            payment_service,
+            "process_refund",
+            return_value=True,
+        ) as process_refund:
+            result = payment_service._payme_cancel_transaction({"id": "payme-tx-1", "reason": 42})
+
+        db.session.refresh(transaction)
+        order_service_cls.return_value.cancel_order.assert_called_once_with(
+            sample_payment.order.id,
+            reason="Payme Cancel: 42",
+            process_payment_refund=False,
+        )
+        process_refund.assert_called_once_with(sample_payment.id, sample_payment.amount, "Payme Cancel: 42")
+        assert transaction.status == "refunded"
+        assert result["result"]["state"] == PaymeState.REFUNDED.value

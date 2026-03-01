@@ -17,7 +17,7 @@ import redis
 from business_app.models.order import Order, OrderItem
 from business_app.models.payment import Payment, PaymentTransaction, CreditCard
 from business_app.models.user import User
-from business_app.utils.exceptions import PaymentError, ValidationError, NotFoundError
+from business_app.utils.exceptions import ConflictError, PaymentError, ValidationError, NotFoundError
 from business_app.utils.constants import OrderStatus, PaymentStatus, PaymentMethod, PaymeErrors, PaymeState
 from business_app.utils.helpers import generate_random_string, to_ms
 from business_app.utils.audit_logger import audit_logger, AuditEventType, AuditSeverity
@@ -1793,9 +1793,21 @@ class PaymentService:
              if payment.order.status in [OrderStatus.DELIVERED, OrderStatus.OUT_FOR_DELIVERY]:
                   return {'error': {'code': PaymeErrors.UNABLE_TO_CANCEL, 'message': 'Order delivered or being delivered, cannot cancel'}}
              else:
-                # Update order status to cancelled if needed
-                payment.order.status = OrderStatus.CANCELLED
-                db.session.commit()
+                from business_app.services.order_service import OrderService
+
+                try:
+                    OrderService().cancel_order(
+                        payment.order.id,
+                        reason=f"Payme Cancel: {reason}",
+                        process_payment_refund=False,
+                    )
+                except (ConflictError, ValidationError) as exc:
+                    return {
+                        'error': {
+                            'code': PaymeErrors.UNABLE_TO_CANCEL,
+                            'message': str(exc),
+                        }
+                    }
                   
              # Process Refund
              # Mark Payment as Refunded

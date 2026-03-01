@@ -102,6 +102,17 @@ def test_perform_bulk_action_requires_admin(order_service, db, sample_user):
         order_service.perform_bulk_action('confirm', [1], sample_user.id)
 
 
+def test_perform_bulk_action_cancel_uses_actor_id_without_order_ownership(order_service, db, sample_user, admin_user):
+    address = _create_address(db, sample_user.id)
+    order = _create_order(db, sample_user.id, address.id, 'ORD-BULK-CANCEL-1', OrderStatus.PENDING, Decimal('22000'))
+
+    with patch.object(order_service, 'cancel_order') as cancel_order_mock:
+        result = order_service.perform_bulk_action('cancel', [order.id], admin_user.id)
+
+    assert result == [{'order_id': order.id, 'success': True}]
+    cancel_order_mock.assert_called_once_with(order.id, reason='Bulk cancellation', actor_user_id=admin_user.id)
+
+
 def test_create_subscription_order_delegates_to_subscription_service(order_service, sample_user):
     subscription_result = {
         'id': 55,

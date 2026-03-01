@@ -21,7 +21,7 @@ from business_app.utils.constants import OrderStatus
 from business_app.utils.exceptions import ValidationError
 
 
-def _create_contract_and_account(user_id: int):
+def _create_contract_and_account(user_id: int, *, is_loyalty_points_eligible: bool = False):
     contract = CorporateContract(
         user_id=user_id,
         contract_number=f"CTR-{uuid4().hex[:10]}",
@@ -31,6 +31,7 @@ def _create_contract_and_account(user_id: int):
         end_date=None,
         currency="UZS",
         is_active=True,
+        is_loyalty_points_eligible=is_loyalty_points_eligible,
     )
     db.session.add(contract)
     db.session.flush()
@@ -148,6 +149,82 @@ def test_resolve_unit_price_uses_contract_override(db, sample_user):
 
     assert overridden == Decimal("12500.00")
     assert fallback == Decimal("15000.00")
+
+
+def test_create_contract_defaults_loyalty_points_ineligible(db, sample_user):
+    sample_user.user_type = "entity"
+    db.session.commit()
+
+    service = CorporateContractService()
+
+    contract = service.create_contract(
+        {
+            "user_id": sample_user.id,
+            "contract_number": f"CTR-{uuid4().hex[:10]}",
+            "name": "Default Loyalty Contract",
+        },
+        actor_user_id=sample_user.id,
+    )
+    db.session.commit()
+
+    assert contract.is_loyalty_points_eligible is False
+    if contract.start_date and contract.start_date.tzinfo is None:
+        contract.start_date = contract.start_date.replace(tzinfo=UTC)
+    assert contract.to_dict()["is_loyalty_points_eligible"] is False
+
+
+def test_create_contract_persists_explicit_loyalty_points_eligibility(db, sample_user):
+    sample_user.user_type = "entity"
+    db.session.commit()
+
+    service = CorporateContractService()
+
+    contract = service.create_contract(
+        {
+            "user_id": sample_user.id,
+            "contract_number": f"CTR-{uuid4().hex[:10]}",
+            "name": "Eligible Loyalty Contract",
+            "is_loyalty_points_eligible": True,
+        },
+        actor_user_id=sample_user.id,
+    )
+    db.session.commit()
+
+    assert contract.is_loyalty_points_eligible is True
+
+
+def test_update_contract_can_enable_loyalty_points_eligibility(db, sample_user):
+    sample_user.user_type = "entity"
+    db.session.commit()
+
+    service = CorporateContractService()
+    contract, _ = _create_contract_and_account(sample_user.id)
+
+    updated = service.update_contract(
+        contract.id,
+        {"is_loyalty_points_eligible": True},
+        actor_user_id=sample_user.id,
+    )
+    db.session.commit()
+
+    assert updated.is_loyalty_points_eligible is True
+
+
+def test_update_contract_can_disable_loyalty_points_eligibility(db, sample_user):
+    sample_user.user_type = "entity"
+    db.session.commit()
+
+    service = CorporateContractService()
+    contract, _ = _create_contract_and_account(sample_user.id, is_loyalty_points_eligible=True)
+
+    updated = service.update_contract(
+        contract.id,
+        {"is_loyalty_points_eligible": False},
+        actor_user_id=sample_user.id,
+    )
+    db.session.commit()
+
+    assert updated.is_loyalty_points_eligible is False
 
 
 def test_resolve_contract_pricing_rejects_overlapping_matching_contracts(db, sample_user):
@@ -358,6 +435,112 @@ def test_get_balance_keeps_products_separate_for_mixed_contract(db, sample_user)
     assert by_product[product_a.id]["available_units"] == 3.0
     assert by_product[product_b.id]["prepaid_units"] == 0.0
     assert by_product[product_b.id]["available_units"] == 0.0
+
+
+def test_get_loyalty_eligible_amount_uses_total_amount_for_non_contract_orders(db, sample_user):
+    sample_user.user_type = "entity"
+    db.session.commit()
+
+    service = CorporateContractService()
+    product = _create_product("Retail Water", Decimal("15000.00"))
+    order = _create_order_with_item(
+        user_id=sample_user.id,
+        product_id=product.id,
+        quantity=2,
+        unit_price=Decimal("15000.00"),
+    )
+    order.delivery_fee = Decimal("5000.00")
+    order.total_amount = Decimal("35000.00")
+    db.session.commit()
+
+    eligible_amount = service.get_loyalty_eligible_amount_for_order(order)
+
+    assert eligible_amount == Decimal("35000.00")
+
+
+def test_get_loyalty_eligible_amount_returns_zero_for_ineligible_contract_items(db, sample_user):
+    sample_user.user_type = "entity"
+    db.session.commit()
+
+    service = CorporateContractService()
+    contract, _ = _create_contract_and_account(sample_user.id, is_loyalty_points_eligible=False)
+    product = _create_product("Ineligible Contract Water", Decimal("15000.00"))
+    price_row = _create_contract_price(contract.id, product.id, Decimal("14000.00"))
+    order = _create_order_with_item(
+        user_id=sample_user.id,
+        product_id=product.id,
+        quantity=2,
+        unit_price=Decimal("14000.00"),
+        contract_id=contract.id,
+        contract_product_price_id=price_row.id,
+    )
+
+    eligible_amount = service.get_loyalty_eligible_amount_for_order(order)
+
+    assert eligible_amount == Decimal("0.00")
+
+
+def test_get_loyalty_eligible_amount_excludes_only_ineligible_contract_lines(db, sample_user):
+    sample_user.user_type = "entity"
+    db.session.commit()
+
+    service = CorporateContractService()
+    eligible_contract, _ = _create_contract_and_account(sample_user.id, is_loyalty_points_eligible=True)
+    ineligible_contract, _ = _create_contract_and_account(sample_user.id, is_loyalty_points_eligible=False)
+    product_a = _create_product("Eligible Contract Water", Decimal("15000.00"))
+    product_b = _create_product("Ineligible Contract Water", Decimal("18000.00"))
+    product_c = _create_product("Retail Water Mixed", Decimal("12000.00"))
+    eligible_price = _create_contract_price(eligible_contract.id, product_a.id, Decimal("14000.00"))
+    ineligible_price = _create_contract_price(ineligible_contract.id, product_b.id, Decimal("17000.00"))
+
+    order = Order(
+        order_number=f"ORD-{uuid4().hex[:8]}",
+        user_id=sample_user.id,
+        status=OrderStatus.PENDING,
+        subtotal=Decimal("57000.00"),
+        delivery_fee=Decimal("4000.00"),
+        total_amount=Decimal("61000.00"),
+        order_source="web",
+    )
+    db.session.add(order)
+    db.session.flush()
+
+    db.session.add(
+        OrderItem(
+            order_id=order.id,
+            product_id=product_a.id,
+            contract_id=eligible_contract.id,
+            contract_product_price_id=eligible_price.id,
+            quantity=2,
+            unit_price=Decimal("14000.00"),
+            total_price=Decimal("28000.00"),
+        )
+    )
+    db.session.add(
+        OrderItem(
+            order_id=order.id,
+            product_id=product_b.id,
+            contract_id=ineligible_contract.id,
+            contract_product_price_id=ineligible_price.id,
+            quantity=1,
+            unit_price=Decimal("17000.00"),
+            total_price=Decimal("17000.00"),
+        )
+    )
+    db.session.add(
+        OrderItem(
+            order_id=order.id,
+            product_id=product_c.id,
+            quantity=1,
+            unit_price=Decimal("12000.00"),
+            total_price=Decimal("12000.00"),
+        )
+    )
+    db.session.commit()
+
+    eligible_amount = service.get_loyalty_eligible_amount_for_order(order)
+
+    assert eligible_amount == Decimal("40000.00")
 
 
 def test_reserve_for_order_uses_stored_order_item_contract_linkage(db, sample_user):

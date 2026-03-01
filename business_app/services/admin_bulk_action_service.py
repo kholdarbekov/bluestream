@@ -152,9 +152,12 @@ class AdminBulkActionService:
 
                 if action == 'cancel':
                     if order.status in [OrderStatus.PENDING, OrderStatus.CONFIRMED]:
-                        order.status = OrderStatus.CANCELLED
-                        order.cancelled_at = datetime.now(UTC)
-                        order.cancellation_reason = reason
+                        from business_app.services.order_service import OrderService
+                        OrderService().cancel_order(
+                            order.id,
+                            reason=reason,
+                            actor_user_id=admin_id,
+                        )
                     else:
                         failed_count += 1
                         errors.append({'order_id': order_id, 'error': f'Cannot cancel order with status {order.status}'})

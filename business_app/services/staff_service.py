@@ -30,6 +30,13 @@ from business_app import db
 class StaffService:
     """Service for staff bot operations"""
 
+    ACTIVE_DELIVERY_STATUSES = (
+        DeliveryStatus.ASSIGNED,
+        DeliveryStatus.PICKED_UP,
+        DeliveryStatus.IN_TRANSIT,
+        DeliveryStatus.ARRIVED,
+    )
+
     @staticmethod
     def _normalize_role_value(value: Any) -> Optional[str]:
         """Normalize Enum/string role values to canonical string."""
@@ -80,6 +87,56 @@ class StaffService:
             normalized.append(role_value)
 
         return normalized
+
+    @staticmethod
+    def get_active_delivery_statuses() -> Tuple[DeliveryStatus, ...]:
+        """Return statuses counted as active driver workload."""
+        return StaffService.ACTIVE_DELIVERY_STATUSES
+
+    @staticmethod
+    def get_active_delivery_counts(delivery_person_ids: List[int]) -> Dict[int, int]:
+        """Return live active-delivery counts keyed by delivery-person user ID."""
+        person_ids = sorted({int(person_id) for person_id in delivery_person_ids if person_id})
+        if not person_ids:
+            return {}
+
+        counts = {person_id: 0 for person_id in person_ids}
+        rows = (
+            db.session.query(
+                Delivery.delivery_person_id,
+                func.count(Delivery.id),
+            )
+            .filter(
+                Delivery.delivery_person_id.in_(person_ids),
+                Delivery.status.in_(StaffService.get_active_delivery_statuses()),
+            )
+            .group_by(Delivery.delivery_person_id)
+            .all()
+        )
+
+        for delivery_person_id, active_count in rows:
+            counts[int(delivery_person_id)] = int(active_count)
+
+        return counts
+
+    @staticmethod
+    def get_active_delivery_count(delivery_person_id: int) -> int:
+        """Return the live active-delivery count for one delivery person."""
+        if not delivery_person_id:
+            return 0
+        return StaffService.get_active_delivery_counts([delivery_person_id]).get(int(delivery_person_id), 0)
+
+    @staticmethod
+    def sync_active_delivery_counters(delivery_person_ids: List[int]) -> None:
+        """Best-effort sync for legacy cached workload counters."""
+        person_ids = sorted({int(person_id) for person_id in delivery_person_ids if person_id})
+        if not person_ids:
+            return
+
+        live_counts = StaffService.get_active_delivery_counts(person_ids)
+        profiles = DeliveryPerson.query.filter(DeliveryPerson.user_id.in_(person_ids)).all()
+        for profile in profiles:
+            profile.current_active_deliveries = live_counts.get(profile.user_id, 0)
 
     @staticmethod
     def create_delivery_person(staff_data: Dict[str, Any], created_by: Optional[int] = None) -> DeliveryPerson:
@@ -746,10 +803,11 @@ class StaffService:
             raise ValidationError("This delivery has already been accepted by another driver", error_code='STAFF_DELIVERY_ALREADY_TAKEN')
 
         # Check delivery person's capacity
-        dp = DeliveryPerson.query.filter_by(user_id=delivery_person_id).first()
+        dp = DeliveryPerson.query.filter_by(user_id=delivery_person_id).with_for_update().first()
         if dp:
             max_concurrent = dp.max_concurrent_deliveries or 3
-            if dp.current_active_deliveries >= max_concurrent:
+            active_delivery_count = StaffService.get_active_delivery_count(delivery_person_id)
+            if active_delivery_count >= max_concurrent:
                 raise ValidationError(
                     f"Maximum concurrent deliveries ({max_concurrent}) reached",
                     error_code='STAFF_MAX_CONCURRENT_REACHED',
@@ -772,9 +830,9 @@ class StaffService:
         )
         db.session.add(history)
 
-        # Update delivery person's active count
         if dp:
-            dp.current_active_deliveries = (dp.current_active_deliveries or 0) + 1
+            db.session.flush()
+            StaffService.sync_active_delivery_counters([delivery_person_id])
 
         db.session.commit()
 
@@ -882,16 +940,13 @@ class StaffService:
                 dp = DeliveryPerson.query.filter_by(user_id=delivery.delivery_person_id).first()
                 if dp:
                     dp.total_cash_collected = (dp.total_cash_collected or Decimal('0')) + Decimal(str(cash_amount))
-                    dp.current_active_deliveries = max((dp.current_active_deliveries or 1) - 1, 0)
                     dp.total_deliveries = (dp.total_deliveries or 0) + 1
                     dp.successful_deliveries = (dp.successful_deliveries or 0) + 1
         elif new_status == 'failed':
             delivery.failed_delivery_reason = metadata.get('fail_reason', 'other')
             delivery.delivery_attempts = (delivery.delivery_attempts or 0) + 1
-            # Decrement active deliveries
             dp = DeliveryPerson.query.filter_by(user_id=delivery.delivery_person_id).first()
             if dp:
-                dp.current_active_deliveries = max((dp.current_active_deliveries or 1) - 1, 0)
                 dp.total_deliveries = (dp.total_deliveries or 0) + 1
 
         # Create status history
@@ -930,6 +985,10 @@ class StaffService:
             else:
                 delivery.order.status = OrderStatus(order_status_str)
                 delivery.order.updated_at = now
+
+        if delivery.delivery_person_id:
+            db.session.flush()
+            StaffService.sync_active_delivery_counters([delivery.delivery_person_id])
 
         db.session.commit()
 
@@ -1017,16 +1076,9 @@ class StaffService:
         Returns:
             List of active Delivery objects
         """
-        active_statuses = [
-            DeliveryStatus.ASSIGNED,
-            DeliveryStatus.PICKED_UP,
-            DeliveryStatus.IN_TRANSIT,
-            DeliveryStatus.ARRIVED,
-        ]
-
         deliveries = Delivery.query.filter(
             Delivery.delivery_person_id == delivery_person_id,
-            Delivery.status.in_(active_statuses)
+            Delivery.status.in_(StaffService.get_active_delivery_statuses())
         ).options(
             joinedload(Delivery.order).joinedload(Order.order_items).joinedload(OrderItem.product),
             joinedload(Delivery.order).joinedload(Order.delivery_address),
@@ -1183,6 +1235,10 @@ class StaffService:
 
         order.status = OrderStatus.PREPARING
         order.updated_at = datetime.now(timezone.utc)
+        if delivery.delivery_person_id:
+            db.session.flush()
+            StaffService.sync_active_delivery_counters([delivery.delivery_person_id])
+
         db.session.commit()
 
         # Notify customer that order entered preparing stage.

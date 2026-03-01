@@ -72,6 +72,7 @@ const Delivery = () => {
     { value: 'arrived', label: t('ui.delivery.status_arrived', 'Arrived') },
     { value: 'delivered', label: t('ui.delivery.status_delivered') },
     { value: 'failed', label: t('ui.delivery.status_failed') },
+    { value: 'cancelled', label: t('ui.delivery.status_cancelled', 'Cancelled') },
     { value: 'returned', label: t('ui.delivery.status_returned') }
   ];
   const statusTransitions = {
@@ -83,6 +84,7 @@ const Delivery = () => {
     arrived: ['arrived', 'delivered', 'failed', 'returned'],
     delivered: ['delivered'],
     failed: ['failed'],
+    cancelled: ['cancelled'],
     returned: ['returned']
   };
 
@@ -127,6 +129,7 @@ const Delivery = () => {
     arrived: 'geekblue',
     delivered: 'green',
     failed: 'red',
+    cancelled: 'magenta',
     returned: 'volcano'
   };
 
@@ -140,6 +143,7 @@ const Delivery = () => {
       case 'arrived': return <EnvironmentOutlined />;
       case 'delivered': return <CheckCircleOutlined />;
       case 'failed': return <ExclamationCircleOutlined />;
+      case 'cancelled': return <ExclamationCircleOutlined />;
       case 'returned': return <ExclamationCircleOutlined />;
       default: return <ClockCircleOutlined />;
     }
@@ -394,6 +398,9 @@ const Delivery = () => {
   const completionRate = Number(summary.completion_rate || 0);
 
   const getDeliveryProgress = (status) => {
+    if (status === 'cancelled') {
+      return 100;
+    }
     const statusOrder = ['scheduled', 'pending', 'assigned', 'picked_up', 'in_transit', 'arrived', 'delivered'];
     const currentIndex = statusOrder.indexOf(status);
     return currentIndex >= 0 ? ((currentIndex + 1) / statusOrder.length) * 100 : 0;
@@ -447,7 +454,7 @@ const Delivery = () => {
             : t('ui.delivery.waiting_for_assignment'),
           timestamps.assigned
         ),
-        status: ['assigned', 'picked_up', 'in_transit', 'arrived', 'delivered'].includes(delivery.status) ? 'finish' : 'wait',
+        status: ['assigned', 'picked_up', 'in_transit', 'arrived', 'delivered'].includes(delivery.status) ? 'finish' : delivery.status === 'cancelled' ? 'error' : 'wait',
         icon: delivery.driver_name ? <CheckCircleOutlined /> : <ClockCircleOutlined />
       },
       {
@@ -456,7 +463,7 @@ const Delivery = () => {
           t('ui.delivery.driver_collected_package'),
           timestamps.picked_up
         ),
-        status: ['picked_up', 'in_transit', 'arrived', 'delivered'].includes(delivery.status) ? 'finish' : 'wait',
+        status: ['picked_up', 'in_transit', 'arrived', 'delivered'].includes(delivery.status) ? 'finish' : delivery.status === 'cancelled' ? 'error' : 'wait',
         icon: ['picked_up', 'in_transit', 'arrived', 'delivered'].includes(delivery.status) ? <CheckCircleOutlined /> : <ClockCircleOutlined />
       },
       {
@@ -465,7 +472,7 @@ const Delivery = () => {
           t('ui.delivery.package_on_way'),
           timestamps.in_transit || timestamps.arrived
         ),
-        status: ['in_transit', 'arrived', 'delivered'].includes(delivery.status) ? 'finish' : delivery.status === 'failed' ? 'error' : 'wait',
+        status: ['in_transit', 'arrived', 'delivered'].includes(delivery.status) ? 'finish' : ['failed', 'cancelled'].includes(delivery.status) ? 'error' : 'wait',
         icon: ['in_transit', 'arrived'].includes(delivery.status) ? <TruckOutlined /> : ['delivered'].includes(delivery.status) ? <CheckCircleOutlined /> : <ClockCircleOutlined />
       },
       {
@@ -475,11 +482,13 @@ const Delivery = () => {
             ? t('ui.delivery.package_delivered_success')
             : delivery.status === 'failed'
               ? t('ui.delivery.delivery_failed')
+              : delivery.status === 'cancelled'
+                ? t('ui.delivery.delivery_cancelled', 'Delivery cancelled')
               : t('ui.delivery.waiting_for_delivery'),
-          timestamps.delivered || timestamps.failed
+          timestamps.delivered || timestamps.failed || timestamps.cancelled
         ),
-        status: delivery.status === 'delivered' ? 'finish' : delivery.status === 'failed' ? 'error' : 'wait',
-        icon: delivery.status === 'delivered' ? <CheckCircleOutlined /> : delivery.status === 'failed' ? <ExclamationCircleOutlined /> : <ClockCircleOutlined />
+        status: delivery.status === 'delivered' ? 'finish' : ['failed', 'cancelled'].includes(delivery.status) ? 'error' : 'wait',
+        icon: delivery.status === 'delivered' ? <CheckCircleOutlined /> : ['failed', 'cancelled'].includes(delivery.status) ? <ExclamationCircleOutlined /> : <ClockCircleOutlined />
       }
     ];
   };
@@ -668,8 +677,8 @@ const Delivery = () => {
             <Divider>{t('ui.delivery.delivery_progress')}</Divider>
             <Progress
               percent={getDeliveryProgress(selectedDelivery.status)}
-              status={selectedDelivery.status === 'delivered' ? 'success' : selectedDelivery.status === 'failed' ? 'exception' : 'active'}
-              strokeColor={selectedDelivery.status === 'failed' ? '#ff4d4f' : '#52c41a'}
+              status={selectedDelivery.status === 'delivered' ? 'success' : ['failed', 'cancelled'].includes(selectedDelivery.status) ? 'exception' : 'active'}
+              strokeColor={['failed', 'cancelled'].includes(selectedDelivery.status) ? '#ff4d4f' : '#52c41a'}
             />
 
             <div style={{ marginTop: 16, textAlign: 'right' }}>
@@ -734,9 +743,9 @@ const Delivery = () => {
                 <p>
                   <strong>{t('ui.delivery.delivered_at', 'Delivered at')}:</strong> {formatDateTimeShort(selectedDelivery.actual_delivery_time)}
                 </p>
-              ) : selectedDelivery.status === 'failed' && selectedDelivery.updated_at ? (
+              ) : ['failed', 'cancelled'].includes(selectedDelivery.status) && selectedDelivery.updated_at ? (
                 <p>
-                  <strong>{t('ui.delivery.failed_at', 'Failed at')}:</strong> {formatDateTimeShort(selectedDelivery.updated_at)}
+                  <strong>{selectedDelivery.status === 'cancelled' ? t('ui.delivery.cancelled_at', 'Cancelled at') : t('ui.delivery.failed_at', 'Failed at')}:</strong> {formatDateTimeShort(selectedDelivery.updated_at)}
                 </p>
               ) : (
                 <p>

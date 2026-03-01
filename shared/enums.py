@@ -49,6 +49,7 @@ class DeliveryStatus(Enum):
     ARRIVED = 'arrived'
     DELIVERED = 'delivered'
     FAILED = 'failed'
+    CANCELLED = 'cancelled'
     RETURNED = 'returned'
 
 

@@ -2806,7 +2806,7 @@ def get_delivery_personnel():
         )
 
         return paginated_response(
-            items=[serialize_delivery_person_admin(person) for person in pagination.items],
+            items=_serialize_delivery_person_admin_items(pagination.items),
             page=page,
             per_page=per_page,
             total=pagination.total
@@ -9864,9 +9864,16 @@ def upload_file():
 # STAFF MANAGEMENT ENDPOINTS (Admin Panel - Phase 6)
 # ============================================================================
 
-def _serialize_staff_delivery_person_data(dp: DeliveryPerson) -> dict:
+def _serialize_staff_delivery_person_data(dp: DeliveryPerson, active_delivery_count=None) -> dict:
     """Serialize delivery person with extra staff/admin fields."""
-    data = serialize_delivery_person_admin(dp)
+    from business_app.services.staff_service import StaffService
+
+    if active_delivery_count is None:
+        active_delivery_count = StaffService.get_active_delivery_count(dp.user_id)
+    data = serialize_delivery_person_admin(
+        dp,
+        current_active_deliveries=active_delivery_count,
+    )
     data['user_id'] = dp.user_id
     data['employee_id'] = dp.employee_id
     data['vehicle_capacity_kg'] = dp.vehicle_capacity_kg
@@ -9874,13 +9881,30 @@ def _serialize_staff_delivery_person_data(dp: DeliveryPerson) -> dict:
     data['working_hours_end'] = dp.working_hours_end
     data['working_days'] = dp.working_days
     data['max_concurrent_deliveries'] = dp.max_concurrent_deliveries
-    data['current_active_deliveries'] = dp.current_active_deliveries
+    data['current_active_deliveries'] = active_delivery_count
     data['total_cash_collected'] = float(dp.total_cash_collected or 0)
     data['notifications_muted'] = dp.notifications_muted
     data['hire_date'] = dp.hire_date.isoformat() if dp.hire_date else None
     data['emergency_contact_name'] = dp.emergency_contact_name
     data['emergency_contact_phone'] = dp.emergency_contact_phone
     return data
+
+
+def _serialize_delivery_person_admin_items(delivery_people):
+    """Serialize delivery-person rows with live workload counts."""
+    from business_app.services.staff_service import StaffService
+
+    delivery_people = list(delivery_people or [])
+    active_counts = StaffService.get_active_delivery_counts(
+        [person.user_id for person in delivery_people]
+    )
+    return [
+        serialize_delivery_person_admin(
+            person,
+            current_active_deliveries=active_counts.get(person.user_id, 0),
+        )
+        for person in delivery_people
+    ]
 
 
 def _build_staff_order_info(delivery: Delivery) -> dict:
@@ -9961,7 +9985,18 @@ def get_staff_delivery_persons():
         query = query.order_by(DeliveryPerson.created_at.desc())
         pagination = query.paginate(page=page, per_page=per_page, error_out=False)
 
-        persons_data = [_serialize_staff_delivery_person_data(dp) for dp in pagination.items]
+        from business_app.services.staff_service import StaffService
+
+        active_counts = StaffService.get_active_delivery_counts(
+            [dp.user_id for dp in pagination.items]
+        )
+        persons_data = [
+            _serialize_staff_delivery_person_data(
+                dp,
+                active_delivery_count=active_counts.get(dp.user_id, 0),
+            )
+            for dp in pagination.items
+        ]
 
         # Summary stats
         total_drivers = DeliveryPerson.query.count()
@@ -10313,47 +10348,23 @@ def admin_reassign_delivery(delivery_id):
     try:
         data = request.get_json()
         new_person_id = data['new_delivery_person_id']
-
-        delivery = Delivery.query.get(delivery_id)
-        if not delivery:
+        existing_delivery = Delivery.query.get(delivery_id)
+        if not existing_delivery:
             return not_found_response(resource_type='Delivery')
 
-        old_person_id = delivery.delivery_person_id
-
-        # Decrement old person's active count
-        if old_person_id:
-            old_dp = DeliveryPerson.query.filter_by(user_id=old_person_id).first()
-            if old_dp:
-                old_dp.current_active_deliveries = max(
-                    (old_dp.current_active_deliveries or 1) - 1, 0
-                )
-
-        # Assign new person
-        new_dp = DeliveryPerson.query.filter_by(user_id=new_person_id).first()
-        if not new_dp:
-            return not_found_response(resource_type='DeliveryPerson')
-
-        max_concurrent = new_dp.max_concurrent_deliveries or 3
-        if new_dp.current_active_deliveries >= max_concurrent:
-            return validation_error_response(
-                f'Delivery person has reached max concurrent deliveries ({max_concurrent})'
+        old_person_id = existing_delivery.delivery_person_id
+        if old_person_id == new_person_id:
+            return success_response(
+                data={'delivery': existing_delivery.to_dict()},
+                message='Delivery is already assigned to this delivery person'
             )
 
-        delivery.delivery_person_id = new_person_id
-        delivery.updated_at = datetime.now(UTC)
-        new_dp.current_active_deliveries = (new_dp.current_active_deliveries or 0) + 1
-
-        # Create status history entry
-        history = DeliveryStatusHistory(
-            delivery_id=delivery.id,
-            old_status=delivery.status,
-            new_status=delivery.status,
-            changed_by=int(get_jwt_identity()),
-            changed_at=datetime.now(UTC),
-            notes=f'Reassigned from user {old_person_id} to user {new_person_id} by admin'
+        actor_id = int(get_jwt_identity())
+        delivery = AdminDeliveryService.reassign_delivery(
+            delivery_id=delivery_id,
+            new_person_id=new_person_id,
+            actor_id=actor_id,
         )
-        db.session.add(history)
-        db.session.commit()
 
         current_app.logger.info(
             f"Delivery {delivery_id} reassigned from {old_person_id} to {new_person_id}"
@@ -10383,6 +10394,8 @@ def admin_reassign_delivery(delivery_id):
             message='Delivery reassigned successfully'
         )
 
+    except (ValidationError, NotFoundError) as e:
+        return error_response(str(e), status_code=400)
     except Exception as e:
         current_app.logger.error(f"Admin reassign delivery error: {e}")
         return internal_error_response('Failed to reassign delivery')

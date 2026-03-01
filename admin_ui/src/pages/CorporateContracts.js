@@ -57,6 +57,7 @@ const buildContractPayload = (values) => ({
   currency: values.currency || 'UZS',
   notes: values.notes || '',
   is_active: values.is_active !== false,
+  is_loyalty_points_eligible: values.is_loyalty_points_eligible === true,
   bank_details: {
     account_number: values.account_number || '',
     bank_name: values.bank_name || '',
@@ -263,7 +264,8 @@ const contractBalanceQuery = useQuery(
     contractForm.setFieldsValue({
       status: 'active',
       currency: 'UZS',
-      is_active: true
+      is_active: true,
+      is_loyalty_points_eligible: false
     });
     setIsContractModalOpen(true);
   };
@@ -285,6 +287,7 @@ const contractBalanceQuery = useQuery(
       currency: selectedContract.currency || 'UZS',
       notes: selectedContract.notes || '',
       is_active: selectedContract.is_active !== false,
+      is_loyalty_points_eligible: selectedContract.is_loyalty_points_eligible === true,
       account_number: selectedContract.bank_details?.account_number || '',
       bank_name: selectedContract.bank_details?.bank_name || '',
       mfo: selectedContract.bank_details?.mfo || '',
@@ -471,6 +474,16 @@ const contractBalanceQuery = useQuery(
       render: (status) => (
         <Tag color={statusColors[status] || 'default'}>
           {status}
+        </Tag>
+      )
+    },
+    {
+      title: t('ui.corporate.loyalty_points', 'Loyalty'),
+      dataIndex: 'is_loyalty_points_eligible',
+      key: 'is_loyalty_points_eligible',
+      render: (value) => (
+        <Tag color={value ? 'green' : 'default'}>
+          {value ? t('ui.corporate.loyalty_eligible', 'Eligible') : t('ui.corporate.loyalty_ineligible', 'Not eligible')}
         </Tag>
       )
     },
@@ -677,6 +690,13 @@ const contractBalanceQuery = useQuery(
                   </Descriptions.Item>
                   <Descriptions.Item label={t('ui.corporate.account', 'Account')}>
                     {selectedContract.bank_details?.account_number || '-'}
+                  </Descriptions.Item>
+                  <Descriptions.Item label={t('ui.corporate.loyalty_points', 'Loyalty Points')}>
+                    <Tag color={selectedContract.is_loyalty_points_eligible ? 'green' : 'default'}>
+                      {selectedContract.is_loyalty_points_eligible
+                        ? t('ui.corporate.loyalty_eligible', 'Eligible')
+                        : t('ui.corporate.loyalty_ineligible', 'Not eligible')}
+                    </Tag>
                   </Descriptions.Item>
                 </Descriptions>
 
@@ -947,6 +967,10 @@ const contractBalanceQuery = useQuery(
 
           <Form.Item name="is_active" valuePropName="checked">
             <Checkbox>{t('ui.corporate.is_active', 'Contract is active')}</Checkbox>
+          </Form.Item>
+
+          <Form.Item name="is_loyalty_points_eligible" valuePropName="checked">
+            <Checkbox>{t('ui.corporate.loyalty_points_eligible', 'Eligible for loyalty points')}</Checkbox>
           </Form.Item>
 
           <div style={{ marginBottom: 16 }}>

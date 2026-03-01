@@ -30,6 +30,8 @@ class CorporateContractService:
     """Service for corporate contract pricing and prepayment ledgers."""
 
     LEGAL_ENTITY_TYPE = UserType.ENTITY.value
+    TRUE_VALUES = {"1", "true", "yes", "on"}
+    FALSE_VALUES = {"0", "false", "no", "off"}
 
     def _is_legal_entity_user(self, user: Optional[User]) -> bool:
         return bool(user and user.is_entity_user)
@@ -38,6 +40,24 @@ class CorporateContractService:
     def _translate(key: str, default: str, **kwargs) -> str:
         translated = get_translation(key, **kwargs)
         return default if translated == key else translated
+
+    @classmethod
+    def _normalize_bool(cls, value: Any, *, default: Optional[bool] = None) -> bool:
+        if value is None:
+            if default is None:
+                raise ValidationError("Boolean value is required")
+            return default
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in cls.TRUE_VALUES:
+                return True
+            if normalized in cls.FALSE_VALUES:
+                return False
+        if isinstance(value, (int, float)):
+            return bool(value)
+        raise ValidationError("Invalid boolean value")
 
     def validate_business_account_order(
         self,
@@ -430,6 +450,10 @@ class CorporateContractService:
             bank_details=payload.get("bank_details") or {},
             notes=payload.get("notes"),
             is_active=bool(payload.get("is_active", True)),
+            is_loyalty_points_eligible=self._normalize_bool(
+                payload.get("is_loyalty_points_eligible"),
+                default=False,
+            ),
             created_by_user_id=actor_user_id,
             updated_by_user_id=actor_user_id,
         )
@@ -457,6 +481,8 @@ class CorporateContractService:
                 raise ValidationError("Invalid contract status") from exc
         if "is_active" in payload:
             contract.is_active = bool(payload["is_active"])
+        if "is_loyalty_points_eligible" in payload:
+            contract.is_loyalty_points_eligible = self._normalize_bool(payload.get("is_loyalty_points_eligible"))
         if "notes" in payload:
             contract.notes = payload.get("notes")
         if "bank_details" in payload:
@@ -482,6 +508,33 @@ class CorporateContractService:
         self._validate_contract_price_overlaps(contract)
         db.session.flush()
         return contract
+
+    def get_loyalty_eligible_amount_for_order(self, order: Order) -> Decimal:
+        if not order:
+            raise ValidationError("Order is required")
+
+        order_items = list(getattr(order, "order_items", None) or [])
+        if not order_items:
+            return Decimal("0.00")
+
+        contract_ids = {item.contract_id for item in order_items if item.contract_id}
+        if not contract_ids:
+            return Decimal(str(order.total_amount or 0))
+
+        contract_flags = {
+            contract_id: is_eligible
+            for contract_id, is_eligible in db.session.query(
+                CorporateContract.id,
+                CorporateContract.is_loyalty_points_eligible,
+            ).filter(CorporateContract.id.in_(contract_ids)).all()
+        }
+
+        eligible_amount = Decimal("0.00")
+        for item in order_items:
+            if not item.contract_id or contract_flags.get(item.contract_id, False):
+                eligible_amount += Decimal(str(item.total_price or 0))
+
+        return eligible_amount
 
     def upsert_contract_prices(
         self,

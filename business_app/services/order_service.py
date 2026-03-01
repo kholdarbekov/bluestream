@@ -570,7 +570,7 @@ class OrderService:
                 if action == 'confirm':
                     self.update_order_status(order.id, OrderStatus.CONFIRMED, updated_by=actor_user_id)
                 elif action == 'cancel':
-                    self.cancel_order(order.id, user_id=actor_user_id, reason='Bulk cancellation')
+                    self.cancel_order(order.id, reason='Bulk cancellation', actor_user_id=actor_user_id)
                 elif action == 'mark_priority':
                     order.is_urgent = True
                     order.updated_at = datetime.now(timezone.utc)
@@ -769,7 +769,15 @@ class OrderService:
     
     @log_service_call(operation_type='order', track_performance=True)
     @log_business_event(event_type='cancelled', entity_type='order')
-    def cancel_order(self, order_id: int, user_id: int = None, reason: str = None) -> Order:
+    def cancel_order(
+        self,
+        order_id: int,
+        user_id: int = None,
+        reason: str = None,
+        *,
+        actor_user_id: int = None,
+        process_payment_refund: bool = True,
+    ) -> Order:
         """Cancel an order"""
         from business_app.utils.constants import PaymentMethod
         
@@ -783,6 +791,24 @@ class OrderService:
             except ValueError:
                 pass
         
+        delivery_status = None
+        if order.delivery and getattr(order.delivery, 'status', None) is not None:
+            delivery_status = order.delivery.status
+            if isinstance(delivery_status, str):
+                try:
+                    delivery_status = DeliveryStatus(delivery_status)
+                except ValueError:
+                    pass
+
+        if delivery_status in [
+            DeliveryStatus.PICKED_UP,
+            DeliveryStatus.IN_TRANSIT,
+            DeliveryStatus.ARRIVED,
+        ]:
+            raise ConflictError("Order cannot be cancelled while delivery is in transit")
+
+        actor_id = actor_user_id if actor_user_id is not None else user_id
+
         # Check if order can be cancelled
         if current_status in [OrderStatus.DELIVERED, OrderStatus.CANCELLED]:
             raise ConflictError("Order cannot be cancelled")
@@ -813,25 +839,29 @@ class OrderService:
                 logger.error(f"Error releasing inventory reservations for order {order_id}: {e}")
         
         # Cancel order
-        order = self.update_order_status(order_id, OrderStatus.CANCELLED, user_id, reason)
+        order = self.update_order_status(order_id, OrderStatus.CANCELLED, actor_id, reason)
 
         # Release reserved corporate prepayment units (if any).
         from business_app.services.corporate_contract_service import CorporateContractService
         CorporateContractService().release_for_order(
             order_id=order.id,
             reason=reason,
-            actor_user_id=user_id,
+            actor_user_id=actor_id,
         )
         db.session.commit()
         
         # Handle refund if payment was made
-        if order.payment and order.payment.status == PaymentStatus.COMPLETED:
+        if process_payment_refund and order.payment and order.payment.status == PaymentStatus.COMPLETED:
             from .payment_service import PaymentService
             payment_service = PaymentService()
             payment_service.process_refund(order.payment.id, order.total_amount, reason)
         
-        # Cancel delivery if assigned
-        if order.delivery:
+        # Cancel delivery if it is still awaiting route execution
+        if order.delivery and delivery_status in [
+            DeliveryStatus.SCHEDULED,
+            DeliveryStatus.PENDING,
+            DeliveryStatus.ASSIGNED,
+        ]:
             from .delivery_service import DeliveryService
             delivery_service = DeliveryService()
             delivery_service.cancel_delivery(order.delivery.id, reason)
@@ -1198,16 +1228,22 @@ class OrderService:
     def _process_loyalty_points_for_order(self, order: Order):
         """
         Process loyalty points for an order:
-        Award points based on order amount.
+        Award points based on the loyalty-eligible amount.
         """
         from .loyalty_service import LoyaltyService
+        from business_app.services.corporate_contract_service import CorporateContractService
         from business_app.utils.constants import LoyaltyActionType
         
         try:
             loyalty_service = LoyaltyService()
-            
-            # Award points for the purchase using program configuration and tier multipliers
-            points_earned = loyalty_service.calculate_points_for_purchase(order.user_id, int(order.total_amount))
+            eligible_amount = CorporateContractService().get_loyalty_eligible_amount_for_order(order)
+            if eligible_amount <= 0:
+                order.loyalty_points_earned = 0
+                logger.info(f"Skipping loyalty points for order {order.order_number}: no eligible amount")
+                return
+
+            # Contract-linked orders use the eligible line-item subtotal as the points basis.
+            points_earned = loyalty_service.calculate_points_for_purchase(order.user_id, int(eligible_amount))
             if points_earned > 0:
                 loyalty_service.award_points(
                     order.user_id, 
@@ -1219,6 +1255,8 @@ class OrderService:
                 # Update order with earned points for reference
                 order.loyalty_points_earned = points_earned
                 logger.info(f"Awarded {points_earned} points for order {order.order_number}")
+            else:
+                order.loyalty_points_earned = 0
                     
         except Exception as e:
             # Don't fail the order if loyalty processing fails

@@ -4,7 +4,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from business_app.models.delivery import Delivery
+from business_app.models.delivery import Delivery, DeliveryStatusHistory
 from business_app.models.user import UserAddress
 from business_app.services.delivery_service import DeliveryService
 from business_app.utils.constants import DeliveryStatus, DeliveryType
@@ -111,3 +111,24 @@ class TestDeliveryServiceBusinessRules:
     def test_calculate_delivery_fee_current_policy_is_free(self, delivery_service):
         assert delivery_service.calculate_delivery_fee(41.30, 69.24, order_total=10000) == 0
         assert delivery_service.calculate_delivery_fee(41.30, 69.24, order_total=100000) == 0
+
+    def test_cancel_delivery_marks_delivery_cancelled(self, delivery_service, order_with_address, db):
+        delivery = Delivery(
+            order_id=order_with_address.id,
+            status=DeliveryStatus.SCHEDULED,
+            scheduled_date=datetime.now(UTC),
+            scheduled_time_slot="09:00-12:00",
+        )
+        db.session.add(delivery)
+        db.session.commit()
+
+        cancelled = delivery_service.cancel_delivery(delivery.id, reason="Order cancelled by customer")
+
+        db.session.refresh(delivery)
+        history = DeliveryStatusHistory.query.filter_by(delivery_id=delivery.id).order_by(DeliveryStatusHistory.id.asc()).all()
+
+        assert cancelled.status == DeliveryStatus.CANCELLED
+        assert delivery.status == DeliveryStatus.CANCELLED
+        assert delivery.delivery_notes == "Order cancelled by customer"
+        assert history[-1].new_status == DeliveryStatus.CANCELLED
+        assert history[-1].notes == "Order cancelled by customer"

@@ -51,6 +51,7 @@ def test_admin_api_delegates_delivery_management_to_service_layer():
     assert "from business_app.services.admin_delivery_service import AdminDeliveryService" in text
     assert "AdminDeliveryService.list_deliveries(" in text
     assert "AdminDeliveryService.update_delivery(" in text
+    assert "AdminDeliveryService.reassign_delivery(" in text
     assert "def _serialize_admin_delivery(" not in text
     assert "def _get_admin_delivery_summary(" not in text
 
@@ -71,4 +72,5 @@ def test_admin_service_modules_exist_with_expected_entrypoints():
     assert "class AdminDeliveryService:" in delivery_text
     assert "def list_deliveries(" in delivery_text
     assert "def update_delivery(" in delivery_text
+    assert "def reassign_delivery(" in delivery_text
     assert "def serialize_delivery(" in delivery_text

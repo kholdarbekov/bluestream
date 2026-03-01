@@ -25,6 +25,7 @@ ACTIVE_DELIVERY_STATUSES = {
 TERMINAL_DELIVERY_STATUSES = {
     DeliveryStatus.DELIVERED,
     DeliveryStatus.FAILED,
+    DeliveryStatus.CANCELLED,
     DeliveryStatus.RETURNED,
 }
 
@@ -41,6 +42,7 @@ class AdminDeliveryService:
         "arrived": DeliveryStatus.ARRIVED,
         "delivered": DeliveryStatus.DELIVERED,
         "failed": DeliveryStatus.FAILED,
+        "cancelled": DeliveryStatus.CANCELLED,
         "returned": DeliveryStatus.RETURNED,
     }
 
@@ -74,6 +76,7 @@ class AdminDeliveryService:
         },
         DeliveryStatus.DELIVERED: set(),
         DeliveryStatus.FAILED: set(),
+        DeliveryStatus.CANCELLED: set(),
         DeliveryStatus.RETURNED: set(),
     }
 
@@ -158,6 +161,51 @@ class AdminDeliveryService:
             db.session.commit()
 
         return AdminDeliveryService.serialize_delivery(delivery)
+
+    @staticmethod
+    def reassign_delivery(delivery_id: int, new_person_id: int, actor_id: int) -> Delivery:
+        """Reassign a delivery to a different delivery person."""
+        delivery = Delivery.query.with_for_update().get(delivery_id)
+        if not delivery:
+            raise NotFoundError("Delivery not found")
+
+        old_person_id = delivery.delivery_person_id
+        if old_person_id == new_person_id:
+            return delivery
+
+        new_profile = (
+            DeliveryPerson.query.filter_by(user_id=new_person_id)
+            .with_for_update()
+            .first()
+        )
+        if not new_profile:
+            raise NotFoundError("Delivery person not found")
+
+        max_concurrent = new_profile.max_concurrent_deliveries or 3
+        active_delivery_count = StaffService.get_active_delivery_count(new_person_id)
+        if active_delivery_count >= max_concurrent:
+            raise ValidationError(
+                f"Delivery person has reached max concurrent deliveries ({max_concurrent})"
+            )
+
+        now = datetime.now(UTC)
+        delivery.delivery_person_id = new_person_id
+        delivery.updated_at = now
+
+        history = DeliveryStatusHistory(
+            delivery_id=delivery.id,
+            old_status=delivery.status,
+            new_status=delivery.status,
+            changed_by=actor_id,
+            changed_at=now,
+            notes=f"Reassigned from user {old_person_id} to user {new_person_id} by admin",
+        )
+        db.session.add(history)
+        db.session.flush()
+        StaffService.sync_active_delivery_counters([old_person_id, new_person_id])
+        db.session.commit()
+
+        return delivery
 
     @staticmethod
     def serialize_delivery(delivery: Delivery) -> Dict[str, Any]:
@@ -312,12 +360,7 @@ class AdminDeliveryService:
     def _release_driver_workload(delivery: Delivery) -> None:
         if not delivery.delivery_person_id:
             return
-
-        profile = DeliveryPerson.query.filter_by(user_id=delivery.delivery_person_id).first()
-        if not profile:
-            return
-
-        profile.current_active_deliveries = max((profile.current_active_deliveries or 1) - 1, 0)
+        StaffService.sync_active_delivery_counters([delivery.delivery_person_id])
 
     @staticmethod
     def _build_filtered_query(
@@ -386,8 +429,9 @@ class AdminDeliveryService:
         )
         delivered = counts.get(DeliveryStatus.DELIVERED.value, 0)
         failed = counts.get(DeliveryStatus.FAILED.value, 0)
+        cancelled = counts.get(DeliveryStatus.CANCELLED.value, 0)
         returned = counts.get(DeliveryStatus.RETURNED.value, 0)
-        terminal_total = delivered + failed + returned
+        terminal_total = delivered + failed + cancelled + returned
 
         unassigned_count = (
             query.filter(Delivery.delivery_person_id.is_(None))
@@ -406,6 +450,7 @@ class AdminDeliveryService:
             "active_deliveries": active,
             "completed_deliveries": delivered,
             "failed_deliveries": failed,
+            "cancelled_deliveries": cancelled,
             "returned_deliveries": returned,
             "unassigned_deliveries": unassigned_count,
             "completion_rate": round((delivered / terminal_total) * 100, 2) if terminal_total else 0.0,

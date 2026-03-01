@@ -626,7 +626,7 @@ def get_status_history(delivery) -> List[Dict[str, Any]]:
     
     current_status = delivery.status.value if delivery.status else 'created'
     
-    if current_status in ['assigned', 'picked_up', 'in_transit', 'delivered', 'failed']:
+    if current_status in ['assigned', 'picked_up', 'in_transit', 'delivered', 'failed', 'cancelled']:
         history.append({
             'status': 'assigned',
             'timestamp': getattr(delivery, 'assigned_at', delivery.updated_at).isoformat() if hasattr(delivery, 'assigned_at') else None,
@@ -658,6 +658,12 @@ def get_status_history(delivery) -> List[Dict[str, Any]]:
             'status': 'failed',
             'timestamp': getattr(delivery, 'failed_at', delivery.updated_at).isoformat() if hasattr(delivery, 'failed_at') else None,
             'description': f'Delivery failed: {getattr(delivery, "failed_delivery_reason", "Unknown reason")}'
+        })
+    elif current_status == 'cancelled':
+        history.append({
+            'status': 'cancelled',
+            'timestamp': delivery.updated_at.isoformat() if delivery.updated_at else None,
+            'description': getattr(delivery, 'delivery_notes', None) or 'Delivery cancelled because the order was cancelled'
         })
     
     return history

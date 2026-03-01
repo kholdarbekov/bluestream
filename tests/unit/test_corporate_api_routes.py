@@ -12,11 +12,12 @@ from business_app.utils.password_security import hash_password
 
 
 class _ContractStub:
-    def __init__(self, contract_id: int = 11):
+    def __init__(self, contract_id: int = 11, *, is_loyalty_points_eligible: bool = False):
         self.id = contract_id
         self.contract_number = "CTR-0011"
         self.name = "Corporate 11"
         self.currency = "UZS"
+        self.is_loyalty_points_eligible = is_loyalty_points_eligible
         self.prepayment_account = None
         self.product_prices = []
 
@@ -26,6 +27,7 @@ class _ContractStub:
             "contract_number": self.contract_number,
             "name": self.name,
             "currency": self.currency,
+            "is_loyalty_points_eligible": self.is_loyalty_points_eligible,
         }
 
 
@@ -85,7 +87,63 @@ def test_admin_corporate_contract_list_route_delegates_to_service(
     payload = response.get_json()
     assert payload["success"] is True
     assert payload["data"]["items"][0]["contract_number"] == "CTR-0011"
+    assert payload["data"]["items"][0]["is_loyalty_points_eligible"] is False
     service.list_contracts.assert_called_once()
+
+
+def test_admin_create_corporate_contract_route_forwards_loyalty_eligibility(
+    client,
+    app,
+    admin_user,
+    monkeypatch,
+):
+    stub_contract = _ContractStub(contract_id=19, is_loyalty_points_eligible=True)
+    service = Mock()
+    service.create_contract.return_value = stub_contract
+    monkeypatch.setattr("business_app.api.admin.get_corporate_contract_service", lambda: service)
+
+    response = client.post(
+        "/api/v1/admin/corporate/contracts",
+        headers=_admin_headers(app, admin_user.id),
+        json={
+            "user_id": 77,
+            "contract_number": "CTR-0019",
+            "name": "Contract 19",
+            "is_loyalty_points_eligible": True,
+        },
+    )
+
+    assert response.status_code == 201
+    payload = response.get_json()
+    assert payload["success"] is True
+    assert payload["data"]["contract"]["is_loyalty_points_eligible"] is True
+    service.create_contract.assert_called_once()
+    assert service.create_contract.call_args.args[0]["is_loyalty_points_eligible"] is True
+
+
+def test_admin_update_corporate_contract_route_forwards_loyalty_eligibility(
+    client,
+    app,
+    admin_user,
+    monkeypatch,
+):
+    stub_contract = _ContractStub(contract_id=23, is_loyalty_points_eligible=False)
+    service = Mock()
+    service.update_contract.return_value = stub_contract
+    monkeypatch.setattr("business_app.api.admin.get_corporate_contract_service", lambda: service)
+
+    response = client.put(
+        "/api/v1/admin/corporate/contracts/23",
+        headers=_admin_headers(app, admin_user.id),
+        json={"is_loyalty_points_eligible": False},
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["success"] is True
+    assert payload["data"]["contract"]["is_loyalty_points_eligible"] is False
+    service.update_contract.assert_called_once()
+    assert service.update_contract.call_args.kwargs["payload"]["is_loyalty_points_eligible"] is False
 
 
 def test_admin_corporate_topup_route_delegates_to_service(

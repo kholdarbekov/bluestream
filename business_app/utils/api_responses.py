@@ -238,12 +238,12 @@ def forbidden_response(message: str = 'Access forbidden'):
     return error_response(message=message, status_code=403)
 
 
-def validation_error_response(errors: Union[List[str], Dict[str, Any], str]):
+def validation_error_response(*args, **kwargs):
     """
     Create a 400 Bad Request response for validation errors
 
     Args:
-        errors: Validation error details
+        errors: Validation error details. Accepts legacy positional or keyword forms.
 
     Returns:
         Flask response tuple (json, 400)
@@ -255,6 +255,15 @@ def validation_error_response(errors: Union[List[str], Dict[str, Any], str]):
         except ValidationError as e:
             return validation_error_response(e.errors())
     """
+    errors = kwargs.pop('errors', None)
+    if args:
+        if errors is None:
+            errors = args[0]
+        elif not errors:
+            errors = args[0]
+    if errors is None:
+        errors = 'Validation failed'
+
     error_list = []
 
     if isinstance(errors, list):

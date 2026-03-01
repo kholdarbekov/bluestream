@@ -132,6 +132,10 @@ class OperatorKeyboards:
             [InlineKeyboardButton(
                 f"\U0001f4b3 {i18n.get('staff.operator.payment_click', language)}",
                 callback_data="staff_op_pay_click"
+            )],
+            [InlineKeyboardButton(
+                f"\U0001f3e6 {i18n.get('staff.operator.payment_business_account', language)}",
+                callback_data="staff_op_pay_business_account"
             )]
         ])
 

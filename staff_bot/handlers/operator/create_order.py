@@ -303,7 +303,12 @@ class CreateOrderHandler(BaseHandler):
 
         try:
             # Parse: staff_op_pay_{method}
-            method = query.data.split('_')[-1]
+            prefix = "staff_op_pay_"
+            if not query.data.startswith(prefix):
+                await query.answer(i18n.get('staff.error_occurred', language), show_alert=True)
+                return SELECT_PAYMENT
+
+            method = query.data[len(prefix):]
             context.user_data['new_order']['payment_method'] = method
 
             # Ask for delivery notes

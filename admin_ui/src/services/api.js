@@ -1,5 +1,6 @@
 import axios from 'axios';
 import toast from 'react-hot-toast';
+import { extractApiErrorMessage } from '../utils/apiError';
 
 // Create axios instance with cookie support
 console.log('API URL:', process.env.REACT_APP_API_URL);
@@ -85,7 +86,7 @@ api.interceptors.response.use(
     return response;
   },
   async (error) => {
-    const message = error.response?.data?.message || error.message || 'An error occurred';
+    const message = extractApiErrorMessage(error, 'An error occurred');
 
     // Handle CSRF token errors (max 3 retries)
     if (error.response?.status === 400 &&

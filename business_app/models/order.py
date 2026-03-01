@@ -165,6 +165,8 @@ class OrderItem(db.Model):
     id = Column(Integer, primary_key=True)
     order_id = Column(Integer, ForeignKey('orders.id'), nullable=False, index=True)
     product_id = Column(Integer, ForeignKey('products.id'), nullable=False, index=True)
+    contract_id = Column(Integer, ForeignKey('corporate_contracts.id'), nullable=True, index=True)
+    contract_product_price_id = Column(Integer, ForeignKey('corporate_contract_product_prices.id'), nullable=True, index=True)
     quantity = Column(Integer, nullable=False)
     unit_price = Column(Numeric(precision=10, scale=2), nullable=False)
     discount_amount = Column(Numeric(precision=10, scale=2), default=Decimal('0.00'))
@@ -173,6 +175,8 @@ class OrderItem(db.Model):
     order = relationship('Order', back_populates='order_items')
     # Removed back_populates since Product model doesn't have order_items relationship
     product = relationship('Product')
+    contract = relationship('CorporateContract')
+    contract_product_price = relationship('CorporateContractProductPrice')
     
     def calculate_total(self):
         """Calculate total price for this item"""
@@ -183,6 +187,8 @@ class OrderItem(db.Model):
         return {
             'id': self.id,
             'product_id': self.product_id,
+            'contract_id': self.contract_id,
+            'contract_product_price_id': self.contract_product_price_id,
             'quantity': self.quantity,
             'unit_price': self.unit_price,
             'discount_amount': self.discount_amount,
@@ -226,3 +232,8 @@ class OrderStatusHistory(db.Model, TimestampMixin):
                 'role': self.changed_by_user.role.value
             } if self.changed_by_user else None
         }
+
+
+# Ensure related corporate models are registered before SQLAlchemy configures
+# OrderItem relationship targets in app startup paths that import order models first.
+from business_app.models.corporate import CorporateContract, CorporateContractProductPrice  # noqa: E402,F401

@@ -42,6 +42,20 @@ import AddressMapPicker from '../components/AddressMapPicker';
 import { formatLocalDate, formatLocaleDateTime } from '../utils/dateUtils';
 
 const { Option } = Select;
+const USER_TYPE_OPTIONS = [
+  { value: 'individual', labelKey: 'ui.users.user_type_individual', fallback: 'Individual' },
+  { value: 'entity', labelKey: 'ui.users.user_type_entity', fallback: 'Entity' }
+];
+
+const getUserTypeMeta = (t, userType) => {
+  if (userType === 'entity') {
+    return { color: 'gold', label: t('ui.users.user_type_entity', 'Entity') };
+  }
+  if (userType === 'staff') {
+    return { color: 'blue', label: t('ui.users.user_type_staff', 'Staff') };
+  }
+  return { color: 'default', label: t('ui.users.user_type_individual', 'Individual') };
+};
 
 const Users = () => {
   // Load users namespace for ui.users.* keys
@@ -50,6 +64,7 @@ const Users = () => {
   const [statusFilter, setStatusFilter] = useState('');
   const [registrationMethodFilter, setRegistrationMethodFilter] = useState('');
   const [selectedUser, setSelectedUser] = useState(null);
+  const [editingUser, setEditingUser] = useState(null);
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [isCreateModalVisible, setIsCreateModalVisible] = useState(false);
   const [isAddressModalVisible, setIsAddressModalVisible] = useState(false);
@@ -62,8 +77,11 @@ const Users = () => {
   const responsive = useResponsive();
   const [createForm] = Form.useForm();
   const [addressForm] = Form.useForm();
+  const selectedUserType = Form.useWatch('user_type', createForm);
+  const isEditingStaffUser = editingUser?.user_type === 'staff';
 
   const queryClient = useQueryClient();
+  const selectedUserTypeMeta = getUserTypeMeta(t, selectedUser?.user_type);
 
   // Fetch users
   const { data, isLoading } = useQuery(
@@ -106,6 +124,27 @@ const Users = () => {
       },
       onError: (error) => {
         const errorMessage = error.response?.data?.message || t('ui.users.user_create_failed', 'Failed to create user');
+        message.error(errorMessage);
+      }
+    }
+  );
+
+  const editUserMutation = useMutation(
+    ({ userId, userData }) => adminService.updateUser(userId, userData),
+    {
+      onSuccess: (response) => {
+        const updatedUser = response?.data?.user || null;
+        message.success(t('ui.users.user_updated_success', 'User updated successfully'));
+        setIsCreateModalVisible(false);
+        setEditingUser(null);
+        createForm.resetFields();
+        queryClient.invalidateQueries('users');
+        if (updatedUser && selectedUser?.id === updatedUser.id) {
+          setSelectedUser(updatedUser);
+        }
+      },
+      onError: (error) => {
+        const errorMessage = error.response?.data?.message || t('ui.users.user_update_failed', 'Failed to update user');
         message.error(errorMessage);
       }
     }
@@ -355,6 +394,9 @@ const Users = () => {
                 {responsive.isMobileDevice ? 'TG' : 'Telegram'}
               </Tag>
             )}
+            <Tag color={getUserTypeMeta(t, record.user_type).color} size="small">
+              {getUserTypeMeta(t, record.user_type).label}
+            </Tag>
             {record.is_verified && (
               <CheckCircleOutlined
                 style={{ color: '#52c41a' }}
@@ -491,6 +533,11 @@ const Users = () => {
                 onClick: () => handleViewUser(record)
               },
               {
+                key: 'edit',
+                label: t('ui.users.edit_user', 'Edit User'),
+                onClick: () => handleEditUser(record)
+              },
+              {
                 key: 'activate',
                 label: t('ui.users.activate'),
                 disabled: record.status === 'active',
@@ -537,6 +584,39 @@ const Users = () => {
     setIsModalVisible(true);
     setUserAddresses([]);
     fetchUserAddresses(user.id);
+  };
+
+  const handleEditUser = (user) => {
+    setEditingUser(user);
+    setIsCreateModalVisible(true);
+    createForm.setFieldsValue({
+      first_name: user.first_name || '',
+      last_name: user.last_name || '',
+      phone: user.phone || '',
+      email: user.email || '',
+      user_type: user.user_type || 'individual',
+      company_name: user.company_name || '',
+      tax_id: user.tax_id || ''
+    });
+  };
+
+  const handleCreateOrEditSubmit = (values) => {
+    const payload = {
+      ...values,
+      user_type: values.user_type || (editingUser?.user_type || 'individual')
+    };
+
+    if (payload.user_type !== 'entity') {
+      payload.company_name = '';
+      payload.tax_id = '';
+    }
+
+    if (editingUser) {
+      editUserMutation.mutate({ userId: editingUser.id, userData: payload });
+      return;
+    }
+
+    createUserMutation.mutate(payload);
   };
 
   const handleStatusChange = (userId, status) => {
@@ -659,7 +739,12 @@ const Users = () => {
               <Button
                 type="primary"
                 icon={<PlusOutlined />}
-                onClick={() => setIsCreateModalVisible(true)}
+                onClick={() => {
+                  setEditingUser(null);
+                  createForm.resetFields();
+                  createForm.setFieldsValue({ user_type: 'individual' });
+                  setIsCreateModalVisible(true);
+                }}
                 style={{
                   minHeight: responsive.isTouchDevice ? '40px' : '32px'
                 }}
@@ -751,6 +836,22 @@ const Users = () => {
                   <div style={{ marginBottom: 8 }}>
                     <strong>{t('ui.users.phone')}:</strong> {selectedUser.phone || t('ui.users.na')}
                   </div>
+                  {(selectedUser.company_name || selectedUser.user_type || selectedUser.tax_id) && (
+                    <>
+                      <div style={{ marginBottom: 8 }}>
+                        <strong>{t('ui.users.company_name', 'Company Name')}:</strong> {selectedUser.company_name || t('ui.users.na')}
+                      </div>
+                      <div style={{ marginBottom: 8 }}>
+                        <strong>{t('ui.users.user_type', 'User Type')}:</strong>
+                        <Tag color={selectedUserTypeMeta.color} style={{ marginLeft: 8 }}>
+                          {selectedUserTypeMeta.label}
+                        </Tag>
+                      </div>
+                      <div style={{ marginBottom: 8 }}>
+                        <strong>{t('ui.users.tax_id', 'Tax ID')}:</strong> {selectedUser.tax_id || t('ui.users.na')}
+                      </div>
+                    </>
+                  )}
                 </Col>
                 <Col xs={24} sm={12}>
                   <div style={{ marginBottom: 8 }}>
@@ -1158,15 +1259,16 @@ const Users = () => {
 
       {/* Create User Modal */}
       <Modal
-        title={t('ui.users.create_new_user', 'Create New User')}
+        title={editingUser ? t('ui.users.edit_user', 'Edit User') : t('ui.users.create_new_user', 'Create New User')}
         open={isCreateModalVisible}
         onCancel={() => {
           setIsCreateModalVisible(false);
+          setEditingUser(null);
           createForm.resetFields();
         }}
         onOk={() => createForm.submit()}
-        confirmLoading={createUserMutation.isLoading}
-        okText={t('ui.users.create', 'Create')}
+        confirmLoading={createUserMutation.isLoading || editUserMutation.isLoading}
+        okText={editingUser ? t('ui.common.save', 'Save') : t('ui.users.create', 'Create')}
         cancelText={t('ui.common.cancel', 'Cancel')}
         width={responsive.isMobileDevice ? '95%' : 500}
         style={{
@@ -1177,7 +1279,8 @@ const Users = () => {
         <Form
           form={createForm}
           layout="vertical"
-          onFinish={(values) => createUserMutation.mutate(values)}
+          initialValues={{ user_type: 'individual' }}
+          onFinish={handleCreateOrEditSubmit}
           style={{ marginTop: 16 }}
         >
           <Row gutter={16}>
@@ -1225,6 +1328,85 @@ const Users = () => {
           >
             <Input placeholder={t('ui.users.enter_email_optional', 'Enter email (optional)')} />
           </Form.Item>
+
+          <Row gutter={16}>
+            <Col xs={24} sm={12}>
+              <Form.Item
+                name="user_type"
+                label={t('ui.users.user_type', 'User Type')}
+              >
+                <Select
+                  allowClear={!isEditingStaffUser}
+                  disabled={isEditingStaffUser}
+                  placeholder={t('ui.users.select_user_type', 'Select user type')}
+                >
+                  {(isEditingStaffUser
+                    ? [{ value: 'staff', labelKey: 'ui.users.user_type_staff', fallback: 'Staff' }]
+                    : USER_TYPE_OPTIONS
+                  ).map((option) => (
+                    <Option key={option.value} value={option.value}>
+                      {t(option.labelKey, option.fallback)}
+                    </Option>
+                  ))}
+                </Select>
+              </Form.Item>
+            </Col>
+            <Col xs={24} sm={12}>
+              <Form.Item
+                name="company_name"
+                label={t('ui.users.company_name', 'Company Name')}
+                rules={[
+                  {
+                    validator: (_, value) => {
+                      if (selectedUserType === 'entity' && !value?.trim()) {
+                        return Promise.reject(new Error(t('ui.users.company_name_required', 'Company name is required for entity users')));
+                      }
+                      return Promise.resolve();
+                    }
+                  }
+                ]}
+              >
+                <Input placeholder={t('ui.users.enter_company_name_optional', 'Enter company name (optional)')} />
+              </Form.Item>
+            </Col>
+          </Row>
+
+          <Form.Item
+            name="tax_id"
+            label={t('ui.users.tax_id', 'Tax ID')}
+            normalize={(value) => (typeof value === 'string' ? value.toUpperCase() : value)}
+            rules={[
+              {
+                validator: (_, value) => {
+                  if (!value) {
+                    return Promise.resolve();
+                  }
+                  if (/^[A-Z0-9-]{5,20}$/.test(value)) {
+                    return Promise.resolve();
+                  }
+                  return Promise.reject(new Error(t('ui.users.invalid_tax_id', 'Use 5-20 uppercase letters, digits, or dashes')));
+                }
+              }
+            ]}
+          >
+            <Input placeholder={t('ui.users.enter_tax_id_optional', 'Enter tax ID (optional)')} />
+          </Form.Item>
+
+          {selectedUserType === 'entity' && (
+            <div style={{
+              background: '#e6f4ff',
+              border: '1px solid #91caff',
+              borderRadius: 6,
+              padding: 12,
+              marginBottom: 16
+            }}>
+              <strong>{t('ui.users.entity_client', 'Entity client')}:</strong>{' '}
+              {t(
+                'ui.users.entity_client_note',
+                'Users created with user type \"Entity\" become selectable in the Corporate Contracts screen.'
+              )}
+            </div>
+          )}
 
           <Form.Item
             name="notes"

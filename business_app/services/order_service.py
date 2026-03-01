@@ -3,6 +3,7 @@ Order service for the Water Business Platform
 """
 import logging
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from typing import List, Dict, Any, Optional, Tuple
 from flask import current_app
 from sqlalchemy import and_, desc, func, or_
@@ -73,7 +74,7 @@ class OrderService:
         
         # Validate and calculate order items
         items_data = order_data['items']
-        order_items, subtotal = self._process_order_items(items_data)
+        order_items, subtotal = self._process_order_items(items_data, user_id=user_id)
         
         # Calculate delivery fee
         delivery_address = order_data['delivery_address']
@@ -97,8 +98,15 @@ class OrderService:
                 'click': PaymentMethod.CLICK,
                 'card': PaymentMethod.CARD,
                 'loyalty_points': PaymentMethod.LOYALTY_POINTS,
+                'business_account': PaymentMethod.BUSINESS_ACCOUNT,
             }
             payment_method = payment_method_map.get(payment_method_str)
+            if payment_method == PaymentMethod.BUSINESS_ACCOUNT:
+                from business_app.services.corporate_contract_service import CorporateContractService
+                CorporateContractService().validate_business_account_order(
+                    user=user,
+                    order_items=order_items,
+                )
 
         # Create order
         order_source = order_data.get('order_source', 'web')
@@ -126,6 +134,8 @@ class OrderService:
             order_item = OrderItem(
                 order_id=order.id,
                 product_id=item_data['product_id'],
+                contract_id=item_data.get('contract_id'),
+                contract_product_price_id=item_data.get('contract_product_price_id'),
                 quantity=item_data['quantity'],
                 unit_price=item_data['unit_price'],  # Use current price at order time
                 total_price=item_data['total_price']
@@ -167,7 +177,16 @@ class OrderService:
                 }
             )
             logger.info(f"CREATE ORDER: FINISHED")
+
+            # Reserve prepayment bottle units for corporate contracts.
+            from business_app.services.corporate_contract_service import CorporateContractService
+            CorporateContractService().reserve_for_order(order.id)
+            db.session.commit()
             
+        except ValidationError:
+            db.session.delete(order)
+            db.session.commit()
+            raise
         except Exception as e:
             # If reservation fails, cancel the order
             logger.error(f"Failed to reserve inventory for order {order.id}: {e}")
@@ -795,6 +814,15 @@ class OrderService:
         
         # Cancel order
         order = self.update_order_status(order_id, OrderStatus.CANCELLED, user_id, reason)
+
+        # Release reserved corporate prepayment units (if any).
+        from business_app.services.corporate_contract_service import CorporateContractService
+        CorporateContractService().release_for_order(
+            order_id=order.id,
+            reason=reason,
+            actor_user_id=user_id,
+        )
+        db.session.commit()
         
         # Handle refund if payment was made
         if order.payment and order.payment.status == PaymentStatus.COMPLETED:
@@ -954,10 +982,15 @@ class OrderService:
             if field not in address:
                 raise ValidationError(f"Missing required address field: {field}")
     
-    def _process_order_items(self, items_data: List[Dict[str, Any]], order_id: Optional[int] = None) -> Tuple[List[Dict[str, Any]], int]:
+    def _process_order_items(
+        self,
+        items_data: List[Dict[str, Any]],
+        user_id: int,
+        order_id: Optional[int] = None,
+    ) -> Tuple[List[Dict[str, Any]], Decimal]:
         """Process and validate order items with comprehensive inventory checks"""
         processed_items = []
-        subtotal = 0
+        subtotal = Decimal("0.00")
         
         # Validate basic item structure
         for item in items_data:
@@ -988,6 +1021,8 @@ class OrderService:
             raise ValidationError(f"Inventory check failed: {'; '.join(unavailable_items)}")
         
         # Process items and calculate pricing
+        from business_app.services.corporate_contract_service import CorporateContractService
+        corporate_service = CorporateContractService()
         for item in items_data:
             product: Product = Product.query.get(item['product_id'])
             if not product:
@@ -998,12 +1033,21 @@ class OrderService:
             
             quantity = int(item['quantity'])
             
-            # Get current price (may include user-specific pricing in the future)
-            unit_price = product.calculate_price(quantity=quantity)
-            total_price = unit_price * quantity
+            fallback_price = Decimal(str(product.calculate_price(quantity=quantity)))
+            resolution = corporate_service.resolve_contract_pricing_for_user_product(
+                user_id=user_id,
+                product_id=product.id,
+                fallback_price=fallback_price,
+            )
+            unit_price = Decimal(str(resolution['unit_price']))
+            total_price = Decimal(str(unit_price)) * Decimal(str(quantity))
             
             processed_items.append({
                 'product_id': product.id,
+                'contract_id': resolution['contract'].id if resolution['contract'] else None,
+                'contract_product_price_id': (
+                    resolution['contract_price_row'].id if resolution['contract_price_row'] else None
+                ),
                 'quantity': quantity,
                 'unit_price': unit_price,
                 'total_price': total_price,
@@ -1142,6 +1186,14 @@ class OrderService:
                 
             except Exception as e:
                 logger.error(f"Failed to process loyalty triggers for delivered order {order.id}: {e}")
+
+            # Consume reserved corporate prepayment units on successful delivery.
+            from business_app.services.corporate_contract_service import CorporateContractService
+            CorporateContractService().consume_for_order(
+                order_id=order.id,
+                delivery_id=order.delivery.id if order.delivery else None,
+            )
+            db.session.commit()
     
     def _process_loyalty_points_for_order(self, order: Order):
         """

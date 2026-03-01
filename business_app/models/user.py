@@ -5,7 +5,8 @@ from sqlalchemy.orm import relationship, backref
 from flask_sqlalchemy import SQLAlchemy
 from business_app import db
 from business_app.models import TimestampMixin
-from business_app.utils.constants import UserRole, UserStatus, UserGender
+from business_app.utils.constants import UserRole, UserStatus, UserGender, UserType
+from business_app.utils.user_types import is_entity_user_type, is_staff_user_type, normalize_user_type
 from shared.constants import DISPLAY_TIMEZONE
 from shared.validators import (
     validate_password_strength, validate_email, sanitize_user_input,
@@ -37,10 +38,16 @@ class User(db.Model, TimestampMixin):
     sms_notifications = Column(Boolean, default=True)
     push_notifications = Column(Boolean, default=True)
     
-    # business account fields
+    # actor classification + legal entity metadata
+    user_type = Column(
+        Enum(UserType, name='user_type', values_callable=lambda x: [e.value for e in x]),
+        nullable=False,
+        default=UserType.INDIVIDUAL,
+        server_default=UserType.INDIVIDUAL.value,
+        index=True,
+    )
     company_name = Column(String(200), nullable=True)
     tax_id = Column(String(50), nullable=True)
-    business_type = Column(String(50), nullable=True)
 
     last_login = Column(DateTime(timezone=True), nullable=True)
     failed_login_attempts = Column(Integer, default=0)
@@ -102,6 +109,19 @@ class User(db.Model, TimestampMixin):
         """Check if user has admin role"""
         return self.role == UserRole.ADMIN if isinstance(self.role, UserRole) else self.role == UserRole.ADMIN.value
 
+    @property
+    def normalized_user_type(self) -> str:
+        """Get canonical user type with fallback for partially-migrated objects/tests."""
+        return normalize_user_type(self.user_type, role=self.role, staff_roles=self.staff_roles)
+
+    @property
+    def is_staff_user(self) -> bool:
+        return is_staff_user_type(self.user_type, role=self.role, staff_roles=self.staff_roles)
+
+    @property
+    def is_entity_user(self) -> bool:
+        return is_entity_user_type(self.user_type, role=self.role, staff_roles=self.staff_roles)
+
     def validate_user_data(self):
         """Validate all user data before saving"""
         errors = []
@@ -134,6 +154,14 @@ class User(db.Model, TimestampMixin):
             except ValueError:
                 valid_statuses = [s.value for s in UserStatus]
                 errors.append(f"Status must be one of: {', '.join(valid_statuses)}")
+
+        # Validate user type
+        if self.user_type and not isinstance(self.user_type, UserType):
+            try:
+                self.user_type = UserType(self.user_type) if isinstance(self.user_type, str) else self.user_type
+            except ValueError:
+                valid_user_types = [u.value for u in UserType]
+                errors.append(f"User type must be one of: {', '.join(valid_user_types)}")
 
         # Validate names if provided (shared sanitizer)
         if self.first_name:
@@ -185,6 +213,9 @@ class User(db.Model, TimestampMixin):
             'telegram_id': self.telegram_id,
             'registration_source': self.registration_source,
             'registration_method': self.registration_method,
+            'user_type': self.normalized_user_type,
+            'company_name': self.company_name,
+            'tax_id': self.tax_id,
             'telegram_username': self.telegram_username,
             'is_bot_active': self.is_bot_active,
             'bot_state': self.bot_state,

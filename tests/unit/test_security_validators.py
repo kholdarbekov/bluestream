@@ -67,9 +67,11 @@ class TestSecurityValidatorCore:
         assert SecurityValidator.validate_tax_id("ab-123")[0] is False
         assert SecurityValidator.validate_tax_id("AB-12345")[0] is True
 
-        assert SecurityValidator.validate_business_type("") == (True, "Business type is optional")
-        assert SecurityValidator.validate_business_type("corporation")[0] is True
-        assert SecurityValidator.validate_business_type("invalid-type")[0] is False
+        assert SecurityValidator.validate_user_type("") == (True, "User type is optional")
+        assert SecurityValidator.validate_user_type("individual")[0] is True
+        assert SecurityValidator.validate_user_type("entity")[0] is True
+        assert SecurityValidator.validate_user_type("staff")[0] is True
+        assert SecurityValidator.validate_user_type("invalid-type")[0] is False
 
     def test_sanitize_hash_token_and_hash_validation(self):
         sanitized = SecurityValidator.sanitize_user_input(" <script>alert(1)</script> ")
@@ -105,7 +107,7 @@ class TestSecurityValidatorCore:
             "status": "wrong",
             "telegram_id": "bad",
             "tax_id": "bad lower",
-            "business_type": "wrong",
+            "user_type": "wrong",
             "first_name": "  Jane<script> ",
             "company_name": "Acme Inc",
         }

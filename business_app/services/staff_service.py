@@ -18,7 +18,7 @@ from business_app.models.delivery import Delivery, DeliveryPerson, DeliveryStatu
 from business_app.models.staff import StaffActivityLog
 from business_app.utils.exceptions import ValidationError, NotFoundError, ForbiddenError, ConflictError
 from business_app.utils.constants import (
-    UserRole, UserStatus, OrderStatus, DeliveryStatus, PaymentMethod
+    UserRole, UserStatus, OrderStatus, DeliveryStatus, PaymentMethod, UserType
 )
 from shared.staff_constants import (
     STAFF_BOT_ROLES, STAFF_ACTIONS, DELIVERY_STATUS_TRANSITIONS,
@@ -114,6 +114,7 @@ class StaffService:
                     phone=formatted_phone,
                     email=(staff_data.get('email') or '').strip() or None,
                     password_hash=hash_password(secrets.token_urlsafe(32)),
+                    user_type=UserType.STAFF,
                     role=UserRole.DELIVERY_DRIVER,
                     status=UserStatus.ACTIVE,
                     registration_source='admin',
@@ -166,6 +167,7 @@ class StaffService:
                 roles.append(role)
 
         user.staff_roles = roles
+        user.user_type = UserType.STAFF
         if creating_new_user:
             user.role = UserRole.DELIVERY_DRIVER
             user.status = UserStatus.ACTIVE
@@ -292,6 +294,7 @@ class StaffService:
         if UserRole.DELIVERY_DRIVER.value not in roles:
             roles.append(UserRole.DELIVERY_DRIVER.value)
         user.staff_roles = roles
+        user.user_type = UserType.STAFF
 
         db.session.commit()
 
@@ -336,6 +339,7 @@ class StaffService:
                 user = User(
                     phone=formatted_phone,
                     password_hash=hash_password(secrets.token_urlsafe(32)),
+                    user_type=UserType.STAFF,
                     role=UserRole.OPERATOR,
                     status=UserStatus.ACTIVE,
                     registration_source='admin',
@@ -388,6 +392,7 @@ class StaffService:
                 roles.append(role)
 
         user.staff_roles = roles
+        user.user_type = UserType.STAFF
         if creating_new_user:
             user.role = UserRole.OPERATOR
 
@@ -460,6 +465,7 @@ class StaffService:
             if UserRole.OPERATOR.value not in roles:
                 roles.append(UserRole.OPERATOR.value)
             user.staff_roles = roles
+        user.user_type = UserType.STAFF
 
         db.session.commit()
 
@@ -491,6 +497,7 @@ class StaffService:
             normalized_roles.append(UserRole.DELIVERY_DRIVER.value)
 
         user.staff_roles = normalized_roles
+        user.user_type = UserType.STAFF
         db.session.commit()
 
         StaffService._log_activity(
@@ -1245,6 +1252,7 @@ class StaffService:
             last_name=user_data.get('last_name', '').strip() if user_data.get('last_name') else None,
             email=None,
             password_hash=hash_password(random_password),
+            user_type=UserType.INDIVIDUAL,
             role=UserRole.CUSTOMER.value,
             status=UserStatus.ACTIVE.value,
             is_verified=False,
@@ -1303,7 +1311,9 @@ class StaffService:
 
         # Process order items
         from business_app.models.product import Product
+        from business_app.services.corporate_contract_service import CorporateContractService
 
+        corporate_service = CorporateContractService()
         order_items = []
         subtotal = Decimal('0')
 
@@ -1318,12 +1328,22 @@ class StaffService:
                     error_code='STAFF_PRODUCT_NOT_FOUND',
                 )
 
-            unit_price = product.price
+            fallback_price = Decimal(str(product.calculate_price(quantity=quantity)))
+            resolution = corporate_service.resolve_contract_pricing_for_user_product(
+                user_id=client_id,
+                product_id=product_id,
+                fallback_price=fallback_price,
+            )
+            unit_price = Decimal(str(resolution['unit_price']))
             item_total = unit_price * Decimal(str(quantity))
             subtotal += item_total
 
             order_items.append({
                 'product_id': product_id,
+                'contract_id': resolution['contract'].id if resolution['contract'] else None,
+                'contract_product_price_id': (
+                    resolution['contract_price_row'].id if resolution['contract_price_row'] else None
+                ),
                 'quantity': quantity,
                 'unit_price': unit_price,
                 'total_price': item_total,
@@ -1341,6 +1361,11 @@ class StaffService:
                 payment_method = PaymentMethod(payment_method_str)
             except ValueError:
                 pass
+        if payment_method == PaymentMethod.BUSINESS_ACCOUNT:
+            corporate_service.validate_business_account_order(
+                user=client,
+                order_items=order_items,
+            )
 
         # Create order
         order = Order(
@@ -1364,6 +1389,8 @@ class StaffService:
             order_item = OrderItem(
                 order_id=order.id,
                 product_id=item_data['product_id'],
+                contract_id=item_data.get('contract_id'),
+                contract_product_price_id=item_data.get('contract_product_price_id'),
                 quantity=item_data['quantity'],
                 unit_price=item_data['unit_price'],
                 total_price=item_data['total_price'],
@@ -1379,6 +1406,9 @@ class StaffService:
             scheduled_time_slot=order.delivery_time_slot or '09:00-12:00',
         )
         db.session.add(delivery)
+
+        # Reserve corporate prepayment units on order creation.
+        CorporateContractService().reserve_for_order(order.id, actor_user_id=operator_id)
 
         db.session.commit()
 

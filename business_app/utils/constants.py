@@ -15,6 +15,7 @@ from shared.enums import (  # noqa: F401
     SubscriptionFrequency,
     UserGender,
     UserRole,
+    UserType,
     UserStatus,
 )
 

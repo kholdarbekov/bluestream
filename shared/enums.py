@@ -78,6 +78,13 @@ class UserRole(Enum):
     OPERATOR = 'operator'
 
 
+class UserType(Enum):
+    """Top-level actor classification for users."""
+    INDIVIDUAL = 'individual'
+    ENTITY = 'entity'
+    STAFF = 'staff'
+
+
 class UserStatus(Enum):
     """User status enumeration"""
     ACTIVE = 'active'

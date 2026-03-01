@@ -6,6 +6,7 @@ from flask import Blueprint, request, current_app
 from flask_jwt_extended import jwt_required, get_jwt_identity
 
 from business_app.services.staff_service import StaffService
+from business_app.utils.service_factory import get_corporate_contract_service
 from business_app.utils.address_helpers import get_address_label, get_address_line
 from business_app.utils.decorators import require_staff_roles
 from business_app.utils.error_handlers import handle_api_exception
@@ -435,6 +436,29 @@ def get_client_addresses(user_id):
         })
 
     return success_response({'items': items, 'total': len(items)})
+
+
+@staff_bp.route('/operator/users/<int:user_id>/corporate-balance', methods=['GET'])
+@handle_api_exception
+@jwt_required()
+@require_staff_roles('operator')
+def get_client_corporate_balance(user_id):
+    """Get active corporate contract balances for a client user."""
+    service = get_corporate_contract_service()
+    contract_balances = service.get_active_contract_balances_for_user(user_id)
+
+    if not contract_balances:
+        return success_response({
+            'user_id': user_id,
+            'has_active_contracts': False,
+            'contracts': [],
+        })
+
+    return success_response({
+        'user_id': user_id,
+        'has_active_contracts': True,
+        'contracts': contract_balances,
+    })
 
 
 # --- Shared Staff Operations ---

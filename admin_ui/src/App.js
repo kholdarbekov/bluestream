@@ -6,6 +6,7 @@ import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Users from './pages/Users';
 import Orders from './pages/Orders';
+import CorporateContracts from './pages/CorporateContracts';
 import Products from './pages/Products';
 import ProductCategories from './pages/ProductCategories';
 import Delivery from './pages/Delivery';
@@ -43,6 +44,7 @@ function App() {
                   <Route path="/dashboard" element={<Dashboard />} />
                   <Route path="/users" element={<Users />} />
                   <Route path="/orders" element={<Orders />} />
+                  <Route path="/corporate-contracts" element={<CorporateContracts />} />
                   <Route path="/products" element={<Products />} />
                   <Route path="/product-categories" element={<ProductCategories />} />
                   <Route path="/delivery" element={<Delivery />} />

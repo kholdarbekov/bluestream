@@ -325,6 +325,21 @@ BACKEND_TRANSLATIONS = {
         'uz': 'Buyurtma yetkazildi',
         'ru': 'Заказ доставлен'
     },
+    'api.orders.error.business_account_entity_only': {
+        'en': 'Business Account payment is only available for entity customers.',
+        'uz': 'Business Account to\'lov usuli faqat yuridik mijozlar uchun mavjud.',
+        'ru': 'Способ оплаты Business Account доступен только для юридических клиентов.'
+    },
+    'api.orders.error.business_account_contract_required': {
+        'en': 'Business Account payment requires an active corporate contract that covers at least one order item.',
+        'uz': 'Business Account to\'lovi uchun buyurtmadagi kamida bitta mahsulotni qamrab oluvchi faol korporativ shartnoma kerak.',
+        'ru': 'Для оплаты через Business Account нужен активный корпоративный договор, покрывающий хотя бы одну позицию заказа.'
+    },
+    'api.orders.error.ambiguous_contract_pricing': {
+        'en': 'Ambiguous contract pricing for product {product_id}. Multiple active contracts match: {contract_numbers}',
+        'uz': '{product_id} mahsulot uchun shartnoma narxi noaniq. Bir nechta faol shartnoma mos keldi: {contract_numbers}',
+        'ru': 'Неоднозначная контрактная цена для товара {product_id}. Подходят несколько активных договоров: {contract_numbers}'
+    },
 
     # ============================================================================
     # API - Products (api.products.*)
@@ -1511,6 +1526,506 @@ BACKEND_TRANSLATIONS = {
         'en': 'Translation updated successfully',
         'uz': 'Tarjima muvaffaqiyatli yangilandi',
         'ru': 'Перевод успешно обновлен'
+    },
+    'ui.common.cancel': {
+        'en': 'Cancel',
+        'uz': 'Bekor qilish',
+        'ru': 'Отмена'
+    },
+    'ui.common.edit': {
+        'en': 'Edit',
+        'uz': 'Tahrirlash',
+        'ru': 'Редактировать'
+    },
+    'ui.common.remove': {
+        'en': 'Remove',
+        'uz': 'Olib tashlash',
+        'ru': 'Удалить'
+    },
+    'ui.common.save': {
+        'en': 'Save',
+        'uz': 'Saqlash',
+        'ru': 'Сохранить'
+    },
+    'ui.common.status': {
+        'en': 'Status',
+        'uz': 'Holat',
+        'ru': 'Статус'
+    },
+    'ui.nav.corporate_contracts': {
+        'en': 'Corporate Contracts',
+        'uz': 'Korporativ shartnomalar',
+        'ru': 'Корпоративные договоры'
+    },
+    'ui.orders.payment_business_account': {
+        'en': 'Business Account',
+        'uz': 'Hisob raqami orqali',
+        'ru': 'Безналичный счёт'
+    },
+    'ui.orders.order_create_validation_title': {
+        'en': 'Could not create order',
+        'uz': 'Buyurtmani yaratib bo\'lmadi',
+        'ru': 'Не удалось создать заказ'
+    },
+    'ui.corporate.account': {
+        'en': 'Account Number',
+        'uz': 'Hisob raqami',
+        'ru': 'Номер счёта'
+    },
+    'ui.corporate.active_contracts': {
+        'en': 'Active Contracts',
+        'uz': 'Faol shartnomalar',
+        'ru': 'Активные договоры'
+    },
+    'ui.corporate.add_price_override': {
+        'en': 'Add Price Override',
+        'uz': 'Maxsus narx qo\'shish',
+        'ru': 'Добавить особую цену'
+    },
+    'ui.corporate.amount': {
+        'en': 'Amount',
+        'uz': 'Summa',
+        'ru': 'Сумма'
+    },
+    'ui.corporate.available': {
+        'en': 'Available',
+        'uz': 'Mavjud',
+        'ru': 'Доступно'
+    },
+    'ui.corporate.balance': {
+        'en': 'Balance',
+        'uz': 'Balans',
+        'ru': 'Баланс'
+    },
+    'ui.corporate.bank': {
+        'en': 'Bank',
+        'uz': 'Bank',
+        'ru': 'Банк'
+    },
+    'ui.corporate.bank_details': {
+        'en': 'Bank Details',
+        'uz': 'Bank ma\'lumotlari',
+        'ru': 'Банковские реквизиты'
+    },
+    'ui.corporate.consumed': {
+        'en': 'Consumed',
+        'uz': 'Sarflangan',
+        'ru': 'Списано'
+    },
+    'ui.corporate.contract_create_failed': {
+        'en': 'Failed to create contract',
+        'uz': 'Shartnomani yaratib bo\'lmadi',
+        'ru': 'Не удалось создать договор'
+    },
+    'ui.corporate.contract_created': {
+        'en': 'Corporate contract created',
+        'uz': 'Korporativ shartnoma yaratildi',
+        'ru': 'Корпоративный договор создан'
+    },
+    'ui.corporate.contract_details': {
+        'en': 'Contract Details',
+        'uz': 'Shartnoma tafsilotlari',
+        'ru': 'Детали договора'
+    },
+    'ui.corporate.contract_name': {
+        'en': 'Contract Name',
+        'uz': 'Shartnoma nomi',
+        'ru': 'Название договора'
+    },
+    'ui.corporate.contract_name_required': {
+        'en': 'Contract name is required',
+        'uz': 'Shartnoma nomi majburiy',
+        'ru': 'Название договора обязательно'
+    },
+    'ui.corporate.contract_number': {
+        'en': 'Contract Number',
+        'uz': 'Shartnoma raqami',
+        'ru': 'Номер договора'
+    },
+    'ui.corporate.contract_number_required': {
+        'en': 'Contract number is required',
+        'uz': 'Shartnoma raqami majburiy',
+        'ru': 'Номер договора обязателен'
+    },
+    'ui.corporate.contract_update_failed': {
+        'en': 'Failed to update contract',
+        'uz': 'Shartnomani yangilab bo\'lmadi',
+        'ru': 'Не удалось обновить договор'
+    },
+    'ui.corporate.contract_updated': {
+        'en': 'Corporate contract updated',
+        'uz': 'Korporativ shartnoma yangilandi',
+        'ru': 'Корпоративный договор обновлён'
+    },
+    'ui.corporate.contracts': {
+        'en': 'Corporate Contracts',
+        'uz': 'Korporativ shartnomalar',
+        'ru': 'Корпоративные договоры'
+    },
+    'ui.corporate.contracts_with_debt': {
+        'en': 'Contracts With Debt',
+        'uz': 'Qarzdor shartnomalar',
+        'ru': 'Договоры с задолженностью'
+    },
+    'ui.corporate.currency': {
+        'en': 'Currency',
+        'uz': 'Valyuta',
+        'ru': 'Валюта'
+    },
+    'ui.corporate.customer': {
+        'en': 'Customer',
+        'uz': 'Mijoz',
+        'ru': 'Клиент'
+    },
+    'ui.corporate.customer_required': {
+        'en': 'Customer is required',
+        'uz': 'Mijozni tanlash majburiy',
+        'ru': 'Клиент обязателен'
+    },
+    'ui.corporate.debt': {
+        'en': 'Debt',
+        'uz': 'Qarz',
+        'ru': 'Долг'
+    },
+    'ui.corporate.edit_contract': {
+        'en': 'Edit Contract',
+        'uz': 'Shartnomani tahrirlash',
+        'ru': 'Редактировать договор'
+    },
+    'ui.corporate.end_date': {
+        'en': 'End Date',
+        'uz': 'Tugash sanasi',
+        'ru': 'Дата окончания'
+    },
+    'ui.corporate.event_date': {
+        'en': 'Created',
+        'uz': 'Yaratilgan',
+        'ru': 'Создано'
+    },
+    'ui.corporate.event_type': {
+        'en': 'Event',
+        'uz': 'Hodisa',
+        'ru': 'Событие'
+    },
+    'ui.corporate.inn': {
+        'en': 'INN',
+        'uz': 'STIR',
+        'ru': 'ИНН'
+    },
+    'ui.corporate.is_active': {
+        'en': 'Contract is active',
+        'uz': 'Shartnoma faol',
+        'ru': 'Договор активен'
+    },
+    'ui.corporate.last_topup': {
+        'en': 'Last Topup',
+        'uz': 'Oxirgi to\'ldirish',
+        'ru': 'Последнее пополнение'
+    },
+    'ui.corporate.ledger': {
+        'en': 'Ledger',
+        'uz': 'Harakatlar jurnali',
+        'ru': 'Журнал операций'
+    },
+    'ui.corporate.manage_prices': {
+        'en': 'Manage Prices',
+        'uz': 'Narxlarni boshqarish',
+        'ru': 'Управление ценами'
+    },
+    'ui.corporate.mfo': {
+        'en': 'MFO',
+        'uz': 'MFO',
+        'ru': 'МФО'
+    },
+    'ui.corporate.new_contract': {
+        'en': 'New Contract',
+        'uz': 'Yangi shartnoma',
+        'ru': 'Новый договор'
+    },
+    'ui.corporate.no_balance_products': {
+        'en': 'No prepayment-eligible products configured yet.',
+        'uz': 'Oldindan to\'lovga mos mahsulotlar hali sozlanmagan.',
+        'ru': 'Товары, доступные для предоплаты, пока не настроены.'
+    },
+    'ui.corporate.no_ledger_entries': {
+        'en': 'No ledger entries yet.',
+        'uz': 'Harakatlar hali yo\'q.',
+        'ru': 'Записей в журнале пока нет.'
+    },
+    'ui.corporate.no_overlap_conflicts': {
+        'en': 'No overlapping active contract coverage found for the current selection.',
+        'uz': 'Joriy tanlov uchun faol shartnomalar kesishuvi topilmadi.',
+        'ru': 'Для текущего выбора пересечений активных договоров не найдено.'
+    },
+    'ui.corporate.no_price_overrides': {
+        'en': 'No contract-specific price overrides yet.',
+        'uz': 'Shartnomaga xos narxlar hali kiritilmagan.',
+        'ru': 'Индивидуальные цены по договору пока не настроены.'
+    },
+    'ui.corporate.notes': {
+        'en': 'Notes',
+        'uz': 'Izohlar',
+        'ru': 'Примечания'
+    },
+    'ui.corporate.open_ended': {
+        'en': 'Open ended',
+        'uz': 'Ochiq muddatli',
+        'ru': 'Без даты окончания'
+    },
+    'ui.corporate.overlap_conflicts_found': {
+        'en': 'Overlap conflicts found',
+        'uz': 'Kesishuvlar topildi',
+        'ru': 'Найдены пересечения'
+    },
+    'ui.corporate.overlap_preview_failed': {
+        'en': 'Failed to preview overlaps',
+        'uz': 'Kesishuvlarni oldindan ko\'rib bo\'lmadi',
+        'ru': 'Не удалось показать пересечения'
+    },
+    'ui.corporate.period': {
+        'en': 'Period',
+        'uz': 'Davr',
+        'ru': 'Период'
+    },
+    'ui.corporate.phone': {
+        'en': 'Phone',
+        'uz': 'Telefon',
+        'ru': 'Телефон'
+    },
+    'ui.corporate.prepaid': {
+        'en': 'Prepaid',
+        'uz': 'Oldindan to\'langan',
+        'ru': 'Предоплачено'
+    },
+    'ui.corporate.prepayment_eligible': {
+        'en': 'Prepayment eligible',
+        'uz': 'Oldindan to\'lovga mos',
+        'ru': 'Доступно для предоплаты'
+    },
+    'ui.corporate.prepayment_scope': {
+        'en': 'Prepayment Scope',
+        'uz': 'Oldindan to\'lov qamrovi',
+        'ru': 'Покрытие предоплаты'
+    },
+    'ui.corporate.preview_overlaps': {
+        'en': 'Preview Overlaps',
+        'uz': 'Kesishuvlarni tekshirish',
+        'ru': 'Проверить пересечения'
+    },
+    'ui.corporate.price_override': {
+        'en': 'Price Override',
+        'uz': 'Maxsus narx',
+        'ru': 'Особая цена'
+    },
+    'ui.corporate.price_overrides': {
+        'en': 'Price Overrides',
+        'uz': 'Maxsus narxlar',
+        'ru': 'Особые цены'
+    },
+    'ui.corporate.prices_update_failed': {
+        'en': 'Failed to update prices',
+        'uz': 'Narxlarni yangilab bo\'lmadi',
+        'ru': 'Не удалось обновить цены'
+    },
+    'ui.corporate.prices_updated': {
+        'en': 'Contract prices updated',
+        'uz': 'Shartnoma narxlari yangilandi',
+        'ru': 'Цены по договору обновлены'
+    },
+    'ui.corporate.product': {
+        'en': 'Product',
+        'uz': 'Mahsulot',
+        'ru': 'Товар'
+    },
+    'ui.corporate.product_required': {
+        'en': 'Product is required',
+        'uz': 'Mahsulotni tanlash majburiy',
+        'ru': 'Товар обязателен'
+    },
+    'ui.corporate.products_in_debt': {
+        'en': 'Products In Debt',
+        'uz': 'Qarzdagi mahsulotlar',
+        'ru': 'Товары в долге'
+    },
+    'ui.corporate.products_reserved': {
+        'en': 'Reserved Products',
+        'uz': 'Rezervdagi mahsulotlar',
+        'ru': 'Зарезервированные товары'
+    },
+    'ui.corporate.reference': {
+        'en': 'Transfer Reference',
+        'uz': 'To\'lov havolasi',
+        'ru': 'Референс перевода'
+    },
+    'ui.corporate.reserved': {
+        'en': 'Reserved',
+        'uz': 'Rezerv qilingan',
+        'ru': 'Зарезервировано'
+    },
+    'ui.corporate.search_contracts': {
+        'en': 'Search by contract, customer, phone',
+        'uz': 'Shartnoma, mijoz yoki telefon bo\'yicha qidirish',
+        'ru': 'Поиск по договору, клиенту или телефону'
+    },
+    'ui.corporate.select_contract_hint': {
+        'en': 'Select a contract to view pricing, balances, and ledger entries.',
+        'uz': 'Narxlar, balans va jurnal yozuvlarini ko\'rish uchun shartnomani tanlang.',
+        'ru': 'Выберите договор, чтобы посмотреть цены, баланс и записи журнала.'
+    },
+    'ui.corporate.select_customer': {
+        'en': 'Select customer',
+        'uz': 'Mijozni tanlang',
+        'ru': 'Выберите клиента'
+    },
+    'ui.corporate.select_product': {
+        'en': 'Select product',
+        'uz': 'Mahsulotni tanlang',
+        'ru': 'Выберите товар'
+    },
+    'ui.corporate.start_date': {
+        'en': 'Start Date',
+        'uz': 'Boshlanish sanasi',
+        'ru': 'Дата начала'
+    },
+    'ui.corporate.status': {
+        'en': 'Status',
+        'uz': 'Holat',
+        'ru': 'Статус'
+    },
+    'ui.corporate.topup': {
+        'en': 'Top Up',
+        'uz': 'To\'ldirish',
+        'ru': 'Пополнить'
+    },
+    'ui.corporate.topup_failed': {
+        'en': 'Failed to apply topup',
+        'uz': 'To\'ldirishni qo\'llab bo\'lmadi',
+        'ru': 'Не удалось применить пополнение'
+    },
+    'ui.corporate.topup_success': {
+        'en': 'Prepayment topup applied',
+        'uz': 'Oldindan to\'lov to\'ldirildi',
+        'ru': 'Предоплата пополнена'
+    },
+    'ui.corporate.total_contracts': {
+        'en': 'Total Contracts',
+        'uz': 'Jami shartnomalar',
+        'ru': 'Всего договоров'
+    },
+    'ui.corporate.tracked_products': {
+        'en': 'Tracked Products',
+        'uz': 'Hisobga olinadigan mahsulotlar',
+        'ru': 'Отслеживаемые товары'
+    },
+    'ui.corporate.unit_price': {
+        'en': 'Unit Price',
+        'uz': 'Birlik narxi',
+        'ru': 'Цена за единицу'
+    },
+    'ui.corporate.unit_price_required': {
+        'en': 'Unit price is required',
+        'uz': 'Birlik narxi majburiy',
+        'ru': 'Цена за единицу обязательна'
+    },
+    'ui.corporate.units': {
+        'en': 'Units',
+        'uz': 'Dona',
+        'ru': 'Единицы'
+    },
+    'ui.corporate.units_required': {
+        'en': 'Units are required',
+        'uz': 'Dona soni majburiy',
+        'ru': 'Количество обязательно'
+    },
+    'ui.corporate.unknown_customer': {
+        'en': 'Unknown',
+        'uz': 'Noma\'lum',
+        'ru': 'Неизвестно'
+    },
+    'ui.users.user_type': {
+        'en': 'User Type',
+        'uz': 'Foydalanuvchi turi',
+        'ru': 'Тип пользователя'
+    },
+    'ui.users.select_user_type': {
+        'en': 'Select user type',
+        'uz': 'Foydalanuvchi turini tanlang',
+        'ru': 'Выберите тип пользователя'
+    },
+    'ui.users.user_type_entity': {
+        'en': 'Entity',
+        'uz': 'Yuridik shaxs',
+        'ru': 'Юридическое лицо'
+    },
+    'ui.users.user_type_individual': {
+        'en': 'Individual',
+        'uz': 'Jismoniy shaxs',
+        'ru': 'Физическое лицо'
+    },
+    'ui.users.user_type_staff': {
+        'en': 'Staff',
+        'uz': 'Xodim',
+        'ru': 'Сотрудник'
+    },
+    'ui.users.company_name': {
+        'en': 'Company Name',
+        'uz': 'Kompaniya nomi',
+        'ru': 'Название компании'
+    },
+    'ui.users.company_name_required': {
+        'en': 'Company name is required for entity users',
+        'uz': 'Yuridik shaxs foydalanuvchilari uchun kompaniya nomi majburiy',
+        'ru': 'Для юридических лиц название компании обязательно'
+    },
+    'ui.users.enter_company_name_optional': {
+        'en': 'Enter company name (optional)',
+        'uz': 'Kompaniya nomini kiriting (ixtiyoriy)',
+        'ru': 'Введите название компании (необязательно)'
+    },
+    'ui.users.tax_id': {
+        'en': 'Tax ID',
+        'uz': 'STIR',
+        'ru': 'ИНН'
+    },
+    'ui.users.invalid_tax_id': {
+        'en': 'Use 5-20 uppercase letters, digits, or dashes',
+        'uz': '5-20 ta katta harf, raqam yoki chiziqchadan foydalaning',
+        'ru': 'Используйте 5-20 заглавных букв, цифр или дефисов'
+    },
+    'ui.users.enter_tax_id_optional': {
+        'en': 'Enter tax ID (optional)',
+        'uz': 'STIRni kiriting (ixtiyoriy)',
+        'ru': 'Введите ИНН (необязательно)'
+    },
+    'ui.users.entity_client': {
+        'en': 'Entity client',
+        'uz': 'Yuridik mijoz',
+        'ru': 'Юридический клиент'
+    },
+    'ui.users.entity_client_note': {
+        'en': 'Users created with user type "Entity" become selectable in the Corporate Contracts screen.',
+        'uz': '"Yuridik shaxs" turi bilan yaratilgan foydalanuvchilar Corporate Contracts sahifasida tanlanadi.',
+        'ru': 'Пользователи с типом "Юридическое лицо" становятся доступными для выбора на экране Corporate Contracts.'
+    },
+    'ui.users.edit_user': {
+        'en': 'Edit User',
+        'uz': 'Foydalanuvchini tahrirlash',
+        'ru': 'Редактировать пользователя'
+    },
+    'ui.users.user_updated_success': {
+        'en': 'User updated successfully',
+        'uz': 'Foydalanuvchi muvaffaqiyatli yangilandi',
+        'ru': 'Пользователь успешно обновлён'
+    },
+    'ui.users.user_update_failed': {
+        'en': 'Failed to update user',
+        'uz': 'Foydalanuvchini yangilab bo\'lmadi',
+        'ru': 'Не удалось обновить пользователя'
+    },
+    'ui.users.admin_created_user_note': {
+        'en': 'Users created here are for phone orders only. They cannot login to the customer portal.',
+        'uz': 'Bu yerda yaratilgan foydalanuvchilar faqat telefon buyurtmalari uchun. Ular mijoz portaliga kira olmaydi.',
+        'ru': 'Пользователи, созданные здесь, предназначены только для телефонных заказов. Они не могут войти в клиентский портал.'
     },
     'api.notifications.success.deleted': {
         'en': 'Notification deleted successfully',
@@ -2703,11 +3218,6 @@ BACKEND_TRANSLATIONS = {
         'en': 'Please share your contact:',
         'uz': 'Iltimos, kontaktingizni ulashing:',
         'ru': 'Пожалуйста, поделитесь своим контактом:'
-    },
-    'telegram.welcome': {
-        'en': 'Welcome to Bluestream!',
-        'uz': 'Bluestream\'ga xush kelibsiz!',
-        'ru': 'Добро пожаловать в Bluestream!'
     },
     'telegram.back': {
         'en': '⬅️ Back',

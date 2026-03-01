@@ -26,7 +26,8 @@ import {
   MenuOutlined,
   FileTextOutlined,
   TagsOutlined,
-  TeamOutlined
+  TeamOutlined,
+  BankOutlined
 } from '@ant-design/icons';
 import { useAuthStore } from '../../stores/authStore';
 import { useRealTimeWithFallback } from '../../hooks/useRealTimeUpdates';
@@ -74,6 +75,11 @@ const AdminLayout = ({ children }) => {
       key: '/orders',
       icon: <ShoppingCartOutlined />,
       label: t('ui.nav.orders')
+    },
+    {
+      key: '/corporate-contracts',
+      icon: <BankOutlined />,
+      label: t('ui.nav.corporate_contracts', 'Corporate Contracts')
     },
     {
       key: '/products',

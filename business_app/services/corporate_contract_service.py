@@ -1,0 +1,1061 @@
+"""Corporate contract and prepayment accounting workflows."""
+
+from datetime import datetime, timezone
+from decimal import Decimal
+from typing import Any, Dict, List, Optional
+
+from sqlalchemy import or_
+from sqlalchemy.orm import joinedload
+
+from business_app import db
+from business_app.models.corporate import (
+    CorporateContract,
+    CorporateContractProductPrice,
+    CorporateContractStatus,
+    CorporatePrepaymentAccount,
+    CorporatePrepaymentBalance,
+    CorporatePrepaymentEventType,
+    CorporatePrepaymentLedger,
+)
+from business_app.models.order import Order, OrderItem
+from business_app.models.product import Product
+from business_app.models.user import User
+from business_app.utils.audit_logger import audit_logger, AuditEventType, AuditSeverity
+from business_app.utils.constants import UserType
+from business_app.utils.exceptions import NotFoundError, ValidationError
+from business_app.utils.translations import get_translation
+
+
+class CorporateContractService:
+    """Service for corporate contract pricing and prepayment ledgers."""
+
+    LEGAL_ENTITY_TYPE = UserType.ENTITY.value
+
+    def _is_legal_entity_user(self, user: Optional[User]) -> bool:
+        return bool(user and user.is_entity_user)
+
+    @staticmethod
+    def _translate(key: str, default: str, **kwargs) -> str:
+        translated = get_translation(key, **kwargs)
+        return default if translated == key else translated
+
+    def validate_business_account_order(
+        self,
+        user: User,
+        order_items: List[Dict[str, Any]],
+    ) -> None:
+        """Ensure business-account settlement is only used for eligible corporate orders."""
+        if not user or not user.is_entity_user:
+            raise ValidationError(
+                self._translate(
+                    "api.orders.error.business_account_entity_only",
+                    "Business Account payment is only available for entity customers.",
+                )
+            )
+
+        if not any(item.get("contract_id") for item in order_items):
+            raise ValidationError(
+                self._translate(
+                    "api.orders.error.business_account_contract_required",
+                    "Business Account payment requires an active corporate contract that covers at least one order item.",
+                )
+            )
+
+    @staticmethod
+    def _normalize_effective_at(effective_at: Optional[datetime] = None) -> datetime:
+        effective_at = effective_at or datetime.now(timezone.utc)
+        if effective_at.tzinfo is None:
+            effective_at = effective_at.replace(tzinfo=timezone.utc)
+        return effective_at
+
+    @staticmethod
+    def _date_ranges_overlap(
+        start_a: Optional[datetime],
+        end_a: Optional[datetime],
+        start_b: Optional[datetime],
+        end_b: Optional[datetime],
+    ) -> bool:
+        start_a = start_a or datetime.min.replace(tzinfo=timezone.utc)
+        start_b = start_b or datetime.min.replace(tzinfo=timezone.utc)
+        end_a = end_a or datetime.max.replace(tzinfo=timezone.utc)
+        end_b = end_b or datetime.max.replace(tzinfo=timezone.utc)
+        if start_a.tzinfo is None:
+            start_a = start_a.replace(tzinfo=timezone.utc)
+        if start_b.tzinfo is None:
+            start_b = start_b.replace(tzinfo=timezone.utc)
+        if end_a.tzinfo is None:
+            end_a = end_a.replace(tzinfo=timezone.utc)
+        if end_b.tzinfo is None:
+            end_b = end_b.replace(tzinfo=timezone.utc)
+        return start_a <= end_b and start_b <= end_a
+
+    def _contract_is_applicable_at(self, contract: CorporateContract, effective_at: datetime) -> bool:
+        if not contract.is_active:
+            return False
+        if contract.status != CorporateContractStatus.ACTIVE:
+            return False
+        return (
+            (contract.start_date is None or contract.start_date <= effective_at)
+            and (contract.end_date is None or contract.end_date >= effective_at)
+        )
+
+    def _build_overlap_conflicts(
+        self,
+        *,
+        user_id: int,
+        start_date: Optional[datetime],
+        end_date: Optional[datetime],
+        prices: List[Dict[str, Any]],
+        exclude_contract_id: Optional[int] = None,
+        current_contract_label: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        active_prices = [
+            price for price in (prices or [])
+            if price.get("product_id") and bool(price.get("is_active", True))
+        ]
+        if not active_prices:
+            return []
+
+        other_contracts = CorporateContract.query.options(
+            joinedload(CorporateContract.product_prices).joinedload(CorporateContractProductPrice.product)
+        ).filter(
+            CorporateContract.user_id == user_id,
+            CorporateContract.is_active.is_(True),
+            CorporateContract.status == CorporateContractStatus.ACTIVE,
+        )
+        if exclude_contract_id:
+            other_contracts = other_contracts.filter(CorporateContract.id != exclude_contract_id)
+        other_contracts = other_contracts.all()
+
+        conflicts: List[Dict[str, Any]] = []
+        seen = set()
+        for price in active_prices:
+            product_id = price["product_id"]
+            for other_contract in other_contracts:
+                if not self._date_ranges_overlap(start_date, end_date, other_contract.start_date, other_contract.end_date):
+                    continue
+                for other_row in other_contract.product_prices:
+                    if not other_row.is_active or other_row.product_id != product_id:
+                        continue
+                    key = (product_id, other_contract.id, other_row.id)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    conflicts.append(
+                        {
+                            "product_id": product_id,
+                            "product_name": getattr(other_row.product, "name", None),
+                            "current_contract": {
+                                "id": exclude_contract_id,
+                                "label": current_contract_label,
+                                "start_date": start_date.isoformat() if start_date else None,
+                                "end_date": end_date.isoformat() if end_date else None,
+                            },
+                            "conflicting_contract": {
+                                "id": other_contract.id,
+                                "contract_number": other_contract.contract_number,
+                                "name": other_contract.name,
+                                "start_date": other_contract.start_date.isoformat() if other_contract.start_date else None,
+                                "end_date": other_contract.end_date.isoformat() if other_contract.end_date else None,
+                            },
+                            "conflicting_price_row": {
+                                "id": other_row.id,
+                                "unit_price": float(other_row.unit_price) if other_row.unit_price is not None else None,
+                                "is_prepayment_eligible": other_row.is_prepayment_eligible,
+                            },
+                        }
+                    )
+        return conflicts
+
+    def preview_contract_price_overlaps(
+        self,
+        *,
+        contract_id: Optional[int] = None,
+        user_id: Optional[int] = None,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None,
+        status: Optional[str] = None,
+        is_active: Optional[bool] = None,
+        prices: Optional[List[Dict[str, Any]]] = None,
+        contract_number: Optional[str] = None,
+        contract_name: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        contract = self.get_contract_by_id(contract_id) if contract_id else None
+        resolved_user_id = user_id or (contract.user_id if contract else None)
+        if not resolved_user_id:
+            raise ValidationError("user_id is required to preview contract overlaps")
+
+        resolved_start = start_date or (contract.start_date if contract else None)
+        resolved_end = end_date if end_date is not None else (contract.end_date if contract else None)
+        resolved_status = status or (contract.status.value if contract and contract.status else CorporateContractStatus.ACTIVE.value)
+        resolved_is_active = bool(is_active if is_active is not None else (contract.is_active if contract else True))
+        resolved_prices = prices if prices is not None else [
+            {
+                "product_id": row.product_id,
+                "is_active": row.is_active,
+            }
+            for row in (contract.product_prices if contract else [])
+        ]
+
+        if isinstance(resolved_start, str):
+            resolved_start = datetime.fromisoformat(resolved_start)
+        if isinstance(resolved_end, str):
+            resolved_end = datetime.fromisoformat(resolved_end)
+        if resolved_start and resolved_start.tzinfo is None:
+            resolved_start = resolved_start.replace(tzinfo=timezone.utc)
+        if resolved_end and resolved_end.tzinfo is None:
+            resolved_end = resolved_end.replace(tzinfo=timezone.utc)
+
+        if not resolved_is_active or resolved_status != CorporateContractStatus.ACTIVE.value:
+            return {
+                "has_conflicts": False,
+                "conflicts": [],
+                "summary": {
+                    "conflicts_count": 0,
+                    "products_count": 0,
+                    "conflicting_contracts_count": 0,
+                },
+            }
+
+        conflicts = self._build_overlap_conflicts(
+            user_id=resolved_user_id,
+            start_date=resolved_start,
+            end_date=resolved_end,
+            prices=resolved_prices,
+            exclude_contract_id=contract.id if contract else None,
+            current_contract_label=contract_number or (contract.contract_number if contract else contract_name or "Draft Contract"),
+        )
+        return {
+            "has_conflicts": bool(conflicts),
+            "conflicts": conflicts,
+            "summary": {
+                "conflicts_count": len(conflicts),
+                "products_count": len({item["product_id"] for item in conflicts}),
+                "conflicting_contracts_count": len({item["conflicting_contract"]["id"] for item in conflicts}),
+            },
+        }
+
+    def get_contract_by_id(self, contract_id: int) -> CorporateContract:
+        contract = CorporateContract.query.options(
+            joinedload(CorporateContract.user),
+            joinedload(CorporateContract.product_prices).joinedload(CorporateContractProductPrice.product),
+            joinedload(CorporateContract.prepayment_account)
+            .joinedload(CorporatePrepaymentAccount.product_balances)
+            .joinedload(CorporatePrepaymentBalance.product),
+        ).get(contract_id)
+        if not contract:
+            raise NotFoundError("Corporate contract not found")
+        return contract
+
+    def get_active_contract_for_user(self, user_id: int) -> Optional[CorporateContract]:
+        contracts = self.list_active_contracts_for_user(user_id=user_id)
+        if len(contracts) == 1:
+            return contracts[0]
+        return None
+
+    def list_active_contracts_for_user(
+        self,
+        user_id: int,
+        effective_at: Optional[datetime] = None,
+    ) -> List[CorporateContract]:
+        user = User.query.get(user_id)
+        if not self._is_legal_entity_user(user):
+            return []
+
+        effective_at = self._normalize_effective_at(effective_at)
+        return CorporateContract.query.options(
+            joinedload(CorporateContract.user),
+            joinedload(CorporateContract.product_prices).joinedload(CorporateContractProductPrice.product),
+            joinedload(CorporateContract.prepayment_account)
+            .joinedload(CorporatePrepaymentAccount.product_balances)
+            .joinedload(CorporatePrepaymentBalance.product),
+        ).filter(
+            CorporateContract.user_id == user_id,
+            CorporateContract.is_active.is_(True),
+            CorporateContract.status == CorporateContractStatus.ACTIVE,
+            CorporateContract.start_date <= effective_at,
+            or_(
+                CorporateContract.end_date.is_(None),
+                CorporateContract.end_date >= effective_at,
+            ),
+        ).order_by(CorporateContract.start_date.desc(), CorporateContract.created_at.desc()).all()
+
+    def _get_applicable_contract_price_rows(
+        self,
+        user_id: int,
+        product_id: int,
+        effective_at: Optional[datetime] = None,
+    ) -> List[CorporateContractProductPrice]:
+        effective_at = self._normalize_effective_at(effective_at)
+        contracts = self.list_active_contracts_for_user(user_id=user_id, effective_at=effective_at)
+        matches: List[CorporateContractProductPrice] = []
+        for contract in contracts:
+            for price_row in contract.product_prices:
+                if (
+                    price_row.product_id == product_id
+                    and price_row.is_active
+                ):
+                    matches.append(price_row)
+        return matches
+
+    def resolve_contract_pricing_for_user_product(
+        self,
+        user_id: int,
+        product_id: int,
+        fallback_price: Decimal,
+        effective_at: Optional[datetime] = None,
+    ) -> Dict[str, Any]:
+        matches = self._get_applicable_contract_price_rows(
+            user_id=user_id,
+            product_id=product_id,
+            effective_at=effective_at,
+        )
+        if not matches:
+            return {
+                "unit_price": Decimal(str(fallback_price)),
+                "contract": None,
+                "contract_price_row": None,
+            }
+        if len(matches) > 1:
+            contract_numbers = [row.contract.contract_number for row in matches if row.contract]
+            raise ValidationError(
+                self._translate(
+                    "api.orders.error.ambiguous_contract_pricing",
+                    "Ambiguous contract pricing for product "
+                    f"{product_id}. Multiple active contracts match: {', '.join(contract_numbers)}",
+                    product_id=product_id,
+                    contract_numbers=", ".join(contract_numbers),
+                )
+            )
+        match = matches[0]
+        return {
+            "unit_price": Decimal(str(match.unit_price)),
+            "contract": match.contract,
+            "contract_price_row": match,
+        }
+
+    def resolve_unit_price(
+        self,
+        user_id: int,
+        product_id: int,
+        fallback_price: Decimal,
+    ) -> Decimal:
+        resolved = self.resolve_contract_pricing_for_user_product(
+            user_id=user_id,
+            product_id=product_id,
+            fallback_price=fallback_price,
+        )
+        return Decimal(str(resolved["unit_price"]))
+
+    def list_contracts(
+        self,
+        user_id: Optional[int] = None,
+        status: Optional[str] = None,
+        page: int = 1,
+        per_page: int = 20,
+    ) -> Dict[str, Any]:
+        query = CorporateContract.query.options(
+            joinedload(CorporateContract.user),
+            joinedload(CorporateContract.prepayment_account)
+            .joinedload(CorporatePrepaymentAccount.product_balances),
+        )
+        if user_id:
+            query = query.filter(CorporateContract.user_id == user_id)
+        if status:
+            try:
+                status_enum = CorporateContractStatus(status)
+            except ValueError as exc:
+                raise ValidationError("Invalid contract status") from exc
+            query = query.filter(CorporateContract.status == status_enum)
+
+        pagination = query.order_by(CorporateContract.created_at.desc()).paginate(
+            page=page,
+            per_page=per_page,
+            error_out=False,
+        )
+        return {
+            "items": pagination.items,
+            "total": pagination.total,
+            "page": page,
+            "per_page": per_page,
+        }
+
+    def create_contract(self, payload: Dict[str, Any], actor_user_id: Optional[int] = None) -> CorporateContract:
+        user_id = payload.get("user_id")
+        if not user_id:
+            raise ValidationError("user_id is required")
+
+        user = User.query.get(user_id)
+        if not user:
+            raise NotFoundError("User not found")
+        if not self._is_legal_entity_user(user):
+            raise ValidationError("User is not a legal entity client")
+
+        contract_number = payload.get("contract_number")
+        if not contract_number:
+            raise ValidationError("contract_number is required")
+
+        existing = CorporateContract.query.filter_by(contract_number=contract_number).first()
+        if existing:
+            raise ValidationError("contract_number already exists")
+
+        status_raw = payload.get("status", CorporateContractStatus.ACTIVE.value)
+        try:
+            status = CorporateContractStatus(status_raw)
+        except ValueError as exc:
+            raise ValidationError("Invalid contract status") from exc
+
+        start_date = payload.get("start_date")
+        if isinstance(start_date, str):
+            start_date = datetime.fromisoformat(start_date)
+        if start_date is None:
+            start_date = datetime.now(timezone.utc)
+        if start_date.tzinfo is None:
+            start_date = start_date.replace(tzinfo=timezone.utc)
+
+        end_date = payload.get("end_date")
+        if isinstance(end_date, str):
+            end_date = datetime.fromisoformat(end_date)
+        if end_date and end_date.tzinfo is None:
+            end_date = end_date.replace(tzinfo=timezone.utc)
+
+        contract = CorporateContract(
+            user_id=user_id,
+            contract_number=contract_number,
+            name=payload.get("name") or contract_number,
+            status=status,
+            start_date=start_date,
+            end_date=end_date,
+            currency=payload.get("currency", "UZS"),
+            bank_details=payload.get("bank_details") or {},
+            notes=payload.get("notes"),
+            is_active=bool(payload.get("is_active", True)),
+            created_by_user_id=actor_user_id,
+            updated_by_user_id=actor_user_id,
+        )
+        db.session.add(contract)
+        db.session.flush()
+
+        account = CorporatePrepaymentAccount(
+            contract_id=contract.id,
+            is_active=True,
+        )
+        db.session.add(account)
+        db.session.flush()
+        self._validate_contract_price_overlaps(contract)
+        return contract
+
+    def update_contract(self, contract_id: int, payload: Dict[str, Any], actor_user_id: Optional[int] = None) -> CorporateContract:
+        contract = self.get_contract_by_id(contract_id)
+
+        if "name" in payload:
+            contract.name = payload.get("name") or contract.name
+        if "status" in payload:
+            try:
+                contract.status = CorporateContractStatus(payload["status"])
+            except ValueError as exc:
+                raise ValidationError("Invalid contract status") from exc
+        if "is_active" in payload:
+            contract.is_active = bool(payload["is_active"])
+        if "notes" in payload:
+            contract.notes = payload.get("notes")
+        if "bank_details" in payload:
+            contract.bank_details = payload.get("bank_details") or {}
+        if "currency" in payload:
+            contract.currency = payload["currency"]
+        if "start_date" in payload:
+            start_date = payload.get("start_date")
+            if isinstance(start_date, str):
+                start_date = datetime.fromisoformat(start_date)
+            if start_date and start_date.tzinfo is None:
+                start_date = start_date.replace(tzinfo=timezone.utc)
+            contract.start_date = start_date
+        if "end_date" in payload:
+            end_date = payload.get("end_date")
+            if isinstance(end_date, str):
+                end_date = datetime.fromisoformat(end_date)
+            if end_date and end_date.tzinfo is None:
+                end_date = end_date.replace(tzinfo=timezone.utc)
+            contract.end_date = end_date
+
+        contract.updated_by_user_id = actor_user_id
+        self._validate_contract_price_overlaps(contract)
+        db.session.flush()
+        return contract
+
+    def upsert_contract_prices(
+        self,
+        contract_id: int,
+        prices: List[Dict[str, Any]],
+        actor_user_id: Optional[int] = None,
+    ) -> List[CorporateContractProductPrice]:
+        contract = self.get_contract_by_id(contract_id)
+        updated: List[CorporateContractProductPrice] = []
+
+        for entry in prices or []:
+            product_id = entry.get("product_id")
+            if not product_id:
+                raise ValidationError("product_id is required for every price entry")
+            if not Product.query.get(product_id):
+                raise NotFoundError(f"Product {product_id} not found")
+
+            unit_price = entry.get("unit_price")
+            if unit_price is None:
+                raise ValidationError("unit_price is required for every price entry")
+
+            row = CorporateContractProductPrice.query.filter_by(
+                contract_id=contract.id,
+                product_id=product_id,
+            ).first()
+            if not row:
+                row = CorporateContractProductPrice(
+                    contract_id=contract.id,
+                    product_id=product_id,
+                )
+                db.session.add(row)
+
+            row.unit_price = Decimal(str(unit_price))
+            row.is_prepayment_eligible = bool(entry.get("is_prepayment_eligible", True))
+            row.is_active = bool(entry.get("is_active", True))
+            row.notes = entry.get("notes")
+            updated.append(row)
+
+        self._validate_contract_price_overlaps(contract)
+        db.session.flush()
+        return updated
+
+    def _validate_contract_price_overlaps(self, contract: CorporateContract) -> None:
+        preview = self.preview_contract_price_overlaps(
+            contract_id=contract.id,
+            user_id=contract.user_id,
+            start_date=contract.start_date,
+            end_date=contract.end_date,
+            status=contract.status.value if contract.status else CorporateContractStatus.ACTIVE.value,
+            is_active=contract.is_active,
+            prices=[
+                {
+                    "product_id": row.product_id,
+                    "is_active": row.is_active,
+                }
+                for row in contract.product_prices
+            ],
+            contract_number=contract.contract_number,
+            contract_name=contract.name,
+        )
+        if preview["has_conflicts"]:
+            first = preview["conflicts"][0]
+            raise ValidationError(
+                "Overlapping active contract coverage detected for "
+                f"user {contract.user_id}, product {first['product_id']}, "
+                f"contracts {contract.contract_number} and {first['conflicting_contract']['contract_number']}"
+            )
+
+    def _get_or_create_locked_account(self, contract_id: int) -> CorporatePrepaymentAccount:
+        account = CorporatePrepaymentAccount.query.filter_by(contract_id=contract_id).with_for_update().first()
+        if account:
+            return account
+
+        account = CorporatePrepaymentAccount(
+            contract_id=contract_id,
+            is_active=True,
+        )
+        db.session.add(account)
+        db.session.flush()
+        return account
+
+    def _get_or_create_locked_balance(self, account_id: int, product_id: int) -> CorporatePrepaymentBalance:
+        balance = CorporatePrepaymentBalance.query.filter_by(
+            account_id=account_id,
+            product_id=product_id,
+        ).with_for_update().first()
+        if balance:
+            return balance
+
+        balance = CorporatePrepaymentBalance(
+            account_id=account_id,
+            product_id=product_id,
+            prepaid_units=Decimal("0.00"),
+            reserved_units=Decimal("0.00"),
+            consumed_units=Decimal("0.00"),
+            is_active=True,
+        )
+        db.session.add(balance)
+        db.session.flush()
+        return balance
+
+    def _get_contract_price_rows(self, contract_id: int, product_ids: List[int]) -> Dict[int, CorporateContractProductPrice]:
+        if not product_ids:
+            return {}
+
+        rows = CorporateContractProductPrice.query.options(
+            joinedload(CorporateContractProductPrice.product)
+        ).filter(
+            CorporateContractProductPrice.contract_id == contract_id,
+            CorporateContractProductPrice.product_id.in_(product_ids),
+            CorporateContractProductPrice.is_active.is_(True),
+        ).all()
+        return {row.product_id: row for row in rows}
+
+    def _get_prepayment_lines_for_order(self, order_items: List[OrderItem]) -> List[Dict[str, Any]]:
+        if not order_items:
+            return []
+        lines: List[Dict[str, Any]] = []
+
+        for item in order_items:
+            if not item.contract_id or not item.contract_product_price_id:
+                continue
+
+            price_row = CorporateContractProductPrice.query.options(
+                joinedload(CorporateContractProductPrice.contract),
+                joinedload(CorporateContractProductPrice.product),
+            ).filter_by(
+                id=item.contract_product_price_id,
+                contract_id=item.contract_id,
+            ).first()
+            if not price_row or not price_row.is_active or not price_row.is_prepayment_eligible:
+                continue
+
+            units = Decimal(str(item.quantity or 0))
+            if units <= 0:
+                continue
+
+            unit_price = Decimal(str(item.unit_price if item.unit_price is not None else price_row.unit_price))
+            lines.append(
+                {
+                    "order_item": item,
+                    "price_row": price_row,
+                    "contract_id": item.contract_id,
+                    "product_id": item.product_id,
+                    "units": units,
+                    "unit_price": unit_price,
+                    "amount": units * unit_price,
+                }
+            )
+
+        return lines
+
+    def _get_order_reserve_entries(self, order_id: int) -> List[CorporatePrepaymentLedger]:
+        return CorporatePrepaymentLedger.query.filter(
+            CorporatePrepaymentLedger.order_id == order_id,
+            CorporatePrepaymentLedger.event_type == CorporatePrepaymentEventType.RESERVE,
+        ).order_by(CorporatePrepaymentLedger.id.asc()).all()
+
+    def reserve_for_order(self, order_id: int, actor_user_id: Optional[int] = None) -> List[CorporatePrepaymentLedger]:
+        order = Order.query.options(
+            joinedload(Order.order_items).joinedload(OrderItem.product),
+            joinedload(Order.user),
+        ).get(order_id)
+        if not order:
+            raise NotFoundError("Order not found")
+        lines = self._get_prepayment_lines_for_order(order.order_items)
+        if not lines:
+            return []
+
+        ledger_entries: List[CorporatePrepaymentLedger] = []
+        total_reserved_units = Decimal("0.00")
+        contract_totals: Dict[int, Decimal] = {}
+
+        for line in lines:
+            order_item = line["order_item"]
+            idempotency_key = f"reserve:order_item:{order_item.id}"
+            existing = CorporatePrepaymentLedger.query.filter_by(idempotency_key=idempotency_key).first()
+            if existing:
+                ledger_entries.append(existing)
+                total_reserved_units += Decimal(str(existing.units or 0))
+                contract_totals[existing.contract_id] = contract_totals.get(existing.contract_id, Decimal("0.00")) + Decimal(str(existing.units or 0))
+                continue
+
+            account = self._get_or_create_locked_account(line["contract_id"])
+            balance = self._get_or_create_locked_balance(account.id, line["product_id"])
+            balance.reserved_units = Decimal(str(balance.reserved_units or 0)) + line["units"]
+            contract = line["price_row"].contract
+
+            ledger_entry = CorporatePrepaymentLedger(
+                contract_id=line["contract_id"],
+                account_id=account.id,
+                balance_id=balance.id,
+                product_id=line["product_id"],
+                order_id=order.id,
+                order_item_id=order_item.id,
+                actor_user_id=actor_user_id,
+                event_type=CorporatePrepaymentEventType.RESERVE,
+                units=line["units"],
+                unit_price_snapshot=line["unit_price"],
+                amount=line["amount"],
+                currency=contract.currency,
+                notes="Reserved product units on order creation",
+                idempotency_key=idempotency_key,
+                entry_metadata={
+                    "order_number": order.order_number,
+                    "product_name": getattr(order_item.product, "name", None),
+                },
+            )
+            db.session.add(ledger_entry)
+            ledger_entries.append(ledger_entry)
+            total_reserved_units += line["units"]
+            contract_totals[line["contract_id"]] = contract_totals.get(line["contract_id"], Decimal("0.00")) + line["units"]
+
+        db.session.flush()
+        for contract_id, reserved_units in contract_totals.items():
+            audit_logger.log_event(
+                event_type=AuditEventType.ORDER_UPDATED,
+                action="corporate_prepayment_reserved",
+                severity=AuditSeverity.MEDIUM,
+                resource_type="corporate_contract",
+                resource_id=str(contract_id),
+                additional_data={
+                    "order_id": order.id,
+                    "reserved_units": float(reserved_units),
+                    "reserved_products": len([entry for entry in ledger_entries if entry.contract_id == contract_id]),
+                },
+            )
+        return ledger_entries
+
+    def consume_for_order(
+        self,
+        order_id: int,
+        delivery_id: Optional[int] = None,
+        actor_user_id: Optional[int] = None,
+    ) -> List[CorporatePrepaymentLedger]:
+        reserve_entries = self._get_order_reserve_entries(order_id)
+        if not reserve_entries:
+            return []
+
+        ledger_entries: List[CorporatePrepaymentLedger] = []
+        total_consumed_units = Decimal("0.00")
+
+        for reserve_entry in reserve_entries:
+            idempotency_key = f"consume:reserve:{reserve_entry.id}"
+            existing = CorporatePrepaymentLedger.query.filter_by(idempotency_key=idempotency_key).first()
+            if existing:
+                ledger_entries.append(existing)
+                total_consumed_units += Decimal(str(existing.units or 0))
+                continue
+
+            already_released = CorporatePrepaymentLedger.query.filter_by(
+                idempotency_key=f"release:reserve:{reserve_entry.id}"
+            ).first()
+            if already_released:
+                continue
+
+            balance = CorporatePrepaymentBalance.query.filter_by(id=reserve_entry.balance_id).with_for_update().first()
+            if not balance:
+                raise NotFoundError("Corporate prepayment balance not found")
+
+            units = Decimal(str(reserve_entry.units or 0))
+            balance.reserved_units = max(Decimal("0.00"), Decimal(str(balance.reserved_units or 0)) - units)
+            balance.consumed_units = Decimal(str(balance.consumed_units or 0)) + units
+
+            ledger_entry = CorporatePrepaymentLedger(
+                contract_id=reserve_entry.contract_id,
+                account_id=reserve_entry.account_id,
+                balance_id=reserve_entry.balance_id,
+                product_id=reserve_entry.product_id,
+                order_id=order_id,
+                order_item_id=reserve_entry.order_item_id,
+                delivery_id=delivery_id,
+                actor_user_id=actor_user_id,
+                event_type=CorporatePrepaymentEventType.CONSUME,
+                units=units,
+                unit_price_snapshot=reserve_entry.unit_price_snapshot,
+                amount=reserve_entry.amount,
+                currency=reserve_entry.currency,
+                notes="Consumed reserved product units on successful delivery",
+                idempotency_key=idempotency_key,
+                entry_metadata={"source_reserve_entry_id": reserve_entry.id},
+            )
+            db.session.add(ledger_entry)
+            ledger_entries.append(ledger_entry)
+            total_consumed_units += units
+
+        db.session.flush()
+
+        audit_logger.log_event(
+            event_type=AuditEventType.ORDER_DELIVERED,
+            action="corporate_prepayment_consumed",
+            severity=AuditSeverity.MEDIUM,
+            resource_type="corporate_contract",
+            resource_id=str(reserve_entries[0].contract_id),
+            additional_data={
+                "order_id": order_id,
+                "delivery_id": delivery_id,
+                "consumed_units": float(total_consumed_units),
+                "consumed_products": len(ledger_entries),
+            },
+        )
+        return ledger_entries
+
+    def release_for_order(
+        self,
+        order_id: int,
+        reason: Optional[str] = None,
+        actor_user_id: Optional[int] = None,
+    ) -> List[CorporatePrepaymentLedger]:
+        reserve_entries = self._get_order_reserve_entries(order_id)
+        if not reserve_entries:
+            return []
+
+        ledger_entries: List[CorporatePrepaymentLedger] = []
+
+        for reserve_entry in reserve_entries:
+            already_consumed = CorporatePrepaymentLedger.query.filter_by(
+                idempotency_key=f"consume:reserve:{reserve_entry.id}"
+            ).first()
+            if already_consumed:
+                continue
+
+            idempotency_key = f"release:reserve:{reserve_entry.id}"
+            existing = CorporatePrepaymentLedger.query.filter_by(idempotency_key=idempotency_key).first()
+            if existing:
+                ledger_entries.append(existing)
+                continue
+
+            balance = CorporatePrepaymentBalance.query.filter_by(id=reserve_entry.balance_id).with_for_update().first()
+            if not balance:
+                raise NotFoundError("Corporate prepayment balance not found")
+
+            units = Decimal(str(reserve_entry.units or 0))
+            balance.reserved_units = max(Decimal("0.00"), Decimal(str(balance.reserved_units or 0)) - units)
+
+            ledger_entry = CorporatePrepaymentLedger(
+                contract_id=reserve_entry.contract_id,
+                account_id=reserve_entry.account_id,
+                balance_id=reserve_entry.balance_id,
+                product_id=reserve_entry.product_id,
+                order_id=order_id,
+                order_item_id=reserve_entry.order_item_id,
+                actor_user_id=actor_user_id,
+                event_type=CorporatePrepaymentEventType.RELEASE,
+                units=units,
+                unit_price_snapshot=reserve_entry.unit_price_snapshot,
+                amount=reserve_entry.amount,
+                currency=reserve_entry.currency,
+                notes=reason or "Released reserved product units on order cancellation",
+                idempotency_key=idempotency_key,
+                entry_metadata={"source_reserve_entry_id": reserve_entry.id},
+            )
+            db.session.add(ledger_entry)
+            ledger_entries.append(ledger_entry)
+
+        db.session.flush()
+        return ledger_entries
+
+    def topup_contract(
+        self,
+        contract_id: int,
+        product_id: int,
+        units: Decimal,
+        amount: Optional[Decimal] = None,
+        transfer_ref: Optional[str] = None,
+        actor_user_id: Optional[int] = None,
+        notes: Optional[str] = None,
+    ) -> CorporatePrepaymentLedger:
+        if Decimal(str(units)) <= 0:
+            raise ValidationError("Topup units must be positive")
+
+        contract = self.get_contract_by_id(contract_id)
+        account = self._get_or_create_locked_account(contract.id)
+        price_row = CorporateContractProductPrice.query.filter(
+            CorporateContractProductPrice.contract_id == contract.id,
+            CorporateContractProductPrice.product_id == product_id,
+            CorporateContractProductPrice.is_active.is_(True),
+        ).first()
+        if not price_row:
+            raise ValidationError("Product is not configured on this contract")
+        if not price_row.is_prepayment_eligible:
+            raise ValidationError("Product is not eligible for corporate prepayment")
+
+        balance = self._get_or_create_locked_balance(account.id, product_id)
+        units_decimal = Decimal(str(units))
+        amount_decimal = Decimal(str(amount)) if amount is not None else None
+        unit_price_snapshot = (
+            (amount_decimal / units_decimal) if amount_decimal is not None and units_decimal != 0 else Decimal(str(price_row.unit_price))
+        )
+
+        balance.prepaid_units = Decimal(str(balance.prepaid_units or 0)) + units_decimal
+        balance.last_topup_at = datetime.now(timezone.utc)
+        account.last_topup_at = balance.last_topup_at
+
+        ledger_entry = CorporatePrepaymentLedger(
+            contract_id=contract.id,
+            account_id=account.id,
+            balance_id=balance.id,
+            product_id=product_id,
+            actor_user_id=actor_user_id,
+            event_type=CorporatePrepaymentEventType.TOPUP,
+            units=units_decimal,
+            unit_price_snapshot=unit_price_snapshot,
+            amount=amount_decimal,
+            currency=contract.currency,
+            transfer_reference=transfer_ref,
+            notes=notes or "Corporate prepayment topup",
+            idempotency_key=f"topup:contract:{contract.id}:product:{product_id}:{datetime.now(timezone.utc).timestamp()}",
+            entry_metadata={
+                "product_name": getattr(price_row.product, "name", None),
+            },
+        )
+        db.session.add(ledger_entry)
+        db.session.flush()
+
+        audit_logger.log_event(
+            event_type=AuditEventType.PAYMENT_PROCESSED,
+            action="corporate_prepayment_topped_up",
+            severity=AuditSeverity.MEDIUM,
+            resource_type="corporate_contract",
+            resource_id=str(contract.id),
+            additional_data={
+                "product_id": product_id,
+                "units": float(units_decimal),
+                "amount": float(amount) if amount is not None else None,
+                "transfer_reference": transfer_ref,
+            },
+        )
+        return ledger_entry
+
+    def get_balance(self, contract_id: int) -> Dict[str, Any]:
+        contract = self.get_contract_by_id(contract_id)
+        account = contract.prepayment_account
+        if not account:
+            account = CorporatePrepaymentAccount(
+                contract_id=contract.id,
+                is_active=True,
+            )
+            db.session.add(account)
+            db.session.flush()
+
+        price_rows = {
+            row.product_id: row
+            for row in contract.product_prices
+            if row.is_active and row.is_prepayment_eligible
+        }
+        balance_rows = {row.product_id: row for row in account.product_balances or []}
+        product_ids = sorted(set(price_rows.keys()) | set(balance_rows.keys()))
+        products: List[Dict[str, Any]] = []
+
+        for product_id in product_ids:
+            balance_row = balance_rows.get(product_id)
+            price_row = price_rows.get(product_id)
+            product = None
+            if balance_row and balance_row.product:
+                product = balance_row.product
+            elif price_row and price_row.product:
+                product = price_row.product
+
+            if balance_row:
+                product_balance = balance_row.to_dict()
+            else:
+                product_balance = {
+                    "id": None,
+                    "account_id": account.id,
+                    "product_id": product_id,
+                    "product_name": getattr(product, "name", None),
+                    "product_sku": getattr(product, "sku", None),
+                    "product_size": getattr(getattr(product, "size", None), "value", getattr(product, "size", None)),
+                    "prepaid_units": 0.0,
+                    "reserved_units": 0.0,
+                    "consumed_units": 0.0,
+                    "available_units": 0.0,
+                    "debt_units": 0.0,
+                    "is_active": True,
+                    "last_topup_at": None,
+                }
+
+            product_balance.update(
+                {
+                    "contract_unit_price": float(price_row.unit_price) if price_row and price_row.unit_price is not None else None,
+                    "is_prepayment_eligible": bool(price_row.is_prepayment_eligible) if price_row else False,
+                    "contract_price_row_id": price_row.id if price_row else None,
+                }
+            )
+            products.append(product_balance)
+
+        summary = {
+            "tracked_products_count": len(products),
+            "products_with_reservations_count": sum(1 for item in products if Decimal(str(item["reserved_units"])) > 0),
+            "products_in_debt_count": sum(1 for item in products if Decimal(str(item["available_units"])) < 0),
+            "last_topup_at": account.last_topup_at.isoformat() if account.last_topup_at else None,
+        }
+
+        return {
+            "contract_id": contract.id,
+            "currency": contract.currency,
+            "account_id": account.id,
+            "summary": summary,
+            "products": products,
+        }
+
+    def get_active_contract_balances_for_user(
+        self,
+        user_id: int,
+        effective_at: Optional[datetime] = None,
+    ) -> List[Dict[str, Any]]:
+        contracts = self.list_active_contracts_for_user(user_id=user_id, effective_at=effective_at)
+        results: List[Dict[str, Any]] = []
+        for contract in contracts:
+            balance = self.get_balance(contract.id)
+            results.append(
+                {
+                    "contract": {
+                        "id": contract.id,
+                        "contract_number": contract.contract_number,
+                        "name": contract.name,
+                        "currency": contract.currency,
+                        "start_date": contract.start_date.isoformat() if contract.start_date else None,
+                        "end_date": contract.end_date.isoformat() if contract.end_date else None,
+                    },
+                    "balance": balance,
+                }
+            )
+        return results
+
+    def get_ledger(
+        self,
+        contract_id: int,
+        page: int = 1,
+        per_page: int = 50,
+        event_type: Optional[str] = None,
+        product_id: Optional[int] = None,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None,
+    ) -> Dict[str, Any]:
+        self.get_contract_by_id(contract_id)
+
+        query = CorporatePrepaymentLedger.query.options(
+            joinedload(CorporatePrepaymentLedger.product)
+        ).filter_by(contract_id=contract_id)
+        if event_type:
+            try:
+                query = query.filter(
+                    CorporatePrepaymentLedger.event_type == CorporatePrepaymentEventType(event_type)
+                )
+            except ValueError as exc:
+                raise ValidationError("Invalid ledger event_type") from exc
+        if product_id:
+            query = query.filter(CorporatePrepaymentLedger.product_id == product_id)
+
+        if start_date:
+            query = query.filter(CorporatePrepaymentLedger.created_at >= start_date)
+        if end_date:
+            query = query.filter(CorporatePrepaymentLedger.created_at <= end_date)
+
+        pagination = query.order_by(CorporatePrepaymentLedger.created_at.desc()).paginate(
+            page=page,
+            per_page=min(per_page, 200),
+            error_out=False,
+        )
+        return {
+            "items": pagination.items,
+            "total": pagination.total,
+            "page": page,
+            "per_page": min(per_page, 200),
+        }
+
+
+_corporate_contract_service = None
+
+
+def get_corporate_contract_service() -> CorporateContractService:
+    global _corporate_contract_service
+    if _corporate_contract_service is None:
+        _corporate_contract_service = CorporateContractService()
+    return _corporate_contract_service

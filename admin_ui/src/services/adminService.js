@@ -34,6 +34,11 @@ class AdminService {
     return response.data;
   }
 
+  async updateUser(userId, userData) {
+    const response = await api.put(`/admin/users/${userId}`, userData);
+    return response.data;
+  }
+
   // Unlock a locked user account
   async unlockUserAccount(userId) {
     const response = await api.post(`/admin/users/${userId}/unlock`);
@@ -80,6 +85,52 @@ class AdminService {
 
   async updateOrderStatus(orderId, status, notes) {
     const response = await api.put(`/admin/orders/${orderId}/status`, { status, notes });
+    return response.data;
+  }
+
+  // Corporate contract management
+  async getCorporateContracts(params = {}) {
+    const response = await api.get('/admin/corporate/contracts', { params });
+    return response.data;
+  }
+
+  async createCorporateContract(contractData) {
+    const response = await api.post('/admin/corporate/contracts', contractData);
+    return response.data;
+  }
+
+  async getCorporateContract(contractId) {
+    const response = await api.get(`/admin/corporate/contracts/${contractId}`);
+    return response.data;
+  }
+
+  async updateCorporateContract(contractId, contractData) {
+    const response = await api.put(`/admin/corporate/contracts/${contractId}`, contractData);
+    return response.data;
+  }
+
+  async updateCorporateContractPrices(contractId, prices) {
+    const response = await api.put(`/admin/corporate/contracts/${contractId}/prices`, { prices });
+    return response.data;
+  }
+
+  async previewCorporateContractOverlaps(previewData) {
+    const response = await api.post('/admin/corporate/contracts/overlap-preview', previewData);
+    return response.data;
+  }
+
+  async topupCorporateContract(contractId, topupData) {
+    const response = await api.post(`/admin/corporate/contracts/${contractId}/prepayments/topup`, topupData);
+    return response.data;
+  }
+
+  async getCorporateContractBalance(contractId) {
+    const response = await api.get(`/admin/corporate/contracts/${contractId}/balance`);
+    return response.data;
+  }
+
+  async getCorporateContractLedger(contractId, params = {}) {
+    const response = await api.get(`/admin/corporate/contracts/${contractId}/ledger`, { params });
     return response.data;
   }
 

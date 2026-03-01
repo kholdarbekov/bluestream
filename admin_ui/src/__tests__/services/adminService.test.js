@@ -75,6 +75,22 @@ describe('AdminService', () => {
       });
       expect(result).toEqual(mockResponse);
     });
+
+    it('updates user profile successfully', async () => {
+      const mockResponse = { message: 'User updated' };
+      const payload = {
+        first_name: 'Acme',
+        phone: '+998901234567',
+        user_type: 'entity',
+        company_name: 'Acme Water'
+      };
+      api.put.mockResolvedValue({ data: mockResponse });
+
+      const result = await adminService.updateUser(1, payload);
+
+      expect(api.put).toHaveBeenCalledWith('/admin/users/1', payload);
+      expect(result).toEqual(mockResponse);
+    });
   });
 
   describe('getOrders', () => {
@@ -92,6 +108,61 @@ describe('AdminService', () => {
 
       expect(api.get).toHaveBeenCalledWith('/admin/orders', { params: {} });
       expect(result).toEqual(mockData);
+    });
+  });
+
+  describe('corporate contracts', () => {
+    it('fetches corporate contracts successfully', async () => {
+      const mockData = {
+        data: {
+          items: [{ id: 1, contract_number: 'CTR-001' }]
+        }
+      };
+
+      api.get.mockResolvedValue({ data: mockData });
+
+      const result = await adminService.getCorporateContracts({ page: 1, per_page: 20 });
+
+      expect(api.get).toHaveBeenCalledWith('/admin/corporate/contracts', {
+        params: { page: 1, per_page: 20 }
+      });
+      expect(result).toEqual(mockData);
+    });
+
+    it('updates contract prices successfully', async () => {
+      const prices = [{ product_id: 1, unit_price: 12000 }];
+      const mockResponse = { message: 'ok' };
+
+      api.put.mockResolvedValue({ data: mockResponse });
+
+      const result = await adminService.updateCorporateContractPrices(7, prices);
+
+      expect(api.put).toHaveBeenCalledWith('/admin/corporate/contracts/7/prices', { prices });
+      expect(result).toEqual(mockResponse);
+    });
+
+    it('previews contract overlaps successfully', async () => {
+      const payload = { user_id: 1, prices: [{ product_id: 2, is_active: true }] };
+      const mockResponse = { data: { preview: { has_conflicts: false } } };
+
+      api.post.mockResolvedValue({ data: mockResponse });
+
+      const result = await adminService.previewCorporateContractOverlaps(payload);
+
+      expect(api.post).toHaveBeenCalledWith('/admin/corporate/contracts/overlap-preview', payload);
+      expect(result).toEqual(mockResponse);
+    });
+
+    it('submits corporate topup successfully', async () => {
+      const payload = { units: 10, amount: 100000, transfer_ref: 'BANK-1' };
+      const mockResponse = { message: 'topup created' };
+
+      api.post.mockResolvedValue({ data: mockResponse });
+
+      const result = await adminService.topupCorporateContract(4, payload);
+
+      expect(api.post).toHaveBeenCalledWith('/admin/corporate/contracts/4/prepayments/topup', payload);
+      expect(result).toEqual(mockResponse);
     });
   });
 

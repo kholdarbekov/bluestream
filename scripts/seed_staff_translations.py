@@ -108,6 +108,26 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "uz": "Manzil",
         "ru": "Адрес",
     },
+    "staff.operator.payment_cash": {
+        "en": "Cash",
+        "uz": "Naqd pul",
+        "ru": "Наличные",
+    },
+    "staff.operator.payment_payme": {
+        "en": "Payme",
+        "uz": "Payme",
+        "ru": "Payme",
+    },
+    "staff.operator.payment_click": {
+        "en": "Click",
+        "uz": "Click",
+        "ru": "Click",
+    },
+    "staff.operator.payment_business_account": {
+        "en": "Business Account",
+        "uz": "Hisob raqami orqali",
+        "ru": "Безналичный счёт",
+    },
     "staff.back": {"en": "Back", "uz": "Orqaga", "ru": "Назад"},
     "staff.confirm": {"en": "Confirm", "uz": "Tasdiqlash", "ru": "Подтвердить"},
     "staff.cancel": {"en": "Cancel", "uz": "Bekor qilish", "ru": "Отмена"},

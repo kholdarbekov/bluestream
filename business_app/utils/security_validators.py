@@ -10,6 +10,8 @@ from datetime import datetime, UTC
 import secrets
 import string
 
+from business_app.utils.user_types import VALID_USER_TYPE_VALUES
+
 
 class SecurityValidator:
     """Centralized security validation class for all sensitive data."""
@@ -268,24 +270,24 @@ class SecurityValidator:
         return True, "Tax ID is valid"
     
     @staticmethod
-    def validate_business_type(business_type: str) -> Tuple[bool, str]:
+    def validate_user_type(user_type: str) -> Tuple[bool, str]:
         """
-        Validate business type.
+        Validate top-level user type.
         
         Args:
-            business_type: The business type to validate
+            user_type: The user type to validate
             
         Returns:
             Tuple of (is_valid, error_message)
         """
-        if not business_type:
-            return True, "Business type is optional"
+        if not user_type:
+            return True, "User type is optional"
+
+        normalized = user_type.strip().lower()
+        if normalized not in VALID_USER_TYPE_VALUES:
+            return False, f"User type must be one of: {', '.join(VALID_USER_TYPE_VALUES)}"
         
-        valid_types = ['individual', 'small_business', 'corporation', 'non_profit', 'government']
-        if business_type not in valid_types:
-            return False, f"Business type must be one of: {', '.join(valid_types)}"
-        
-        return True, "Business type is valid"
+        return True, "User type is valid"
     
     @staticmethod
     def generate_secure_token(length: int = 32) -> str:
@@ -421,11 +423,11 @@ class SecurityValidator:
             if not is_valid:
                 errors.append(f"Tax ID: {message}")
         
-        # Business type validation
-        if 'business_type' in user_data:
-            is_valid, message = cls.validate_business_type(user_data['business_type'])
+        # User type validation
+        if 'user_type' in user_data:
+            is_valid, message = cls.validate_user_type(user_data['user_type'])
             if not is_valid:
-                errors.append(f"Business type: {message}")
+                errors.append(f"User type: {message}")
         
         # Name field sanitization and validation
         name_fields = ['first_name', 'last_name', 'company_name']

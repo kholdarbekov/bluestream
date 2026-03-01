@@ -17,7 +17,8 @@ import {
   message,
   Descriptions,
   Divider,
-  Spin
+  Spin,
+  Alert
 } from 'antd';
 import {
   SearchOutlined,
@@ -37,6 +38,7 @@ import { formatDate, formatDateTimeShort } from '../utils/dateUtils';
 import adminService from '../services/adminService';
 import api from '../services/api';
 import { useTranslation } from 'react-i18next';
+import { extractApiErrorMessages } from '../utils/apiError';
 
 const { Option } = Select;
 const { RangePicker } = DatePicker;
@@ -55,6 +57,7 @@ const Orders = () => {
   const [userAddresses, setUserAddresses] = useState([]);
   const [pagination, setPagination] = useState({ page: 1, per_page: 20 });
   const [orderDetailsLoading, setOrderDetailsLoading] = useState(false);
+  const [createOrderErrors, setCreateOrderErrors] = useState([]);
   const [form] = Form.useForm();
   const [createOrderForm] = Form.useForm();
 
@@ -115,12 +118,17 @@ const Orders = () => {
         queryClient.invalidateQueries('orders');
         setIsCreateModalVisible(false);
         createOrderForm.resetFields();
+        setCreateOrderErrors([]);
         setSelectedUserId(null);
         setUserAddresses([]);
       },
       onError: (error) => {
-        const errorMessage = error.response?.data?.message || t('ui.orders.order_create_failed', 'Failed to create order');
-        message.error(errorMessage);
+        const errorMessages = extractApiErrorMessages(
+          error,
+          t('ui.orders.order_create_failed', 'Failed to create order')
+        );
+        setCreateOrderErrors(errorMessages);
+        message.error(errorMessages[0]);
       }
     }
   );
@@ -145,6 +153,7 @@ const Orders = () => {
 
   // Handle create order submit
   const handleCreateOrderSubmit = (values) => {
+    setCreateOrderErrors([]);
     const orderData = {
       user_id: values.user_id,
       delivery_address_id: values.delivery_address_id,
@@ -667,6 +676,7 @@ const Orders = () => {
         onCancel={() => {
           setIsCreateModalVisible(false);
           createOrderForm.resetFields();
+          setCreateOrderErrors([]);
           setSelectedUserId(null);
           setUserAddresses([]);
         }}
@@ -679,6 +689,22 @@ const Orders = () => {
           onFinish={handleCreateOrderSubmit}
           initialValues={{ payment_method: 'cash', items: [{}] }}
         >
+          {createOrderErrors.length > 0 && (
+            <Alert
+              type="error"
+              showIcon
+              style={{ marginBottom: 16 }}
+              message={t('ui.orders.order_create_validation_title', 'Could not create order')}
+              description={
+                <ul style={{ margin: 0, paddingLeft: 18 }}>
+                  {createOrderErrors.map((errorText, index) => (
+                    <li key={`${errorText}-${index}`}>{errorText}</li>
+                  ))}
+                </ul>
+              }
+            />
+          )}
+
           {/* User Selection */}
           <Form.Item
             name="user_id"
@@ -815,6 +841,7 @@ const Orders = () => {
               <Option value="cash">{t('ui.orders.payment_cash', 'Cash on Delivery')}</Option>
               <Option value="payme">{t('ui.orders.payment_payme', 'Payme')}</Option>
               <Option value="click">{t('ui.orders.payment_click', 'Click')}</Option>
+              <Option value="business_account">{t('ui.orders.payment_business_account', 'Business Account')}</Option>
             </Select>
           </Form.Item>
 
@@ -835,6 +862,7 @@ const Orders = () => {
               <Button onClick={() => {
                 setIsCreateModalVisible(false);
                 createOrderForm.resetFields();
+                setCreateOrderErrors([]);
                 setSelectedUserId(null);
                 setUserAddresses([]);
               }}>

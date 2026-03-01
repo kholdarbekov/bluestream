@@ -34,6 +34,15 @@ class ValidationError(WaterBusinessException):
         super().__init__(message, details, error_code)
         self.validation_errors = validation_errors or []
 
+    @property
+    def errors(self):
+        """Backward-compatible validation payload for API layers."""
+        if self.validation_errors:
+            return self.validation_errors
+        if self.details:
+            return self.details
+        return [self.message]
+
 
 class NotFoundError(WaterBusinessException):
     """Raised when a requested resource is not found"""

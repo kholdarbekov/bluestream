@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field, field_validator, ConfigDict
 from pydantic.alias_generators import to_camel
 from business_app.models.product import Product, ProductCategory
 from business_app.models.order import Order
+from business_app.utils.user_types import normalize_user_type
 
 
 class UserRole(str, Enum):
@@ -571,6 +572,13 @@ def serialize_user_admin(user, include_statistics: bool = False) -> Dict[str, An
             'registration_method': getattr(user, 'registration_method', None),
             'preferred_language': getattr(user, 'preferred_language', None),
             'is_verified': getattr(user, 'is_verified', False),
+            'user_type': normalize_user_type(
+                getattr(user, 'user_type', None),
+                role=getattr(user, 'role', None),
+                staff_roles=getattr(user, 'staff_roles', None),
+            ),
+            'company_name': getattr(user, 'company_name', None),
+            'tax_id': getattr(user, 'tax_id', None),
             # Telegram fields
             'telegram_id': user.telegram_id,
             'telegram_username': getattr(user, 'telegram_username', None),

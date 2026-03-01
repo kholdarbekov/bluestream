@@ -6,6 +6,7 @@ from flask import Blueprint, request, jsonify, current_app, g
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from sqlalchemy import and_, or_, desc, func, text, cast, String
 from datetime import datetime, UTC, timedelta
+from decimal import Decimal
 from shared.constants import DISPLAY_TIMEZONE
 
 from business_app.models.user import User, UserAddress
@@ -22,7 +23,7 @@ from business_app.models.audit import AuditLog, AuditEventType, AuditSeverity
 # TranslatableContent replaced by unified Translation system
 from business_app.models.translation import Translation, TranslationCategory, Language
 # from business_app.services.admin_service import AdminService
-from business_app.utils.service_factory import get_notification_service
+from business_app.utils.service_factory import get_notification_service, get_corporate_contract_service
 from business_app.services.subscription_service import SubscriptionService
 from business_app.services.payment_service import PaymentService
 from business_app.services.review_service import ReviewService
@@ -55,6 +56,7 @@ from business_app.utils.constants import UserRole, SubscriptionStatus, OrderStat
 # from business_app.tasks.admin_tasks import send_bulk_email_task, generate_report_task
 from business_app import db
 from business_app.utils.helpers import get_current_language
+from business_app.utils.user_types import normalize_user_type
 from business_app.utils.translations import get_translation
 from business_app.utils.exceptions import ValidationError, ConflictError, NotFoundError
 from business_app.utils.api_responses import (
@@ -73,6 +75,336 @@ def _is_operator_staff_member():
         User.role == UserRole.OPERATOR,
         cast(User.staff_roles, String).ilike('%"operator"%')
     )
+
+
+def _serialize_corporate_contract(contract):
+    payload = contract.to_dict()
+    user = getattr(contract, "user", None)
+    if user:
+        payload["user"] = {
+            "id": user.id,
+            "first_name": user.first_name,
+            "last_name": user.last_name,
+            "phone": user.phone,
+            "email": user.email,
+            "user_type": normalize_user_type(
+                getattr(user, "user_type", None),
+                role=getattr(user, "role", None),
+                staff_roles=getattr(user, "staff_roles", None),
+            ),
+            "company_name": getattr(user, "company_name", None),
+            "tax_id": getattr(user, "tax_id", None),
+        }
+    else:
+        payload["user"] = None
+    if contract.prepayment_account:
+        payload["prepayment_account"] = contract.prepayment_account.to_dict()
+    else:
+        payload["prepayment_account"] = None
+    payload["prices"] = [price.to_dict() for price in contract.product_prices]
+    return payload
+
+
+def _parse_iso_datetime(value):
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        normalized = value.replace("Z", "+00:00")
+        return datetime.fromisoformat(normalized)
+    raise ValidationError("Invalid datetime format")
+
+
+def _commit_db_session():
+    getattr(db, "session").commit()
+
+
+def _rollback_db_session():
+    getattr(db, "session").rollback()
+
+
+@admin_bp.route('/corporate/contracts', methods=['GET'])
+@jwt_required()
+@manager_or_higher_required
+def list_corporate_contracts():
+    """List corporate contracts."""
+    try:
+        service = get_corporate_contract_service()
+        user_id = request.args.get('user_id', type=int)
+        status = request.args.get('status')
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 20, type=int)
+
+        result = service.list_contracts(
+            user_id=user_id,
+            status=status,
+            page=page,
+            per_page=per_page,
+        )
+        return success_response(
+            data={
+                'items': [_serialize_corporate_contract(item) for item in result['items']],
+            },
+            meta={
+                'page': result['page'],
+                'per_page': result['per_page'],
+                'total': result['total'],
+            },
+        )
+    except ValidationError as e:
+        return validation_error_response(str(e))
+    except Exception as e:
+        current_app.logger.error(f"List corporate contracts error: {e}")
+        return internal_error_response('Failed to list corporate contracts')
+
+
+@admin_bp.route('/corporate/contracts', methods=['POST'])
+@jwt_required()
+@manager_or_higher_required
+def create_corporate_contract():
+    """Create corporate contract."""
+    try:
+        current_user_id = get_jwt_identity()
+        payload = request.get_json() or {}
+        service = get_corporate_contract_service()
+
+        contract = service.create_contract(payload, actor_user_id=current_user_id)
+        _commit_db_session()
+
+        return created_response(
+            data={'contract': _serialize_corporate_contract(contract)},
+            message='Corporate contract created successfully',
+        )
+    except ValidationError as e:
+        _rollback_db_session()
+        return validation_error_response(str(e))
+    except NotFoundError as e:
+        _rollback_db_session()
+        return not_found_response(message=str(e))
+    except Exception as e:
+        _rollback_db_session()
+        current_app.logger.error(f"Create corporate contract error: {e}")
+        return internal_error_response('Failed to create corporate contract')
+
+
+@admin_bp.route('/corporate/contracts/<int:contract_id>', methods=['GET'])
+@jwt_required()
+@manager_or_higher_required
+def get_corporate_contract(contract_id):
+    """Get corporate contract details."""
+    try:
+        service = get_corporate_contract_service()
+        contract = service.get_contract_by_id(contract_id)
+        return success_response(data={'contract': _serialize_corporate_contract(contract)})
+    except NotFoundError as e:
+        return not_found_response(message=str(e))
+    except Exception as e:
+        current_app.logger.error(f"Get corporate contract error: {e}")
+        return internal_error_response('Failed to get corporate contract')
+
+
+@admin_bp.route('/corporate/contracts/<int:contract_id>', methods=['PUT'])
+@jwt_required()
+@manager_or_higher_required
+def update_corporate_contract(contract_id):
+    """Update corporate contract."""
+    try:
+        current_user_id = get_jwt_identity()
+        payload = request.get_json() or {}
+        service = get_corporate_contract_service()
+
+        contract = service.update_contract(
+            contract_id=contract_id,
+            payload=payload,
+            actor_user_id=current_user_id,
+        )
+        _commit_db_session()
+
+        return success_response(
+            data={'contract': _serialize_corporate_contract(contract)},
+            message='Corporate contract updated successfully',
+        )
+    except ValidationError as e:
+        _rollback_db_session()
+        return validation_error_response(str(e))
+    except NotFoundError as e:
+        _rollback_db_session()
+        return not_found_response(message=str(e))
+    except Exception as e:
+        _rollback_db_session()
+        current_app.logger.error(f"Update corporate contract error: {e}")
+        return internal_error_response('Failed to update corporate contract')
+
+
+@admin_bp.route('/corporate/contracts/<int:contract_id>/prices', methods=['PUT'])
+@jwt_required()
+@manager_or_higher_required
+def upsert_corporate_contract_prices(contract_id):
+    """Bulk upsert corporate contract product prices."""
+    try:
+        current_user_id = get_jwt_identity()
+        payload = request.get_json() or {}
+        prices = payload if isinstance(payload, list) else payload.get('prices', [])
+        if not isinstance(prices, list):
+            return validation_error_response('prices must be a list')
+
+        service = get_corporate_contract_service()
+        updated_rows = service.upsert_contract_prices(
+            contract_id=contract_id,
+            prices=prices,
+            actor_user_id=current_user_id,
+        )
+        _commit_db_session()
+
+        return success_response(
+            data={'prices': [row.to_dict() for row in updated_rows]},
+            message='Corporate contract prices updated successfully',
+        )
+    except ValidationError as e:
+        _rollback_db_session()
+        return validation_error_response(str(e))
+    except NotFoundError as e:
+        _rollback_db_session()
+        return not_found_response(message=str(e))
+    except Exception as e:
+        _rollback_db_session()
+        current_app.logger.error(f"Upsert corporate contract prices error: {e}")
+        return internal_error_response('Failed to update contract prices')
+
+
+@admin_bp.route('/corporate/contracts/overlap-preview', methods=['POST'])
+@jwt_required()
+@manager_or_higher_required
+def preview_corporate_contract_overlaps():
+    """Preview active contract overlap conflicts for contract dates/products."""
+    try:
+        payload = request.get_json() or {}
+        service = get_corporate_contract_service()
+        preview = service.preview_contract_price_overlaps(
+            contract_id=payload.get('contract_id'),
+            user_id=payload.get('user_id'),
+            start_date=_parse_iso_datetime(payload.get('start_date')),
+            end_date=_parse_iso_datetime(payload.get('end_date')),
+            status=payload.get('status'),
+            is_active=payload.get('is_active'),
+            prices=payload.get('prices', []),
+            contract_number=payload.get('contract_number'),
+            contract_name=payload.get('name'),
+        )
+        return success_response(data={'preview': preview})
+    except ValidationError as e:
+        return validation_error_response(str(e))
+    except NotFoundError as e:
+        return not_found_response(message=str(e))
+    except Exception as e:
+        current_app.logger.error(f"Corporate overlap preview error: {e}")
+        return internal_error_response('Failed to preview contract overlaps')
+
+
+@admin_bp.route('/corporate/contracts/<int:contract_id>/prepayments/topup', methods=['POST'])
+@jwt_required()
+@manager_or_higher_required
+def topup_corporate_contract(contract_id):
+    """Top up corporate prepayment units for a specific product."""
+    try:
+        current_user_id = get_jwt_identity()
+        payload = request.get_json() or {}
+
+        product_id = payload.get('product_id')
+        if product_id is None:
+            return validation_error_response('product_id is required')
+
+        units = payload.get('units')
+        if units is None:
+            return validation_error_response('units is required')
+
+        service = get_corporate_contract_service()
+        ledger_entry = service.topup_contract(
+            contract_id=contract_id,
+            product_id=int(product_id),
+            units=Decimal(str(units)),
+            amount=Decimal(str(payload['amount'])) if payload.get('amount') is not None else None,
+            transfer_ref=payload.get('transfer_ref'),
+            actor_user_id=current_user_id,
+            notes=payload.get('notes'),
+        )
+        balance = service.get_balance(contract_id)
+        _commit_db_session()
+
+        return created_response(
+            data={
+                'ledger_entry': ledger_entry.to_dict(),
+                'balance': balance,
+            },
+            message='Corporate prepayment topup applied',
+        )
+    except ValidationError as e:
+        _rollback_db_session()
+        return validation_error_response(str(e))
+    except NotFoundError as e:
+        _rollback_db_session()
+        return not_found_response(message=str(e))
+    except Exception as e:
+        _rollback_db_session()
+        current_app.logger.error(f"Corporate topup error: {e}")
+        return internal_error_response('Failed to top up corporate contract')
+
+
+@admin_bp.route('/corporate/contracts/<int:contract_id>/balance', methods=['GET'])
+@jwt_required()
+@manager_or_higher_required
+def get_corporate_contract_balance(contract_id):
+    """Get corporate prepayment balance."""
+    try:
+        service = get_corporate_contract_service()
+        balance = service.get_balance(contract_id)
+        return success_response(data={'balance': balance})
+    except NotFoundError as e:
+        return not_found_response(message=str(e))
+    except Exception as e:
+        current_app.logger.error(f"Get corporate balance error: {e}")
+        return internal_error_response('Failed to get corporate contract balance')
+
+
+@admin_bp.route('/corporate/contracts/<int:contract_id>/ledger', methods=['GET'])
+@jwt_required()
+@manager_or_higher_required
+def get_corporate_contract_ledger(contract_id):
+    """Get corporate prepayment ledger events."""
+    try:
+        service = get_corporate_contract_service()
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 50, type=int)
+        event_type = request.args.get('event_type')
+        product_id = request.args.get('product_id', type=int)
+        start_date = _parse_iso_datetime(request.args.get('start_date'))
+        end_date = _parse_iso_datetime(request.args.get('end_date'))
+
+        result = service.get_ledger(
+            contract_id=contract_id,
+            page=page,
+            per_page=per_page,
+            event_type=event_type,
+            product_id=product_id,
+            start_date=start_date,
+            end_date=end_date,
+        )
+        return success_response(
+            data={'items': [item.to_dict() for item in result['items']]},
+            meta={
+                'page': result['page'],
+                'per_page': result['per_page'],
+                'total': result['total'],
+            },
+        )
+    except ValidationError as e:
+        return validation_error_response(str(e))
+    except NotFoundError as e:
+        return not_found_response(message=str(e))
+    except Exception as e:
+        current_app.logger.error(f"Get corporate ledger error: {e}")
+        return internal_error_response('Failed to get corporate contract ledger')
 
 
 
@@ -136,7 +468,7 @@ def get_admin_dashboard():
         orders_growth = ((orders_current - orders_previous) / orders_previous * 100) if orders_previous > 0 else 0
 
         # Revenue metrics - current period
-        revenue_current = db.session.query(func.sum(Order.total_amount)).filter(
+        revenue_current = getattr(db, "session").query(func.sum(Order.total_amount)).filter(
             Order.created_at >= current_start,
             Order.status != OrderStatus.CANCELLED.value
         ).scalar() or 0
@@ -898,6 +1230,9 @@ def create_user():
     Optional fields:
     - last_name: User last name
     - email: User email (must be unique if provided)
+    - company_name: Legal entity name for entity clients
+    - tax_id: Tax identifier
+    - user_type: User classification, use `entity` for legal-entity clients
     - notes: Admin notes about the user (logged, not stored)
 
     Returns:
@@ -911,6 +1246,9 @@ def create_user():
         first_name = data.get('first_name', '').strip()
         last_name = data.get('last_name', '').strip() if data.get('last_name') else None
         email = data.get('email', '').strip() if data.get('email') else None
+        company_name = data.get('company_name', '').strip() if data.get('company_name') else None
+        tax_id = data.get('tax_id', '').strip() if data.get('tax_id') else None
+        user_type = data.get('user_type', '').strip() if data.get('user_type') else None
         notes = data.get('notes', '').strip() if data.get('notes') else None
 
         # Validate required fields
@@ -929,6 +1267,9 @@ def create_user():
             created_by_admin_id=current_user_id,
             last_name=last_name,
             email=email,
+            company_name=company_name,
+            tax_id=tax_id,
+            user_type=user_type,
             notes=notes
         )
 
@@ -944,11 +1285,52 @@ def create_user():
     except ConflictError as e:
         return error_response(str(e), status_code=409)
     except ValidationError as e:
-        return validation_error_response(str(e), errors=e.errors if hasattr(e, 'errors') else None)
+        return validation_error_response(e.errors)
     except Exception as e:
         db.session.rollback()
         current_app.logger.error(f"Create user error: {e}")
         return internal_error_response('Failed to create user')
+
+
+@admin_bp.route('/users/<int:user_id>', methods=['PUT'])
+@jwt_required()
+@validate_admin_action(['edit_users'])
+@validate_json(['phone', 'first_name'])
+def update_user(user_id):
+    """Update a user from the admin panel."""
+    try:
+        current_user_id = get_jwt_identity()
+        data = request.get_json()
+
+        from business_app.services.auth_service import AuthService
+        auth_service = AuthService()
+
+        user = auth_service.update_user_by_admin(
+            user_id=user_id,
+            updated_by_admin_id=current_user_id,
+            phone=data.get('phone', '').strip(),
+            first_name=data.get('first_name', '').strip(),
+            last_name=data.get('last_name', '').strip() if data.get('last_name') else None,
+            email=data.get('email', '').strip() if data.get('email') else None,
+            company_name=data.get('company_name', '').strip() if data.get('company_name') else None,
+            tax_id=data.get('tax_id', '').strip() if data.get('tax_id') else None,
+            user_type=data.get('user_type', '').strip() if data.get('user_type') else None,
+        )
+
+        return success_response(
+            data={'user': serialize_user_admin(user)},
+            message='User updated successfully'
+        )
+    except ConflictError as e:
+        return error_response(str(e), status_code=409)
+    except ValidationError as e:
+        return validation_error_response(e.errors)
+    except NotFoundError as e:
+        return not_found_response(message=str(e))
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(f"Update user error: {e}")
+        return internal_error_response('Failed to update user')
 
 
 # ============================================================================
@@ -1305,7 +1687,7 @@ def create_order_for_user():
     - delivery_address_id: ID of delivery address
 
     Optional fields:
-    - payment_method: cash, payme, click (default: cash)
+    - payment_method: cash, payme, click, business_account (default: cash)
     - delivery_notes: Special delivery instructions
     """
     try:
@@ -1366,7 +1748,7 @@ def create_order_for_user():
         )
 
     except ValidationError as e:
-        return validation_error_response(str(e), errors=e.errors if hasattr(e, 'errors') else None)
+        return validation_error_response(e.errors)
     except Exception as e:
         db.session.rollback()
         current_app.logger.error(f"Create order for user error: {e}")

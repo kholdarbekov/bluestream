@@ -12,10 +12,12 @@ import redis
 
 from business_app.models.user import User, UserAddress, UserSession
 from business_app.utils.exceptions import ValidationError, UnauthorizedError, ConflictError, NotFoundError
+from business_app.utils.security_validators import SecurityValidator
 from business_app.utils.validators import EmailValidator, PhoneValidator, PasswordValidator
 from business_app.utils.helpers import generate_otp, format_phone_number, generate_random_string
 from business_app.utils.password_security import hash_password, verify_password, needs_password_rehash
-from business_app.utils.constants import UserRole, UserStatus
+from business_app.utils.constants import UserRole, UserStatus, UserType
+from business_app.utils.user_types import infer_non_staff_user_type
 from business_app.utils.translations import get_translation
 from business_app.tasks.notification_tasks import send_verification_sms_task
 from business_app import db
@@ -90,7 +92,7 @@ class AuthService:
             'date_of_birth', 'gender', 'role', 'status', 'is_verified',
             'is_premium', 'preferred_language', 'preferred_currency', 'timezone',
             'email_notifications', 'sms_notifications', 'push_notifications',
-            'company_name', 'tax_id', 'business_type', 'email_verification_token',
+            'user_type', 'company_name', 'tax_id', 'email_verification_token',
             'email_verified_at', 'telegram_id', 'registration_source',
             'telegram_username', 'is_bot_active', 'bot_state', 'last_bot_interaction'
         }
@@ -423,7 +425,6 @@ class AuthService:
         phone_hash = hashlib.sha256(user.phone.encode()).hexdigest()[:16]
         
         # Generate 6-digit OTP
-        from business_app.utils.security import generate_otp
         otp_code = generate_otp(length=6)
         
         # Store OTP with 10 minute expiry
@@ -899,6 +900,7 @@ class AuthService:
             first_name=first_name,
             last_name=last_name,
             password_hash=self._hash_password(password),
+            user_type=UserType.STAFF.value,
             role=UserRole.ADMIN.value,
             status=UserStatus.ACTIVE.value,
             phone_verified_at=datetime.now(timezone.utc),
@@ -917,7 +919,10 @@ class AuthService:
         created_by_admin_id: int,
         last_name: str = None,
         email: str = None,
-        notes: str = None
+        notes: str = None,
+        company_name: str = None,
+        tax_id: str = None,
+        user_type: str = None,
     ) -> User:
         """
         Create a user account via admin panel (for call center operations).
@@ -935,6 +940,9 @@ class AuthService:
             last_name: Optional - User last name
             email: Optional - User email (must be unique if provided)
             notes: Optional - Admin notes about the user
+            company_name: Optional - Company or legal entity name
+            tax_id: Optional - Tax identifier
+            user_type: Optional - User classification (`individual` or `entity`)
 
         Returns:
             Created User object
@@ -982,6 +990,41 @@ class AuthService:
                 {'first_name': ['First name is required']}
             )
 
+        normalized_company_name = company_name.strip() if company_name else None
+        normalized_user_type = infer_non_staff_user_type(user_type)
+        normalized_tax_id = tax_id.strip().upper() if tax_id else None
+
+        if user_type:
+            is_valid, message = SecurityValidator.validate_user_type(user_type)
+            if not is_valid:
+                raise ValidationError(
+                    get_translation('error.validation.failed'),
+                    {'user_type': [message]}
+                )
+            if user_type.strip().lower() == UserType.STAFF.value:
+                raise ValidationError(
+                    get_translation('error.validation.failed'),
+                    {'user_type': ['Staff users must be managed through staff administration flows']}
+                )
+
+        if normalized_tax_id:
+            is_valid, message = SecurityValidator.validate_tax_id(normalized_tax_id)
+            if not is_valid:
+                raise ValidationError(
+                    get_translation('error.validation.failed'),
+                    {'tax_id': [message]}
+                )
+
+        if normalized_user_type == UserType.ENTITY.value and not normalized_company_name:
+            raise ValidationError(
+                get_translation('error.validation.failed'),
+                {'company_name': ['Company name is required for entity users']}
+            )
+
+        if normalized_user_type != UserType.ENTITY.value:
+            normalized_company_name = None
+            normalized_tax_id = None
+
         # Generate a secure random password that the user will never know
         # This prevents login via password - admin-created users can only be managed via admin panel
         random_password = secrets.token_urlsafe(32)
@@ -994,11 +1037,14 @@ class AuthService:
             first_name=first_name.strip(),
             last_name=last_name.strip() if last_name else None,
             password_hash=secure_password_hash,
+            user_type=normalized_user_type,
             role=UserRole.CUSTOMER.value,
             status=UserStatus.ACTIVE.value,  # Active so orders can be placed
             is_verified=False,  # Not verified - cannot access cabinet pages
             registration_source='admin_created',
-            preferred_language='uz'  # Default language for Uzbekistan
+            preferred_language='uz',  # Default language for Uzbekistan
+            company_name=normalized_company_name,
+            tax_id=normalized_tax_id,
         )
 
         db.session.add(user)
@@ -1012,6 +1058,122 @@ class AuthService:
         if notes:
             log_message += f", notes={notes}"
         logger.info(log_message)
+
+        return user
+
+    def update_user_by_admin(
+        self,
+        user_id: int,
+        *,
+        first_name: str,
+        updated_by_admin_id: int,
+        last_name: str = None,
+        phone: str = None,
+        email: str = None,
+        company_name: str = None,
+        tax_id: str = None,
+        user_type: str = None,
+    ) -> User:
+        """Update a user from the admin panel using the simplified two-type business model."""
+        user = User.query.get(user_id)
+        if not user:
+            raise NotFoundError("User not found")
+
+        if not first_name or not first_name.strip():
+            raise ValidationError(
+                get_translation('error.validation.failed'),
+                {'first_name': ['First name is required']}
+            )
+
+        formatted_phone = None
+        if phone:
+            phone_validator = PhoneValidator(phone, 'phone')
+            phone_validator.validate()
+            if not phone_validator.is_valid():
+                raise ValidationError(
+                    get_translation('error.validation.invalid_phone'),
+                    {'phone': phone_validator.get_errors()}
+                )
+            formatted_phone = format_phone_number(phone)
+            existing_by_phone = User.query.filter(User.phone == formatted_phone, User.id != user_id).first()
+            if existing_by_phone:
+                raise ConflictError(get_translation('error.validation.phone_already_exists'))
+
+        formatted_email = None
+        if email:
+            email_validator = EmailValidator(email, 'email')
+            email_validator.validate()
+            if not email_validator.is_valid():
+                raise ValidationError(
+                    get_translation('error.validation.invalid_email'),
+                    {'email': email_validator.get_errors()}
+                )
+            formatted_email = email.lower().strip()
+            existing_by_email = User.query.filter(User.email == formatted_email, User.id != user_id).first()
+            if existing_by_email:
+                raise ConflictError(get_translation('api.auth.email_already_exists'))
+
+        current_user_type = user.normalized_user_type
+        raw_user_type = user_type if user_type is not None else getattr(user.user_type, "value", user.user_type)
+        normalized_user_type = infer_non_staff_user_type(raw_user_type)
+        if user_type:
+            is_valid, message = SecurityValidator.validate_user_type(user_type)
+            if not is_valid:
+                raise ValidationError(
+                    get_translation('error.validation.failed'),
+                    {'user_type': [message]}
+                )
+            requested_user_type = user_type.strip().lower()
+            if current_user_type == UserType.STAFF.value and requested_user_type != UserType.STAFF.value:
+                raise ValidationError(
+                    get_translation('error.validation.failed'),
+                    {'user_type': ['Staff type changes must be managed through staff administration flows']}
+                )
+            if current_user_type != UserType.STAFF.value and requested_user_type == UserType.STAFF.value:
+                raise ValidationError(
+                    get_translation('error.validation.failed'),
+                    {'user_type': ['Staff users must be managed through staff administration flows']}
+                )
+
+        normalized_company_name = user.company_name if company_name is None else (company_name.strip() or None)
+        normalized_tax_id = user.tax_id if tax_id is None else (tax_id.strip().upper() or None)
+
+        if normalized_tax_id:
+            is_valid, message = SecurityValidator.validate_tax_id(normalized_tax_id)
+            if not is_valid:
+                raise ValidationError(
+                    get_translation('error.validation.failed'),
+                    {'tax_id': [message]}
+                )
+
+        if normalized_user_type == UserType.ENTITY.value and not normalized_company_name:
+            raise ValidationError(
+                get_translation('error.validation.failed'),
+                {'company_name': ['Company name is required for entity users']}
+            )
+
+        if normalized_user_type != UserType.ENTITY.value:
+            normalized_company_name = None
+            normalized_tax_id = None
+
+        user.first_name = first_name.strip()
+        user.last_name = last_name.strip() if last_name else None
+        user.phone = formatted_phone
+        user.email = formatted_email
+        if current_user_type != UserType.STAFF.value:
+            user.user_type = normalized_user_type
+        user.company_name = normalized_company_name
+        user.tax_id = normalized_tax_id
+
+        db.session.add(user)
+        db.session.commit()
+
+        logger.info(
+            "User updated by admin: user_id=%s, updated_by_admin_id=%s, user_type=%s",
+            user.id,
+            updated_by_admin_id,
+            getattr(user.user_type, "value", user.user_type),
+        )
 
         return user
 

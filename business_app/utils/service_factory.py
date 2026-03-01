@@ -188,6 +188,12 @@ def get_cart_service():
     return ServiceFactory.get_service(CartService, 'cart_service')
 
 
+def get_corporate_contract_service():
+    """Get CorporateContractService instance"""
+    from business_app.services.corporate_contract_service import CorporateContractService
+    return ServiceFactory.get_service(CorporateContractService, 'corporate_contract_service')
+
+
 # Decorator for automatic service injection
 def inject_services(*service_names):
     """
@@ -219,6 +225,7 @@ def inject_services(*service_names):
                 'product_service': get_product_service,
                 'review_service': get_review_service,
                 'cart_service': get_cart_service,
+                'corporate_contract_service': get_corporate_contract_service,
             }
             
             # Inject requested services

@@ -29,7 +29,7 @@ from business_app.models.user import User
 from business_app.models.product import Product, ProductCategory
 from business_app.models.order import Order
 from business_app.models.payment import Payment
-from business_app.utils.constants import UserRole, OrderStatus, PaymentStatus, PaymentMethod
+from business_app.utils.constants import UserRole, UserType, OrderStatus, PaymentStatus, PaymentMethod
 from business_app.utils.password_security import hash_password
 
 
@@ -167,6 +167,7 @@ def sample_user(db):
         password_hash=hash_password('TestPassword123!'),
         first_name='Test',
         last_name='User',
+        user_type=UserType.INDIVIDUAL,
         role=UserRole.CUSTOMER,
         is_verified=True,
         created_at=datetime.now(UTC)
@@ -185,6 +186,7 @@ def admin_user(db):
         password_hash=hash_password('AdminPassword123!'),
         first_name='Admin',
         last_name='User',
+        user_type=UserType.STAFF,
         role=UserRole.ADMIN,
         is_verified=True,
         created_at=datetime.now(UTC)
@@ -203,6 +205,7 @@ def delivery_driver(db):
         password_hash=hash_password('DriverPassword123!'),
         first_name='Delivery',
         last_name='Driver',
+        user_type=UserType.STAFF,
         role=UserRole.DELIVERY_DRIVER,
         is_verified=True,
         created_at=datetime.now(UTC)

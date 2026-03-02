@@ -16,7 +16,7 @@ from business_app.serializers.order_serializers import (
     CreateOrderRequest, OrderFeedbackRequest, CartEstimateRequest
 )
 from business_app.utils.decorators import validate_json, rate_limit, require_verification
-from business_app.utils.constants import OrderStatus, PaymentMethod, NotificationType
+from business_app.utils.constants import OrderStatus, NotificationType
 from business_app.utils.validation_helpers import validate_list_request_params
 from business_app.utils.error_handlers import handle_api_exception
 from business_app.utils.exceptions import (
@@ -338,29 +338,13 @@ def create_order():
             current_app.logger.error(f"CREATE ORDER API: Failed to clear cart: {e}")
 
         # Create delivery record if delivery details provided
-        if order.delivery_date and order.delivery_time_slot:
-            delivery = get_delivery_service().create_delivery(order)
+        if order.delivery_date and order.delivery_time_slot and not getattr(order, 'delivery', None):
+            delivery = get_delivery_service().create_delivery(order.id)
 
             # Auto-assign delivery driver
             auto_assign_delivery_task.delay(delivery.id)
 
         current_app.logger.info(f"CREATE ORDER API: order_number={order.order_number}, type={type(order.order_number)}, total_amount={order.total_amount}, type={type(order.total_amount)}")
-
-        # Create payment record for electronic payment methods (payme, click)
-        # Note: For on-site card payments (user enters card on our site), we don't need
-        # payment links - the payment is processed via cards.create -> cards.verify -> receipts.pay
-        if order.payment_method in [PaymentMethod.PAYME, PaymentMethod.CLICK]:
-            from business_app.services.payment_service import PaymentService
-
-            payment_service = PaymentService()
-
-            payment = payment_service.create_payment(
-                order_id=order.id,
-                payment_method=order.payment_method,
-                amount=int(order.total_amount)
-            )
-
-            current_app.logger.info(f"Payment record created for order {order.id}: payment_id={payment.id}")
 
         # Send order confirmation
         # get_notification_service().send_notification(

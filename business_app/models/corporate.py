@@ -65,6 +65,7 @@ class CorporateContract(db.Model, TimestampMixin):
     notes = Column(Text, nullable=True)
     is_active = Column(Boolean, nullable=False, default=True, index=True)
     is_loyalty_points_eligible = Column(Boolean, nullable=False, default=False, index=True)
+    allows_debt = Column(Boolean, nullable=False, default=False, index=True)
     created_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     updated_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
 
@@ -124,6 +125,7 @@ class CorporateContract(db.Model, TimestampMixin):
             "notes": self.notes,
             "is_active": self.is_active,
             "is_loyalty_points_eligible": self.is_loyalty_points_eligible,
+            "allows_debt": self.allows_debt,
             "is_currently_active": self.is_currently_active,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,

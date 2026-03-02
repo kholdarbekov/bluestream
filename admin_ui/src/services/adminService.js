@@ -169,6 +169,22 @@ const normalizeRevenueForecast = (predictionPayload) => {
   };
 };
 
+const normalizeAdminCollectionResponse = (payload = {}) => {
+  const envelope = payload || {};
+  const data = envelope.data || {};
+  const meta = envelope.meta || {};
+  const items = data.items || data.programs || data.rewards || data.tiers || [];
+
+  return {
+    items,
+    meta,
+    summary: meta.summary || data.summary || {},
+    total: meta.total ?? data.total ?? items.length,
+    page: meta.page ?? 1,
+    per_page: meta.per_page ?? items.length,
+  };
+};
+
 class AdminService {
   // Dashboard API calls
   async getDashboardData(params = {}) {
@@ -403,24 +419,34 @@ class AdminService {
   }
 
   // Loyalty Program management
+  async getLoyaltyMembers(params = {}) {
+    const response = await api.get('/admin/loyalty/members', { params });
+    return normalizeAdminCollectionResponse(response.data);
+  }
+
+  async getLoyaltyMember(userId) {
+    const response = await api.get(`/admin/loyalty/members/${userId}`);
+    return response.data?.data || {};
+  }
+
   async getLoyaltyPrograms(params = {}) {
     const response = await api.get('/admin/loyalty/programs', { params });
-    return response.data;
+    return normalizeAdminCollectionResponse(response.data);
   }
 
   async getLoyaltyCustomers(params = {}) {
     const response = await api.get('/admin/loyalty-customers', { params });
-    return response.data;
+    return normalizeAdminCollectionResponse(response.data);
   }
 
   async createLoyaltyProgram(programData) {
     const response = await api.post('/admin/loyalty/programs', programData);
-    return response.data;
+    return response.data?.data?.program || response.data;
   }
 
   async updateLoyaltyProgram(programId, programData) {
     const response = await api.put(`/admin/loyalty/programs/${programId}`, programData);
-    return response.data;
+    return response.data?.data?.program || response.data;
   }
 
   async deleteLoyaltyProgram(programId) {
@@ -431,22 +457,52 @@ class AdminService {
   // Loyalty Tier management
   async getLoyaltyTiers(params = {}) {
     const response = await api.get('/admin/loyalty/tiers', { params });
-    return response.data;
+    return normalizeAdminCollectionResponse(response.data);
   }
 
   async createLoyaltyTier(tierData) {
     const response = await api.post('/admin/loyalty/tiers', tierData);
-    return response.data;
+    return response.data?.data?.tier || response.data;
   }
 
   async updateLoyaltyTier(tierId, tierData) {
     const response = await api.put(`/admin/loyalty/tiers/${tierId}`, tierData);
-    return response.data;
+    return response.data?.data?.tier || response.data;
   }
 
   async deleteLoyaltyTier(tierId) {
     const response = await api.delete(`/admin/loyalty/tiers/${tierId}`);
     return response.data;
+  }
+
+  async getLoyaltyRewards(params = {}) {
+    const response = await api.get('/admin/loyalty/rewards', { params });
+    return normalizeAdminCollectionResponse(response.data);
+  }
+
+  async getLoyaltyReward(rewardId) {
+    const response = await api.get(`/admin/loyalty/rewards/${rewardId}`);
+    return response.data?.data?.reward || {};
+  }
+
+  async createLoyaltyReward(rewardData) {
+    const response = await api.post('/admin/loyalty/rewards', rewardData);
+    return response.data?.data?.reward || response.data;
+  }
+
+  async updateLoyaltyReward(rewardId, rewardData) {
+    const response = await api.put(`/admin/loyalty/rewards/${rewardId}`, rewardData);
+    return response.data?.data?.reward || response.data;
+  }
+
+  async deleteLoyaltyReward(rewardId) {
+    const response = await api.delete(`/admin/loyalty/rewards/${rewardId}`);
+    return response.data;
+  }
+
+  async getLoyaltyAnalytics(params = {}) {
+    const response = await api.get('/admin/loyalty/analytics', { params });
+    return response.data?.data || {};
   }
 
   // Notification management

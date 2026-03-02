@@ -30,6 +30,7 @@ from business_app.services.review_service import ReviewService
 from business_app.services.admin_report_service import AdminReportService
 from business_app.services.admin_bulk_action_service import AdminBulkActionService
 from business_app.services.admin_delivery_service import AdminDeliveryService
+from business_app.services.admin_loyalty_service import AdminLoyaltyService
 from business_app.serializers.admin_serializers import (
     serialize_user_admin, serialize_order_admin, serialize_product_admin,
     serialize_delivery_person_admin, serialize_category_admin,
@@ -5496,6 +5497,45 @@ def perform_bulk_action():
 # LOYALTY REWARD MANAGEMENT ENDPOINTS
 # ============================================================================
 
+@admin_bp.route('/loyalty/members', methods=['GET'])
+@admin_bp.route('/loyalty-customers', methods=['GET'])
+@jwt_required()
+@validate_admin_action(['view_loyalty', 'manage_loyalty'])
+def get_loyalty_members():
+    """Get loyalty members with pagination, filtering, and summary stats."""
+    try:
+        result = AdminLoyaltyService.list_members(
+            page=request.args.get('page', 1, type=int),
+            per_page=request.args.get('per_page', 20, type=int),
+            search=request.args.get('search', '', type=str),
+            program_id=request.args.get('program_id', type=int),
+            tier=request.args.get('tier', type=str),
+        )
+        return paginated_response(
+            items=result['items'],
+            total=result['total'],
+            page=result['page'],
+            per_page=result['per_page'],
+            additional_meta={'summary': result['summary']},
+        )
+    except Exception as e:
+        current_app.logger.error(f"Get loyalty members error: {e}")
+        return internal_error_response('Failed to get loyalty members')
+
+
+@admin_bp.route('/loyalty/members/<int:user_id>', methods=['GET'])
+@jwt_required()
+@validate_admin_action(['view_loyalty', 'manage_loyalty'])
+def get_loyalty_member_detail(user_id):
+    """Get detailed loyalty member data."""
+    try:
+        return success_response(data=AdminLoyaltyService.get_member_detail(user_id))
+    except NotFoundError as exc:
+        return not_found_response(str(exc))
+    except Exception as e:
+        current_app.logger.error(f"Get loyalty member detail error: {e}")
+        return internal_error_response('Failed to get loyalty member detail')
+
 @admin_bp.route('/loyalty/rewards', methods=['GET'])
 @jwt_required()
 @validate_admin_action(['view_loyalty', 'manage_loyalty'])
@@ -5513,59 +5553,20 @@ def get_loyalty_rewards():
         - search: Search in name and description
     """
     try:
-        page = int(request.args.get('page', 1))
-        per_page = min(int(request.args.get('per_page', 20)), 100)
-
-        # Build query
-        query = LoyaltyReward.query
-
-        # Program filter
-        program_id = request.args.get('program_id', type=int)
-        if program_id:
-            query = query.filter_by(program_id=program_id)
-
-        # Reward type filter
-        reward_type = request.args.get('reward_type')
-        if reward_type:
-            query = query.filter_by(reward_type=reward_type)
-
-        # Active filter
-        is_active = request.args.get('is_active')
-        if is_active is not None:
-            is_active_bool = is_active.lower() == 'true'
-            query = query.filter_by(is_active=is_active_bool)
-
-        # Featured filter
-        is_featured = request.args.get('is_featured')
-        if is_featured is not None:
-            is_featured_bool = is_featured.lower() == 'true'
-            query = query.filter_by(is_featured=is_featured_bool)
-
-        # Search
-        search = request.args.get('search')
-        if search:
-            query = query.filter(
-                or_(
-                    LoyaltyReward.name.ilike(f'%{search}%'),
-                    LoyaltyReward.description.ilike(f'%{search}%')
-                )
-            )
-
-        # Sort by sort_order and created_at
-        query = query.order_by(LoyaltyReward.sort_order.asc(), LoyaltyReward.created_at.desc())
-
-        # Paginate
-        pagination = query.paginate(page=page, per_page=per_page, error_out=False)
-
-        # Serialize rewards
-        language = get_current_language()
-        rewards = [reward.to_dict(language=language) for reward in pagination.items]
-
+        result = AdminLoyaltyService.list_rewards(
+            page=request.args.get('page', 1, type=int),
+            per_page=request.args.get('per_page', 20, type=int),
+            program_id=request.args.get('program_id', type=int),
+            reward_type=request.args.get('reward_type'),
+            is_active=request.args.get('is_active'),
+            search=request.args.get('search', '', type=str),
+            language=get_current_language(),
+        )
         return paginated_response(
-            items=rewards,
-            total=pagination.total,
-            page=page,
-            per_page=per_page
+            items=result['items'],
+            total=result['total'],
+            page=result['page'],
+            per_page=result['per_page']
         )
 
     except Exception as e:
@@ -5579,35 +5580,13 @@ def get_loyalty_rewards():
 def get_loyalty_reward_detail(reward_id):
     """Get detailed information about a specific loyalty reward"""
     try:
-        reward = LoyaltyReward.query.get(reward_id)
-
-        if not reward:
-            return not_found_response('Loyalty reward not found')
-
-        language = get_current_language()
-        reward_data = reward.to_dict(language=language, include_all_translations=True)
-
-        # Add program info
-        if reward.program:
-            reward_data['program'] = reward.program.to_dict()
-
-        # Add product info if applicable
-        if reward.free_product:
-            reward_data['free_product'] = {
-                'id': reward.free_product.id,
-                'name': reward.free_product.name,
-                'price': float(reward.free_product.price) if reward.free_product.price else 0
-            }
-
-        # Add redemption statistics
-        reward_data['redemption_stats'] = {
-            'total_redemptions': reward.redemptions_used,
-            'remaining_redemptions': reward.max_redemptions - reward.redemptions_used if reward.max_redemptions else None,
-            'is_available': reward.is_active and (not reward.max_redemptions or reward.redemptions_used < reward.max_redemptions)
-        }
-
+        reward_data = AdminLoyaltyService.get_reward_detail(
+            reward_id,
+            language=get_current_language(),
+        )
         return success_response(data={'reward': reward_data})
-
+    except NotFoundError as exc:
+        return not_found_response(str(exc))
     except Exception as e:
         current_app.logger.error(f"Get loyalty reward detail error: {e}")
         return internal_error_response('Failed to get loyalty reward detail')
@@ -5841,12 +5820,18 @@ def delete_loyalty_reward(reward_id):
 def get_loyalty_programs():
     """Get all loyalty programs"""
     try:
-        programs = LoyaltyProgram.query.order_by(LoyaltyProgram.is_default.desc(), LoyaltyProgram.created_at.desc()).all()
-
-        programs_data = [program.to_dict() for program in programs]
-
-        return success_response(data={'programs': programs_data})
-
+        result = AdminLoyaltyService.list_programs(
+            page=request.args.get('page', 1, type=int),
+            per_page=request.args.get('per_page', 20, type=int),
+            search=request.args.get('search', '', type=str),
+            status=request.args.get('status'),
+        )
+        return paginated_response(
+            items=result['items'],
+            total=result['total'],
+            page=result['page'],
+            per_page=result['per_page'],
+        )
     except Exception as e:
         current_app.logger.error(f"Get loyalty programs error: {e}")
         return internal_error_response('Failed to get loyalty programs')
@@ -5871,6 +5856,7 @@ def create_loyalty_program():
             is_active=data.get('is_active', True),
             is_default=data.get('is_default', False),
             points_per_uzs=data.get('points_per_uzs', 1.0),
+            uzs_per_point=data.get('uzs_per_point', 250),
             signup_bonus=data.get('signup_bonus', 100),
             referral_bonus=data.get('referral_bonus', 50),
             birthday_bonus=data.get('birthday_bonus', 25),
@@ -5922,6 +5908,8 @@ def update_loyalty_program(program_id):
             program.is_active = data['is_active']
         if 'points_per_uzs' in data:
             program.points_per_uzs = data['points_per_uzs']
+        if 'uzs_per_point' in data:
+            program.uzs_per_point = data['uzs_per_point']
         if 'signup_bonus' in data:
             program.signup_bonus = data['signup_bonus']
         if 'referral_bonus' in data:
@@ -6235,119 +6223,11 @@ def get_loyalty_analytics():
         - program_id: Filter by program ID
     """
     try:
-        # Date range
-        end_date = request.args.get('end_date')
-        if end_date:
-            end_dt = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
-        else:
-            end_dt = datetime.now(UTC)
-
-        start_date = request.args.get('start_date')
-        if start_date:
-            start_dt = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
-        else:
-            start_dt = end_dt - timedelta(days=30)
-
-        program_id = request.args.get('program_id', type=int)
-
-        # Total active members
-        from business_app.models.loyalty import LoyaltyPoints
-
-        active_members_query = LoyaltyPoints.query.filter(LoyaltyPoints.current_balance > 0)
-        if program_id:
-            active_members_query = active_members_query.filter_by(program_id=program_id)
-
-        active_members = active_members_query.count()
-
-        # Total points in circulation
-        total_points = db.session.query(
-            func.sum(LoyaltyPoints.current_balance)
-        ).filter(LoyaltyPoints.current_balance > 0)
-
-        if program_id:
-            total_points = total_points.filter(LoyaltyPoints.program_id == program_id)
-
-        total_points_value = total_points.scalar() or 0
-
-        # Redemption statistics
-        from business_app.models.loyalty import LoyaltyTransaction
-
-        redemptions = LoyaltyTransaction.query.filter(
-            LoyaltyTransaction.transaction_type == 'redeemed',
-            LoyaltyTransaction.created_at >= start_dt,
-            LoyaltyTransaction.created_at <= end_dt
-        )
-
-        total_redemptions = redemptions.count()
-        total_redeemed_points = abs(db.session.query(
-            func.sum(LoyaltyTransaction.points)
-        ).filter(
-            LoyaltyTransaction.transaction_type == 'redeemed',
-            LoyaltyTransaction.created_at >= start_dt,
-            LoyaltyTransaction.created_at <= end_dt,
-            LoyaltyTransaction.points < 0
-        ).scalar() or 0)
-
-        # Earned points
-        earned_points = db.session.query(
-            func.sum(LoyaltyTransaction.points)
-        ).filter(
-            LoyaltyTransaction.transaction_type == 'earned',
-            LoyaltyTransaction.created_at >= start_dt,
-            LoyaltyTransaction.created_at <= end_dt
-        ).scalar() or 0
-
-        # Top rewards by redemptions
-        top_rewards = db.session.query(
-            LoyaltyReward.id,
-            LoyaltyReward.name,
-            LoyaltyReward.points_cost,
-            LoyaltyReward.redemptions_used
-        ).filter(
-            LoyaltyReward.redemptions_used > 0
-        ).order_by(
-            LoyaltyReward.redemptions_used.desc()
-        ).limit(10).all()
-
-        top_rewards_list = [
-            {
-                'reward_id': reward_id,
-                'name': name,
-                'points_cost': points_cost,
-                'redemptions': redemptions_used
-            }
-            for reward_id, name, points_cost, redemptions_used in top_rewards
-        ]
-
-        # Tier distribution
-        tier_distribution = db.session.query(
-            LoyaltyPoints.current_tier,
-            func.count(LoyaltyPoints.id)
-        ).group_by(LoyaltyPoints.current_tier).all()
-
-        tier_stats = {
-            tier: count for tier, count in tier_distribution
-        }
-
-        analytics = {
-            'period': {
-                'start_date': start_dt.isoformat(),
-                'end_date': end_dt.isoformat()
-            },
-            'active_members': active_members,
-            'total_points_in_circulation': total_points_value,
-            'period_stats': {
-                'points_earned': earned_points,
-                'points_redeemed': total_redeemed_points,
-                'total_redemptions': total_redemptions,
-                'avg_redemption_value': round(total_redeemed_points / total_redemptions, 2) if total_redemptions > 0 else 0
-            },
-            'top_rewards': top_rewards_list,
-            'tier_distribution': tier_stats
-        }
-
-        return success_response(data={'analytics': analytics})
-
+        return success_response(data=AdminLoyaltyService.get_analytics(
+            start_date=request.args.get('start_date'),
+            end_date=request.args.get('end_date'),
+            program_id=request.args.get('program_id', type=int),
+        ))
     except Exception as e:
         current_app.logger.error(f"Get loyalty analytics error: {e}")
         import traceback

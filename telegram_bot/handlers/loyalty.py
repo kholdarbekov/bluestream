@@ -16,6 +16,20 @@ logger = logging.getLogger('handlers')
 
 class LoyaltyHandlers(BaseHandler):
     """Loyalty program handlers"""
+
+    @staticmethod
+    def _unwrap_response_data(response):
+        """Support both bare payloads and success_response envelopes."""
+        payload = getattr(response, "data", None) or {}
+        if isinstance(payload, dict) and isinstance(payload.get("data"), dict):
+            return payload["data"]
+        return payload if isinstance(payload, dict) else {}
+
+    @classmethod
+    def _unwrap_paginated_items(cls, response):
+        """Support both paginated_response envelopes and older flat payloads."""
+        payload = cls._unwrap_response_data(response)
+        return payload.get("items") or payload.get("history") or []
     
     async def loyalty_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Show loyalty points and rewards"""
@@ -38,14 +52,14 @@ class LoyaltyHandlers(BaseHandler):
                 rewards_response = await client.get_loyalty_rewards(user_token)
                 
                 if points_response.success:
-                    points_data = points_response.data
-                    current_points = points_data.get('current_balance', 0)
-                    lifetime_points = points_data.get('lifetime_earned', 0)
+                    points_data = self._unwrap_response_data(points_response)
+                    current_points = points_data.get('current_balance', points_data.get('points_balance', 0))
+                    lifetime_points = points_data.get('lifetime_earned', points_data.get('lifetime_points', 0))
                 else:
                     current_points = lifetime_points = 0
                 
                 if rewards_response.success:
-                    rewards = rewards_response.data.get('rewards', [])
+                    rewards = self._unwrap_response_data(rewards_response).get('rewards', [])
                 else:
                     rewards = []
             
@@ -114,7 +128,7 @@ class LoyaltyHandlers(BaseHandler):
                     await self._handle_api_error(update, response.error, language)
                     return
                 
-                history = response.data.get('history', [])
+                history = self._unwrap_paginated_items(response)
             
             if not history:
                 history_text = i18n.get('telegram.loyalty.points_history', language) + "\n\n" + i18n.get('telegram.loyalty.no_history', language)

@@ -494,9 +494,10 @@ class ProductHandlers(BaseHandler):
             quantity_text = f"🛒 {product['name']}\n\n{i18n.get('telegram.quantity', language)}: {current_qty}\n{i18n.get('telegram.price', language)}: {format_price(product['pricing']['base_price'] * current_qty)} UZS"
             keyboard = ProductKeyboards.quantity_selector(product_id, current_qty, language)
             
-            await query.edit_message_text(
-                text=quantity_text,
-                reply_markup=keyboard
+            await self._edit_or_replace_callback_message(
+                query,
+                quantity_text,
+                reply_markup=keyboard,
             )
             await query.answer()
             
@@ -547,9 +548,10 @@ class ProductHandlers(BaseHandler):
                         await self._handle_api_error(update, update_response.error, language)
                         return
                     
-                    await query.edit_message_text(
-                        text=quantity_text,
-                        reply_markup=keyboard
+                    await self._edit_or_replace_callback_message(
+                        query,
+                        quantity_text,
+                        reply_markup=keyboard,
                     )
             
             await query.answer()
@@ -739,9 +741,10 @@ class ProductHandlers(BaseHandler):
         
         keyboard = OrderKeyboards.cart_actions(language, cart_is_empty, meets_minimum)
         
-        await update.callback_query.edit_message_text(
-            text=cart_text,
-            reply_markup=keyboard
+        await self._edit_or_replace_callback_message(
+            update.callback_query,
+            cart_text,
+            reply_markup=keyboard,
         )
         await update.callback_query.answer()
     

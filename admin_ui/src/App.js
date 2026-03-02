@@ -11,7 +11,9 @@ import Products from './pages/Products';
 import ProductCategories from './pages/ProductCategories';
 import Delivery from './pages/Delivery';
 import Loyalty from './pages/Loyalty';
+import LoyaltyMembers from './pages/LoyaltyMembers';
 import LoyaltyPrograms from './pages/LoyaltyPrograms';
+import LoyaltyRewards from './pages/LoyaltyRewards';
 import Notifications from './pages/Notifications';
 import Analytics from './pages/Analytics';
 import Translations from './pages/Translations';
@@ -50,7 +52,10 @@ function App() {
                   <Route path="/delivery" element={<Delivery />} />
                   <Route path="/delivery-time-slots" element={<TimeSlots />} />
                   <Route path="/loyalty" element={<Loyalty />} />
-                  <Route path="/loyalty-programs" element={<LoyaltyPrograms />} />
+                  <Route path="/loyalty/members" element={<LoyaltyMembers />} />
+                  <Route path="/loyalty/programs" element={<LoyaltyPrograms />} />
+                  <Route path="/loyalty/rewards" element={<LoyaltyRewards />} />
+                  <Route path="/loyalty-programs" element={<Navigate to="/loyalty/programs" replace />} />
                   <Route path="/notifications" element={<Notifications />} />
                   <Route path="/analytics" element={<Analytics />} />
                   <Route path="/blog" element={<Blog />} />

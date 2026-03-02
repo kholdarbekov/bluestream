@@ -13,6 +13,7 @@ from typing import Dict, Any, Optional, List
 from flask import current_app, request
 import requests
 import redis
+from sqlalchemy.orm import joinedload
 
 from business_app.models.order import Order, OrderItem
 from business_app.models.payment import Payment, PaymentTransaction, CreditCard
@@ -110,6 +111,83 @@ class PaymentService:
         db.session.add(payment)
         db.session.commit()
         
+        return payment
+
+    def initialize_order_payment(
+        self,
+        order_id: int,
+        actor_user_id: Optional[int] = None,
+        paid_at: Optional[datetime] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        *,
+        trigger_notifications: bool = True,
+        allow_order_confirmation: bool = True,
+    ) -> Optional[Payment]:
+        """Create or finalize the canonical payment record for an order."""
+        order = Order.query.options(
+            joinedload(Order.payment),
+            joinedload(Order.order_items),
+        ).get(order_id)
+        if not order:
+            raise NotFoundError("Order not found")
+
+        payment_method = order.payment_method
+        if isinstance(payment_method, str):
+            try:
+                payment_method = PaymentMethod(payment_method)
+            except ValueError:
+                return order.payment
+        if payment_method not in {
+            PaymentMethod.PAYME,
+            PaymentMethod.CLICK,
+            PaymentMethod.BUSINESS_ACCOUNT,
+        }:
+            return order.payment
+
+        payment = order.payment
+        if not payment:
+            payment = Payment(
+                order_id=order.id,
+                user_id=order.user_id,
+                amount=order.total_amount,
+                currency='UZS',
+                payment_method=payment_method,
+                status=PaymentStatus.PENDING,
+                description=f'Payment for order #{order.order_number}',
+                provider_data={},
+            )
+            db.session.add(payment)
+            db.session.flush()
+        elif payment.payment_method != payment_method:
+            payment.payment_method = payment_method
+
+        if payment_method in {PaymentMethod.PAYME, PaymentMethod.CLICK}:
+            db.session.commit()
+            return payment
+
+        provider_data = dict(payment.provider_data or {})
+        provider_data.update(self._build_business_account_payment_metadata(order, metadata))
+        if actor_user_id is not None:
+            provider_data["actor_user_id"] = actor_user_id
+        payment.provider_data = provider_data
+
+        completed_at = paid_at or payment.paid_at or datetime.now(timezone.utc)
+        if completed_at and completed_at.tzinfo is None:
+            completed_at = completed_at.replace(tzinfo=timezone.utc)
+        current_status_value = payment.status.value if hasattr(payment.status, "value") else str(payment.status)
+        status_was_completed = current_status_value == PaymentStatus.COMPLETED.value
+        payment.status = PaymentStatus.COMPLETED
+        payment.paid_at = completed_at
+        self._sync_order_paid_projection(order, payment.status, completed_at)
+
+        if not status_was_completed:
+            self._handle_successful_payment(
+                payment,
+                trigger_notifications=trigger_notifications,
+                allow_order_confirmation=allow_order_confirmation,
+            )
+
+        db.session.commit()
         return payment
     
     def create_payment_link(self, payment_id: int) -> Dict[str, str]:
@@ -1201,7 +1279,7 @@ class PaymentService:
                 payment.status = PaymentStatus.CANCELLED
             else:
                 payment.status = PaymentStatus.PARTIALLY_REFUNDED
-            
+            self._sync_order_paid_projection(payment.order, payment.status)
             db.session.commit()
         
         return success
@@ -2103,18 +2181,78 @@ class PaymentService:
         
         db.session.add(transaction)
         return transaction
-    
-    def _handle_successful_payment(self, payment: Payment):
+
+    def _build_business_account_payment_metadata(
+        self,
+        order: Order,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        from business_app.models.corporate import CorporateContract
+
+        contract_ids = sorted({
+            int(item.contract_id)
+            for item in (order.order_items or [])
+            if getattr(item, "contract_id", None)
+        })
+        debt_contract_ids = set()
+        if contract_ids:
+            debt_contract_ids = {
+                contract_id
+                for contract_id, allows_debt in db.session.query(
+                    CorporateContract.id,
+                    CorporateContract.allows_debt,
+                ).filter(CorporateContract.id.in_(contract_ids)).all()
+                if allows_debt
+            }
+
+        payload = {
+            "settlement_mode": "corporate_contract",
+            "contract_ids": contract_ids,
+            "has_debt_enabled_contract": bool(debt_contract_ids),
+            "debt_enabled_contract_ids": sorted(debt_contract_ids),
+        }
+        if metadata:
+            payload.update(metadata)
+        return payload
+
+    def _sync_order_paid_projection(
+        self,
+        order: Optional[Order],
+        payment_status: Any,
+        paid_at: Optional[datetime] = None,
+    ) -> None:
+        if not order:
+            return
+
+        status_value = payment_status.value if hasattr(payment_status, "value") else str(payment_status)
+        is_completed = status_value == PaymentStatus.COMPLETED.value
+        order.is_paid = is_completed
+        order.paid_at = paid_at if is_completed else None
+
+    def _handle_successful_payment(
+        self,
+        payment: Payment,
+        *,
+        trigger_notifications: bool = True,
+        allow_order_confirmation: bool = True,
+    ):
         """Handle successful payment"""
         # Update order status
         order = payment.order
+        if not order:
+            return
+        self._sync_order_paid_projection(order, payment.status, payment.paid_at)
+
         # Handle both Enum and string status values
         status_value = order.status.value if hasattr(order.status, 'value') else order.status
-        if status_value == 'pending':
+        if allow_order_confirmation and status_value == 'pending':
             from .order_service import OrderService
             order_service = OrderService()
             order_service.update_order_status(order.id, OrderStatus.CONFIRMED)
-        
+
+        if not trigger_notifications:
+            return
+
         # Send notification
         from ..tasks.notification_tasks import send_payment_confirmation_task
         send_payment_confirmation_task.delay(payment.id)

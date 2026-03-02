@@ -173,6 +173,44 @@ class TestProductHandlerDeepFlows:
         await handler.add_to_cart(update, context)
         handler._handle_api_error.assert_awaited_once_with(update, "cart failed", "en")
 
+    async def test_add_to_cart_replaces_photo_message_when_editing_text_fails(self, monkeypatch):
+        handler = products_module.ProductHandlers()
+        update = DummyUpdate()
+        update.callback_query = DummyCallbackQuery(data="add_to_cart_9")
+        update.callback_query.edit_message_text = AsyncMock(
+            side_effect=RuntimeError("There is no text in the message to edit")
+        )
+        update.callback_query.message.photo = [object()]
+        context = make_context()
+
+        monkeypatch.setattr(products_module.i18n, "get_user_language", AsyncMock(return_value="en"))
+        monkeypatch.setattr(products_module.i18n, "get", _i18n_get)
+        monkeypatch.setattr(products_module, "get_auth_token", AsyncMock(return_value="jwt"))
+        monkeypatch.setattr(products_module.ProductKeyboards, "quantity_selector", lambda *_a, **_k: "qty-kbd")
+        monkeypatch.setattr(
+            products_module,
+            "api_client",
+            FakeAPIClientContext(
+                get_product=_resp(
+                    success=True,
+                    data={"data": {"product": {"name": "Water", "pricing": {"base_price": 15000}}}},
+                ),
+                add_to_cart=_resp(
+                    success=True,
+                    data={"data": {"cart": {"cart_items": [{"product_id": 9, "quantity": 2}]}}},
+                ),
+            ),
+        )
+
+        await handler.add_to_cart(update, context)
+
+        update.callback_query.message.delete.assert_awaited_once()
+        update.callback_query.message.reply_text.assert_awaited_once_with(
+            text="🛒 Water\n\ntelegram.quantity:en: 2\ntelegram.price:en: 30,000 UZS",
+            reply_markup="qty-kbd",
+        )
+        update.callback_query.answer.assert_awaited_once()
+
     async def test_product_details_handles_malformed_callback_data(self, monkeypatch):
         handler = products_module.ProductHandlers()
         handler._handle_error = AsyncMock()
@@ -327,6 +365,37 @@ class TestLoyaltyHandlerDeepFlows:
         update.callback_query.edit_message_text.assert_awaited_once()
         update.callback_query.answer.assert_awaited_once()
 
+    async def test_loyalty_menu_supports_api_envelope_payloads(self, monkeypatch):
+        handler = loyalty_module.LoyaltyHandlers()
+        update = DummyUpdate()
+        update.callback_query = DummyCallbackQuery(data="menu_loyalty")
+        context = make_context()
+
+        monkeypatch.setattr(loyalty_module, "user_middleware", AsyncMock(return_value={"id": 1}))
+        monkeypatch.setattr(loyalty_module.i18n, "get_user_language", AsyncMock(return_value="en"))
+        monkeypatch.setattr(loyalty_module.i18n, "get", _i18n_get)
+        monkeypatch.setattr(loyalty_module, "get_auth_token", AsyncMock(return_value="jwt"))
+        monkeypatch.setattr(
+            loyalty_module,
+            "api_client",
+            FakeAPIClientContext(
+                get_loyalty_points=_resp(
+                    success=True,
+                    data={"data": {"points_balance": 120, "lifetime_points": 999}},
+                ),
+                get_loyalty_rewards=_resp(
+                    success=True,
+                    data={"data": {"rewards": [{"name": "Reward A", "points_cost": 100}]}},
+                ),
+            ),
+        )
+
+        await handler.loyalty_menu(update, context)
+
+        text = update.callback_query.edit_message_text.await_args.kwargs["text"]
+        assert "120" in text
+        assert "999" in text
+
     async def test_loyalty_history_empty(self, monkeypatch):
         handler = loyalty_module.LoyaltyHandlers()
         update = DummyUpdate()
@@ -371,6 +440,42 @@ class TestLoyaltyHandlerDeepFlows:
         await handler.loyalty_history(update, context)
         update.callback_query.edit_message_text.assert_awaited_once()
         update.callback_query.answer.assert_awaited_once()
+
+    async def test_loyalty_history_supports_paginated_response_items(self, monkeypatch):
+        handler = loyalty_module.LoyaltyHandlers()
+        update = DummyUpdate()
+        update.callback_query = DummyCallbackQuery(data="loyalty_history")
+        context = make_context()
+
+        monkeypatch.setattr(loyalty_module.i18n, "get_user_language", AsyncMock(return_value="en"))
+        monkeypatch.setattr(loyalty_module.i18n, "get", _i18n_get)
+        monkeypatch.setattr(loyalty_module, "get_auth_token", AsyncMock(return_value="jwt"))
+        monkeypatch.setattr(loyalty_module.MenuKeyboards, "back_button", lambda _l: "back-kbd")
+        monkeypatch.setattr(
+            loyalty_module,
+            "api_client",
+            FakeAPIClientContext(
+                get_loyalty_history=_resp(
+                    success=True,
+                    data={
+                        "data": {
+                            "items": [
+                                {
+                                    "created_at": "2026-02-23T10:00:00Z",
+                                    "points": 55,
+                                    "transaction_type": "earned",
+                                }
+                            ]
+                        }
+                    },
+                )
+            ),
+        )
+
+        await handler.loyalty_history(update, context)
+
+        text = update.callback_query.edit_message_text.await_args.kwargs["text"]
+        assert "+55" in text
 
     async def test_redeem_reward_success_calls_loyalty_menu(self, monkeypatch):
         handler = loyalty_module.LoyaltyHandlers()

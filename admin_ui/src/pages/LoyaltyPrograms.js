@@ -1,710 +1,675 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
-  Table,
-  Card,
   Button,
-  Space,
-  Tag,
-  Dropdown,
-  Modal,
+  Card,
+  Col,
+  Empty,
   Form,
   Input,
   InputNumber,
+  Modal,
   Row,
-  Col,
+  Select,
+  Space,
   Statistic,
-  message,
   Switch,
-  Divider,
-  Tabs
+  Table,
+  Tabs,
+  Tag,
+  message
 } from 'antd';
 import {
-  GiftOutlined,
-  MoreOutlined,
-  PlusOutlined,
-  EditOutlined,
   DeleteOutlined,
-  EyeOutlined,
-  WarningOutlined,
-  TrophyOutlined,
-  StarOutlined
+  EditOutlined,
+  ExportOutlined,
+  GiftOutlined,
+  PlusOutlined,
+  SettingOutlined,
+  StarOutlined,
+  TrophyOutlined
 } from '@ant-design/icons';
-import { useQuery, useMutation, useQueryClient } from 'react-query';
+import { useMutation, useQuery, useQueryClient } from 'react-query';
+import { useTranslation } from 'react-i18next';
 import adminService from '../services/adminService';
+import exportUtils from '../utils/exportUtils';
+import { formatDate } from '../utils/dateUtils';
 
 const { TextArea } = Input;
-const { TabPane } = Tabs;
 
 const LoyaltyPrograms = () => {
-  const [selectedProgram, setSelectedProgram] = useState(null);
-  const [isDetailModalVisible, setIsDetailModalVisible] = useState(false);
-  const [isCreateModalVisible, setIsCreateModalVisible] = useState(false);
-  const [isEditModalVisible, setIsEditModalVisible] = useState(false);
-  const [createForm] = Form.useForm();
-  const [editForm] = Form.useForm();
-
+  const { t } = useTranslation('loyalty');
   const queryClient = useQueryClient();
+  const [activeTab, setActiveTab] = useState('programs');
+  const [searchText, setSearchText] = useState('');
+  const [statusFilter, setStatusFilter] = useState();
+  const [selectedProgramId, setSelectedProgramId] = useState();
+  const [pagination, setPagination] = useState({ page: 1, per_page: 20 });
+  const [programModal, setProgramModal] = useState({ open: false, program: null });
+  const [tierModal, setTierModal] = useState({ open: false, tier: null });
+  const [programForm] = Form.useForm();
+  const [tierForm] = Form.useForm();
 
-  // Fetch loyalty programs
-  const { data, isLoading } = useQuery(
-    'loyaltyPrograms',
-    () => adminService.getLoyaltyPrograms(),
+  const programsQuery = useQuery(
+    ['loyalty-programs', pagination, searchText, statusFilter],
+    () => adminService.getLoyaltyPrograms({
+      page: pagination.page,
+      per_page: pagination.per_page,
+      search: searchText,
+      status: statusFilter,
+    }),
+    { keepPreviousData: true }
+  );
+
+  const programs = programsQuery.data?.items || [];
+  const totalPrograms = programsQuery.data?.total || 0;
+
+  useEffect(() => {
+    if (!selectedProgramId && programs.length > 0) {
+      const defaultProgram = programs.find((program) => program.is_default);
+      setSelectedProgramId((defaultProgram || programs[0]).id);
+    }
+  }, [programs, selectedProgramId]);
+
+  const tiersQuery = useQuery(
+    ['loyalty-tiers', selectedProgramId],
+    () => adminService.getLoyaltyTiers({ program_id: selectedProgramId }),
     {
-      keepPreviousData: true
+      enabled: Boolean(selectedProgramId),
+      keepPreviousData: true,
     }
   );
 
-  // Create program mutation
+  const tiers = tiersQuery.data?.items || [];
+
+  const invalidateLoyaltyQueries = () => {
+    queryClient.invalidateQueries(['loyalty-programs']);
+    queryClient.invalidateQueries(['loyalty-tiers']);
+    queryClient.invalidateQueries(['loyalty-program-options']);
+  };
+
   const createProgramMutation = useMutation(
-    (programData) => adminService.createLoyaltyProgram(programData),
+    (values) => adminService.createLoyaltyProgram(values),
     {
       onSuccess: () => {
-        message.success('Loyalty program created successfully');
-        queryClient.invalidateQueries('loyaltyPrograms');
-        setIsCreateModalVisible(false);
-        createForm.resetFields();
-      },
-      onError: (error) => {
-        const errorMessage = error.response?.data?.message || 'Failed to create program';
-        message.error(errorMessage);
+        message.success(t('ui.loyalty.create_success', { defaultValue: 'Program created successfully' }));
+        setProgramModal({ open: false, program: null });
+        programForm.resetFields();
+        invalidateLoyaltyQueries();
       }
     }
   );
 
-  // Update program mutation
   const updateProgramMutation = useMutation(
-    ({ programId, programData }) => adminService.updateLoyaltyProgram(programId, programData),
+    ({ programId, values }) => adminService.updateLoyaltyProgram(programId, values),
     {
       onSuccess: () => {
-        message.success('Loyalty program updated successfully');
-        queryClient.invalidateQueries('loyaltyPrograms');
-        setIsEditModalVisible(false);
-        editForm.resetFields();
-      },
-      onError: (error) => {
-        const errorMessage = error.response?.data?.message || 'Failed to update program';
-        message.error(errorMessage);
+        message.success(t('ui.loyalty.update_success', { defaultValue: 'Program updated successfully' }));
+        setProgramModal({ open: false, program: null });
+        programForm.resetFields();
+        invalidateLoyaltyQueries();
       }
     }
   );
 
-  // Delete program mutation
   const deleteProgramMutation = useMutation(
     (programId) => adminService.deleteLoyaltyProgram(programId),
     {
       onSuccess: () => {
-        message.success('Loyalty program deleted successfully');
-        queryClient.invalidateQueries('loyaltyPrograms');
-      },
-      onError: (error) => {
-        const errorMessage = error.response?.data?.message || 'Failed to delete program';
-        message.error(errorMessage);
+        message.success(t('ui.loyalty.delete_success', { defaultValue: 'Program updated successfully' }));
+        invalidateLoyaltyQueries();
       }
     }
   );
 
-  const columns = [
+  const createTierMutation = useMutation(
+    (values) => adminService.createLoyaltyTier(values),
     {
-      title: 'ID',
-      dataIndex: 'id',
-      key: 'id',
-      width: 70
-    },
+      onSuccess: () => {
+        message.success(t('ui.loyalty.tier_create_success', { defaultValue: 'Tier created successfully' }));
+        setTierModal({ open: false, tier: null });
+        tierForm.resetFields();
+        invalidateLoyaltyQueries();
+      }
+    }
+  );
+
+  const updateTierMutation = useMutation(
+    ({ tierId, values }) => adminService.updateLoyaltyTier(tierId, values),
     {
-      title: 'Program Name',
+      onSuccess: () => {
+        message.success(t('ui.loyalty.tier_update_success', { defaultValue: 'Tier updated successfully' }));
+        setTierModal({ open: false, tier: null });
+        tierForm.resetFields();
+        invalidateLoyaltyQueries();
+      }
+    }
+  );
+
+  const deleteTierMutation = useMutation(
+    (tierId) => adminService.deleteLoyaltyTier(tierId),
+    {
+      onSuccess: () => {
+        message.success(t('ui.loyalty.tier_delete_success', { defaultValue: 'Tier removed successfully' }));
+        invalidateLoyaltyQueries();
+      }
+    }
+  );
+
+  const handleExport = async () => {
+    const result = await exportUtils.exportLoyaltyPrograms({
+      search: searchText,
+      status: statusFilter,
+    });
+    if (!result.success) {
+      message.error(result.message);
+    }
+  };
+
+  const programColumns = useMemo(() => ([
+    {
+      title: t('ui.loyalty.program_name', { defaultValue: 'Program Name' }),
       dataIndex: 'name',
       key: 'name',
-      render: (text, record) => (
+      render: (_, record) => (
         <div>
-          <div style={{ fontWeight: 'bold' }}>
-            {text}
-            {record.is_default && <Tag color="gold" style={{ marginLeft: 8 }}>DEFAULT</Tag>}
+          <div style={{ fontWeight: 600 }}>
+            {record.name}
+            {record.is_default ? <Tag color="gold" style={{ marginLeft: 8 }}>DEFAULT</Tag> : null}
           </div>
-          {record.description && (
-            <small style={{ color: '#666' }}>{record.description.substring(0, 60)}...</small>
-          )}
+          <div style={{ color: '#8c8c8c' }}>{record.description || '-'}</div>
         </div>
       )
     },
     {
-      title: 'Points Rate',
-      dataIndex: 'points_per_uzs',
-      key: 'points_per_uzs',
-      width: 120,
-      render: (rate) => (
-        <Tag color="blue">{rate} pts/UZS</Tag>
-      )
+      title: t('ui.loyalty.uzs_per_point', { defaultValue: 'UZS per Point' }),
+      dataIndex: 'uzs_per_point',
+      key: 'uzs_per_point',
+      width: 140,
     },
     {
-      title: 'Sign-up Bonus',
-      dataIndex: 'signup_bonus',
-      key: 'signup_bonus',
+      title: t('ui.loyalty.active_members', { defaultValue: 'Members' }),
+      dataIndex: 'member_count',
+      key: 'member_count',
       width: 120,
-      render: (bonus) => (
-        <span>{bonus || 0} pts</span>
-      )
     },
     {
-      title: 'Expiry',
-      dataIndex: 'points_expiry_days',
-      key: 'points_expiry_days',
+      title: t('ui.loyalty.tiers', { defaultValue: 'Tiers' }),
+      dataIndex: 'tier_count',
+      key: 'tier_count',
       width: 100,
-      render: (days) => (
-        <span>{days || 'Never'} days</span>
-      )
     },
     {
-      title: 'Status',
+      title: t('ui.loyalty.status', { defaultValue: 'Status' }),
       dataIndex: 'is_active',
       key: 'is_active',
-      width: 100,
-      render: (is_active) => (
-        <Tag color={is_active ? 'green' : 'red'}>
-          {is_active ? 'Active' : 'Inactive'}
-        </Tag>
-      )
+      width: 120,
+      render: (value) => <Tag color={value ? 'green' : 'red'}>{value ? 'Active' : 'Inactive'}</Tag>
     },
     {
-      title: 'Actions',
+      title: t('ui.loyalty.created', { defaultValue: 'Created' }),
+      dataIndex: 'created_at',
+      key: 'created_at',
+      width: 140,
+      render: (value) => formatDate(value)
+    },
+    {
+      title: t('ui.loyalty.actions', { defaultValue: 'Actions' }),
       key: 'actions',
-      width: 100,
+      width: 120,
       render: (_, record) => (
-        <Dropdown
-          menu={{
-            items: [
-              {
-                key: 'view',
-                label: 'View Details',
-                icon: <EyeOutlined />,
-                onClick: () => handleViewProgram(record)
-              },
-              {
-                key: 'edit',
-                label: 'Edit Program',
-                icon: <EditOutlined />,
-                onClick: () => handleEditProgram(record)
-              },
-              {
-                type: 'divider'
-              },
-              {
-                key: 'delete',
-                label: 'Delete Program',
-                icon: <DeleteOutlined />,
-                danger: true,
-                disabled: record.is_default,
-                onClick: () => handleDeleteProgram(record)
-              }
-            ]
-          }}
-          trigger={['click']}
-        >
-          <Button type="text" icon={<MoreOutlined />} />
-        </Dropdown>
+        <Space>
+          <Button
+            type="text"
+            icon={<EditOutlined />}
+            onClick={() => {
+              setProgramModal({ open: true, program: record });
+              programForm.setFieldsValue(record);
+            }}
+          />
+          <Button
+            type="text"
+            danger
+            icon={<DeleteOutlined />}
+            onClick={() => {
+              Modal.confirm({
+                title: t('ui.loyalty.delete_confirm_title', { defaultValue: 'Delete program?' }),
+                content: record.is_default
+                  ? t('ui.loyalty.default_program_warning', { defaultValue: 'Default programs cannot be deleted.' })
+                  : t('ui.loyalty.delete_confirm_message', { defaultValue: `Delete ${record.name}?` }),
+                onOk: () => deleteProgramMutation.mutate(record.id),
+                okButtonProps: { disabled: record.is_default },
+              });
+            }}
+          />
+        </Space>
       )
     }
-  ];
+  ]), [deleteProgramMutation, programForm, t]);
 
-  const handleViewProgram = (program) => {
-    setSelectedProgram(program);
-    setIsDetailModalVisible(true);
-  };
-
-  const handleEditProgram = (program) => {
-    setSelectedProgram(program);
-    editForm.setFieldsValue({
-      name: program.name,
-      description: program.description,
-      points_per_uzs: program.points_per_uzs,
-      signup_bonus: program.signup_bonus,
-      referral_bonus: program.referral_bonus,
-      birthday_bonus: program.birthday_bonus,
-      points_expiry_days: program.points_expiry_days,
-      min_redemption_points: program.min_redemption_points,
-      is_active: program.is_active,
-      is_default: program.is_default
-    });
-    setIsEditModalVisible(true);
-  };
-
-  const handleDeleteProgram = (program) => {
-    if (program.is_default) {
-      message.warning('Cannot delete the default program');
-      return;
+  const tierColumns = useMemo(() => ([
+    {
+      title: t('ui.loyalty.tier_name', { defaultValue: 'Tier Name' }),
+      dataIndex: 'name',
+      key: 'name',
+      render: (_, record) => <Tag color={record.color || 'gold'}>{record.name}</Tag>
+    },
+    {
+      title: t('ui.loyalty.points_range', { defaultValue: 'Points Range' }),
+      dataIndex: 'points_range',
+      key: 'points_range',
+    },
+    {
+      title: t('ui.loyalty.multiplier', { defaultValue: 'Multiplier' }),
+      dataIndex: 'points_multiplier',
+      key: 'points_multiplier',
+      width: 120,
+      render: (value) => `${value || 1}x`
+    },
+    {
+      title: t('ui.loyalty.discount', { defaultValue: 'Discount' }),
+      dataIndex: 'discount_percentage',
+      key: 'discount_percentage',
+      width: 120,
+      render: (value) => `${value || 0}%`
+    },
+    {
+      title: t('ui.loyalty.status', { defaultValue: 'Status' }),
+      dataIndex: 'is_active',
+      key: 'is_active',
+      width: 120,
+      render: (value) => <Tag color={value ? 'green' : 'red'}>{value ? 'Active' : 'Inactive'}</Tag>
+    },
+    {
+      title: t('ui.loyalty.actions', { defaultValue: 'Actions' }),
+      key: 'actions',
+      width: 120,
+      render: (_, record) => (
+        <Space>
+          <Button
+            type="text"
+            icon={<EditOutlined />}
+            onClick={() => {
+              setTierModal({ open: true, tier: record });
+              tierForm.setFieldsValue(record);
+            }}
+          />
+          <Button
+            type="text"
+            danger
+            icon={<DeleteOutlined />}
+            onClick={() => {
+              Modal.confirm({
+                title: t('ui.loyalty.delete_tier_confirm_title', { defaultValue: 'Delete tier?' }),
+                content: t('ui.loyalty.delete_tier_confirm_message', { defaultValue: `Delete ${record.name}?` }),
+                onOk: () => deleteTierMutation.mutate(record.id),
+              });
+            }}
+          />
+        </Space>
+      )
     }
-
-    Modal.confirm({
-      title: 'Delete Loyalty Program?',
-      content: `Are you sure you want to delete "${program.name}"? Programs with members will be deactivated instead.`,
-      icon: <WarningOutlined />,
-      okText: 'Delete',
-      okType: 'danger',
-      onOk: () => {
-        deleteProgramMutation.mutate(program.id);
-      }
-    });
-  };
-
-  const handleCreateSubmit = (values) => {
-    createProgramMutation.mutate(values);
-  };
-
-  const handleEditSubmit = (values) => {
-    updateProgramMutation.mutate({
-      programId: selectedProgram.id,
-      programData: values
-    });
-  };
-
-  // Calculate summary statistics
-  const programs = data?.data?.programs || [];
-  const totalPrograms = programs.length;
-  const activePrograms = programs.filter(p => p.is_active).length;
-  const defaultProgram = programs.find(p => p.is_default);
+  ]), [deleteTierMutation, t, tierForm]);
 
   return (
     <div>
-      {/* Summary Cards */}
       <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
-        <Col xs={24} sm={8}>
+        <Col xs={24} md={8}>
           <Card>
             <Statistic
-              title="Total Programs"
+              title={t('ui.loyalty.total_programs', { defaultValue: 'Total Programs' })}
               value={totalPrograms}
               prefix={<GiftOutlined />}
             />
           </Card>
         </Col>
-        <Col xs={24} sm={8}>
+        <Col xs={24} md={8}>
           <Card>
             <Statistic
-              title="Active Programs"
-              value={activePrograms}
-              valueStyle={{ color: '#52c41a' }}
+              title={t('ui.loyalty.active_programs', { defaultValue: 'Active Programs' })}
+              value={programs.filter((program) => program.is_active).length}
               prefix={<StarOutlined />}
             />
           </Card>
         </Col>
-        <Col xs={24} sm={8}>
+        <Col xs={24} md={8}>
           <Card>
             <Statistic
-              title="Default Program"
-              value={defaultProgram?.name || 'None'}
+              title={t('ui.loyalty.total_members', { defaultValue: 'Total Members' })}
+              value={programs.reduce((sum, program) => sum + (program.member_count || 0), 0)}
               prefix={<TrophyOutlined />}
-              valueStyle={{ fontSize: '18px' }}
             />
           </Card>
         </Col>
       </Row>
 
       <Card>
-        {/* Action Button */}
-        <div className="table-actions">
-          <Space wrap />
-          <Space>
-            <Button
-              type="primary"
-              icon={<PlusOutlined />}
-              onClick={() => setIsCreateModalVisible(true)}
-            >
-              Add Loyalty Program
-            </Button>
-          </Space>
-        </div>
+        <Tabs
+          activeKey={activeTab}
+          onChange={setActiveTab}
+          items={[
+            {
+              key: 'programs',
+              label: t('ui.loyalty.tab_programs', { defaultValue: 'Programs' }),
+              children: (
+                <>
+                  <div className="table-actions">
+                    <Space wrap>
+                      <Input.Search
+                        allowClear
+                        placeholder={t('ui.loyalty.search_programs', { defaultValue: 'Search programs' })}
+                        style={{ width: 260 }}
+                        value={searchText}
+                        onChange={(event) => {
+                          setSearchText(event.target.value);
+                          setPagination((current) => ({ ...current, page: 1 }));
+                        }}
+                      />
+                      <Select
+                        allowClear
+                        placeholder={t('ui.loyalty.filter_by_status', { defaultValue: 'Filter by status' })}
+                        style={{ width: 180 }}
+                        value={statusFilter}
+                        onChange={(value) => {
+                          setStatusFilter(value);
+                          setPagination((current) => ({ ...current, page: 1 }));
+                        }}
+                        options={[
+                          { value: 'active', label: 'Active' },
+                          { value: 'inactive', label: 'Inactive' },
+                        ]}
+                      />
+                    </Space>
 
-        {/* Programs Table */}
-        <Table
-          columns={columns}
-          dataSource={programs}
-          loading={isLoading}
-          rowKey="id"
-          pagination={false}
-          className="admin-table"
+                    <Space>
+                      <Button icon={<ExportOutlined />} onClick={handleExport}>
+                        {t('ui.loyalty.export_data', { defaultValue: 'Export Programs' })}
+                      </Button>
+                      <Button
+                        type="primary"
+                        icon={<PlusOutlined />}
+                        onClick={() => {
+                          setProgramModal({ open: true, program: null });
+                          programForm.resetFields();
+                          programForm.setFieldsValue({
+                            is_active: true,
+                            is_default: false,
+                            uzs_per_point: 250,
+                            signup_bonus: 100,
+                            referral_bonus: 50,
+                            birthday_bonus: 25,
+                            points_expiry_days: 365,
+                            min_redemption_points: 100,
+                          });
+                        }}
+                      >
+                        {t('ui.loyalty.create_program', { defaultValue: 'Create Program' })}
+                      </Button>
+                    </Space>
+                  </div>
+
+                  <Table
+                    rowKey="id"
+                    columns={programColumns}
+                    dataSource={programs}
+                    loading={programsQuery.isLoading}
+                    locale={{
+                      emptyText: <Empty description={t('ui.loyalty.no_programs', { defaultValue: 'No loyalty programs found' })} />
+                    }}
+                    pagination={{
+                      current: pagination.page,
+                      pageSize: pagination.per_page,
+                      total: totalPrograms,
+                      showSizeChanger: true,
+                    }}
+                    onChange={(pageInfo) => {
+                      setPagination({
+                        page: pageInfo.current,
+                        per_page: pageInfo.pageSize,
+                      });
+                    }}
+                  />
+                </>
+              )
+            },
+            {
+              key: 'tiers',
+              label: t('ui.loyalty.tab_tiers', { defaultValue: 'Tiers' }),
+              children: (
+                <>
+                  <div className="table-actions">
+                    <Space wrap>
+                      <Select
+                        placeholder={t('ui.loyalty.program', { defaultValue: 'Program' })}
+                        style={{ width: 240 }}
+                        value={selectedProgramId}
+                        onChange={setSelectedProgramId}
+                        options={programs.map((program) => ({
+                          value: program.id,
+                          label: program.name,
+                        }))}
+                      />
+                    </Space>
+                    <Space>
+                      <Button
+                        type="primary"
+                        icon={<PlusOutlined />}
+                        disabled={!selectedProgramId}
+                        onClick={() => {
+                          setTierModal({ open: true, tier: null });
+                          tierForm.resetFields();
+                          tierForm.setFieldsValue({
+                            program_id: selectedProgramId,
+                            is_active: true,
+                            display_order: tiers.length,
+                            points_multiplier: 1.0,
+                            discount_percentage: 0,
+                            color: '#CD7F32',
+                            icon: 'fa-medal',
+                          });
+                        }}
+                      >
+                        {t('ui.loyalty.create_tier', { defaultValue: 'Create Tier' })}
+                      </Button>
+                    </Space>
+                  </div>
+
+                  <Table
+                    rowKey="id"
+                    columns={tierColumns}
+                    dataSource={tiers}
+                    loading={tiersQuery.isLoading}
+                    locale={{
+                      emptyText: <Empty description={t('ui.loyalty.no_tiers', { defaultValue: 'No tiers configured' })} />
+                    }}
+                    pagination={false}
+                  />
+                </>
+              )
+            }
+          ]}
         />
       </Card>
 
-      {/* Program Details Modal */}
       <Modal
-        title={`Program Details - ${selectedProgram?.name}`}
-        open={isDetailModalVisible}
-        onCancel={() => setIsDetailModalVisible(false)}
+        open={programModal.open}
+        title={programModal.program ? t('ui.loyalty.edit_program', { defaultValue: 'Edit Program' }) : t('ui.loyalty.create_program', { defaultValue: 'Create Program' })}
+        onCancel={() => setProgramModal({ open: false, program: null })}
         footer={null}
-        width={700}
-      >
-        {selectedProgram && (
-          <div>
-            <Row gutter={16}>
-              <Col span={24}>
-                <h3>
-                  {selectedProgram.name}
-                  {selectedProgram.is_default && <Tag color="gold" style={{ marginLeft: 8 }}>DEFAULT</Tag>}
-                  <Tag color={selectedProgram.is_active ? 'green' : 'red'} style={{ marginLeft: 8 }}>
-                    {selectedProgram.is_active ? 'Active' : 'Inactive'}
-                  </Tag>
-                </h3>
-                <p><strong>ID:</strong> {selectedProgram.id}</p>
-              </Col>
-            </Row>
-
-            {selectedProgram.description && (
-              <>
-                <Divider>Description</Divider>
-                <p>{selectedProgram.description}</p>
-              </>
-            )}
-
-            <Divider>Program Settings</Divider>
-            <Row gutter={16}>
-              <Col span={12}>
-                <p><strong>Points per UZS:</strong> {selectedProgram.points_per_uzs}</p>
-                <p><strong>Sign-up Bonus:</strong> {selectedProgram.signup_bonus || 0} pts</p>
-                <p><strong>Referral Bonus:</strong> {selectedProgram.referral_bonus || 0} pts</p>
-              </Col>
-              <Col span={12}>
-                <p><strong>Birthday Bonus:</strong> {selectedProgram.birthday_bonus || 0} pts</p>
-                <p><strong>Points Expiry:</strong> {selectedProgram.points_expiry_days || 'Never'} days</p>
-                <p><strong>Min Redemption:</strong> {selectedProgram.min_redemption_points || 0} pts</p>
-              </Col>
-            </Row>
-
-            <div style={{ marginTop: 16, textAlign: 'right' }}>
-              <Space>
-                <Button
-                  type="primary"
-                  onClick={() => {
-                    setIsDetailModalVisible(false);
-                    handleEditProgram(selectedProgram);
-                  }}
-                >
-                  Edit Program
-                </Button>
-                <Button onClick={() => setIsDetailModalVisible(false)}>
-                  Close
-                </Button>
-              </Space>
-            </div>
-          </div>
-        )}
-      </Modal>
-
-      {/* Create Program Modal */}
-      <Modal
-        title="Add New Loyalty Program"
-        open={isCreateModalVisible}
-        onCancel={() => setIsCreateModalVisible(false)}
-        footer={null}
-        width={700}
+        width={720}
       >
         <Form
-          form={createForm}
+          form={programForm}
           layout="vertical"
-          onFinish={handleCreateSubmit}
+          onFinish={(values) => {
+            if (programModal.program) {
+              updateProgramMutation.mutate({ programId: programModal.program.id, values });
+              return;
+            }
+            createProgramMutation.mutate(values);
+          }}
         >
-          <Tabs defaultActiveKey="1">
-            <TabPane tab="Basic Info" key="1">
-              <Form.Item
-                name="name"
-                label="Program Name"
-                rules={[{ required: true, message: 'Please enter program name' }]}
-              >
-                <Input placeholder="Enter program name" />
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item name="name" label={t('ui.loyalty.program_name', { defaultValue: 'Program Name' })} rules={[{ required: true }]}>
+                <Input />
               </Form.Item>
-
-              <Form.Item
-                name="description"
-                label="Description"
-              >
-                <TextArea
-                  rows={3}
-                  placeholder="Enter program description..."
-                />
+            </Col>
+            <Col span={12}>
+              <Form.Item name="uzs_per_point" label={t('ui.loyalty.uzs_per_point', { defaultValue: 'UZS per Point' })} rules={[{ required: true }]}>
+                <InputNumber min={1} style={{ width: '100%' }} />
               </Form.Item>
+            </Col>
+          </Row>
 
-              <Row gutter={16}>
-                <Col span={12}>
-                  <Form.Item
-                    name="is_active"
-                    label="Active"
-                    valuePropName="checked"
-                    initialValue={true}
-                  >
-                    <Switch />
-                  </Form.Item>
-                </Col>
-                <Col span={12}>
-                  <Form.Item
-                    name="is_default"
-                    label="Set as Default"
-                    valuePropName="checked"
-                    initialValue={false}
-                  >
-                    <Switch />
-                  </Form.Item>
-                </Col>
-              </Row>
-            </TabPane>
+          <Form.Item name="description" label={t('ui.loyalty.form_description', { defaultValue: 'Description' })}>
+            <TextArea rows={3} />
+          </Form.Item>
 
-            <TabPane tab="Points & Rewards" key="2">
-              <Row gutter={16}>
-                <Col span={12}>
-                  <Form.Item
-                    name="points_per_uzs"
-                    label="Points per UZS"
-                    initialValue={1}
-                    rules={[{ required: true, message: 'Please enter points rate' }]}
-                  >
-                    <InputNumber
-                      placeholder="1"
-                      style={{ width: '100%' }}
-                      min={0}
-                      step={0.1}
-                    />
-                  </Form.Item>
-                </Col>
-                <Col span={12}>
-                  <Form.Item
-                    name="min_redemption_points"
-                    label="Min Redemption Points"
-                    initialValue={100}
-                  >
-                    <InputNumber
-                      placeholder="100"
-                      style={{ width: '100%' }}
-                      min={0}
-                    />
-                  </Form.Item>
-                </Col>
-              </Row>
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item name="signup_bonus" label={t('ui.loyalty.signup_bonus', { defaultValue: 'Sign-up Bonus' })}>
+                <InputNumber min={0} style={{ width: '100%' }} />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="referral_bonus" label={t('ui.loyalty.referral_bonus', { defaultValue: 'Referral Bonus' })}>
+                <InputNumber min={0} style={{ width: '100%' }} />
+              </Form.Item>
+            </Col>
+          </Row>
 
-              <Row gutter={16}>
-                <Col span={12}>
-                  <Form.Item
-                    name="signup_bonus"
-                    label="Sign-up Bonus (pts)"
-                    initialValue={0}
-                  >
-                    <InputNumber
-                      placeholder="0"
-                      style={{ width: '100%' }}
-                      min={0}
-                    />
-                  </Form.Item>
-                </Col>
-                <Col span={12}>
-                  <Form.Item
-                    name="referral_bonus"
-                    label="Referral Bonus (pts)"
-                    initialValue={0}
-                  >
-                    <InputNumber
-                      placeholder="0"
-                      style={{ width: '100%' }}
-                      min={0}
-                    />
-                  </Form.Item>
-                </Col>
-              </Row>
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item name="birthday_bonus" label={t('ui.loyalty.birthday_bonus', { defaultValue: 'Birthday Bonus' })}>
+                <InputNumber min={0} style={{ width: '100%' }} />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="points_expiry_days" label={t('ui.loyalty.points_expiry_days', { defaultValue: 'Points Expiry Days' })}>
+                <InputNumber min={0} style={{ width: '100%' }} />
+              </Form.Item>
+            </Col>
+          </Row>
 
-              <Row gutter={16}>
-                <Col span={12}>
-                  <Form.Item
-                    name="birthday_bonus"
-                    label="Birthday Bonus (pts)"
-                    initialValue={0}
-                  >
-                    <InputNumber
-                      placeholder="0"
-                      style={{ width: '100%' }}
-                      min={0}
-                    />
-                  </Form.Item>
-                </Col>
-                <Col span={12}>
-                  <Form.Item
-                    name="points_expiry_days"
-                    label="Points Expiry (days)"
-                    initialValue={365}
-                  >
-                    <InputNumber
-                      placeholder="365"
-                      style={{ width: '100%' }}
-                      min={0}
-                    />
-                  </Form.Item>
-                </Col>
-              </Row>
-            </TabPane>
-          </Tabs>
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item name="min_redemption_points" label={t('ui.loyalty.min_redemption_points', { defaultValue: 'Minimum Redemption Points' })}>
+                <InputNumber min={0} style={{ width: '100%' }} />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Space size={24} style={{ marginTop: 30 }}>
+                <Form.Item name="is_active" label={t('ui.loyalty.active', { defaultValue: 'Active' })} valuePropName="checked">
+                  <Switch />
+                </Form.Item>
+                <Form.Item name="is_default" label={t('ui.loyalty.default_program', { defaultValue: 'Default Program' })} valuePropName="checked">
+                  <Switch />
+                </Form.Item>
+              </Space>
+            </Col>
+          </Row>
 
-          <Form.Item style={{ marginBottom: 0, textAlign: 'right', marginTop: 16 }}>
+          <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
             <Space>
-              <Button onClick={() => setIsCreateModalVisible(false)}>
-                Cancel
+              <Button onClick={() => setProgramModal({ open: false, program: null })}>
+                {t('ui.loyalty.cancel', { defaultValue: 'Cancel' })}
               </Button>
-              <Button
-                type="primary"
-                htmlType="submit"
-                loading={createProgramMutation.isLoading}
-              >
-                Create Program
+              <Button type="primary" htmlType="submit" loading={createProgramMutation.isLoading || updateProgramMutation.isLoading}>
+                {programModal.program ? t('ui.loyalty.update_program', { defaultValue: 'Update Program' }) : t('ui.loyalty.create_program', { defaultValue: 'Create Program' })}
               </Button>
             </Space>
           </Form.Item>
         </Form>
       </Modal>
 
-      {/* Edit Program Modal */}
       <Modal
-        title={`Edit Program - ${selectedProgram?.name}`}
-        open={isEditModalVisible}
-        onCancel={() => setIsEditModalVisible(false)}
+        open={tierModal.open}
+        title={tierModal.tier ? t('ui.loyalty.edit_tier', { defaultValue: 'Edit Tier' }) : t('ui.loyalty.create_tier', { defaultValue: 'Create Tier' })}
+        onCancel={() => setTierModal({ open: false, tier: null })}
         footer={null}
-        width={700}
+        width={640}
       >
         <Form
-          form={editForm}
+          form={tierForm}
           layout="vertical"
-          onFinish={handleEditSubmit}
+          onFinish={(values) => {
+            const payload = {
+              ...values,
+              program_id: values.program_id || selectedProgramId,
+            };
+            if (tierModal.tier) {
+              updateTierMutation.mutate({ tierId: tierModal.tier.id, values: payload });
+              return;
+            }
+            createTierMutation.mutate(payload);
+          }}
         >
-          <Tabs defaultActiveKey="1">
-            <TabPane tab="Basic Info" key="1">
-              <Form.Item
-                name="name"
-                label="Program Name"
-                rules={[{ required: true, message: 'Please enter program name' }]}
-              >
-                <Input placeholder="Enter program name" />
+          <Form.Item name="program_id" hidden>
+            <InputNumber />
+          </Form.Item>
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item name="name" label={t('ui.loyalty.tier_name', { defaultValue: 'Tier Name' })} rules={[{ required: true }]}>
+                <Input />
               </Form.Item>
-
-              <Form.Item
-                name="description"
-                label="Description"
-              >
-                <TextArea
-                  rows={3}
-                  placeholder="Enter program description..."
-                />
+            </Col>
+            <Col span={12}>
+              <Form.Item name="display_order" label={t('ui.loyalty.display_order', { defaultValue: 'Display Order' })}>
+                <InputNumber min={0} style={{ width: '100%' }} />
               </Form.Item>
+            </Col>
+          </Row>
 
-              <Row gutter={16}>
-                <Col span={12}>
-                  <Form.Item
-                    name="is_active"
-                    label="Active"
-                    valuePropName="checked"
-                  >
-                    <Switch />
-                  </Form.Item>
-                </Col>
-                <Col span={12}>
-                  <Form.Item
-                    name="is_default"
-                    label="Set as Default"
-                    valuePropName="checked"
-                  >
-                    <Switch />
-                  </Form.Item>
-                </Col>
-              </Row>
-            </TabPane>
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item name="min_points" label={t('ui.loyalty.min_points', { defaultValue: 'Minimum Points' })} rules={[{ required: true }]}>
+                <InputNumber min={0} style={{ width: '100%' }} />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="max_points" label={t('ui.loyalty.max_points', { defaultValue: 'Maximum Points' })}>
+                <InputNumber min={0} style={{ width: '100%' }} />
+              </Form.Item>
+            </Col>
+          </Row>
 
-            <TabPane tab="Points & Rewards" key="2">
-              <Row gutter={16}>
-                <Col span={12}>
-                  <Form.Item
-                    name="points_per_uzs"
-                    label="Points per UZS"
-                    rules={[{ required: true, message: 'Please enter points rate' }]}
-                  >
-                    <InputNumber
-                      placeholder="1"
-                      style={{ width: '100%' }}
-                      min={0}
-                      step={0.1}
-                    />
-                  </Form.Item>
-                </Col>
-                <Col span={12}>
-                  <Form.Item
-                    name="min_redemption_points"
-                    label="Min Redemption Points"
-                  >
-                    <InputNumber
-                      placeholder="100"
-                      style={{ width: '100%' }}
-                      min={0}
-                    />
-                  </Form.Item>
-                </Col>
-              </Row>
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item name="points_multiplier" label={t('ui.loyalty.multiplier', { defaultValue: 'Multiplier' })}>
+                <InputNumber min={1} step={0.1} style={{ width: '100%' }} />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="discount_percentage" label={t('ui.loyalty.discount', { defaultValue: 'Discount' })}>
+                <InputNumber min={0} max={100} style={{ width: '100%' }} />
+              </Form.Item>
+            </Col>
+          </Row>
 
-              <Row gutter={16}>
-                <Col span={12}>
-                  <Form.Item
-                    name="signup_bonus"
-                    label="Sign-up Bonus (pts)"
-                  >
-                    <InputNumber
-                      placeholder="0"
-                      style={{ width: '100%' }}
-                      min={0}
-                    />
-                  </Form.Item>
-                </Col>
-                <Col span={12}>
-                  <Form.Item
-                    name="referral_bonus"
-                    label="Referral Bonus (pts)"
-                  >
-                    <InputNumber
-                      placeholder="0"
-                      style={{ width: '100%' }}
-                      min={0}
-                    />
-                  </Form.Item>
-                </Col>
-              </Row>
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item name="color" label={t('ui.loyalty.tier_color', { defaultValue: 'Color' })}>
+                <Input />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="icon" label={t('ui.loyalty.tier_icon', { defaultValue: 'Icon' })}>
+                <Input />
+              </Form.Item>
+            </Col>
+          </Row>
 
-              <Row gutter={16}>
-                <Col span={12}>
-                  <Form.Item
-                    name="birthday_bonus"
-                    label="Birthday Bonus (pts)"
-                  >
-                    <InputNumber
-                      placeholder="0"
-                      style={{ width: '100%' }}
-                      min={0}
-                    />
-                  </Form.Item>
-                </Col>
-                <Col span={12}>
-                  <Form.Item
-                    name="points_expiry_days"
-                    label="Points Expiry (days)"
-                  >
-                    <InputNumber
-                      placeholder="365"
-                      style={{ width: '100%' }}
-                      min={0}
-                    />
-                  </Form.Item>
-                </Col>
-              </Row>
-            </TabPane>
-          </Tabs>
+          <Form.Item name="is_active" label={t('ui.loyalty.status', { defaultValue: 'Status' })} valuePropName="checked">
+            <Switch />
+          </Form.Item>
 
-          <Form.Item style={{ marginBottom: 0, textAlign: 'right', marginTop: 16 }}>
+          <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
             <Space>
-              <Button onClick={() => setIsEditModalVisible(false)}>
-                Cancel
+              <Button onClick={() => setTierModal({ open: false, tier: null })}>
+                {t('ui.loyalty.cancel', { defaultValue: 'Cancel' })}
               </Button>
-              <Button
-                type="primary"
-                htmlType="submit"
-                loading={updateProgramMutation.isLoading}
-              >
-                Update Program
+              <Button type="primary" htmlType="submit" loading={createTierMutation.isLoading || updateTierMutation.isLoading}>
+                {tierModal.tier ? t('ui.loyalty.update', { defaultValue: 'Update' }) : t('ui.loyalty.create', { defaultValue: 'Create' })}
               </Button>
             </Space>
           </Form.Item>

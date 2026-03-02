@@ -335,6 +335,21 @@ BACKEND_TRANSLATIONS = {
         'uz': 'Business Account to\'lovi uchun buyurtmadagi kamida bitta mahsulotni qamrab oluvchi faol korporativ shartnoma kerak.',
         'ru': 'Для оплаты через Business Account нужен активный корпоративный договор, покрывающий хотя бы одну позицию заказа.'
     },
+    'api.orders.error.business_account_all_items_must_be_contract_backed': {
+        'en': 'Every order item must be covered by an active corporate contract for Business Account payment.',
+        'uz': 'Business Account to\'lovi uchun buyurtmadagi barcha mahsulotlar faol korporativ shartnoma bilan qamrab olinishi kerak.',
+        'ru': 'Для оплаты через Business Account все позиции заказа должны быть покрыты активным корпоративным договором.'
+    },
+    'api.orders.error.business_account_contract_line_invalid': {
+        'en': 'One or more contract-backed order lines are invalid for Business Account payment.',
+        'uz': 'Business Account to\'lovi uchun shartnomaga bog\'langan ayrim buyurtma satrlari yaroqsiz.',
+        'ru': 'Одна или несколько контрактных позиций заказа недействительны для оплаты через Business Account.'
+    },
+    'api.orders.error.business_account_insufficient_prepayment': {
+        'en': 'Corporate prepayment balance is insufficient for one or more order items.',
+        'uz': 'Bir yoki bir nechta buyurtma mahsuloti uchun korporativ oldindan to\'lov qoldig\'i yetarli emas.',
+        'ru': 'Корпоративного предоплаченного остатка недостаточно для одной или нескольких позиций заказа.'
+    },
     'api.orders.error.ambiguous_contract_pricing': {
         'en': 'Ambiguous contract pricing for product {product_id}. Multiple active contracts match: {contract_numbers}',
         'uz': '{product_id} mahsulot uchun shartnoma narxi noaniq. Bir nechta faol shartnoma mos keldi: {contract_numbers}',
@@ -1557,6 +1572,621 @@ BACKEND_TRANSLATIONS = {
         'uz': 'Korporativ shartnomalar',
         'ru': 'Корпоративные договоры'
     },
+    'ui.nav.loyalty': {
+        'en': 'Loyalty',
+        'uz': 'Sodiqlik dasturi',
+        'ru': 'Лояльность'
+    },
+    'ui.nav.loyalty_members': {
+        'en': 'Members',
+        'uz': 'A\'zolar',
+        'ru': 'Участники'
+    },
+    'ui.nav.loyalty_programs': {
+        'en': 'Programs',
+        'uz': 'Dasturlar',
+        'ru': 'Программы'
+    },
+    'ui.nav.loyalty_rewards': {
+        'en': 'Rewards',
+        'uz': 'Mukofotlar',
+        'ru': 'Награды'
+    },
+    'ui.analytics.avg_redemption_value': {
+        'en': 'Average Redemption Value',
+        'uz': 'O\'rtacha yechib olish qiymati',
+        'ru': 'Средняя стоимость списания'
+    },
+    'ui.analytics.loyalty': {
+        'en': 'Loyalty',
+        'uz': 'Sodiqlik dasturi',
+        'ru': 'Лояльность'
+    },
+    'ui.analytics.loyalty_points_earned': {
+        'en': 'Points Earned',
+        'uz': 'Yig\'ilgan ballar',
+        'ru': 'Начисленные баллы'
+    },
+    'ui.analytics.loyalty_points_redeemed': {
+        'en': 'Points Redeemed',
+        'uz': 'Ishlatilgan ballar',
+        'ru': 'Списанные баллы'
+    },
+    'ui.analytics.loyalty_points_trend': {
+        'en': 'Loyalty Points Trend',
+        'uz': 'Sodiqlik ballari dinamikasi',
+        'ru': 'Динамика баллов лояльности'
+    },
+    'ui.analytics.members': {
+        'en': 'Members',
+        'uz': 'A\'zolar',
+        'ru': 'Участники'
+    },
+    'ui.analytics.points': {
+        'en': 'Points',
+        'uz': 'Ballar',
+        'ru': 'Баллы'
+    },
+    'ui.analytics.points_in_circulation': {
+        'en': 'Points In Circulation',
+        'uz': 'Aylanmadagi ballar',
+        'ru': 'Баллы в обращении'
+    },
+    'ui.analytics.program': {
+        'en': 'Program',
+        'uz': 'Dastur',
+        'ru': 'Программа'
+    },
+    'ui.analytics.program_breakdown': {
+        'en': 'Program Breakdown',
+        'uz': 'Dasturlar kesimidagi ko\'rsatkichlar',
+        'ru': 'Разбивка по программам'
+    },
+    'ui.analytics.redemptions': {
+        'en': 'Redemptions',
+        'uz': 'Yechib olishlar',
+        'ru': 'Списания'
+    },
+    'ui.analytics.rewards': {
+        'en': 'Rewards',
+        'uz': 'Mukofotlar',
+        'ru': 'Награды'
+    },
+    'ui.analytics.tier_distribution': {
+        'en': 'Tier Distribution',
+        'uz': 'Darajalar taqsimoti',
+        'ru': 'Распределение по уровням'
+    },
+    'ui.analytics.top_rewards': {
+        'en': 'Top Rewards',
+        'uz': 'Eng ommabop mukofotlar',
+        'ru': 'Популярные награды'
+    },
+    'ui.analytics.total_loyalty_members': {
+        'en': 'Total Loyalty Members',
+        'uz': 'Jami sodiqlik a\'zolari',
+        'ru': 'Всего участников программы'
+    },
+    'ui.analytics.total_redemptions': {
+        'en': 'Total Redemptions',
+        'uz': 'Jami yechib olishlar',
+        'ru': 'Всего списаний'
+    },
+    'ui.loyalty.actions': {
+        'en': 'Actions',
+        'uz': 'Amallar',
+        'ru': 'Действия'
+    },
+    'ui.loyalty.active': {
+        'en': 'Active',
+        'uz': 'Faol',
+        'ru': 'Активно'
+    },
+    'ui.loyalty.active_members': {
+        'en': 'Active Members',
+        'uz': 'Faol a\'zolar',
+        'ru': 'Активные участники'
+    },
+    'ui.loyalty.active_programs': {
+        'en': 'Active Programs',
+        'uz': 'Faol dasturlar',
+        'ru': 'Активные программы'
+    },
+    'ui.loyalty.active_rewards': {
+        'en': 'Active Rewards',
+        'uz': 'Faol mukofotlar',
+        'ru': 'Активные награды'
+    },
+    'ui.loyalty.avg_points_per_member': {
+        'en': 'Average Points per Member',
+        'uz': 'Bir a\'zoga o\'rtacha ball',
+        'ru': 'Среднее число баллов на участника'
+    },
+    'ui.loyalty.birthday_bonus': {
+        'en': 'Birthday Bonus',
+        'uz': 'Tug\'ilgan kun bonusi',
+        'ru': 'Бонус ко дню рождения'
+    },
+    'ui.loyalty.cancel': {
+        'en': 'Cancel',
+        'uz': 'Bekor qilish',
+        'ru': 'Отмена'
+    },
+    'ui.loyalty.create': {
+        'en': 'Create',
+        'uz': 'Yaratish',
+        'ru': 'Создать'
+    },
+    'ui.loyalty.create_program': {
+        'en': 'Create Program',
+        'uz': 'Dastur yaratish',
+        'ru': 'Создать программу'
+    },
+    'ui.loyalty.create_reward': {
+        'en': 'Create Reward',
+        'uz': 'Mukofot yaratish',
+        'ru': 'Создать награду'
+    },
+    'ui.loyalty.create_success': {
+        'en': 'Program created successfully',
+        'uz': 'Dastur muvaffaqiyatli yaratildi',
+        'ru': 'Программа успешно создана'
+    },
+    'ui.loyalty.create_tier': {
+        'en': 'Create Tier',
+        'uz': 'Daraja yaratish',
+        'ru': 'Создать уровень'
+    },
+    'ui.loyalty.created': {
+        'en': 'Created',
+        'uz': 'Yaratilgan',
+        'ru': 'Создано'
+    },
+    'ui.loyalty.current_points': {
+        'en': 'Current Points',
+        'uz': 'Joriy ballar',
+        'ru': 'Текущие баллы'
+    },
+    'ui.loyalty.customer': {
+        'en': 'Customer',
+        'uz': 'Mijoz',
+        'ru': 'Клиент'
+    },
+    'ui.loyalty.default_program': {
+        'en': 'Default Program',
+        'uz': 'Asosiy dastur',
+        'ru': 'Программа по умолчанию'
+    },
+    'ui.loyalty.default_program_warning': {
+        'en': 'Only one loyalty program should be marked as default.',
+        'uz': 'Faqat bitta sodiqlik dasturi asosiy sifatida belgilanishi kerak.',
+        'ru': 'Только одна программа лояльности должна быть отмечена как основная.'
+    },
+    'ui.loyalty.delete_confirm_message': {
+        'en': 'Are you sure you want to delete this loyalty program?',
+        'uz': 'Ushbu sodiqlik dasturini o\'chirishni tasdiqlaysizmi?',
+        'ru': 'Вы уверены, что хотите удалить эту программу лояльности?'
+    },
+    'ui.loyalty.delete_confirm_title': {
+        'en': 'Delete Program',
+        'uz': 'Dasturni o\'chirish',
+        'ru': 'Удалить программу'
+    },
+    'ui.loyalty.delete_success': {
+        'en': 'Program deleted successfully',
+        'uz': 'Dastur muvaffaqiyatli o\'chirildi',
+        'ru': 'Программа успешно удалена'
+    },
+    'ui.loyalty.delete_tier_confirm_message': {
+        'en': 'Are you sure you want to delete this tier?',
+        'uz': 'Ushbu darajani o\'chirishni tasdiqlaysizmi?',
+        'ru': 'Вы уверены, что хотите удалить этот уровень?'
+    },
+    'ui.loyalty.delete_tier_confirm_title': {
+        'en': 'Delete Tier',
+        'uz': 'Darajani o\'chirish',
+        'ru': 'Удалить уровень'
+    },
+    'ui.loyalty.description': {
+        'en': 'Description',
+        'uz': 'Tavsif',
+        'ru': 'Описание'
+    },
+    'ui.loyalty.discount': {
+        'en': 'Discount',
+        'uz': 'Chegirma',
+        'ru': 'Скидка'
+    },
+    'ui.loyalty.discount_type': {
+        'en': 'Discount Type',
+        'uz': 'Chegirma turi',
+        'ru': 'Тип скидки'
+    },
+    'ui.loyalty.discount_value': {
+        'en': 'Discount Value',
+        'uz': 'Chegirma qiymati',
+        'ru': 'Размер скидки'
+    },
+    'ui.loyalty.display_order': {
+        'en': 'Display Order',
+        'uz': 'Ko\'rsatish tartibi',
+        'ru': 'Порядок отображения'
+    },
+    'ui.loyalty.edit_program': {
+        'en': 'Edit Program',
+        'uz': 'Dasturni tahrirlash',
+        'ru': 'Редактировать программу'
+    },
+    'ui.loyalty.edit_reward': {
+        'en': 'Edit Reward',
+        'uz': 'Mukofotni tahrirlash',
+        'ru': 'Редактировать награду'
+    },
+    'ui.loyalty.edit_tier': {
+        'en': 'Edit Tier',
+        'uz': 'Darajani tahrirlash',
+        'ru': 'Редактировать уровень'
+    },
+    'ui.loyalty.export_data': {
+        'en': 'Export Programs',
+        'uz': 'Dasturlarni eksport qilish',
+        'ru': 'Экспорт программ'
+    },
+    'ui.loyalty.export_members': {
+        'en': 'Export Members',
+        'uz': 'A\'zolarni eksport qilish',
+        'ru': 'Экспорт участников'
+    },
+    'ui.loyalty.export_rewards': {
+        'en': 'Export Rewards',
+        'uz': 'Mukofotlarni eksport qilish',
+        'ru': 'Экспорт наград'
+    },
+    'ui.loyalty.featured': {
+        'en': 'Featured',
+        'uz': 'Ajratilgan',
+        'ru': 'Рекомендуемое'
+    },
+    'ui.loyalty.featured_rewards': {
+        'en': 'Featured Rewards',
+        'uz': 'Ajratilgan mukofotlar',
+        'ru': 'Рекомендуемые награды'
+    },
+    'ui.loyalty.filter_by_status': {
+        'en': 'Filter by status',
+        'uz': 'Holat bo\'yicha filtrlash',
+        'ru': 'Фильтр по статусу'
+    },
+    'ui.loyalty.form_description': {
+        'en': 'Description',
+        'uz': 'Tavsif',
+        'ru': 'Описание'
+    },
+    'ui.loyalty.free_product_id': {
+        'en': 'Free Product',
+        'uz': 'Bepul mahsulot',
+        'ru': 'Бесплатный товар'
+    },
+    'ui.loyalty.image_url': {
+        'en': 'Image URL',
+        'uz': 'Rasm URL manzili',
+        'ru': 'URL изображения'
+    },
+    'ui.loyalty.last_activity': {
+        'en': 'Last Activity',
+        'uz': 'Oxirgi faollik',
+        'ru': 'Последняя активность'
+    },
+    'ui.loyalty.max_points': {
+        'en': 'Maximum Points',
+        'uz': 'Maksimal ball',
+        'ru': 'Максимум баллов'
+    },
+    'ui.loyalty.max_redemptions': {
+        'en': 'Maximum Redemptions',
+        'uz': 'Maksimal yechib olishlar',
+        'ru': 'Максимум списаний'
+    },
+    'ui.loyalty.max_uses_per_user': {
+        'en': 'Max Uses per User',
+        'uz': 'Bir foydalanuvchi uchun maksimal ishlatish',
+        'ru': 'Максимум использований на пользователя'
+    },
+    'ui.loyalty.member_details': {
+        'en': 'Member Details',
+        'uz': 'A\'zo tafsilotlari',
+        'ru': 'Детали участника'
+    },
+    'ui.loyalty.member_not_found': {
+        'en': 'Member not found',
+        'uz': 'A\'zo topilmadi',
+        'ru': 'Участник не найден'
+    },
+    'ui.loyalty.member_since': {
+        'en': 'Member Since',
+        'uz': 'A\'zolikka qo\'shilgan sana',
+        'ru': 'Участник с'
+    },
+    'ui.loyalty.min_order_value': {
+        'en': 'Minimum Order Value',
+        'uz': 'Minimal buyurtma summasi',
+        'ru': 'Минимальная сумма заказа'
+    },
+    'ui.loyalty.min_points': {
+        'en': 'Minimum Points',
+        'uz': 'Minimal ball',
+        'ru': 'Минимум баллов'
+    },
+    'ui.loyalty.min_redemption_points': {
+        'en': 'Minimum Redemption Points',
+        'uz': 'Minimal yechib olish ballari',
+        'ru': 'Минимум баллов для списания'
+    },
+    'ui.loyalty.multiplier': {
+        'en': 'Multiplier',
+        'uz': 'Ko\'paytirgich',
+        'ru': 'Множитель'
+    },
+    'ui.loyalty.no_members': {
+        'en': 'No loyalty members found',
+        'uz': 'Sodiqlik a\'zolari topilmadi',
+        'ru': 'Участники программы не найдены'
+    },
+    'ui.loyalty.no_programs': {
+        'en': 'No loyalty programs found',
+        'uz': 'Sodiqlik dasturlari topilmadi',
+        'ru': 'Программы лояльности не найдены'
+    },
+    'ui.loyalty.no_recent_activity': {
+        'en': 'No recent transactions',
+        'uz': 'So\'nggi tranzaksiyalar yo\'q',
+        'ru': 'Недавних транзакций нет'
+    },
+    'ui.loyalty.no_recent_redemptions': {
+        'en': 'No recent redemptions',
+        'uz': 'So\'nggi yechib olishlar yo\'q',
+        'ru': 'Недавних списаний нет'
+    },
+    'ui.loyalty.no_rewards': {
+        'en': 'No rewards found',
+        'uz': 'Mukofotlar topilmadi',
+        'ru': 'Награды не найдены'
+    },
+    'ui.loyalty.no_tiers': {
+        'en': 'No tiers configured',
+        'uz': 'Darajalar sozlanmagan',
+        'ru': 'Уровни не настроены'
+    },
+    'ui.loyalty.points_cost': {
+        'en': 'Points Cost',
+        'uz': 'Ball qiymati',
+        'ru': 'Стоимость в баллах'
+    },
+    'ui.loyalty.points_distributed': {
+        'en': 'Points In Circulation',
+        'uz': 'Aylanmadagi ballar',
+        'ru': 'Баллы в обращении'
+    },
+    'ui.loyalty.points_expiry_days': {
+        'en': 'Points Expiry Days',
+        'uz': 'Ball amal qilish kunlari',
+        'ru': 'Срок действия баллов в днях'
+    },
+    'ui.loyalty.points_range': {
+        'en': 'Points Range',
+        'uz': 'Ball oralig\'i',
+        'ru': 'Диапазон баллов'
+    },
+    'ui.loyalty.program': {
+        'en': 'Program',
+        'uz': 'Dastur',
+        'ru': 'Программа'
+    },
+    'ui.loyalty.program_name': {
+        'en': 'Program Name',
+        'uz': 'Dastur nomi',
+        'ru': 'Название программы'
+    },
+    'ui.loyalty.recent_activity': {
+        'en': 'Recent Transactions',
+        'uz': 'So\'nggi tranzaksiyalar',
+        'ru': 'Недавние транзакции'
+    },
+    'ui.loyalty.recent_redemptions': {
+        'en': 'Recent Redemptions',
+        'uz': 'So\'nggi yechib olishlar',
+        'ru': 'Недавние списания'
+    },
+    'ui.loyalty.redemptions': {
+        'en': 'Redemptions',
+        'uz': 'Yechib olishlar',
+        'ru': 'Списания'
+    },
+    'ui.loyalty.referral_bonus': {
+        'en': 'Referral Bonus',
+        'uz': 'Referal bonusi',
+        'ru': 'Реферальный бонус'
+    },
+    'ui.loyalty.reward_create_success': {
+        'en': 'Reward created successfully',
+        'uz': 'Mukofot muvaffaqiyatli yaratildi',
+        'ru': 'Награда успешно создана'
+    },
+    'ui.loyalty.reward_delete_confirm_message': {
+        'en': 'Are you sure you want to delete this reward?',
+        'uz': 'Ushbu mukofotni o\'chirishni tasdiqlaysizmi?',
+        'ru': 'Вы уверены, что хотите удалить эту награду?'
+    },
+    'ui.loyalty.reward_delete_confirm_title': {
+        'en': 'Delete Reward',
+        'uz': 'Mukofotni o\'chirish',
+        'ru': 'Удалить награду'
+    },
+    'ui.loyalty.reward_delete_success': {
+        'en': 'Reward deleted successfully',
+        'uz': 'Mukofot muvaffaqiyatli o\'chirildi',
+        'ru': 'Награда успешно удалена'
+    },
+    'ui.loyalty.reward_details': {
+        'en': 'Reward Details',
+        'uz': 'Mukofot tafsilotlari',
+        'ru': 'Детали награды'
+    },
+    'ui.loyalty.reward_name': {
+        'en': 'Reward Name',
+        'uz': 'Mukofot nomi',
+        'ru': 'Название награды'
+    },
+    'ui.loyalty.reward_update_success': {
+        'en': 'Reward updated successfully',
+        'uz': 'Mukofot muvaffaqiyatli yangilandi',
+        'ru': 'Награда успешно обновлена'
+    },
+    'ui.loyalty.search_members': {
+        'en': 'Search members',
+        'uz': 'A\'zolarni qidirish',
+        'ru': 'Поиск участников'
+    },
+    'ui.loyalty.search_programs': {
+        'en': 'Search programs',
+        'uz': 'Dasturlarni qidirish',
+        'ru': 'Поиск программ'
+    },
+    'ui.loyalty.search_rewards': {
+        'en': 'Search rewards',
+        'uz': 'Mukofotlarni qidirish',
+        'ru': 'Поиск наград'
+    },
+    'ui.loyalty.signup_bonus': {
+        'en': 'Signup Bonus',
+        'uz': 'Ro\'yxatdan o\'tish bonusi',
+        'ru': 'Бонус за регистрацию'
+    },
+    'ui.loyalty.sort_order': {
+        'en': 'Sort Order',
+        'uz': 'Saralash tartibi',
+        'ru': 'Порядок сортировки'
+    },
+    'ui.loyalty.status': {
+        'en': 'Status',
+        'uz': 'Holat',
+        'ru': 'Статус'
+    },
+    'ui.loyalty.tab_programs': {
+        'en': 'Programs',
+        'uz': 'Dasturlar',
+        'ru': 'Программы'
+    },
+    'ui.loyalty.tab_tiers': {
+        'en': 'Tiers',
+        'uz': 'Darajalar',
+        'ru': 'Уровни'
+    },
+    'ui.loyalty.terms': {
+        'en': 'Terms & Conditions',
+        'uz': 'Shartlar va qoidalar',
+        'ru': 'Условия и правила'
+    },
+    'ui.loyalty.tier': {
+        'en': 'Tier',
+        'uz': 'Daraja',
+        'ru': 'Уровень'
+    },
+    'ui.loyalty.tier_color': {
+        'en': 'Tier Color',
+        'uz': 'Daraja rangi',
+        'ru': 'Цвет уровня'
+    },
+    'ui.loyalty.tier_create_success': {
+        'en': 'Tier created successfully',
+        'uz': 'Daraja muvaffaqiyatli yaratildi',
+        'ru': 'Уровень успешно создан'
+    },
+    'ui.loyalty.tier_delete_success': {
+        'en': 'Tier deleted successfully',
+        'uz': 'Daraja muvaffaqiyatli o\'chirildi',
+        'ru': 'Уровень успешно удалён'
+    },
+    'ui.loyalty.tier_icon': {
+        'en': 'Tier Icon',
+        'uz': 'Daraja belgisi',
+        'ru': 'Иконка уровня'
+    },
+    'ui.loyalty.tier_name': {
+        'en': 'Tier Name',
+        'uz': 'Daraja nomi',
+        'ru': 'Название уровня'
+    },
+    'ui.loyalty.tier_update_success': {
+        'en': 'Tier updated successfully',
+        'uz': 'Daraja muvaffaqiyatli yangilandi',
+        'ru': 'Уровень успешно обновлён'
+    },
+    'ui.loyalty.tiers': {
+        'en': 'Tiers',
+        'uz': 'Darajalar',
+        'ru': 'Уровни'
+    },
+    'ui.loyalty.total_earned': {
+        'en': 'Total Earned',
+        'uz': 'Jami yig\'ilgan',
+        'ru': 'Всего начислено'
+    },
+    'ui.loyalty.total_members': {
+        'en': 'Total Members',
+        'uz': 'Jami a\'zolar',
+        'ru': 'Всего участников'
+    },
+    'ui.loyalty.total_programs': {
+        'en': 'Total Programs',
+        'uz': 'Jami dasturlar',
+        'ru': 'Всего программ'
+    },
+    'ui.loyalty.total_rewards': {
+        'en': 'Total Rewards',
+        'uz': 'Jami mukofotlar',
+        'ru': 'Всего наград'
+    },
+    'ui.loyalty.type': {
+        'en': 'Type',
+        'uz': 'Turi',
+        'ru': 'Тип'
+    },
+    'ui.loyalty.update': {
+        'en': 'Update',
+        'uz': 'Yangilash',
+        'ru': 'Обновить'
+    },
+    'ui.loyalty.update_program': {
+        'en': 'Update Program',
+        'uz': 'Dasturni yangilash',
+        'ru': 'Обновить программу'
+    },
+    'ui.loyalty.update_success': {
+        'en': 'Program updated successfully',
+        'uz': 'Dastur muvaffaqiyatli yangilandi',
+        'ru': 'Программа успешно обновлена'
+    },
+    'ui.loyalty.uzs_per_point': {
+        'en': 'UZS per Point',
+        'uz': 'Bir ball uchun UZS',
+        'ru': 'UZS за балл'
+    },
+    'ui.loyalty.valid_from': {
+        'en': 'Valid From',
+        'uz': 'Amal boshlanishi',
+        'ru': 'Действует с'
+    },
+    'ui.loyalty.valid_until': {
+        'en': 'Valid Until',
+        'uz': 'Amal qilish muddati',
+        'ru': 'Действует до'
+    },
+    'ui.loyalty.voucher_code': {
+        'en': 'Voucher Code',
+        'uz': 'Vaucher kodi',
+        'ru': 'Код ваучера'
+    },
     'ui.orders.payment_business_account': {
         'en': 'Business Account',
         'uz': 'Hisob raqami orqali',
@@ -1586,6 +2216,11 @@ BACKEND_TRANSLATIONS = {
         'en': 'Amount',
         'uz': 'Summa',
         'ru': 'Сумма'
+    },
+    'ui.corporate.allows_debt': {
+        'en': 'Allow contract debt',
+        'uz': 'Shartnoma qarziga ruxsat berish',
+        'ru': 'Разрешить долг по договору'
     },
     'ui.corporate.available': {
         'en': 'Available',
@@ -1686,6 +2321,21 @@ BACKEND_TRANSLATIONS = {
         'en': 'Debt',
         'uz': 'Qarz',
         'ru': 'Долг'
+    },
+    'ui.corporate.debt_allowed': {
+        'en': 'Debt allowed',
+        'uz': 'Qarzga ruxsat berilgan',
+        'ru': 'Долг разрешён'
+    },
+    'ui.corporate.debt_disallowed': {
+        'en': 'No debt',
+        'uz': 'Qarzga ruxsat yo\'q',
+        'ru': 'Без долга'
+    },
+    'ui.corporate.debt_policy': {
+        'en': 'Debt Policy',
+        'uz': 'Qarz siyosati',
+        'ru': 'Политика долга'
     },
     'ui.corporate.edit_contract': {
         'en': 'Edit Contract',

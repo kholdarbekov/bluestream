@@ -182,6 +182,10 @@ class OrderService:
             from business_app.services.corporate_contract_service import CorporateContractService
             CorporateContractService().reserve_for_order(order.id)
             db.session.commit()
+
+            from business_app.services.payment_service import PaymentService
+            PaymentService().initialize_order_payment(order.id)
+            db.session.refresh(order)
             
         except ValidationError:
             db.session.delete(order)

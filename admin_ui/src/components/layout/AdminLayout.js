@@ -53,7 +53,7 @@ const AdminLayout = ({ children }) => {
     enableWebSocket: true,
     enablePolling: true,
     pollingInterval: 30000,
-    queries: ['dashboard', 'orders', 'users', 'products', 'deliveries', 'translations'],
+    queries: ['dashboard', 'orders', 'users', 'products', 'deliveries', 'translations', 'loyalty-members', 'loyalty-programs', 'loyalty-rewards', 'analytics-loyalty'],
     onConnect: () => console.log('Real-time updates connected'),
     onDisconnect: () => console.log('Real-time updates disconnected'),
     onError: (error) => console.error('Real-time updates error:', error)
@@ -112,12 +112,16 @@ const AdminLayout = ({ children }) => {
       label: t('ui.nav.loyalty'),
       children: [
         {
-          key: '/loyalty',
-          label: t('ui.nav.customers')
+          key: '/loyalty/members',
+          label: t('ui.nav.loyalty_members', { defaultValue: 'Members' })
         },
         {
-          key: '/loyalty-programs',
-          label: t('ui.nav.programs')
+          key: '/loyalty/programs',
+          label: t('ui.nav.loyalty_programs', { defaultValue: 'Programs' })
+        },
+        {
+          key: '/loyalty/rewards',
+          label: t('ui.nav.loyalty_rewards', { defaultValue: 'Rewards' })
         }
       ]
     },
@@ -218,7 +222,14 @@ const AdminLayout = ({ children }) => {
 
   // Get current page title
   const getPageTitle = useCallback(() => {
-    const currentItem = menuItems.find(item => item.key === location.pathname);
+    const currentItem = menuItems.find((item) => (
+      item.key === location.pathname
+      || (item.children || []).some((child) => child.key === location.pathname)
+    ));
+    if (currentItem?.children?.length) {
+      const child = currentItem.children.find((entry) => entry.key === location.pathname);
+      return child?.label || currentItem.label;
+    }
     return currentItem?.label || t('ui.nav.dashboard');
   }, [location.pathname, menuItems, t]);
 

@@ -192,7 +192,8 @@ export const useRealTimeUpdates = (options = {}) => {
         break;
 
       case 'loyalty_points_updated':
-        queryClient.invalidateQueries(['loyalty-customers']);
+        queryClient.invalidateQueries(['loyalty-members']);
+        queryClient.invalidateQueries(['analytics-loyalty']);
         if (payload.points_added > 0) {
           message.info(`${payload.customer_name} earned ${payload.points_added} points`);
         }

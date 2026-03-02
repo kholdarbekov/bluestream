@@ -73,9 +73,15 @@ def test_order_service_create_order_supports_business_account_and_reserve(
             'contract_price_row': SimpleNamespace(id=901),
         },
     ) as resolve_price, patch(
+        'business_app.services.corporate_contract_service.CorporateContractService.validate_business_account_order',
+        return_value=None,
+    ) as validate_business_account_order, patch(
         'business_app.services.corporate_contract_service.CorporateContractService.reserve_for_order',
         return_value=None,
-    ) as reserve_for_order:
+    ) as reserve_for_order, patch(
+        'business_app.services.payment_service.PaymentService.initialize_order_payment',
+        return_value=None,
+    ) as initialize_payment:
         order = service.create_order(
             sample_user.id,
             {
@@ -92,9 +98,11 @@ def test_order_service_create_order_supports_business_account_and_reserve(
 
     assert order.payment_method == PaymentMethod.BUSINESS_ACCOUNT
     assert resolve_price.called
+    validate_business_account_order.assert_called_once()
     assert order.order_items[0].contract_id == 91
     assert order.order_items[0].contract_product_price_id == 901
     reserve_for_order.assert_called_once_with(order.id)
+    initialize_payment.assert_called_once_with(order.id)
 
 
 def test_staff_service_create_phone_order_supports_business_account_and_reserve(
@@ -116,9 +124,15 @@ def test_staff_service_create_phone_order_supports_business_account_and_reserve(
             'contract_price_row': SimpleNamespace(id=707),
         },
     ) as resolve_price, patch(
+        'business_app.services.corporate_contract_service.CorporateContractService.validate_business_account_order',
+        return_value=None,
+    ) as validate_business_account_order, patch(
         'business_app.services.corporate_contract_service.CorporateContractService.reserve_for_order',
         return_value=None,
-    ) as reserve_for_order:
+    ) as reserve_for_order, patch(
+        'business_app.services.payment_service.PaymentService.initialize_order_payment',
+        return_value=None,
+    ) as initialize_payment:
         order = StaffService.create_phone_order(
             operator_id=operator.id,
             client_id=sample_user.id,
@@ -132,9 +146,11 @@ def test_staff_service_create_phone_order_supports_business_account_and_reserve(
 
     assert order.payment_method == PaymentMethod.BUSINESS_ACCOUNT
     assert resolve_price.called
+    validate_business_account_order.assert_called_once()
     assert order.order_items[0].contract_id == 77
     assert order.order_items[0].contract_product_price_id == 707
     reserve_for_order.assert_called_once_with(order.id, actor_user_id=operator.id)
+    initialize_payment.assert_called_once_with(order.id, actor_user_id=operator.id)
 
 
 def test_order_service_business_account_requires_applicable_contract(
@@ -197,7 +213,7 @@ def test_order_service_business_account_requires_applicable_contract(
             )
             assert False, "Expected ValidationError"
         except ValidationError as exc:
-            assert "Business Account payment requires an active corporate contract" in str(exc)
+            assert "active corporate contract" in str(exc)
 
 
 def test_staff_service_business_account_requires_applicable_contract(
@@ -232,4 +248,4 @@ def test_staff_service_business_account_requires_applicable_contract(
             )
             assert False, "Expected ValidationError"
         except ValidationError as exc:
-            assert "Business Account payment requires an active corporate contract" in str(exc)
+            assert "active corporate contract" in str(exc)

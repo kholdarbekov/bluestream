@@ -1,8 +1,9 @@
 """Corporate contract and prepayment accounting workflows."""
 
+from collections import defaultdict
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy import or_
 from sqlalchemy.orm import joinedload
@@ -39,7 +40,12 @@ class CorporateContractService:
     @staticmethod
     def _translate(key: str, default: str, **kwargs) -> str:
         translated = get_translation(key, **kwargs)
-        return default if translated == key else translated
+        if translated == key:
+            try:
+                return default.format(**kwargs)
+            except (KeyError, ValueError):
+                return default
+        return translated
 
     @classmethod
     def _normalize_bool(cls, value: Any, *, default: Optional[bool] = None) -> bool:
@@ -73,13 +79,206 @@ class CorporateContractService:
                 )
             )
 
-        if not any(item.get("contract_id") for item in order_items):
+        if not order_items:
             raise ValidationError(
                 self._translate(
                     "api.orders.error.business_account_contract_required",
-                    "Business Account payment requires an active corporate contract that covers at least one order item.",
+                    "Business Account payment requires active corporate contract coverage for the order items.",
                 )
             )
+
+        effective_at = self._normalize_effective_at()
+        contract_ids = {item.get("contract_id") for item in order_items if item.get("contract_id")}
+        contracts = self._get_contracts_for_business_account_validation(
+            user_id=user.id,
+            contract_ids=contract_ids,
+        )
+        validation_errors = self._collect_business_account_contract_errors(
+            order_items=order_items,
+            contracts=contracts,
+            effective_at=effective_at,
+        )
+        if validation_errors:
+            raise ValidationError(
+                self._translate(
+                    "api.orders.error.business_account_contract_required",
+                    "Business Account payment requires every order item to be covered by an active corporate contract.",
+                ),
+                validation_errors=validation_errors,
+            )
+
+        shortage_errors = self._collect_business_account_balance_shortages(
+            order_items=order_items,
+            contracts=contracts,
+        )
+        if shortage_errors:
+            raise ValidationError(
+                self._translate(
+                    "api.orders.error.business_account_insufficient_prepayment",
+                    "Corporate prepayment balance is insufficient for one or more order items.",
+                ),
+                validation_errors=shortage_errors,
+            )
+
+    @staticmethod
+    def _format_units(value: Any) -> str:
+        units = Decimal(str(value or 0))
+        if units == units.to_integral():
+            return str(int(units))
+        return format(units.normalize(), "f")
+
+    def _get_contracts_for_business_account_validation(
+        self,
+        *,
+        user_id: int,
+        contract_ids: set[int],
+    ) -> Dict[int, CorporateContract]:
+        if not contract_ids:
+            return {}
+
+        contracts = CorporateContract.query.options(
+            joinedload(CorporateContract.product_prices).joinedload(CorporateContractProductPrice.product),
+            joinedload(CorporateContract.prepayment_account)
+            .joinedload(CorporatePrepaymentAccount.product_balances)
+            .joinedload(CorporatePrepaymentBalance.product),
+        ).filter(
+            CorporateContract.user_id == user_id,
+            CorporateContract.id.in_(contract_ids),
+        ).all()
+        return {contract.id: contract for contract in contracts}
+
+    def _collect_business_account_contract_errors(
+        self,
+        *,
+        order_items: List[Dict[str, Any]],
+        contracts: Dict[int, CorporateContract],
+        effective_at: datetime,
+    ) -> List[str]:
+        errors: List[str] = []
+
+        for item in order_items:
+            product_id = item.get("product_id")
+            contract_id = item.get("contract_id")
+            price_row_id = item.get("contract_product_price_id")
+
+            if not contract_id or not price_row_id:
+                errors.append(
+                    self._translate(
+                        "api.orders.error.business_account_all_items_must_be_contract_backed",
+                        "Product {product_id} is not covered by an active corporate contract for Business Account payment.",
+                        product_id=product_id,
+                    )
+                )
+                continue
+
+            contract = contracts.get(contract_id)
+            if not contract:
+                errors.append(
+                    self._translate(
+                        "api.orders.error.business_account_contract_line_invalid",
+                        "Contract linkage for product {product_id} is invalid.",
+                        product_id=product_id,
+                    )
+                )
+                continue
+
+            if not self._contract_is_applicable_at(contract, effective_at):
+                errors.append(
+                    self._translate(
+                        "api.orders.error.business_account_contract_line_invalid",
+                        "Contract {contract_number} for product {product_id} is not active for Business Account payment.",
+                        contract_number=contract.contract_number,
+                        product_id=product_id,
+                    )
+                )
+                continue
+
+            price_row = next(
+                (
+                    row for row in (contract.product_prices or [])
+                    if row.id == price_row_id
+                ),
+                None,
+            )
+            if not price_row or not price_row.is_active or price_row.product_id != product_id:
+                errors.append(
+                    self._translate(
+                        "api.orders.error.business_account_contract_line_invalid",
+                        "Contract price row for product {product_id} is invalid or inactive.",
+                        product_id=product_id,
+                    )
+                )
+
+        return errors
+
+    def _collect_business_account_balance_shortages(
+        self,
+        *,
+        order_items: List[Dict[str, Any]],
+        contracts: Dict[int, CorporateContract],
+    ) -> List[str]:
+        requested_units_by_line: Dict[Tuple[int, int], Decimal] = defaultdict(lambda: Decimal("0.00"))
+        shortages: List[str] = []
+
+        for item in order_items:
+            contract_id = item.get("contract_id")
+            product_id = item.get("product_id")
+            if not contract_id or not product_id:
+                continue
+
+            contract = contracts.get(contract_id)
+            if not contract or contract.allows_debt:
+                continue
+
+            price_row = next(
+                (
+                    row for row in (contract.product_prices or [])
+                    if row.id == item.get("contract_product_price_id")
+                ),
+                None,
+            )
+            if not price_row or not price_row.is_prepayment_eligible:
+                continue
+
+            requested_units_by_line[(contract_id, product_id)] += Decimal(str(item.get("quantity") or 0))
+
+        for (contract_id, product_id), requested_units in requested_units_by_line.items():
+            contract = contracts[contract_id]
+            balance_map = {
+                balance.product_id: balance
+                for balance in (contract.prepayment_account.product_balances if contract.prepayment_account else [])
+            }
+            balance = balance_map.get(product_id)
+            available_units = Decimal(str(balance.available_units if balance else 0))
+            if requested_units <= available_units:
+                continue
+
+            price_row = next(
+                (
+                    row for row in (contract.product_prices or [])
+                    if row.product_id == product_id and row.is_active
+                ),
+                None,
+            )
+            product_name = None
+            if price_row and price_row.product:
+                product_name = price_row.product.name
+            elif balance and balance.product:
+                product_name = balance.product.name
+
+            shortages.append(
+                self._translate(
+                    "api.orders.error.business_account_insufficient_prepayment",
+                    "Contract {contract_number} has insufficient prepaid units for {product_name}: requested {requested_units}, available {available_units}, shortage {shortage_units}.",
+                    contract_number=contract.contract_number,
+                    product_name=product_name or f"product {product_id}",
+                    requested_units=self._format_units(requested_units),
+                    available_units=self._format_units(available_units),
+                    shortage_units=self._format_units(requested_units - available_units),
+                )
+            )
+
+        return shortages
 
     @staticmethod
     def _normalize_effective_at(effective_at: Optional[datetime] = None) -> datetime:
@@ -114,9 +313,15 @@ class CorporateContractService:
             return False
         if contract.status != CorporateContractStatus.ACTIVE:
             return False
+        start_date = contract.start_date
+        end_date = contract.end_date
+        if start_date and start_date.tzinfo is None:
+            start_date = start_date.replace(tzinfo=timezone.utc)
+        if end_date and end_date.tzinfo is None:
+            end_date = end_date.replace(tzinfo=timezone.utc)
         return (
-            (contract.start_date is None or contract.start_date <= effective_at)
-            and (contract.end_date is None or contract.end_date >= effective_at)
+            (start_date is None or start_date <= effective_at)
+            and (end_date is None or end_date >= effective_at)
         )
 
     def _build_overlap_conflicts(
@@ -454,6 +659,10 @@ class CorporateContractService:
                 payload.get("is_loyalty_points_eligible"),
                 default=False,
             ),
+            allows_debt=self._normalize_bool(
+                payload.get("allows_debt"),
+                default=False,
+            ),
             created_by_user_id=actor_user_id,
             updated_by_user_id=actor_user_id,
         )
@@ -483,6 +692,8 @@ class CorporateContractService:
             contract.is_active = bool(payload["is_active"])
         if "is_loyalty_points_eligible" in payload:
             contract.is_loyalty_points_eligible = self._normalize_bool(payload.get("is_loyalty_points_eligible"))
+        if "allows_debt" in payload:
+            contract.allows_debt = self._normalize_bool(payload.get("allows_debt"))
         if "notes" in payload:
             contract.notes = payload.get("notes")
         if "bank_details" in payload:

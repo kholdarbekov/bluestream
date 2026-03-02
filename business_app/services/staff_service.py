@@ -1468,6 +1468,10 @@ class StaffService:
 
         db.session.commit()
 
+        from business_app.services.payment_service import PaymentService
+        PaymentService().initialize_order_payment(order.id, actor_user_id=operator_id)
+        db.session.refresh(order)
+
         # Log activity
         StaffService._log_activity(
             user_id=operator_id,

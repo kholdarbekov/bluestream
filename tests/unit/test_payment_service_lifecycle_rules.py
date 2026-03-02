@@ -39,6 +39,48 @@ def loyalty_payment(db, sample_order):
 @pytest.mark.unit
 @pytest.mark.payment
 class TestPaymentLifecycleRules:
+    def test_initialize_order_payment_creates_pending_payme_record_idempotently(
+        self,
+        payment_service,
+        sample_order,
+        db,
+    ):
+        sample_order.payment_method = PaymentMethod.PAYME
+        db.session.commit()
+
+        first = payment_service.initialize_order_payment(sample_order.id)
+        second = payment_service.initialize_order_payment(sample_order.id)
+
+        payments = Payment.query.filter_by(order_id=sample_order.id).all()
+        assert len(payments) == 1
+        assert first.id == second.id
+        assert first.status == PaymentStatus.PENDING
+
+    def test_initialize_order_payment_completes_business_account_idempotently(
+        self,
+        payment_service,
+        sample_order,
+        db,
+    ):
+        sample_order.payment_method = PaymentMethod.BUSINESS_ACCOUNT
+        db.session.commit()
+
+        with patch.object(payment_service, "_handle_successful_payment") as handle_success:
+            first = payment_service.initialize_order_payment(
+                sample_order.id,
+                metadata={"backfill_applied": False},
+            )
+            second = payment_service.initialize_order_payment(sample_order.id)
+
+        db.session.refresh(sample_order)
+        db.session.refresh(first)
+        assert first.id == second.id
+        assert first.status == PaymentStatus.COMPLETED
+        assert first.provider_data["settlement_mode"] == "corporate_contract"
+        assert sample_order.is_paid is True
+        assert sample_order.paid_at is not None
+        handle_success.assert_called_once()
+
     def test_process_loyalty_points_payment_rejects_when_points_insufficient(
         self,
         payment_service,

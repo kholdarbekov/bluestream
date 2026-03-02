@@ -15,6 +15,7 @@ from business_app.utils.constants import (
     LoyaltyActionType,
     LoyaltyTransactionType,
     RewardStatus,
+    OrderStatus,
 )
 from business_app.utils.helpers import generate_referral_code, calculate_loyalty_points, calculate_discount_from_points
 from business_app import db
@@ -162,6 +163,8 @@ class LoyaltyService:
         return {
             'points_balance': account.current_balance or 0,
             'lifetime_points': account.total_earned or 0,
+            'current_balance': account.current_balance or 0,
+            'lifetime_earned': account.total_earned or 0,
             'tier': account.current_tier,
             'next_tier_threshold': account.points_to_next_tier or 0,
         }
@@ -1062,7 +1065,7 @@ class LoyaltyService:
         
         return {
             'total_expired_points': total_expired_points,
-            'users_affected': len(users_affected)
+            'affected_users': len(users_affected)
         }
     
     # Private helper methods
@@ -1567,7 +1570,7 @@ class LoyaltyService:
                 'target_points': None,
                 'message': 'You have reached the highest tier!'
             }
-    
+
     def gift_points(self, sender_id: int, recipient_id: int, points_amount: int, message: str = '') -> LoyaltyTransaction:
         """Gift points from one user to another"""
         # Check sender's balance
@@ -1591,5 +1594,136 @@ class LoyaltyService:
             LoyaltyActionType.WELCOME_BONUS,  # Using this as gift type
             sender_id
         )
-        
+
         return credit_transaction
+
+    def process_pending_referrals(self) -> Dict[str, Any]:
+        """Process eligible pending referrals and award bonuses."""
+        pending_referrals = ReferralProgram.query.filter_by(status='pending').all()
+        processed_count = 0
+        total_points_awarded = 0
+
+        for referral in pending_referrals:
+            if not referral.referee_id:
+                continue
+
+            first_order = referral.first_order
+            if not first_order:
+                first_order = (
+                    Order.query.filter_by(user_id=referral.referee_id)
+                    .order_by(Order.created_at.asc())
+                    .first()
+                )
+                if first_order:
+                    referral.first_order_id = first_order.id
+
+            if not first_order:
+                continue
+
+            if first_order.status != OrderStatus.DELIVERED:
+                continue
+
+            referral.status = 'completed'
+            referral.completed_at = datetime.now(timezone.utc)
+
+            referrer_points = referral.referrer_bonus_points or self.get_referrer_bonus_points()
+            referee_points = referral.referee_bonus_points or self.get_referee_bonus_points()
+
+            self.award_points(
+                referral.referrer_id,
+                referrer_points,
+                f"Referral bonus for user #{referral.referee_id}",
+                LoyaltyActionType.REFERRAL,
+                referral.first_order_id,
+            )
+            self.award_points(
+                referral.referee_id,
+                referee_points,
+                "Referral signup bonus",
+                LoyaltyActionType.REFERRAL,
+                referral.first_order_id,
+            )
+
+            referral.referrer_bonus_points = referrer_points
+            referral.referee_bonus_points = referee_points
+            processed_count += 1
+            total_points_awarded += referrer_points + referee_points
+
+        if pending_referrals:
+            db.session.commit()
+
+        return {
+            'processed_count': processed_count,
+            'total_points_awarded': total_points_awarded,
+        }
+
+    def get_points_expiring_soon(self, days: int = 7) -> List[Dict[str, Any]]:
+        """Return users with positive earned points expiring soon."""
+        now = datetime.now(timezone.utc)
+        end_window = now + timedelta(days=days)
+
+        rows = db.session.query(
+            LoyaltyTransaction.user_id,
+            func.sum(LoyaltyTransaction.points),
+            func.min(LoyaltyTransaction.expires_at),
+        ).filter(
+            LoyaltyTransaction.transaction_type.in_([
+                LoyaltyTransactionType.EARNED,
+                LoyaltyTransactionType.BONUS,
+            ]),
+            LoyaltyTransaction.points > 0,
+            LoyaltyTransaction.is_expired.is_(False),
+            LoyaltyTransaction.expires_at.isnot(None),
+            LoyaltyTransaction.expires_at >= now,
+            LoyaltyTransaction.expires_at <= end_window,
+        ).group_by(
+            LoyaltyTransaction.user_id,
+        ).all()
+
+        return [
+            {
+                'user_id': user_id,
+                'expiring_points': int(expiring_points or 0),
+                'expiry_date': expiry_date,
+            }
+            for user_id, expiring_points, expiry_date in rows
+            if expiring_points
+        ]
+
+    def update_all_tiers(self) -> Dict[str, List[Dict[str, Any]]]:
+        """Recompute all loyalty tiers and report upgrades/downgrades."""
+        upgrades: List[Dict[str, Any]] = []
+        downgrades: List[Dict[str, Any]] = []
+
+        accounts = LoyaltyPoints.query.all()
+        for account in accounts:
+            old_tier = account.current_tier
+            previous_points_to_next = account.points_to_next_tier
+            self._check_tier_upgrade(account)
+
+            if account.current_tier != old_tier:
+                target_collection = upgrades
+                old_config = LoyaltyTierConfig.query.filter_by(
+                    name=old_tier,
+                    program_id=account.program_id,
+                ).first()
+                new_config = LoyaltyTierConfig.query.filter_by(
+                    name=account.current_tier,
+                    program_id=account.program_id,
+                ).first()
+                if old_config and new_config and new_config.display_order < old_config.display_order:
+                    target_collection = downgrades
+
+                target_collection.append({
+                    'user_id': account.user_id,
+                    'old_tier': old_tier,
+                    'new_tier': account.current_tier,
+                    'benefits': self.get_tier_benefits(account.current_tier).get('benefits', []),
+                    'points_needed_for_restore': account.points_to_next_tier or previous_points_to_next or 0,
+                })
+
+        db.session.commit()
+        return {
+            'upgrades': upgrades,
+            'downgrades': downgrades,
+        }

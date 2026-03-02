@@ -26,7 +26,9 @@ import {
   EnvironmentOutlined,
   LineChartOutlined,
   ExportOutlined,
-  CalendarOutlined
+  CalendarOutlined,
+  GiftOutlined,
+  StarOutlined
 } from '@ant-design/icons';
 import { useQuery } from 'react-query';
 import { useTranslation } from 'react-i18next';
@@ -58,7 +60,7 @@ const getTimeframeDateRange = (timeframe) => {
   return [start.subtract(30, 'days'), end];
 };
 
-const buildExportRows = (activeTab, overviewData, salesTrends, churnData, deliveryHeatmap, revenueForecast) => {
+const buildExportRows = (activeTab, overviewData, salesTrends, churnData, deliveryHeatmap, revenueForecast, loyaltyAnalytics) => {
   if (activeTab === 'sales') {
     return (salesTrends?.labels || []).map((label, index) => ({
       Period: label,
@@ -94,6 +96,15 @@ const buildExportRows = (activeTab, overviewData, salesTrends, churnData, delive
       Historical: revenueForecast?.historical?.at(index) ?? '',
       Forecast: revenueForecast?.forecast?.at(index) ?? ''
     }));
+  }
+
+  if (activeTab === 'loyalty') {
+    return [
+      { Metric: 'Total Loyalty Members', Value: loyaltyAnalytics?.summary?.total_members || 0 },
+      { Metric: 'Points In Circulation', Value: loyaltyAnalytics?.summary?.total_points_in_circulation || 0 },
+      { Metric: 'Points Earned', Value: loyaltyAnalytics?.summary?.points_earned || 0 },
+      { Metric: 'Points Redeemed', Value: loyaltyAnalytics?.summary?.points_redeemed || 0 },
+    ];
   }
 
   return [
@@ -171,6 +182,18 @@ const Analytics = () => {
     {
       keepPreviousData: true,
       enabled: activeTab === 'forecast'
+    }
+  );
+
+  const { data: loyaltyAnalytics } = useQuery(
+    ['analytics-loyalty', startDate, endDate],
+    () => adminService.getLoyaltyAnalytics({
+      start_date: startDate,
+      end_date: endDate,
+    }),
+    {
+      keepPreviousData: true,
+      enabled: activeTab === 'loyalty'
     }
   );
 
@@ -258,6 +281,33 @@ const Analytics = () => {
     return items;
   }, [analyticsData, t]);
 
+  const loyaltyTrendChartData = {
+    labels: (loyaltyAnalytics?.points_trend || []).map((item) => formatDate(item.date)),
+    datasets: [
+      {
+        label: t('ui.analytics.loyalty_points_earned', { defaultValue: 'Points Earned' }),
+        data: (loyaltyAnalytics?.points_trend || []).map((item) => item.earned || 0)
+      },
+      {
+        label: t('ui.analytics.loyalty_points_redeemed', { defaultValue: 'Points Redeemed' }),
+        data: (loyaltyAnalytics?.points_trend || []).map((item) => item.redeemed || 0)
+      }
+    ]
+  };
+
+  const loyaltyTierDistributionData = {
+    labels: (loyaltyAnalytics?.tier_distribution || []).map((item) => item.tier || 'Unknown'),
+    values: (loyaltyAnalytics?.tier_distribution || []).map((item) => item.count || 0)
+  };
+
+  const loyaltyTopRewardsData = {
+    labels: (loyaltyAnalytics?.top_rewards || []).map((item) => item.name),
+    datasets: [{
+      label: t('ui.analytics.redemptions', { defaultValue: 'Redemptions' }),
+      data: (loyaltyAnalytics?.top_rewards || []).map((item) => item.redemptions || 0)
+    }]
+  };
+
   const handleTimeframeChange = (value) => {
     setTimeframe(value);
     setDateRange(getTimeframeDateRange(value));
@@ -276,7 +326,8 @@ const Analytics = () => {
       salesTrends,
       churnData,
       deliveryHeatmap,
-      revenueForecast
+      revenueForecast,
+      loyaltyAnalytics
     );
 
     const exportResult = exportUtils.exportToExcel(
@@ -721,6 +772,107 @@ const Analytics = () => {
               )}
             />
           </Card>
+        </div>
+      )
+    },
+    {
+      key: 'loyalty',
+      label: t('ui.analytics.loyalty', { defaultValue: 'Loyalty' }),
+      children: (
+        <div>
+          <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
+            <Col xs={24} sm={6}>
+              <Card>
+                <Statistic
+                  title={t('ui.analytics.total_loyalty_members', { defaultValue: 'Total Loyalty Members' })}
+                  value={loyaltyAnalytics?.summary?.total_members || 0}
+                  prefix={<UserOutlined />}
+                />
+              </Card>
+            </Col>
+            <Col xs={24} sm={6}>
+              <Card>
+                <Statistic
+                  title={t('ui.analytics.points_in_circulation', { defaultValue: 'Points In Circulation' })}
+                  value={loyaltyAnalytics?.summary?.total_points_in_circulation || 0}
+                  prefix={<GiftOutlined />}
+                />
+              </Card>
+            </Col>
+            <Col xs={24} sm={6}>
+              <Card>
+                <Statistic
+                  title={t('ui.analytics.total_redemptions', { defaultValue: 'Total Redemptions' })}
+                  value={loyaltyAnalytics?.summary?.total_redemptions || 0}
+                  prefix={<ShoppingCartOutlined />}
+                />
+              </Card>
+            </Col>
+            <Col xs={24} sm={6}>
+              <Card>
+                <Statistic
+                  title={t('ui.analytics.avg_redemption_value', { defaultValue: 'Average Redemption Value' })}
+                  value={loyaltyAnalytics?.summary?.avg_redemption_value || 0}
+                  prefix={<StarOutlined />}
+                />
+              </Card>
+            </Col>
+          </Row>
+
+          <Row gutter={[16, 16]}>
+            <Col xs={24} lg={16}>
+              <Card title={t('ui.analytics.loyalty_points_trend', { defaultValue: 'Loyalty Points Trend' })}>
+                <LineChart data={loyaltyTrendChartData} height={320} />
+              </Card>
+            </Col>
+            <Col xs={24} lg={8}>
+              <Card title={t('ui.analytics.tier_distribution', { defaultValue: 'Tier Distribution' })}>
+                <PieChart data={loyaltyTierDistributionData} height={320} />
+              </Card>
+            </Col>
+          </Row>
+
+          <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
+            <Col xs={24} lg={12}>
+              <Card title={t('ui.analytics.top_rewards', { defaultValue: 'Top Rewards' })}>
+                <BarChart data={loyaltyTopRewardsData} height={300} />
+              </Card>
+            </Col>
+            <Col xs={24} lg={12}>
+              <Card title={t('ui.analytics.program_breakdown', { defaultValue: 'Program Breakdown' })}>
+                <Table
+                  rowKey="program_id"
+                  pagination={false}
+                  dataSource={loyaltyAnalytics?.program_breakdown || []}
+                  columns={[
+                    {
+                      title: t('ui.analytics.program', { defaultValue: 'Program' }),
+                      dataIndex: 'program_name',
+                      key: 'program_name'
+                    },
+                    {
+                      title: t('ui.analytics.members', { defaultValue: 'Members' }),
+                      dataIndex: 'member_count',
+                      key: 'member_count',
+                      width: 120
+                    },
+                    {
+                      title: t('ui.analytics.points', { defaultValue: 'Points' }),
+                      dataIndex: 'points_in_circulation',
+                      key: 'points_in_circulation',
+                      width: 160
+                    },
+                    {
+                      title: t('ui.analytics.rewards', { defaultValue: 'Rewards' }),
+                      dataIndex: 'reward_count',
+                      key: 'reward_count',
+                      width: 120
+                    }
+                  ]}
+                />
+              </Card>
+            </Col>
+          </Row>
         </div>
       )
     }

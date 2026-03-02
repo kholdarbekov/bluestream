@@ -21,7 +21,12 @@ from business_app.utils.constants import OrderStatus
 from business_app.utils.exceptions import ValidationError
 
 
-def _create_contract_and_account(user_id: int, *, is_loyalty_points_eligible: bool = False):
+def _create_contract_and_account(
+    user_id: int,
+    *,
+    is_loyalty_points_eligible: bool = False,
+    allows_debt: bool = False,
+):
     contract = CorporateContract(
         user_id=user_id,
         contract_number=f"CTR-{uuid4().hex[:10]}",
@@ -32,6 +37,7 @@ def _create_contract_and_account(user_id: int, *, is_loyalty_points_eligible: bo
         currency="UZS",
         is_active=True,
         is_loyalty_points_eligible=is_loyalty_points_eligible,
+        allows_debt=allows_debt,
     )
     db.session.add(contract)
     db.session.flush()
@@ -168,9 +174,11 @@ def test_create_contract_defaults_loyalty_points_ineligible(db, sample_user):
     db.session.commit()
 
     assert contract.is_loyalty_points_eligible is False
+    assert contract.allows_debt is False
     if contract.start_date and contract.start_date.tzinfo is None:
         contract.start_date = contract.start_date.replace(tzinfo=UTC)
     assert contract.to_dict()["is_loyalty_points_eligible"] is False
+    assert contract.to_dict()["allows_debt"] is False
 
 
 def test_create_contract_persists_explicit_loyalty_points_eligibility(db, sample_user):
@@ -225,6 +233,43 @@ def test_update_contract_can_disable_loyalty_points_eligibility(db, sample_user)
     db.session.commit()
 
     assert updated.is_loyalty_points_eligible is False
+
+
+def test_create_contract_persists_explicit_allows_debt(db, sample_user):
+    sample_user.user_type = "entity"
+    db.session.commit()
+
+    service = CorporateContractService()
+
+    contract = service.create_contract(
+        {
+            "user_id": sample_user.id,
+            "contract_number": f"CTR-{uuid4().hex[:10]}",
+            "name": "Debt Allowed Contract",
+            "allows_debt": True,
+        },
+        actor_user_id=sample_user.id,
+    )
+    db.session.commit()
+
+    assert contract.allows_debt is True
+
+
+def test_update_contract_can_toggle_allows_debt(db, sample_user):
+    sample_user.user_type = "entity"
+    db.session.commit()
+
+    service = CorporateContractService()
+    contract, _ = _create_contract_and_account(sample_user.id, allows_debt=False)
+
+    updated = service.update_contract(
+        contract.id,
+        {"allows_debt": True},
+        actor_user_id=sample_user.id,
+    )
+    db.session.commit()
+
+    assert updated.allows_debt is True
 
 
 def test_resolve_contract_pricing_rejects_overlapping_matching_contracts(db, sample_user):
@@ -295,6 +340,112 @@ def test_preview_contract_price_overlaps_returns_conflict_details(db, sample_use
     assert preview["summary"]["conflicts_count"] == 1
     assert preview["conflicts"][0]["product_id"] == product.id
     assert preview["conflicts"][0]["conflicting_contract"]["id"] == contract_one.id
+
+
+def test_validate_business_account_order_requires_every_item_to_be_contract_backed(db, sample_user):
+    sample_user.user_type = "entity"
+    db.session.commit()
+
+    service = CorporateContractService()
+
+    try:
+        service.validate_business_account_order(
+            user=sample_user,
+            order_items=[
+                {
+                    "product_id": 10,
+                    "quantity": 2,
+                    "contract_id": None,
+                    "contract_product_price_id": None,
+                }
+            ],
+        )
+        assert False, "Expected ValidationError"
+    except ValidationError as exc:
+        assert "covered by an active corporate contract" in exc.errors[0]
+
+
+def test_validate_business_account_order_rejects_insufficient_balance_when_debt_disabled(db, sample_user):
+    sample_user.user_type = "entity"
+    db.session.commit()
+
+    service = CorporateContractService()
+    contract, _ = _create_contract_and_account(sample_user.id, allows_debt=False)
+    product = _create_product("Strict Contract Water", Decimal("15000.00"))
+    price_row = _create_contract_price(contract.id, product.id, Decimal("14000.00"))
+    service.topup_contract(
+        contract_id=contract.id,
+        product_id=product.id,
+        units=Decimal("1.00"),
+        amount=Decimal("14000.00"),
+    )
+    db.session.commit()
+
+    try:
+        service.validate_business_account_order(
+            user=sample_user,
+            order_items=[
+                {
+                    "product_id": product.id,
+                    "quantity": 2,
+                    "contract_id": contract.id,
+                    "contract_product_price_id": price_row.id,
+                }
+            ],
+        )
+        assert False, "Expected ValidationError"
+    except ValidationError as exc:
+        assert "insufficient prepaid units" in exc.errors[0]
+        assert contract.contract_number in exc.errors[0]
+
+
+def test_validate_business_account_order_allows_shortage_when_contract_allows_debt(db, sample_user):
+    sample_user.user_type = "entity"
+    db.session.commit()
+
+    service = CorporateContractService()
+    contract, _ = _create_contract_and_account(sample_user.id, allows_debt=True)
+    product = _create_product("Debt Enabled Water", Decimal("15000.00"))
+    price_row = _create_contract_price(contract.id, product.id, Decimal("14000.00"))
+
+    service.validate_business_account_order(
+        user=sample_user,
+        order_items=[
+            {
+                "product_id": product.id,
+                "quantity": 3,
+                "contract_id": contract.id,
+                "contract_product_price_id": price_row.id,
+            }
+        ],
+    )
+
+
+def test_validate_business_account_order_skips_balance_check_for_non_prepayment_items(db, sample_user):
+    sample_user.user_type = "entity"
+    db.session.commit()
+
+    service = CorporateContractService()
+    contract, _ = _create_contract_and_account(sample_user.id, allows_debt=False)
+    product = _create_product("Invoice Only Water", Decimal("15000.00"))
+    price_row = _create_contract_price(
+        contract.id,
+        product.id,
+        Decimal("14000.00"),
+        is_prepayment_eligible=False,
+    )
+
+    service.validate_business_account_order(
+        user=sample_user,
+        order_items=[
+            {
+                "product_id": product.id,
+                "quantity": 5,
+                "contract_id": contract.id,
+                "contract_product_price_id": price_row.id,
+            }
+        ],
+    )
 
 
 def test_reserve_then_consume_allows_negative_available_balance(db, sample_user):

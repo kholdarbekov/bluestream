@@ -93,6 +93,7 @@ class LoyaltyProgram(db.Model, TimestampMixin):
             'is_active': self.is_active,
             'is_default': self.is_default,
             'points_per_uzs': self.points_per_uzs,
+            'uzs_per_point': self.uzs_per_point,
             'signup_bonus': self.signup_bonus,
             'referral_bonus': self.referral_bonus,
             'birthday_bonus': self.birthday_bonus,
@@ -100,6 +101,7 @@ class LoyaltyProgram(db.Model, TimestampMixin):
             'min_redemption_points': self.min_redemption_points,
             'tier_thresholds': self.tier_thresholds,
             'tier_multipliers': self.tier_multipliers,
+            'terms_and_conditions': self.terms_and_conditions,
             'start_date': self.start_date.isoformat() if self.start_date else None,
             'end_date': self.end_date.isoformat() if self.end_date else None,
             'created_at': self.created_at.isoformat() if self.created_at else None

@@ -58,6 +58,7 @@ const buildContractPayload = (values) => ({
   notes: values.notes || '',
   is_active: values.is_active !== false,
   is_loyalty_points_eligible: values.is_loyalty_points_eligible === true,
+  allows_debt: values.allows_debt === true,
   bank_details: {
     account_number: values.account_number || '',
     bank_name: values.bank_name || '',
@@ -265,7 +266,8 @@ const contractBalanceQuery = useQuery(
       status: 'active',
       currency: 'UZS',
       is_active: true,
-      is_loyalty_points_eligible: false
+      is_loyalty_points_eligible: false,
+      allows_debt: false,
     });
     setIsContractModalOpen(true);
   };
@@ -288,6 +290,7 @@ const contractBalanceQuery = useQuery(
       notes: selectedContract.notes || '',
       is_active: selectedContract.is_active !== false,
       is_loyalty_points_eligible: selectedContract.is_loyalty_points_eligible === true,
+      allows_debt: selectedContract.allows_debt === true,
       account_number: selectedContract.bank_details?.account_number || '',
       bank_name: selectedContract.bank_details?.bank_name || '',
       mfo: selectedContract.bank_details?.mfo || '',
@@ -484,6 +487,16 @@ const contractBalanceQuery = useQuery(
       render: (value) => (
         <Tag color={value ? 'green' : 'default'}>
           {value ? t('ui.corporate.loyalty_eligible', 'Eligible') : t('ui.corporate.loyalty_ineligible', 'Not eligible')}
+        </Tag>
+      )
+    },
+    {
+      title: t('ui.corporate.debt_policy', 'Debt'),
+      dataIndex: 'allows_debt',
+      key: 'allows_debt',
+      render: (value) => (
+        <Tag color={value ? 'orange' : 'default'}>
+          {value ? t('ui.corporate.debt_allowed', 'Debt allowed') : t('ui.corporate.debt_disallowed', 'No debt')}
         </Tag>
       )
     },
@@ -696,6 +709,13 @@ const contractBalanceQuery = useQuery(
                       {selectedContract.is_loyalty_points_eligible
                         ? t('ui.corporate.loyalty_eligible', 'Eligible')
                         : t('ui.corporate.loyalty_ineligible', 'Not eligible')}
+                    </Tag>
+                  </Descriptions.Item>
+                  <Descriptions.Item label={t('ui.corporate.debt_policy', 'Debt Policy')}>
+                    <Tag color={selectedContract.allows_debt ? 'orange' : 'default'}>
+                      {selectedContract.allows_debt
+                        ? t('ui.corporate.debt_allowed', 'Debt allowed')
+                        : t('ui.corporate.debt_disallowed', 'No debt')}
                     </Tag>
                   </Descriptions.Item>
                 </Descriptions>
@@ -971,6 +991,10 @@ const contractBalanceQuery = useQuery(
 
           <Form.Item name="is_loyalty_points_eligible" valuePropName="checked">
             <Checkbox>{t('ui.corporate.loyalty_points_eligible', 'Eligible for loyalty points')}</Checkbox>
+          </Form.Item>
+
+          <Form.Item name="allows_debt" valuePropName="checked">
+            <Checkbox>{t('ui.corporate.allows_debt', 'Allow contract debt')}</Checkbox>
           </Form.Item>
 
           <div style={{ marginBottom: 16 }}>

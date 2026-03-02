@@ -242,14 +242,17 @@ class ExportUtils {
       const filename = `loyalty_programs_export_${new Date().toISOString().split('T')[0]}`;
 
       const programsData = await adminService.getLoyaltyPrograms({ ...filters, per_page: 10000 });
-      const exportData = (programsData.data?.items || []).map(program => ({
+      const exportData = (programsData.items || []).map(program => ({
         'Program Name': program.name,
-        'Type': program.type,
-        'Points per Dollar': program.points_per_dollar,
-        'Active Members': program.active_members,
-        'Status': program.status,
-        'Min Purchase': `${program.min_purchase_amount?.toFixed(2) || '0.00'} UZS`,
-        'Expiry (Months)': program.expiry_months || 'Never',
+        'Status': program.is_active ? 'Active' : 'Inactive',
+        'Default Program': program.is_default ? 'Yes' : 'No',
+        'UZS per Point': program.uzs_per_point || 0,
+        'Sign-up Bonus': program.signup_bonus || 0,
+        'Referral Bonus': program.referral_bonus || 0,
+        'Birthday Bonus': program.birthday_bonus || 0,
+        'Min Redemption Points': program.min_redemption_points || 0,
+        'Member Count': program.member_count || 0,
+        'Tier Count': program.tier_count || 0,
         'Created': formatLocalDate(program.created_at)
       }));
 
@@ -257,6 +260,56 @@ class ExportUtils {
     } catch (error) {
       console.error('Loyalty programs export error:', error);
       return { success: false, message: 'Failed to export loyalty programs' };
+    }
+  }
+
+  async exportLoyaltyMembers(filters = {}, format = 'excel') {
+    try {
+      const filename = `loyalty_members_export_${new Date().toISOString().split('T')[0]}`;
+
+      const membersData = await adminService.getLoyaltyMembers({ ...filters, per_page: 10000 });
+      const exportData = (membersData.items || []).map(member => ({
+        'Customer': member.customer_name,
+        'Email': member.customer_email || '',
+        'Phone': member.customer_phone || '',
+        'Program': member.program_name || '',
+        'Tier': member.current_tier || '',
+        'Current Balance': member.current_balance || 0,
+        'Total Earned': member.total_earned || 0,
+        'Total Redeemed': member.total_redeemed || 0,
+        'Member Since': formatLocalDate(member.member_since),
+        'Last Activity': formatLocalDate(member.last_activity_at)
+      }));
+
+      return this.exportToExcel(exportData, filename, 'Loyalty Members');
+    } catch (error) {
+      console.error('Loyalty members export error:', error);
+      return { success: false, message: 'Failed to export loyalty members' };
+    }
+  }
+
+  async exportLoyaltyRewards(filters = {}, format = 'excel') {
+    try {
+      const filename = `loyalty_rewards_export_${new Date().toISOString().split('T')[0]}`;
+
+      const rewardsData = await adminService.getLoyaltyRewards({ ...filters, per_page: 10000 });
+      const exportData = (rewardsData.items || []).map(reward => ({
+        'Reward Name': reward.name,
+        'Program': reward.program_name || '',
+        'Type': reward.reward_type,
+        'Points Cost': reward.points_cost || 0,
+        'Redemptions Used': reward.redemptions_used || 0,
+        'Max Redemptions': reward.max_redemptions || '',
+        'Featured': reward.is_featured ? 'Yes' : 'No',
+        'Status': reward.is_active ? 'Active' : 'Inactive',
+        'Valid Until': formatLocalDate(reward.valid_until),
+        'Created': formatLocalDate(reward.created_at)
+      }));
+
+      return this.exportToExcel(exportData, filename, 'Loyalty Rewards');
+    } catch (error) {
+      console.error('Loyalty rewards export error:', error);
+      return { success: false, message: 'Failed to export loyalty rewards' };
     }
   }
 
@@ -291,7 +344,9 @@ class ExportUtils {
       orders: this.exportOrders,
       products: this.exportProducts,
       deliveries: this.exportDeliveries,
+      'loyalty-members': this.exportLoyaltyMembers,
       'loyalty-programs': this.exportLoyaltyPrograms,
+      'loyalty-rewards': this.exportLoyaltyRewards,
       'notification-campaigns': this.exportNotificationCampaigns
     };
 

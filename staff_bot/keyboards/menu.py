@@ -29,6 +29,11 @@ class MenuKeyboards:
                 f"\U0001f69a {i18n.get('staff.menu.active_deliveries', language)}"
             ])
             keyboard.append([
+                f"\u2795 {i18n.get('staff.menu.create_tryout_now', language)}",
+                f"\U0001f9ea {i18n.get('staff.menu.tryout_tasks', language)}",
+            ])
+            keyboard.append([
+                f"\u267b\ufe0f {i18n.get('staff.menu.active_tryouts', language)}",
                 f"\U0001f4cb {i18n.get('staff.menu.delivery_history', language)}",
                 f"\U0001f4ca {i18n.get('staff.menu.my_stats', language)}"
             ])
@@ -82,6 +87,20 @@ class MenuKeyboards:
                 )
             ])
             keyboard.append([
+                InlineKeyboardButton(
+                    f"\u2795 {i18n.get('staff.menu.create_tryout_now', language)}",
+                    callback_data="staff_tryout_create"
+                ),
+                InlineKeyboardButton(
+                    f"\U0001f9ea {i18n.get('staff.menu.tryout_tasks', language)}",
+                    callback_data="staff_tryout_tasks"
+                ),
+            ])
+            keyboard.append([
+                InlineKeyboardButton(
+                    f"\u267b\ufe0f {i18n.get('staff.menu.active_tryouts', language)}",
+                    callback_data="staff_tryout_active"
+                ),
                 InlineKeyboardButton(
                     f"\U0001f4cb {i18n.get('staff.menu.delivery_history', language)}",
                     callback_data="staff_delivery_history"

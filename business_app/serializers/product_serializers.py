@@ -70,6 +70,9 @@ class ProductInventorySchema(BaseModel):
     is_low_stock: bool = Field(default=False)
     is_in_stock: bool = Field(default=True)
     restock_date: Optional[datetime] = None
+    is_tryout_eligible: bool = Field(default=True)
+    tracks_returnable_bottles: bool = Field(default=False)
+    returnable_bottles_per_unit: float = Field(default=0.0)
 
 
 class ProductRatingsSchema(BaseModel):
@@ -241,6 +244,9 @@ class CreateProductRequest(BaseModel):
     min_stock_level: Optional[int] = Field(None, ge=0)
     is_active: bool = Field(default=True)
     is_featured: bool = Field(default=False)
+    is_tryout_eligible: bool = Field(default=True)
+    tracks_returnable_bottles: bool = Field(default=False)
+    returnable_bottles_per_unit: Decimal = Field(default=Decimal("0.00"), ge=0)
     
     @field_validator('base_price')
     @classmethod
@@ -267,6 +273,9 @@ class UpdateProductRequest(BaseModel):
     min_stock_level: Optional[int] = Field(None, ge=0)
     is_active: Optional[bool] = None
     is_featured: Optional[bool] = None
+    is_tryout_eligible: Optional[bool] = None
+    tracks_returnable_bottles: Optional[bool] = None
+    returnable_bottles_per_unit: Optional[Decimal] = Field(None, ge=0)
     
     @field_validator('base_price')
     @classmethod
@@ -383,6 +392,9 @@ def serialize_product(product: Product, language: str = 'uz', user=None, quantit
                 'min_stock_level': product.min_stock_level,
                 'is_low_stock': is_product_low_stock(product),
                 'is_in_stock': is_product_in_stock(product),
+                'is_tryout_eligible': bool(getattr(product, 'is_tryout_eligible', True)),
+                'tracks_returnable_bottles': bool(getattr(product, 'tracks_returnable_bottles', False)),
+                'returnable_bottles_per_unit': float(getattr(product, 'returnable_bottles_per_unit', 0) or 0),
                 # 'restock_date': product.restock_date.isoformat() if product.restock_date else None
             },
             'ratings': {

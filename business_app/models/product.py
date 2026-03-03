@@ -71,6 +71,9 @@ class Product(db.Model, TimestampMixin, TranslatableMixin):
     stock_quantity = Column(Integer, default=0)
     min_stock_level = Column(Integer, default=0)
     max_stock_level = Column(Integer, default=1000)
+    is_tryout_eligible = Column(Boolean, nullable=False, default=True, index=True)
+    tracks_returnable_bottles = Column(Boolean, nullable=False, default=False, index=True)
+    returnable_bottles_per_unit = Column(Numeric(precision=12, scale=2), nullable=False, default=Decimal('0.00'))
     
     # Media and content
     images = Column(JSON, default=[])
@@ -108,6 +111,9 @@ class Product(db.Model, TimestampMixin, TranslatableMixin):
             'weight': float(self.weight) if self.weight else None,
             'images': self.images or [],
             'nutrition_facts': self.nutrition_facts or {},
+            'is_tryout_eligible': bool(self.is_tryout_eligible),
+            'tracks_returnable_bottles': bool(self.tracks_returnable_bottles),
+            'returnable_bottles_per_unit': float(self.returnable_bottles_per_unit or 0),
         })
         
         return result

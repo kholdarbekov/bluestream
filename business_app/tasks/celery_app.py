@@ -32,7 +32,8 @@ def make_celery(app=None):
             'business_app.tasks.order_tasks',
             'business_app.tasks.audit_tasks',
             'business_app.tasks.session_tasks',
-            'business_app.tasks.loyalty_tasks'
+            'business_app.tasks.loyalty_tasks',
+            'business_app.tasks.tryout_tasks',
         ]
     )
     
@@ -145,6 +146,12 @@ def make_celery(app=None):
             'task': 'business_app.tasks.session_tasks.cleanup_expired_sessions_task',
             'schedule': crontab(hour=4, minute=0),  # Daily at 4 AM
             'kwargs': {'batch_size': 1000}
+        },
+
+        # Scan due-soon and overdue try-out bottle returns daily.
+        'process-tryout-reminders': {
+            'task': 'tryouts.process_due_reminders',
+            'schedule': crontab(hour=9, minute=30),
         }
     }
     
@@ -203,6 +210,7 @@ celery.conf.task_routes = {
     'business_app.tasks.audit_tasks.*': {'queue': 'maintenance'},
     'business_app.tasks.session_tasks.*': {'queue': 'maintenance'},
     'business_app.tasks.loyalty_tasks.*': {'queue': 'loyalty'},
+    'business_app.tasks.tryout_tasks.*': {'queue': 'maintenance'},
 }
 
 

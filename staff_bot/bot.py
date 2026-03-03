@@ -51,6 +51,8 @@ from token_manager import TokenManager
 from handlers.start import StartHandler, SELECT_LANGUAGE
 from handlers.menu import main_menu_handler, menu_handler
 from handlers.language import LanguageHandler
+from handlers.tryouts import TryoutHandler
+from handlers.tryouts import ENTER_TRYOUT_PHONE, ENTER_TRYOUT_NAME, ENTER_TRYOUT_ADDRESS
 from handlers.delivery import (
     OrdersPoolHandler, ActiveDeliveryHandler, StatusUpdateHandler,
     HistoryHandler, LocationHandler
@@ -275,6 +277,7 @@ class StaffBot:
         status_update_handler = StatusUpdateHandler()
         history_handler = HistoryHandler()
         location_handler = LocationHandler()
+        tryout_handler = TryoutHandler()
 
         # Operator handlers
         create_user_handler = CreateUserHandler()
@@ -295,6 +298,7 @@ class StaffBot:
             'status_update': status_update_handler,
             'history': history_handler,
             'location': location_handler,
+            'tryouts': tryout_handler,
         }
         self._operator_handlers = {
             'orders_pool_view': operator_orders_pool_view_handler,
@@ -350,6 +354,19 @@ class StaffBot:
             CallbackQueryHandler(active_delivery_handler.view_active_delivery, pattern=r"^staff_view_active_\d+$"),
             CallbackQueryHandler(active_delivery_handler.navigate_to_address, pattern=r"^staff_navigate_\d+$"),
 
+            # Try-outs
+            CallbackQueryHandler(tryout_handler.show_create_products, pattern="^staff_tryout_select_products$"),
+            CallbackQueryHandler(tryout_handler.show_task_pool, pattern="^staff_tryout_tasks$"),
+            CallbackQueryHandler(tryout_handler.show_active_tryouts, pattern="^staff_tryout_active$"),
+            CallbackQueryHandler(tryout_handler.select_create_product, pattern=r"^staff_tryout_product_\d+$"),
+            CallbackQueryHandler(tryout_handler.select_create_quantity, pattern=r"^staff_tryout_qty_\d+_\d+$"),
+            CallbackQueryHandler(tryout_handler.finish_product_selection, pattern="^staff_tryout_products_done$"),
+            CallbackQueryHandler(tryout_handler.confirm_create_tryout, pattern="^staff_tryout_confirm_create$"),
+            CallbackQueryHandler(tryout_handler.accept_task, pattern=r"^staff_tryout_accept_\d+$"),
+            CallbackQueryHandler(tryout_handler.complete_handoff, pattern=r"^staff_tryout_handoff_\d+$"),
+            CallbackQueryHandler(tryout_handler.prompt_pickup, pattern=r"^staff_tryout_pickup_\d+$"),
+            CallbackQueryHandler(tryout_handler.view_tryout, pattern=r"^staff_tryout_view_\d+$"),
+
             # Status updates
             CallbackQueryHandler(status_update_handler.initiate_status_change, pattern=r"^staff_status_\d+_"),
             CallbackQueryHandler(status_update_handler.execute_status_change, pattern=r"^staff_execute_status_\d+_"),
@@ -387,6 +404,7 @@ class StaffBot:
         create_client_text_pattern = self._menu_text_pattern('staff.menu.create_client')
         search_client_text_pattern = self._menu_text_pattern('staff.menu.search_client')
         create_order_text_pattern = self._menu_text_pattern('staff.menu.create_order')
+        create_tryout_text_pattern = self._menu_text_pattern('staff.menu.create_tryout_now')
 
         # Create User conversation
         create_user_conv = ConversationHandler(
@@ -534,6 +552,38 @@ class StaffBot:
         )
         self.application.add_handler(add_address_conv)
 
+        create_tryout_conv = ConversationHandler(
+            entry_points=[
+                CallbackQueryHandler(tryout_handler.start_create_tryout, pattern="^staff_tryout_create$"),
+                MessageHandler(
+                    filters.Regex(create_tryout_text_pattern) & ~filters.COMMAND,
+                    tryout_handler.start_create_tryout
+                ),
+            ],
+            states={
+                ENTER_TRYOUT_PHONE: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, tryout_handler.receive_create_phone)
+                ],
+                ENTER_TRYOUT_NAME: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, tryout_handler.receive_create_name)
+                ],
+                ENTER_TRYOUT_ADDRESS: [
+                    MessageHandler(filters.LOCATION, tryout_handler.receive_create_location),
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, tryout_handler.receive_create_address)
+                ],
+            },
+            fallbacks=[
+                CommandHandler("cancel", tryout_handler.cancel_create_tryout),
+                CallbackQueryHandler(tryout_handler.cancel_create_tryout, pattern="^staff_back_to_main$"),
+            ],
+            per_chat=True,
+            per_user=True,
+            name="staff_create_tryout",
+            conversation_timeout=300,
+            allow_reentry=True
+        )
+        self.application.add_handler(create_tryout_conv)
+
         # Keep main-menu back handler after conversations so their fallbacks can run.
         self.application.add_handler(
             CallbackQueryHandler(main_menu_handler, pattern="^staff_back_to_main$"),
@@ -589,6 +639,12 @@ class StaffBot:
                 await status_update_handler.receive_cash_amount(update, context)
             return
 
+        if context.user_data.get('tryout_pickup_task_id'):
+            tryout_handler = self._delivery_handlers.get('tryouts')
+            if tryout_handler:
+                await tryout_handler.receive_pickup_quantities(update, context)
+            return
+
         text = update.message.text.strip()
         language = await self._language_handler._get_language(update, context)
 
@@ -598,6 +654,8 @@ class StaffBot:
             i18n.get('staff.menu.new_orders', language): 'staff_new_orders',
             i18n.get('staff.menu.new_orders_view', language): 'staff_op_new_orders',
             i18n.get('staff.menu.active_deliveries', language): 'staff_active_deliveries',
+            i18n.get('staff.menu.tryout_tasks', language): 'staff_tryout_tasks',
+            i18n.get('staff.menu.active_tryouts', language): 'staff_tryout_active',
             i18n.get('staff.menu.delivery_history', language): 'staff_delivery_history',
             i18n.get('staff.menu.my_stats', language): 'staff_my_stats',
             i18n.get('staff.menu.recent_orders', language): 'staff_recent_orders',
@@ -621,6 +679,8 @@ class StaffBot:
                 # Delivery
                 'staff_new_orders': self._delivery_handlers['orders_pool'].show_pool,
                 'staff_active_deliveries': self._delivery_handlers['active_delivery'].show_active_deliveries,
+                'staff_tryout_tasks': self._delivery_handlers['tryouts'].show_task_pool,
+                'staff_tryout_active': self._delivery_handlers['tryouts'].show_active_tryouts,
                 'staff_delivery_history': self._delivery_handlers['history'].show_history,
                 'staff_my_stats': self._delivery_handlers['history'].show_stats,
                 # Operator

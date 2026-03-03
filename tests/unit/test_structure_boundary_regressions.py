@@ -17,6 +17,7 @@ API_BOUNDARY_SCORE_BUDGET = {
     "__init__.py": 0,
     "addresses.py": 18,
     "admin.py": 482,
+    "admin_tryouts.py": 0,
     "analytics.py": 25,
     "auth.py": 36,
     "blog.py": 6,
@@ -30,6 +31,7 @@ API_BOUNDARY_SCORE_BUDGET = {
     "products.py": 14,
     "session_management.py": 6,
     "staff.py": 0,
+    "staff_tryouts.py": 0,
     "subscriptions.py": 32,
     "translations.py": 4,
 }

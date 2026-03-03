@@ -94,6 +94,44 @@ class UserStatus(Enum):
     PENDING_VERIFICATION = 'pending_verification'
 
 
+class TryoutStatus(Enum):
+    """Try-out lifecycle status."""
+    DRAFT = 'draft'
+    SCHEDULED = 'scheduled'
+    ACTIVE = 'active'
+    CLOSED = 'closed'
+    CANCELLED = 'cancelled'
+
+
+class TryoutOutcome(Enum):
+    """Commercial outcome of a try-out."""
+    PENDING = 'pending'
+    CONVERTED = 'converted'
+    DECLINED = 'declined'
+
+
+class TryoutTaskType(Enum):
+    """Operational task type for try-outs."""
+    HANDOFF = 'handoff'
+    PICKUP = 'pickup'
+
+
+class TryoutTaskStatus(Enum):
+    """Driver task status for try-outs."""
+    OPEN = 'open'
+    ASSIGNED = 'assigned'
+    COMPLETED = 'completed'
+    CANCELLED = 'cancelled'
+
+
+class TryoutBottleLedgerEventType(Enum):
+    """Bottle custody ledger event type."""
+    HANDOFF = 'handoff'
+    PICKUP = 'pickup'
+    ADJUSTMENT = 'adjustment'
+    VOID = 'void'
+
+
 class UserGender(Enum):
     """User gender enumeration"""
     MALE = 'male'

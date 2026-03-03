@@ -53,6 +53,21 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "uz": "Yetkazish tarixi",
         "ru": "История доставок",
     },
+    "staff.menu.tryout_tasks": {
+        "en": "Try-out Tasks",
+        "uz": "Sinov vazifalari",
+        "ru": "Задачи по пробным выдачам",
+    },
+    "staff.menu.create_tryout_now": {
+        "en": "Create Try-out Now",
+        "uz": "Hozir sinov yaratish",
+        "ru": "Создать пробную выдачу",
+    },
+    "staff.menu.active_tryouts": {
+        "en": "Active Try-outs",
+        "uz": "Faol sinovlar",
+        "ru": "Активные пробные выдачи",
+    },
     "staff.menu.my_stats": {
         "en": "My Stats",
         "uz": "Mening statistikam",
@@ -249,6 +264,191 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "en": "Invalid input. Please correct it and try again.",
         "uz": "Noto'gri malumot kiritildi. Iltimos, tuzatib qayta urinib koring.",
         "ru": "Некорректный ввод. Исправьте и повторите.",
+    },
+    "staff.tryout.tasks_title": {
+        "en": "Try-out Task Pool",
+        "uz": "Sinov vazifalari",
+        "ru": "Список задач по пробным выдачам",
+    },
+    "staff.tryout.no_tasks": {
+        "en": "No try-out tasks are available right now.",
+        "uz": "Hozircha sinov vazifalari yoq.",
+        "ru": "Сейчас нет задач по пробным выдачам.",
+    },
+    "staff.tryout.active_title": {
+        "en": "My Active Try-outs",
+        "uz": "Mening faol sinovlarim",
+        "ru": "Мои активные пробные выдачи",
+    },
+    "staff.tryout.no_active": {
+        "en": "No active try-outs with outstanding bottles.",
+        "uz": "Qaytarilishi kerak bo'lgan idishlari bor faol sinovlar yoq.",
+        "ru": "Нет активных пробных выдач с невозвращенной тарой.",
+    },
+    "staff.tryout.task_type": {
+        "en": "Task type",
+        "uz": "Vazifa turi",
+        "ru": "Тип задачи",
+    },
+    "staff.tryout.task_status": {
+        "en": "Task status",
+        "uz": "Vazifa holati",
+        "ru": "Статус задачи",
+    },
+    "staff.tryout.outstanding": {
+        "en": "Outstanding bottles",
+        "uz": "Qaytishi kerak bolgan butilkalar",
+        "ru": "Невозвращенная тара",
+    },
+    "staff.tryout.accept_task": {
+        "en": "Accept Task",
+        "uz": "Vazifani olish",
+        "ru": "Принять задачу",
+    },
+    "staff.tryout.complete_handoff": {
+        "en": "Complete Handoff",
+        "uz": "Topshirishni yakunlash",
+        "ru": "Завершить передачу",
+    },
+    "staff.tryout.record_pickup": {
+        "en": "Record Pickup",
+        "uz": "Qaytarishni kiritish",
+        "ru": "Зафиксировать возврат",
+    },
+    "staff.tryout.view_tryout": {
+        "en": "View Try-out",
+        "uz": "Sinovni korish",
+        "ru": "Открыть пробную выдачу",
+    },
+    "staff.tryout.open_tasks": {
+        "en": "Open Tasks",
+        "uz": "Ochiq vazifalar",
+        "ru": "Открытые задачи",
+    },
+    "staff.tryout.task_accepted": {
+        "en": "Try-out task accepted.",
+        "uz": "Sinov vazifasi olindi.",
+        "ru": "Задача по пробной выдаче принята.",
+    },
+    "staff.tryout.handoff_recorded": {
+        "en": "Try-out handoff recorded.",
+        "uz": "Sinov topshiruvi qayd etildi.",
+        "ru": "Передача пробной выдачи зафиксирована.",
+    },
+    "staff.tryout.task_not_found": {
+        "en": "Try-out task not found.",
+        "uz": "Sinov vazifasi topilmadi.",
+        "ru": "Задача по пробной выдаче не найдена.",
+    },
+    "staff.tryout.tryout_not_found": {
+        "en": "Try-out not found.",
+        "uz": "Sinov topilmadi.",
+        "ru": "Пробная выдача не найдена.",
+    },
+    "staff.tryout.pickup_prompt": {
+        "en": "Send returned bottle quantities one per line.",
+        "uz": "Qaytgan butilkalarni har qatorda yuboring.",
+        "ru": "Отправьте возвращенную тару по одной строке.",
+    },
+    "staff.tryout.pickup_invalid_format": {
+        "en": "Invalid format. Use product_id:units on each line.",
+        "uz": "Format notogri. Har qatorda product_id:units korinishida yuboring.",
+        "ru": "Неверный формат. Используйте идентификатор товара и количество в каждой строке.",
+    },
+    "staff.tryout.pickup_recorded": {
+        "en": "Bottle pickup recorded.",
+        "uz": "Butilka qaytarilishi qayd etildi.",
+        "ru": "Возврат тары зафиксирован.",
+    },
+    "staff.tryout.enter_phone": {
+        "en": "Enter the customer's phone number.",
+        "uz": "Mijozning telefon raqamini kiriting.",
+        "ru": "Введите номер телефона клиента.",
+    },
+    "staff.tryout.enter_name": {
+        "en": "Enter the customer's first name.",
+        "uz": "Mijozning ismini kiriting.",
+        "ru": "Введите имя клиента.",
+    },
+    "staff.tryout.enter_address": {
+        "en": "Enter the try-out delivery address.",
+        "uz": "Sinov topshiriladigan manzilni kiriting.",
+        "ru": "Введите адрес пробной выдачи.",
+    },
+    "staff.tryout.enter_address_or_location": {
+        "en": "Enter the try-out delivery address or send your location.",
+        "uz": "Sinov topshiriladigan manzilni kiriting yoki joylashuvingizni yuboring.",
+        "ru": "Введите адрес пробной выдачи или отправьте геолокацию.",
+    },
+    "staff.tryout.send_location": {
+        "en": "Send Location",
+        "uz": "Joylashuvni yuborish",
+        "ru": "Отправить геолокацию",
+    },
+    "staff.tryout.address_received": {
+        "en": "Address saved. Now choose the try-out products.",
+        "uz": "Manzil saqlandi. Endi sinov mahsulotlarini tanlang.",
+        "ru": "Адрес сохранен. Теперь выберите товары для пробной выдачи.",
+    },
+    "staff.tryout.invalid_address": {
+        "en": "Address is too short. Please enter a fuller address.",
+        "uz": "Manzil juda qisqa. Iltimos, toliqroq manzil kiriting.",
+        "ru": "Адрес слишком короткий. Введите полный адрес.",
+    },
+    "staff.tryout.location_received": {
+        "en": "Location received: {address}",
+        "uz": "Joylashuv qabul qilindi: {address}",
+        "ru": "Геолокация получена: {address}",
+    },
+    "staff.tryout.location_geocode_failed": {
+        "en": "Location received, but the address could not be resolved. Please type the address manually.",
+        "uz": "Joylashuv qabul qilindi, lekin manzil aniqlanmadi. Iltimos, manzilni qo'lda kiriting.",
+        "ru": "Геолокация получена, но адрес определить не удалось. Пожалуйста, введите адрес вручную.",
+    },
+    "staff.tryout.select_products": {
+        "en": "Select try-out products.",
+        "uz": "Sinov mahsulotlarini tanlang.",
+        "ru": "Выберите товары для пробной выдачи.",
+    },
+    "staff.tryout.select_quantity": {
+        "en": "Select quantity for {product}.",
+        "uz": "{product} uchun miqdorni tanlang.",
+        "ru": "Выберите количество для {product}.",
+    },
+    "staff.tryout.selected_products": {
+        "en": "Selected products",
+        "uz": "Tanlangan mahsulotlar",
+        "ru": "Выбранные товары",
+    },
+    "staff.tryout.done_selecting": {
+        "en": "Done Selecting",
+        "uz": "Tanlashni yakunlash",
+        "ru": "Завершить выбор",
+    },
+    "staff.tryout.add_more_products": {
+        "en": "Add More Products",
+        "uz": "Yana mahsulot qoshish",
+        "ru": "Добавить еще товары",
+    },
+    "staff.tryout.no_products_selected": {
+        "en": "Select at least one product first.",
+        "uz": "Avval kamida bitta mahsulot tanlang.",
+        "ru": "Сначала выберите хотя бы один товар.",
+    },
+    "staff.tryout.confirm_create_title": {
+        "en": "Confirm Try-out",
+        "uz": "Sinovni tasdiqlash",
+        "ru": "Подтвердите пробную выдачу",
+    },
+    "staff.tryout.product_not_found": {
+        "en": "Selected product was not found.",
+        "uz": "Tanlangan mahsulot topilmadi.",
+        "ru": "Выбранный товар не найден.",
+    },
+    "staff.tryout.created_success": {
+        "en": "Try-out created successfully: {tryout_number}",
+        "uz": "Sinov muvaffaqiyatli yaratildi: {tryout_number}",
+        "ru": "Пробная выдача создана: {tryout_number}",
     },
     "staff.error.api.rate_limited": {
         "en": "Too many requests. Please wait and try again.",

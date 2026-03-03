@@ -184,6 +184,9 @@ class ProductAdminSchema(BaseModel):
     is_active: bool = Field(default=True)
     is_featured: bool = Field(default=False)
     track_inventory: bool = Field(default=True)
+    is_tryout_eligible: bool = Field(default=True)
+    tracks_returnable_bottles: bool = Field(default=False)
+    returnable_bottles_per_unit: float = Field(default=0.0)
     
     # Performance metrics
     total_sold: int = Field(default=0)
@@ -730,6 +733,9 @@ def serialize_product_admin(product: Product) -> Dict[str, Any]:
             'status': 'active' if product.is_active else 'inactive',  # Frontend expects 'status'
             'is_featured': product.is_featured,
             'track_inventory': product.track_inventory,
+            'is_tryout_eligible': bool(getattr(product, 'is_tryout_eligible', True)),
+            'tracks_returnable_bottles': bool(getattr(product, 'tracks_returnable_bottles', False)),
+            'returnable_bottles_per_unit': float(getattr(product, 'returnable_bottles_per_unit', 0) or 0),
             'images': images,
             'image_url': image_url,  # First image for display convenience
             'created_at': product.created_at.isoformat() if product.created_at else None,

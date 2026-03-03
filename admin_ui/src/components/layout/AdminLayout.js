@@ -92,6 +92,11 @@ const AdminLayout = ({ children }) => {
       label: t('ui.nav.categories')
     },
     {
+      key: '/tryouts',
+      icon: <TruckOutlined />,
+      label: t('ui.nav.tryouts', 'Try-outs')
+    },
+    {
       key: '/delivery',
       icon: <TruckOutlined />,
       label: t('ui.nav.delivery'),

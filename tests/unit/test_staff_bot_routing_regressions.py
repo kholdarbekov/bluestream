@@ -90,3 +90,22 @@ def test_staff_operator_text_entry_patterns_present():
     ]
     missing = [fragment for fragment in required_fragments if fragment not in text]
     assert not missing, f"Missing operator text-conversation entry fragments: {missing}"
+
+
+def test_staff_tryout_conversation_and_callbacks_present():
+    """Ensure try-out create/task callbacks and conversation entry wiring are registered."""
+    text = BOT_FILE.read_text(encoding="utf-8")
+    required_fragments = [
+        "create_tryout_text_pattern = self._menu_text_pattern('staff.menu.create_tryout_now')",
+        'CallbackQueryHandler(tryout_handler.start_create_tryout, pattern="^staff_tryout_create$")',
+        'CallbackQueryHandler(tryout_handler.show_create_products, pattern="^staff_tryout_select_products$")',
+        'CallbackQueryHandler(tryout_handler.select_create_product, pattern=r"^staff_tryout_product_\\d+$")',
+        'CallbackQueryHandler(tryout_handler.select_create_quantity, pattern=r"^staff_tryout_qty_\\d+_\\d+$")',
+        'CallbackQueryHandler(tryout_handler.finish_product_selection, pattern="^staff_tryout_products_done$")',
+        'CallbackQueryHandler(tryout_handler.confirm_create_tryout, pattern="^staff_tryout_confirm_create$")',
+        'MessageHandler(filters.LOCATION, tryout_handler.receive_create_location)',
+        'MessageHandler(filters.TEXT & ~filters.COMMAND, tryout_handler.receive_create_address)',
+        'name="staff_create_tryout"',
+    ]
+    missing = [fragment for fragment in required_fragments if fragment not in text]
+    assert not missing, f"Missing try-out conversation fragments: {missing}"

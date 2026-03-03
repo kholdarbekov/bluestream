@@ -296,7 +296,10 @@ const Products = () => {
       stock_quantity: product.stock_quantity,
       volume: product.volume,
       status: product.status,
-      is_featured: product.is_featured
+      is_featured: product.is_featured,
+      is_tryout_eligible: product.is_tryout_eligible !== false,
+      tracks_returnable_bottles: Boolean(product.tracks_returnable_bottles),
+      returnable_bottles_per_unit: product.returnable_bottles_per_unit || 0,
     });
     // Set existing image in file list for preview
     if (product.image_url) {
@@ -640,6 +643,9 @@ const Products = () => {
                 <p><strong>{t('ui.products.price')}:</strong> UZS{selectedProduct.price?.toFixed(2)}</p>
                 <p><strong>{t('ui.products.volume')}:</strong> {selectedProduct.volume}</p>
                 <p><strong>{t('ui.products.stock')}:</strong> {selectedProduct.stock_quantity} {t('ui.products.units')}</p>
+                <p><strong>Try-out Eligible:</strong> {selectedProduct.is_tryout_eligible !== false ? 'Yes' : 'No'}</p>
+                <p><strong>Tracks Returnable Bottles:</strong> {selectedProduct.tracks_returnable_bottles ? 'Yes' : 'No'}</p>
+                <p><strong>Returnable Bottles Per Unit:</strong> {selectedProduct.returnable_bottles_per_unit || 0}</p>
                 <p><strong>{t('ui.products.status')}:</strong>
                   <Tag color={productStatusColors[selectedProduct.status]} style={{ marginLeft: 8 }}>
                     {t(`ui.products.status_${selectedProduct.status}`)}
@@ -862,6 +868,35 @@ const Products = () => {
 
 
 
+          <Row gutter={16}>
+            <Col span={8}>
+              <Form.Item
+                name="is_tryout_eligible"
+                label="Try-out Eligible"
+                valuePropName="checked"
+              >
+                <Switch />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item
+                name="tracks_returnable_bottles"
+                label="Tracks Returnable Bottles"
+                valuePropName="checked"
+              >
+                <Switch />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item
+                name="returnable_bottles_per_unit"
+                label="Returnable Bottles Per Unit"
+              >
+                <InputNumber style={{ width: '100%' }} min={0} precision={2} />
+              </Form.Item>
+            </Col>
+          </Row>
+
           <Form.Item
             name="is_featured"
             label={t('ui.products.featured_product_label')}
@@ -1063,6 +1098,35 @@ const Products = () => {
           </Row>
 
 
+
+          <Row gutter={16}>
+            <Col span={8}>
+              <Form.Item
+                name="is_tryout_eligible"
+                label="Try-out Eligible"
+                valuePropName="checked"
+              >
+                <Switch />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item
+                name="tracks_returnable_bottles"
+                label="Tracks Returnable Bottles"
+                valuePropName="checked"
+              >
+                <Switch />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item
+                name="returnable_bottles_per_unit"
+                label="Returnable Bottles Per Unit"
+              >
+                <InputNumber style={{ width: '100%' }} min={0} precision={2} />
+              </Form.Item>
+            </Col>
+          </Row>
 
           <Form.Item
             name="is_featured"

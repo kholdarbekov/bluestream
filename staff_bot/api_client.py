@@ -393,6 +393,82 @@ class StaffAPIClient:
             token=token
         )
 
+    # --- Try-out Operations ---
+
+    async def create_tryout(self, token: str, payload: Dict) -> APIResponse:
+        return await self._make_request(
+            'POST',
+            '/api/v1/staff/tryouts',
+            token=token,
+            data=payload,
+        )
+
+    async def get_tryout_task_pool(self, token: str) -> APIResponse:
+        return await self._make_request(
+            'GET',
+            '/api/v1/staff/tryout-tasks/pool',
+            token=token,
+        )
+
+    async def accept_tryout_task(self, token: str, task_id: int) -> APIResponse:
+        return await self._make_request(
+            'POST',
+            f'/api/v1/staff/tryout-tasks/{task_id}/accept',
+            token=token,
+        )
+
+    async def get_active_tryout_tasks(self, token: str) -> APIResponse:
+        return await self._make_request(
+            'GET',
+            '/api/v1/staff/tryout-tasks/active',
+            token=token,
+        )
+
+    async def get_active_tryouts(self, token: str) -> APIResponse:
+        return await self._make_request(
+            'GET',
+            '/api/v1/staff/tryouts/active',
+            token=token,
+        )
+
+    async def get_tryout_details(self, token: str, tryout_id: int) -> APIResponse:
+        return await self._make_request(
+            'GET',
+            f'/api/v1/staff/tryouts/{tryout_id}',
+            token=token,
+        )
+
+    async def complete_tryout_handoff(self, token: str, task_id: int, payload: Dict = None) -> APIResponse:
+        return await self._make_request(
+            'POST',
+            f'/api/v1/staff/tryout-tasks/{task_id}/complete-handoff',
+            token=token,
+            data=payload or {},
+        )
+
+    async def record_tryout_pickup(self, token: str, task_id: int, payload: Dict) -> APIResponse:
+        return await self._make_request(
+            'POST',
+            f'/api/v1/staff/tryout-tasks/{task_id}/record-pickup',
+            token=token,
+            data=payload,
+        )
+
+    async def get_tryout_history(self, token: str) -> APIResponse:
+        return await self._make_request(
+            'GET',
+            '/api/v1/staff/tryouts/history',
+            token=token,
+        )
+
+    async def reverse_geocode_address(self, token: str, latitude: float, longitude: float) -> APIResponse:
+        return await self._make_request(
+            'POST',
+            '/api/v1/addresses/reverse-geocode',
+            token=token,
+            data={'latitude': latitude, 'longitude': longitude},
+        )
+
 
 # Global API client instance
 api_client = StaffAPIClient()

@@ -17,6 +17,11 @@ from shared.enums import (  # noqa: F401
     UserRole,
     UserType,
     UserStatus,
+    TryoutStatus,
+    TryoutOutcome,
+    TryoutTaskType,
+    TryoutTaskStatus,
+    TryoutBottleLedgerEventType,
 )
 
 

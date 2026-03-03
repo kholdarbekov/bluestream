@@ -10,6 +10,7 @@ import CorporateContracts from './pages/CorporateContracts';
 import Products from './pages/Products';
 import ProductCategories from './pages/ProductCategories';
 import Delivery from './pages/Delivery';
+import Tryouts from './pages/Tryouts';
 import Loyalty from './pages/Loyalty';
 import LoyaltyMembers from './pages/LoyaltyMembers';
 import LoyaltyPrograms from './pages/LoyaltyPrograms';
@@ -50,6 +51,7 @@ function App() {
                   <Route path="/products" element={<Products />} />
                   <Route path="/product-categories" element={<ProductCategories />} />
                   <Route path="/delivery" element={<Delivery />} />
+                  <Route path="/tryouts" element={<Tryouts />} />
                   <Route path="/delivery-time-slots" element={<TimeSlots />} />
                   <Route path="/loyalty" element={<Loyalty />} />
                   <Route path="/loyalty/members" element={<LoyaltyMembers />} />

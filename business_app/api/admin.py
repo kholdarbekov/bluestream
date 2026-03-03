@@ -2040,6 +2040,9 @@ def create_product():
             is_featured=data.get('is_featured', False),
             requires_prescription=data.get('requires_prescription', False),
             track_inventory=data.get('track_inventory', True),
+            is_tryout_eligible=data.get('is_tryout_eligible', True),
+            tracks_returnable_bottles=data.get('tracks_returnable_bottles', False),
+            returnable_bottles_per_unit=data.get('returnable_bottles_per_unit', 0),
             stock_quantity=data.get('stock_quantity', 0),
             min_stock_level=data.get('min_stock_level', 0),
             max_stock_level=data.get('max_stock_level', 1000),
@@ -2146,6 +2149,12 @@ def update_product(product_id):
             product.requires_prescription = data['requires_prescription']
         if 'track_inventory' in data:
             product.track_inventory = data['track_inventory']
+        if 'is_tryout_eligible' in data:
+            product.is_tryout_eligible = data['is_tryout_eligible']
+        if 'tracks_returnable_bottles' in data:
+            product.tracks_returnable_bottles = data['tracks_returnable_bottles']
+        if 'returnable_bottles_per_unit' in data:
+            product.returnable_bottles_per_unit = data['returnable_bottles_per_unit']
         if 'stock_quantity' in data:
             product.stock_quantity = data['stock_quantity']
         if 'min_stock_level' in data:

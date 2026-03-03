@@ -81,12 +81,34 @@ const MapRecenter = ({ position }) => {
   return null;
 };
 
+const MapInvalidateOnVisible = ({ isVisible, position }) => {
+  const map = useMap();
+
+  useEffect(() => {
+    if (!isVisible) {
+      return undefined;
+    }
+
+    const timer = window.setTimeout(() => {
+      map.invalidateSize();
+      if (position) {
+        map.setView(position, map.getZoom(), { animate: false });
+      }
+    }, 0);
+
+    return () => window.clearTimeout(timer);
+  }, [isVisible, map, position]);
+
+  return null;
+};
+
 const AddressMapPicker = ({
   value,
   onChange,
   onAddressFound,
   style,
-  height = 300
+  height = 300,
+  isVisible = true,
 }) => {
   const [geoConfig, setGeoConfig] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -430,6 +452,7 @@ const AddressMapPicker = ({
 
           {/* Recenter when position changes */}
           <MapRecenter position={position} />
+          <MapInvalidateOnVisible isVisible={isVisible} position={position} />
         </MapContainer>
       </div>
 

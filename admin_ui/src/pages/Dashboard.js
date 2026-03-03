@@ -252,9 +252,11 @@ const Dashboard = () => {
           <Card
             title={t('ui.dashboard.revenue_trend')}
             className="chart-container"
-            headStyle={{
-              fontSize: responsive.getFontSize('14px', '16px', '16px'),
-              padding: responsive.isMobileDevice ? '12px' : '16px 24px'
+            styles={{
+              header: {
+                fontSize: responsive.getFontSize('14px', '16px', '16px'),
+                padding: responsive.isMobileDevice ? '12px' : '16px 24px'
+              }
             }}
           >
             <LineChart
@@ -270,9 +272,11 @@ const Dashboard = () => {
           <Card
             title={t('ui.dashboard.order_status_distribution')}
             className="chart-container"
-            headStyle={{
-              fontSize: responsive.getFontSize('14px', '16px', '16px'),
-              padding: responsive.isMobileDevice ? '12px' : '16px 24px'
+            styles={{
+              header: {
+                fontSize: responsive.getFontSize('14px', '16px', '16px'),
+                padding: responsive.isMobileDevice ? '12px' : '16px 24px'
+              }
             }}
           >
             <PieChart
@@ -288,9 +292,11 @@ const Dashboard = () => {
           <Card
             title={t('ui.dashboard.sales_performance')}
             className="chart-container"
-            headStyle={{
-              fontSize: responsive.getFontSize('14px', '16px', '16px'),
-              padding: responsive.isMobileDevice ? '12px' : '16px 24px'
+            styles={{
+              header: {
+                fontSize: responsive.getFontSize('14px', '16px', '16px'),
+                padding: responsive.isMobileDevice ? '12px' : '16px 24px'
+              }
             }}
           >
             <LineChart
@@ -305,9 +311,11 @@ const Dashboard = () => {
           <Card
             title={t('ui.dashboard.top_products')}
             className="chart-container"
-            headStyle={{
-              fontSize: responsive.getFontSize('14px', '16px', '16px'),
-              padding: responsive.isMobileDevice ? '12px' : '16px 24px'
+            styles={{
+              header: {
+                fontSize: responsive.getFontSize('14px', '16px', '16px'),
+                padding: responsive.isMobileDevice ? '12px' : '16px 24px'
+              }
             }}
           >
             <BarChart

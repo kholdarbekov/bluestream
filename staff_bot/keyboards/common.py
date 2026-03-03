@@ -1,7 +1,7 @@
 """
 Common/shared keyboard components for Staff Bot
 """
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup
 from typing import List
 
 from i18n import i18n
@@ -77,3 +77,15 @@ class CommonKeyboards:
             ))
 
         return buttons
+
+    @staticmethod
+    def location_request(language: str, button_text: str) -> ReplyKeyboardMarkup:
+        """Reply keyboard with Telegram location request button."""
+        return ReplyKeyboardMarkup(
+            [
+                [KeyboardButton(button_text, request_location=True)],
+                [KeyboardButton(i18n.get('staff.cancel', language))],
+            ],
+            resize_keyboard=True,
+            one_time_keyboard=True,
+        )

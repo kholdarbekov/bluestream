@@ -92,7 +92,8 @@ class StaffAPIClient:
         return httpx.AsyncClient(
             base_url=self.base_url,
             timeout=self.timeout,
-            verify=self._resolve_verify_config()
+            verify=self._resolve_verify_config(),
+            follow_redirects=True,
         )
 
     @staticmethod
@@ -442,7 +443,7 @@ class StaffAPIClient:
         """Get available products (for operator order creation)"""
         return await self._make_request(
             'GET',
-            '/api/v1/products',
+            '/api/v1/products/',
             token=token
         )
 

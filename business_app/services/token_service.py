@@ -74,6 +74,25 @@ class TokenService:
             self.redis_available = False
             self.redis_client = None
             self._redis_connected = False
+
+    @staticmethod
+    def _normalize_user_lookup_id(user_id: Any) -> Any:
+        """Normalize JWT subject values before using them in ORM lookups."""
+        if isinstance(user_id, str):
+            normalized = user_id.strip()
+            if normalized.isdigit():
+                return int(normalized)
+            return normalized
+        return user_id
+
+    @staticmethod
+    def _is_user_active(user: Optional[User]) -> bool:
+        """Treat both enum-backed and raw-string statuses as active when equivalent."""
+        if not user:
+            return False
+
+        status = user.status.value if hasattr(user.status, 'value') else user.status
+        return status == UserStatus.ACTIVE.value
     
     def generate_tokens(self, user: User, additional_claims: Optional[Dict] = None) -> Dict[str, Any]:
         """
@@ -173,6 +192,7 @@ class TokenService:
             # Decode refresh token to get claims
             claims = decode_token(refresh_token)
             user_id = claims['sub']
+            lookup_user_id = self._normalize_user_lookup_id(user_id)
             session_id = claims.get('session_id')
             
             # Check if refresh token is blacklisted
@@ -181,12 +201,12 @@ class TokenService:
                 raise ValueError("Refresh token is blacklisted")
             
             # Get user
-            user = User.query.get(user_id)
-            if not user or user.status != UserStatus.ACTIVE.value:
+            user = User.query.get(lookup_user_id)
+            if not self._is_user_active(user):
                 raise ValueError("User not found or inactive")
             
             # Validate session
-            if not self._validate_session(user_id, session_id):
+            if not self._validate_session(lookup_user_id, session_id):
                 raise ValueError("Invalid session")
             
             # Get access token expiration from configuration
@@ -216,7 +236,7 @@ class TokenService:
             )
             
             # Update session info
-            self._update_session_info(user_id, session_id, {
+            self._update_session_info(lookup_user_id, session_id, {
                 'last_refresh': datetime.now(timezone.utc).isoformat(),
                 'access_token_jti': get_jti(access_token)
             })
@@ -398,6 +418,7 @@ class TokenService:
             claims = decode_token(token)
             token_jti = claims['jti']
             user_id = claims['sub']
+            lookup_user_id = self._normalize_user_lookup_id(user_id)
             session_id = claims.get('session_id')
             
             # Check if token is blacklisted
@@ -409,7 +430,7 @@ class TokenService:
                 }
             
             # Check user status
-            user = User.query.get(user_id)
+            user = User.query.get(lookup_user_id)
             if not user:
                 return {
                     'valid': False,
@@ -417,7 +438,7 @@ class TokenService:
                     'error_code': 'USER_NOT_FOUND'
                 }
             
-            if user.status != UserStatus.ACTIVE.value:
+            if not self._is_user_active(user):
                 return {
                     'valid': False,
                     'reason': 'User account is not active',
@@ -425,7 +446,7 @@ class TokenService:
                 }
             
             # Validate session if session_id is present
-            if session_id and not self._validate_session(user_id, session_id):
+            if session_id and not self._validate_session(lookup_user_id, session_id):
                 return {
                     'valid': False,
                     'reason': 'Invalid session',

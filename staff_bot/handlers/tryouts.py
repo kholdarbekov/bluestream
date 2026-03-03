@@ -147,6 +147,13 @@ class TryoutHandler(BaseHandler):
 
         response, products = await self._fetch_tryout_products(token)
         if not response.success:
+            logger.warning(
+                "Tryout product load failed after address capture: user=%s status=%s error_code=%s error=%s",
+                update.effective_user.id if update and update.effective_user else None,
+                getattr(response, 'status_code', None),
+                getattr(response, 'error_code', None),
+                getattr(response, 'error', None),
+            )
             await self._handle_api_response_error(update, response, language)
             return
 

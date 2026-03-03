@@ -67,7 +67,7 @@ class PaymentService:
     def create_payment(self, order_id: int, payment_method: PaymentMethod,
                       amount: int = None, **kwargs) -> Payment:
         """
-        Create payment record
+        Create or update the canonical payment record for an order.
 
         Args:
             order_id: Order ID
@@ -97,18 +97,33 @@ class PaymentService:
         if amount > order.total_amount:
             raise ValidationError(get_translation('error.validation.amount_exceeds_total'))
         
-        # Create payment record
-        payment = Payment(
-            order_id=order_id,
-            user_id=order.user_id,
-            payment_method=payment_method,
-            amount=amount,
-            status=PaymentStatus.PENDING,
-            currency='UZS',
-            provider_data=kwargs
-        )
-        
-        db.session.add(payment)
+        payment = Payment.query.filter_by(order_id=order_id).first()
+        provider_data = dict(kwargs)
+
+        if payment:
+            payment.user_id = order.user_id
+            payment.payment_method = payment_method
+            payment.amount = amount
+            payment.status = PaymentStatus.PENDING
+            payment.currency = provider_data.pop('currency', payment.currency or 'UZS')
+            payment.description = provider_data.pop('description', payment.description)
+            payment.callback_url = provider_data.pop('return_url', payment.callback_url)
+            payment.failure_reason = None
+            payment.provider_data = provider_data
+        else:
+            payment = Payment(
+                order_id=order_id,
+                user_id=order.user_id,
+                payment_method=payment_method,
+                amount=amount,
+                status=PaymentStatus.PENDING,
+                currency=provider_data.pop('currency', 'UZS'),
+                description=provider_data.pop('description', None),
+                callback_url=provider_data.pop('return_url', None),
+                provider_data=provider_data,
+            )
+            db.session.add(payment)
+
         db.session.commit()
         
         return payment

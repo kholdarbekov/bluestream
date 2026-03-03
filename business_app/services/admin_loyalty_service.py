@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from typing import Any, Dict, Optional
 
-from sqlalchemy import func, or_
+from sqlalchemy import case, func, or_
 
 from business_app import db
 from business_app.models.loyalty import (
@@ -26,23 +26,8 @@ class AdminLoyaltyService:
     """Business/query logic for admin loyalty endpoints."""
 
     @staticmethod
-    def list_members(
-        *,
-        page: int = 1,
-        per_page: int = 20,
-        search: str = "",
-        program_id: Optional[int] = None,
-        tier: Optional[str] = None,
-    ) -> Dict[str, Any]:
-        """Return paginated loyalty members with summary metadata."""
-        page = max(page, 1)
-        per_page = min(max(per_page, 1), 100)
-
-        query = db.session.query(LoyaltyPoints, User).join(
-            User,
-            User.id == LoyaltyPoints.user_id,
-        )
-
+    def _apply_member_filters(query, *, search: str = "", program_id: Optional[int] = None, tier: Optional[str] = None):
+        """Apply shared loyalty-member filters to a query rooted on LoyaltyPoints/User."""
         if search:
             term = f"%{search.strip()}%"
             query = query.filter(
@@ -60,23 +45,101 @@ class AdminLoyaltyService:
         if tier:
             query = query.filter(LoyaltyPoints.current_tier == tier)
 
-        ordered_query = query.order_by(
+        return query
+
+    @staticmethod
+    def _latest_activity_subquery():
+        """Return a subquery containing the latest loyalty transaction timestamp per user."""
+        return (
+            db.session.query(
+                LoyaltyTransaction.user_id.label("user_id"),
+                func.max(LoyaltyTransaction.created_at).label("last_activity_at"),
+            )
+            .group_by(LoyaltyTransaction.user_id)
+            .subquery()
+        )
+
+    @staticmethod
+    def list_members(
+        *,
+        page: int = 1,
+        per_page: int = 20,
+        search: str = "",
+        program_id: Optional[int] = None,
+        tier: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Return paginated loyalty members with summary metadata."""
+        page = max(page, 1)
+        per_page = min(max(per_page, 1), 100)
+
+        latest_activity_subquery = AdminLoyaltyService._latest_activity_subquery()
+
+        row_query = db.session.query(
+            LoyaltyPoints,
+            User,
+            LoyaltyProgram.name.label("program_name"),
+            latest_activity_subquery.c.last_activity_at.label("latest_activity_at"),
+        ).join(
+            User,
+            User.id == LoyaltyPoints.user_id,
+        ).outerjoin(
+            LoyaltyProgram,
+            LoyaltyProgram.id == LoyaltyPoints.program_id,
+        ).outerjoin(
+            latest_activity_subquery,
+            latest_activity_subquery.c.user_id == LoyaltyPoints.user_id,
+        )
+        row_query = AdminLoyaltyService._apply_member_filters(
+            row_query,
+            search=search,
+            program_id=program_id,
+            tier=tier,
+        )
+
+        ordered_query = row_query.order_by(
             LoyaltyPoints.last_activity_date.desc(),
             LoyaltyPoints.created_at.desc(),
             LoyaltyPoints.id.desc(),
         )
         pagination = ordered_query.paginate(page=page, per_page=per_page, error_out=False)
 
-        filtered_pairs = query.all()
-        items = [
-            AdminLoyaltyService.serialize_member(account, user)
-            for account, user in pagination.items
-        ]
-
-        total_points_in_circulation = sum(
-            max(0, account.current_balance or 0) for account, _ in filtered_pairs
+        summary_query = db.session.query(
+            func.count(LoyaltyPoints.id).label("total_members"),
+            func.coalesce(
+                func.sum(case(((LoyaltyPoints.current_balance > 0), 1), else_=0)),
+                0,
+            ).label("active_members"),
+            func.coalesce(
+                func.sum(
+                    case(
+                        ((LoyaltyPoints.current_balance > 0), LoyaltyPoints.current_balance),
+                        else_=0,
+                    )
+                ),
+                0,
+            ).label("total_points_in_circulation"),
+            func.coalesce(func.sum(LoyaltyPoints.total_earned), 0).label("total_points_earned"),
+        ).join(
+            User,
+            User.id == LoyaltyPoints.user_id,
         )
-        total_earned = sum(account.total_earned or 0 for account, _ in filtered_pairs)
+        summary_query = AdminLoyaltyService._apply_member_filters(
+            summary_query,
+            search=search,
+            program_id=program_id,
+            tier=tier,
+        )
+        summary = summary_query.one()
+
+        items = [
+            AdminLoyaltyService.serialize_member(
+                account,
+                user,
+                program_name=program_name,
+                latest_activity_at=latest_activity_at,
+            )
+            for account, user, program_name, latest_activity_at in pagination.items
+        ]
 
         return {
             "items": items,
@@ -84,14 +147,12 @@ class AdminLoyaltyService:
             "per_page": pagination.per_page,
             "total": pagination.total,
             "summary": {
-                "total_members": pagination.total,
-                "active_members": sum(
-                    1 for account, _ in filtered_pairs if (account.current_balance or 0) > 0
-                ),
-                "total_points_in_circulation": total_points_in_circulation,
-                "total_points_earned": total_earned,
+                "total_members": summary.total_members,
+                "active_members": summary.active_members,
+                "total_points_in_circulation": summary.total_points_in_circulation,
+                "total_points_earned": summary.total_points_earned,
                 "average_points_balance": round(
-                    total_points_in_circulation / pagination.total,
+                    summary.total_points_in_circulation / pagination.total,
                     2,
                 ) if pagination.total else 0,
             },
@@ -139,18 +200,30 @@ class AdminLoyaltyService:
         }
 
     @staticmethod
-    def serialize_member(account: LoyaltyPoints, user: User) -> Dict[str, Any]:
+    def serialize_member(
+        account: LoyaltyPoints,
+        user: User,
+        *,
+        program_name: Optional[str] = None,
+        latest_activity_at: Optional[datetime] = None,
+    ) -> Dict[str, Any]:
         """Serialize a loyalty member row."""
-        program = LoyaltyProgram.query.get(account.program_id) if account.program_id else None
-
         last_activity = account.last_activity_date
         if not last_activity:
-            last_transaction = (
-                LoyaltyTransaction.query.filter_by(user_id=account.user_id)
-                .order_by(LoyaltyTransaction.created_at.desc())
-                .first()
-            )
-            last_activity = last_transaction.created_at if last_transaction else None
+            if latest_activity_at is not None:
+                last_activity = latest_activity_at
+            else:
+                last_transaction = (
+                    LoyaltyTransaction.query.filter_by(user_id=account.user_id)
+                    .order_by(LoyaltyTransaction.created_at.desc())
+                    .first()
+                )
+                last_activity = last_transaction.created_at if last_transaction else None
+
+        resolved_program_name = program_name
+        if resolved_program_name is None and account.program_id:
+            program = LoyaltyProgram.query.get(account.program_id)
+            resolved_program_name = program.name if program else None
 
         return {
             "id": account.id,
@@ -159,7 +232,7 @@ class AdminLoyaltyService:
             "customer_email": user.email,
             "customer_phone": user.phone,
             "program_id": account.program_id,
-            "program_name": program.name if program else None,
+            "program_name": resolved_program_name,
             "current_tier": account.current_tier,
             "current_balance": account.current_balance or 0,
             "total_earned": account.total_earned or 0,
@@ -185,7 +258,33 @@ class AdminLoyaltyService:
         page = max(page, 1)
         per_page = min(max(per_page, 1), 100)
 
-        query = LoyaltyProgram.query
+        member_counts_subquery = (
+            db.session.query(
+                LoyaltyPoints.program_id.label("program_id"),
+                func.count(LoyaltyPoints.id).label("member_count"),
+            )
+            .group_by(LoyaltyPoints.program_id)
+            .subquery()
+        )
+        tier_counts_subquery = (
+            db.session.query(
+                LoyaltyTierConfig.program_id.label("program_id"),
+                func.count(LoyaltyTierConfig.id).label("tier_count"),
+            )
+            .group_by(LoyaltyTierConfig.program_id)
+            .subquery()
+        )
+        query = db.session.query(
+            LoyaltyProgram,
+            func.coalesce(member_counts_subquery.c.member_count, 0).label("member_count"),
+            func.coalesce(tier_counts_subquery.c.tier_count, 0).label("tier_count"),
+        ).outerjoin(
+            member_counts_subquery,
+            member_counts_subquery.c.program_id == LoyaltyProgram.id,
+        ).outerjoin(
+            tier_counts_subquery,
+            tier_counts_subquery.c.program_id == LoyaltyProgram.id,
+        )
 
         if search:
             term = f"%{search.strip()}%"
@@ -208,8 +307,12 @@ class AdminLoyaltyService:
 
         return {
             "items": [
-                AdminLoyaltyService.serialize_program(program)
-                for program in pagination.items
+                AdminLoyaltyService.serialize_program(
+                    program,
+                    member_count=member_count,
+                    tier_count=tier_count,
+                )
+                for program, member_count, tier_count in pagination.items
             ],
             "page": pagination.page,
             "per_page": pagination.per_page,
@@ -217,12 +320,17 @@ class AdminLoyaltyService:
         }
 
     @staticmethod
-    def serialize_program(program: LoyaltyProgram) -> Dict[str, Any]:
+    def serialize_program(
+        program: LoyaltyProgram,
+        *,
+        member_count: Optional[int] = None,
+        tier_count: Optional[int] = None,
+    ) -> Dict[str, Any]:
         """Serialize a loyalty program with derived counts."""
         payload = program.to_dict()
         payload.update({
-            "member_count": LoyaltyPoints.query.filter_by(program_id=program.id).count(),
-            "tier_count": LoyaltyTierConfig.query.filter_by(program_id=program.id).count(),
+            "member_count": member_count if member_count is not None else LoyaltyPoints.query.filter_by(program_id=program.id).count(),
+            "tier_count": tier_count if tier_count is not None else LoyaltyTierConfig.query.filter_by(program_id=program.id).count(),
         })
         return payload
 

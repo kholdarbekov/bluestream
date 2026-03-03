@@ -162,6 +162,18 @@ class TestOrdersAndDeliveryAPI:
         assert body['date'] == target_date
         assert 'time_slots' in body
 
+    def test_delivery_time_slots_uses_aggregated_booking_query(self, client, delivery_slot, monkeypatch):
+        target_date = (date.today() + timedelta(days=1)).isoformat()
+
+        def _fail_if_called(*args, **kwargs):
+            raise AssertionError("Per-slot booking count helper should not be called")
+
+        monkeypatch.setattr(DeliveryTimeSlot, "get_current_orders_count", _fail_if_called)
+
+        response = client.get(f'/api/v1/delivery/time-slots?date={target_date}')
+
+        assert response.status_code == 200
+
     def test_calculate_delivery_fee_requires_auth(self, client):
         response = client.post('/api/v1/delivery/calculate-fee', json={'address_id': 1, 'order_total': 20000})
         assert response.status_code == 401

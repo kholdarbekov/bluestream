@@ -16,6 +16,10 @@ from business_app.models.delivery import DeliveryTimeSlot
 @translatable('name', 'description')
 class Subscription(db.Model, TimestampMixin, TranslatableMixin):
     __tablename__ = 'subscriptions'
+    __table_args__ = (
+        Index('idx_subscriptions_status_next_billing', 'status', 'next_billing_date'),
+        Index('idx_subscriptions_status_next_delivery', 'status', 'next_delivery_date'),
+    )
     
     id = Column(Integer, primary_key=True)
     subscription_number = Column(String(50), unique=True, nullable=False, index=True)
@@ -246,5 +250,4 @@ class SubscriptionLog(db.Model, TimestampMixin):
                 'name': self.user.full_name
             } if self.user else None
         }
-
 

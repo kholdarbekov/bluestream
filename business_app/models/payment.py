@@ -16,13 +16,13 @@ class Payment(db.Model, TimestampMixin):
     __table_args__ = (
         Index('idx_payments_user_status', 'user_id', 'status'),
         Index('idx_payments_status_created', 'status', 'created_at'),
-        Index('idx_payments_order_status', 'order_id', 'status'),
     )
 
     id = Column(Integer, primary_key=True)
     payment_id = Column(String(100), unique=True, nullable=False, index=True)
     user_id = Column(Integer, ForeignKey('users.id'), nullable=False, index=True)
-    order_id = Column(Integer, ForeignKey('orders.id'), nullable=True)
+    # Canonical payment contract: at most one payment record may reference a given order.
+    order_id = Column(Integer, ForeignKey('orders.id'), nullable=True, unique=True)
     subscription_id = Column(Integer, ForeignKey('subscriptions.id'), nullable=True)
     
     amount = Column(Numeric(precision=10, scale=2), nullable=False)

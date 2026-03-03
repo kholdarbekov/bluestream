@@ -44,6 +44,12 @@ class ProductCategory(db.Model, TimestampMixin, TranslatableMixin):
 @translatable('name', 'description', 'short_description', 'ingredients', 'meta_title', 'meta_description')
 class Product(db.Model, TimestampMixin, TranslatableMixin):
     __tablename__ = 'products'
+    __table_args__ = (
+        Index('idx_products_active_category', 'is_active', 'category_id'),
+        Index('idx_products_active_featured', 'is_active', 'is_featured'),
+        Index('idx_products_active_base_price', 'is_active', 'base_price'),
+        Index('idx_products_slug', 'slug'),
+    )
     
     id = Column(Integer, primary_key=True)
     name = Column(String(200), nullable=False)           # Default/fallback name (Uzbek)

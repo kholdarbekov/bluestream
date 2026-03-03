@@ -7,7 +7,8 @@ from datetime import datetime, timedelta, UTC
 from typing import List, Dict, Any, Optional, Tuple
 from decimal import Decimal
 from flask import current_app
-from sqlalchemy import and_, or_, func, desc
+from sqlalchemy import and_, or_, func, desc, literal
+from sqlalchemy.orm import selectinload
 
 from business_app.models.product import Product, ProductCategory, PriceRule
 from business_app.models.review import Review
@@ -90,7 +91,9 @@ class ProductService:
             raise ValidationError("Per page must be >= 1")
 
         # Build base query
-        query = Product.query.filter_by(is_active=True)
+        query = Product.query.options(
+            selectinload(Product.category)
+        ).filter_by(is_active=True)
 
         # Apply filters
         if category_id:
@@ -98,11 +101,7 @@ class ProductService:
 
         if search:
             search_term = f"%{search.strip()}%"
-            query = query.filter(or_(
-                Product.name.ilike(search_term),
-                Product.description.ilike(search_term),
-                Product.sku.ilike(search_term)
-            ))
+            query = query.filter(self._build_search_expression().ilike(search_term))
 
         if is_featured is not None:
             query = query.filter_by(is_featured=is_featured)
@@ -175,7 +174,9 @@ class ProductService:
         Raises:
             NotFoundError: If product not found
         """
-        product = Product.query.filter_by(id=product_id, is_active=True).first()
+        product = Product.query.options(
+            selectinload(Product.category)
+        ).filter_by(id=product_id, is_active=True).first()
 
         if not product:
             raise NotFoundError(f"Product with ID {product_id} not found")
@@ -593,6 +594,16 @@ class ProductService:
             'created': Product.created_at
         }
         return sort_fields.get(sort_by, Product.name)
+
+    def _build_search_expression(self):
+        """Build a normalized search expression compatible with PostgreSQL and SQLite."""
+        return func.trim(
+            func.coalesce(Product.name, '')
+            + literal(' ')
+            + func.coalesce(Product.description, '')
+            + literal(' ')
+            + func.coalesce(Product.sku, '')
+        )
 
     def _calculate_price_rule_discount(
         self,

@@ -107,9 +107,10 @@ def process_daily_subscription_billing():
         
         # Get subscriptions due for billing today
         today = datetime.now(timezone.utc).date()
+        next_day_start = datetime.combine(today + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc)
         
         due_subscriptions = Subscription.query.filter(
-            Subscription.next_billing_date <= today,
+            Subscription.next_billing_date < next_day_start,
             Subscription.status.in_([SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIAL])
         ).all()
         
@@ -164,9 +165,12 @@ def send_renewal_reminders():
         
         # Send reminders 3 days before renewal
         reminder_date = datetime.now(timezone.utc).date() + timedelta(days=3)
+        reminder_start = datetime.combine(reminder_date, datetime.min.time(), tzinfo=timezone.utc)
+        reminder_end = reminder_start + timedelta(days=1)
         
         upcoming_renewals = Subscription.query.filter(
-            Subscription.next_billing_date == reminder_date,
+            Subscription.next_billing_date >= reminder_start,
+            Subscription.next_billing_date < reminder_end,
             Subscription.status == SubscriptionStatus.ACTIVE
         ).all()
         
@@ -178,10 +182,14 @@ def send_renewal_reminders():
                 language = get_current_language()
                 template_data = {
                     'subscription_id': subscription.id,
-                    'plan_name': subscription.plan.get_translated('name', language) if subscription.plan else 'Standard',
+                    'plan_name': subscription.name,
                     'renewal_date': subscription.next_billing_date.isoformat(),
-                    'amount': subscription.total_amount,
-                    'frequency': subscription.frequency.value
+                    'amount': subscription.billing_amount,
+                    'frequency': (
+                        subscription.billing_cycle.value
+                        if hasattr(subscription.billing_cycle, 'value')
+                        else subscription.billing_cycle
+                    ),
                 }
                 
                 notification_service.send_notification(

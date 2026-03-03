@@ -18,6 +18,7 @@ class Order(db.Model, TimestampMixin):
         Index('idx_orders_user_status', 'user_id', 'status'),
         Index('idx_orders_status_created', 'status', 'created_at'),
         Index('idx_orders_user_created', 'user_id', 'created_at'),
+        Index('idx_orders_delivery_slot_date', 'delivery_time_slot', 'delivery_date'),
     )
 
     id = Column(Integer, primary_key=True)
@@ -61,6 +62,7 @@ class Order(db.Model, TimestampMixin):
     created_by_staff = relationship('User', foreign_keys=[created_by_staff_id])
     delivery_address = relationship('UserAddress', back_populates='orders')
     order_items = relationship('OrderItem', back_populates='order', cascade='all, delete-orphan')
+    # `Payment.order_id` is unique, so `Order.payment` remains the canonical one-to-one payment link.
     payment = relationship('Payment', back_populates='order', uselist=False)
     delivery = relationship('Delivery', back_populates='order', uselist=False)
     subscription = relationship('Subscription', back_populates='orders')

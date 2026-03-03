@@ -14,6 +14,9 @@ from business_app.utils.constants import LoyaltyTransactionType
 
 class LoyaltyTransaction(db.Model, TimestampMixin):
     __tablename__ = 'loyalty_transactions'
+    __table_args__ = (
+        Index('idx_loyalty_transactions_user_created', 'user_id', 'created_at'),
+    )
     
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey('users.id'), nullable=False, index=True)
@@ -226,6 +229,9 @@ class LoyaltyTierConfig(db.Model, TimestampMixin):
 class LoyaltyPoints(db.Model, TimestampMixin):
     """User loyalty points balance"""
     __tablename__ = 'loyalty_points'
+    __table_args__ = (
+        Index('idx_loyalty_points_program_tier_activity', 'program_id', 'current_tier', 'last_activity_date'),
+    )
     
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey('users.id'), nullable=False, index=True, unique=True)

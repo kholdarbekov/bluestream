@@ -4,6 +4,7 @@ from decimal import Decimal
 from unittest.mock import patch
 
 import pytest
+from sqlalchemy.exc import IntegrityError
 
 from business_app.models.payment import Payment, PaymentTransaction
 from business_app.services.payment_service import PaymentService
@@ -39,6 +40,40 @@ def loyalty_payment(db, sample_order):
 @pytest.mark.unit
 @pytest.mark.payment
 class TestPaymentLifecycleRules:
+    def test_payment_order_id_unique_constraint_rejects_duplicates(
+        self,
+        db,
+        sample_order,
+    ):
+        first = Payment(
+            order_id=sample_order.id,
+            user_id=sample_order.user_id,
+            payment_method=PaymentMethod.PAYME,
+            amount=sample_order.total_amount,
+            currency="UZS",
+            status=PaymentStatus.PENDING,
+            payment_id="unique-payment-1",
+            provider_data={},
+        )
+        second = Payment(
+            order_id=sample_order.id,
+            user_id=sample_order.user_id,
+            payment_method=PaymentMethod.PAYME,
+            amount=sample_order.total_amount,
+            currency="UZS",
+            status=PaymentStatus.PENDING,
+            payment_id="unique-payment-2",
+            provider_data={},
+        )
+
+        db.session.add(first)
+        db.session.commit()
+
+        db.session.add(second)
+        with pytest.raises(IntegrityError):
+            db.session.commit()
+        db.session.rollback()
+
     def test_initialize_order_payment_creates_pending_payme_record_idempotently(
         self,
         payment_service,

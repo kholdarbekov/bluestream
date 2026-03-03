@@ -1,6 +1,6 @@
 from datetime import datetime, UTC
 from decimal import Decimal
-from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, Text, JSON, ForeignKey, Numeric
+from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, Text, JSON, ForeignKey, Numeric, Index
 from sqlalchemy.orm import relationship
 from business_app import db
 from business_app.utils.constants import OrderStatus
@@ -133,11 +133,19 @@ class PromotionalCampaign(db.Model, TimestampMixin, TranslatableMixin):
 class CampaignUsage(db.Model, TimestampMixin):
     """Track campaign usage by customers"""
     __tablename__ = 'campaign_usage'
+    __table_args__ = (
+        Index('idx_campaign_usage_campaign_user', 'campaign_id', 'user_id'),
+        Index('idx_campaign_usage_order_id', 'order_id'),
+    )
     
     id = Column(Integer, primary_key=True)
-    campaign_id = Column(Integer, nullable=False)
-    user_id = Column(Integer, nullable=False)
-    order_id = Column(Integer, nullable=True)
+    campaign_id = Column(Integer, ForeignKey('promotional_campaigns.id'), nullable=False)
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=False)
+    order_id = Column(Integer, ForeignKey('orders.id'), nullable=True)
+
+    campaign = relationship('PromotionalCampaign', backref='usage_records')
+    user = relationship('User')
+    order = relationship('Order')
     
     def __repr__(self):
         return f'<CampaignUsage {self.campaign_id}:{self.user_id}>'

@@ -204,6 +204,54 @@ class DeliveryService:
                 available_slots.append(slot)
         
         return available_slots
+
+    def get_time_slot_availability(self, target_date) -> List[Dict[str, Any]]:
+        """Return delivery slot capacity details for a specific booking date."""
+        booking_rows = (
+            db.session.query(
+                Order.delivery_time_slot,
+                db.func.count(Order.id),
+            )
+            .filter(
+                Order.delivery_date >= target_date,
+                Order.delivery_date < target_date + timedelta(days=1),
+                Order.delivery_time_slot.isnot(None),
+            )
+            .group_by(Order.delivery_time_slot)
+            .all()
+        )
+        bookings_by_slot = {
+            slot_label: count for slot_label, count in booking_rows
+        }
+
+        slots_data = []
+        for slot in DeliveryTimeSlot.query.filter_by(is_active=True).all():
+            if not slot.is_available_on_date(target_date):
+                continue
+
+            current_bookings = bookings_by_slot.get(
+                f"{slot.start_time}-{slot.end_time}",
+                0,
+            )
+            available_capacity = slot.max_orders - current_bookings
+            delivery_fee = float(slot.delivery_fee)
+            premium_fee = float(slot.premium_fee) if slot.is_premium else 0
+
+            slots_data.append({
+                'id': slot.id,
+                'name': slot.name,
+                'start_time': slot.start_time,
+                'end_time': slot.end_time,
+                'time_range': f"{slot.start_time}-{slot.end_time}",
+                'delivery_fee': delivery_fee,
+                'is_premium': slot.is_premium,
+                'premium_fee': premium_fee,
+                'total_fee': delivery_fee + premium_fee,
+                'available_capacity': available_capacity,
+                'is_available': available_capacity > 0
+            })
+
+        return slots_data
     
     def track_delivery(self, tracking_code: str) -> Dict[str, Any]:
         """Get delivery tracking information"""

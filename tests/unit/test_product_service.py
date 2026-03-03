@@ -5,6 +5,7 @@ from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
 import pytest
+from sqlalchemy import event
 
 from business_app.models.order import Order, OrderItem
 from business_app.models.product import PriceRule, Product
@@ -109,6 +110,23 @@ class TestProductRetrieval:
 
         assert total == 3
         assert all(p.stock_quantity > 0 for p in products)
+
+    def test_get_products_eager_loads_category_with_bounded_queries(self, product_service, sample_products, db):
+        statements = []
+
+        def _before_cursor_execute(conn, cursor, statement, parameters, context, executemany):
+            statements.append(statement)
+
+        event.listen(db.engine, "before_cursor_execute", _before_cursor_execute)
+        try:
+            products, total, *_ = product_service.get_products_with_filters(page=1, per_page=10)
+            category_names = [product.category.name if product.category else None for product in products]
+        finally:
+            event.remove(db.engine, "before_cursor_execute", _before_cursor_execute)
+
+        assert total == 4
+        assert all(name == 'Water' for name in category_names)
+        assert len(statements) <= 3
 
     def test_get_products_validates_pagination(self, product_service):
         with pytest.raises(ValidationError):

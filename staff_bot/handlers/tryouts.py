@@ -1,6 +1,8 @@
 """Driver-facing try-out task handlers for the staff bot."""
 
 import logging
+from decimal import Decimal, InvalidOperation
+from typing import Dict, Optional
 
 from telegram import ReplyKeyboardRemove, Update
 from telegram.ext import ContextTypes, ConversationHandler
@@ -11,7 +13,7 @@ from i18n import i18n
 from keyboards.common import CommonKeyboards
 from keyboards.tryouts import TryoutKeyboards
 from permissions import require_auth, require_delivery_driver
-from utils.formatters import escape_html
+from utils.formatters import escape_html, format_quantity
 from utils.validators import validate_name, validate_phone
 
 
@@ -132,6 +134,91 @@ class TryoutHandler(BaseHandler):
         ]
         return response, eligible
 
+    @staticmethod
+    def _as_decimal(value) -> Decimal:
+        try:
+            return Decimal(str(value or 0))
+        except (InvalidOperation, TypeError, ValueError):
+            return Decimal('0')
+
+    @staticmethod
+    def _create_selected_quantities(payload: dict) -> Dict[int, int]:
+        quantities: Dict[int, int] = {}
+        for item in payload.get('items', []):
+            product_id = int(item.get('product_id'))
+            quantities[product_id] = quantities.get(product_id, 0) + int(item.get('quantity') or 0)
+        return quantities
+
+    @staticmethod
+    def _pickup_selected_map(state: dict) -> Dict[int, str]:
+        raw_selected = state.get('selected', {})
+        normalized: Dict[int, str] = {}
+        for product_id, units in raw_selected.items():
+            normalized[int(product_id)] = str(units)
+        state['selected'] = normalized
+        return normalized
+
+    def _get_pickup_product(self, state: dict, product_id: int) -> Optional[dict]:
+        return next(
+            (row for row in state.get('products', []) if int(row.get('product_id')) == int(product_id)),
+            None,
+        )
+
+    def _find_open_pickup_task_id(self, tryout: dict) -> Optional[int]:
+        for task in tryout.get('tasks') or []:
+            if task.get('task_type') == 'pickup' and task.get('status') in {'open', 'assigned'}:
+                return int(task.get('id'))
+        return None
+
+    def _clear_pickup_state(self, context: ContextTypes.DEFAULT_TYPE) -> None:
+        context.user_data.pop('tryout_pickup_task_id', None)
+        context.user_data.pop('tryout_pickup_products', None)
+        context.user_data.pop('tryout_pickup_state', None)
+
+    def _build_pickup_state(self, task: dict) -> dict:
+        return {
+            'task_id': int(task.get('id')),
+            'tryout_id': int(task.get('tryout_id')),
+            'tryout_number': task.get('tryout_number') or 'Try-out',
+            'products': [
+                {
+                    'product_id': int(row.get('product_id')),
+                    'product_name': row.get('product_name'),
+                    'units': format_quantity(row.get('units')),
+                }
+                for row in task.get('outstanding_bottle_products') or []
+            ],
+            'selected': {},
+        }
+
+    def _build_pickup_overview(self, language: str, state: dict) -> str:
+        selected = self._pickup_selected_map(state)
+        lines = [
+            f"♻️ <b>{escape_html(state.get('tryout_number'))}</b>",
+            i18n.get('staff.tryout.pickup_select_product', language),
+            "",
+        ]
+
+        for row in state.get('products', []):
+            product_id = int(row.get('product_id'))
+            selected_units = selected.get(product_id)
+            selected_text = (
+                i18n.get(
+                    'staff.tryout.pickup_selected',
+                    language,
+                    selected=format_quantity(selected_units),
+                )
+                if selected_units
+                else i18n.get('staff.tryout.pickup_not_selected', language)
+            )
+            lines.append(
+                f"• {escape_html(row.get('product_name'))}: "
+                f"{format_quantity(row.get('units'))} "
+                f"({escape_html(selected_text)})"
+            )
+
+        return "\n".join(lines)
+
     async def _show_product_selection(
         self,
         update: Update,
@@ -158,17 +245,18 @@ class TryoutHandler(BaseHandler):
             return
 
         context.user_data['new_tryout_products'] = products
+        selected_quantities = self._create_selected_quantities(context.user_data.get('new_tryout', {}))
         text = i18n.get('staff.tryout.select_products', language)
         if use_message:
             await update.message.reply_text(
                 text,
-                reply_markup=TryoutKeyboards.product_list(language, products)
+                reply_markup=TryoutKeyboards.product_list(language, products, selected_quantities)
             )
         else:
             await update.callback_query.answer()
             await update.callback_query.edit_message_text(
                 text,
-                reply_markup=TryoutKeyboards.product_list(language, products)
+                reply_markup=TryoutKeyboards.product_list(language, products, selected_quantities)
             )
 
     @require_auth
@@ -193,9 +281,13 @@ class TryoutHandler(BaseHandler):
             )
             return
 
+        selected_quantity = self._create_selected_quantities(context.user_data.get('new_tryout', {})).get(product_id, 0)
         await query.edit_message_text(
-            i18n.get('staff.tryout.select_quantity', language, product=product.get('name')),
-            reply_markup=TryoutKeyboards.quantity_selection(language, product_id),
+            "\n".join([
+                i18n.get('staff.tryout.select_quantity', language, product=product.get('name')),
+                i18n.get('staff.tryout.current_quantity', language, quantity=selected_quantity),
+            ]),
+            reply_markup=TryoutKeyboards.quantity_selection(language, product_id, selected_quantity),
         )
 
     @require_auth
@@ -232,6 +324,30 @@ class TryoutHandler(BaseHandler):
 
         await query.edit_message_text(
             self._build_create_summary(language, context.user_data['new_tryout']),
+            parse_mode='HTML',
+            reply_markup=TryoutKeyboards.create_summary(language),
+        )
+
+    @require_auth
+    @require_delivery_driver
+    async def remove_create_product(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        query = update.callback_query
+        language = await self._get_language(update, context)
+
+        product_id = int(query.data.split('_')[-1])
+        payload = context.user_data.get('new_tryout', {})
+        items = payload.get('items', [])
+        remaining_items = [item for item in items if int(item.get('product_id')) != product_id]
+        payload['items'] = remaining_items
+        context.user_data['new_tryout'] = payload
+
+        if not remaining_items:
+            await self._show_product_selection(update, context)
+            return
+
+        await query.answer()
+        await query.edit_message_text(
+            self._build_create_summary(language, payload),
             parse_mode='HTML',
             reply_markup=TryoutKeyboards.create_summary(language),
         )
@@ -347,6 +463,7 @@ class TryoutHandler(BaseHandler):
     @require_delivery_driver
     async def show_task_pool(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         language = await self._get_language(update, context)
+        self._clear_pickup_state(context)
         token = await self._get_auth_token(update, context)
         if not token:
             await self._handle_auth_error(update, language)
@@ -488,46 +605,235 @@ class TryoutHandler(BaseHandler):
             )
             return
 
-        context.user_data['tryout_pickup_task_id'] = task_id
-        context.user_data['tryout_pickup_products'] = task.get('outstanding_bottle_products') or []
-
-        instructions = [
-            i18n.get('staff.tryout.pickup_prompt', language),
-            "",
-            "Format:",
-            "product_id:units",
-        ]
-        for row in context.user_data['tryout_pickup_products']:
-            instructions.append(
-                f"{row.get('product_id')}: {escape_html(row.get('product_name'))} "
-                f"({row.get('units')})"
+        if not (task.get('outstanding_bottle_products') or []):
+            await query.edit_message_text(
+                i18n.get('staff.tryout.pickup_no_outstanding', language),
+                reply_markup=CommonKeyboards.back_button(language, "staff_tryout_tasks"),
             )
+            return
+
+        state = self._build_pickup_state(task)
+        context.user_data['tryout_pickup_task_id'] = task_id
+        context.user_data['tryout_pickup_products'] = state.get('products', [])
+        context.user_data['tryout_pickup_state'] = state
 
         await query.edit_message_text(
-            "\n".join(instructions),
-            reply_markup=CommonKeyboards.back_button(language, "staff_tryout_tasks"),
+            self._build_pickup_overview(language, state),
+            parse_mode='HTML',
+            reply_markup=TryoutKeyboards.pickup_overview(language, state),
         )
 
     @require_auth
     @require_delivery_driver
-    async def receive_pickup_quantities(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    async def show_pickup_overview(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        query = update.callback_query
+        await query.answer()
         language = await self._get_language(update, context)
-        task_id = context.user_data.get('tryout_pickup_task_id')
-        if not task_id:
+        state = context.user_data.get('tryout_pickup_state')
+        if not state:
+            await query.edit_message_text(
+                i18n.get('staff.tryout.task_not_found', language),
+                reply_markup=CommonKeyboards.back_button(language, "staff_tryout_tasks"),
+            )
             return
 
-        lines = [line.strip() for line in (update.message.text or '').splitlines() if line.strip()]
-        pickups = []
-        try:
-            for line in lines:
-                product_id_raw, units_raw = [segment.strip() for segment in line.split(':', 1)]
-                pickups.append({
-                    'product_id': int(product_id_raw),
-                    'units': float(units_raw),
-                })
-        except Exception:
-            await update.message.reply_text(i18n.get('staff.tryout.pickup_invalid_format', language))
+        await query.edit_message_text(
+            self._build_pickup_overview(language, state),
+            parse_mode='HTML',
+            reply_markup=TryoutKeyboards.pickup_overview(language, state),
+        )
+
+    @require_auth
+    @require_delivery_driver
+    async def edit_pickup_product(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        query = update.callback_query
+        await query.answer()
+        language = await self._get_language(update, context)
+        _, _, _, _, task_id_raw, product_id_raw = query.data.split('_')
+        task_id = int(task_id_raw)
+        product_id = int(product_id_raw)
+
+        state = context.user_data.get('tryout_pickup_state')
+        if not state or int(state.get('task_id')) != task_id:
+            await query.edit_message_text(
+                i18n.get('staff.tryout.task_not_found', language),
+                reply_markup=CommonKeyboards.back_button(language, "staff_tryout_tasks"),
+            )
             return
+
+        product = self._get_pickup_product(state, product_id)
+        if not product:
+            await query.edit_message_text(
+                i18n.get('staff.tryout.product_not_found', language),
+                reply_markup=CommonKeyboards.back_button(language, f"staff_tryout_pickup_back_{task_id}"),
+            )
+            return
+
+        selected = self._pickup_selected_map(state).get(product_id, '0')
+        await query.edit_message_text(
+            "\n".join([
+                i18n.get('staff.tryout.pickup_select_quantity', language, product=product.get('product_name')),
+                i18n.get(
+                    'staff.tryout.pickup_current_quantity',
+                    language,
+                    quantity=format_quantity(selected),
+                    outstanding=format_quantity(product.get('units')),
+                ),
+            ]),
+            reply_markup=TryoutKeyboards.pickup_quantity_selection(
+                language,
+                task_id,
+                product_id,
+                product.get('units'),
+                selected,
+            ),
+        )
+
+    @require_auth
+    @require_delivery_driver
+    async def select_pickup_quantity(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        query = update.callback_query
+        await query.answer()
+        language = await self._get_language(update, context)
+        _, _, _, _, task_id_raw, product_id_raw, units_raw = query.data.split('_')
+        task_id = int(task_id_raw)
+        product_id = int(product_id_raw)
+        units = Decimal(units_raw) / Decimal('100')
+
+        state = context.user_data.get('tryout_pickup_state')
+        if not state or int(state.get('task_id')) != task_id:
+            await query.edit_message_text(
+                i18n.get('staff.tryout.task_not_found', language),
+                reply_markup=CommonKeyboards.back_button(language, "staff_tryout_tasks"),
+            )
+            return
+
+        product = self._get_pickup_product(state, product_id)
+        if not product:
+            await query.edit_message_text(
+                i18n.get('staff.tryout.product_not_found', language),
+                reply_markup=CommonKeyboards.back_button(language, f"staff_tryout_pickup_back_{task_id}"),
+            )
+            return
+
+        selected = self._pickup_selected_map(state)
+        selected[product_id] = format_quantity(units)
+        context.user_data['tryout_pickup_state'] = state
+
+        await query.edit_message_text(
+            self._build_pickup_overview(language, state),
+            parse_mode='HTML',
+            reply_markup=TryoutKeyboards.pickup_overview(language, state),
+        )
+
+    @require_auth
+    @require_delivery_driver
+    async def clear_pickup_product(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        query = update.callback_query
+        await query.answer()
+        language = await self._get_language(update, context)
+        _, _, _, _, task_id_raw, product_id_raw = query.data.split('_')
+        task_id = int(task_id_raw)
+        product_id = int(product_id_raw)
+
+        state = context.user_data.get('tryout_pickup_state')
+        if not state or int(state.get('task_id')) != task_id:
+            await query.edit_message_text(
+                i18n.get('staff.tryout.task_not_found', language),
+                reply_markup=CommonKeyboards.back_button(language, "staff_tryout_tasks"),
+            )
+            return
+
+        selected = self._pickup_selected_map(state)
+        selected.pop(product_id, None)
+        context.user_data['tryout_pickup_state'] = state
+
+        await query.edit_message_text(
+            self._build_pickup_overview(language, state),
+            parse_mode='HTML',
+            reply_markup=TryoutKeyboards.pickup_overview(language, state),
+        )
+
+    @require_auth
+    @require_delivery_driver
+    async def fill_pickup_all(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        query = update.callback_query
+        await query.answer()
+        language = await self._get_language(update, context)
+        task_id = int(query.data.split('_')[-1])
+
+        state = context.user_data.get('tryout_pickup_state')
+        if not state or int(state.get('task_id')) != task_id:
+            await query.edit_message_text(
+                i18n.get('staff.tryout.task_not_found', language),
+                reply_markup=CommonKeyboards.back_button(language, "staff_tryout_tasks"),
+            )
+            return
+
+        state['selected'] = {
+            int(row.get('product_id')): format_quantity(row.get('units'))
+            for row in state.get('products', [])
+        }
+        context.user_data['tryout_pickup_state'] = state
+
+        await query.edit_message_text(
+            self._build_pickup_overview(language, state),
+            parse_mode='HTML',
+            reply_markup=TryoutKeyboards.pickup_overview(language, state),
+        )
+
+    @require_auth
+    @require_delivery_driver
+    async def clear_pickup_selection(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        query = update.callback_query
+        await query.answer()
+        language = await self._get_language(update, context)
+        task_id = int(query.data.split('_')[-1])
+
+        state = context.user_data.get('tryout_pickup_state')
+        if not state or int(state.get('task_id')) != task_id:
+            await query.edit_message_text(
+                i18n.get('staff.tryout.task_not_found', language),
+                reply_markup=CommonKeyboards.back_button(language, "staff_tryout_tasks"),
+            )
+            return
+
+        state['selected'] = {}
+        context.user_data['tryout_pickup_state'] = state
+
+        await query.edit_message_text(
+            self._build_pickup_overview(language, state),
+            parse_mode='HTML',
+            reply_markup=TryoutKeyboards.pickup_overview(language, state),
+        )
+
+    @require_auth
+    @require_delivery_driver
+    async def submit_pickup(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        query = update.callback_query
+        await query.answer()
+        language = await self._get_language(update, context)
+        task_id = int(query.data.split('_')[-1])
+        state = context.user_data.get('tryout_pickup_state')
+        if not state or int(state.get('task_id')) != task_id:
+            await query.edit_message_text(
+                i18n.get('staff.tryout.task_not_found', language),
+                reply_markup=CommonKeyboards.back_button(language, "staff_tryout_tasks"),
+            )
+            return
+
+        selected = self._pickup_selected_map(state)
+        if not selected:
+            await query.edit_message_text(
+                i18n.get('staff.tryout.pickup_nothing_selected', language),
+                reply_markup=TryoutKeyboards.pickup_overview(language, state),
+            )
+            return
+
+        pickups = [
+            {'product_id': product_id, 'units': float(self._as_decimal(units))}
+            for product_id, units in selected.items()
+        ]
 
         token = await self._get_auth_token(update, context)
         if not token:
@@ -540,17 +846,30 @@ class TryoutHandler(BaseHandler):
             await self._handle_api_response_error(update, response, language)
             return
 
-        context.user_data.pop('tryout_pickup_task_id', None)
-        context.user_data.pop('tryout_pickup_products', None)
-        await update.message.reply_text(
+        self._clear_pickup_state(context)
+        await query.edit_message_text(
             i18n.get('staff.tryout.pickup_recorded', language),
             reply_markup=CommonKeyboards.back_button(language, "staff_tryout_active"),
         )
 
     @require_auth
     @require_delivery_driver
+    async def receive_pickup_quantities(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        language = await self._get_language(update, context)
+        state = context.user_data.get('tryout_pickup_state')
+        if not state:
+            return
+
+        await update.message.reply_text(
+            i18n.get('staff.tryout.pickup_use_buttons', language),
+            reply_markup=TryoutKeyboards.pickup_overview(language, state),
+        )
+
+    @require_auth
+    @require_delivery_driver
     async def show_active_tryouts(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         language = await self._get_language(update, context)
+        self._clear_pickup_state(context)
         token = await self._get_auth_token(update, context)
         if not token:
             await self._handle_auth_error(update, language)
@@ -581,6 +900,7 @@ class TryoutHandler(BaseHandler):
         for tryout in items:
             contact = tryout.get('trial_contact') or {}
             address = tryout.get('address_snapshot') or {}
+            pickup_task_id = self._find_open_pickup_task_id(tryout)
             lines = [
                 f"🧪 <b>{escape_html(tryout.get('tryout_number'))}</b>",
                 f"👤 {escape_html(contact.get('full_name'))}",
@@ -591,7 +911,7 @@ class TryoutHandler(BaseHandler):
             await target.reply_text(
                 "\n".join(lines),
                 parse_mode='HTML',
-                reply_markup=TryoutKeyboards.tryout_actions(language, tryout.get('id')),
+                reply_markup=TryoutKeyboards.tryout_actions(language, tryout.get('id'), pickup_task_id),
             )
 
     @require_auth
@@ -622,6 +942,7 @@ class TryoutHandler(BaseHandler):
 
         contact = tryout.get('trial_contact') or {}
         address = tryout.get('address_snapshot') or {}
+        pickup_task_id = self._find_open_pickup_task_id(tryout)
         lines = [
             f"🧪 <b>{escape_html(tryout.get('tryout_number'))}</b>",
             f"👤 {escape_html(contact.get('full_name'))}",
@@ -636,5 +957,10 @@ class TryoutHandler(BaseHandler):
         await query.edit_message_text(
             "\n".join(lines),
             parse_mode='HTML',
-            reply_markup=CommonKeyboards.back_button(language, "staff_tryout_active"),
+            reply_markup=TryoutKeyboards.tryout_actions(
+                language,
+                tryout.get('id'),
+                pickup_task_id,
+                back_callback="staff_tryout_active",
+            ),
         )

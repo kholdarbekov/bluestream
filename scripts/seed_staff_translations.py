@@ -360,6 +360,66 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "uz": "Butilka qaytarilishi qayd etildi.",
         "ru": "Возврат тары зафиксирован.",
     },
+    "staff.tryout.pickup_select_product": {
+        "en": "Choose a product and then tap the returned quantity.",
+        "uz": "Mahsulotni tanlang, keyin qaytgan miqdorni bosing.",
+        "ru": "Выберите товар, затем нажмите количество возвращенной тары.",
+    },
+    "staff.tryout.pickup_selected": {
+        "en": "selected: {selected}",
+        "uz": "tanlandi: {selected}",
+        "ru": "выбрано: {selected}",
+    },
+    "staff.tryout.pickup_not_selected": {
+        "en": "not selected yet",
+        "uz": "hali tanlanmagan",
+        "ru": "пока не выбрано",
+    },
+    "staff.tryout.pickup_select_quantity": {
+        "en": "Select how many bottles were returned for {product}.",
+        "uz": "{product} uchun nechta butilka qaytganini tanlang.",
+        "ru": "Выберите, сколько бутылей вернули по товару {product}.",
+    },
+    "staff.tryout.pickup_current_quantity": {
+        "en": "Selected now: {quantity} of {outstanding}",
+        "uz": "Hozir tanlangan: {quantity} / {outstanding}",
+        "ru": "Сейчас выбрано: {quantity} из {outstanding}",
+    },
+    "staff.tryout.pickup_submit": {
+        "en": "Record Selected Bottles",
+        "uz": "Tanlangan butilkalarni qayd etish",
+        "ru": "Зафиксировать выбранную тару",
+    },
+    "staff.tryout.pickup_clear_selection": {
+        "en": "Clear Selection",
+        "uz": "Tanlovni tozalash",
+        "ru": "Очистить выбор",
+    },
+    "staff.tryout.pickup_fill_all": {
+        "en": "Fill All Outstanding",
+        "uz": "Barchasini to'ldirish",
+        "ru": "Заполнить весь остаток",
+    },
+    "staff.tryout.pickup_clear_product": {
+        "en": "Remove This Product",
+        "uz": "Bu mahsulotni olib tashlash",
+        "ru": "Убрать этот товар",
+    },
+    "staff.tryout.pickup_nothing_selected": {
+        "en": "Select at least one returned quantity first.",
+        "uz": "Avval kamida bitta qaytgan miqdorni tanlang.",
+        "ru": "Сначала выберите хотя бы одно возвращенное количество.",
+    },
+    "staff.tryout.pickup_no_outstanding": {
+        "en": "There are no outstanding bottles left for this try-out.",
+        "uz": "Bu sinov bo'yicha qaytishi kerak bo'lgan butilkalar qolmagan.",
+        "ru": "По этой пробной выдаче не осталось невозвращенной тары.",
+    },
+    "staff.tryout.pickup_use_buttons": {
+        "en": "Use the buttons below to record bottle returns.",
+        "uz": "Butilka qaytarilishini qayd etish uchun pastdagi tugmalardan foydalaning.",
+        "ru": "Используйте кнопки ниже, чтобы зафиксировать возврат тары.",
+    },
     "staff.tryout.enter_phone": {
         "en": "Enter the customer's phone number.",
         "uz": "Mijozning telefon raqamini kiriting.",
@@ -415,6 +475,11 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "uz": "{product} uchun miqdorni tanlang.",
         "ru": "Выберите количество для {product}.",
     },
+    "staff.tryout.current_quantity": {
+        "en": "Current quantity: {quantity}",
+        "uz": "Hozirgi miqdor: {quantity}",
+        "ru": "Текущее количество: {quantity}",
+    },
     "staff.tryout.selected_products": {
         "en": "Selected products",
         "uz": "Tanlangan mahsulotlar",
@@ -444,6 +509,11 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "en": "Selected product was not found.",
         "uz": "Tanlangan mahsulot topilmadi.",
         "ru": "Выбранный товар не найден.",
+    },
+    "staff.tryout.remove_product": {
+        "en": "Remove Product",
+        "uz": "Mahsulotni olib tashlash",
+        "ru": "Убрать товар",
     },
     "staff.tryout.created_success": {
         "en": "Try-out created successfully: {tryout_number}",

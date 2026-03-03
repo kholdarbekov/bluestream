@@ -736,6 +736,114 @@ TRANSLATIONS: Dict[str, TranslationRecord] = {
             "ru": "Возврат тары зафиксирован.",
         },
     },
+    "staff.tryout.pickup_select_product": {
+        "category": "staff_bot",
+        "description": "Pickup overview prompt",
+        "translations": {
+            "en": "Choose a product and then tap the returned quantity.",
+            "uz": "Mahsulotni tanlang, keyin qaytgan miqdorni bosing.",
+            "ru": "Выберите товар, затем нажмите количество возвращенной тары.",
+        },
+    },
+    "staff.tryout.pickup_selected": {
+        "category": "staff_bot",
+        "description": "Pickup overview selected quantity label",
+        "translations": {
+            "en": "selected: {selected}",
+            "uz": "tanlandi: {selected}",
+            "ru": "выбрано: {selected}",
+        },
+    },
+    "staff.tryout.pickup_not_selected": {
+        "category": "staff_bot",
+        "description": "Pickup overview not selected label",
+        "translations": {
+            "en": "not selected yet",
+            "uz": "hali tanlanmagan",
+            "ru": "пока не выбрано",
+        },
+    },
+    "staff.tryout.pickup_select_quantity": {
+        "category": "staff_bot",
+        "description": "Pickup quantity selection prompt",
+        "translations": {
+            "en": "Select how many bottles were returned for {product}.",
+            "uz": "{product} uchun nechta butilka qaytganini tanlang.",
+            "ru": "Выберите, сколько бутылей вернули по товару {product}.",
+        },
+    },
+    "staff.tryout.pickup_current_quantity": {
+        "category": "staff_bot",
+        "description": "Pickup quantity status message",
+        "translations": {
+            "en": "Selected now: {quantity} of {outstanding}",
+            "uz": "Hozir tanlangan: {quantity} / {outstanding}",
+            "ru": "Сейчас выбрано: {quantity} из {outstanding}",
+        },
+    },
+    "staff.tryout.pickup_submit": {
+        "category": "staff_bot",
+        "description": "Pickup submit button label",
+        "translations": {
+            "en": "Record Selected Bottles",
+            "uz": "Tanlangan butilkalarni qayd etish",
+            "ru": "Зафиксировать выбранную тару",
+        },
+    },
+    "staff.tryout.pickup_clear_selection": {
+        "category": "staff_bot",
+        "description": "Pickup clear selection button label",
+        "translations": {
+            "en": "Clear Selection",
+            "uz": "Tanlovni tozalash",
+            "ru": "Очистить выбор",
+        },
+    },
+    "staff.tryout.pickup_fill_all": {
+        "category": "staff_bot",
+        "description": "Pickup fill-all button label",
+        "translations": {
+            "en": "Fill All Outstanding",
+            "uz": "Barchasini to'ldirish",
+            "ru": "Заполнить весь остаток",
+        },
+    },
+    "staff.tryout.pickup_clear_product": {
+        "category": "staff_bot",
+        "description": "Pickup clear current product button label",
+        "translations": {
+            "en": "Remove This Product",
+            "uz": "Bu mahsulotni olib tashlash",
+            "ru": "Убрать этот товар",
+        },
+    },
+    "staff.tryout.pickup_nothing_selected": {
+        "category": "staff_bot",
+        "description": "Pickup submit without selection warning",
+        "translations": {
+            "en": "Select at least one returned quantity first.",
+            "uz": "Avval kamida bitta qaytgan miqdorni tanlang.",
+            "ru": "Сначала выберите хотя бы одно возвращенное количество.",
+        },
+    },
+    "staff.tryout.pickup_no_outstanding": {
+        "category": "staff_bot",
+        "description": "Pickup requested when nothing is outstanding",
+        "translations": {
+            "en": "There are no outstanding bottles left for this try-out.",
+            "uz": "Bu sinov bo'yicha qaytishi kerak bo'lgan butilkalar qolmagan.",
+            "ru": "По этой пробной выдаче не осталось невозвращенной тары.",
+        },
+    },
+    "staff.tryout.pickup_use_buttons": {
+        "category": "staff_bot",
+        "description": "Pickup text-entry nudge",
+        "translations": {
+            "en": "Use the buttons below to record bottle returns.",
+            "uz": "Butilka qaytarilishini qayd etish uchun pastdagi tugmalardan foydalaning.",
+            "ru": "Используйте кнопки ниже, чтобы зафиксировать возврат тары.",
+        },
+    },
     "staff.tryout.enter_phone": {
         "category": "staff_bot",
         "description": "Create try-out phone prompt",
@@ -826,6 +934,15 @@ TRANSLATIONS: Dict[str, TranslationRecord] = {
             "ru": "Выберите количество для {product}.",
         },
     },
+    "staff.tryout.current_quantity": {
+        "category": "staff_bot",
+        "description": "Current selected quantity for a create-flow product",
+        "translations": {
+            "en": "Current quantity: {quantity}",
+            "uz": "Hozirgi miqdor: {quantity}",
+            "ru": "Текущее количество: {quantity}",
+        },
+    },
     "staff.tryout.selected_products": {
         "category": "staff_bot",
         "description": "Selected products heading",
@@ -851,6 +968,15 @@ TRANSLATIONS: Dict[str, TranslationRecord] = {
             "en": "Add More Products",
             "uz": "Yana mahsulot qo'shish",
             "ru": "Добавить еще товары",
+        },
+    },
+    "staff.tryout.remove_product": {
+        "category": "staff_bot",
+        "description": "Remove selected product button label",
+        "translations": {
+            "en": "Remove Product",
+            "uz": "Mahsulotni olib tashlash",
+            "ru": "Убрать товар",
         },
     },
     "staff.tryout.confirm_create_title": {

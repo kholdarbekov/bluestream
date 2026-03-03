@@ -3,6 +3,7 @@ Message formatters for Staff Bot
 Format order details, delivery status, addresses, etc. for Telegram messages.
 """
 import html
+from decimal import Decimal, InvalidOperation
 from typing import Dict, Any, Optional
 from datetime import datetime
 from i18n import i18n
@@ -30,6 +31,19 @@ def format_currency(amount, currency: Optional[str] = None, language: str = 'en'
         return f"{float(amount):,.0f} {currency}"
     except (ValueError, TypeError):
         return f"{amount} {currency}"
+
+
+def format_quantity(value: Any) -> str:
+    """Format integer-like quantities without a trailing decimal part."""
+    try:
+        quantity = Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        return str(value)
+
+    text = format(quantity.normalize(), 'f')
+    if '.' in text:
+        text = text.rstrip('0').rstrip('.')
+    return text or '0'
 
 
 def format_order_card(order: Dict[str, Any], language: str) -> str:

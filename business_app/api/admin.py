@@ -1915,6 +1915,7 @@ def get_products_admin():
         category_id = request.args.get('category_id', type=int)
         is_active = request.args.get('is_active', type=bool)
         low_stock_only = request.args.get('low_stock_only', type=bool, default=False)
+        pricing_user_id = request.args.get('pricing_user_id', type=int)
         
         # Build query
         query = Product.query
@@ -1950,13 +1951,49 @@ def get_products_admin():
             page=page, per_page=per_page, error_out=False
         )
 
+        pricing_map = {}
+        if pricing_user_id and pagination.items:
+            product_ids = [product.id for product in pagination.items]
+            fallback_prices = {
+                product.id: Decimal(str(product.calculate_price(quantity=1)))
+                for product in pagination.items
+            }
+            pricing_map = get_corporate_contract_service().resolve_pricing_for_user_products(
+                user_id=pricing_user_id,
+                product_ids=product_ids,
+                fallback_prices=fallback_prices,
+            )
+
+        serialized_items = []
+        for product in pagination.items:
+            serialized = serialize_product_admin(product)
+            if pricing_user_id:
+                resolved = pricing_map.get(product.id)
+                if resolved:
+                    serialized['effective_unit_price'] = float(resolved['unit_price'])
+                    serialized['pricing_source'] = resolved['pricing_source']
+                    serialized['pricing_contract_id'] = (
+                        resolved['contract'].id if resolved.get('contract') else None
+                    )
+                    serialized['pricing_contract_product_price_id'] = (
+                        resolved['contract_price_row'].id if resolved.get('contract_price_row') else None
+                    )
+                else:
+                    serialized['effective_unit_price'] = float(product.calculate_price(quantity=1))
+                    serialized['pricing_source'] = 'fallback'
+                    serialized['pricing_contract_id'] = None
+                    serialized['pricing_contract_product_price_id'] = None
+            serialized_items.append(serialized)
+
         return paginated_response(
-            items=[serialize_product_admin(product) for product in pagination.items],
+            items=serialized_items,
             page=page,
             per_page=per_page,
             total=pagination.total
         )
 
+    except ValidationError as e:
+        return validation_error_response(str(e))
     except Exception as e:
         current_app.logger.error(f"Get products admin error: {e}")
         return internal_error_response('Failed to get products')

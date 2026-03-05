@@ -88,8 +88,12 @@ const Orders = () => {
 
   // Fetch products for order creation
   const { data: productsData } = useQuery(
-    ['products-for-order'],
-    () => adminService.getProducts({ per_page: 100, is_active: true }),
+    ['products-for-order', selectedUserId],
+    () => adminService.getProducts({
+      per_page: 100,
+      is_active: true,
+      ...(selectedUserId ? { pricing_user_id: selectedUserId } : {})
+    }),
     { enabled: isCreateModalVisible }
   );
 
@@ -383,6 +387,17 @@ const Orders = () => {
   const handleDateRangeChange = (dates) => {
     setDateRange(dates);
     setPagination({ ...pagination, page: 1 });
+  };
+
+  const getEffectiveProductPrice = (product) => {
+    if (
+      selectedUserId &&
+      product?.effective_unit_price !== undefined &&
+      product?.effective_unit_price !== null
+    ) {
+      return product.effective_unit_price;
+    }
+    return product?.price;
   };
 
   // Calculate summary statistics
@@ -789,11 +804,15 @@ const Orders = () => {
                             option.children.toLowerCase().includes(input.toLowerCase())
                           }
                         >
-                          {(productsData?.data?.items || []).map(product => (
-                            <Option key={product.id} value={product.id}>
-                              {product.name} - {product.price?.toLocaleString()} UZS
-                            </Option>
-                          ))}
+                          {(productsData?.data?.items || []).map(product => {
+                            const effectivePrice = getEffectiveProductPrice(product);
+                            return (
+                              <Option key={product.id} value={product.id}>
+                                {product.name} - {effectivePrice?.toLocaleString()} UZS
+                                {product.pricing_source === 'contract' ? ' (Contract)' : ''}
+                              </Option>
+                            );
+                          })}
                         </Select>
                       </Form.Item>
                     </Col>

@@ -113,6 +113,22 @@ def test_check_phone_availability_for_telegram_returns_masked_existing_user(auth
     assert result["existing_user_masked"]["name"].startswith("T")
 
 
+def test_check_phone_availability_for_telegram_hides_existing_user_for_same_telegram_id(
+    auth_service, db, sample_user
+):
+    sample_user.telegram_id = "12345"
+    db.session.commit()
+
+    result = auth_service.check_phone_availability_for_telegram(
+        phone=sample_user.phone,
+        telegram_id="12345",
+    )
+
+    assert result["available"] is True
+    assert result["can_link"] is False
+    assert result["existing_user_masked"] is None
+
+
 def test_send_phone_link_otp_rejects_when_phone_already_linked(auth_service, db, sample_user):
     sample_user.telegram_id = "already-linked"
     telegram_user = User(

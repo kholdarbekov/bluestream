@@ -157,6 +157,55 @@ def test_resolve_unit_price_uses_contract_override(db, sample_user):
     assert fallback == Decimal("15000.00")
 
 
+def test_resolve_pricing_for_user_products_returns_contract_and_fallback(db, sample_user):
+    sample_user.user_type = "entity"
+    db.session.commit()
+
+    service = CorporateContractService()
+    contract, _ = _create_contract_and_account(sample_user.id)
+    covered_product = _create_product("Contract Map Water", Decimal("18000.00"))
+    uncovered_product = _create_product("Fallback Map Water", Decimal("15000.00"))
+    price_row = _create_contract_price(contract.id, covered_product.id, Decimal("19000.00"))
+
+    pricing_map = service.resolve_pricing_for_user_products(
+        user_id=sample_user.id,
+        product_ids=[covered_product.id, uncovered_product.id],
+        fallback_prices={
+            covered_product.id: Decimal("18000.00"),
+            uncovered_product.id: Decimal("15000.00"),
+        },
+    )
+
+    assert pricing_map[covered_product.id]["unit_price"] == Decimal("19000.00")
+    assert pricing_map[covered_product.id]["pricing_source"] == "contract"
+    assert pricing_map[covered_product.id]["contract"].id == contract.id
+    assert pricing_map[covered_product.id]["contract_price_row"].id == price_row.id
+
+    assert pricing_map[uncovered_product.id]["unit_price"] == Decimal("15000.00")
+    assert pricing_map[uncovered_product.id]["pricing_source"] == "fallback"
+    assert pricing_map[uncovered_product.id]["contract"] is None
+    assert pricing_map[uncovered_product.id]["contract_price_row"] is None
+
+
+def test_resolve_pricing_for_user_products_uses_fallback_for_individual_user(db, sample_user):
+    sample_user.user_type = "individual"
+    db.session.commit()
+
+    service = CorporateContractService()
+    product = _create_product("Individual Fallback Water", Decimal("17000.00"))
+
+    pricing_map = service.resolve_pricing_for_user_products(
+        user_id=sample_user.id,
+        product_ids=[product.id],
+        fallback_prices={product.id: Decimal("17000.00")},
+    )
+
+    assert pricing_map[product.id]["unit_price"] == Decimal("17000.00")
+    assert pricing_map[product.id]["pricing_source"] == "fallback"
+    assert pricing_map[product.id]["contract"] is None
+    assert pricing_map[product.id]["contract_price_row"] is None
+
+
 def test_create_contract_defaults_loyalty_points_ineligible(db, sample_user):
     sample_user.user_type = "entity"
     db.session.commit()

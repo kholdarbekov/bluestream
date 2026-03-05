@@ -1454,9 +1454,17 @@ class AuthService:
         from business_app.utils.validators import normalize_phone_number
 
         normalized_phone = normalize_phone_number(phone)
+        telegram_id_str = str(telegram_id)
         existing_user = User.query.filter_by(phone=normalized_phone).first()
 
         if not existing_user:
+            return {
+                'available': True,
+                'can_link': False,
+                'existing_user_masked': None,
+            }
+
+        if existing_user.telegram_id and str(existing_user.telegram_id) == telegram_id_str:
             return {
                 'available': True,
                 'can_link': False,

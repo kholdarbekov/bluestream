@@ -572,6 +572,87 @@ class CorporateContractService:
         )
         return Decimal(str(resolved["unit_price"]))
 
+    def resolve_pricing_for_user_products(
+        self,
+        *,
+        user_id: int,
+        product_ids: List[int],
+        fallback_prices: Dict[int, Decimal],
+        effective_at: Optional[datetime] = None,
+    ) -> Dict[int, Dict[str, Any]]:
+        """Resolve effective pricing metadata for multiple products for one user."""
+        unique_product_ids: List[int] = []
+        for product_id in product_ids or []:
+            normalized_id = int(product_id)
+            if normalized_id not in unique_product_ids:
+                unique_product_ids.append(normalized_id)
+
+        if not unique_product_ids:
+            return {}
+
+        fallback_lookup = {
+            int(product_id): Decimal(str(price))
+            for product_id, price in (fallback_prices or {}).items()
+        }
+        pricing_map: Dict[int, Dict[str, Any]] = {}
+
+        user = User.query.get(user_id)
+        if not self._is_legal_entity_user(user):
+            for product_id in unique_product_ids:
+                fallback_price = Decimal(str(fallback_lookup.get(product_id, Decimal("0.00"))))
+                pricing_map[product_id] = {
+                    "unit_price": fallback_price,
+                    "contract": None,
+                    "contract_price_row": None,
+                    "pricing_source": "fallback",
+                }
+            return pricing_map
+
+        effective_at = self._normalize_effective_at(effective_at)
+        contracts = self.list_active_contracts_for_user(user_id=user_id, effective_at=effective_at)
+        matches_by_product_id: Dict[int, List[CorporateContractProductPrice]] = defaultdict(list)
+
+        for contract in contracts:
+            for price_row in contract.product_prices:
+                if not price_row.is_active or price_row.product_id not in unique_product_ids:
+                    continue
+                matches_by_product_id[price_row.product_id].append(price_row)
+
+        for product_id in unique_product_ids:
+            fallback_price = Decimal(str(fallback_lookup.get(product_id, Decimal("0.00"))))
+            matches = matches_by_product_id.get(product_id, [])
+
+            if not matches:
+                pricing_map[product_id] = {
+                    "unit_price": fallback_price,
+                    "contract": None,
+                    "contract_price_row": None,
+                    "pricing_source": "fallback",
+                }
+                continue
+
+            if len(matches) > 1:
+                contract_numbers = [row.contract.contract_number for row in matches if row.contract]
+                raise ValidationError(
+                    self._translate(
+                        "api.orders.error.ambiguous_contract_pricing",
+                        "Ambiguous contract pricing for product "
+                        f"{product_id}. Multiple active contracts match: {', '.join(contract_numbers)}",
+                        product_id=product_id,
+                        contract_numbers=", ".join(contract_numbers),
+                    )
+                )
+
+            match = matches[0]
+            pricing_map[product_id] = {
+                "unit_price": Decimal(str(match.unit_price)),
+                "contract": match.contract,
+                "contract_price_row": match,
+                "pricing_source": "contract",
+            }
+
+        return pricing_map
+
     def list_contracts(
         self,
         user_id: Optional[int] = None,

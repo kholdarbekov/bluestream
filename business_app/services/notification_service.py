@@ -262,6 +262,20 @@ class NotificationService:
                 for item in order.order_items
             ]
         }
+
+        if notification_type == NotificationType.DELIVERY_UPDATE:
+            order_status_value = self._status_value(order.status)
+            delivery = Delivery.query.filter_by(order_id=order.id).first()
+            language = getattr(order.user, 'preferred_language', 'en') if order.user else 'en'
+            template_data.update(
+                {
+                    'delivery_status_code': order_status_value,
+                    'delivery_status': self._get_localized_delivery_status_label(order_status_value, language),
+                    'tracking_code': (
+                        delivery.tracking_number if delivery and getattr(delivery, 'tracking_number', None) else ''
+                    ),
+                }
+            )
         
         return self.send_notification(order.user_id, notification_type, None, template_data)
     
@@ -1165,6 +1179,34 @@ class NotificationService:
 
         return list(deduped.values())
 
+    def _extract_delivery_status_code(self, template_data: Dict[str, Any]) -> Optional[str]:
+        """Extract normalized delivery status from template payload."""
+        if not template_data:
+            return None
+
+        for field in ('delivery_status_code', 'event_type', 'delivery_status', 'order_status'):
+            raw_value = template_data.get(field)
+            normalized_value = self._normalize_delivery_status_code(raw_value)
+            if normalized_value:
+                return normalized_value
+
+        return None
+
+    def _normalize_delivery_status_code(self, raw_value: Any) -> Optional[str]:
+        """Normalize raw status payload into delivery-style status code."""
+        if raw_value is None:
+            return None
+
+        normalized_value = self._status_value(raw_value).strip().lower()
+        if not normalized_value:
+            return None
+
+        normalized_value = normalized_value.replace('-', '_').replace(' ', '_')
+        if normalized_value == 'intransit':
+            normalized_value = DeliveryStatus.IN_TRANSIT.value
+
+        return normalized_value
+
     def _get_localized_delivery_status_label(self, status_value: str, language: str) -> str:
         """Resolve a customer-facing localized label for delivery status notifications."""
         translation_key = f'notification.delivery_status.{status_value}'
@@ -1497,6 +1539,21 @@ class NotificationService:
         if not self.telegram_bot_token:
             raise ConfigurationError(get_translation('error.configuration.telegram_not_configured'))
 
+        notification_type_value = self._status_value(notification_type)
+        if notification_type_value == NotificationType.DELIVERY_UPDATE.value:
+            delivery_status_code = self._extract_delivery_status_code(template_data or {})
+            if not delivery_status_code or not self._should_force_delivery_status_telegram(delivery_status_code):
+                logger.info(
+                    "Skipped Telegram delivery update: user_id=%s status=%s reason=status_not_allowed",
+                    getattr(user, 'id', None),
+                    delivery_status_code or 'unknown',
+                )
+                return {
+                    'success': True,
+                    'skipped': True,
+                    'reason': 'delivery_status_not_allowed',
+                }
+
         # Get user's Telegram ID (serves as chat ID for direct messages)
         telegram_chat_id = getattr(user, 'telegram_id', None)
         if not telegram_chat_id:
@@ -1515,7 +1572,6 @@ class NotificationService:
 
         # Render template
         content = self._render_template(template_content, template_data, language)
-        notification_type_value = self._status_value(notification_type)
         if notification_type_value == NotificationType.DELIVERY_UPDATE.value:
             content = self._strip_driver_info_from_delivery_message(content)
         
@@ -1707,6 +1763,15 @@ class NotificationService:
             for channel in channels:
                 channel_value = channel.value if hasattr(channel, 'value') else str(channel)
                 result = results.get(channel_value, {})
+                if result.get('skipped'):
+                    logger.info(
+                        "Skipping notification audit row for skipped channel send: user_id=%s channel=%s notification_type=%s reason=%s",
+                        user_id,
+                        channel_value,
+                        notification_type_value,
+                        result.get('reason'),
+                    )
+                    continue
 
                 # Extract message from template_data or use a default
                 message = payload.get('message', payload.get('otp_code', 'Notification sent'))

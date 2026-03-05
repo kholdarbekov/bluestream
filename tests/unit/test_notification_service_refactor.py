@@ -385,6 +385,7 @@ def test_send_telegram_notification_uses_bundled_fallback_template_when_db_missi
             NotificationType.DELIVERY_UPDATE,
             {
                 'order_number': 'TG_000036_26',
+                'delivery_status_code': DeliveryStatus.IN_TRANSIT.value,
                 'delivery_status': "Buyurtma yo'lda",
                 'tracking_code': 'TRK123',
             },
@@ -437,6 +438,8 @@ Phone: {driver_phone}
             NotificationType.DELIVERY_UPDATE,
             {
                 'order_number': 'TG_000037_26',
+                'delivery_status_code': DeliveryStatus.IN_TRANSIT.value,
+                'delivery_status': 'In Transit',
                 'driver_name': 'Driver Test',
                 'driver_phone': '+998900000000',
             },
@@ -450,3 +453,88 @@ Phone: {driver_phone}
     assert 'Driver:' not in payload_text
     assert 'Phone:' not in payload_text
     assert '📞' not in payload_text
+
+
+def test_send_telegram_notification_skips_non_target_delivery_status(app, db, sample_user):
+    sample_user.telegram_id = '104933915'
+    sample_user.is_bot_active = True
+    db.session.commit()
+
+    service = NotificationService()
+    app.config['TELEGRAM_BOT_TOKEN'] = 'test-token'
+    service.telegram_bot_token = 'test-token'
+
+    with patch('business_app.services.notification_service.requests.post') as post_mock:
+        result = service._send_telegram_notification(
+            sample_user,
+            NotificationType.DELIVERY_UPDATE,
+            {
+                'order_number': 'TG_000038_26',
+                'delivery_status_code': DeliveryStatus.DELIVERED.value,
+                'delivery_status': 'Delivered',
+                'tracking_code': 'TRK456',
+            },
+            'en',
+        )
+
+    assert result['success'] is True
+    assert result['skipped'] is True
+    assert result['reason'] == 'delivery_status_not_allowed'
+    post_mock.assert_not_called()
+
+
+def test_send_telegram_notification_skips_when_only_order_status_is_delivered(app, db, sample_user):
+    sample_user.telegram_id = '104933915'
+    sample_user.is_bot_active = True
+    db.session.commit()
+
+    service = NotificationService()
+    app.config['TELEGRAM_BOT_TOKEN'] = 'test-token'
+    service.telegram_bot_token = 'test-token'
+
+    with patch('business_app.services.notification_service.requests.post') as post_mock:
+        result = service._send_telegram_notification(
+            sample_user,
+            NotificationType.DELIVERY_UPDATE,
+            {
+                'order_number': 'TG_000038_26',
+                'order_status': DeliveryStatus.DELIVERED.value,
+            },
+            'en',
+        )
+
+    assert result['success'] is True
+    assert result['skipped'] is True
+    assert result['reason'] == 'delivery_status_not_allowed'
+    post_mock.assert_not_called()
+
+
+def test_send_telegram_notification_allows_in_transit_delivery_status(app, db, sample_user):
+    sample_user.telegram_id = '104933915'
+    sample_user.is_bot_active = True
+    db.session.commit()
+
+    service = NotificationService()
+    app.config['TELEGRAM_BOT_TOKEN'] = 'test-token'
+    service.telegram_bot_token = 'test-token'
+
+    fake_response = Mock()
+    fake_response.raise_for_status.return_value = None
+    fake_response.json.return_value = {'ok': True, 'result': {'message_id': 779}}
+
+    with patch('business_app.services.notification_service.requests.post', return_value=fake_response) as post_mock:
+        result = service._send_telegram_notification(
+            sample_user,
+            NotificationType.DELIVERY_UPDATE,
+            {
+                'order_number': 'TG_000039_26',
+                'delivery_status_code': DeliveryStatus.IN_TRANSIT.value,
+                'delivery_status': 'In Transit',
+                'tracking_code': 'TRK789',
+            },
+            'en',
+        )
+
+    assert result['success'] is True
+    assert result.get('skipped') is None
+    post_mock.assert_called_once()

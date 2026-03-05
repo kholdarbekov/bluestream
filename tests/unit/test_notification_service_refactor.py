@@ -387,8 +387,6 @@ def test_send_telegram_notification_uses_bundled_fallback_template_when_db_missi
                 'order_number': 'TG_000036_26',
                 'delivery_status': "Buyurtma yo'lda",
                 'tracking_code': 'TRK123',
-                'driver_name': 'Driver Test',
-                'driver_phone': '+998900000000',
             },
             'uz',
         )
@@ -398,3 +396,57 @@ def test_send_telegram_notification_uses_bundled_fallback_template_when_db_missi
     payload = post_mock.call_args.kwargs['json']
     assert payload['chat_id'] == '104933915'
     assert 'Yetkazib berish yangiligi' in payload['text']
+    assert 'Haydovchi' not in payload['text']
+    assert 'Telefon' not in payload['text']
+
+
+def test_send_telegram_notification_strips_driver_info_from_db_template(app, db, sample_user):
+    sample_user.telegram_id = '104933915'
+    sample_user.is_bot_active = True
+    db.session.commit()
+
+    service = NotificationService()
+    app.config['TELEGRAM_BOT_TOKEN'] = 'test-token'
+    service.telegram_bot_token = 'test-token'
+
+    fake_template = SimpleNamespace(
+        content='''🚚 <b>Delivery Update</b>
+
+Order: #{order_number}
+Driver: {driver_name}
+Phone: {driver_phone}
+📞 +998901234567''',
+        get_translated=lambda field, language: '''🚚 <b>Delivery Update</b>
+
+Order: #{order_number}
+Driver: {driver_name}
+Phone: {driver_phone}
+📞 +998901234567''' if field == 'content' else None,
+    )
+
+    fake_response = Mock()
+    fake_response.raise_for_status.return_value = None
+    fake_response.json.return_value = {'ok': True, 'result': {'message_id': 778}}
+
+    with (
+        patch.object(service, '_get_notification_template', return_value=fake_template),
+        patch('business_app.services.notification_service.requests.post', return_value=fake_response) as post_mock,
+    ):
+        result = service._send_telegram_notification(
+            sample_user,
+            NotificationType.DELIVERY_UPDATE,
+            {
+                'order_number': 'TG_000037_26',
+                'driver_name': 'Driver Test',
+                'driver_phone': '+998900000000',
+            },
+            'en',
+        )
+
+    assert result['success'] is True
+    payload_text = post_mock.call_args.kwargs['json']['text']
+    assert 'Driver Test' not in payload_text
+    assert '+998900000000' not in payload_text
+    assert 'Driver:' not in payload_text
+    assert 'Phone:' not in payload_text
+    assert '📞' not in payload_text

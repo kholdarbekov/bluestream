@@ -4,6 +4,7 @@ Handles SMS, Email, Telegram, and Push notifications
 """
 import json
 import logging
+import re
 from celery.utils.log import get_task_logger
 from datetime import datetime, timezone, timedelta
 from types import SimpleNamespace
@@ -270,18 +271,11 @@ class NotificationService:
         if not delivery:
             raise NotificationError(get_translation('error.not_found'))
 
-        delivery_person = delivery.delivery_person
-
         template_data = {
             'tracking_code': delivery.tracking_number,
             'order_number': delivery.order.order_number if delivery.order else '',
             'delivery_status': delivery.status.value,
             'estimated_delivery': delivery.estimated_delivery_time.isoformat() if delivery.estimated_delivery_time else None,
-            'driver_name': (
-                f"{delivery_person.first_name} {delivery_person.last_name or ''}".strip()
-                if delivery_person else None
-            ),
-            'driver_phone': delivery_person.phone if delivery_person else None,
             'event_type': event_type,
         }
         
@@ -1193,7 +1187,6 @@ class NotificationService:
         language: str,
     ) -> Dict[str, Any]:
         """Build notification template data from the immutable delivery status event."""
-        delivery_person = delivery.delivery_person
         status_value = self._status_value(history.new_status)
 
         return {
@@ -1205,11 +1198,6 @@ class NotificationService:
                 delivery.estimated_delivery_time.isoformat()
                 if delivery.estimated_delivery_time else None
             ),
-            'driver_name': (
-                f"{delivery_person.first_name} {delivery_person.last_name or ''}".strip()
-                if delivery_person else None
-            ),
-            'driver_phone': delivery_person.phone if delivery_person else None,
             'event_type': status_value,
             'delivery_id': delivery.id,
             'order_id': delivery.order.id if delivery.order else None,
@@ -1527,6 +1515,9 @@ class NotificationService:
 
         # Render template
         content = self._render_template(template_content, template_data, language)
+        notification_type_value = self._status_value(notification_type)
+        if notification_type_value == NotificationType.DELIVERY_UPDATE.value:
+            content = self._strip_driver_info_from_delivery_message(content)
         
         # Send via Telegram Bot API
         url = f"https://api.telegram.org/bot{self.telegram_bot_token}/sendMessage"
@@ -1553,6 +1544,34 @@ class NotificationService:
                 e,
             )
             return {'success': False, 'error': str(e)}
+
+    @staticmethod
+    def _strip_driver_info_from_delivery_message(content: str) -> str:
+        """Remove any driver-identifying lines from delivery Telegram messages."""
+        if not content:
+            return content
+
+        cleaned_lines: List[str] = []
+        for line in content.splitlines():
+            stripped_line = line.strip()
+            normalized_line = re.sub(r'<[^>]+>', '', stripped_line).lower()
+            remove_line = False
+
+            if '{driver_name}' in normalized_line or '{driver_phone}' in normalized_line:
+                remove_line = True
+            elif any(token in normalized_line for token in ('driver', 'haydovchi', 'водитель')):
+                remove_line = True
+            elif normalized_line.startswith('📞'):
+                remove_line = True
+            elif re.match(r'^(phone|telefon|телефон)\s*[:\-]', normalized_line):
+                remove_line = True
+
+            if not remove_line:
+                cleaned_lines.append(line)
+
+        cleaned_content = '\n'.join(cleaned_lines)
+        cleaned_content = re.sub(r'\n{3,}', '\n\n', cleaned_content).strip()
+        return cleaned_content
     
     def _send_push_notification(self, user: User, notification_type: NotificationType,
                                template_data: Dict[str, Any], language: str) -> Dict[str, Any]:
@@ -1813,9 +1832,7 @@ DEFAULT_TEMPLATES = {
 Buyurtma: #{order_number}
 Holati: {delivery_status}
 Kuzatish: {tracking_code}
-
-Haydovchi: {driver_name}
-Telefon: {driver_phone}'''
+'''
             },
             'en': {
                 'content': '''🚚 <b>Delivery Update</b>
@@ -1823,9 +1840,7 @@ Telefon: {driver_phone}'''
 Order: #{order_number}
 Status: {delivery_status}
 Tracking: {tracking_code}
-
-Driver: {driver_name}
-Phone: {driver_phone}'''
+'''
             },
             'ru': {
                 'content': '''🚚 <b>Обновление доставки</b>
@@ -1833,9 +1848,7 @@ Phone: {driver_phone}'''
 Заказ: #{order_number}
 Статус: {delivery_status}
 Отслеживание: {tracking_code}
-
-Водитель: {driver_name}
-Телефон: {driver_phone}'''
+'''
             }
         }
     },

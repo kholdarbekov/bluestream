@@ -353,13 +353,6 @@ class OrderHandlers(BaseHandler):
                 else:
                     tracking_text += f"⏰ {i18n.get('telegram.orders.estimated_remaining', language)}: {mins}m\n"
             
-            # Add delivery info if available
-            if delivery:
-                if delivery.get('driver_name'):
-                    tracking_text += f"\n🚗 {i18n.get('telegram.orders.driver', language)}: {delivery['driver_name']}\n"
-                if delivery.get('driver_phone'):
-                    tracking_text += f"📞 {delivery['driver_phone']}\n"
-            
             # Create back button (use order_tracking keyboard for tracking view)
             keyboard = OrderKeyboards.order_tracking(order_id, language)
             

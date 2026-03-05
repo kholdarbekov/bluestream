@@ -275,6 +275,44 @@ class TestOrderHandlerDeepFlows:
         update.callback_query.edit_message_text.assert_awaited_once()
         update.callback_query.answer.assert_awaited_once()
 
+    async def test_track_order_does_not_include_driver_info(self, monkeypatch):
+        handler = orders_module.OrderHandlers()
+        update = DummyUpdate()
+        update.callback_query = DummyCallbackQuery(data="track_order_9")
+        context = make_context()
+
+        tracking_data = {
+            "data": {
+                "order": {"status": "out_for_delivery", "order_number": "ORD-9"},
+                "delivery": {"driver_name": "John Driver", "driver_phone": "+998901112233"},
+                "timeline": [
+                    {
+                        "status": "out_for_delivery",
+                        "timestamp": "2026-03-05T10:00:00+00:00",
+                        "is_current": True,
+                        "notes": "",
+                    }
+                ],
+                "estimated_time_remaining": {"total_minutes": 25, "hours": 0},
+            }
+        }
+        monkeypatch.setattr(orders_module.i18n, "get_user_language", AsyncMock(return_value="en"))
+        monkeypatch.setattr(orders_module.i18n, "get", _i18n_get)
+        monkeypatch.setattr(orders_module, "get_auth_token", AsyncMock(return_value="jwt"))
+        monkeypatch.setattr(orders_module.OrderKeyboards, "order_tracking", lambda _id, _lang: "trk-kbd")
+        monkeypatch.setattr(
+            orders_module,
+            "api_client",
+            FakeAPIClientContext(track_order=_resp(success=True, data=tracking_data)),
+        )
+
+        await handler.track_order(update, context)
+
+        rendered_text = update.callback_query.edit_message_text.call_args.kwargs["text"]
+        assert "John Driver" not in rendered_text
+        assert "+998901112233" not in rendered_text
+        assert "telegram.orders.driver:en" not in rendered_text
+
     async def test_checkout_handler_no_addresses_sets_waiting_state(self, monkeypatch):
         handler = orders_module.OrderHandlers()
         handler.user_repo = SimpleNamespace(update_user_state=AsyncMock())

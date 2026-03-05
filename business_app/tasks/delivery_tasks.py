@@ -482,25 +482,41 @@ def track_delivery_location_task(self, delivery_id: int, latitude: float, longit
         
         # Calculate distance to destination
         maps_service = MapsService()
+        destination_latitude = None
+        destination_longitude = None
+        if delivery.order and delivery.order.delivery_address:
+            destination_latitude = delivery.order.delivery_address.latitude
+            destination_longitude = delivery.order.delivery_address.longitude
+        else:
+            destination_latitude = getattr(delivery.order, 'delivery_latitude', None)
+            destination_longitude = getattr(delivery.order, 'delivery_longitude', None)
+
+        if destination_latitude is None or destination_longitude is None:
+            logger.warning(
+                "Skipping distance-based arrival check for delivery %s: destination coordinates unavailable",
+                delivery_id,
+            )
+            db.session.commit()
+            return {
+                'success': True,
+                'delivery_id': delivery_id,
+                'distance_to_destination': None,
+                'status': delivery.status.value,
+            }
+
         distance_to_destination = maps_service.calculate_distance(
             latitude, longitude,
-            delivery.order.delivery_latitude, delivery.order.delivery_longitude
+            destination_latitude, destination_longitude
         )
         
         # Update status if driver is close to destination (within 100m)
         if distance_to_destination < 0.1 and delivery.status == DeliveryStatus.IN_TRANSIT:
-            delivery.status = DeliveryStatus.ARRIVED
-            
-            # Notify customer that driver has arrived
-            notification_service = NotificationService()
-            notification_service.send_notification(
-                delivery.order.user_id,
-                'driver_arrived',
-                template_data={
-                    'order_number': delivery.order.order_number,
-                    'driver_name': f"{delivery.delivery_person.first_name} {delivery.delivery_person.last_name}",
-                    'driver_phone': delivery.delivery_person.phone
-                }
+            delivery_service = DeliveryService()
+            delivery = delivery_service.mark_delivery_arrived(
+                delivery.id,
+                actor_user_id=None,
+                notes='Automatically marked as arrived based on location tracking',
+                automatic=True,
             )
         
         db.session.commit()

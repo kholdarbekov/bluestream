@@ -588,19 +588,19 @@ def send_order_notification_task(self, order_id: int, notification_type: str):
 
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=60, time_limit=120, soft_time_limit=100)
-def send_delivery_update_task(self, delivery_id: int, status: str):
-    """Send delivery status update notification"""
+def send_delivery_update_task(self, history_id: int):
+    """Send delivery status update notification from a committed history event."""
     try:
-        logger.info(f"Sending delivery update for delivery {delivery_id}, status: {status}")
+        logger.info("Sending delivery update for history %s", history_id)
         
         notification_service = NotificationService()
-        result = notification_service.send_delivery_notification(delivery_id, status)
+        result = notification_service.send_delivery_status_change_notification(history_id)
         
-        logger.info(f"Delivery update sent successfully for delivery {delivery_id}")
+        logger.info("Delivery update processed for history %s", history_id)
         return result
         
     except Exception as exc:
-        logger.error(f"Failed to send delivery update: {exc}")
+        logger.error("Failed to send delivery update for history %s: %s", history_id, exc)
         raise self.retry(exc=exc)
 
 

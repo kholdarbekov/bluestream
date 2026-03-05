@@ -198,6 +198,16 @@ BACKEND_TRANSLATIONS = {
         'uz': 'Buyurtma yo\'lda',
         'ru': 'Заказ в пути'
     },
+    'notification.delivery_status.in_transit': {
+        'en': 'In Transit',
+        'uz': 'Yo\'lda',
+        'ru': 'В пути'
+    },
+    'notification.delivery_status.arrived': {
+        'en': 'Arrived',
+        'uz': 'Yetib keldi',
+        'ru': 'Прибыл'
+    },
     'api.delivery.completed': {
         'en': 'Delivery completed',
         'uz': 'Yetkazib berish yakunlandi',

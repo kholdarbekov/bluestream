@@ -829,9 +829,10 @@ class StaffService:
             notes='Accepted via staff bot'
         )
         db.session.add(history)
+        db.session.flush()
+        history_id = history.id
 
         if dp:
-            db.session.flush()
             StaffService.sync_active_delivery_counters([delivery_person_id])
 
         db.session.commit()
@@ -839,7 +840,7 @@ class StaffService:
         # Notify customer that delivery has been assigned.
         try:
             from business_app.tasks.notification_tasks import send_delivery_update_task
-            send_delivery_update_task.delay(delivery.id, DeliveryStatus.ASSIGNED.value)
+            send_delivery_update_task.delay(history_id)
         except Exception as notify_exc:
             current_app.logger.warning(
                 "Failed to enqueue assigned-delivery notification for delivery %s: %s",
@@ -960,6 +961,8 @@ class StaffService:
             reason=metadata.get('fail_reason')
         )
         db.session.add(history)
+        db.session.flush()
+        history_id = history.id
 
         # Sync order status per DELIVERY_TO_ORDER_STATUS_SYNC
         order_status_str = DELIVERY_TO_ORDER_STATUS_SYNC.get(new_status)
@@ -995,7 +998,7 @@ class StaffService:
         # Notify customer about delivery status updates.
         try:
             from business_app.tasks.notification_tasks import send_delivery_update_task
-            send_delivery_update_task.delay(delivery.id, new_status)
+            send_delivery_update_task.delay(history_id)
         except Exception as notify_exc:
             current_app.logger.warning(
                 "Failed to enqueue delivery-status notification for delivery %s: %s",

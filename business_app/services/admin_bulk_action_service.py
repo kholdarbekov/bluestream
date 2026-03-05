@@ -12,6 +12,7 @@ from business_app.models.product import Product
 from business_app.models.review import Review
 from business_app.models.subscription import Subscription
 from business_app.models.user import User
+from business_app.services.delivery_service import DeliveryService
 from business_app.utils.constants import DeliveryStatus, OrderStatus, SubscriptionStatus, UserRole, UserStatus
 
 
@@ -383,8 +384,13 @@ class AdminBulkActionService:
                     delivery.status = DeliveryStatus.ASSIGNED
 
                 elif action == 'mark_in_transit':
-                    delivery.status = DeliveryStatus.IN_TRANSIT
-                    delivery.picked_up_at = datetime.now(UTC)
+                    DeliveryService().begin_delivery_in_transit(
+                        delivery.id,
+                        actor_user_id=admin_id,
+                        notes=reason or 'Updated via admin bulk action to in_transit',
+                    )
+                    success_count += 1
+                    continue
 
                 elif action == 'mark_delivered':
                     delivery.status = DeliveryStatus.DELIVERED

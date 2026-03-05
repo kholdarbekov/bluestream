@@ -720,6 +720,16 @@ BACKEND_TRANSLATIONS = {
         'uz': 'Muvaffaqiyatli yetib kelgan deb belgilandi',
         'ru': 'Успешно отмечено как прибытие'
     },
+    'notification.delivery_status.in_transit': {
+        'en': 'In Transit',
+        'uz': 'Yo\'lda',
+        'ru': 'В пути'
+    },
+    'notification.delivery_status.arrived': {
+        'en': 'Arrived',
+        'uz': 'Yetib keldi',
+        'ru': 'Прибыл'
+    },
     'api.delivery.completion_processing': {
         'en': 'Delivery completion is being processed',
         'uz': 'Yetkazib berishni yakunlash jarayoni davom etmoqda',

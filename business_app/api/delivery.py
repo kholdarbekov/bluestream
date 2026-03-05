@@ -7,11 +7,12 @@ from flask_jwt_extended import jwt_required, get_jwt_identity
 from sqlalchemy import func
 from datetime import datetime, UTC, timedelta, date
 
+from business_app import db
 from business_app.models.delivery import Delivery
 from business_app.models.order import Order
 from business_app.models.user import User
 from business_app.utils.service_factory import (
-    get_delivery_service, get_maps_service, get_notification_service, get_file_storage_service
+    get_delivery_service, get_maps_service, get_file_storage_service
 )
 from business_app.utils.error_handlers import handle_api_exception
 from business_app.utils.api_responses import success_response, error_response
@@ -485,26 +486,11 @@ def start_delivery(delivery_id):
         if delivery.status != DeliveryStatus.ASSIGNED:
             return jsonify({'error': get_translation('api.delivery.error.cannot_start_at_stage')}), 400
 
-        # Update delivery status
-        delivery.status = DeliveryStatus.IN_TRANSIT
-        delivery.updated_at = datetime.now(UTC)
-
-        # Set route data if not exists
-        if not delivery.route_data:
-            delivery.route_data = {}
-        delivery.route_data['picked_up_at'] = datetime.now(UTC).isoformat()
-
-        db.session.commit()
-
-        # Send notification to customer
-        get_notification_service().send_notification(
-            delivery.order.user_id,
-            'delivery_started',
-            template_data={
-                'order_number': delivery.order.order_number,
-                'driver_name': user.full_name,
-                'tracking_number': delivery.tracking_number
-            }
+        delivery = get_delivery_service().begin_delivery_in_transit(
+            delivery_id,
+            actor_user_id=current_user_id,
+            required_driver_id=current_user_id,
+            notes='Delivery started via driver API',
         )
 
         return jsonify({
@@ -541,26 +527,11 @@ def mark_arrived(delivery_id):
         if delivery.status != DeliveryStatus.IN_TRANSIT:
             return jsonify({'error': get_translation('api.delivery.error.must_be_in_transit_to_arrive')}), 400
 
-        # Update delivery status
-        delivery.status = DeliveryStatus.ARRIVED
-        delivery.updated_at = datetime.now(UTC)
-
-        # Update route data
-        if not delivery.route_data:
-            delivery.route_data = {}
-        delivery.route_data['arrived_at'] = datetime.now(UTC).isoformat()
-
-        db.session.commit()
-
-        # Send notification to customer
-        get_notification_service().send_notification(
-            delivery.order.user_id,
-            'driver_arrived',
-            template_data={
-                'order_number': delivery.order.order_number,
-                'driver_name': user.full_name,
-                'driver_phone': user.phone
-            }
+        delivery = get_delivery_service().mark_delivery_arrived(
+            delivery_id,
+            actor_user_id=current_user_id,
+            required_driver_id=current_user_id,
+            notes='Marked as arrived via driver API',
         )
 
         return jsonify({

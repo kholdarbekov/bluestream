@@ -20,7 +20,7 @@ from business_app.models.notification import (
 )
 from business_app.models.user import User
 from business_app.models.order import Order
-from business_app.models.delivery import Delivery
+from business_app.models.delivery import Delivery, DeliveryStatusHistory
 from business_app.models.payment import Payment
 from business_app.models.subscription import Subscription
 from business_app.utils.exceptions import (
@@ -35,6 +35,7 @@ from business_app.utils.constants import (
     NotificationType,
     NotificationChannel,
     NotificationStatus,
+    DeliveryStatus,
 )
 from business_app.utils.translations import get_translation
 from business_app.services.email_template_service import get_email_template_service
@@ -289,6 +290,67 @@ class NotificationService:
             NotificationType.DELIVERY_UPDATE,
             None,
             template_data
+        )
+
+    def send_delivery_status_change_notification(self, history_id: int) -> Dict[str, Any]:
+        """Send delivery-status notification from a committed history event snapshot."""
+        history = DeliveryStatusHistory.query.get(history_id)
+        if not history:
+            logger.warning("Delivery status history %s not found; skipping notification", history_id)
+            return {'success': False, 'error': 'Delivery status history not found'}
+
+        delivery = Delivery.query.get(history.delivery_id)
+        if not delivery:
+            logger.warning(
+                "Delivery %s not found for delivery status history %s; skipping notification",
+                history.delivery_id,
+                history_id,
+            )
+            return {'success': False, 'error': 'Delivery not found'}
+
+        order = delivery.order
+        if not order:
+            logger.warning(
+                "Order missing for delivery %s (history %s); skipping notification",
+                delivery.id,
+                history_id,
+            )
+            return {'success': False, 'error': 'Order not found'}
+
+        user = User.query.get(order.user_id)
+        if not user:
+            logger.warning(
+                "User %s not found for delivery %s (history %s); skipping notification",
+                order.user_id,
+                delivery.id,
+                history_id,
+            )
+            return {'success': False, 'error': 'User not found'}
+
+        history_status = self._status_value(history.new_status)
+        live_status = self._status_value(delivery.status)
+        if history_status != live_status:
+            logger.warning(
+                "Delivery status mismatch for history %s: event_status=%s live_status=%s delivery_id=%s",
+                history_id,
+                history_status,
+                live_status,
+                delivery.id,
+            )
+
+        language = getattr(user, 'preferred_language', 'en') or 'en'
+        template_data = self._build_delivery_status_template_data(
+            delivery=delivery,
+            history=history,
+            language=language,
+        )
+        channels = self._resolve_delivery_status_channels(user, history_status)
+
+        return self.send_notification(
+            user.id,
+            NotificationType.DELIVERY_UPDATE,
+            channels,
+            template_data,
         )
     
     def send_payment_notification(self, payment_id: int) -> Dict[str, Any]:
@@ -1059,6 +1121,100 @@ class NotificationService:
             NotificationType.REWARD_REDEEMED.value: [NotificationChannel.EMAIL],
         }
         return defaults.get(notification_type, [NotificationChannel.EMAIL])
+
+    @staticmethod
+    def _status_value(status: Any) -> str:
+        """Normalize enum-or-string status values to plain strings."""
+        return status.value if hasattr(status, 'value') else str(status)
+
+    @staticmethod
+    def _user_has_connected_telegram(user: User) -> bool:
+        """Return True when the customer has an active linked Telegram bot."""
+        return bool(getattr(user, 'telegram_id', None) and getattr(user, 'is_bot_active', False))
+
+    def _should_force_delivery_status_telegram(self, status_value: str) -> bool:
+        """Statuses that must include Telegram for connected users."""
+        return status_value in {
+            DeliveryStatus.IN_TRANSIT.value,
+            DeliveryStatus.ARRIVED.value,
+        }
+
+    def _resolve_delivery_status_channels(self, user: User, status_value: str) -> List[NotificationChannel]:
+        """Resolve channels for a delivery status event with Telegram override rules."""
+        channels = list(self._get_user_preferred_channels(user.id, NotificationType.DELIVERY_UPDATE))
+        deduped = {
+            self._status_value(channel): channel
+            for channel in channels
+        }
+
+        if self._should_force_delivery_status_telegram(status_value):
+            if self._user_has_connected_telegram(user):
+                deduped[NotificationChannel.TELEGRAM.value] = NotificationChannel.TELEGRAM
+                logger.info(
+                    "Forced Telegram delivery notification enabled: user_id=%s status=%s history_rule=connected_bot",
+                    user.id,
+                    status_value,
+                )
+            else:
+                logger.info(
+                    "Skipped forced Telegram delivery notification: user_id=%s status=%s reason=bot_not_connected",
+                    user.id,
+                    status_value,
+                )
+        else:
+            if deduped.pop(NotificationChannel.TELEGRAM.value, None) is not None:
+                logger.info(
+                    "Removed Telegram from non-target delivery notification: user_id=%s status=%s",
+                    user.id,
+                    status_value,
+                )
+
+        return list(deduped.values())
+
+    def _get_localized_delivery_status_label(self, status_value: str, language: str) -> str:
+        """Resolve a customer-facing localized label for delivery status notifications."""
+        translation_key = f'notification.delivery_status.{status_value}'
+        label = get_translation(translation_key, language)
+        if label and label != translation_key:
+            return label
+
+        fallback_key = f'api.delivery.{status_value}'
+        fallback_label = get_translation(fallback_key, language)
+        if fallback_label and fallback_label != fallback_key:
+            return fallback_label
+
+        return status_value.replace('_', ' ').title()
+
+    def _build_delivery_status_template_data(
+        self,
+        *,
+        delivery: Delivery,
+        history: DeliveryStatusHistory,
+        language: str,
+    ) -> Dict[str, Any]:
+        """Build notification template data from the immutable delivery status event."""
+        delivery_person = delivery.delivery_person
+        status_value = self._status_value(history.new_status)
+
+        return {
+            'tracking_code': delivery.tracking_number,
+            'order_number': delivery.order.order_number if delivery.order else '',
+            'delivery_status': self._get_localized_delivery_status_label(status_value, language),
+            'delivery_status_code': status_value,
+            'estimated_delivery': (
+                delivery.estimated_delivery_time.isoformat()
+                if delivery.estimated_delivery_time else None
+            ),
+            'driver_name': (
+                f"{delivery_person.first_name} {delivery_person.last_name or ''}".strip()
+                if delivery_person else None
+            ),
+            'driver_phone': delivery_person.phone if delivery_person else None,
+            'event_type': status_value,
+            'delivery_id': delivery.id,
+            'order_id': delivery.order.id if delivery.order else None,
+            'history_id': history.id,
+        }
     
     # Private methods for different channels
     def _send_email_notification(self, user: User, notification_type: NotificationType,
@@ -1390,6 +1546,12 @@ class NotificationService:
                 'message_id': result.get('result', {}).get('message_id')
             }
         except Exception as e:
+            logger.warning(
+                "Telegram notification failed: user_id=%s notification_type=%s error=%s",
+                getattr(user, 'id', None),
+                self._status_value(notification_type),
+                e,
+            )
             return {'success': False, 'error': str(e)}
     
     def _send_push_notification(self, user: User, notification_type: NotificationType,
@@ -1441,7 +1603,46 @@ class NotificationService:
             is_active=True
         ).first()
 
-        return template
+        if template:
+            return template
+
+        fallback_template = self._build_default_notification_template(notification_type_val, channel_val)
+        if fallback_template:
+            logger.warning(
+                "Notification template missing in DB; using built-in fallback: notification_type=%s channel=%s",
+                notification_type_val,
+                channel_val,
+            )
+            return fallback_template
+
+        return None
+
+    def _build_default_notification_template(self, notification_type: str, channel: str):
+        """Build an in-memory fallback template from bundled defaults."""
+        template_config = DEFAULT_TEMPLATES.get((notification_type, channel))
+        if not template_config:
+            return None
+
+        translations = template_config.get('translations', {})
+        default_translation = translations.get('uz', {})
+
+        def _get_translated(field_name: str, language: str):
+            language_translation = translations.get(language, {})
+            if field_name in language_translation:
+                return language_translation[field_name]
+            if field_name in default_translation:
+                return default_translation[field_name]
+            return None
+
+        return SimpleNamespace(
+            name=template_config.get('name'),
+            notification_type=notification_type,
+            channel=channel,
+            subject=default_translation.get('subject'),
+            content=default_translation.get('content', ''),
+            is_active=True,
+            get_translated=_get_translated,
+        )
     
     def _render_template(self, template: str, data: Dict[str, Any], language: str) -> str:
         """Render template with data"""
@@ -1477,25 +1678,46 @@ class NotificationService:
                                   results: Dict[str, Any]):
         """Create notification record in database"""
         try:
+            user = User.query.get(user_id)
+            payload = template_data or {}
+            notification_type_value = (
+                notification_type.value if hasattr(notification_type, 'value') else str(notification_type)
+            )
+
             # Create a notification record for each channel
             for channel in channels:
-                result = results.get(channel.value, {})
+                channel_value = channel.value if hasattr(channel, 'value') else str(channel)
+                result = results.get(channel_value, {})
 
                 # Extract message from template_data or use a default
-                message = template_data.get('message', template_data.get('otp_code', 'Notification sent'))
-                title = template_data.get('title', notification_type.value.replace('_', ' ').title())
+                message = payload.get('message', payload.get('otp_code', 'Notification sent'))
+                title = payload.get('title', notification_type_value.replace('_', ' ').title())
 
                 notification = Notification(
                     user_id=user_id,
-                    notification_type=notification_type.value,
-                    channel=channel.value,
+                    notification_type=notification_type_value,
+                    channel=channel_value,
                     title=title,
                     message=str(message),
                     is_sent=result.get('success', False),
                     sent_at=datetime.now(timezone.utc) if result.get('success') else None,
                     delivery_status='sent' if result.get('success') else 'failed',
                     failure_reason=result.get('error') if not result.get('success') else None,
-                    extra_data=template_data
+                    recipient_phone=(
+                        getattr(user, 'phone', None)
+                        if channel_value == NotificationChannel.SMS.value else None
+                    ),
+                    recipient_email=(
+                        getattr(user, 'email', None)
+                        if channel_value == NotificationChannel.EMAIL.value else None
+                    ),
+                    recipient_telegram_id=(
+                        getattr(user, 'telegram_id', None)
+                        if channel_value == NotificationChannel.TELEGRAM.value else None
+                    ),
+                    order_id=payload.get('order_id'),
+                    delivery_id=payload.get('delivery_id'),
+                    extra_data=payload,
                 )
 
                 db.session.add(notification)

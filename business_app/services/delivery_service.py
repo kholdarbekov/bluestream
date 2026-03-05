@@ -26,6 +26,13 @@ class DeliveryService:
         self.max_delivery_distance = current_app.config.get('DELIVERY_RADIUS_KM', 50)
         self.store_latitude = TASHKENT_COORDINATES['latitude']
         self.store_longitude = TASHKENT_COORDINATES['longitude']
+
+    @staticmethod
+    def _normalize_actor_id(actor_user_id: Optional[int]) -> Optional[int]:
+        """Normalize JWT/string actor ids to integers for model comparisons."""
+        if actor_user_id is None:
+            return None
+        return int(actor_user_id)
     
     def create_delivery(self, order_id: int, delivery_type: DeliveryType = DeliveryType.STANDARD,
                        scheduled_time_slot: str = None) -> Delivery:
@@ -152,13 +159,106 @@ class DeliveryService:
         self._update_delivery_status_fields(delivery, new_status, current_location)
         
         # Create status history
-        self._create_delivery_status_history(delivery_id, old_status, new_status, driver_id, notes)
+        history = self._create_delivery_status_history(delivery_id, old_status, new_status, driver_id, notes)
+        db.session.flush()
         
         db.session.commit()
         
         # Handle status-specific actions
-        self._handle_delivery_status_change(delivery, new_status, sync_order_status)
+        self._handle_delivery_status_change(
+            delivery,
+            new_status,
+            sync_order_status,
+            history_id=history.id,
+        )
         
+        return delivery
+
+    def begin_delivery_in_transit(
+        self,
+        delivery_id: int,
+        *,
+        actor_user_id: int = None,
+        required_driver_id: int = None,
+        notes: str = None,
+    ) -> Delivery:
+        """Advance an assigned delivery directly to in-transit for legacy entrypoints."""
+        actor_user_id = self._normalize_actor_id(actor_user_id)
+        required_driver_id = self._normalize_actor_id(required_driver_id)
+        delivery = Delivery.query.get(delivery_id)
+        if not delivery:
+            raise NotFoundError("Delivery not found")
+
+        if required_driver_id is not None and delivery.delivery_person_id != required_driver_id:
+            raise NotFoundError("Delivery not found or not assigned")
+
+        if delivery.status != DeliveryStatus.ASSIGNED:
+            raise ValidationError("Cannot start delivery at the current stage")
+
+        now = datetime.now(timezone.utc)
+        delivery.status = DeliveryStatus.IN_TRANSIT
+        delivery.updated_at = now
+        delivery.route_data = delivery.route_data or {}
+        delivery.route_data.setdefault('picked_up_at', now.isoformat())
+        delivery.route_data['in_transit_at'] = now.isoformat()
+
+        history = DeliveryStatusHistory(
+            delivery_id=delivery.id,
+            old_status=DeliveryStatus.ASSIGNED,
+            new_status=DeliveryStatus.IN_TRANSIT,
+            changed_by=actor_user_id,
+            changed_at=now,
+            notes=notes or 'Delivery started',
+        )
+        db.session.add(history)
+        db.session.flush()
+        db.session.commit()
+
+        self._enqueue_delivery_status_notification(history.id)
+        return delivery
+
+    def mark_delivery_arrived(
+        self,
+        delivery_id: int,
+        *,
+        actor_user_id: int = None,
+        required_driver_id: int = None,
+        notes: str = None,
+        automatic: bool = False,
+    ) -> Delivery:
+        """Mark an in-transit delivery as arrived via a canonical history event."""
+        actor_user_id = self._normalize_actor_id(actor_user_id)
+        required_driver_id = self._normalize_actor_id(required_driver_id)
+        delivery = Delivery.query.get(delivery_id)
+        if not delivery:
+            raise NotFoundError("Delivery not found")
+
+        if required_driver_id is not None and delivery.delivery_person_id != required_driver_id:
+            raise NotFoundError("Delivery not found or not assigned")
+
+        if delivery.status != DeliveryStatus.IN_TRANSIT:
+            raise ValidationError("Delivery must be in transit to mark as arrived")
+
+        now = datetime.now(timezone.utc)
+        delivery.status = DeliveryStatus.ARRIVED
+        delivery.updated_at = now
+        delivery.route_data = delivery.route_data or {}
+        delivery.route_data['arrived_at'] = now.isoformat()
+
+        history = DeliveryStatusHistory(
+            delivery_id=delivery.id,
+            old_status=DeliveryStatus.IN_TRANSIT,
+            new_status=DeliveryStatus.ARRIVED,
+            changed_by=actor_user_id,
+            changed_at=now,
+            notes=notes or 'Marked as arrived',
+            automatic=automatic,
+        )
+        db.session.add(history)
+        db.session.flush()
+        db.session.commit()
+
+        self._enqueue_delivery_status_notification(history.id)
         return delivery
     
     def calculate_delivery_fee(self, latitude: float, longitude: float, order_total: int) -> int:
@@ -515,9 +615,11 @@ class DeliveryService:
         )
         
         db.session.add(history)
+        return history
     
     def _handle_delivery_status_change(self, delivery: Delivery, new_status: DeliveryStatus,
-                                       sync_order_status: bool = True):
+                                       sync_order_status: bool = True,
+                                       history_id: int = None):
         """Handle actions when delivery status changes
         
         Args:
@@ -526,16 +628,22 @@ class DeliveryService:
             sync_order_status: If True, update associated order status when delivery
                              is completed. Set to False when this was triggered by
                              OrderService to prevent circular callbacks.
+            history_id: Committed delivery status history ID for event-driven notifications.
         """
         # Send notifications
-        from ..tasks.notification_tasks import send_delivery_update_task
-        send_delivery_update_task.delay(delivery.id, new_status.value)
+        if history_id is not None:
+            self._enqueue_delivery_status_notification(history_id)
         
         # Update order status if delivery is completed AND sync is enabled
         if new_status == DeliveryStatus.DELIVERED and sync_order_status:
             from .order_service import OrderService
             order_service = OrderService()
             order_service.update_order_status(delivery.order_id, OrderStatus.DELIVERED)
+
+    def _enqueue_delivery_status_notification(self, history_id: int):
+        """Enqueue one canonical delivery-status notification for a committed history event."""
+        from ..tasks.notification_tasks import send_delivery_update_task
+        send_delivery_update_task.delay(history_id)
     
     def _schedule_delivery_assignment(self, delivery_id: int):
         """Schedule automatic delivery assignment"""

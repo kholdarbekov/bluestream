@@ -1,6 +1,7 @@
 """Business-rule unit tests for DeliveryService constraints and helpers."""
 
 from datetime import UTC, datetime, timedelta
+from unittest.mock import patch
 
 import pytest
 
@@ -132,3 +133,28 @@ class TestDeliveryServiceBusinessRules:
         assert delivery.delivery_notes == "Order cancelled by customer"
         assert history[-1].new_status == DeliveryStatus.CANCELLED
         assert history[-1].notes == "Order cancelled by customer"
+
+    def test_update_delivery_status_enqueues_notification_with_history_id(
+        self, delivery_service, order_with_address, db
+    ):
+        delivery = Delivery(
+            order_id=order_with_address.id,
+            status=DeliveryStatus.IN_TRANSIT,
+            scheduled_date=datetime.now(UTC),
+            scheduled_time_slot="09:00-12:00",
+        )
+        db.session.add(delivery)
+        db.session.commit()
+
+        with patch("business_app.tasks.notification_tasks.send_delivery_update_task.delay") as delay_mock:
+            delivery_service.update_delivery_status(delivery.id, DeliveryStatus.ARRIVED)
+
+        history = (
+            DeliveryStatusHistory.query
+            .filter_by(delivery_id=delivery.id, new_status=DeliveryStatus.ARRIVED)
+            .order_by(DeliveryStatusHistory.id.desc())
+            .first()
+        )
+
+        assert history is not None
+        delay_mock.assert_called_once_with(history.id)

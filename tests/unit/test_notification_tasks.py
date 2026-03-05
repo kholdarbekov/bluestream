@@ -150,3 +150,18 @@ class TestNotificationTasks:
         assert result["success"] is True
         kwargs = mock_service.send_sms_to_phone.call_args.kwargs
         assert kwargs["template_key"] == "sms.welcome"
+
+    def test_send_delivery_update_task_uses_history_based_contract(self, app):
+        with (
+            app.app_context(),
+            patch("business_app.tasks.notification_tasks.NotificationService") as mock_service_cls,
+        ):
+            mock_service = mock_service_cls.return_value
+            mock_service.send_delivery_status_change_notification.return_value = {
+                "telegram": {"success": True}
+            }
+
+            result = notification_tasks.send_delivery_update_task.run(321)
+
+        assert result["telegram"]["success"] is True
+        mock_service.send_delivery_status_change_notification.assert_called_once_with(321)

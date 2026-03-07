@@ -13,7 +13,7 @@ from business_app.utils.service_factory import (
 from business_app.utils.translations import get_translation
 from business_app.serializers.order_serializers import (
     serialize_order, serialize_order_delivery, serialize_delivery_slot,
-    CreateOrderRequest, OrderFeedbackRequest, CartEstimateRequest
+    serialize_order_payment, CreateOrderRequest, OrderFeedbackRequest, CartEstimateRequest
 )
 from business_app.utils.decorators import validate_json, rate_limit, require_verification
 from business_app.utils.constants import OrderStatus, NotificationType
@@ -73,7 +73,7 @@ def get_orders():
     
     return success_response(
         data={
-            'orders': [serialize_order(order, include_items=True) for order in paginated['items']],
+            'orders': [serialize_order(order, include_items=True, include_payment=True) for order in paginated['items']],
             'pagination': pagination_data,
         },
         message=get_translation('api.orders.list_retrieved')
@@ -89,12 +89,17 @@ def get_order(order_id):
         details = get_order_service().get_order_details_for_user(order_id, current_user_id)
         order = details['order']
         delivery_info = serialize_order_delivery(details['delivery']) if details['delivery'] else None
+        from business_app.services.cash_collection_service import CashCollectionService
+
+        cash_collection_service = CashCollectionService()
+        payment_timeline = cash_collection_service.get_order_payment_timeline(order.id)
 
         return success_response(
             data={
-                'order': serialize_order(order, include_items=True, include_delivery=True),
+                'order': serialize_order(order, include_items=True, include_delivery=True, include_payment=True),
                 'delivery': delivery_info,
-                'timeline': details['timeline']
+                'timeline': details['timeline'],
+                'payment_timeline': payment_timeline,
             },
             message=get_translation('api.orders.retrieved')
         )
@@ -358,8 +363,13 @@ def create_order():
         current_app.logger.info(f"CREATE ORDER API: send_notification finished")
 
         response_data = {
-            'order': serialize_order(order, include_items=True)
+            'order': serialize_order(order, include_items=True, include_payment=True)
         }
+
+        if (order.payment_method.value if hasattr(order.payment_method, 'value') else order.payment_method) == 'cash':
+            from business_app.services.cash_collection_service import CashCollectionService
+
+            response_data['payment_restrictions'] = CashCollectionService().get_cod_restriction_context(current_user_id)
 
         return created_response(
             data=response_data,
@@ -592,6 +602,9 @@ def track_order(order_id):
         tracking = get_order_service().get_order_tracking_for_user(order_id, current_user_id)
         order = tracking['order']
         delivery_info = serialize_order_delivery(tracking['delivery']) if tracking['delivery'] else None
+        from business_app.services.cash_collection_service import CashCollectionService
+
+        cash_collection_service = CashCollectionService()
 
         return success_response(
             data={
@@ -600,11 +613,13 @@ def track_order(order_id):
                     'order_number': order.order_number,
                     'status': order.status.value,
                     'total_amount': order.total_amount,
-                    'created_at': order.created_at.isoformat()
+                    'created_at': order.created_at.isoformat(),
+                    'payment_info': serialize_order_payment(order.payment) if getattr(order, 'payment', None) else None,
                 },
                 'delivery': delivery_info,
                 'timeline': tracking['timeline'],
-                'estimated_time_remaining': tracking['estimated_time_remaining']
+                'estimated_time_remaining': tracking['estimated_time_remaining'],
+                'payment_timeline': cash_collection_service.get_order_payment_timeline(order.id),
             },
             message=get_translation('api.orders.retrieved')
         )

@@ -53,6 +53,7 @@ def get_payment_methods():
     """Get available payment methods"""
     try:
         current_user_id = get_jwt_identity()
+        from business_app.services.cash_collection_service import CashCollectionService
 
         user = User.query.get(current_user_id)
         if not user:
@@ -108,8 +109,16 @@ def get_payment_methods():
             }
         ]
 
+        cod_context = CashCollectionService().get_cod_restriction_context(current_user_id)
+        if cod_context['cod_restricted']:
+            available_methods = [
+                method for method in available_methods
+                if method['method'] != 'cash'
+            ]
+
         return success_response(data={
             'available_methods': available_methods,
+            'payment_restrictions': cod_context,
             'saved_cards': [
                 serialize_credit_card(card) for card in saved_cards
             ]
@@ -118,6 +127,34 @@ def get_payment_methods():
     except Exception as e:
         current_app.logger.error(f"Get payment methods error: {e}")
         return internal_error_response(message=get_translation('api.payments.error.get_methods_failed'))
+
+
+@payments_bp.route('/cod/statement', methods=['GET'])
+@jwt_required()
+@handle_api_exception
+def get_cod_statement():
+    """Get the authenticated user's COD receivable statement."""
+    current_user_id = get_jwt_identity()
+    from business_app.services.cash_collection_service import CashCollectionService
+
+    statement = CashCollectionService().get_customer_cod_statement(current_user_id)
+    return success_response(data=statement)
+
+
+@payments_bp.route('/orders/<int:order_id>/timeline', methods=['GET'])
+@jwt_required()
+@handle_api_exception
+def get_order_payment_timeline(order_id):
+    """Get payment timeline for one of the authenticated user's orders."""
+    current_user_id = get_jwt_identity()
+    order = Order.query.filter_by(id=order_id, user_id=current_user_id).first()
+    if not order:
+        return not_found_response(message=get_translation('api.orders.not_found'))
+
+    from business_app.services.cash_collection_service import CashCollectionService
+
+    timeline = CashCollectionService().get_order_payment_timeline(order_id)
+    return success_response(data=timeline)
 
 
 @payments_bp.route('/create', methods=['POST'])

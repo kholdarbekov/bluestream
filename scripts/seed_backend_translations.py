@@ -680,6 +680,11 @@ BACKEND_TRANSLATIONS = {
         'uz': 'Buyurtma yo\'lda',
         'ru': 'Заказ в пути'
     },
+    'api.delivery.arrived': {
+        'en': 'Order has arrived',
+        'uz': 'Buyurtma yetib keldi',
+        'ru': 'Заказ прибыл'
+    },
     'api.delivery.completed': {
         'en': 'Delivery completed',
         'uz': 'Yetkazib berish yakunlandi',
@@ -2707,6 +2712,21 @@ BACKEND_TRANSLATIONS = {
         'uz': 'Push token muvaffaqiyatli o\'chirildi',
         'ru': 'Push-токен успешно удален'
     },
+    'api.notifications.success.user_notification_settings_updated': {
+        'en': 'User notification settings updated successfully',
+        'uz': 'Foydalanuvchi bildirishnoma sozlamalari muvaffaqiyatli yangilandi',
+        'ru': 'Настройки уведомлений пользователя успешно обновлены'
+    },
+    'api.notifications.validation.delivery_telegram_toggle_boolean': {
+        'en': 'delivery_telegram_status_updates_enabled must be a boolean',
+        'uz': 'delivery_telegram_status_updates_enabled mantiqiy qiymat (boolean) bo\'lishi kerak',
+        'ru': 'delivery_telegram_status_updates_enabled должен быть булевым значением'
+    },
+    'api.notifications.validation.reason_required': {
+        'en': 'Reason is required',
+        'uz': 'Sabab ko\'rsatish majburiy',
+        'ru': 'Необходимо указать причину'
+    },
 
     # ============================================================================
     # Validation Errors (error.validation.*)
@@ -3198,6 +3218,101 @@ BACKEND_TRANSLATIONS = {
         'en': 'Registration Method',
         'uz': 'Ro\'yxatdan o\'tish usuli',
         'ru': 'Способ регистрации'
+    },
+    'ui.users.notification_settings': {
+        'en': 'Notification Settings',
+        'uz': 'Bildirishnoma sozlamalari',
+        'ru': 'Настройки уведомлений'
+    },
+    'ui.users.delivery_telegram_updates_setting': {
+        'en': 'Telegram delivery updates (in transit, arrived)',
+        'uz': 'Telegram orqali yetkazib berish yangilanishlari (yo\'lda, yetib bordi)',
+        'ru': 'Обновления доставки в Telegram (в пути, прибыл)'
+    },
+    'ui.users.delivery_telegram_updates_setting_help': {
+        'en': 'Controls Telegram notifications for delivery status changes.',
+        'uz': 'Yetkazib berish holati o\'zgarganda Telegram bildirishnomalarini boshqaradi.',
+        'ru': 'Управляет Telegram-уведомлениями об изменениях статуса доставки.'
+    },
+    'ui.users.notification_status_enabled': {
+        'en': 'Enabled',
+        'uz': 'Yoqilgan',
+        'ru': 'Включено'
+    },
+    'ui.users.notification_status_disabled': {
+        'en': 'Disabled',
+        'uz': 'O\'chirilgan',
+        'ru': 'Отключено'
+    },
+    'ui.users.notification_source_explicit': {
+        'en': 'Explicit',
+        'uz': 'Aniq sozlangan',
+        'ru': 'Явно задано'
+    },
+    'ui.users.notification_source_default': {
+        'en': 'Default',
+        'uz': 'Standart',
+        'ru': 'По умолчанию'
+    },
+    'ui.users.telegram_connected': {
+        'en': 'Telegram connected',
+        'uz': 'Telegram ulangan',
+        'ru': 'Telegram подключен'
+    },
+    'ui.users.telegram_not_connected': {
+        'en': 'Telegram not connected',
+        'uz': 'Telegram ulanmagan',
+        'ru': 'Telegram не подключен'
+    },
+    'ui.users.bot_active': {
+        'en': 'Bot active',
+        'uz': 'Bot faol',
+        'ru': 'Бот активен'
+    },
+    'ui.users.bot_inactive': {
+        'en': 'Bot inactive',
+        'uz': 'Bot nofaol',
+        'ru': 'Бот неактивен'
+    },
+    'ui.users.notification_change_reason_title': {
+        'en': 'Confirm Notification Setting Change',
+        'uz': 'Bildirishnoma sozlamasini o\'zgartirishni tasdiqlang',
+        'ru': 'Подтвердите изменение настройки уведомлений'
+    },
+    'ui.users.notification_change_reason_prompt_enable': {
+        'en': 'Please provide a reason for enabling Telegram delivery updates.',
+        'uz': 'Telegram yetkazib berish yangilanishlarini yoqish sababini kiriting.',
+        'ru': 'Укажите причину включения Telegram-уведомлений о доставке.'
+    },
+    'ui.users.notification_change_reason_prompt_disable': {
+        'en': 'Please provide a reason for disabling Telegram delivery updates.',
+        'uz': 'Telegram yetkazib berish yangilanishlarini o\'chirish sababini kiriting.',
+        'ru': 'Укажите причину отключения Telegram-уведомлений о доставке.'
+    },
+    'ui.users.notification_change_reason_placeholder': {
+        'en': 'Enter reason',
+        'uz': 'Sababni kiriting',
+        'ru': 'Введите причину'
+    },
+    'ui.users.notification_change_reason_required': {
+        'en': 'Reason is required',
+        'uz': 'Sabab ko\'rsatish majburiy',
+        'ru': 'Необходимо указать причину'
+    },
+    'ui.users.notification_settings_updated': {
+        'en': 'Notification settings updated',
+        'uz': 'Bildirishnoma sozlamalari yangilandi',
+        'ru': 'Настройки уведомлений обновлены'
+    },
+    'ui.users.notification_settings_update_failed': {
+        'en': 'Failed to update notification settings',
+        'uz': 'Bildirishnoma sozlamalarini yangilab bo\'lmadi',
+        'ru': 'Не удалось обновить настройки уведомлений'
+    },
+    'ui.users.notification_settings_load_failed': {
+        'en': 'Failed to load notification settings',
+        'uz': 'Bildirishnoma sozlamalarini yuklab bo\'lmadi',
+        'ru': 'Не удалось загрузить настройки уведомлений'
     },
 
     # ============================================================================
@@ -4557,6 +4672,51 @@ BACKEND_TRANSLATIONS = {
         'en': '🔔 Notifications',
         'uz': '🔔 Bildirishnomalar',
         'ru': '🔔 Уведомления'
+    },
+    'telegram.notifications.title': {
+        'en': '🔔 Notification Settings',
+        'uz': '🔔 Bildirishnoma sozlamalari',
+        'ru': '🔔 Настройки уведомлений'
+    },
+    'telegram.notifications.delivery_status_updates_label': {
+        'en': 'Telegram delivery status updates',
+        'uz': 'Telegram orqali yetkazib berish holati yangilanishlari',
+        'ru': 'Обновления статуса доставки в Telegram'
+    },
+    'telegram.notifications.delivery_status_updates_description': {
+        'en': 'Receive Telegram notifications for "in transit" and "arrived" statuses.',
+        'uz': '"Yo\'lda" va "yetib bordi" holatlari uchun Telegram bildirishnomalarini qabul qilish.',
+        'ru': 'Получать Telegram-уведомления для статусов «в пути» и «прибыл».'
+    },
+    'telegram.notifications.current_status_enabled': {
+        'en': 'Status: ✅ Enabled',
+        'uz': 'Holat: ✅ Yoqilgan',
+        'ru': 'Статус: ✅ Включено'
+    },
+    'telegram.notifications.current_status_disabled': {
+        'en': 'Status: ❌ Disabled',
+        'uz': 'Holat: ❌ O\'chirilgan',
+        'ru': 'Статус: ❌ Отключено'
+    },
+    'telegram.notifications.toggle_disable_button': {
+        'en': 'Turn Off',
+        'uz': 'O\'chirish',
+        'ru': 'Выключить'
+    },
+    'telegram.notifications.toggle_enable_button': {
+        'en': 'Turn On',
+        'uz': 'Yoqish',
+        'ru': 'Включить'
+    },
+    'telegram.notifications.update_success': {
+        'en': 'Notification setting updated',
+        'uz': 'Bildirishnoma sozlamasi yangilandi',
+        'ru': 'Настройка уведомлений обновлена'
+    },
+    'telegram.notifications.update_failed': {
+        'en': 'Failed to update notification setting',
+        'uz': 'Bildirishnoma sozlamasini yangilab bo\'lmadi',
+        'ru': 'Не удалось обновить настройку уведомлений'
     },
     'telegram.profile.payment_methods': {
         'en': '💳 Payment Methods',

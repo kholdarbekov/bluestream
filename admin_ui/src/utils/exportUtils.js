@@ -319,7 +319,7 @@ class ExportUtils {
       const filename = `notification_campaigns_export_${new Date().toISOString().split('T')[0]}`;
 
       const campaignsData = await adminService.getNotificationCampaigns({ ...filters, per_page: 10000 });
-      const exportData = (campaignsData.data?.items || []).map(campaign => ({
+      const exportData = (campaignsData.campaigns || []).map(campaign => ({
         'Campaign Name': campaign.name,
         'Channel': campaign.channel,
         'Subject': campaign.subject,

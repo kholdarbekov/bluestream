@@ -60,7 +60,7 @@ from business_app import db
 from business_app.utils.helpers import get_current_language
 from business_app.utils.user_types import normalize_user_type
 from business_app.utils.translations import get_translation
-from business_app.utils.exceptions import ValidationError, ConflictError, NotFoundError
+from business_app.utils.exceptions import ValidationError, ConflictError, NotFoundError, ForbiddenError
 from business_app.utils.api_responses import (
     success_response, error_response, paginated_response, created_response,
     not_found_response, validation_error_response, internal_error_response,
@@ -1096,6 +1096,81 @@ def get_user_details(user_id):
         return internal_error_response('Failed to get user details')
 
 
+@admin_bp.route('/users/<int:user_id>/payment-methods', methods=['GET'])
+@jwt_required()
+@manager_or_higher_required
+def get_user_payment_methods_admin(user_id):
+    """Get debt-aware payment methods for admin-created orders."""
+    try:
+        from business_app.services.staff_service import StaffService
+
+        payload = StaffService.get_client_payment_methods(user_id)
+        return success_response(data=payload)
+    except NotFoundError:
+        return not_found_response(resource_type='User')
+    except ValidationError as e:
+        return validation_error_response(e.message)
+    except Exception as e:
+        current_app.logger.error(f"Get admin user payment methods error: {e}")
+        return internal_error_response('Failed to get user payment methods')
+
+
+@admin_bp.route('/users/<int:user_id>/notification-settings', methods=['GET'])
+@jwt_required()
+@validate_admin_action(['view_users'])
+def get_user_notification_settings(user_id):
+    """Get customer notification settings manageable by support/admin staff."""
+    try:
+        settings = get_notification_service().get_delivery_telegram_status_updates_setting(user_id)
+        return success_response(data={'notification_settings': settings})
+    except NotFoundError:
+        return not_found_response(resource_type='User')
+    except Exception as e:
+        current_app.logger.error(f"Get user notification settings error: {e}")
+        return internal_error_response('Failed to get user notification settings')
+
+
+@admin_bp.route('/users/<int:user_id>/notification-settings', methods=['PUT'])
+@jwt_required()
+@manager_or_higher_required
+@validate_json(['delivery_telegram_status_updates_enabled', 'reason'])
+def update_user_notification_settings(user_id):
+    """Update customer notification settings on behalf of the customer."""
+    try:
+        actor_user_id = int(get_jwt_identity())
+        payload = request.get_json() or {}
+        enabled = payload.get('delivery_telegram_status_updates_enabled')
+        reason = (payload.get('reason') or '').strip()
+
+        if not isinstance(enabled, bool):
+            return validation_error_response(
+                get_translation('api.notifications.validation.delivery_telegram_toggle_boolean')
+            )
+        if not reason:
+            return validation_error_response(
+                get_translation('api.notifications.validation.reason_required')
+            )
+
+        settings = get_notification_service().set_delivery_telegram_status_updates_setting(
+            user_id=user_id,
+            enabled=enabled,
+            source='admin',
+            actor_user_id=actor_user_id,
+            reason=reason,
+        )
+        return success_response(
+            data={'notification_settings': settings},
+            message=get_translation('api.notifications.success.user_notification_settings_updated'),
+        )
+    except NotFoundError:
+        return not_found_response(resource_type='User')
+    except ValidationError as e:
+        return validation_error_response(str(e))
+    except Exception as e:
+        current_app.logger.error(f"Update user notification settings error: {e}")
+        return internal_error_response('Failed to update user notification settings')
+
+
 @admin_bp.route('/users/<int:user_id>/status', methods=['PUT'])
 @jwt_required()
 @manager_or_higher_required
@@ -1836,6 +1911,9 @@ def get_order_details(order_id):
             'delivery_fee': float(getattr(order, 'delivery_fee', 0)),
             'payment_method': order.payment_method.value if order.payment_method else None,
             'payment_status': order.payment.status.value if order.payment and hasattr(order.payment.status, 'value') else ('pending' if not order.payment else str(order.payment.status)),
+            'amount_collected': float(getattr(order.payment, 'amount_collected', 0) or 0) if order.payment else 0,
+            'outstanding_amount': float(getattr(order.payment, 'outstanding_amount', 0) or 0) if order.payment else 0,
+            'collection_events_count': len(getattr(order.payment, 'cash_collection_allocations', []) or []) if order.payment else 0,
             'delivery_date': order.delivery_date.isoformat() if order.delivery_date else None,
             'special_instructions': getattr(order, 'special_instructions', None),
             'admin_notes': getattr(order, 'admin_notes', None),
@@ -1894,6 +1972,11 @@ def get_order_details(order_id):
                     'name': order.delivery.delivery_person.full_name,
                     'phone': order.delivery.delivery_person.phone,
                 }
+
+        from business_app.services.cash_collection_service import CashCollectionService
+
+        cash_collection_service = CashCollectionService()
+        order_data['payment_timeline'] = cash_collection_service.get_order_payment_timeline(order.id)
 
         return success_response(data={'order': order_data})
 
@@ -6282,6 +6365,238 @@ def get_loyalty_analytics():
 
 
 # ============================================================================
+# NOTIFICATION CAMPAIGN MANAGEMENT ENDPOINTS
+# ============================================================================
+
+@admin_bp.route('/notification-campaigns', methods=['GET'])
+@jwt_required()
+@validate_admin_action(['view_notifications', 'manage_notifications'])
+def get_notification_campaigns():
+    """Get saved notification campaigns for the admin notifications page."""
+    try:
+        page = int(request.args.get('page', 1))
+        per_page = min(int(request.args.get('per_page', 20)), 100)
+        search = request.args.get('search')
+        status = request.args.get('status')
+        channel = request.args.get('channel') or request.args.get('type')
+        target_audience = request.args.get('target_audience')
+        start_date = request.args.get('start_date')
+        end_date = request.args.get('end_date')
+
+        campaigns_data = get_notification_service().get_notification_campaigns_paginated(
+            requester_id=get_jwt_identity(),
+            page=page,
+            per_page=per_page,
+            search=search,
+            status=status,
+            channel=channel,
+            target_audience=target_audience,
+            start_date=start_date,
+            end_date=end_date,
+        )
+
+        return paginated_response(
+            items=campaigns_data['items'],
+            total=campaigns_data['total'],
+            page=campaigns_data['page'],
+            per_page=campaigns_data['per_page'],
+        )
+
+    except ValidationError as e:
+        return validation_error_response(str(e))
+    except ForbiddenError as e:
+        return forbidden_response(str(e))
+    except ValueError:
+        return validation_error_response('Invalid pagination value')
+    except Exception as e:
+        current_app.logger.error(f"Get notification campaigns error: {e}")
+        return internal_error_response('Failed to get notification campaigns')
+
+
+@admin_bp.route('/notification-campaigns', methods=['POST'])
+@jwt_required()
+@validate_admin_action(['manage_notifications'])
+def create_notification_campaign():
+    """Create a notification campaign."""
+    try:
+        campaign = get_notification_service().create_notification_campaign(
+            sender_id=get_jwt_identity(),
+            payload=request.get_json() or {},
+        )
+
+        return created_response(
+            data={'campaign': campaign},
+            message='Notification campaign created successfully',
+        )
+
+    except ValidationError as e:
+        return validation_error_response(str(e))
+    except ForbiddenError as e:
+        return forbidden_response(str(e))
+    except Exception as e:
+        current_app.logger.error(f"Create notification campaign error: {e}")
+        return internal_error_response('Failed to create notification campaign')
+
+
+@admin_bp.route('/notification-campaigns/<int:campaign_id>', methods=['GET'])
+@jwt_required()
+@validate_admin_action(['view_notifications', 'manage_notifications'])
+def get_notification_campaign_detail(campaign_id):
+    """Get notification campaign details."""
+    try:
+        campaign = get_notification_service().get_notification_campaign_detail(
+            requester_id=get_jwt_identity(),
+            campaign_id=campaign_id,
+        )
+        return success_response(data={'campaign': campaign})
+    except NotFoundError as e:
+        return not_found_response(message=str(e))
+    except ValidationError as e:
+        return validation_error_response(str(e))
+    except ForbiddenError as e:
+        return forbidden_response(str(e))
+    except Exception as e:
+        current_app.logger.error(f"Get notification campaign detail error: {e}")
+        return internal_error_response('Failed to get notification campaign detail')
+
+
+@admin_bp.route('/notification-campaigns/<int:campaign_id>', methods=['PUT'])
+@jwt_required()
+@validate_admin_action(['manage_notifications'])
+def update_notification_campaign(campaign_id):
+    """Update a notification campaign."""
+    try:
+        campaign = get_notification_service().update_notification_campaign(
+            sender_id=get_jwt_identity(),
+            campaign_id=campaign_id,
+            payload=request.get_json() or {},
+        )
+        return success_response(
+            data={'campaign': campaign},
+            message='Notification campaign updated successfully',
+        )
+    except NotFoundError as e:
+        return not_found_response(message=str(e))
+    except (ValidationError, ConflictError) as e:
+        return validation_error_response(str(e))
+    except ForbiddenError as e:
+        return forbidden_response(str(e))
+    except Exception as e:
+        current_app.logger.error(f"Update notification campaign error: {e}")
+        return internal_error_response('Failed to update notification campaign')
+
+
+@admin_bp.route('/notification-campaigns/<int:campaign_id>', methods=['DELETE'])
+@jwt_required()
+@validate_admin_action(['manage_notifications'])
+def delete_notification_campaign(campaign_id):
+    """Delete a draft or cancelled notification campaign."""
+    try:
+        get_notification_service().delete_notification_campaign(
+            sender_id=get_jwt_identity(),
+            campaign_id=campaign_id,
+        )
+        return success_response(message='Notification campaign deleted successfully')
+    except NotFoundError as e:
+        return not_found_response(message=str(e))
+    except (ValidationError, ConflictError) as e:
+        return validation_error_response(str(e))
+    except ForbiddenError as e:
+        return forbidden_response(str(e))
+    except Exception as e:
+        current_app.logger.error(f"Delete notification campaign error: {e}")
+        return internal_error_response('Failed to delete notification campaign')
+
+
+@admin_bp.route('/notification-campaigns/<int:campaign_id>/duplicate', methods=['POST'])
+@jwt_required()
+@validate_admin_action(['manage_notifications'])
+def duplicate_notification_campaign(campaign_id):
+    """Duplicate a notification campaign."""
+    try:
+        campaign = get_notification_service().duplicate_notification_campaign(
+            sender_id=get_jwt_identity(),
+            campaign_id=campaign_id,
+        )
+        return created_response(
+            data={'campaign': campaign},
+            message='Notification campaign duplicated successfully',
+        )
+    except NotFoundError as e:
+        return not_found_response(message=str(e))
+    except ValidationError as e:
+        return validation_error_response(str(e))
+    except ForbiddenError as e:
+        return forbidden_response(str(e))
+    except Exception as e:
+        current_app.logger.error(f"Duplicate notification campaign error: {e}")
+        return internal_error_response('Failed to duplicate notification campaign')
+
+
+@admin_bp.route('/notification-campaigns/<int:campaign_id>/send', methods=['POST'])
+@jwt_required()
+@validate_admin_action(['manage_notifications'])
+def send_notification_campaign(campaign_id):
+    """Queue a notification campaign for immediate or scheduled execution."""
+    try:
+        payload = request.get_json() or {}
+        send_now = payload.get('send_now')
+        if send_now is None:
+            send_now = not bool(payload.get('scheduled_at'))
+
+        if 'scheduled_at' in payload:
+            get_notification_service().update_notification_campaign(
+                sender_id=get_jwt_identity(),
+                campaign_id=campaign_id,
+                payload=payload,
+            )
+
+        campaign = get_notification_service().queue_notification_campaign(
+            sender_id=get_jwt_identity(),
+            campaign_id=campaign_id,
+            send_now=bool(send_now),
+        )
+        return success_response(
+            data={'campaign': campaign},
+            message='Notification campaign queued successfully',
+        )
+    except NotFoundError as e:
+        return not_found_response(message=str(e))
+    except (ValidationError, ConflictError) as e:
+        return validation_error_response(str(e))
+    except ForbiddenError as e:
+        return forbidden_response(str(e))
+    except Exception as e:
+        current_app.logger.error(f"Send notification campaign error: {e}")
+        return internal_error_response('Failed to queue notification campaign')
+
+
+@admin_bp.route('/notification-campaigns/<int:campaign_id>/cancel', methods=['POST'])
+@jwt_required()
+@validate_admin_action(['manage_notifications'])
+def cancel_notification_campaign(campaign_id):
+    """Cancel a scheduled or sending notification campaign."""
+    try:
+        campaign = get_notification_service().cancel_notification_campaign(
+            sender_id=get_jwt_identity(),
+            campaign_id=campaign_id,
+        )
+        return success_response(
+            data={'campaign': campaign},
+            message='Notification campaign cancelled successfully',
+        )
+    except NotFoundError as e:
+        return not_found_response(message=str(e))
+    except (ValidationError, ConflictError) as e:
+        return validation_error_response(str(e))
+    except ForbiddenError as e:
+        return forbidden_response(str(e))
+    except Exception as e:
+        current_app.logger.error(f"Cancel notification campaign error: {e}")
+        return internal_error_response('Failed to cancel notification campaign')
+
+
+# ============================================================================
 # NOTIFICATION TEMPLATE MANAGEMENT ENDPOINTS
 # ============================================================================
 
@@ -6303,54 +6618,31 @@ def get_notification_templates():
     try:
         page = int(request.args.get('page', 1))
         per_page = min(int(request.args.get('per_page', 20)), 100)
-
-        # Build query
-        query = NotificationTemplate.query
-
-        # Type filter
-        notification_type = request.args.get('notification_type')
-        if notification_type:
-            query = query.filter_by(notification_type=notification_type)
-
-        # Channel filter
-        channel = request.args.get('channel')
-        if channel:
-            query = query.filter_by(channel=channel)
-
-        # Active filter
         is_active = request.args.get('is_active')
+        is_active_bool = None
         if is_active is not None:
             is_active_bool = is_active.lower() == 'true'
-            query = query.filter_by(is_active=is_active_bool)
 
-        # Search
-        search = request.args.get('search')
-        if search:
-            query = query.filter(
-                or_(
-                    NotificationTemplate.name.ilike(f'%{search}%'),
-                    NotificationTemplate.subject.ilike(f'%{search}%'),
-                    NotificationTemplate.content.ilike(f'%{search}%')
-                )
-            )
-
-        # Sort by type and channel
-        query = query.order_by(NotificationTemplate.notification_type.asc(), NotificationTemplate.channel.asc())
-
-        # Paginate
-        pagination = query.paginate(page=page, per_page=per_page, error_out=False)
-
-        # Serialize templates
-        language = get_current_language()
-        templates = [template.to_dict(language=language) for template in pagination.items]
-
-        return paginated_response(
-            items=templates,
-            total=pagination.total,
+        templates_data = get_notification_service().get_admin_notification_templates_paginated(
+            requester_id=get_jwt_identity(),
             page=page,
-            per_page=per_page
+            per_page=per_page,
+            search=request.args.get('search'),
+            notification_type=request.args.get('notification_type'),
+            channel=request.args.get('channel'),
+            is_active=is_active_bool,
         )
 
+        return paginated_response(
+            items=templates_data['items'],
+            total=templates_data['total'],
+            page=templates_data['page'],
+            per_page=templates_data['per_page']
+        )
+    except ValidationError as e:
+        return validation_error_response(str(e))
+    except ForbiddenError as e:
+        return forbidden_response(str(e))
     except Exception as e:
         current_app.logger.error(f"Get notification templates error: {e}")
         return internal_error_response('Failed to get notification templates')
@@ -6362,16 +6654,17 @@ def get_notification_templates():
 def get_notification_template_detail(template_id):
     """Get detailed information about a specific notification template"""
     try:
-        template = NotificationTemplate.query.get(template_id)
-
-        if not template:
-            return not_found_response('Notification template not found')
-
-        language = get_current_language()
-        template_data = template.to_dict(language=language, include_all_translations=True)
-
+        template_data = get_notification_service().get_admin_notification_template_detail(
+            requester_id=get_jwt_identity(),
+            template_id=template_id,
+        )
         return success_response(data={'template': template_data})
-
+    except NotFoundError as e:
+        return not_found_response(message=str(e))
+    except ValidationError as e:
+        return validation_error_response(str(e))
+    except ForbiddenError as e:
+        return forbidden_response(str(e))
     except Exception as e:
         current_app.logger.error(f"Get notification template detail error: {e}")
         return internal_error_response('Failed to get notification template detail')
@@ -6380,7 +6673,6 @@ def get_notification_template_detail(template_id):
 @admin_bp.route('/notification-templates', methods=['POST'])
 @jwt_required()
 @validate_admin_action(['manage_notifications'])
-@validate_json(['name', 'notification_type', 'channel', 'content'])
 def create_notification_template():
     """
     Create a new notification template
@@ -6395,57 +6687,22 @@ def create_notification_template():
         - translations: Multilingual content
     """
     try:
-        data = request.get_json()
-
-        # Validate channel
-        valid_channels = ['email', 'sms', 'push', 'telegram', 'in_app']
-        channel = data.get('channel')
-        if channel not in valid_channels:
-            return validation_error_response(f'Invalid channel. Must be one of: {", ".join(valid_channels)}')
-
-        # Email templates require subject
-        if channel == 'email' and not data.get('subject'):
-            return validation_error_response('subject is required for email templates')
-
-        # Check for duplicate template (same type + channel)
-        existing = NotificationTemplate.query.filter_by(
-            notification_type=data.get('notification_type'),
-            channel=channel
-        ).first()
-
-        if existing:
-            return validation_error_response(f'Template already exists for {data.get("notification_type")} on {channel} channel')
-
-        # Create template
-        template = NotificationTemplate(
-            name=data.get('name'),
-            notification_type=data.get('notification_type'),
-            channel=channel,
-            subject=data.get('subject'),
-            content=data.get('content'),
-            is_active=data.get('is_active', True)
+        template = get_notification_service().create_admin_notification_template(
+            requester_id=get_jwt_identity(),
+            payload=request.get_json() or {},
         )
-
-        db.session.add(template)
-        db.session.flush()
-
-        # Handle translations
-        if data.get('translations'):
-            template.set_translations(data['translations'])
-
-        db.session.commit()
-
-        language = get_current_language()
         return created_response(
-            data={'template': template.to_dict(language=language)},
+            data={'template': template},
             message='Notification template created successfully'
         )
-
+    except ConflictError as e:
+        return validation_error_response(str(e))
+    except ValidationError as e:
+        return validation_error_response(str(e))
+    except ForbiddenError as e:
+        return forbidden_response(str(e))
     except Exception as e:
-        db.session.rollback()
         current_app.logger.error(f"Create notification template error: {e}")
-        import traceback
-        current_app.logger.error(traceback.format_exc())
         return internal_error_response('Failed to create notification template')
 
 
@@ -6455,37 +6712,22 @@ def create_notification_template():
 def update_notification_template(template_id):
     """Update an existing notification template"""
     try:
-        template = NotificationTemplate.query.get(template_id)
-
-        if not template:
-            return not_found_response('Notification template not found')
-
-        data = request.get_json()
-
-        # Update fields
-        if 'name' in data:
-            template.name = data['name']
-        if 'subject' in data:
-            template.subject = data['subject']
-        if 'content' in data:
-            template.content = data['content']
-        if 'is_active' in data:
-            template.is_active = data['is_active']
-
-        # Handle translations
-        if data.get('translations'):
-            template.set_translations(data['translations'])
-
-        db.session.commit()
-
-        language = get_current_language()
+        template = get_notification_service().update_admin_notification_template(
+            requester_id=get_jwt_identity(),
+            template_id=template_id,
+            payload=request.get_json() or {},
+        )
         return success_response(
-            data={'template': template.to_dict(language=language)},
+            data={'template': template},
             message='Notification template updated successfully'
         )
-
+    except NotFoundError as e:
+        return not_found_response(message=str(e))
+    except (ValidationError, ConflictError) as e:
+        return validation_error_response(str(e))
+    except ForbiddenError as e:
+        return forbidden_response(str(e))
     except Exception as e:
-        db.session.rollback()
         current_app.logger.error(f"Update notification template error: {e}")
         return internal_error_response('Failed to update notification template')
 
@@ -6496,19 +6738,22 @@ def update_notification_template(template_id):
 def delete_notification_template(template_id):
     """Delete a notification template"""
     try:
-        template = NotificationTemplate.query.get(template_id)
-
-        if not template:
-            return not_found_response('Notification template not found')
-
-        # Just deactivate instead of deleting to preserve history
-        template.is_active = False
-        db.session.commit()
-
-        return success_response(message=get_translation('api.admin.success.template_deactivated'))
-
+        template = get_notification_service().delete_admin_notification_template(
+            requester_id=get_jwt_identity(),
+            template_id=template_id,
+            reactivate=bool((request.get_json(silent=True) or {}).get('reactivate')),
+        )
+        return success_response(
+            data={'template': template},
+            message='Notification template status updated successfully',
+        )
+    except NotFoundError as e:
+        return not_found_response(message=str(e))
+    except ValidationError as e:
+        return validation_error_response(str(e))
+    except ForbiddenError as e:
+        return forbidden_response(str(e))
     except Exception as e:
-        db.session.rollback()
         current_app.logger.error(f"Delete notification template error: {e}")
         return internal_error_response('Failed to delete notification template')
 
@@ -6525,43 +6770,47 @@ def preview_notification_template(template_id):
         - language: Language code (optional)
     """
     try:
-        template = NotificationTemplate.query.get(template_id)
-
-        if not template:
-            return not_found_response('Notification template not found')
-
-        data = request.get_json() or {}
-        variables = data.get('variables', {})
-        language = data.get('language') or get_current_language()
-
-        # Get localized content
-        template_data = template.to_dict(language=language)
-
-        # Simple placeholder replacement
-        preview_subject = template_data.get('subject', '')
-        preview_content = template_data.get('content', '')
-
-        for key, value in variables.items():
-            placeholder = f'{{{{{key}}}}}'  # {{variable}}
-            preview_subject = preview_subject.replace(placeholder, str(value))
-            preview_content = preview_content.replace(placeholder, str(value))
-
-        preview = {
-            'template_id': template.id,
-            'template_name': template_data.get('name'),
-            'notification_type': template.notification_type,
-            'channel': template.channel,
-            'language': language,
-            'subject': preview_subject,
-            'content': preview_content,
-            'variables_used': list(variables.keys())
-        }
-
+        preview = get_notification_service().preview_admin_notification_template(
+            requester_id=get_jwt_identity(),
+            template_id=template_id,
+            payload=request.get_json() or {},
+        )
         return success_response(data={'preview': preview})
-
+    except NotFoundError as e:
+        return not_found_response(message=str(e))
+    except ValidationError as e:
+        return validation_error_response(str(e))
+    except ForbiddenError as e:
+        return forbidden_response(str(e))
     except Exception as e:
         current_app.logger.error(f"Preview notification template error: {e}")
         return internal_error_response('Failed to preview notification template')
+
+
+@admin_bp.route('/notification-templates/<int:template_id>/test-send', methods=['POST'])
+@jwt_required()
+@validate_admin_action(['manage_notifications'])
+def test_send_notification_template(template_id):
+    """Send a test notification using a template."""
+    try:
+        result = get_notification_service().test_send_admin_notification_template(
+            requester_id=get_jwt_identity(),
+            template_id=template_id,
+            payload=request.get_json() or {},
+        )
+        return success_response(
+            data={'test_send': result},
+            message='Notification template test send queued successfully',
+        )
+    except NotFoundError as e:
+        return not_found_response(message=str(e))
+    except ValidationError as e:
+        return validation_error_response(str(e))
+    except ForbiddenError as e:
+        return forbidden_response(str(e))
+    except Exception as e:
+        current_app.logger.error(f"Test send notification template error: {e}")
+        return internal_error_response('Failed to send notification template test')
 
 
 @admin_bp.route('/notification-templates/types', methods=['GET'])
@@ -6570,46 +6819,14 @@ def preview_notification_template(template_id):
 def get_notification_types():
     """Get list of available notification types"""
     try:
-        # Get distinct notification types from templates
-        types = db.session.query(NotificationTemplate.notification_type).distinct().all()
-
-        # Common notification types
-        common_types = [
-            'order_created',
-            'order_confirmed',
-            'order_shipped',
-            'order_delivered',
-            'order_cancelled',
-            'delivery_reminder',
-            'payment_received',
-            'payment_failed',
-            'subscription_created',
-            'subscription_renewed',
-            'subscription_expiring',
-            'subscription_cancelled',
-            'loyalty_points_earned',
-            'loyalty_reward_available',
-            'welcome',
-            'password_reset',
-            'account_verified',
-            'promotional',
-            'announcement'
-        ]
-
-        # Combine existing types with common types
-        all_types = set([t[0] for t in types] + common_types)
-
-        types_data = [
-            {
-                'value': type_name,
-                'label': type_name.replace('_', ' ').title(),
-                'in_use': type_name in [t[0] for t in types]
-            }
-            for type_name in sorted(all_types)
-        ]
-
+        types_data = get_notification_service().get_admin_notification_types(
+            requester_id=get_jwt_identity(),
+        )
         return success_response(data={'types': types_data})
-
+    except ValidationError as e:
+        return validation_error_response(str(e))
+    except ForbiddenError as e:
+        return forbidden_response(str(e))
     except Exception as e:
         current_app.logger.error(f"Get notification types error: {e}")
         return internal_error_response('Failed to get notification types')
@@ -6621,44 +6838,36 @@ def get_notification_types():
 def get_notification_channels():
     """Get list of available notification channels"""
     try:
-        channels = [
-            {
-                'value': 'email',
-                'label': 'Email',
-                'requires_subject': True,
-                'icon': 'email'
-            },
-            {
-                'value': 'sms',
-                'label': 'SMS',
-                'requires_subject': False,
-                'icon': 'message'
-            },
-            {
-                'value': 'push',
-                'label': 'Push Notification',
-                'requires_subject': False,
-                'icon': 'notifications'
-            },
-            {
-                'value': 'telegram',
-                'label': 'Telegram',
-                'requires_subject': False,
-                'icon': 'telegram'
-            },
-            {
-                'value': 'in_app',
-                'label': 'In-App Notification',
-                'requires_subject': False,
-                'icon': 'inbox'
-            }
-        ]
-
+        channels = get_notification_service().get_admin_notification_channels(
+            requester_id=get_jwt_identity(),
+        )
         return success_response(data={'channels': channels})
-
+    except ValidationError as e:
+        return validation_error_response(str(e))
+    except ForbiddenError as e:
+        return forbidden_response(str(e))
     except Exception as e:
         current_app.logger.error(f"Get notification channels error: {e}")
         return internal_error_response('Failed to get notification channels')
+
+
+@admin_bp.route('/notification-campaign-segments', methods=['GET'])
+@jwt_required()
+@validate_admin_action(['view_notifications', 'manage_notifications'])
+def get_notification_campaign_segments():
+    """Get available segments for notification campaign targeting."""
+    try:
+        segments = get_notification_service().get_admin_notification_segments(
+            requester_id=get_jwt_identity(),
+        )
+        return success_response(data={'segments': segments})
+    except ValidationError as e:
+        return validation_error_response(str(e))
+    except ForbiddenError as e:
+        return forbidden_response(str(e))
+    except Exception as e:
+        current_app.logger.error(f"Get notification campaign segments error: {e}")
+        return internal_error_response('Failed to get notification campaign segments')
 
 
 @admin_bp.route('/system-settings', methods=['GET'])
@@ -10335,64 +10544,195 @@ def get_cash_reconciliation_report():
     try:
         period = request.args.get('period', 'day')  # day, week, month
         driver_id = request.args.get('driver_id', type=int)
+        status = request.args.get('status')
+        blocked_only = request.args.get('blocked_only', 'false').lower() == 'true'
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 20, type=int)
 
-        now = datetime.now(UTC)
-        if period == 'day':
-            start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        elif period == 'week':
-            start_date = now - timedelta(days=7)
-        else:
-            start_date = now - timedelta(days=30)
+        from business_app.services.driver_reconciliation_service import DriverReconciliationService
 
-        # Base query: delivered orders with cash collected
-        query = db.session.query(
-            DeliveryPerson.id,
-            DeliveryPerson.full_name,
-            DeliveryPerson.phone,
-            func.count(Delivery.id).label('delivery_count'),
-            func.coalesce(func.sum(Delivery.cash_collected), 0).label('total_cash'),
-        ).join(
-            Delivery,
-            Delivery.delivery_person_id == DeliveryPerson.user_id
-        ).filter(
-            Delivery.status == DeliveryStatus.DELIVERED.value,
-            Delivery.delivered_at >= start_date
-        ).group_by(
-            DeliveryPerson.id,
-            DeliveryPerson.full_name,
-            DeliveryPerson.phone
+        report = DriverReconciliationService().get_report(
+            period=period,
+            driver_user_id=driver_id,
+            page=page,
+            per_page=per_page,
+            status=status,
+            blocked_only=blocked_only,
         )
+        report['period'] = period
 
-        if driver_id:
-            query = query.filter(DeliveryPerson.id == driver_id)
+        return success_response(data=report)
 
-        results = query.all()
-
-        report_data = []
-        grand_total = 0
-
-        for row in results:
-            cash = float(row.total_cash or 0)
-            grand_total += cash
-            report_data.append({
-                'driver_id': row.id,
-                'driver_name': row.full_name,
-                'phone': row.phone,
-                'delivery_count': row.delivery_count,
-                'total_cash_collected': cash,
-            })
-
-        return success_response(data={
-            'report': report_data,
-            'period': period,
-            'start_date': start_date.isoformat(),
-            'end_date': now.isoformat(),
-            'grand_total_cash': grand_total,
-        })
-
+    except ValidationError as e:
+        return validation_error_response(e.message)
     except Exception as e:
         current_app.logger.error(f"Cash reconciliation report error: {e}")
         return internal_error_response('Failed to generate cash reconciliation report')
+
+
+@admin_bp.route('/staff/cash-reconciliation/collections', methods=['POST'])
+@jwt_required()
+@manager_or_higher_required
+def record_cash_collection_admin():
+    """Record a standalone COD collection or correction from admin workflows."""
+    try:
+        actor_user_id = int(get_jwt_identity())
+        data = request.get_json() or {}
+        if data.get('customer_id') is None:
+            return validation_error_response('customer_id is required')
+        if data.get('amount') is None:
+            return validation_error_response('amount is required')
+
+        from business_app.services.cash_collection_service import CashCollectionService
+        from business_app.services.driver_reconciliation_service import DriverReconciliationService
+
+        event = CashCollectionService().post_collection(
+            customer_id=data.get('customer_id'),
+            amount=data.get('amount'),
+            source=data.get('source') or 'standalone_meeting',
+            collector_user_id=data.get('collector_user_id'),
+            recorded_by_user_id=actor_user_id,
+            order_id=data.get('order_id'),
+            delivery_id=data.get('delivery_id'),
+            driver_cash_session_id=data.get('driver_cash_session_id'),
+            notes=data.get('notes'),
+            proof_data=data.get('proof_data') or {},
+            occurred_at=data.get('occurred_at'),
+            manual_allocations=data.get('manual_allocations'),
+            allocation_mode=data.get('allocation_mode', 'auto'),
+            idempotency_key=data.get('idempotency_key'),
+        )
+
+        session_payload = None
+        if event.driver_cash_session_id:
+            session_payload = DriverReconciliationService().get_session_detail(event.driver_cash_session_id)
+
+        return success_response(
+            data={
+                'cash_collection_event': event.to_dict(),
+                'driver_cash_session': session_payload,
+            },
+            status_code=201,
+        )
+    except NotFoundError as e:
+        return not_found_response(str(e))
+    except ValidationError as e:
+        return validation_error_response(e.message)
+    except Exception as e:
+        current_app.logger.error(f"Admin cash collection record error: {e}")
+        return internal_error_response('Failed to record cash collection')
+
+
+@admin_bp.route('/staff/cash-reconciliation/sessions/<int:session_id>', methods=['GET'])
+@jwt_required()
+@manager_or_higher_required
+def get_cash_reconciliation_session(session_id):
+    """Get one driver reconciliation session with collection drill-down."""
+    try:
+        from business_app.services.driver_reconciliation_service import DriverReconciliationService
+
+        payload = DriverReconciliationService().get_session_detail(session_id)
+        return success_response(data=payload)
+    except NotFoundError:
+        return not_found_response('Driver cash session not found')
+    except Exception as e:
+        current_app.logger.error(f"Get cash reconciliation session error: {e}")
+        return internal_error_response('Failed to load reconciliation session')
+
+
+@admin_bp.route('/staff/cash-reconciliation/sessions/<int:session_id>/verify', methods=['POST'])
+@jwt_required()
+@manager_or_higher_required
+def verify_cash_reconciliation_session(session_id):
+    """Verify a driver reconciliation session."""
+    try:
+        actor_user_id = get_jwt_identity()
+        data = request.get_json() or {}
+        if data.get('verified_cash') is None:
+            return validation_error_response('verified_cash is required')
+
+        from business_app.services.driver_reconciliation_service import DriverReconciliationService
+
+        session = DriverReconciliationService().verify_session(
+            session_id=session_id,
+            verified_cash=data.get('verified_cash'),
+            actor_user_id=actor_user_id,
+            notes=data.get('notes'),
+        )
+        payload = DriverReconciliationService().get_session_detail(session.id)
+        return success_response(data=payload)
+    except NotFoundError:
+        return not_found_response('Driver cash session not found')
+    except ValidationError as e:
+        return validation_error_response(e.message)
+    except Exception as e:
+        current_app.logger.error(f"Verify cash reconciliation session error: {e}")
+        return internal_error_response('Failed to verify reconciliation session')
+
+
+@admin_bp.route('/staff/cash-reconciliation/sessions/<int:session_id>/resolve', methods=['POST'])
+@jwt_required()
+@manager_or_higher_required
+def resolve_cash_reconciliation_session(session_id):
+    """Resolve a mismatched or overdue reconciliation session."""
+    try:
+        actor_user_id = get_jwt_identity()
+        data = request.get_json() or {}
+        resolution_notes = data.get('resolution_notes')
+        if not resolution_notes:
+            return validation_error_response('resolution_notes is required')
+
+        from business_app.services.driver_reconciliation_service import DriverReconciliationService
+
+        session = DriverReconciliationService().resolve_session(
+            session_id=session_id,
+            actor_user_id=actor_user_id,
+            resolution_notes=resolution_notes,
+            verified_cash=data.get('verified_cash'),
+        )
+        payload = DriverReconciliationService().get_session_detail(session.id)
+        return success_response(data=payload)
+    except NotFoundError:
+        return not_found_response('Driver cash session not found')
+    except ValidationError as e:
+        return validation_error_response(e.message)
+    except Exception as e:
+        current_app.logger.error(f"Resolve cash reconciliation session error: {e}")
+        return internal_error_response('Failed to resolve reconciliation session')
+
+
+@admin_bp.route('/staff/cash-reconciliation/customers/<int:customer_id>/statement', methods=['GET'])
+@jwt_required()
+@manager_or_higher_required
+def get_customer_cod_statement_admin(customer_id):
+    """Get COD statement for a customer."""
+    try:
+        from business_app.services.cash_collection_service import CashCollectionService
+
+        statement = CashCollectionService().get_customer_cod_statement(customer_id)
+        return success_response(data=statement)
+    except NotFoundError:
+        return not_found_response('Customer not found')
+    except Exception as e:
+        current_app.logger.error(f"Get customer COD statement error: {e}")
+        return internal_error_response('Failed to load customer COD statement')
+
+
+@admin_bp.route('/staff/cash-reconciliation/orders/<int:order_id>/timeline', methods=['GET'])
+@jwt_required()
+@manager_or_higher_required
+def get_order_payment_timeline_admin(order_id):
+    """Get COD payment timeline for an order."""
+    try:
+        from business_app.services.cash_collection_service import CashCollectionService
+
+        timeline = CashCollectionService().get_order_payment_timeline(order_id)
+        return success_response(data=timeline)
+    except NotFoundError:
+        return not_found_response('Order not found')
+    except Exception as e:
+        current_app.logger.error(f"Get order payment timeline error: {e}")
+        return internal_error_response('Failed to load order payment timeline')
 
 
 @admin_bp.route('/staff/invite-link', methods=['POST'])

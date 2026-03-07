@@ -688,6 +688,31 @@ class ProfileKeyboards:
             one_time_keyboard=True,
             resize_keyboard=True
         )
+
+    @staticmethod
+    def notification_settings(
+        language: str = 'en',
+        delivery_telegram_status_updates_enabled: bool = True,
+    ) -> InlineKeyboardMarkup:
+        """Notification settings keyboard."""
+        toggle_enabled = bool(delivery_telegram_status_updates_enabled)
+        toggle_callback = (
+            'toggle_delivery_telegram_status_off'
+            if toggle_enabled
+            else 'toggle_delivery_telegram_status_on'
+        )
+        toggle_text = (
+            i18n.get('telegram.notifications.toggle_disable_button', language)
+            if toggle_enabled
+            else i18n.get('telegram.notifications.toggle_enable_button', language)
+        )
+
+        buttons = [
+            [{'text': toggle_text, 'callback_data': toggle_callback}],
+            [{'text': i18n.get('telegram.back', language), 'callback_data': 'menu_profile'}],
+        ]
+
+        return KeyboardBuilder.build_inline_keyboard(buttons)
     
     @staticmethod
     def location_request(language: str = 'en') -> ReplyKeyboardMarkup:

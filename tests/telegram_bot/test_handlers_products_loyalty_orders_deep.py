@@ -347,7 +347,29 @@ class TestOrderHandlerDeepFlows:
 
         monkeypatch.setattr(orders_module.i18n, "get_user_language", AsyncMock(return_value="en"))
         monkeypatch.setattr(orders_module.i18n, "get", _i18n_get)
+        monkeypatch.setattr(orders_module, "get_auth_token", AsyncMock(return_value="jwt"))
         monkeypatch.setattr(orders_module.OrderKeyboards, "payment_methods", lambda _methods, _lang: "pay-kbd")
+        monkeypatch.setattr(
+            orders_module,
+            "api_client",
+            FakeAPIClientContext(
+                get_payment_methods=_resp(
+                    success=True,
+                    data={
+                        "data": {
+                            "available_methods": [
+                                {"method": "cash", "is_active": True},
+                                {"method": "payme", "is_active": True},
+                            ],
+                            "payment_restrictions": {
+                                "cod_restricted": False,
+                                "active_cod_debt_count": 0,
+                            },
+                        }
+                    },
+                )
+            ),
+        )
 
         await handler.address_handler(update, context)
 
@@ -357,6 +379,42 @@ class TestOrderHandlerDeepFlows:
             reply_markup="pay-kbd",
         )
         update.callback_query.answer.assert_awaited_once()
+
+    async def test_address_handler_shows_cod_restriction_notice(self, monkeypatch):
+        handler = orders_module.OrderHandlers()
+        update = DummyUpdate()
+        update.callback_query = DummyCallbackQuery(data="address_56")
+        context = make_context()
+
+        monkeypatch.setattr(orders_module.i18n, "get_user_language", AsyncMock(return_value="en"))
+        monkeypatch.setattr(orders_module.i18n, "get", _i18n_get)
+        monkeypatch.setattr(orders_module, "get_auth_token", AsyncMock(return_value="jwt"))
+        monkeypatch.setattr(orders_module.OrderKeyboards, "payment_methods", lambda _methods, _lang: "pay-kbd")
+        monkeypatch.setattr(
+            orders_module,
+            "api_client",
+            FakeAPIClientContext(
+                get_payment_methods=_resp(
+                    success=True,
+                    data={
+                        "data": {
+                            "available_methods": [
+                                {"method": "payme", "is_active": True},
+                            ],
+                            "payment_restrictions": {
+                                "cod_restricted": True,
+                                "active_cod_debt_count": 2,
+                            },
+                        }
+                    },
+                )
+            ),
+        )
+
+        await handler.address_handler(update, context)
+
+        call_kwargs = update.callback_query.edit_message_text.call_args.kwargs
+        assert "Cash on delivery is unavailable because you already have 2 outstanding COD debts." in call_kwargs["text"]
 
 
 @pytest.mark.unit

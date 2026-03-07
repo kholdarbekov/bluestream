@@ -72,6 +72,7 @@ class NotificationPreferencesSchema(BaseModel):
     push_enabled: bool = Field(default=True)
     in_app_enabled: bool = Field(default=True)
     telegram_enabled: bool = Field(default=False)
+    delivery_telegram_status_updates_enabled: bool = Field(default=True)
     
     # Category-specific preferences
     order_notifications: bool = Field(default=True)
@@ -445,6 +446,11 @@ def serialize_notification_preferences(preferences) -> Dict[str, Any]:
             'push_enabled': preferences.push_enabled,
             'in_app_enabled': preferences.in_app_enabled,
             'telegram_enabled': preferences.telegram_enabled,
+            'delivery_telegram_status_updates_enabled': getattr(
+                preferences,
+                'delivery_telegram_status_updates_enabled',
+                True,
+            ),
             
             # Category preferences
             'order_notifications': preferences.order_notifications,
@@ -476,7 +482,12 @@ def serialize_notification_preferences(preferences) -> Dict[str, Any]:
             'sms_enabled': getattr(preferences, 'sms_enabled', True),
             'push_enabled': getattr(preferences, 'push_enabled', True),
             'in_app_enabled': getattr(preferences, 'in_app_enabled', True),
-            'telegram_enabled': getattr(preferences, 'telegram_enabled', False)
+            'telegram_enabled': getattr(preferences, 'telegram_enabled', False),
+            'delivery_telegram_status_updates_enabled': getattr(
+                preferences,
+                'delivery_telegram_status_updates_enabled',
+                True,
+            ),
         }
 
 

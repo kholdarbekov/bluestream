@@ -10,6 +10,7 @@ import {
   Modal,
   Form,
   Select,
+  Switch,
   message,
   Row,
   Col,
@@ -36,6 +37,7 @@ import {
 import { useQuery, useMutation, useQueryClient } from 'react-query';
 import { useTranslation } from 'react-i18next';
 import adminService from '../services/adminService';
+import staffService from '../services/staffService';
 import api from '../services/api';
 import useResponsive from '../hooks/useResponsive';
 import AddressMapPicker from '../components/AddressMapPicker';
@@ -71,6 +73,14 @@ const Users = () => {
   const [editingAddress, setEditingAddress] = useState(null);
   const [userAddresses, setUserAddresses] = useState([]);
   const [addressesLoading, setAddressesLoading] = useState(false);
+  const [notificationSettings, setNotificationSettings] = useState(null);
+  const [notificationSettingsLoading, setNotificationSettingsLoading] = useState(false);
+  const [notificationSettingsError, setNotificationSettingsError] = useState('');
+  const [userCodStatement, setUserCodStatement] = useState(null);
+  const [userCodStatementLoading, setUserCodStatementLoading] = useState(false);
+  const [isNotificationReasonModalVisible, setIsNotificationReasonModalVisible] = useState(false);
+  const [pendingNotificationToggle, setPendingNotificationToggle] = useState(null);
+  const [notificationReason, setNotificationReason] = useState('');
   const [districts, setDistricts] = useState([]);
   const [addressCoordinates, setAddressCoordinates] = useState(null);
   const [pagination, setPagination] = useState({ page: 1, per_page: 20 });
@@ -221,6 +231,31 @@ const Users = () => {
     }
   );
 
+  const updateUserNotificationSettingsMutation = useMutation(
+    ({ userId, enabled, reason }) => adminService.updateUserNotificationSettings(userId, {
+      delivery_telegram_status_updates_enabled: enabled,
+      reason
+    }),
+    {
+      onSuccess: (response) => {
+        const settings = response?.data?.notification_settings || response?.notification_settings || null;
+        if (settings) {
+          setNotificationSettings(settings);
+        }
+        message.success(
+          response?.message || t('ui.users.notification_settings_updated', 'Notification settings updated')
+        );
+        setIsNotificationReasonModalVisible(false);
+        setPendingNotificationToggle(null);
+        setNotificationReason('');
+      },
+      onError: (error) => {
+        const errorMessage = error.response?.data?.message || t('ui.users.notification_settings_update_failed', 'Failed to update notification settings');
+        message.error(errorMessage);
+      }
+    }
+  );
+
   // Handle unlock user
   const handleUnlockUser = (userId) => {
     Modal.confirm({
@@ -245,6 +280,45 @@ const Users = () => {
       setUserAddresses([]);
     } finally {
       setAddressesLoading(false);
+    }
+  };
+
+  const fetchUserNotificationSettings = async (userId) => {
+    setNotificationSettingsLoading(true);
+    setNotificationSettingsError('');
+    try {
+      const response = await adminService.getUserNotificationSettings(userId);
+      const settings = response?.data?.notification_settings || response?.notification_settings || null;
+      setNotificationSettings(settings);
+      if (!settings) {
+        setNotificationSettingsError(
+          t('ui.users.notification_settings_load_failed', 'Failed to load notification settings')
+        );
+      }
+    } catch (error) {
+      setNotificationSettings(null);
+      setNotificationSettingsError(
+        error.response?.data?.message || t('ui.users.notification_settings_load_failed', 'Failed to load notification settings')
+      );
+    } finally {
+      setNotificationSettingsLoading(false);
+    }
+  };
+
+  const fetchUserCodStatement = async (user) => {
+    if (!user || user.role !== 'customer') {
+      setUserCodStatement(null);
+      return;
+    }
+
+    setUserCodStatementLoading(true);
+    try {
+      const response = await staffService.getCustomerCodStatement(user.id);
+      setUserCodStatement(response?.data?.data || null);
+    } catch (_error) {
+      setUserCodStatement(null);
+    } finally {
+      setUserCodStatementLoading(false);
     }
   };
 
@@ -583,7 +657,12 @@ const Users = () => {
     setSelectedUser(user);
     setIsModalVisible(true);
     setUserAddresses([]);
+    setNotificationSettings(null);
+    setNotificationSettingsError('');
+    setUserCodStatement(null);
     fetchUserAddresses(user.id);
+    fetchUserNotificationSettings(user.id);
+    fetchUserCodStatement(user);
   };
 
   const handleEditUser = (user) => {
@@ -630,6 +709,31 @@ const Users = () => {
           reason: `${t('ui.users.status_changed_by_admin')}`
         });
       }
+    });
+  };
+
+  const handleNotificationToggleRequest = (enabled) => {
+    setPendingNotificationToggle(enabled);
+    setNotificationReason('');
+    setIsNotificationReasonModalVisible(true);
+  };
+
+  const handleNotificationSettingsUpdateConfirm = () => {
+    if (!selectedUser) {
+      return;
+    }
+    const reason = notificationReason.trim();
+    if (!reason) {
+      message.error(
+        t('ui.users.notification_change_reason_required', 'Reason is required')
+      );
+      return;
+    }
+
+    updateUserNotificationSettingsMutation.mutate({
+      userId: selectedUser.id,
+      enabled: !!pendingNotificationToggle,
+      reason
     });
   };
 
@@ -802,7 +906,14 @@ const Users = () => {
           </Space>
         }
         open={isModalVisible}
-        onCancel={() => setIsModalVisible(false)}
+        onCancel={() => {
+          setIsModalVisible(false);
+          setNotificationSettings(null);
+          setNotificationSettingsError('');
+          setIsNotificationReasonModalVisible(false);
+          setPendingNotificationToggle(null);
+          setNotificationReason('');
+        }}
         footer={null}
         width={responsive.isMobileDevice ? '95%' : 700}
         style={{
@@ -903,6 +1014,81 @@ const Users = () => {
               </Row>
             </Card>
 
+            {selectedUser.role === 'customer' && (
+              <Card
+                title={t('ui.users.cod_statement', 'COD Statement')}
+                size="small"
+                style={{ marginBottom: 12 }}
+              >
+                {userCodStatementLoading ? (
+                  <div style={{ textAlign: 'center', padding: '12px 0' }}>
+                    {t('ui.common.loading', 'Loading...')}
+                  </div>
+                ) : userCodStatement ? (
+                  <>
+                    <Row gutter={[16, 12]} style={{ marginBottom: 12 }}>
+                      <Col xs={24} sm={8}>
+                        <strong>{t('ui.users.active_cod_debt_count', 'Active COD debts')}:</strong>{' '}
+                        {userCodStatement.active_cod_debt_count || 0}
+                      </Col>
+                      <Col xs={24} sm={8}>
+                        <strong>{t('ui.users.total_outstanding_amount', 'Total outstanding')}:</strong>{' '}
+                        {(userCodStatement.total_outstanding_amount || 0).toLocaleString()} UZS
+                      </Col>
+                      <Col xs={24} sm={8}>
+                        <strong>{t('ui.users.cod_restricted', 'COD restricted')}:</strong>{' '}
+                        <Tag color={userCodStatement.cod_restricted ? 'red' : 'green'}>
+                          {userCodStatement.cod_restricted ? t('ui.common.yes', 'Yes') : t('ui.common.no', 'No')}
+                        </Tag>
+                      </Col>
+                    </Row>
+
+                    <Table
+                      dataSource={userCodStatement.items || []}
+                      rowKey="payment_id"
+                      pagination={false}
+                      size="small"
+                      columns={[
+                        {
+                          title: t('ui.users.order_number', 'Order'),
+                          dataIndex: 'order_number',
+                          key: 'order_number',
+                        },
+                        {
+                          title: t('ui.users.status'),
+                          dataIndex: 'status',
+                          key: 'status',
+                          render: (value) => <Tag>{value}</Tag>,
+                        },
+                        {
+                          title: t('ui.users.total_amount', 'Amount'),
+                          dataIndex: 'amount',
+                          key: 'amount',
+                          render: (value) => `${(value || 0).toLocaleString()} UZS`,
+                        },
+                        {
+                          title: t('ui.users.amount_collected', 'Collected'),
+                          dataIndex: 'amount_collected',
+                          key: 'amount_collected',
+                          render: (value) => `${(value || 0).toLocaleString()} UZS`,
+                        },
+                        {
+                          title: t('ui.users.outstanding_amount', 'Outstanding'),
+                          dataIndex: 'outstanding_amount',
+                          key: 'outstanding_amount',
+                          render: (value) => `${(value || 0).toLocaleString()} UZS`,
+                        },
+                      ]}
+                    />
+                  </>
+                ) : (
+                  <div style={{ color: '#666' }}>
+                    {t('ui.users.no_cod_statement', 'No COD debt found for this customer.')}
+                  </div>
+                )}
+              </Card>
+            )}
+
             {/* Telegram Info */}
             {selectedUser.telegram_id && (
               <Card
@@ -936,6 +1122,73 @@ const Users = () => {
                 </Row>
               </Card>
             )}
+
+            <Card
+              title={t('ui.users.notification_settings', 'Notification Settings')}
+              size="small"
+              style={{ marginBottom: 12 }}
+            >
+              {notificationSettingsLoading ? (
+                <div style={{ textAlign: 'center', padding: '12px 0' }}>
+                  {t('ui.common.loading', 'Loading...')}
+                </div>
+              ) : (
+                <Space direction="vertical" size={10} style={{ width: '100%' }}>
+                  <Row gutter={[12, 12]} align="middle" justify="space-between">
+                    <Col xs={24} sm={16}>
+                      <div style={{ fontWeight: 600 }}>
+                        {t(
+                          'ui.users.delivery_telegram_updates_setting',
+                          'Telegram delivery updates (in transit, arrived)'
+                        )}
+                      </div>
+                      <div style={{ fontSize: '12px', color: '#666', marginTop: 4 }}>
+                        {t(
+                          'ui.users.delivery_telegram_updates_setting_help',
+                          'Controls Telegram notifications for delivery status changes.'
+                        )}
+                      </div>
+                    </Col>
+                    <Col xs={24} sm={8} style={{ textAlign: responsive.isMobileDevice ? 'left' : 'right' }}>
+                      <Switch
+                        checked={notificationSettings?.delivery_telegram_status_updates_enabled ?? true}
+                        loading={updateUserNotificationSettingsMutation.isLoading}
+                        onChange={handleNotificationToggleRequest}
+                      />
+                    </Col>
+                  </Row>
+
+                  <Space wrap size={8}>
+                    <Tag color={(notificationSettings?.delivery_telegram_status_updates_enabled ?? true) ? 'green' : 'red'}>
+                      {(notificationSettings?.delivery_telegram_status_updates_enabled ?? true)
+                        ? t('ui.users.notification_status_enabled', 'Enabled')
+                        : t('ui.users.notification_status_disabled', 'Disabled')}
+                    </Tag>
+                    <Tag color={notificationSettings?.delivery_telegram_status_updates_source === 'explicit' ? 'blue' : 'default'}>
+                      {notificationSettings?.delivery_telegram_status_updates_source === 'explicit'
+                        ? t('ui.users.notification_source_explicit', 'Explicit')
+                        : t('ui.users.notification_source_default', 'Default')}
+                    </Tag>
+                    <Tag color={notificationSettings?.telegram_connected ? 'processing' : 'default'}>
+                      {notificationSettings?.telegram_connected
+                        ? t('ui.users.telegram_connected', 'Telegram connected')
+                        : t('ui.users.telegram_not_connected', 'Telegram not connected')}
+                    </Tag>
+                    <Tag color={notificationSettings?.bot_active ? 'processing' : 'default'}>
+                      {notificationSettings?.bot_active
+                        ? t('ui.users.bot_active', 'Bot active')
+                        : t('ui.users.bot_inactive', 'Bot inactive')}
+                    </Tag>
+                  </Space>
+
+                  {notificationSettingsError && (
+                    <div style={{ color: '#ff4d4f', fontSize: '12px' }}>
+                      {notificationSettingsError}
+                    </div>
+                  )}
+                </Space>
+              )}
+            </Card>
 
             {/* Activity Info */}
             <Card title={t('ui.users.activity_information')} size="small" style={{ marginBottom: 12 }}>
@@ -1074,6 +1327,41 @@ const Users = () => {
             </Card>
           </div>
         )}
+      </Modal>
+
+      <Modal
+        title={t('ui.users.notification_change_reason_title', 'Confirm Notification Setting Change')}
+        open={isNotificationReasonModalVisible}
+        onCancel={() => {
+          setIsNotificationReasonModalVisible(false);
+          setPendingNotificationToggle(null);
+          setNotificationReason('');
+        }}
+        onOk={handleNotificationSettingsUpdateConfirm}
+        confirmLoading={updateUserNotificationSettingsMutation.isLoading}
+        okText={t('ui.common.confirm', 'Confirm')}
+        cancelText={t('ui.common.cancel', 'Cancel')}
+      >
+        <Space direction="vertical" size={10} style={{ width: '100%' }}>
+          <div style={{ fontSize: '13px' }}>
+            {pendingNotificationToggle
+              ? t(
+                'ui.users.notification_change_reason_prompt_enable',
+                'Please provide a reason for enabling Telegram delivery updates.'
+              )
+              : t(
+                'ui.users.notification_change_reason_prompt_disable',
+                'Please provide a reason for disabling Telegram delivery updates.'
+              )}
+          </div>
+          <Input.TextArea
+            rows={4}
+            value={notificationReason}
+            onChange={(event) => setNotificationReason(event.target.value)}
+            placeholder={t('ui.users.notification_change_reason_placeholder', 'Enter reason')}
+            maxLength={500}
+          />
+        </Space>
       </Modal>
 
       {/* Address Add/Edit Modal */}

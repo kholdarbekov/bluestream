@@ -54,7 +54,7 @@ from handlers.language import LanguageHandler
 from handlers.tryouts import TryoutHandler
 from handlers.tryouts import ENTER_TRYOUT_PHONE, ENTER_TRYOUT_NAME, ENTER_TRYOUT_ADDRESS
 from handlers.delivery import (
-    OrdersPoolHandler, ActiveDeliveryHandler, StatusUpdateHandler,
+    OrdersPoolHandler, ActiveDeliveryHandler, StatusUpdateHandler, CashCollectionHandler,
     HistoryHandler, LocationHandler
 )
 from handlers.operator.create_user import CreateUserHandler
@@ -275,6 +275,7 @@ class StaffBot:
         orders_pool_handler = OrdersPoolHandler()
         active_delivery_handler = ActiveDeliveryHandler()
         status_update_handler = StatusUpdateHandler()
+        cash_collection_handler = CashCollectionHandler()
         history_handler = HistoryHandler()
         location_handler = LocationHandler()
         tryout_handler = TryoutHandler()
@@ -296,6 +297,7 @@ class StaffBot:
             'orders_pool': orders_pool_handler,
             'active_delivery': active_delivery_handler,
             'status_update': status_update_handler,
+            'cash_collection': cash_collection_handler,
             'history': history_handler,
             'location': location_handler,
             'tryouts': tryout_handler,
@@ -379,8 +381,15 @@ class StaffBot:
             CallbackQueryHandler(status_update_handler.initiate_status_change, pattern=r"^staff_status_\d+_"),
             CallbackQueryHandler(status_update_handler.execute_status_change, pattern=r"^staff_execute_status_\d+_"),
             CallbackQueryHandler(status_update_handler.select_fail_reason, pattern=r"^staff_failed_reason_\d+_"),
-            CallbackQueryHandler(status_update_handler.confirm_cash_collection, pattern=r"^staff_confirm_cash_\d+$"),
-            CallbackQueryHandler(status_update_handler.edit_cash_amount, pattern=r"^staff_edit_cash_\d+$"),
+            CallbackQueryHandler(status_update_handler.confirm_full_cash_collection, pattern=r"^staff_cash_full_\d+$"),
+            CallbackQueryHandler(status_update_handler.start_partial_cash_collection, pattern=r"^staff_cash_partial_\d+$"),
+            CallbackQueryHandler(status_update_handler.start_no_cash_collection, pattern=r"^staff_cash_none_\d+$"),
+            CallbackQueryHandler(status_update_handler.show_reconciliation_session, pattern="^staff_reconcile_session$"),
+            CallbackQueryHandler(status_update_handler.start_reconciliation_submit, pattern="^staff_reconcile_submit$"),
+            CallbackQueryHandler(cash_collection_handler.start_collection_search, pattern="^staff_cod_collect_menu$"),
+            CallbackQueryHandler(cash_collection_handler.show_customer_statement, pattern=r"^staff_cod_customer_\d+$"),
+            CallbackQueryHandler(cash_collection_handler.start_full_collection, pattern=r"^staff_cod_collect_full_\d+$"),
+            CallbackQueryHandler(cash_collection_handler.start_custom_collection, pattern=r"^staff_cod_collect_custom_\d+$"),
             CallbackQueryHandler(status_update_handler.mark_preparing, pattern=r"^staff_mark_preparing_\d+$"),
 
             # History & Stats
@@ -639,12 +648,31 @@ class StaffBot:
         if not context.user_data.get('authenticated'):
             return
 
-        # Cash amount input flow: after `staff_edit_cash_<delivery_id>` callback,
-        # the next text message should be treated as cash input, not menu text.
-        if context.user_data.get('editing_cash_delivery_id'):
+        # Delivery COD collection and reconciliation inputs take precedence over menu text.
+        cash_flow = context.user_data.get('pending_delivery_cash_flow') or {}
+        if cash_flow.get('flow_type') == 'partial' and cash_flow.get('cash_amount') is None:
             status_update_handler = self._delivery_handlers.get('status_update')
             if status_update_handler:
                 await status_update_handler.receive_cash_amount(update, context)
+            return
+        if cash_flow.get('flow_type') in {'partial', 'none'} and cash_flow.get('cash_amount') is not None:
+            status_update_handler = self._delivery_handlers.get('status_update')
+            if status_update_handler:
+                await status_update_handler.receive_cash_note(update, context)
+            return
+        if context.user_data.get('pending_reconciliation_flow'):
+            status_update_handler = self._delivery_handlers.get('status_update')
+            if status_update_handler:
+                await status_update_handler.receive_reconciliation_declared_cash(update, context)
+            return
+        cod_collection_flow = context.user_data.get('pending_cod_collection_flow') or {}
+        if cod_collection_flow:
+            cash_collection_handler = self._delivery_handlers.get('cash_collection')
+            if cash_collection_handler:
+                if cod_collection_flow.get('amount') is None:
+                    await cash_collection_handler.receive_collection_amount(update, context)
+                else:
+                    await cash_collection_handler.receive_collection_note(update, context)
             return
 
         if context.user_data.get('tryout_pickup_task_id'):
@@ -666,6 +694,8 @@ class StaffBot:
             i18n.get('staff.menu.active_tryouts', language): 'staff_tryout_active',
             i18n.get('staff.menu.delivery_history', language): 'staff_delivery_history',
             i18n.get('staff.menu.my_stats', language): 'staff_my_stats',
+            i18n.get('staff.menu.cash_reconciliation', language): 'staff_reconcile_session',
+            i18n.get('staff.menu.collect_cod_debt', language): 'staff_cod_collect_menu',
             i18n.get('staff.menu.recent_orders', language): 'staff_recent_orders',
             i18n.get('staff.menu.profile', language): 'staff_profile',
             i18n.get('staff.menu.settings', language): 'staff_settings',
@@ -691,6 +721,8 @@ class StaffBot:
                 'staff_tryout_active': self._delivery_handlers['tryouts'].show_active_tryouts,
                 'staff_delivery_history': self._delivery_handlers['history'].show_history,
                 'staff_my_stats': self._delivery_handlers['history'].show_stats,
+                'staff_reconcile_session': self._delivery_handlers['status_update'].show_reconciliation_session,
+                'staff_cod_collect_menu': self._delivery_handlers['cash_collection'].start_collection_search,
                 # Operator
                 'staff_op_new_orders': self._operator_handlers['orders_pool_view'].show_pool,
                 'staff_recent_orders': self._operator_handlers['recent_orders'].show_recent_orders,

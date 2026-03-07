@@ -22,6 +22,7 @@ def _preferences_view(user_id: int) -> SimpleNamespace:
         push_enabled=True,
         in_app_enabled=True,
         telegram_enabled=False,
+        delivery_telegram_status_updates_enabled=True,
         order_notifications=True,
         delivery_notifications=True,
         payment_notifications=True,
@@ -47,16 +48,24 @@ def test_get_notification_preferences_route_delegates_to_service(client, app, sa
     response = client.get('/api/v1/notifications/preferences', headers=_auth_headers(app, sample_user.id))
 
     assert response.status_code == 200
+    body = response.get_json()
+    assert body['data']['preferences']['delivery_telegram_status_updates_enabled'] is True
     service.create_default_preferences.assert_called_once()
     assert int(service.create_default_preferences.call_args.args[0]) == sample_user.id
 
 
 def test_update_notification_preferences_route_delegates_to_service(client, app, sample_user, monkeypatch):
     service = Mock()
-    service.update_notification_preferences_for_user.return_value = _preferences_view(sample_user.id)
+    updated_view = _preferences_view(sample_user.id)
+    updated_view.delivery_telegram_status_updates_enabled = False
+    service.update_notification_preferences_for_user.return_value = updated_view
     monkeypatch.setattr('business_app.api.notifications.get_notification_service', lambda: service)
 
-    payload = {'email_enabled': False, 'system_notifications': True}
+    payload = {
+        'email_enabled': False,
+        'system_notifications': True,
+        'delivery_telegram_status_updates_enabled': False,
+    }
     response = client.put(
         '/api/v1/notifications/preferences',
         headers=_auth_headers(app, sample_user.id),
@@ -64,6 +73,8 @@ def test_update_notification_preferences_route_delegates_to_service(client, app,
     )
 
     assert response.status_code == 200
+    body = response.get_json()
+    assert body['data']['preferences']['delivery_telegram_status_updates_enabled'] is False
     service.update_notification_preferences_for_user.assert_called_once()
     kwargs = service.update_notification_preferences_for_user.call_args.kwargs
     assert int(kwargs['user_id']) == sample_user.id

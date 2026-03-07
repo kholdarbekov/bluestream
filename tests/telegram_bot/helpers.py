@@ -99,6 +99,9 @@ class FakeAPIClientContext:
     async def get_user_orders(self, *_args, **_kwargs):
         return self._method_results.get("get_user_orders")
 
+    async def get_payment_methods(self, *_args, **_kwargs):
+        return self._method_results.get("get_payment_methods")
+
     async def cancel_order(self, *_args, **_kwargs):
         return self._method_results.get("cancel_order")
 
@@ -119,3 +122,9 @@ class FakeAPIClientContext:
 
     async def update_user_profile(self, *_args, **_kwargs):
         return self._method_results.get("update_user_profile")
+
+    async def get_notification_preferences(self, *_args, **_kwargs):
+        return self._method_results.get("get_notification_preferences")
+
+    async def update_notification_preferences(self, *_args, **_kwargs):
+        return self._method_results.get("update_notification_preferences")

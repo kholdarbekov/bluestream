@@ -188,6 +188,15 @@ class AdminDeliveryService:
                 f"Delivery person has reached max concurrent deliveries ({max_concurrent})"
             )
 
+        order_payment_method = delivery.order.payment_method if delivery.order else None
+        if order_payment_method == 'cash' or getattr(order_payment_method, 'value', None) == 'cash':
+            from business_app.services.driver_reconciliation_service import DriverReconciliationService
+
+            if DriverReconciliationService().is_driver_blocked_from_cod(new_person_id):
+                raise ValidationError(
+                    "Delivery person is blocked from new cash on delivery assignments until reconciliation issues are resolved"
+                )
+
         now = datetime.now(UTC)
         delivery.delivery_person_id = new_person_id
         delivery.updated_at = now
@@ -263,6 +272,25 @@ class AdminDeliveryService:
                 order.payment_method.value
                 if order and getattr(order, "payment_method", None)
                 else None
+            ),
+            "payment_status": (
+                order.payment.status.value
+                if order and getattr(order, "payment", None) and hasattr(order.payment.status, "value")
+                else (
+                    str(order.payment.status)
+                    if order and getattr(order, "payment", None)
+                    else None
+                )
+            ),
+            "amount_collected": (
+                float(order.payment.amount_collected or 0)
+                if order and getattr(order, "payment", None)
+                else 0.0
+            ),
+            "outstanding_amount": (
+                float(order.payment.outstanding_amount or 0)
+                if order and getattr(order, "payment", None)
+                else 0.0
             ),
             "items_summary": AdminDeliveryService._build_items_summary(order),
             "current_location": {

@@ -55,6 +55,9 @@ const Orders = () => {
   const [isCreateModalVisible, setIsCreateModalVisible] = useState(false);
   const [selectedUserId, setSelectedUserId] = useState(null);
   const [userAddresses, setUserAddresses] = useState([]);
+  const [userPaymentMethods, setUserPaymentMethods] = useState([]);
+  const [paymentRestrictions, setPaymentRestrictions] = useState(null);
+  const [paymentMethodsLoading, setPaymentMethodsLoading] = useState(false);
   const [pagination, setPagination] = useState({ page: 1, per_page: 20 });
   const [orderDetailsLoading, setOrderDetailsLoading] = useState(false);
   const [createOrderErrors, setCreateOrderErrors] = useState([]);
@@ -143,20 +146,44 @@ const Orders = () => {
     createOrderForm.setFieldsValue({ delivery_address_id: undefined });
 
     if (userId) {
+      setPaymentMethodsLoading(true);
       try {
-        const response = await adminService.getUserAddresses(userId);
-        setUserAddresses(response.data?.addresses || []);
+        const [addressResponse, paymentResponse] = await Promise.all([
+          adminService.getUserAddresses(userId),
+          adminService.getUserPaymentMethods(userId)
+        ]);
+        const addresses = addressResponse.data?.addresses || [];
+        const paymentPayload = paymentResponse.data || {};
+        const availableMethods = paymentPayload.available_methods || [];
+
+        setUserAddresses(addresses);
+        setUserPaymentMethods(availableMethods);
+        setPaymentRestrictions(paymentPayload.payment_restrictions || null);
+        createOrderForm.setFieldsValue({
+          payment_method: availableMethods[0]?.method
+        });
       } catch (error) {
         message.error('Failed to load user addresses');
         setUserAddresses([]);
+        setUserPaymentMethods([]);
+        setPaymentRestrictions(null);
+      } finally {
+        setPaymentMethodsLoading(false);
       }
     } else {
       setUserAddresses([]);
+      setUserPaymentMethods([]);
+      setPaymentRestrictions(null);
     }
   };
 
   // Handle create order submit
   const handleCreateOrderSubmit = (values) => {
+    const allowedMethods = userPaymentMethods.map((method) => method.method);
+    if (allowedMethods.length > 0 && !allowedMethods.includes(values.payment_method)) {
+      message.error(t('ui.orders.payment_method_unavailable', 'Selected payment method is not available for this user'));
+      return;
+    }
     setCreateOrderErrors([]);
     const orderData = {
       user_id: values.user_id,
@@ -540,13 +567,27 @@ const Orders = () => {
                   ${selectedOrder.total_amount?.toFixed(2)}
                 </span>
               </Descriptions.Item>
-              <Descriptions.Item label={t('ui.orders.payment_status')}>
+            <Descriptions.Item label={t('ui.orders.payment_status')}>
                 <Tag color={selectedOrder.payment_status === 'completed' ? 'green' : 'orange'}>
                   {t(`ui.orders.payment_${selectedOrder.payment_status}`)}
                 </Tag>
               </Descriptions.Item>
+              <Descriptions.Item label={t('ui.orders.payment_method', 'Payment Method')}>
+                {selectedOrder.payment_method || '—'}
+              </Descriptions.Item>
               <Descriptions.Item label={t('ui.orders.order_date')}>
                 {formatDateTimeShort(selectedOrder.created_at)}
+              </Descriptions.Item>
+            </Descriptions>
+
+            <Divider>{t('ui.orders.payment_summary', 'Payment Summary')}</Divider>
+            <Descriptions column={3} bordered size="small">
+              <Descriptions.Item label={t('ui.orders.total_amount')}>{selectedOrder.total_amount?.toLocaleString()} UZS</Descriptions.Item>
+              <Descriptions.Item label={t('ui.orders.amount_collected', 'Collected')}>
+                {(selectedOrder.amount_collected || 0).toLocaleString()} UZS
+              </Descriptions.Item>
+              <Descriptions.Item label={t('ui.orders.outstanding_amount', 'Outstanding')}>
+                {(selectedOrder.outstanding_amount || 0).toLocaleString()} UZS
               </Descriptions.Item>
             </Descriptions>
 
@@ -610,6 +651,41 @@ const Orders = () => {
                 )}
               </div>
             </Spin>
+
+            {selectedOrder.payment_timeline?.timeline?.length ? (
+              <>
+                <Divider>{t('ui.orders.payment_timeline', 'Payment Timeline')}</Divider>
+                <Table
+                  dataSource={selectedOrder.payment_timeline.timeline}
+                  rowKey={(record, index) => `${record.type}-${record.timestamp || index}`}
+                  pagination={false}
+                  size="small"
+                  columns={[
+                    {
+                      title: t('ui.orders.timeline_type', 'Type'),
+                      dataIndex: 'type',
+                      key: 'type',
+                    },
+                    {
+                      title: t('ui.orders.timeline_timestamp', 'Timestamp'),
+                      dataIndex: 'timestamp',
+                      key: 'timestamp',
+                    },
+                    {
+                      title: t('ui.orders.timeline_amount', 'Amount'),
+                      key: 'amount',
+                      render: (_, record) => `${(record.allocated_amount ?? record.amount ?? 0).toLocaleString()} UZS`,
+                    },
+                    {
+                      title: t('ui.orders.timeline_notes', 'Notes'),
+                      dataIndex: 'notes',
+                      key: 'notes',
+                      render: (value) => value || '—',
+                    },
+                  ]}
+                />
+              </>
+            ) : null}
 
             <div style={{ marginTop: 16, textAlign: 'right' }}>
               <Space>
@@ -691,10 +767,12 @@ const Orders = () => {
         onCancel={() => {
           setIsCreateModalVisible(false);
           createOrderForm.resetFields();
-          setCreateOrderErrors([]);
-          setSelectedUserId(null);
-          setUserAddresses([]);
-        }}
+                setCreateOrderErrors([]);
+                setSelectedUserId(null);
+                setUserAddresses([]);
+                setUserPaymentMethods([]);
+                setPaymentRestrictions(null);
+              }}
         footer={null}
         width={700}
       >
@@ -702,7 +780,7 @@ const Orders = () => {
           form={createOrderForm}
           layout="vertical"
           onFinish={handleCreateOrderSubmit}
-          initialValues={{ payment_method: 'cash', items: [{}] }}
+          initialValues={{ items: [{}] }}
         >
           {createOrderErrors.length > 0 && (
             <Alert
@@ -782,6 +860,19 @@ const Orders = () => {
             </div>
           )}
 
+          {selectedUserId && paymentRestrictions?.cod_restricted && (
+            <Alert
+              type="warning"
+              showIcon
+              style={{ marginBottom: 16 }}
+              message={t('ui.orders.cod_restricted', 'Cash on delivery is restricted for this customer')}
+              description={t(
+                'ui.orders.cod_restricted_description',
+                'This customer has reached the active COD debt limit. Use one of the prepaid methods below.'
+              )}
+            />
+          )}
+
           {/* Product Items */}
           <Divider>{t('ui.orders.order_items', 'Order Items')}</Divider>
 
@@ -855,12 +946,22 @@ const Orders = () => {
           <Form.Item
             name="payment_method"
             label={t('ui.orders.payment_method', 'Payment Method')}
+            rules={[{ required: true, message: t('ui.orders.payment_method_required', 'Please select a payment method') }]}
           >
-            <Select>
-              <Option value="cash">{t('ui.orders.payment_cash', 'Cash on Delivery')}</Option>
-              <Option value="payme">{t('ui.orders.payment_payme', 'Payme')}</Option>
-              <Option value="click">{t('ui.orders.payment_click', 'Click')}</Option>
-              <Option value="business_account">{t('ui.orders.payment_business_account', 'Business Account')}</Option>
+            <Select
+              loading={paymentMethodsLoading}
+              disabled={!selectedUserId || userPaymentMethods.length === 0}
+              placeholder={
+                selectedUserId
+                  ? t('ui.orders.select_payment_method', 'Select a payment method')
+                  : t('ui.orders.select_customer_first', 'Select a customer first')
+              }
+            >
+              {userPaymentMethods.map((method) => (
+                <Option key={method.method} value={method.method}>
+                  {t(`ui.orders.payment_${method.method}`, method.name || method.method)}
+                </Option>
+              ))}
             </Select>
           </Form.Item>
 
@@ -884,6 +985,8 @@ const Orders = () => {
                 setCreateOrderErrors([]);
                 setSelectedUserId(null);
                 setUserAddresses([]);
+                setUserPaymentMethods([]);
+                setPaymentRestrictions(null);
               }}>
                 {t('ui.common.cancel', 'Cancel')}
               </Button>

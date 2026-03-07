@@ -91,8 +91,12 @@ class OrderPaymentSchema(BaseModel):
     transaction_id: Optional[str] = None
     payment_provider: Optional[str] = None
     paid_at: Optional[datetime] = None
-    
-    @field_validator('amount')
+    amount_collected: Decimal = Field(default=0)
+    outstanding_amount: Decimal = Field(default=0)
+    last_collected_at: Optional[datetime] = None
+    collection_events_count: int = Field(default=0)
+
+    @field_validator('amount', 'amount_collected', 'outstanding_amount')
     @classmethod
     def validate_amount(cls, v):
         return float(v)
@@ -347,6 +351,9 @@ def serialize_order(order: Order, include_items=False, include_delivery=False, i
             'delivery_notes': getattr(order, 'delivery_notes', None),
             'promo_code_used': getattr(order, 'promo_code_used', None),
             'loyalty_points_used': getattr(order, 'loyalty_points_used', 0),
+            'payment_method': order.payment_method.value if getattr(order, 'payment_method', None) else None,
+            'is_paid': getattr(order, 'is_paid', False),
+            'paid_at': order.paid_at.isoformat() if getattr(order, 'paid_at', None) else None,
             'created_at': order.created_at.isoformat(),
             'updated_at': order.updated_at.isoformat() if order.updated_at else None,
             'confirmed_at': order.confirmed_at.isoformat() if getattr(order, 'confirmed_at', None) else None,
@@ -440,17 +447,27 @@ def serialize_order_payment(payment) -> Dict[str, Any]:
             'payment_method': payment.payment_method.value if hasattr(payment.payment_method, 'value') else str(payment.payment_method),
             'payment_status': payment.status.value if hasattr(payment.status, 'value') else str(payment.status),
             'amount': float(payment.amount),
+            'amount_collected': float(getattr(payment, 'amount_collected', 0) or 0),
+            'outstanding_amount': float(getattr(payment, 'outstanding_amount', 0) or 0),
             'currency': getattr(payment, 'currency', 'UZS'),
             'transaction_id': getattr(payment, 'transaction_id', None),
             'payment_provider': getattr(payment, 'payment_provider', None),
-            'paid_at': payment.paid_at.isoformat() if getattr(payment, 'paid_at', None) else None
+            'paid_at': payment.paid_at.isoformat() if getattr(payment, 'paid_at', None) else None,
+            'last_collected_at': (
+                payment.last_collected_at.isoformat()
+                if getattr(payment, 'last_collected_at', None)
+                else None
+            ),
+            'collection_events_count': len(getattr(payment, 'cash_collection_allocations', []) or []),
         }
     except Exception:
         return {
             'id': payment.id,
             'payment_method': str(payment.payment_method),
-            'status': str(payment.status),
-            'amount': float(payment.amount)
+            'payment_status': str(payment.status),
+            'amount': float(payment.amount),
+            'amount_collected': float(getattr(payment, 'amount_collected', 0) or 0),
+            'outstanding_amount': float(getattr(payment, 'outstanding_amount', 0) or 0),
         }
 
 

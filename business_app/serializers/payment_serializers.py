@@ -79,13 +79,17 @@ class PaymentSchema(BaseModel):
     updated_at: Optional[datetime] = None
     processed_at: Optional[datetime] = None
     expires_at: Optional[datetime] = None
+    amount_collected: Decimal = Field(default=0)
+    outstanding_amount: Decimal = Field(default=0)
+    last_collected_at: Optional[datetime] = None
+    collection_events_count: int = Field(default=0)
     
     # Related objects
     order: Optional[OrderInfoSchema] = None
     subscription: Optional[SubscriptionInfoSchema] = None
     refunds: Optional[List[PaymentRefundSchema]] = None
     
-    @field_validator('amount')
+    @field_validator('amount', 'amount_collected', 'outstanding_amount')
     @classmethod
     def validate_amount(cls, v):
         return float(v)
@@ -334,6 +338,14 @@ def serialize_payment(payment, include_sensitive: bool = False) -> Dict[str, Any
             'currency': payment.currency,
             'status': payment.status.value if payment.status else None,
             'payment_method': payment.payment_method.value if payment.payment_method else None,
+            'amount_collected': float(getattr(payment, 'amount_collected', 0) or 0),
+            'outstanding_amount': float(getattr(payment, 'outstanding_amount', 0) or 0),
+            'last_collected_at': (
+                payment.last_collected_at.isoformat()
+                if getattr(payment, 'last_collected_at', None)
+                else None
+            ),
+            'collection_events_count': len(getattr(payment, 'cash_collection_allocations', []) or []),
             'created_at': payment.created_at.isoformat() if payment.created_at else None
         }
 

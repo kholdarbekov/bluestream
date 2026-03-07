@@ -234,6 +234,20 @@ def retry_failed_payments():
         return {'error': str(e)}
 
 
+@shared_task(bind=True, max_retries=2, default_retry_delay=300, time_limit=300, soft_time_limit=270)
+def mark_overdue_cod_reconciliation_sessions(self):
+    """Mark prior-day driver COD reconciliation sessions as overdue."""
+    try:
+        from business_app.services.driver_reconciliation_service import DriverReconciliationService
+
+        updated = DriverReconciliationService().mark_overdue_sessions()
+        logger.info("Marked %s driver COD reconciliation sessions as overdue", updated)
+        return {'updated_sessions': updated}
+    except Exception as exc:
+        logger.error("Failed to mark overdue COD reconciliation sessions: %s", exc)
+        raise self.retry(exc=exc)
+
+
 @shared_task(bind=True, max_retries=2, time_limit=300, soft_time_limit=270)
 def process_loyalty_points_payment(self, payment_id: int, points_to_use: int):
     """Process payment using loyalty points"""

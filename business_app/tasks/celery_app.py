@@ -77,6 +77,12 @@ def make_celery(app=None):
             'task': 'business_app.tasks.payment_tasks.process_pending_payments',
             'schedule': crontab(minute='*/5'),
         },
+
+        # Mark prior-day COD reconciliation sessions as overdue every hour.
+        'mark-overdue-cod-reconciliation-sessions': {
+            'task': 'business_app.tasks.payment_tasks.mark_overdue_cod_reconciliation_sessions',
+            'schedule': crontab(minute=15),
+        },
         
         # Generate daily analytics report
         'daily-analytics-report': {

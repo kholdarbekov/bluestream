@@ -1,192 +1,571 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
-  Table,
-  Card,
-  Input,
-  Button,
-  Space,
-  Tag,
-  Dropdown,
-  Modal,
-  Form,
-  Select,
-  DatePicker,
-  Row,
-  Col,
-  Statistic,
-  message,
-  Tabs,
   Badge,
+  Button,
+  Card,
+  Col,
+  DatePicker,
+  Descriptions,
   Divider,
-  Switch,
-  Radio,
+  Drawer,
+  Dropdown,
+  Empty,
+  Form,
+  Input,
   List,
-  Avatar,
+  Modal,
   Progress,
-  Timeline
+  Radio,
+  Row,
+  Select,
+  Space,
+  Statistic,
+  Switch,
+  Table,
+  Tabs,
+  Tag,
+  Typography,
+  message
 } from 'antd';
 import {
-  SearchOutlined,
   BellOutlined,
-  MoreOutlined,
-  PlusOutlined,
-  EditOutlined,
+  CheckCircleOutlined,
+  ClockCircleOutlined,
+  CopyOutlined,
   DeleteOutlined,
+  EditOutlined,
+  ExperimentOutlined,
+  ExportOutlined,
   EyeOutlined,
-  SendOutlined,
+  InboxOutlined,
   MailOutlined,
   MessageOutlined,
-  PhoneOutlined,
-  ExportOutlined,
-  CheckCircleOutlined,
-  CloseCircleOutlined,
-  ClockCircleOutlined,
-  UserOutlined
+  MoreOutlined,
+  PlusOutlined,
+  SaveOutlined,
+  SearchOutlined,
+  SendOutlined,
+  StopOutlined
 } from '@ant-design/icons';
-import { useQuery, useMutation, useQueryClient } from 'react-query';
+import { useMutation, useQuery, useQueryClient } from 'react-query';
 import moment from 'moment';
 import { formatDate, formatDateTime } from '../utils/dateUtils';
 import adminService from '../services/adminService';
+import exportUtils from '../utils/exportUtils';
 
 const { Option } = Select;
-const { TextArea } = Input;
 const { RangePicker } = DatePicker;
+const { Text, Paragraph } = Typography;
+
+const CAMPAIGN_STATUS_COLORS = {
+  draft: 'default',
+  scheduled: 'gold',
+  sending: 'processing',
+  sent: 'success',
+  failed: 'error',
+  cancelled: 'error'
+};
+
+const CHANNEL_ICONS = {
+  email: <MailOutlined />,
+  sms: <MessageOutlined />,
+  telegram: <SendOutlined />,
+  in_app: <InboxOutlined />,
+  push: <BellOutlined />
+};
+
+const PRIORITY_OPTIONS = [
+  { value: 'low', label: 'Low' },
+  { value: 'normal', label: 'Normal' },
+  { value: 'high', label: 'High' },
+  { value: 'urgent', label: 'Urgent' }
+];
+
+const AUDIENCE_OPTIONS = [
+  { value: 'all_customers', label: 'All Customers' },
+  { value: 'active_customers', label: 'Active Customers' },
+  { value: 'new_customers', label: 'New Customers' },
+  { value: 'loyalty_members', label: 'Loyalty Members' },
+  { value: 'custom_segment', label: 'Custom Segment' }
+];
+
+const parseVariableJson = (rawValue) => {
+  const value = `${rawValue || ''}`.trim();
+  if (!value) {
+    return {};
+  }
+  return JSON.parse(value);
+};
+
+const normalizeCampaignPayload = (values) => ({
+  name: values.name?.trim(),
+  template_id: values.template_id || null,
+  notification_type: values.notification_type,
+  channel: values.channel,
+  subject: values.subject?.trim() || null,
+  content: values.content?.trim() || null,
+  target_audience: values.target_audience,
+  target_segment_id: values.target_segment_id || null,
+  specific_user_ids: (values.specific_user_ids || [])
+    .map((value) => Number(value))
+    .filter((value) => Number.isFinite(value)),
+  priority: values.priority || 'normal',
+  scheduled_at: values.scheduled_at ? values.scheduled_at.toISOString() : null
+});
+
+const normalizeTemplatePayload = (values) => ({
+  name: values.name?.trim(),
+  notification_type: values.notification_type,
+  channel: values.channel,
+  subject: values.subject?.trim() || null,
+  content: values.content?.trim(),
+  is_active: values.is_active !== false
+});
+
+const renderChannelTag = (channel, channels) => {
+  const channelMeta = channels.find((item) => item.value === channel);
+  return (
+    <Tag color={channel === 'push' ? 'default' : 'blue'} icon={CHANNEL_ICONS[channel]}>
+      {(channelMeta?.label || channel || '').toUpperCase()}
+    </Tag>
+  );
+};
 
 const Notifications = () => {
+  const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState('campaigns');
-  const [searchText, setSearchText] = useState('');
-  const [statusFilter, setStatusFilter] = useState('');
-  const [typeFilter, setTypeFilter] = useState('');
-  const [selectedCampaign, setSelectedCampaign] = useState(null);
-  const [selectedTemplate, setSelectedTemplate] = useState(null);
-  const [isCampaignModalVisible, setIsCampaignModalVisible] = useState(false);
-  const [isTemplateModalVisible, setIsTemplateModalVisible] = useState(false);
-  const [isEditModalVisible, setIsEditModalVisible] = useState(false);
-  const [pagination, setPagination] = useState({ page: 1, per_page: 20 });
+  const [campaignPagination, setCampaignPagination] = useState({ page: 1, per_page: 20 });
+  const [templatePagination, setTemplatePagination] = useState({ page: 1, per_page: 20 });
+  const [campaignFilters, setCampaignFilters] = useState({
+    search: '',
+    status: undefined,
+    channel: undefined,
+    target_audience: undefined,
+    dateRange: []
+  });
+  const [templateFilters, setTemplateFilters] = useState({
+    search: '',
+    channel: undefined,
+    notification_type: undefined,
+    is_active: undefined
+  });
+  const [campaignModalOpen, setCampaignModalOpen] = useState(false);
+  const [templateModalOpen, setTemplateModalOpen] = useState(false);
+  const [campaignDrawerOpen, setCampaignDrawerOpen] = useState(false);
+  const [templateDrawerOpen, setTemplateDrawerOpen] = useState(false);
+  const [campaignModalMode, setCampaignModalMode] = useState('create');
+  const [templateModalMode, setTemplateModalMode] = useState('create');
+  const [campaignSubmitMode, setCampaignSubmitMode] = useState('draft');
+  const [editingCampaignId, setEditingCampaignId] = useState(null);
+  const [editingTemplateId, setEditingTemplateId] = useState(null);
+  const [selectedCampaignId, setSelectedCampaignId] = useState(null);
+  const [selectedTemplateId, setSelectedTemplateId] = useState(null);
+  const [templatePreviewLanguage, setTemplatePreviewLanguage] = useState('en');
+  const [templatePreviewVariables, setTemplatePreviewVariables] = useState(
+    JSON.stringify({ user_name: 'Admin User', order_number: 'BS-1001' }, null, 2)
+  );
+
   const [campaignForm] = Form.useForm();
   const [templateForm] = Form.useForm();
-  const [editForm] = Form.useForm();
+  const campaignChannel = Form.useWatch('channel', campaignForm);
+  const campaignAudience = Form.useWatch('target_audience', campaignForm);
+  const templateChannel = Form.useWatch('channel', templateForm);
 
-  const queryClient = useQueryClient();
+  const campaignQueryParams = useMemo(() => {
+    const [startDate, endDate] = campaignFilters.dateRange || [];
+    return {
+      page: campaignPagination.page,
+      per_page: campaignPagination.per_page,
+      search: campaignFilters.search || undefined,
+      status: campaignFilters.status || undefined,
+      channel: campaignFilters.channel || undefined,
+      target_audience: campaignFilters.target_audience || undefined,
+      start_date: startDate ? startDate.startOf('day').toISOString() : undefined,
+      end_date: endDate ? endDate.endOf('day').toISOString() : undefined
+    };
+  }, [campaignFilters, campaignPagination]);
 
-  // Fetch notification campaigns
-  const { data: campaignsData, isLoading: campaignsLoading } = useQuery(
-    ['notification-campaigns', pagination, searchText, statusFilter, typeFilter],
-    () => adminService.getNotificationCampaigns({
-      page: pagination.page,
-      per_page: pagination.per_page,
-      search: searchText,
-      status: statusFilter,
-      type: typeFilter
-    }),
+  const templateQueryParams = useMemo(() => ({
+    page: templatePagination.page,
+    per_page: templatePagination.per_page,
+    search: templateFilters.search || undefined,
+    channel: templateFilters.channel || undefined,
+    notification_type: templateFilters.notification_type || undefined,
+    is_active: templateFilters.is_active
+  }), [templateFilters, templatePagination]);
+
+  const { data: campaignCollection, isLoading: campaignsLoading } = useQuery(
+    ['notification-campaigns', campaignQueryParams],
+    () => adminService.getNotificationCampaigns(campaignQueryParams),
+    { keepPreviousData: true }
+  );
+
+  const { data: templateCollection, isLoading: templatesLoading } = useQuery(
+    ['notification-templates', templateQueryParams],
+    () => adminService.getNotificationTemplates(templateQueryParams),
+    { keepPreviousData: true, enabled: activeTab === 'templates' || templateDrawerOpen || templateModalOpen || campaignModalOpen }
+  );
+
+  const { data: selectedCampaign, isFetching: campaignDetailLoading } = useQuery(
+    ['notification-campaign-detail', selectedCampaignId],
+    () => adminService.getNotificationCampaign(selectedCampaignId),
+    { enabled: Boolean(selectedCampaignId) }
+  );
+
+  const { data: selectedTemplate, isFetching: templateDetailLoading } = useQuery(
+    ['notification-template-detail', selectedTemplateId],
+    () => adminService.getNotificationTemplate(selectedTemplateId),
+    { enabled: Boolean(selectedTemplateId) }
+  );
+
+  const { data: notificationTypes = [] } = useQuery(
+    ['notification-template-types'],
+    () => adminService.getNotificationTemplateTypes()
+  );
+
+  const { data: channelOptions = [] } = useQuery(
+    ['notification-template-channels'],
+    () => adminService.getNotificationTemplateChannels()
+  );
+
+  const { data: segmentOptions = [] } = useQuery(
+    ['notification-campaign-segments'],
+    () => adminService.getNotificationCampaignSegments()
+  );
+
+  const templatePreviewMutation = useMutation(
+    ({ templateId, payload }) => adminService.previewNotificationTemplate(templateId, payload),
     {
-      keepPreviousData: true
+      onError: (error) => {
+        message.error(error?.response?.data?.message || 'Failed to render template preview');
+      }
     }
   );
 
-  // Fetch notification templates
-  const { data: templatesData, isLoading: templatesLoading } = useQuery(
-    ['notification-templates', pagination, searchText],
-    () => adminService.getNotificationTemplates({
-      page: pagination.page,
-      per_page: pagination.per_page,
-      search: searchText
-    }),
-    {
-      keepPreviousData: true,
-      enabled: activeTab === 'templates'
-    }
-  );
-
-  // Create campaign mutation
-  const createCampaignMutation = useMutation(
-    (campaignData) => adminService.createNotificationCampaign(campaignData),
+  const templateTestSendMutation = useMutation(
+    ({ templateId, payload }) => adminService.testSendNotificationTemplate(templateId, payload),
     {
       onSuccess: () => {
-        message.success('Campaign created successfully');
+        message.success('Template test notification sent');
+      },
+      onError: (error) => {
+        message.error(error?.response?.data?.message || 'Failed to send test notification');
+      }
+    }
+  );
+
+  const campaignSaveMutation = useMutation(
+    async ({ values, mode }) => {
+      const payload = normalizeCampaignPayload(values);
+      let campaign;
+
+      if (editingCampaignId) {
+        campaign = await adminService.updateNotificationCampaign(editingCampaignId, payload);
+      } else {
+        campaign = await adminService.createNotificationCampaign(payload);
+      }
+
+      if (mode === 'send_now') {
+        campaign = await adminService.sendNotificationCampaign(campaign.id, { send_now: true });
+      }
+      if (mode === 'schedule') {
+        if (!payload.scheduled_at) {
+          throw new Error('Schedule time is required');
+        }
+        campaign = await adminService.sendNotificationCampaign(campaign.id, { send_now: false });
+      }
+
+      return campaign;
+    },
+    {
+      onSuccess: (_, variables) => {
+        message.success(
+          variables.mode === 'draft'
+            ? 'Campaign saved'
+            : variables.mode === 'send_now'
+              ? 'Campaign sent'
+              : 'Campaign scheduled'
+        );
         queryClient.invalidateQueries('notification-campaigns');
-        setIsCampaignModalVisible(false);
+        if (selectedCampaignId) {
+          queryClient.invalidateQueries(['notification-campaign-detail', selectedCampaignId]);
+        }
+        setCampaignModalOpen(false);
+        setEditingCampaignId(null);
         campaignForm.resetFields();
       },
       onError: (error) => {
-        message.error('Failed to create campaign');
+        message.error(error?.response?.data?.message || error?.message || 'Failed to save campaign');
       }
     }
   );
 
-  // Create template mutation
-  const createTemplateMutation = useMutation(
-    (templateData) => adminService.createNotificationTemplate(templateData),
+  const campaignDeleteMutation = useMutation(
+    (campaignId) => adminService.deleteNotificationCampaign(campaignId),
     {
       onSuccess: () => {
-        message.success('Template created successfully');
+        message.success('Campaign deleted');
+        queryClient.invalidateQueries('notification-campaigns');
+        setCampaignDrawerOpen(false);
+        setSelectedCampaignId(null);
+      },
+      onError: (error) => {
+        message.error(error?.response?.data?.message || 'Failed to delete campaign');
+      }
+    }
+  );
+
+  const campaignDuplicateMutation = useMutation(
+    (campaignId) => adminService.duplicateNotificationCampaign(campaignId),
+    {
+      onSuccess: () => {
+        message.success('Campaign duplicated');
+        queryClient.invalidateQueries('notification-campaigns');
+      },
+      onError: (error) => {
+        message.error(error?.response?.data?.message || 'Failed to duplicate campaign');
+      }
+    }
+  );
+
+  const campaignCancelMutation = useMutation(
+    (campaignId) => adminService.cancelNotificationCampaign(campaignId),
+    {
+      onSuccess: (_, campaignId) => {
+        message.success('Campaign cancelled');
+        queryClient.invalidateQueries('notification-campaigns');
+        queryClient.invalidateQueries(['notification-campaign-detail', campaignId]);
+      },
+      onError: (error) => {
+        message.error(error?.response?.data?.message || 'Failed to cancel campaign');
+      }
+    }
+  );
+
+  const templateSaveMutation = useMutation(
+    async (values) => {
+      const payload = normalizeTemplatePayload(values);
+      if (editingTemplateId) {
+        return adminService.updateNotificationTemplate(editingTemplateId, payload);
+      }
+      return adminService.createNotificationTemplate(payload);
+    },
+    {
+      onSuccess: () => {
+        message.success(editingTemplateId ? 'Template updated' : 'Template created');
         queryClient.invalidateQueries('notification-templates');
-        setIsTemplateModalVisible(false);
+        if (selectedTemplateId) {
+          queryClient.invalidateQueries(['notification-template-detail', selectedTemplateId]);
+        }
+        setTemplateModalOpen(false);
+        setEditingTemplateId(null);
         templateForm.resetFields();
       },
       onError: (error) => {
-        message.error('Failed to create template');
+        message.error(error?.response?.data?.message || 'Failed to save template');
       }
     }
   );
 
-  const campaignStatusColors = {
-    draft: 'grey',
-    scheduled: 'orange',
-    sending: 'blue',
-    sent: 'green',
-    failed: 'red',
-    cancelled: 'red'
+  const templateToggleMutation = useMutation(
+    ({ templateId, isActive }) => adminService.updateNotificationTemplate(templateId, { is_active: isActive }),
+    {
+      onSuccess: () => {
+        message.success('Template status updated');
+        queryClient.invalidateQueries('notification-templates');
+        if (selectedTemplateId) {
+          queryClient.invalidateQueries(['notification-template-detail', selectedTemplateId]);
+        }
+      },
+      onError: (error) => {
+        message.error(error?.response?.data?.message || 'Failed to update template status');
+      }
+    }
+  );
+
+  const runTemplatePreview = async (templateId) => {
+    try {
+      const preview = await templatePreviewMutation.mutateAsync({
+        templateId,
+        payload: {
+          language: templatePreviewLanguage,
+          variables: parseVariableJson(templatePreviewVariables)
+        }
+      });
+      return preview;
+    } catch (error) {
+      return null;
+    }
   };
 
-  const channelIcons = {
-    email: <MailOutlined />,
-    sms: <MessageOutlined />,
-    push: <BellOutlined />,
-    phone: <PhoneOutlined />
+  useEffect(() => {
+    if (selectedTemplateId && templateDrawerOpen) {
+      runTemplatePreview(selectedTemplateId);
+    }
+  }, [selectedTemplateId, templateDrawerOpen, templatePreviewLanguage]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const campaigns = campaignCollection?.campaigns || [];
+  const templates = templateCollection?.templates || [];
+  const availableChannels = channelOptions.filter((channel) => channel.available !== false || channel.value === 'push');
+  const creatableChannels = channelOptions.filter((channel) => channel.available !== false);
+  const totalCampaigns = campaignCollection?.pagination?.total || 0;
+  const activeCampaigns = campaigns.filter((campaign) => ['scheduled', 'sending'].includes(campaign.status)).length;
+  const totalSent = campaigns.reduce((sum, campaign) => sum + (campaign.sent_count || 0), 0);
+  const totalRecipients = campaigns.reduce((sum, campaign) => sum + (campaign.recipient_count || 0), 0);
+  const deliveryRate = totalRecipients > 0 ? (totalSent / totalRecipients) * 100 : 0;
+
+  const openCampaignModal = (mode = 'create') => {
+    setCampaignModalMode(mode);
+    setCampaignModalOpen(true);
+  };
+
+  const openTemplateModal = (mode = 'create') => {
+    setTemplateModalMode(mode);
+    setTemplateModalOpen(true);
+  };
+
+  const handleCreateCampaign = () => {
+    setEditingCampaignId(null);
+    campaignForm.resetFields();
+    campaignForm.setFieldsValue({
+      priority: 'normal',
+      target_audience: 'all_customers'
+    });
+    openCampaignModal('create');
+  };
+
+  const handleViewCampaign = (campaign) => {
+    setSelectedCampaignId(campaign.id);
+    setCampaignDrawerOpen(true);
+  };
+
+  const handleEditCampaign = async (campaign) => {
+    const detail = await adminService.getNotificationCampaign(campaign.id);
+    setEditingCampaignId(detail.id);
+    campaignForm.setFieldsValue({
+      name: detail.name,
+      template_id: detail.template_id || undefined,
+      notification_type: detail.notification_type,
+      channel: detail.channel,
+      subject: detail.subject || '',
+      content: detail.content || '',
+      target_audience: detail.target_audience,
+      target_segment_id: detail.target_segment_id || undefined,
+      specific_user_ids: (detail.specific_user_ids || []).map(String),
+      priority: detail.priority || 'normal',
+      scheduled_at: detail.scheduled_at ? moment(detail.scheduled_at) : null
+    });
+    openCampaignModal('edit');
+  };
+
+  const handleDuplicateCampaign = (campaign) => {
+    campaignDuplicateMutation.mutate(campaign.id);
+  };
+
+  const handleCreateTemplate = () => {
+    setEditingTemplateId(null);
+    templateForm.resetFields();
+    templateForm.setFieldsValue({ is_active: true });
+    openTemplateModal('create');
+  };
+
+  const handleViewTemplate = (template) => {
+    setSelectedTemplateId(template.id);
+    setTemplateDrawerOpen(true);
+  };
+
+  const handleEditTemplate = async (template) => {
+    const detail = await adminService.getNotificationTemplate(template.id);
+    setEditingTemplateId(detail.id);
+    templateForm.setFieldsValue({
+      name: detail.name,
+      notification_type: detail.notification_type,
+      channel: detail.channel,
+      subject: detail.subject || '',
+      content: detail.content || '',
+      is_active: detail.is_active !== false
+    });
+    openTemplateModal('edit');
+  };
+
+  const handleUseTemplate = async (template) => {
+    const detail = template.notification_type ? template : await adminService.getNotificationTemplate(template.id);
+    setEditingCampaignId(null);
+    campaignForm.resetFields();
+    campaignForm.setFieldsValue({
+      name: `${detail.name} Campaign`,
+      template_id: detail.id,
+      notification_type: detail.notification_type,
+      channel: detail.channel,
+      subject: detail.subject || '',
+      content: detail.content || '',
+      target_audience: 'all_customers',
+      priority: 'normal'
+    });
+    setActiveTab('campaigns');
+    openCampaignModal('create');
+  };
+
+  const handleCampaignSubmit = (values) => {
+    campaignSaveMutation.mutate({ values, mode: campaignSubmitMode });
+  };
+
+  const handleTemplateSubmit = (values) => {
+    templateSaveMutation.mutate(values);
+  };
+
+  const handleExportCampaigns = async () => {
+    const result = await exportUtils.exportNotificationCampaigns(campaignQueryParams);
+    if (result?.success === false) {
+      message.error(result.message || 'Export failed');
+      return;
+    }
+    message.success('Campaign export generated');
   };
 
   const campaignColumns = [
     {
-      title: 'Campaign Name',
+      title: 'Campaign',
       dataIndex: 'name',
       key: 'name',
-      render: (text, record) => (
+      render: (_, record) => (
         <div>
-          <div style={{ fontWeight: 'bold' }}>{text}</div>
-          <small style={{ color: '#666' }}>{record.subject}</small>
+          <div style={{ fontWeight: 600 }}>{record.name}</div>
+          <Text type="secondary">{record.subject || record.content || 'No custom content'}</Text>
         </div>
+      )
+    },
+    {
+      title: 'Type',
+      dataIndex: 'notification_type',
+      key: 'notification_type',
+      render: (value, record) => (
+        <Space direction="vertical" size={2}>
+          <Text>{value?.replace(/_/g, ' ')}</Text>
+          <Tag>{record.category}</Tag>
+        </Space>
       )
     },
     {
       title: 'Channel',
       dataIndex: 'channel',
       key: 'channel',
-      width: 100,
-      render: (channel) => (
-        <Tag color="blue" icon={channelIcons[channel]}>
-          {channel?.toUpperCase()}
-        </Tag>
-      )
+      render: (value) => renderChannelTag(value, availableChannels)
     },
     {
       title: 'Recipients',
       dataIndex: 'recipient_count',
       key: 'recipient_count',
-      width: 100,
-      render: (count) => (
-        <Badge count={count} style={{ backgroundColor: '#1890ff' }} />
-      )
+      render: (count) => <Badge count={count} style={{ backgroundColor: '#1677ff' }} />
     },
     {
-      title: 'Sent/Delivered',
-      key: 'delivery_stats',
-      width: 120,
+      title: 'Delivery',
+      key: 'delivery',
       render: (_, record) => (
-        <div>
+        <div style={{ minWidth: 120 }}>
           <div>{record.sent_count}/{record.recipient_count}</div>
           <Progress
-            percent={record.recipient_count > 0 ? (record.sent_count / record.recipient_count) * 100 : 0}
+            percent={record.recipient_count ? (record.sent_count / record.recipient_count) * 100 : 0}
             size="small"
             showInfo={false}
           />
@@ -197,60 +576,48 @@ const Notifications = () => {
       title: 'Status',
       dataIndex: 'status',
       key: 'status',
-      width: 100,
-      render: (status) => (
-        <Tag color={campaignStatusColors[status] || 'default'}>
-          {status?.toUpperCase()}
-        </Tag>
-      )
+      render: (status) => <Tag color={CAMPAIGN_STATUS_COLORS[status]}>{status?.toUpperCase()}</Tag>
     },
     {
-      title: 'Scheduled',
+      title: 'Schedule',
       dataIndex: 'scheduled_at',
       key: 'scheduled_at',
-      width: 120,
-      render: (date) => (date ? formatDateTime(date) : 'Immediate')
+      render: (value) => value ? formatDateTime(value) : 'Immediate'
     },
     {
       title: 'Actions',
       key: 'actions',
-      width: 100,
       render: (_, record) => (
         <Dropdown
+          trigger={['click']}
           menu={{
             items: [
-              {
-                key: 'view',
-                label: 'View Details',
-                icon: <EyeOutlined />,
-                onClick: () => handleViewCampaign(record)
-              },
+              { key: 'view', label: 'View', icon: <EyeOutlined />, onClick: () => handleViewCampaign(record) },
               {
                 key: 'edit',
-                label: 'Edit Campaign',
+                label: 'Edit',
                 icon: <EditOutlined />,
-                disabled: record.status === 'sent' || record.status === 'sending',
+                disabled: !['draft', 'scheduled'].includes(record.status),
                 onClick: () => handleEditCampaign(record)
               },
+              { key: 'duplicate', label: 'Duplicate', icon: <CopyOutlined />, onClick: () => handleDuplicateCampaign(record) },
               {
-                type: 'divider'
-              },
-              {
-                key: 'duplicate',
-                label: 'Duplicate',
-                onClick: () => handleDuplicateCampaign(record)
+                key: 'cancel',
+                label: 'Cancel',
+                icon: <StopOutlined />,
+                disabled: !['scheduled', 'sending'].includes(record.status),
+                onClick: () => campaignCancelMutation.mutate(record.id)
               },
               {
                 key: 'delete',
-                label: 'Delete Campaign',
+                label: 'Delete',
                 icon: <DeleteOutlined />,
                 danger: true,
-                disabled: record.status === 'sending',
-                onClick: () => handleDeleteCampaign(record)
+                disabled: !['draft', 'cancelled'].includes(record.status),
+                onClick: () => campaignDeleteMutation.mutate(record.id)
               }
             ]
           }}
-          trigger={['click']}
         >
           <Button type="text" icon={<MoreOutlined />} />
         </Dropdown>
@@ -260,91 +627,70 @@ const Notifications = () => {
 
   const templateColumns = [
     {
-      title: 'Template Name',
+      title: 'Template',
       dataIndex: 'name',
       key: 'name',
-      render: (text, record) => (
+      render: (_, record) => (
         <div>
-          <div style={{ fontWeight: 'bold' }}>{text}</div>
-          <small style={{ color: '#666' }}>{record.description}</small>
+          <div style={{ fontWeight: 600 }}>{record.name}</div>
+          <Text type="secondary">{record.description || record.content}</Text>
         </div>
+      )
+    },
+    {
+      title: 'Type',
+      dataIndex: 'notification_type',
+      key: 'notification_type',
+      render: (value, record) => (
+        <Space direction="vertical" size={2}>
+          <Text>{value?.replace(/_/g, ' ')}</Text>
+          <Tag>{record.category}</Tag>
+        </Space>
       )
     },
     {
       title: 'Channel',
       dataIndex: 'channel',
       key: 'channel',
-      width: 100,
-      render: (channel) => (
-        <Tag color="blue" icon={channelIcons[channel]}>
-          {channel?.toUpperCase()}
-        </Tag>
-      )
+      render: (value) => renderChannelTag(value, availableChannels)
     },
     {
-      title: 'Category',
-      dataIndex: 'category',
-      key: 'category',
-      width: 120,
-      render: (category) => (
-        <Tag color="green">{category}</Tag>
-      )
-    },
-    {
-      title: 'Usage Count',
+      title: 'Usage',
       dataIndex: 'usage_count',
       key: 'usage_count',
-      width: 100,
-      render: (count) => (
-        <span>{count} times</span>
-      )
+      render: (value) => `${value} campaign(s)`
     },
     {
-      title: 'Created',
-      dataIndex: 'created_at',
-      key: 'created_at',
-      width: 120,
-      render: (date) => formatDate(date)
+      title: 'Status',
+      dataIndex: 'is_active',
+      key: 'is_active',
+      render: (value) => <Tag color={value ? 'success' : 'default'}>{value ? 'ACTIVE' : 'INACTIVE'}</Tag>
+    },
+    {
+      title: 'Updated',
+      dataIndex: 'updated_at',
+      key: 'updated_at',
+      render: (value, record) => formatDate(value || record.created_at)
     },
     {
       title: 'Actions',
       key: 'actions',
-      width: 100,
       render: (_, record) => (
         <Dropdown
+          trigger={['click']}
           menu={{
             items: [
+              { key: 'view', label: 'View', icon: <EyeOutlined />, onClick: () => handleViewTemplate(record) },
+              { key: 'edit', label: 'Edit', icon: <EditOutlined />, onClick: () => handleEditTemplate(record) },
+              { key: 'use', label: 'Use in Campaign', icon: <SendOutlined />, onClick: () => handleUseTemplate(record) },
               {
-                key: 'view',
-                label: 'View Template',
-                icon: <EyeOutlined />,
-                onClick: () => handleViewTemplate(record)
-              },
-              {
-                key: 'edit',
-                label: 'Edit Template',
-                icon: <EditOutlined />,
-                onClick: () => handleEditTemplate(record)
-              },
-              {
-                key: 'use',
-                label: 'Use Template',
-                icon: <SendOutlined />,
-                onClick: () => handleUseTemplate(record)
-              },
-              {
-                type: 'divider'
-              },
-              {
-                key: 'delete',
-                label: 'Delete Template',
-                icon: <DeleteOutlined />,
-                danger: true,
-                onClick: () => handleDeleteTemplate(record)
+                key: 'toggle',
+                label: record.is_active ? 'Deactivate' : 'Activate',
+                icon: record.is_active ? <DeleteOutlined /> : <CheckCircleOutlined />,
+                onClick: () => templateToggleMutation.mutate({ templateId: record.id, isActive: !record.is_active })
               }
             ]
           }}
-          trigger={['click']}
         >
           <Button type="text" icon={<MoreOutlined />} />
         </Dropdown>
@@ -352,520 +698,751 @@ const Notifications = () => {
     }
   ];
 
-  const handleViewCampaign = (campaign) => {
-    setSelectedCampaign(campaign);
-    // Implementation for viewing campaign details
-  };
-
-  const handleEditCampaign = (campaign) => {
-    setSelectedCampaign(campaign);
-    editForm.setFieldsValue({
-      name: campaign.name,
-      subject: campaign.subject,
-      channel: campaign.channel,
-      content: campaign.content,
-      scheduled_at: campaign.scheduled_at ? moment(campaign.scheduled_at) : null
-    });
-    setIsEditModalVisible(true);
-  };
-
-  const handleDeleteCampaign = (campaign) => {
-    Modal.confirm({
-      title: 'Delete Campaign?',
-      content: `Are you sure you want to delete "${campaign.name}"?`,
-      onOk: () => {
-        message.success('Campaign deleted successfully');
-        queryClient.invalidateQueries('notification-campaigns');
-      }
-    });
-  };
-
-  const handleDuplicateCampaign = (campaign) => {
-    const duplicatedCampaign = {
-      ...campaign,
-      name: `${campaign.name} (Copy)`,
-      status: 'draft'
-    };
-    createCampaignMutation.mutate(duplicatedCampaign);
-  };
-
-  const handleViewTemplate = (template) => {
-    setSelectedTemplate(template);
-    // Implementation for viewing template details
-  };
-
-  const handleEditTemplate = (template) => {
-    setSelectedTemplate(template);
-    // Implementation for editing template
-  };
-
-  const handleDeleteTemplate = (template) => {
-    Modal.confirm({
-      title: 'Delete Template?',
-      content: `Are you sure you want to delete "${template.name}"?`,
-      onOk: () => {
-        message.success('Template deleted successfully');
-        queryClient.invalidateQueries('notification-templates');
-      }
-    });
-  };
-
-  const handleUseTemplate = (template) => {
-    campaignForm.setFieldsValue({
-      template_id: template.id,
-      channel: template.channel,
-      subject: template.subject,
-      content: template.content
-    });
-    setIsCampaignModalVisible(true);
-  };
-
-  const handleCreateCampaign = (values) => {
-    createCampaignMutation.mutate(values);
-  };
-
-  const handleCreateTemplate = (values) => {
-    createTemplateMutation.mutate(values);
-  };
-
-  const handleTableChange = (paginationInfo) => {
-    setPagination({
-      page: paginationInfo.current,
-      per_page: paginationInfo.pageSize
-    });
-  };
-
-  const handleSearch = (value) => {
-    setSearchText(value);
-    setPagination({ ...pagination, page: 1 });
-  };
-
-  // Calculate summary statistics
-  const campaigns = campaignsData?.campaigns || [];
-  const templates = templatesData?.templates || [];
-  const totalCampaigns = campaignsData?.pagination?.total || 0;
-  const activeCampaigns = campaigns.filter(c => c.status === 'sending' || c.status === 'scheduled').length;
-  const totalSent = campaigns.reduce((sum, campaign) => sum + (campaign.sent_count || 0), 0);
-  const totalRecipients = campaigns.reduce((sum, campaign) => sum + (campaign.recipient_count || 0), 0);
-  const deliveryRate = totalRecipients > 0 ? ((totalSent / totalRecipients) * 100).toFixed(1) : 0;
-
-  const tabItems = [
-    {
-      key: 'campaigns',
-      label: 'Campaigns',
-      children: (
-        <div>
-          {/* Summary Cards for Campaigns */}
-          <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
-            <Col xs={24} sm={6}>
-              <Card>
-                <Statistic
-                  title="Total Campaigns"
-                  value={totalCampaigns}
-                  prefix={<BellOutlined />}
-                />
-              </Card>
-            </Col>
-            <Col xs={24} sm={6}>
-              <Card>
-                <Statistic
-                  title="Active Campaigns"
-                  value={activeCampaigns}
-                  valueStyle={{ color: '#1890ff' }}
-                  prefix={<SendOutlined />}
-                />
-              </Card>
-            </Col>
-            <Col xs={24} sm={6}>
-              <Card>
-                <Statistic
-                  title="Messages Sent"
-                  value={totalSent}
-                  prefix={<CheckCircleOutlined />}
-                />
-              </Card>
-            </Col>
-            <Col xs={24} sm={6}>
-              <Card>
-                <Statistic
-                  title="Delivery Rate"
-                  value={deliveryRate}
-                  precision={1}
-                  suffix="%"
-                  valueStyle={{ color: '#52c41a' }}
-                />
-              </Card>
-            </Col>
-          </Row>
-
-          <Card>
-            {/* Filter Controls */}
-            <div className="table-actions">
-              <Space wrap>
-                <Input.Search
-                  placeholder="Search campaigns..."
-                  allowClear
-                  onSearch={handleSearch}
-                  style={{ width: 250 }}
-                />
-                <Select
-                  placeholder="Filter by status"
-                  allowClear
-                  onChange={setStatusFilter}
-                  style={{ width: 150 }}
-                >
-                  <Option value="draft">Draft</Option>
-                  <Option value="scheduled">Scheduled</Option>
-                  <Option value="sending">Sending</Option>
-                  <Option value="sent">Sent</Option>
-                  <Option value="failed">Failed</Option>
-                  <Option value="cancelled">Cancelled</Option>
-                </Select>
-                <Select
-                  placeholder="Filter by channel"
-                  allowClear
-                  onChange={setTypeFilter}
-                  style={{ width: 150 }}
-                >
-                  <Option value="email">Email</Option>
-                  <Option value="sms">SMS</Option>
-                  <Option value="push">Push</Option>
-                  <Option value="phone">Phone</Option>
-                </Select>
-              </Space>
-
-              <Space>
-                <Button
-                  type="primary"
-                  icon={<PlusOutlined />}
-                  onClick={() => setIsCampaignModalVisible(true)}
-                >
-                  Create Campaign
-                </Button>
-                <Button icon={<ExportOutlined />}>
-                  Export Report
-                </Button>
-              </Space>
-            </div>
-
-            <Table
-              columns={campaignColumns}
-              dataSource={campaigns}
-              loading={campaignsLoading}
-              rowKey="id"
-              pagination={{
-                current: pagination.page,
-                pageSize: pagination.per_page,
-                total: totalCampaigns,
-                showSizeChanger: true,
-                showQuickJumper: true,
-                showTotal: (total, range) =>
-                  `${range[0]}-${range[1]} of ${total} campaigns`
-              }}
-              onChange={handleTableChange}
-              className="admin-table"
-            />
-          </Card>
-        </div>
-      )
-    },
-    {
-      key: 'templates',
-      label: 'Templates',
-      children: (
-        <div>
-          {/* Summary Cards for Templates */}
-          <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
-            <Col xs={24} sm={8}>
-              <Card>
-                <Statistic
-                  title="Total Templates"
-                  value={templatesData?.pagination?.total || 0}
-                  prefix={<MailOutlined />}
-                />
-              </Card>
-            </Col>
-            <Col xs={24} sm={8}>
-              <Card>
-                <Statistic
-                  title="Email Templates"
-                  value={templates.filter(t => t.channel === 'email').length}
-                  prefix={<MailOutlined />}
-                />
-              </Card>
-            </Col>
-            <Col xs={24} sm={8}>
-              <Card>
-                <Statistic
-                  title="SMS Templates"
-                  value={templates.filter(t => t.channel === 'sms').length}
-                  prefix={<MessageOutlined />}
-                />
-              </Card>
-            </Col>
-          </Row>
-
-          <Card>
-            <div className="table-actions">
-              <Space wrap>
-                <Input.Search
-                  placeholder="Search templates..."
-                  allowClear
-                  onSearch={handleSearch}
-                  style={{ width: 250 }}
-                />
-              </Space>
-
-              <Space>
-                <Button
-                  type="primary"
-                  icon={<PlusOutlined />}
-                  onClick={() => setIsTemplateModalVisible(true)}
-                >
-                  Create Template
-                </Button>
-              </Space>
-            </div>
-
-            <Table
-              columns={templateColumns}
-              dataSource={templates}
-              loading={templatesLoading}
-              rowKey="id"
-              pagination={{
-                current: pagination.page,
-                pageSize: pagination.per_page,
-                total: templatesData?.pagination?.total || 0,
-                showSizeChanger: true,
-                showQuickJumper: true,
-                showTotal: (total, range) =>
-                  `${range[0]}-${range[1]} of ${total} templates`
-              }}
-              onChange={handleTableChange}
-              className="admin-table"
-            />
-          </Card>
-        </div>
-      )
-    }
-  ];
+  const templatePreview = templatePreviewMutation.data;
 
   return (
     <div>
       <Tabs
         activeKey={activeTab}
         onChange={setActiveTab}
-        items={tabItems}
+        items={[
+          {
+            key: 'campaigns',
+            label: 'Campaigns',
+            children: (
+              <>
+                <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
+                  <Col xs={24} sm={12} lg={6}>
+                    <Card><Statistic title="Total Campaigns" value={totalCampaigns} prefix={<BellOutlined />} /></Card>
+                  </Col>
+                  <Col xs={24} sm={12} lg={6}>
+                    <Card><Statistic title="Active Campaigns" value={activeCampaigns} prefix={<ClockCircleOutlined />} /></Card>
+                  </Col>
+                  <Col xs={24} sm={12} lg={6}>
+                    <Card><Statistic title="Messages Sent" value={totalSent} prefix={<CheckCircleOutlined />} /></Card>
+                  </Col>
+                  <Col xs={24} sm={12} lg={6}>
+                    <Card><Statistic title="Delivery Rate" value={deliveryRate} precision={1} suffix="%" /></Card>
+                  </Col>
+                </Row>
+
+                <Card>
+                  <div className="table-actions">
+                    <Space wrap>
+                      <Input.Search
+                        allowClear
+                        placeholder="Search campaigns"
+                        prefix={<SearchOutlined />}
+                        style={{ width: 260 }}
+                        onSearch={(value) => {
+                          setCampaignPagination((prev) => ({ ...prev, page: 1 }));
+                          setCampaignFilters((prev) => ({ ...prev, search: value }));
+                        }}
+                      />
+                      <Select
+                        allowClear
+                        placeholder="Status"
+                        style={{ width: 140 }}
+                        value={campaignFilters.status}
+                        onChange={(value) => {
+                          setCampaignPagination((prev) => ({ ...prev, page: 1 }));
+                          setCampaignFilters((prev) => ({ ...prev, status: value }));
+                        }}
+                      >
+                        {Object.keys(CAMPAIGN_STATUS_COLORS).map((status) => (
+                          <Option key={status} value={status}>{status}</Option>
+                        ))}
+                      </Select>
+                      <Select
+                        allowClear
+                        placeholder="Channel"
+                        style={{ width: 160 }}
+                        value={campaignFilters.channel}
+                        onChange={(value) => {
+                          setCampaignPagination((prev) => ({ ...prev, page: 1 }));
+                          setCampaignFilters((prev) => ({ ...prev, channel: value }));
+                        }}
+                      >
+                        {channelOptions.map((channel) => (
+                          <Option key={channel.value} value={channel.value}>
+                            {channel.label}
+                          </Option>
+                        ))}
+                      </Select>
+                      <Select
+                        allowClear
+                        placeholder="Audience"
+                        style={{ width: 180 }}
+                        value={campaignFilters.target_audience}
+                        onChange={(value) => {
+                          setCampaignPagination((prev) => ({ ...prev, page: 1 }));
+                          setCampaignFilters((prev) => ({ ...prev, target_audience: value }));
+                        }}
+                      >
+                        {AUDIENCE_OPTIONS.map((audience) => (
+                          <Option key={audience.value} value={audience.value}>{audience.label}</Option>
+                        ))}
+                      </Select>
+                      <RangePicker
+                        value={campaignFilters.dateRange}
+                        onChange={(value) => {
+                          setCampaignPagination((prev) => ({ ...prev, page: 1 }));
+                          setCampaignFilters((prev) => ({ ...prev, dateRange: value || [] }));
+                        }}
+                      />
+                    </Space>
+
+                    <Space>
+                      <Button type="primary" icon={<PlusOutlined />} onClick={handleCreateCampaign}>
+                        Create Campaign
+                      </Button>
+                      <Button icon={<ExportOutlined />} onClick={handleExportCampaigns}>
+                        Export
+                      </Button>
+                    </Space>
+                  </div>
+
+                  <Table
+                    rowKey="id"
+                    columns={campaignColumns}
+                    dataSource={campaigns}
+                    loading={campaignsLoading}
+                    pagination={{
+                      current: campaignPagination.page,
+                      pageSize: campaignPagination.per_page,
+                      total: totalCampaigns,
+                      showSizeChanger: true,
+                      showQuickJumper: true
+                    }}
+                    onChange={(pagination) => {
+                      setCampaignPagination({
+                        page: pagination.current,
+                        per_page: pagination.pageSize
+                      });
+                    }}
+                  />
+                </Card>
+              </>
+            )
+          },
+          {
+            key: 'templates',
+            label: 'Templates',
+            children: (
+              <>
+                <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
+                  <Col xs={24} sm={8}>
+                    <Card><Statistic title="Total Templates" value={templateCollection?.pagination?.total || 0} prefix={<MailOutlined />} /></Card>
+                  </Col>
+                  <Col xs={24} sm={8}>
+                    <Card><Statistic title="Telegram Templates" value={templates.filter((item) => item.channel === 'telegram').length} prefix={<SendOutlined />} /></Card>
+                  </Col>
+                  <Col xs={24} sm={8}>
+                    <Card><Statistic title="Inactive Templates" value={templates.filter((item) => item.is_active === false).length} prefix={<ClockCircleOutlined />} /></Card>
+                  </Col>
+                </Row>
+
+                <Card>
+                  <div className="table-actions">
+                    <Space wrap>
+                      <Input.Search
+                        allowClear
+                        placeholder="Search templates"
+                        style={{ width: 260 }}
+                        onSearch={(value) => {
+                          setTemplatePagination((prev) => ({ ...prev, page: 1 }));
+                          setTemplateFilters((prev) => ({ ...prev, search: value }));
+                        }}
+                      />
+                      <Select
+                        allowClear
+                        placeholder="Channel"
+                        style={{ width: 160 }}
+                        value={templateFilters.channel}
+                        onChange={(value) => {
+                          setTemplatePagination((prev) => ({ ...prev, page: 1 }));
+                          setTemplateFilters((prev) => ({ ...prev, channel: value }));
+                        }}
+                      >
+                        {channelOptions.map((channel) => (
+                          <Option key={channel.value} value={channel.value}>{channel.label}</Option>
+                        ))}
+                      </Select>
+                      <Select
+                        allowClear
+                        placeholder="Notification Type"
+                        style={{ width: 220 }}
+                        value={templateFilters.notification_type}
+                        onChange={(value) => {
+                          setTemplatePagination((prev) => ({ ...prev, page: 1 }));
+                          setTemplateFilters((prev) => ({ ...prev, notification_type: value }));
+                        }}
+                      >
+                        {notificationTypes.map((type) => (
+                          <Option key={type.value} value={type.value}>{type.label}</Option>
+                        ))}
+                      </Select>
+                      <Select
+                        allowClear
+                        placeholder="Status"
+                        style={{ width: 140 }}
+                        value={templateFilters.is_active}
+                        onChange={(value) => {
+                          setTemplatePagination((prev) => ({ ...prev, page: 1 }));
+                          setTemplateFilters((prev) => ({ ...prev, is_active: value }));
+                        }}
+                      >
+                        <Option value={true}>Active</Option>
+                        <Option value={false}>Inactive</Option>
+                      </Select>
+                    </Space>
+
+                    <Button type="primary" icon={<PlusOutlined />} onClick={handleCreateTemplate}>
+                      Create Template
+                    </Button>
+                  </div>
+
+                  <Table
+                    rowKey="id"
+                    columns={templateColumns}
+                    dataSource={templates}
+                    loading={templatesLoading}
+                    pagination={{
+                      current: templatePagination.page,
+                      pageSize: templatePagination.per_page,
+                      total: templateCollection?.pagination?.total || 0,
+                      showSizeChanger: true,
+                      showQuickJumper: true
+                    }}
+                    onChange={(pagination) => {
+                      setTemplatePagination({
+                        page: pagination.current,
+                        per_page: pagination.pageSize
+                      });
+                    }}
+                  />
+                </Card>
+              </>
+            )
+          }
+        ]}
       />
 
-      {/* Create Campaign Modal */}
       <Modal
-        title="Create Notification Campaign"
-        open={isCampaignModalVisible}
-        onCancel={() => setIsCampaignModalVisible(false)}
+        title={campaignModalMode === 'edit' ? 'Edit Campaign' : 'Create Campaign'}
+        open={campaignModalOpen}
+        onCancel={() => {
+          setCampaignModalOpen(false);
+          setEditingCampaignId(null);
+        }}
         footer={null}
-        width={700}
+        width={860}
+        destroyOnHidden
       >
-        <Form
-          form={campaignForm}
-          layout="vertical"
-          onFinish={handleCreateCampaign}
-        >
-          <Form.Item
-            name="name"
-            label="Campaign Name"
-            rules={[{ required: true, message: 'Please enter campaign name' }]}
-          >
-            <Input placeholder="Enter campaign name" />
-          </Form.Item>
-
-          <Form.Item
-            name="channel"
-            label="Channel"
-            rules={[{ required: true, message: 'Please select channel' }]}
-          >
-            <Radio.Group>
-              <Radio.Button value="email"><MailOutlined /> Email</Radio.Button>
-              <Radio.Button value="sms"><MessageOutlined /> SMS</Radio.Button>
-              <Radio.Button value="push"><BellOutlined /> Push</Radio.Button>
-              <Radio.Button value="phone"><PhoneOutlined /> Phone</Radio.Button>
-            </Radio.Group>
-          </Form.Item>
-
-          <Form.Item
-            name="subject"
-            label="Subject"
-            rules={[{ required: true, message: 'Please enter subject' }]}
-          >
-            <Input placeholder="Enter subject/title" />
-          </Form.Item>
-
-          <Form.Item
-            name="content"
-            label="Message Content"
-            rules={[{ required: true, message: 'Please enter message content' }]}
-          >
-            <TextArea rows={6} placeholder="Enter your message content..." />
-          </Form.Item>
-
+        <Form form={campaignForm} layout="vertical" onFinish={handleCampaignSubmit}>
           <Row gutter={16}>
-            <Col span={12}>
-              <Form.Item
-                name="target_audience"
-                label="Target Audience"
-                rules={[{ required: true, message: 'Please select audience' }]}
-              >
-                <Select placeholder="Select audience">
-                  <Option value="all_customers">All Customers</Option>
-                  <Option value="active_customers">Active Customers</Option>
-                  <Option value="new_customers">New Customers</Option>
-                  <Option value="loyalty_members">Loyalty Members</Option>
-                  <Option value="custom_segment">Custom Segment</Option>
-                </Select>
+            <Col span={14}>
+              <Form.Item name="name" label="Campaign Name" rules={[{ required: true, message: 'Campaign name is required' }]}>
+                <Input placeholder="Retention push for dormant customers" />
               </Form.Item>
             </Col>
-            <Col span={12}>
-              <Form.Item
-                name="priority"
-                label="Priority"
-              >
-                <Select placeholder="Select priority">
-                  <Option value="high">High</Option>
-                  <Option value="medium">Medium</Option>
-                  <Option value="low">Low</Option>
+            <Col span={10}>
+              <Form.Item name="template_id" label="Template">
+                <Select allowClear placeholder="Optional saved template">
+                  {templates
+                    .filter((template) => template.is_active !== false)
+                    .map((template) => (
+                      <Option key={template.id} value={template.id}>{template.name}</Option>
+                    ))}
                 </Select>
               </Form.Item>
             </Col>
           </Row>
 
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item name="notification_type" label="Notification Type" rules={[{ required: true, message: 'Select a notification type' }]}>
+                <Select showSearch optionFilterProp="children" placeholder="Select notification type">
+                  {notificationTypes.map((type) => (
+                    <Option key={type.value} value={type.value}>
+                      {type.label}
+                    </Option>
+                  ))}
+                </Select>
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="channel" label="Channel" rules={[{ required: true, message: 'Select a channel' }]}>
+                <Radio.Group buttonStyle="solid">
+                  {creatableChannels.map((channel) => (
+                    <Radio.Button key={channel.value} value={channel.value}>
+                      <Space size={6}>
+                        {CHANNEL_ICONS[channel.value]}
+                        {channel.label}
+                      </Space>
+                    </Radio.Button>
+                  ))}
+                </Radio.Group>
+              </Form.Item>
+            </Col>
+          </Row>
+
           <Form.Item
-            name="scheduled_at"
-            label="Schedule (Optional)"
+            noStyle
+            shouldUpdate={(prev, next) => prev.channel !== next.channel || prev.template_id !== next.template_id}
           >
-            <DatePicker
-              showTime
-              placeholder="Send immediately if not scheduled"
-              style={{ width: '100%' }}
-            />
+            {({ getFieldValue }) => {
+              const requiresSubject = campaignChannel === 'email' && !getFieldValue('template_id');
+              return (
+                <Form.Item
+                  name="subject"
+                  label="Subject / Title"
+                  rules={requiresSubject ? [{ required: true, message: 'Subject is required for email campaigns without a template' }] : []}
+                >
+                  <Input placeholder="Optional override" />
+                </Form.Item>
+              );
+            }}
           </Form.Item>
+
+          <Form.Item
+            noStyle
+            shouldUpdate={(prev, next) => prev.template_id !== next.template_id}
+          >
+            {({ getFieldValue }) => {
+              const templateSelected = Boolean(getFieldValue('template_id'));
+              return (
+                <Form.Item
+                  name="content"
+                  label="Message Content"
+                  rules={!templateSelected ? [{ required: true, message: 'Message content is required when no template is selected' }] : []}
+                >
+                  <Input.TextArea rows={6} placeholder="Use {user_name}, {order_number}, {company_name} and other placeholders" />
+                </Form.Item>
+              );
+            }}
+          </Form.Item>
+
+          <Row gutter={16}>
+            <Col span={8}>
+              <Form.Item name="target_audience" label="Target Audience" rules={[{ required: true, message: 'Select an audience' }]}>
+                <Select placeholder="Audience">
+                  {AUDIENCE_OPTIONS.map((option) => (
+                    <Option key={option.value} value={option.value}>{option.label}</Option>
+                  ))}
+                </Select>
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item name="priority" label="Priority">
+                <Select placeholder="Priority">
+                  {PRIORITY_OPTIONS.map((option) => (
+                    <Option key={option.value} value={option.value}>{option.label}</Option>
+                  ))}
+                </Select>
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item name="scheduled_at" label="Schedule">
+                <DatePicker showTime style={{ width: '100%' }} />
+              </Form.Item>
+            </Col>
+          </Row>
+
+          {campaignAudience === 'custom_segment' && (
+            <Row gutter={16}>
+              <Col span={12}>
+                <Form.Item name="target_segment_id" label="User Segment">
+                  <Select allowClear placeholder="Optional saved segment">
+                    {segmentOptions.map((segment) => (
+                      <Option key={segment.id} value={segment.id}>
+                        {segment.name} ({segment.user_count || 0})
+                      </Option>
+                    ))}
+                  </Select>
+                </Form.Item>
+              </Col>
+              <Col span={12}>
+                <Form.Item name="specific_user_ids" label="Specific User IDs">
+                  <Select
+                    mode="tags"
+                    tokenSeparators={[',', ' ']}
+                    placeholder="Enter user IDs if needed"
+                    open={false}
+                  />
+                </Form.Item>
+              </Col>
+            </Row>
+          )}
 
           <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
             <Space>
-              <Button onClick={() => setIsCampaignModalVisible(false)}>
-                Cancel
-              </Button>
-              <Button onClick={() => {
-                campaignForm.setFieldsValue({ status: 'draft' });
-                campaignForm.submit();
-              }}>
-                Save as Draft
-              </Button>
+              <Button onClick={() => setCampaignModalOpen(false)}>Close</Button>
               <Button
-                type="primary"
+                icon={<SaveOutlined />}
+                loading={campaignSaveMutation.isLoading && campaignSubmitMode === 'draft'}
                 onClick={() => {
-                  campaignForm.setFieldsValue({ status: 'scheduled' });
+                  setCampaignSubmitMode('draft');
                   campaignForm.submit();
                 }}
-                loading={createCampaignMutation.isLoading}
               >
-                Schedule Campaign
+                Save Draft
+              </Button>
+              <Button
+                icon={<SendOutlined />}
+                loading={campaignSaveMutation.isLoading && campaignSubmitMode === 'send_now'}
+                onClick={() => {
+                  setCampaignSubmitMode('send_now');
+                  campaignForm.submit();
+                }}
+              >
+                Send Now
+              </Button>
+              <Button
+                type="primary"
+                icon={<ClockCircleOutlined />}
+                loading={campaignSaveMutation.isLoading && campaignSubmitMode === 'schedule'}
+                onClick={() => {
+                  setCampaignSubmitMode('schedule');
+                  campaignForm.submit();
+                }}
+              >
+                Schedule
               </Button>
             </Space>
           </Form.Item>
         </Form>
       </Modal>
 
-      {/* Create Template Modal */}
       <Modal
-        title="Create Notification Template"
-        open={isTemplateModalVisible}
-        onCancel={() => setIsTemplateModalVisible(false)}
+        title={templateModalMode === 'edit' ? 'Edit Template' : 'Create Template'}
+        open={templateModalOpen}
+        onCancel={() => {
+          setTemplateModalOpen(false);
+          setEditingTemplateId(null);
+        }}
         footer={null}
-        width={600}
+        width={760}
+        destroyOnHidden
       >
-        <Form
-          form={templateForm}
-          layout="vertical"
-          onFinish={handleCreateTemplate}
-        >
-          <Form.Item
-            name="name"
-            label="Template Name"
-            rules={[{ required: true, message: 'Please enter template name' }]}
-          >
-            <Input placeholder="Enter template name" />
-          </Form.Item>
-
-          <Form.Item
-            name="description"
-            label="Description"
-          >
-            <Input placeholder="Enter template description" />
-          </Form.Item>
+        <Form form={templateForm} layout="vertical" onFinish={handleTemplateSubmit}>
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item name="name" label="Template Name" rules={[{ required: true, message: 'Template name is required' }]}>
+                <Input placeholder="Telegram delivery reminder" />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="notification_type" label="Notification Type" rules={[{ required: true, message: 'Select a notification type' }]}>
+                <Select showSearch optionFilterProp="children">
+                  {notificationTypes.map((type) => (
+                    <Option key={type.value} value={type.value}>{type.label}</Option>
+                  ))}
+                </Select>
+              </Form.Item>
+            </Col>
+          </Row>
 
           <Row gutter={16}>
             <Col span={12}>
-              <Form.Item
-                name="channel"
-                label="Channel"
-                rules={[{ required: true, message: 'Please select channel' }]}
-              >
-                <Select placeholder="Select channel">
-                  <Option value="email">Email</Option>
-                  <Option value="sms">SMS</Option>
-                  <Option value="push">Push</Option>
-                  <Option value="phone">Phone</Option>
+              <Form.Item name="channel" label="Channel" rules={[{ required: true, message: 'Select a channel' }]}>
+                <Select>
+                  {creatableChannels.map((channel) => (
+                    <Option key={channel.value} value={channel.value}>{channel.label}</Option>
+                  ))}
                 </Select>
               </Form.Item>
             </Col>
             <Col span={12}>
-              <Form.Item
-                name="category"
-                label="Category"
-                rules={[{ required: true, message: 'Please select category' }]}
-              >
-                <Select placeholder="Select category">
-                  <Option value="promotional">Promotional</Option>
-                  <Option value="transactional">Transactional</Option>
-                  <Option value="reminder">Reminder</Option>
-                  <Option value="alert">Alert</Option>
-                </Select>
+              <Form.Item name="is_active" label="Active" valuePropName="checked">
+                <Switch />
               </Form.Item>
             </Col>
           </Row>
 
           <Form.Item
             name="subject"
-            label="Subject/Title"
-            rules={[{ required: true, message: 'Please enter subject' }]}
+            label="Subject / Title"
+            rules={templateChannel === 'email' ? [{ required: true, message: 'Subject is required for email templates' }] : []}
           >
-            <Input placeholder="Enter subject or title" />
+            <Input placeholder="Optional for non-email channels" />
           </Form.Item>
 
-          <Form.Item
-            name="content"
-            label="Template Content"
-            rules={[{ required: true, message: 'Please enter content' }]}
-          >
-            <TextArea rows={6} placeholder="Enter template content with variables like {{customer_name}}" />
+          <Form.Item name="content" label="Template Content" rules={[{ required: true, message: 'Template content is required' }]}>
+            <Input.TextArea rows={8} placeholder="Use {user_name}, {order_number}, {company_name} and other placeholders" />
           </Form.Item>
 
           <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
             <Space>
-              <Button onClick={() => setIsTemplateModalVisible(false)}>
-                Cancel
-              </Button>
-              <Button
-                type="primary"
-                htmlType="submit"
-                loading={createTemplateMutation.isLoading}
-              >
-                Create Template
+              <Button onClick={() => setTemplateModalOpen(false)}>Close</Button>
+              <Button type="primary" loading={templateSaveMutation.isLoading} htmlType="submit">
+                {templateModalMode === 'edit' ? 'Update Template' : 'Create Template'}
               </Button>
             </Space>
           </Form.Item>
         </Form>
       </Modal>
+
+      <Drawer
+        title={selectedCampaign?.name || 'Campaign Details'}
+        width={760}
+        open={campaignDrawerOpen}
+        onClose={() => {
+          setCampaignDrawerOpen(false);
+          setSelectedCampaignId(null);
+        }}
+      >
+        {campaignDetailLoading && !selectedCampaign ? (
+          <Card loading />
+        ) : selectedCampaign ? (
+          <>
+            <Space style={{ marginBottom: 16 }} wrap>
+              <Tag color={CAMPAIGN_STATUS_COLORS[selectedCampaign.status]}>{selectedCampaign.status?.toUpperCase()}</Tag>
+              {renderChannelTag(selectedCampaign.channel, availableChannels)}
+              <Tag>{selectedCampaign.notification_type?.replace(/_/g, ' ')}</Tag>
+              <Button icon={<EditOutlined />} disabled={!['draft', 'scheduled'].includes(selectedCampaign.status)} onClick={() => handleEditCampaign(selectedCampaign)}>
+                Edit
+              </Button>
+              <Button icon={<CopyOutlined />} onClick={() => handleDuplicateCampaign(selectedCampaign)}>
+                Duplicate
+              </Button>
+              <Button
+                icon={<SendOutlined />}
+                disabled={!['draft'].includes(selectedCampaign.status)}
+                onClick={() => adminService.sendNotificationCampaign(selectedCampaign.id, { send_now: true }).then(() => {
+                  message.success('Campaign queued');
+                  queryClient.invalidateQueries('notification-campaigns');
+                  queryClient.invalidateQueries(['notification-campaign-detail', selectedCampaign.id]);
+                }).catch((error) => {
+                  message.error(error?.response?.data?.message || 'Failed to queue campaign');
+                })}
+              >
+                Send Now
+              </Button>
+              <Button
+                icon={<StopOutlined />}
+                disabled={!['scheduled', 'sending'].includes(selectedCampaign.status)}
+                onClick={() => campaignCancelMutation.mutate(selectedCampaign.id)}
+              >
+                Cancel
+              </Button>
+            </Space>
+
+            <Descriptions bordered column={2} size="small">
+              <Descriptions.Item label="Audience">{selectedCampaign.target_audience}</Descriptions.Item>
+              <Descriptions.Item label="Priority">{selectedCampaign.priority}</Descriptions.Item>
+              <Descriptions.Item label="Scheduled">{selectedCampaign.scheduled_at ? formatDateTime(selectedCampaign.scheduled_at) : 'Immediate'}</Descriptions.Item>
+              <Descriptions.Item label="Queued">{selectedCampaign.queued_at ? formatDateTime(selectedCampaign.queued_at) : 'Not queued'}</Descriptions.Item>
+              <Descriptions.Item label="Started">{selectedCampaign.started_at ? formatDateTime(selectedCampaign.started_at) : 'Not started'}</Descriptions.Item>
+              <Descriptions.Item label="Completed">{selectedCampaign.completed_at ? formatDateTime(selectedCampaign.completed_at) : 'Not completed'}</Descriptions.Item>
+              <Descriptions.Item label="Template">{selectedCampaign.template?.name || 'Custom content'}</Descriptions.Item>
+              <Descriptions.Item label="Recipients">{selectedCampaign.recipient_count}</Descriptions.Item>
+              <Descriptions.Item label="Created">{formatDateTime(selectedCampaign.created_at)}</Descriptions.Item>
+              <Descriptions.Item label="Updated">{formatDateTime(selectedCampaign.updated_at)}</Descriptions.Item>
+            </Descriptions>
+
+            <Divider />
+
+            <Row gutter={[16, 16]}>
+              <Col span={8}>
+                <Card><Statistic title="Sent" value={selectedCampaign.summary?.sent || selectedCampaign.sent_count || 0} /></Card>
+              </Col>
+              <Col span={8}>
+                <Card><Statistic title="Delivered" value={selectedCampaign.summary?.delivered || 0} /></Card>
+              </Col>
+              <Col span={8}>
+                <Card><Statistic title="Failed" value={selectedCampaign.summary?.failed || selectedCampaign.failed_count || 0} /></Card>
+              </Col>
+            </Row>
+
+            <Divider />
+
+            <Card size="small" title="Message">
+              {selectedCampaign.subject ? <Paragraph><Text strong>{selectedCampaign.subject}</Text></Paragraph> : null}
+              <Paragraph style={{ whiteSpace: 'pre-wrap', marginBottom: 0 }}>{selectedCampaign.content || 'No content override'}</Paragraph>
+            </Card>
+
+            <Divider />
+
+            <Card size="small" title="Audience Snapshot">
+              {selectedCampaign.target_segment ? (
+                <Paragraph>
+                  <Text strong>{selectedCampaign.target_segment.name}</Text>
+                  <br />
+                  <Text type="secondary">{selectedCampaign.target_segment.description || 'No segment description'}</Text>
+                </Paragraph>
+              ) : null}
+              {(selectedCampaign.recipient_ids_snapshot || []).length > 0 ? (
+                <Paragraph style={{ marginBottom: 0 }}>
+                  Recipient IDs: {(selectedCampaign.recipient_ids_snapshot || []).join(', ')}
+                </Paragraph>
+              ) : (
+                <Text type="secondary">Recipient snapshot will appear after queueing.</Text>
+              )}
+            </Card>
+
+            <Divider />
+
+            <Card size="small" title="Recent Notifications">
+              {selectedCampaign.recent_notifications?.length ? (
+                <List
+                  dataSource={selectedCampaign.recent_notifications}
+                  renderItem={(notification) => (
+                    <List.Item>
+                      <List.Item.Meta
+                        title={
+                          <Space>
+                            <Text>{notification.user_name || `User ${notification.user_id}`}</Text>
+                            <Tag>{notification.channel}</Tag>
+                            <Tag color={notification.status === 'failed' ? 'error' : 'success'}>
+                              {notification.status}
+                            </Tag>
+                          </Space>
+                        }
+                        description={
+                          <div>
+                            <div>{notification.message}</div>
+                            <Text type="secondary">{formatDateTime(notification.created_at)}</Text>
+                          </div>
+                        }
+                      />
+                    </List.Item>
+                  )}
+                />
+              ) : (
+                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No delivery records yet" />
+              )}
+            </Card>
+          </>
+        ) : (
+          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="Select a campaign" />
+        )}
+      </Drawer>
+
+      <Drawer
+        title={selectedTemplate?.name || 'Template Details'}
+        width={760}
+        open={templateDrawerOpen}
+        onClose={() => {
+          setTemplateDrawerOpen(false);
+          setSelectedTemplateId(null);
+        }}
+      >
+        {templateDetailLoading && !selectedTemplate ? (
+          <Card loading />
+        ) : selectedTemplate ? (
+          <>
+            <Space style={{ marginBottom: 16 }} wrap>
+              {renderChannelTag(selectedTemplate.channel, availableChannels)}
+              <Tag>{selectedTemplate.notification_type?.replace(/_/g, ' ')}</Tag>
+              <Tag color={selectedTemplate.is_active ? 'success' : 'default'}>
+                {selectedTemplate.is_active ? 'ACTIVE' : 'INACTIVE'}
+              </Tag>
+              <Button icon={<EditOutlined />} onClick={() => handleEditTemplate(selectedTemplate)}>
+                Edit
+              </Button>
+              <Button icon={<SendOutlined />} onClick={() => handleUseTemplate(selectedTemplate)}>
+                Use in Campaign
+              </Button>
+              <Button
+                icon={<ExperimentOutlined />}
+                loading={templateTestSendMutation.isLoading}
+                onClick={() => {
+                  try {
+                    templateTestSendMutation.mutate({
+                      templateId: selectedTemplate.id,
+                      payload: {
+                        variables: parseVariableJson(templatePreviewVariables)
+                      }
+                    });
+                  } catch (error) {
+                    message.error('Template variables must be valid JSON');
+                  }
+                }}
+              >
+                Send Test
+              </Button>
+              <Button
+                icon={selectedTemplate.is_active ? <DeleteOutlined /> : <CheckCircleOutlined />}
+                onClick={() => templateToggleMutation.mutate({
+                  templateId: selectedTemplate.id,
+                  isActive: !selectedTemplate.is_active
+                })}
+              >
+                {selectedTemplate.is_active ? 'Deactivate' : 'Activate'}
+              </Button>
+            </Space>
+
+            <Descriptions bordered column={2} size="small">
+              <Descriptions.Item label="Usage">{selectedTemplate.usage_count} campaign(s)</Descriptions.Item>
+              <Descriptions.Item label="Category">{selectedTemplate.category}</Descriptions.Item>
+              <Descriptions.Item label="Created">{formatDateTime(selectedTemplate.created_at)}</Descriptions.Item>
+              <Descriptions.Item label="Updated">{formatDateTime(selectedTemplate.updated_at || selectedTemplate.created_at)}</Descriptions.Item>
+            </Descriptions>
+
+            <Divider />
+
+            <Card size="small" title="Template Source">
+              {selectedTemplate.subject ? <Paragraph><Text strong>{selectedTemplate.subject}</Text></Paragraph> : null}
+              <Paragraph style={{ whiteSpace: 'pre-wrap', marginBottom: 0 }}>{selectedTemplate.content}</Paragraph>
+            </Card>
+
+            <Divider />
+
+            <Card
+              size="small"
+              title="Preview"
+              extra={(
+                <Button
+                  size="small"
+                  icon={<EyeOutlined />}
+                  loading={templatePreviewMutation.isLoading}
+                  onClick={() => {
+                    try {
+                      runTemplatePreview(selectedTemplate.id);
+                    } catch (error) {
+                      message.error('Template variables must be valid JSON');
+                    }
+                  }}
+                >
+                  Refresh Preview
+                </Button>
+              )}
+            >
+              <Row gutter={16}>
+                <Col span={8}>
+                  <Select value={templatePreviewLanguage} style={{ width: '100%' }} onChange={setTemplatePreviewLanguage}>
+                    <Option value="en">English</Option>
+                    <Option value="ru">Russian</Option>
+                    <Option value="uz">Uzbek</Option>
+                  </Select>
+                </Col>
+                <Col span={16}>
+                  <Input.TextArea
+                    rows={6}
+                    value={templatePreviewVariables}
+                    onChange={(event) => setTemplatePreviewVariables(event.target.value)}
+                    placeholder='{"user_name":"Admin User"}'
+                  />
+                </Col>
+              </Row>
+
+              <Divider />
+
+              {templatePreview ? (
+                <>
+                  {templatePreview.subject ? <Paragraph><Text strong>{templatePreview.subject}</Text></Paragraph> : null}
+                  <Paragraph style={{ whiteSpace: 'pre-wrap', marginBottom: 0 }}>{templatePreview.content}</Paragraph>
+                </>
+              ) : (
+                <Text type="secondary">Generate a preview to inspect rendered content.</Text>
+              )}
+            </Card>
+          </>
+        ) : (
+          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="Select a template" />
+        )}
+      </Drawer>
     </div>
   );
 };

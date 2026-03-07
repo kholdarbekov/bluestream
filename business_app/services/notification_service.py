@@ -5,25 +5,31 @@ Handles SMS, Email, Telegram, and Push notifications
 import json
 import logging
 import re
+import uuid
 from celery.utils.log import get_task_logger
 from datetime import datetime, timezone, timedelta
 from types import SimpleNamespace
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 from flask import current_app
 import requests
 from eskiz_sms import EskizSMS
 
 from business_app.models.notification import (
     Notification,
+    NotificationCampaign,
     NotificationTemplate,
     NotificationPreference,
     PushNotificationToken,
 )
+from business_app.models.audit import AuditLog, AuditEventType, AuditSeverity
+from business_app.models.analytics import UserSegment
+from business_app.models.loyalty import LoyaltyPoints
 from business_app.models.user import User
 from business_app.models.order import Order
 from business_app.models.delivery import Delivery, DeliveryStatusHistory
 from business_app.models.payment import Payment
 from business_app.models.subscription import Subscription
+from business_app.models.translation import Translation
 from business_app.utils.exceptions import (
     NotificationError,
     ConfigurationError,
@@ -37,6 +43,8 @@ from business_app.utils.constants import (
     NotificationChannel,
     NotificationStatus,
     DeliveryStatus,
+    Priority,
+    UserRole,
 )
 from business_app.utils.translations import get_translation
 from business_app.services.email_template_service import get_email_template_service
@@ -60,6 +68,15 @@ logger = get_task_logger(__name__)
 
 class NotificationService:
     """Service for handling notifications across multiple channels"""
+    DELIVERY_TELEGRAM_STATUS_UPDATES_PREF_KEY = 'delivery_telegram_status_updates'
+    NOTIFICATION_CAMPAIGN_STATUSES = {'draft', 'scheduled', 'sending', 'sent', 'failed', 'cancelled'}
+    NOTIFICATION_CAMPAIGN_AUDIENCES = {
+        'all_customers',
+        'active_customers',
+        'new_customers',
+        'loyalty_members',
+        'custom_segment',
+    }
 
     NOTIFICATION_TYPE_GROUPS = {
         'order': [
@@ -92,6 +109,48 @@ class NotificationService:
             NotificationType.SUBSCRIPTION_CANCELLATION_SCHEDULED.value,
             NotificationType.SUBSCRIPTION_REMINDER.value,
         ],
+    }
+
+    DELIVERY_STATUS_LABEL_FALLBACKS = {
+        'uz': {
+            'scheduled': 'Rejalashtirilgan',
+            'pending': 'Kutilmoqda',
+            'assigned': 'Tayinlandi',
+            'picked_up': 'Olib ketildi',
+            'out_for_delivery': 'Yetkazib berishga chiqarildi',
+            'in_transit': "Yo'lda",
+            'arrived': 'Yetib keldi',
+            'delivered': 'Yetkazib berildi',
+            'failed': "Yetkazib berib bo'lmadi",
+            'cancelled': 'Bekor qilindi',
+            'returned': 'Qaytarildi',
+        },
+        'ru': {
+            'scheduled': 'Запланирован',
+            'pending': 'В ожидании',
+            'assigned': 'Назначен',
+            'picked_up': 'Забран',
+            'out_for_delivery': 'Передан в доставку',
+            'in_transit': 'В пути',
+            'arrived': 'Прибыл',
+            'delivered': 'Доставлен',
+            'failed': 'Не доставлен',
+            'cancelled': 'Отменен',
+            'returned': 'Возвращен',
+        },
+        'en': {
+            'scheduled': 'Scheduled',
+            'pending': 'Pending',
+            'assigned': 'Assigned',
+            'picked_up': 'Picked Up',
+            'out_for_delivery': 'Out For Delivery',
+            'in_transit': 'In Transit',
+            'arrived': 'Arrived',
+            'delivered': 'Delivered',
+            'failed': 'Failed',
+            'cancelled': 'Cancelled',
+            'returned': 'Returned',
+        },
     }
     
     def __init__(self):
@@ -146,7 +205,9 @@ class NotificationService:
     def send_notification(self, user_id: int, notification_type: NotificationType,
                          channels: List[NotificationChannel] = None,
                          template_data: Dict[str, Any] = None,
-                         priority: str = 'normal') -> Dict[str, Any]:
+                         priority: str = 'normal',
+                         template_override=None,
+                         campaign_id: Optional[int] = None) -> Dict[str, Any]:
         """
         Send notification to user across specified channels
         
@@ -171,25 +232,30 @@ class NotificationService:
         # Get user's language preference
         user_language = getattr(user, 'preferred_language', 'en')
         
+        template_data = template_data or {}
         results = {}
         
         for channel in channels:
             try:
                 if channel == NotificationChannel.EMAIL:
                     result = self._send_email_notification(
-                        user, notification_type, template_data, user_language
+                        user, notification_type, template_data, user_language, template_override=template_override
                     )
                 elif channel == NotificationChannel.SMS:
                     result = self._send_sms_notification(
-                        user, notification_type, template_data, user_language
+                        user, notification_type, template_data, user_language, template_override=template_override
                     )
                 elif channel == NotificationChannel.TELEGRAM:
                     result = self._send_telegram_notification(
-                        user, notification_type, template_data, user_language
+                        user, notification_type, template_data, user_language, template_override=template_override
+                    )
+                elif channel == NotificationChannel.IN_APP:
+                    result = self._send_in_app_notification(
+                        user, notification_type, template_data, user_language, template_override=template_override
                     )
                 elif channel == NotificationChannel.PUSH:
                     result = self._send_push_notification(
-                        user, notification_type, template_data, user_language
+                        user, notification_type, template_data, user_language, template_override=template_override
                     )
                 else:
                     result = {'success': False, 'error': f'Unsupported channel: {channel.value}'}
@@ -199,10 +265,10 @@ class NotificationService:
             except Exception as e:
                 logger.error(f"Failed to send {channel.value} notification: {e}")
                 results[channel.value] = {'success': False, 'error': str(e)}
-        
+
         # Create notification record
         self._create_notification_record(
-            user_id, notification_type, channels, template_data, results
+            user_id, notification_type, channels, template_data, results, campaign_id=campaign_id
         )
         
         return results
@@ -625,6 +691,7 @@ class NotificationService:
         rows = NotificationPreference.query.filter_by(user_id=user_id, is_enabled=True).all()
         mapped = self._map_preferences(rows)
         all_types = self._all_managed_types()
+        delivery_telegram_setting = self.get_delivery_telegram_status_updates_setting(user_id)
 
         channel_enabled = {
             NotificationChannel.EMAIL.value: False,
@@ -665,6 +732,7 @@ class NotificationService:
             digest_enabled=False,
             digest_frequency='weekly',
             updated_at=datetime.now(timezone.utc),
+            delivery_telegram_status_updates_enabled=delivery_telegram_setting['delivery_telegram_status_updates_enabled'],
             _mapped_preferences=mapped,
             _all_types=all_types,
         )
@@ -735,8 +803,109 @@ class NotificationService:
                 for channel in channels_to_apply:
                     self._ensure_preference_row(user_id, type_value, channel)
 
+        delivery_telegram_status_updates_enabled = payload.get('delivery_telegram_status_updates_enabled')
+        if delivery_telegram_status_updates_enabled is not None:
+            if not isinstance(delivery_telegram_status_updates_enabled, bool):
+                raise ValidationError('delivery_telegram_status_updates_enabled must be a boolean')
+            self._set_delivery_telegram_status_updates_row(
+                user_id=user_id,
+                enabled=delivery_telegram_status_updates_enabled,
+            )
+
         db.session.commit()
         return self.get_notification_preferences_view(user_id)
+
+    def get_delivery_telegram_status_updates_setting(self, user_id: int) -> Dict[str, Any]:
+        """Get effective Telegram delivery-status notification setting for a user."""
+        normalized_user_id = self._coerce_user_id(user_id)
+        user = User.query.get(normalized_user_id)
+        if not user:
+            raise NotFoundError('User not found')
+
+        row = NotificationPreference.query.filter_by(
+            user_id=normalized_user_id,
+            notification_type=self.DELIVERY_TELEGRAM_STATUS_UPDATES_PREF_KEY,
+            channel=NotificationChannel.TELEGRAM,
+        ).order_by(
+            NotificationPreference.updated_at.desc(),
+            NotificationPreference.created_at.desc(),
+            NotificationPreference.id.desc(),
+        ).first()
+        enabled = True if row is None else bool(row.is_enabled)
+        source = 'default' if row is None else 'explicit'
+        updated_at = row.updated_at or row.created_at if row else None
+
+        return {
+            'delivery_telegram_status_updates_enabled': enabled,
+            'delivery_telegram_status_updates_source': source,
+            'telegram_connected': bool(getattr(user, 'telegram_id', None)),
+            'bot_active': bool(getattr(user, 'is_bot_active', False)),
+            'updated_at': updated_at.isoformat() if updated_at else None,
+        }
+
+    def set_delivery_telegram_status_updates_setting(
+        self,
+        user_id: int,
+        enabled: bool,
+        *,
+        source: str = 'user',
+        actor_user_id: Optional[int] = None,
+        reason: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Persist Telegram delivery-status setting with optional admin audit trail."""
+        normalized_user_id = self._coerce_user_id(user_id)
+
+        if not isinstance(enabled, bool):
+            raise ValidationError('delivery_telegram_status_updates_enabled must be a boolean')
+        if source not in {'user', 'admin'}:
+            raise ValidationError('source must be either user or admin')
+
+        reason_text = (reason or '').strip()
+        if source == 'admin':
+            if not reason_text:
+                raise ValidationError('Reason is required for admin updates')
+
+        current = self.get_delivery_telegram_status_updates_setting(normalized_user_id)
+        self._set_delivery_telegram_status_updates_row(user_id=normalized_user_id, enabled=enabled)
+        db.session.commit()
+
+        updated = self.get_delivery_telegram_status_updates_setting(normalized_user_id)
+        if source == 'admin':
+            try:
+                from business_app.models.audit import AuditEventType, AuditSeverity
+                from business_app.utils.audit_logger import audit_logger
+
+                audit_logger.log_event(
+                    event_type=AuditEventType.USER_UPDATED,
+                    action='admin_update_delivery_telegram_notification_setting',
+                    severity=AuditSeverity.MEDIUM,
+                    resource_type='user',
+                    resource_id=str(normalized_user_id),
+                    description='Admin updated Telegram delivery notification setting',
+                    old_values={
+                        'delivery_telegram_status_updates_enabled': current['delivery_telegram_status_updates_enabled'],
+                        'delivery_telegram_status_updates_source': current['delivery_telegram_status_updates_source'],
+                    },
+                    new_values={
+                        'delivery_telegram_status_updates_enabled': updated['delivery_telegram_status_updates_enabled'],
+                        'delivery_telegram_status_updates_source': updated['delivery_telegram_status_updates_source'],
+                    },
+                    additional_data={
+                        'reason': reason_text,
+                        'actor_user_id': actor_user_id,
+                        'setting_key': self.DELIVERY_TELEGRAM_STATUS_UPDATES_PREF_KEY,
+                    },
+                    success=True,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Failed to write admin notification setting audit log: user_id=%s actor_user_id=%s error=%s",
+                    normalized_user_id,
+                    actor_user_id,
+                    exc,
+                )
+
+        return updated
 
     def register_push_token_for_user(
         self,
@@ -1043,6 +1212,496 @@ class NotificationService:
             },
         }
 
+    def get_admin_notification_templates_paginated(
+        self,
+        requester_id: int,
+        page: int,
+        per_page: int,
+        search: Optional[str] = None,
+        notification_type: Optional[str] = None,
+        channel: Optional[str] = None,
+        is_active: Optional[bool] = None,
+    ) -> Dict[str, Any]:
+        """Get paginated admin notification templates."""
+        self._require_admin_user(requester_id)
+
+        query = NotificationTemplate.query
+        normalized_type = self._normalize_notification_type_filter(notification_type, allow_empty=True)
+        normalized_channel = self._normalize_campaign_channel(channel, allow_empty=True)
+
+        if normalized_type:
+            query = query.filter_by(notification_type=normalized_type)
+        if normalized_channel:
+            query = query.filter_by(channel=normalized_channel)
+        if is_active is not None:
+            query = query.filter_by(is_active=bool(is_active))
+        if search:
+            search_term = f'%{search.strip()}%'
+            query = query.filter(
+                NotificationTemplate.name.ilike(search_term)
+                | NotificationTemplate.subject.ilike(search_term)
+                | NotificationTemplate.content.ilike(search_term)
+            )
+
+        pagination = query.order_by(
+            NotificationTemplate.notification_type.asc(),
+            NotificationTemplate.channel.asc(),
+            NotificationTemplate.id.desc(),
+        ).paginate(page=page, per_page=per_page, error_out=False)
+
+        return {
+            'items': [self._serialize_admin_notification_template(template) for template in pagination.items],
+            'page': page,
+            'per_page': per_page,
+            'total': pagination.total,
+        }
+
+    def get_admin_notification_template_detail(self, requester_id: int, template_id: int) -> Dict[str, Any]:
+        """Get one admin notification template."""
+        self._require_admin_user(requester_id)
+        template = self._get_notification_template_or_404(template_id)
+        return self._serialize_admin_notification_template(template, include_translations=True)
+
+    def create_admin_notification_template(self, requester_id: int, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Create an admin notification template."""
+        self._require_admin_user(requester_id)
+        normalized_payload = self._normalize_admin_notification_template_payload(payload)
+
+        existing = NotificationTemplate.query.filter_by(
+            notification_type=normalized_payload['notification_type'],
+            channel=normalized_payload['channel'],
+        ).first()
+        if existing:
+            raise ConflictError(
+                f'Template already exists for {normalized_payload["notification_type"]} on {normalized_payload["channel"]}'
+            )
+
+        template = NotificationTemplate(
+            name=normalized_payload['name'],
+            notification_type=normalized_payload['notification_type'],
+            channel=normalized_payload['channel'],
+            subject=normalized_payload['subject'],
+            content=normalized_payload['content'],
+            is_active=normalized_payload['is_active'],
+        )
+        db.session.add(template)
+        db.session.flush()
+
+        if normalized_payload['translations']:
+            template.set_translations(normalized_payload['translations'])
+
+        db.session.commit()
+        return self._serialize_admin_notification_template(template, include_translations=True)
+
+    def update_admin_notification_template(
+        self,
+        requester_id: int,
+        template_id: int,
+        payload: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Update an admin notification template."""
+        self._require_admin_user(requester_id)
+        template = self._get_notification_template_or_404(template_id)
+        normalized_payload = self._normalize_admin_notification_template_payload(payload, partial=True)
+
+        next_notification_type = normalized_payload.get('notification_type', template.notification_type)
+        next_channel = normalized_payload.get('channel', template.channel)
+
+        duplicate = (
+            NotificationTemplate.query.filter_by(
+                notification_type=next_notification_type,
+                channel=next_channel,
+            )
+            .filter(NotificationTemplate.id != template.id)
+            .first()
+        )
+        if duplicate:
+            raise ConflictError(f'Template already exists for {next_notification_type} on {next_channel}')
+
+        for field in ('name', 'notification_type', 'channel', 'subject', 'content', 'is_active'):
+            if field in normalized_payload:
+                setattr(template, field, normalized_payload[field])
+
+        if 'translations' in normalized_payload:
+            template.set_translations(normalized_payload['translations'])
+
+        db.session.commit()
+        return self._serialize_admin_notification_template(template, include_translations=True)
+
+    def delete_admin_notification_template(self, requester_id: int, template_id: int, *, reactivate: bool = False) -> Dict[str, Any]:
+        """Soft deactivate or reactivate an admin notification template."""
+        self._require_admin_user(requester_id)
+        template = self._get_notification_template_or_404(template_id)
+        template.is_active = bool(reactivate)
+        db.session.commit()
+        return self._serialize_admin_notification_template(template, include_translations=True)
+
+    def preview_admin_notification_template(
+        self,
+        requester_id: int,
+        template_id: int,
+        payload: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Render a notification template preview."""
+        self._require_admin_user(requester_id)
+        template = self._get_notification_template_or_404(template_id)
+        variables = (payload or {}).get('variables') or {}
+        if not isinstance(variables, dict):
+            raise ValidationError('variables must be an object')
+        language = str((payload or {}).get('language') or 'en').strip() or 'en'
+
+        subject = template.get_translated('subject', language) if hasattr(template, 'get_translated') else template.subject
+        content = template.get_translated('content', language) if hasattr(template, 'get_translated') else template.content
+
+        return {
+            'template_id': template.id,
+            'template_name': template.name,
+            'notification_type': template.notification_type,
+            'channel': template.channel,
+            'language': language,
+            'subject': self._render_template(subject or '', variables, language),
+            'content': self._render_template(content or '', variables, language),
+            'variables_used': sorted(variables.keys()),
+        }
+
+    def test_send_admin_notification_template(
+        self,
+        requester_id: int,
+        template_id: int,
+        payload: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Send a template test notification to the requesting admin."""
+        admin_user = self._require_admin_user(requester_id)
+        template = self._get_notification_template_or_404(template_id)
+        test_data = (payload or {}).get('variables') or {}
+        if not isinstance(test_data, dict):
+            raise ValidationError('variables must be an object')
+
+        try:
+            notification_type = NotificationType(template.notification_type)
+        except ValueError as exc:
+            raise ValidationError('Template has invalid notification type') from exc
+
+        result = self.send_notification(
+            user_id=admin_user.id,
+            notification_type=notification_type,
+            channels=[NotificationChannel(template.channel)],
+            template_data={
+                **self._build_notification_campaign_template_data(
+                    NotificationCampaign(name='Test', notification_type=template.notification_type, channel=template.channel),
+                    admin_user,
+                ),
+                **test_data,
+                'title': test_data.get('title') or template.subject or template.name,
+                'message': test_data.get('message') or template.content,
+            },
+            template_override=template,
+        )
+
+        created = (
+            Notification.query.filter_by(
+                user_id=admin_user.id,
+                notification_type=template.notification_type,
+                channel=NotificationChannel(template.channel),
+            )
+            .order_by(Notification.created_at.desc())
+            .first()
+        )
+        return {
+            'notification_id': created.id if created else None,
+            'channel': template.channel,
+            'result': result.get(template.channel, {}),
+        }
+
+    def get_admin_notification_types(self, requester_id: int) -> List[Dict[str, Any]]:
+        """Get supported notification type metadata."""
+        self._require_admin_user(requester_id)
+
+        existing_types = {
+            row[0]
+            for row in db.session.query(NotificationTemplate.notification_type).distinct().all()
+            if row[0]
+        }
+        all_types = {notification_type.value for notification_type in NotificationType}
+        all_types.update(self._all_managed_types())
+
+        return [
+            {
+                'value': type_name,
+                'label': type_name.replace('_', ' ').title(),
+                'category': self._notification_type_category(type_name),
+                'in_use': type_name in existing_types,
+            }
+            for type_name in sorted(all_types)
+        ]
+
+    def get_admin_notification_channels(self, requester_id: int) -> List[Dict[str, Any]]:
+        """Get supported channel metadata for the admin console."""
+        self._require_admin_user(requester_id)
+        return [
+            {
+                'value': NotificationChannel.EMAIL.value,
+                'label': 'Email',
+                'requires_subject': True,
+                'icon': 'email',
+                'available': True,
+            },
+            {
+                'value': NotificationChannel.SMS.value,
+                'label': 'SMS',
+                'requires_subject': False,
+                'icon': 'message',
+                'available': True,
+            },
+            {
+                'value': NotificationChannel.TELEGRAM.value,
+                'label': 'Telegram',
+                'requires_subject': False,
+                'icon': 'telegram',
+                'available': True,
+            },
+            {
+                'value': NotificationChannel.IN_APP.value,
+                'label': 'In-App Notification',
+                'requires_subject': False,
+                'icon': 'inbox',
+                'available': True,
+            },
+            {
+                'value': NotificationChannel.PUSH.value,
+                'label': 'Push Notification',
+                'requires_subject': False,
+                'icon': 'notifications',
+                'available': False,
+            },
+        ]
+
+    def get_admin_notification_segments(self, requester_id: int) -> List[Dict[str, Any]]:
+        """Get available user segments for custom campaign targeting."""
+        self._require_admin_user(requester_id)
+        segments = UserSegment.query.filter_by(is_active=True).order_by(UserSegment.name.asc()).all()
+        return [
+            {
+                'id': segment.id,
+                'name': segment.name,
+                'description': segment.description,
+                'user_count': segment.user_count,
+                'criteria': segment.criteria,
+            }
+            for segment in segments
+        ]
+
+    def get_notification_campaigns_paginated(
+        self,
+        requester_id: int,
+        page: int,
+        per_page: int,
+        search: Optional[str] = None,
+        status: Optional[str] = None,
+        channel: Optional[str] = None,
+        target_audience: Optional[str] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Get paginated notification campaigns (admin-only)."""
+        self._require_admin_user(requester_id)
+
+        query = NotificationCampaign.query
+        normalized_status = self._normalize_campaign_status(status, allow_empty=True)
+        normalized_channel = self._normalize_campaign_channel(channel, allow_empty=True)
+        normalized_audience = self._normalize_campaign_audience(target_audience, allow_empty=True)
+
+        if normalized_status:
+            query = query.filter_by(status=normalized_status)
+        if normalized_channel:
+            query = query.filter_by(channel=normalized_channel)
+        if normalized_audience:
+            query = query.filter_by(target_audience=normalized_audience)
+        if search:
+            search_term = f'%{search.strip()}%'
+            query = query.filter(
+                NotificationCampaign.name.ilike(search_term)
+                | NotificationCampaign.subject_override.ilike(search_term)
+                | NotificationCampaign.content_override.ilike(search_term)
+            )
+        if start_date:
+            query = query.filter(NotificationCampaign.created_at >= self._parse_campaign_datetime(start_date))
+        if end_date:
+            query = query.filter(NotificationCampaign.created_at <= self._parse_campaign_datetime(end_date))
+
+        pagination = query.order_by(
+            NotificationCampaign.created_at.desc(),
+            NotificationCampaign.id.desc(),
+        ).paginate(page=page, per_page=per_page, error_out=False)
+
+        return {
+            'items': [self._serialize_notification_campaign(campaign) for campaign in pagination.items],
+            'page': page,
+            'per_page': per_page,
+            'total': pagination.total,
+        }
+
+    def create_notification_campaign(self, sender_id: int, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Create a draft notification campaign."""
+        sender = self._require_admin_user(sender_id)
+        normalized_payload = self._normalize_notification_campaign_payload(payload)
+
+        campaign = NotificationCampaign(
+            name=normalized_payload['name'],
+            template_id=normalized_payload.get('template_id'),
+            notification_type=normalized_payload['notification_type'],
+            channel=normalized_payload['channel'],
+            subject_override=normalized_payload.get('subject_override'),
+            content_override=normalized_payload.get('content_override'),
+            target_audience=normalized_payload['target_audience'],
+            target_segment_id=normalized_payload.get('target_segment_id'),
+            specific_user_ids=normalized_payload.get('specific_user_ids', []),
+            status='draft',
+            priority=normalized_payload['priority'],
+            scheduled_at=normalized_payload.get('scheduled_at'),
+            created_by_user_id=sender.id,
+            updated_by_user_id=sender.id,
+        )
+        db.session.add(campaign)
+        db.session.commit()
+
+        return self._serialize_notification_campaign_detail(campaign)
+
+    def get_notification_campaign_detail(self, requester_id: int, campaign_id: int) -> Dict[str, Any]:
+        """Get one notification campaign with delivery summary."""
+        self._require_admin_user(requester_id)
+        campaign = self._get_notification_campaign_or_404(campaign_id)
+        return self._serialize_notification_campaign_detail(campaign)
+
+    def update_notification_campaign(
+        self,
+        sender_id: int,
+        campaign_id: int,
+        payload: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Update a draft or scheduled notification campaign."""
+        sender = self._require_admin_user(sender_id)
+        campaign = self._get_notification_campaign_or_404(campaign_id)
+        self._assert_campaign_editable(campaign)
+
+        normalized_payload = self._normalize_notification_campaign_payload(
+            payload,
+            require_schedule=False,
+        )
+        campaign.name = normalized_payload['name']
+        campaign.template_id = normalized_payload.get('template_id')
+        campaign.notification_type = normalized_payload['notification_type']
+        campaign.channel = normalized_payload['channel']
+        campaign.subject_override = normalized_payload.get('subject_override')
+        campaign.content_override = normalized_payload.get('content_override')
+        campaign.target_audience = normalized_payload['target_audience']
+        campaign.target_segment_id = normalized_payload.get('target_segment_id')
+        campaign.specific_user_ids = normalized_payload.get('specific_user_ids', [])
+        campaign.priority = normalized_payload['priority']
+        campaign.scheduled_at = normalized_payload.get('scheduled_at')
+        campaign.updated_by_user_id = sender.id
+
+        if campaign.status == 'scheduled':
+            campaign.recipient_ids_snapshot = []
+            campaign.recipient_count = 0
+            campaign.celery_task_id = None
+            campaign.queued_at = None
+            campaign.started_at = None
+            campaign.completed_at = None
+
+        db.session.commit()
+        return self._serialize_notification_campaign_detail(campaign)
+
+    def delete_notification_campaign(self, sender_id: int, campaign_id: int) -> None:
+        """Delete a draft or cancelled notification campaign."""
+        self._require_admin_user(sender_id)
+        campaign = self._get_notification_campaign_or_404(campaign_id)
+        if campaign.status not in {'draft', 'cancelled'}:
+            raise ConflictError('Only draft or cancelled campaigns can be deleted')
+
+        db.session.delete(campaign)
+        db.session.commit()
+
+    def duplicate_notification_campaign(self, sender_id: int, campaign_id: int) -> Dict[str, Any]:
+        """Duplicate a notification campaign into a draft."""
+        sender = self._require_admin_user(sender_id)
+        source = self._get_notification_campaign_or_404(campaign_id)
+
+        duplicate = NotificationCampaign(
+            name=f'{source.name} (Copy)',
+            template_id=source.template_id,
+            notification_type=source.notification_type,
+            channel=source.channel,
+            subject_override=source.subject_override,
+            content_override=source.content_override,
+            target_audience=source.target_audience,
+            target_segment_id=source.target_segment_id,
+            specific_user_ids=list(source.specific_user_ids or []),
+            status='draft',
+            priority=source.priority,
+            created_by_user_id=sender.id,
+            updated_by_user_id=sender.id,
+        )
+        db.session.add(duplicate)
+        db.session.commit()
+        return self._serialize_notification_campaign_detail(duplicate)
+
+    def queue_notification_campaign(self, sender_id: int, campaign_id: int, send_now: bool) -> Dict[str, Any]:
+        """Queue a notification campaign for immediate or scheduled execution."""
+        self._require_admin_user(sender_id)
+        campaign = self._get_notification_campaign_or_404(campaign_id)
+        self._assert_campaign_editable(campaign)
+
+        recipient_ids = self._resolve_notification_campaign_recipient_ids(campaign)
+        if not recipient_ids:
+            raise ValidationError('No recipients matched the selected audience')
+
+        scheduled_at = None if send_now else campaign.scheduled_at
+        if not send_now and not scheduled_at:
+            raise ValidationError('scheduled_at is required to schedule a campaign')
+
+        from business_app.tasks.notification_tasks import execute_notification_campaign_task
+
+        apply_async_kwargs = {}
+        if scheduled_at:
+            apply_async_kwargs['eta'] = scheduled_at
+
+        task = execute_notification_campaign_task.apply_async(args=[campaign.id], **apply_async_kwargs)
+
+        campaign.recipient_ids_snapshot = recipient_ids
+        campaign.recipient_count = len(recipient_ids)
+        campaign.celery_task_id = task.id
+        campaign.queued_at = datetime.now(timezone.utc)
+        campaign.started_at = None
+        campaign.completed_at = None
+        campaign.cancelled_at = None
+        campaign.last_error = None
+        campaign.status = 'sending' if send_now else 'scheduled'
+        db.session.commit()
+
+        return self._serialize_notification_campaign_detail(campaign)
+
+    def cancel_notification_campaign(self, sender_id: int, campaign_id: int) -> Dict[str, Any]:
+        """Cancel a scheduled or queued campaign."""
+        self._require_admin_user(sender_id)
+        campaign = self._get_notification_campaign_or_404(campaign_id)
+        if campaign.status not in {'scheduled', 'sending'}:
+            raise ConflictError('Only scheduled or sending campaigns can be cancelled')
+
+        if campaign.celery_task_id:
+            try:
+                from business_app.tasks.celery_app import celery
+
+                celery.control.revoke(campaign.celery_task_id, terminate=False)
+            except Exception as exc:
+                logger.warning('Failed to revoke notification campaign task %s: %s', campaign.celery_task_id, exc)
+
+        campaign.status = 'cancelled'
+        campaign.cancelled_at = datetime.now(timezone.utc)
+        campaign.last_error = None
+        db.session.commit()
+        return self._serialize_notification_campaign_detail(campaign)
+
     def _mark_notification_read(self, notification: Notification) -> None:
         """Mark a notification as read using delivery status and metadata."""
         notification.delivery_status = NotificationStatus.READ
@@ -1058,6 +1717,658 @@ class NotificationService:
         for values in self.NOTIFICATION_TYPE_GROUPS.values():
             all_types.extend(values)
         return sorted(set(all_types))
+
+    def _notification_type_category(self, notification_type: str) -> str:
+        """Resolve a display category from the canonical notification type."""
+        for category, values in self.NOTIFICATION_TYPE_GROUPS.items():
+            if notification_type in values:
+                return category
+        return 'general'
+
+    def _get_notification_template_or_404(self, template_id: int) -> NotificationTemplate:
+        """Get one notification template or raise not found."""
+        template = NotificationTemplate.query.get(template_id)
+        if not template:
+            raise NotFoundError('Notification template not found')
+        return template
+
+    def _normalize_notification_type_filter(
+        self,
+        notification_type: Optional[str],
+        *,
+        allow_empty: bool = False,
+    ) -> Optional[str]:
+        """Normalize a notification type filter or payload field."""
+        if notification_type in (None, ''):
+            if allow_empty:
+                return None
+            raise ValidationError('notification_type is required')
+
+        normalized = str(notification_type).strip().lower()
+        try:
+            return NotificationType(normalized).value
+        except ValueError as exc:
+            raise ValidationError('Invalid notification_type value') from exc
+
+    def _normalize_admin_notification_template_payload(
+        self,
+        payload: Dict[str, Any],
+        *,
+        partial: bool = False,
+    ) -> Dict[str, Any]:
+        """Validate and normalize admin template payloads."""
+        if not isinstance(payload, dict):
+            raise ValidationError('Invalid template payload')
+
+        normalized: Dict[str, Any] = {}
+
+        if not partial or 'name' in payload:
+            name = str(payload.get('name') or '').strip()
+            if not name:
+                raise ValidationError('Template name is required')
+            normalized['name'] = name
+
+        if not partial or 'notification_type' in payload:
+            normalized['notification_type'] = self._normalize_notification_type_filter(payload.get('notification_type'))
+
+        if not partial or 'channel' in payload:
+            normalized['channel'] = self._normalize_campaign_channel(payload.get('channel'))
+
+        if not partial or 'subject' in payload:
+            normalized['subject'] = (payload.get('subject') or '').strip() or None
+
+        if not partial or 'content' in payload:
+            content = (payload.get('content') or '').strip()
+            if not content:
+                raise ValidationError('Template content is required')
+            normalized['content'] = content
+
+        channel_value = normalized.get('channel')
+        if channel_value == NotificationChannel.EMAIL.value and not normalized.get('subject'):
+            raise ValidationError('subject is required for email templates')
+
+        if 'is_active' in payload or not partial:
+            normalized['is_active'] = bool(payload.get('is_active', True))
+
+        if 'translations' in payload:
+            translations = payload.get('translations') or {}
+            if not isinstance(translations, dict):
+                raise ValidationError('translations must be an object')
+            normalized['translations'] = translations
+        elif not partial:
+            normalized['translations'] = {}
+
+        return normalized
+
+    def _serialize_admin_notification_template(
+        self,
+        template: NotificationTemplate,
+        *,
+        include_translations: bool = False,
+    ) -> Dict[str, Any]:
+        """Serialize a notification template for admin responses."""
+        usage_count = NotificationCampaign.query.filter_by(template_id=template.id).count()
+        payload = template.to_dict(language='en', include_all_translations=include_translations)
+        payload.update(
+            {
+                'category': self._notification_type_category(template.notification_type),
+                'usage_count': usage_count,
+                'description': payload.get('description') or payload.get('subject') or '',
+            }
+        )
+        if include_translations:
+            translations: Dict[str, Dict[str, Any]] = {}
+            for field_name in getattr(template, '_translatable_fields', []):
+                field_translations = template.get_all_translations(field_name)
+                for language, value in (field_translations or {}).items():
+                    translations.setdefault(language, {})
+                    translations[language][field_name] = value
+            payload['translations'] = translations
+        return payload
+
+    def _normalize_notification_campaign_payload(
+        self,
+        payload: Dict[str, Any],
+        *,
+        require_schedule: bool = False,
+    ) -> Dict[str, Any]:
+        """Validate and normalize notification campaign payloads."""
+        if not isinstance(payload, dict):
+            raise ValidationError('Invalid campaign payload')
+
+        name = str(payload.get('name') or '').strip()
+        if not name:
+            raise ValidationError('Campaign name is required')
+
+        notification_type = str(payload.get('notification_type') or '').strip()
+        try:
+            notification_type = NotificationType(notification_type).value
+        except ValueError as exc:
+            raise ValidationError('Invalid notification_type value') from exc
+
+        priority = self._normalize_campaign_priority(payload.get('priority'))
+        target_audience = self._normalize_campaign_audience(payload.get('target_audience'))
+        channel = self._normalize_campaign_channel(payload.get('channel'))
+
+        template_id = payload.get('template_id')
+        if template_id is not None:
+            try:
+                template_id = int(template_id)
+            except (TypeError, ValueError) as exc:
+                raise ValidationError('template_id must be an integer') from exc
+            template = NotificationTemplate.query.get(template_id)
+            if not template or not template.is_active:
+                raise NotFoundError('Template not found')
+            if template.notification_type != notification_type:
+                raise ValidationError('Template notification_type does not match campaign notification_type')
+            if template.channel != channel:
+                raise ValidationError('Template channel does not match campaign channel')
+
+        subject_override = (payload.get('subject') or payload.get('subject_override') or '').strip() or None
+        content_override = (payload.get('content') or payload.get('content_override') or '').strip() or None
+        if template_id is None and not content_override:
+            raise ValidationError('Message content is required when no template is selected')
+        if channel == NotificationChannel.EMAIL.value and template_id is None and not subject_override:
+            raise ValidationError('Subject is required for email campaigns without a template')
+
+        target_segment_id = payload.get('target_segment_id')
+        if target_segment_id is not None:
+            try:
+                target_segment_id = int(target_segment_id)
+            except (TypeError, ValueError) as exc:
+                raise ValidationError('target_segment_id must be an integer') from exc
+            segment = UserSegment.query.get(target_segment_id)
+            if not segment or not segment.is_active:
+                raise NotFoundError('Target segment not found')
+
+        specific_user_ids = payload.get('specific_user_ids')
+        if specific_user_ids is None:
+            specific_user_ids = []
+        if not isinstance(specific_user_ids, list):
+            raise ValidationError('specific_user_ids must be a list when provided')
+        normalized_user_ids = []
+        for user_id in specific_user_ids:
+            try:
+                normalized_user_ids.append(int(user_id))
+            except (TypeError, ValueError) as exc:
+                raise ValidationError('specific_user_ids must contain integers') from exc
+
+        if target_audience == 'custom_segment' and not target_segment_id and not normalized_user_ids:
+            raise ValidationError('custom_segment campaigns require target_segment_id or specific_user_ids')
+        if target_audience != 'custom_segment':
+            target_segment_id = None
+            normalized_user_ids = []
+
+        scheduled_at = payload.get('scheduled_at')
+        scheduled_for = self._parse_campaign_datetime(scheduled_at) if scheduled_at else None
+        if require_schedule and not scheduled_for:
+            raise ValidationError('scheduled_at is required')
+
+        return {
+            'name': name,
+            'template_id': template_id,
+            'notification_type': notification_type,
+            'channel': channel,
+            'subject_override': subject_override,
+            'content_override': content_override,
+            'target_audience': target_audience,
+            'target_segment_id': target_segment_id,
+            'specific_user_ids': sorted(set(normalized_user_ids)),
+            'priority': priority,
+            'scheduled_at': scheduled_for,
+        }
+
+    def _normalize_campaign_channel(self, channel: Optional[str], allow_empty: bool = False) -> Optional[str]:
+        """Normalize admin UI campaign channels to supported values."""
+        if channel in (None, ''):
+            if allow_empty:
+                return None
+            raise ValidationError('Channel is required')
+
+        normalized = str(channel).strip().lower()
+        if normalized == 'phone':
+            normalized = NotificationChannel.SMS.value
+        supported_channels = {
+            NotificationChannel.EMAIL.value,
+            NotificationChannel.SMS.value,
+            NotificationChannel.TELEGRAM.value,
+            NotificationChannel.IN_APP.value,
+        }
+        if normalized not in supported_channels:
+            raise ValidationError('Invalid channel value')
+        return normalized
+
+    def _normalize_campaign_audience(
+        self,
+        target_audience: Optional[str],
+        allow_empty: bool = False,
+    ) -> Optional[str]:
+        """Normalize supported campaign audiences."""
+        if target_audience in (None, ''):
+            if allow_empty:
+                return None
+            raise ValidationError('Target audience is required')
+
+        normalized = str(target_audience).strip().lower()
+        if normalized not in self.NOTIFICATION_CAMPAIGN_AUDIENCES:
+            raise ValidationError('Invalid target audience')
+        return normalized
+
+    def _normalize_campaign_priority(self, priority: Optional[str]) -> str:
+        """Normalize campaign priority."""
+        priority_value = str(priority or Priority.NORMAL.value).strip().lower()
+        priority_aliases = {'medium': Priority.NORMAL.value}
+        normalized = priority_aliases.get(priority_value, priority_value)
+        if normalized not in {Priority.LOW.value, Priority.NORMAL.value, Priority.HIGH.value, Priority.URGENT.value}:
+            raise ValidationError('Invalid priority value')
+        return normalized
+
+    def _normalize_campaign_status(self, status: Optional[str], allow_empty: bool = False) -> Optional[str]:
+        """Normalize supported campaign statuses."""
+        if status in (None, ''):
+            if allow_empty:
+                return None
+            raise ValidationError('Status is required')
+
+        normalized = str(status).strip().lower()
+        if normalized not in self.NOTIFICATION_CAMPAIGN_STATUSES:
+            raise ValidationError('Invalid campaign status')
+        return normalized
+
+    def _parse_campaign_datetime(self, value: Any) -> datetime:
+        """Parse optional campaign scheduling values."""
+        if isinstance(value, datetime):
+            return value
+        if isinstance(value, str):
+            try:
+                return datetime.fromisoformat(value.replace('Z', '+00:00'))
+            except ValueError as exc:
+                raise ValidationError('Invalid scheduled_at format') from exc
+        raise ValidationError('Invalid scheduled_at format')
+
+    def execute_notification_campaign(self, campaign_id: int) -> Dict[str, Any]:
+        """Execute a queued notification campaign."""
+        campaign = self._get_notification_campaign_or_404(campaign_id)
+        if campaign.status == 'cancelled':
+            return {'campaign_id': campaign.id, 'status': campaign.status, 'skipped': True}
+
+        if campaign.status not in {'scheduled', 'sending'}:
+            raise ConflictError('Campaign is not queued for execution')
+
+        recipient_ids = list(campaign.recipient_ids_snapshot or [])
+        if not recipient_ids:
+            recipient_ids = self._resolve_notification_campaign_recipient_ids(campaign)
+            campaign.recipient_ids_snapshot = recipient_ids
+            campaign.recipient_count = len(recipient_ids)
+
+        campaign.status = 'sending'
+        campaign.started_at = datetime.now(timezone.utc)
+        campaign.last_error = None
+        db.session.commit()
+
+        successful_count = 0
+        failed_count = 0
+        errors: List[Dict[str, Any]] = []
+        channel_enum = NotificationChannel(campaign.channel)
+
+        for recipient_id in recipient_ids:
+            db.session.refresh(campaign)
+            if campaign.status == 'cancelled':
+                break
+
+            user = User.query.get(recipient_id)
+            if not user:
+                failed_count += 1
+                errors.append({'user_id': recipient_id, 'error': 'User not found'})
+                continue
+
+            template_data = self._build_notification_campaign_template_data(campaign, user)
+            template_override = self._build_notification_campaign_template_override(campaign, getattr(user, 'preferred_language', 'en'))
+            subject_preview, content_preview = self._render_campaign_preview_content(
+                campaign,
+                template_data,
+                getattr(user, 'preferred_language', 'en'),
+            )
+            template_data['title'] = subject_preview or campaign.name
+            template_data['message'] = content_preview or campaign.name
+
+            result = self.send_notification(
+                user_id=user.id,
+                notification_type=NotificationType(campaign.notification_type),
+                channels=[channel_enum],
+                template_data=template_data,
+                priority=campaign.priority,
+                template_override=template_override,
+                campaign_id=campaign.id,
+            )
+            channel_result = result.get(campaign.channel, {})
+            if channel_result.get('success'):
+                successful_count += 1
+            else:
+                failed_count += 1
+                errors.append({'user_id': user.id, 'error': channel_result.get('error', 'Notification failed')})
+
+        campaign.completed_at = datetime.now(timezone.utc)
+        campaign.last_error = json.dumps(errors[:20]) if errors else None
+        if campaign.status == 'cancelled':
+            campaign.completed_at = campaign.completed_at
+        else:
+            campaign.status = 'failed' if successful_count == 0 else ('sent' if failed_count == 0 else 'failed')
+        db.session.commit()
+
+        return {
+            'campaign_id': campaign.id,
+            'status': campaign.status,
+            'successful_count': successful_count,
+            'failed_count': failed_count,
+            'errors': errors,
+        }
+
+    def _require_admin_user(self, user_id: Any) -> User:
+        """Ensure the requester is an active admin."""
+        normalized_user_id = self._coerce_user_id(user_id)
+        user = User.query.get(normalized_user_id)
+        if not user or not user.is_admin:
+            raise ForbiddenError('Admin access required')
+        return user
+
+    def _get_notification_campaign_or_404(self, campaign_id: int) -> NotificationCampaign:
+        """Get one notification campaign or raise not found."""
+        campaign = NotificationCampaign.query.get(campaign_id)
+        if not campaign:
+            raise NotFoundError('Notification campaign not found')
+        return campaign
+
+    def _assert_campaign_editable(self, campaign: NotificationCampaign) -> None:
+        """Ensure a campaign can still be edited."""
+        if campaign.status not in {'draft', 'scheduled'}:
+            raise ConflictError('Only draft or scheduled campaigns can be edited')
+        if campaign.status == 'scheduled' and campaign.started_at:
+            raise ConflictError('Campaign has already started sending')
+
+    def _resolve_notification_campaign_recipient_ids(self, campaign: NotificationCampaign) -> List[int]:
+        """Resolve campaign recipients and return a stable sorted list of ids."""
+        if campaign.target_audience == 'all_customers':
+            rows = User.query.filter(User.role == UserRole.CUSTOMER).with_entities(User.id).all()
+            return sorted({row.id for row in rows})
+
+        if campaign.target_audience == 'active_customers':
+            rows = (
+                db.session.query(User.id)
+                .join(Order, Order.user_id == User.id)
+                .filter(User.role == UserRole.CUSTOMER)
+                .distinct()
+                .all()
+            )
+            return sorted({row.id for row in rows})
+
+        if campaign.target_audience == 'new_customers':
+            rows = User.query.filter(
+                User.role == UserRole.CUSTOMER,
+                User.created_at >= datetime.now(timezone.utc) - timedelta(days=30),
+            ).with_entities(User.id).all()
+            return sorted({row.id for row in rows})
+
+        if campaign.target_audience == 'loyalty_members':
+            rows = db.session.query(LoyaltyPoints.user_id).distinct().all()
+            return sorted({row.user_id for row in rows})
+
+        if campaign.target_audience == 'custom_segment':
+            explicit_ids = {int(user_id) for user_id in (campaign.specific_user_ids or [])}
+            if explicit_ids:
+                return sorted(explicit_ids)
+            if campaign.target_segment_id:
+                segment = UserSegment.query.get(campaign.target_segment_id)
+                if not segment or not segment.is_active:
+                    raise NotFoundError('Target segment not found')
+                return self._resolve_user_segment_recipient_ids(segment)
+
+        raise ValidationError('Unable to resolve campaign recipients')
+
+    def _resolve_user_segment_recipient_ids(self, segment: UserSegment) -> List[int]:
+        """Resolve ids for a user segment criteria subset."""
+        criteria = segment.criteria if isinstance(segment.criteria, dict) else {}
+        remaining_keys = set(criteria.keys())
+        query = User.query.filter(User.role == UserRole.CUSTOMER)
+
+        if 'user_ids' in criteria:
+            user_ids = criteria.get('user_ids') or []
+            return sorted({int(user_id) for user_id in user_ids})
+
+        simple_filters = {
+            'status': User.status,
+            'preferred_language': User.preferred_language,
+            'registration_source': User.registration_source,
+            'registration_method': User.registration_method,
+        }
+        for key, column in simple_filters.items():
+            if key in criteria:
+                query = query.filter(column == criteria[key])
+                remaining_keys.discard(key)
+
+        boolean_filters = {
+            'is_verified': User.is_verified,
+            'is_premium': User.is_premium,
+        }
+        for key, column in boolean_filters.items():
+            if key in criteria:
+                query = query.filter(column.is_(bool(criteria[key])))
+                remaining_keys.discard(key)
+
+        if 'created_after' in criteria:
+            query = query.filter(User.created_at >= self._parse_campaign_datetime(criteria['created_after']))
+            remaining_keys.discard('created_after')
+        if 'created_before' in criteria:
+            query = query.filter(User.created_at <= self._parse_campaign_datetime(criteria['created_before']))
+            remaining_keys.discard('created_before')
+
+        if 'has_orders' in criteria or 'min_order_count' in criteria or 'max_order_count' in criteria:
+            order_count_subquery = (
+                db.session.query(
+                    Order.user_id.label('user_id'),
+                    func.count(Order.id).label('order_count'),
+                )
+                .group_by(Order.user_id)
+                .subquery()
+            )
+            query = query.outerjoin(order_count_subquery, order_count_subquery.c.user_id == User.id)
+            if 'has_orders' in criteria:
+                if criteria['has_orders']:
+                    query = query.filter(func.coalesce(order_count_subquery.c.order_count, 0) > 0)
+                else:
+                    query = query.filter(func.coalesce(order_count_subquery.c.order_count, 0) == 0)
+                remaining_keys.discard('has_orders')
+            if 'min_order_count' in criteria:
+                query = query.filter(func.coalesce(order_count_subquery.c.order_count, 0) >= int(criteria['min_order_count']))
+                remaining_keys.discard('min_order_count')
+            if 'max_order_count' in criteria:
+                query = query.filter(func.coalesce(order_count_subquery.c.order_count, 0) <= int(criteria['max_order_count']))
+                remaining_keys.discard('max_order_count')
+
+        unsupported_keys = remaining_keys - {'user_ids'}
+        if unsupported_keys:
+            raise ValidationError(f'Unsupported segment criteria for notification campaigns: {", ".join(sorted(unsupported_keys))}')
+
+        rows = query.with_entities(User.id).distinct().all()
+        return sorted({row.id for row in rows})
+
+    def _build_notification_campaign_template_data(
+        self,
+        campaign: NotificationCampaign,
+        user: User,
+    ) -> Dict[str, Any]:
+        """Build campaign template data for one recipient."""
+        return {
+            'campaign_name': campaign.name,
+            'user_id': user.id,
+            'user_name': user.full_name or user.email or user.phone or f'User {user.id}',
+            'user_email': user.email,
+            'user_phone': user.phone,
+            'company_name': self.company_name,
+            'company_phone': self.company_phone,
+            'company_email': self.company_email,
+        }
+
+    def _build_notification_campaign_template_override(
+        self,
+        campaign: NotificationCampaign,
+        language: str,
+    ):
+        """Build a template-like object honoring campaign overrides."""
+        template = campaign.template
+        subject = campaign.subject_override
+        content = campaign.content_override
+
+        if template and not subject:
+            subject = template.get_translated('subject', language) if hasattr(template, 'get_translated') else template.subject
+        if template and not content:
+            content = template.get_translated('content', language) if hasattr(template, 'get_translated') else template.content
+
+        if not content:
+            content = ''
+
+        return SimpleNamespace(
+            name=campaign.name,
+            notification_type=campaign.notification_type,
+            channel=campaign.channel,
+            subject=subject,
+            content=content,
+            get_translated=lambda field_name, _language: subject if field_name == 'subject' else content,
+        )
+
+    def _render_campaign_preview_content(
+        self,
+        campaign: NotificationCampaign,
+        template_data: Dict[str, Any],
+        language: str,
+    ) -> tuple:
+        """Render campaign subject/content previews."""
+        template_override = self._build_notification_campaign_template_override(campaign, language)
+        subject = template_override.get_translated('subject', language)
+        content = template_override.get_translated('content', language)
+        return (
+            self._render_template(subject or '', template_data, language),
+            self._render_template(content or '', template_data, language),
+        )
+
+    def _serialize_notification_campaign(self, campaign: NotificationCampaign) -> Dict[str, Any]:
+        """Serialize campaign summary for admin list views."""
+        sent_count = self._count_campaign_notifications(
+            campaign.id,
+            statuses={NotificationStatus.SENT.value, NotificationStatus.DELIVERED.value, NotificationStatus.READ.value},
+        )
+        failed_count = self._count_campaign_notifications(
+            campaign.id,
+            statuses={NotificationStatus.FAILED.value},
+        )
+        return {
+            'id': campaign.id,
+            'name': campaign.name,
+            'template_id': campaign.template_id,
+            'notification_type': campaign.notification_type,
+            'category': self._notification_type_category(campaign.notification_type),
+            'channel': campaign.channel,
+            'subject': campaign.subject_override or (campaign.template.subject if campaign.template else ''),
+            'content': campaign.content_override or (campaign.template.content if campaign.template else ''),
+            'status': campaign.status,
+            'priority': campaign.priority,
+            'target_audience': campaign.target_audience,
+            'target_segment_id': campaign.target_segment_id,
+            'recipient_count': campaign.recipient_count or len(campaign.recipient_ids_snapshot or []),
+            'sent_count': sent_count,
+            'failed_count': failed_count,
+            'scheduled_at': campaign.scheduled_at.isoformat() if campaign.scheduled_at else None,
+            'queued_at': campaign.queued_at.isoformat() if campaign.queued_at else None,
+            'started_at': campaign.started_at.isoformat() if campaign.started_at else None,
+            'completed_at': campaign.completed_at.isoformat() if campaign.completed_at else None,
+            'cancelled_at': campaign.cancelled_at.isoformat() if campaign.cancelled_at else None,
+            'created_at': campaign.created_at.isoformat() if campaign.created_at else None,
+            'updated_at': campaign.updated_at.isoformat() if campaign.updated_at else None,
+        }
+
+    def _serialize_notification_campaign_detail(self, campaign: NotificationCampaign) -> Dict[str, Any]:
+        """Serialize campaign detail including delivery summary and recent activity."""
+        payload = self._serialize_notification_campaign(campaign)
+        payload.update(
+            {
+                'specific_user_ids': list(campaign.specific_user_ids or []),
+                'recipient_ids_snapshot': list(campaign.recipient_ids_snapshot or []),
+                'target_segment': (
+                    {
+                        'id': campaign.target_segment.id,
+                        'name': campaign.target_segment.name,
+                        'description': campaign.target_segment.description,
+                        'user_count': campaign.target_segment.user_count,
+                    }
+                    if campaign.target_segment else None
+                ),
+                'template': self._serialize_admin_notification_template(campaign.template)
+                if campaign.template else None,
+                'created_by_user_id': campaign.created_by_user_id,
+                'updated_by_user_id': campaign.updated_by_user_id,
+                'celery_task_id': campaign.celery_task_id,
+                'last_error': campaign.last_error,
+                'summary': self._get_campaign_delivery_summary(campaign.id),
+                'recent_notifications': self._get_recent_campaign_notifications(campaign.id),
+            }
+        )
+        return payload
+
+    def _count_campaign_notifications(self, campaign_id: int, statuses: set) -> int:
+        """Count campaign notifications in a status set."""
+        return (
+            Notification.query.filter(Notification.campaign_id == campaign_id)
+            .filter(Notification.delivery_status.in_(list(statuses)))
+            .count()
+        )
+
+    def _get_campaign_delivery_summary(self, campaign_id: int) -> Dict[str, Any]:
+        """Return delivery summary for one campaign."""
+        total = Notification.query.filter(Notification.campaign_id == campaign_id).count()
+        sent = self._count_campaign_notifications(
+            campaign_id,
+            {NotificationStatus.SENT.value, NotificationStatus.DELIVERED.value, NotificationStatus.READ.value},
+        )
+        delivered = self._count_campaign_notifications(campaign_id, {NotificationStatus.DELIVERED.value, NotificationStatus.READ.value})
+        failed = self._count_campaign_notifications(campaign_id, {NotificationStatus.FAILED.value})
+        pending = self._count_campaign_notifications(campaign_id, {NotificationStatus.PENDING.value})
+        return {
+            'total': total,
+            'sent': sent,
+            'delivered': delivered,
+            'failed': failed,
+            'pending': pending,
+            'delivery_rate': round((delivered / total * 100), 2) if total > 0 else 0,
+        }
+
+    def _get_recent_campaign_notifications(self, campaign_id: int) -> List[Dict[str, Any]]:
+        """Return recent notification rows for a campaign."""
+        notifications = (
+            Notification.query.filter(Notification.campaign_id == campaign_id)
+            .order_by(Notification.created_at.desc())
+            .limit(20)
+            .all()
+        )
+        items = []
+        for notification in notifications:
+            user = notification.user
+            items.append(
+                {
+                    'id': notification.id,
+                    'user_id': notification.user_id,
+                    'user_name': user.full_name if user else '',
+                    'user_email': user.email if user else None,
+                    'user_phone': user.phone if user else None,
+                    'channel': notification.channel.value if hasattr(notification.channel, 'value') else notification.channel,
+                    'status': notification.delivery_status.value if hasattr(notification.delivery_status, 'value') else notification.delivery_status,
+                    'title': notification.title,
+                    'message': notification.message,
+                    'failure_reason': notification.failure_reason,
+                    'created_at': notification.created_at.isoformat() if notification.created_at else None,
+                    'sent_at': notification.sent_at.isoformat() if notification.sent_at else None,
+                }
+            )
+        return items
 
     def _map_preferences(self, rows: List[NotificationPreference]) -> Dict[str, set]:
         """Map preference rows to type->set(channel_value)."""
@@ -1089,6 +2400,41 @@ class NotificationService:
                 is_enabled=True,
             )
         )
+
+    def _set_delivery_telegram_status_updates_row(self, user_id: int, enabled: bool) -> None:
+        """Upsert explicit Telegram delivery-status updates preference row."""
+        normalized_user_id = self._coerce_user_id(user_id)
+
+        existing_rows = NotificationPreference.query.filter_by(
+            user_id=normalized_user_id,
+            notification_type=self.DELIVERY_TELEGRAM_STATUS_UPDATES_PREF_KEY,
+            channel=NotificationChannel.TELEGRAM,
+        ).order_by(NotificationPreference.id.asc()).all()
+
+        if existing_rows:
+            primary_row = existing_rows[0]
+            primary_row.is_enabled = enabled
+
+            for duplicate_row in existing_rows[1:]:
+                db.session.delete(duplicate_row)
+            return
+
+        db.session.add(
+            NotificationPreference(
+                user_id=normalized_user_id,
+                notification_type=self.DELIVERY_TELEGRAM_STATUS_UPDATES_PREF_KEY,
+                channel=NotificationChannel.TELEGRAM,
+                is_enabled=enabled,
+            )
+        )
+
+    @staticmethod
+    def _coerce_user_id(user_id: Any) -> int:
+        """Normalize user id inputs coming from JWT identity values."""
+        try:
+            return int(user_id)
+        except (TypeError, ValueError):
+            raise ValidationError('Invalid user id')
 
     def _enabled_channels_from_payload(self, payload: Dict[str, Any]) -> List[NotificationChannel]:
         """Extract globally enabled channels from update payload."""
@@ -1154,6 +2500,17 @@ class NotificationService:
             self._status_value(channel): channel
             for channel in channels
         }
+        delivery_telegram_setting = self.get_delivery_telegram_status_updates_setting(user.id)
+        delivery_telegram_enabled = delivery_telegram_setting['delivery_telegram_status_updates_enabled']
+
+        if not delivery_telegram_enabled:
+            if deduped.pop(NotificationChannel.TELEGRAM.value, None) is not None:
+                logger.info(
+                    "Delivery Telegram notifications disabled by explicit preference: user_id=%s status=%s",
+                    user.id,
+                    status_value,
+                )
+            return list(deduped.values())
 
         if self._should_force_delivery_status_telegram(status_value):
             if self._user_has_connected_telegram(user):
@@ -1169,6 +2526,12 @@ class NotificationService:
                     user.id,
                     status_value,
                 )
+                if deduped.pop(NotificationChannel.TELEGRAM.value, None) is not None:
+                    logger.info(
+                        "Removed Telegram from delivery notification: user_id=%s status=%s reason=bot_not_connected",
+                        user.id,
+                        status_value,
+                    )
         else:
             if deduped.pop(NotificationChannel.TELEGRAM.value, None) is not None:
                 logger.info(
@@ -1207,19 +2570,53 @@ class NotificationService:
 
         return normalized_value
 
+    @staticmethod
+    def _normalize_language_code(language: Optional[str]) -> str:
+        """Normalize locale-like language values (e.g. uz-UZ, uz_UZ) to base code."""
+        raw_language = str(language or 'en').strip().lower().replace('_', '-')
+        if not raw_language:
+            return 'en'
+        return raw_language.split('-', 1)[0]
+
+    def _get_translation_exact_language(self, key: str, language: str) -> Optional[str]:
+        """Fetch translation for an exact language only (no cross-language fallback)."""
+        translation = Translation.query.filter_by(
+            key=key,
+            language=language,
+            is_active=True,
+        ).first()
+        if not translation or not translation.value:
+            return None
+        return translation.value
+
     def _get_localized_delivery_status_label(self, status_value: str, language: str) -> str:
         """Resolve a customer-facing localized label for delivery status notifications."""
-        translation_key = f'notification.delivery_status.{status_value}'
-        label = get_translation(translation_key, language)
+        normalized_language = self._normalize_language_code(language)
+        normalized_status = self._normalize_delivery_status_code(status_value) or self._status_value(status_value)
+        translation_key = f'notification.delivery_status.{normalized_status}'
+
+        exact_label = self._get_translation_exact_language(translation_key, normalized_language)
+        if exact_label:
+            return exact_label
+
+        fallback_key = f'api.delivery.{normalized_status}'
+        fallback_exact_label = self._get_translation_exact_language(fallback_key, normalized_language)
+        if fallback_exact_label:
+            return fallback_exact_label
+
+        bundled_label = self.DELIVERY_STATUS_LABEL_FALLBACKS.get(normalized_language, {}).get(normalized_status)
+        if bundled_label:
+            return bundled_label
+
+        label = get_translation(translation_key, normalized_language)
         if label and label != translation_key:
             return label
 
-        fallback_key = f'api.delivery.{status_value}'
-        fallback_label = get_translation(fallback_key, language)
+        fallback_label = get_translation(fallback_key, normalized_language)
         if fallback_label and fallback_label != fallback_key:
             return fallback_label
 
-        return status_value.replace('_', ' ').title()
+        return normalized_status.replace('_', ' ').title()
 
     def _build_delivery_status_template_data(
         self,
@@ -1248,7 +2645,8 @@ class NotificationService:
     
     # Private methods for different channels
     def _send_email_notification(self, user: User, notification_type: NotificationType,
-                                template_data: Dict[str, Any], language: str) -> Dict[str, Any]:
+                                template_data: Dict[str, Any], language: str,
+                                template_override=None) -> Dict[str, Any]:
         """Send email notification using Brevo API with file-based templates"""
         if not self.brevo_api_key:
             raise ConfigurationError(get_translation('error.configuration.email_not_configured'))
@@ -1282,7 +2680,7 @@ class NotificationService:
         else:
             # Fallback to database templates
             logger.info(f"File template not found, falling back to DB for {notification_type_str}")
-            template = self._get_notification_template(
+            template = template_override or self._get_notification_template(
                 notification_type, NotificationChannel.EMAIL, language
             )
 
@@ -1342,7 +2740,8 @@ class NotificationService:
             return {'success': False, 'error': str(e)}
     
     def _send_sms_notification(self, user: User, notification_type: NotificationType,
-                              template_data: Dict[str, Any], language: str) -> Dict[str, Any]:
+                              template_data: Dict[str, Any], language: str,
+                              template_override=None) -> Dict[str, Any]:
         """Send SMS notification using Eskiz"""
         logger.info(
             "_send_sms_notification started user=%s, notification_type=%s, template_data=%s, language=%s",
@@ -1360,7 +2759,7 @@ class NotificationService:
             return {'success': False, 'error': get_translation('error.validation.no_phone_number')}
 
         # Get template
-        template = self._get_notification_template(
+        template = template_override or self._get_notification_template(
             notification_type, NotificationChannel.SMS, language
         )
 
@@ -1534,7 +2933,8 @@ class NotificationService:
             return {'success': False, 'error': str(e)}
 
     def _send_telegram_notification(self, user: User, notification_type: NotificationType,
-                                   template_data: Dict[str, Any], language: str) -> Dict[str, Any]:
+                                   template_data: Dict[str, Any], language: str,
+                                   template_override=None) -> Dict[str, Any]:
         """Send Telegram notification"""
         if not self.telegram_bot_token:
             raise ConfigurationError(get_translation('error.configuration.telegram_not_configured'))
@@ -1560,7 +2960,7 @@ class NotificationService:
             return {'success': False, 'error': get_translation('error.validation.no_telegram_id')}
         
         # Get template
-        template = self._get_notification_template(
+        template = template_override or self._get_notification_template(
             notification_type, NotificationChannel.TELEGRAM, language
         )
 
@@ -1630,12 +3030,33 @@ class NotificationService:
         return cleaned_content
     
     def _send_push_notification(self, user: User, notification_type: NotificationType,
-                               template_data: Dict[str, Any], language: str) -> Dict[str, Any]:
+                               template_data: Dict[str, Any], language: str,
+                               template_override=None) -> Dict[str, Any]:
         """Send push notification"""
         # Push notification implementation would depend on your chosen service
         # (Firebase, OneSignal, etc.) - placeholder for now
         return {'success': False, 'error': get_translation('error.push_not_implemented')}
-    
+
+    def _send_in_app_notification(self, user: User, notification_type: NotificationType,
+                                 template_data: Dict[str, Any], language: str,
+                                 template_override=None) -> Dict[str, Any]:
+        """Create an in-app notification row without an external provider."""
+        template = template_override or self._get_notification_template(
+            notification_type, NotificationChannel.IN_APP, language
+        )
+        if not template:
+            return {'success': False, 'error': get_translation('error.template_not_found')}
+
+        template_subject = template.get_translated('subject', language) if hasattr(template, 'get_translated') else template.subject
+        template_content = template.get_translated('content', language) if hasattr(template, 'get_translated') else template.content
+
+        return {
+            'success': True,
+            'title': self._render_template(template_subject or notification_type.value.replace('_', ' ').title(), template_data, language),
+            'content': self._render_template(template_content or '', template_data, language),
+            'message_id': f'in-app:{uuid.uuid4()}',
+        }
+
     def _get_user_preferred_channels(self, user_id: int, 
                                    notification_type: NotificationType) -> List[NotificationChannel]:
         """Get user's preferred notification channels for a type"""
@@ -1727,11 +3148,14 @@ class NotificationService:
         try:
             # Simple template rendering - replace placeholders
             rendered = template
+            data = data or {}
             
             # Replace data placeholders
             for key, value in data.items():
                 placeholder = f"{{{key}}}"
+                brace_placeholder = f"{{{{{key}}}}}"
                 rendered = rendered.replace(placeholder, str(value))
+                rendered = rendered.replace(brace_placeholder, str(value))
             
             # Replace translation placeholders
             import re
@@ -1750,7 +3174,7 @@ class NotificationService:
     
     def _create_notification_record(self, user_id: int, notification_type: NotificationType,
                                   channels: List[NotificationChannel], template_data: Dict[str, Any],
-                                  results: Dict[str, Any]):
+                                  results: Dict[str, Any], campaign_id: Optional[int] = None):
         """Create notification record in database"""
         try:
             user = User.query.get(user_id)
@@ -1799,6 +3223,7 @@ class NotificationService:
                         getattr(user, 'telegram_id', None)
                         if channel_value == NotificationChannel.TELEGRAM.value else None
                     ),
+                    campaign_id=campaign_id,
                     order_id=payload.get('order_id'),
                     delivery_id=payload.get('delivery_id'),
                     extra_data=payload,

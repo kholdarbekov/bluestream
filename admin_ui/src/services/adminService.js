@@ -185,6 +185,76 @@ const normalizeAdminCollectionResponse = (payload = {}) => {
   };
 };
 
+const buildLegacyPaginationShape = (normalized) => ({
+  total: normalized.total,
+  page: normalized.page,
+  per_page: normalized.per_page,
+  pages: normalized.meta.pages ?? 1,
+  has_next: normalized.meta.has_next ?? false,
+  has_prev: normalized.meta.has_prev ?? false,
+});
+
+const notificationTypeCategory = (notificationType) => {
+  const value = `${notificationType || ''}`.toLowerCase();
+  if (value.startsWith('order_')) return 'order';
+  if (value.startsWith('delivery_')) return 'delivery';
+  if (value.startsWith('payment_')) return 'payment';
+  if (value.includes('loyalty') || value.includes('reward')) return 'loyalty';
+  if (value.startsWith('subscription_')) return 'subscription';
+  if (value.includes('security')) return 'security';
+  if (value.includes('promotional')) return 'promotion';
+  if (value.includes('reminder')) return 'reminder';
+  if (value.includes('system')) return 'system';
+  return 'general';
+};
+
+const normalizeNotificationCampaign = (campaign = {}) => ({
+  ...campaign,
+  category: campaign.category || notificationTypeCategory(campaign.notification_type),
+  sent_count: toNumber(campaign.sent_count ?? campaign.summary?.sent),
+  delivered_count: toNumber(campaign.delivered_count ?? campaign.summary?.delivered),
+  failed_count: toNumber(campaign.failed_count ?? campaign.summary?.failed),
+  pending_count: toNumber(campaign.pending_count ?? campaign.summary?.pending),
+  recipient_count: toNumber(campaign.recipient_count),
+  specific_user_ids: campaign.specific_user_ids || [],
+  recipient_ids_snapshot: campaign.recipient_ids_snapshot || [],
+  summary: {
+    total: toNumber(campaign.summary?.total),
+    sent: toNumber(campaign.summary?.sent),
+    delivered: toNumber(campaign.summary?.delivered),
+    failed: toNumber(campaign.summary?.failed),
+    pending: toNumber(campaign.summary?.pending),
+    delivery_rate: toNumber(campaign.summary?.delivery_rate),
+  },
+  recent_notifications: campaign.recent_notifications || [],
+});
+
+const normalizeNotificationTemplate = (template = {}) => ({
+  ...template,
+  description: template.description || template.subject || '',
+  category: template.category || notificationTypeCategory(template.notification_type),
+  usage_count: toNumber(template.usage_count),
+  translations: template.translations || {},
+});
+
+const normalizeNotificationCampaignCollection = (payload = {}) => {
+  const normalized = normalizeAdminCollectionResponse(payload);
+
+  return {
+    campaigns: normalized.items.map(normalizeNotificationCampaign),
+    pagination: buildLegacyPaginationShape(normalized),
+  };
+};
+
+const normalizeNotificationTemplateCollection = (payload = {}) => {
+  const normalized = normalizeAdminCollectionResponse(payload);
+
+  return {
+    templates: normalized.items.map(normalizeNotificationTemplate),
+    pagination: buildLegacyPaginationShape(normalized),
+  };
+};
+
 class AdminService {
   // Dashboard API calls
   async getDashboardData(params = {}) {
@@ -205,6 +275,21 @@ class AdminService {
 
   async getUserDetails(userId) {
     const response = await api.get(`/admin/users/${userId}`);
+    return response.data;
+  }
+
+  async getUserPaymentMethods(userId) {
+    const response = await api.get(`/admin/users/${userId}/payment-methods`);
+    return response.data;
+  }
+
+  async getUserNotificationSettings(userId) {
+    const response = await api.get(`/admin/users/${userId}/notification-settings`);
+    return response.data;
+  }
+
+  async updateUserNotificationSettings(userId, payload) {
+    const response = await api.put(`/admin/users/${userId}/notification-settings`, payload);
     return response.data;
   }
 
@@ -508,22 +593,94 @@ class AdminService {
   // Notification management
   async getNotificationCampaigns(params = {}) {
     const response = await api.get('/admin/notification-campaigns', { params });
-    return response.data;
+    return normalizeNotificationCampaignCollection(response.data);
+  }
+
+  async getNotificationCampaign(campaignId) {
+    const response = await api.get(`/admin/notification-campaigns/${campaignId}`);
+    return normalizeNotificationCampaign(response.data?.data?.campaign || {});
   }
 
   async getNotificationTemplates(params = {}) {
     const response = await api.get('/admin/notification-templates', { params });
-    return response.data;
+    return normalizeNotificationTemplateCollection(response.data);
+  }
+
+  async getNotificationTemplate(templateId) {
+    const response = await api.get(`/admin/notification-templates/${templateId}`);
+    return normalizeNotificationTemplate(response.data?.data?.template || {});
   }
 
   async createNotificationCampaign(campaignData) {
     const response = await api.post('/admin/notification-campaigns', campaignData);
-    return response.data;
+    return normalizeNotificationCampaign(response.data?.data?.campaign || {});
   }
 
   async createNotificationTemplate(templateData) {
     const response = await api.post('/admin/notification-templates', templateData);
+    return normalizeNotificationTemplate(response.data?.data?.template || {});
+  }
+
+  async updateNotificationCampaign(campaignId, campaignData) {
+    const response = await api.put(`/admin/notification-campaigns/${campaignId}`, campaignData);
+    return normalizeNotificationCampaign(response.data?.data?.campaign || {});
+  }
+
+  async deleteNotificationCampaign(campaignId) {
+    const response = await api.delete(`/admin/notification-campaigns/${campaignId}`);
     return response.data;
+  }
+
+  async duplicateNotificationCampaign(campaignId) {
+    const response = await api.post(`/admin/notification-campaigns/${campaignId}/duplicate`);
+    return normalizeNotificationCampaign(response.data?.data?.campaign || {});
+  }
+
+  async sendNotificationCampaign(campaignId, payload = {}) {
+    const response = await api.post(`/admin/notification-campaigns/${campaignId}/send`, payload);
+    return normalizeNotificationCampaign(response.data?.data?.campaign || {});
+  }
+
+  async cancelNotificationCampaign(campaignId) {
+    const response = await api.post(`/admin/notification-campaigns/${campaignId}/cancel`);
+    return normalizeNotificationCampaign(response.data?.data?.campaign || {});
+  }
+
+  async updateNotificationTemplate(templateId, templateData) {
+    const response = await api.put(`/admin/notification-templates/${templateId}`, templateData);
+    return normalizeNotificationTemplate(response.data?.data?.template || {});
+  }
+
+  async deleteNotificationTemplate(templateId, reactivate = false) {
+    const response = await api.delete(`/admin/notification-templates/${templateId}`, {
+      data: reactivate ? { reactivate: true } : undefined
+    });
+    return normalizeNotificationTemplate(response.data?.data?.template || {});
+  }
+
+  async previewNotificationTemplate(templateId, payload = {}) {
+    const response = await api.post(`/admin/notification-templates/${templateId}/preview`, payload);
+    return response.data?.data?.preview || {};
+  }
+
+  async testSendNotificationTemplate(templateId, payload = {}) {
+    const response = await api.post(`/admin/notification-templates/${templateId}/test-send`, payload);
+    return response.data?.data?.test_send || {};
+  }
+
+  async getNotificationTemplateTypes() {
+    const response = await api.get('/admin/notification-templates/types');
+    return response.data?.data?.types || [];
+  }
+
+  async getNotificationTemplateChannels() {
+    const response = await api.get('/admin/notification-templates/channels');
+    return response.data?.data?.channels || [];
+  }
+
+  async getNotificationCampaignSegments() {
+    const response = await api.get('/admin/notification-campaign-segments');
+    return response.data?.data?.segments || [];
   }
 
   // Advanced Analytics

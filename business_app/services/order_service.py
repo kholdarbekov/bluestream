@@ -101,6 +101,10 @@ class OrderService:
                 'business_account': PaymentMethod.BUSINESS_ACCOUNT,
             }
             payment_method = payment_method_map.get(payment_method_str)
+            if payment_method == PaymentMethod.CASH:
+                from business_app.services.cash_collection_service import CashCollectionService
+
+                CashCollectionService().validate_customer_can_use_cod(user_id)
             if payment_method == PaymentMethod.BUSINESS_ACCOUNT:
                 from business_app.services.corporate_contract_service import CorporateContractService
                 CorporateContractService().validate_business_account_order(

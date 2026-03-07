@@ -77,6 +77,29 @@ def test_staff_create_order_conversation_wiring_present():
     assert not missing, f"Missing create-order conversation fragments: {missing}"
 
 
+def test_staff_cod_callback_and_reconciliation_wiring_present():
+    """Ensure COD completion and reconciliation callbacks stay registered."""
+    text = BOT_FILE.read_text(encoding="utf-8")
+    required_fragments = [
+        'CallbackQueryHandler(status_update_handler.confirm_full_cash_collection, pattern=r"^staff_cash_full_\\d+$")',
+        'CallbackQueryHandler(status_update_handler.start_partial_cash_collection, pattern=r"^staff_cash_partial_\\d+$")',
+        'CallbackQueryHandler(status_update_handler.start_no_cash_collection, pattern=r"^staff_cash_none_\\d+$")',
+        'CallbackQueryHandler(status_update_handler.show_reconciliation_session, pattern="^staff_reconcile_session$")',
+        'CallbackQueryHandler(status_update_handler.start_reconciliation_submit, pattern="^staff_reconcile_submit$")',
+        'CallbackQueryHandler(cash_collection_handler.start_collection_search, pattern="^staff_cod_collect_menu$")',
+        'CallbackQueryHandler(cash_collection_handler.show_customer_statement, pattern=r"^staff_cod_customer_\\d+$")',
+        'CallbackQueryHandler(cash_collection_handler.start_full_collection, pattern=r"^staff_cod_collect_full_\\d+$")',
+        'CallbackQueryHandler(cash_collection_handler.start_custom_collection, pattern=r"^staff_cod_collect_custom_\\d+$")',
+        "i18n.get('staff.menu.cash_reconciliation', language): 'staff_reconcile_session'",
+        "i18n.get('staff.menu.collect_cod_debt', language): 'staff_cod_collect_menu'",
+        "if cod_collection_flow:",
+        "await cash_collection_handler.receive_collection_amount(update, context)",
+        "await cash_collection_handler.receive_collection_note(update, context)",
+    ]
+    missing = [fragment for fragment in required_fragments if fragment not in text]
+    assert not missing, f"Missing COD/reconciliation callback fragments: {missing}"
+
+
 def test_staff_operator_text_entry_patterns_present():
     """Ensure reply-keyboard operator flows enter conversations via message handlers."""
     text = BOT_FILE.read_text(encoding="utf-8")

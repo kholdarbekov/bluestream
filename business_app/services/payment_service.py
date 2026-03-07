@@ -104,12 +104,13 @@ class PaymentService:
             payment.user_id = order.user_id
             payment.payment_method = payment_method
             payment.amount = amount
-            payment.status = PaymentStatus.PENDING
             payment.currency = provider_data.pop('currency', payment.currency or 'UZS')
             payment.description = provider_data.pop('description', payment.description)
             payment.callback_url = provider_data.pop('return_url', payment.callback_url)
             payment.failure_reason = None
             payment.provider_data = provider_data
+            if payment_method != PaymentMethod.CASH:
+                payment.status = PaymentStatus.PENDING
         else:
             payment = Payment(
                 order_id=order_id,
@@ -123,6 +124,13 @@ class PaymentService:
                 provider_data=provider_data,
             )
             db.session.add(payment)
+
+        if payment_method == PaymentMethod.CASH:
+            from business_app.services.cash_collection_service import CashCollectionService
+
+            payment.amount_collected = payment.amount_collected or Decimal('0.00')
+            payment.outstanding_amount = amount
+            CashCollectionService().sync_payment_projection(payment)
 
         db.session.commit()
         
@@ -156,8 +164,20 @@ class PaymentService:
             PaymentMethod.PAYME,
             PaymentMethod.CLICK,
             PaymentMethod.BUSINESS_ACCOUNT,
+            PaymentMethod.CASH,
         }:
             return order.payment
+
+        if payment_method == PaymentMethod.CASH:
+            from business_app.services.cash_collection_service import CashCollectionService
+
+            payment = CashCollectionService().ensure_cod_payment_for_order(
+                order,
+                actor_user_id=actor_user_id,
+                metadata=metadata,
+            )
+            db.session.commit()
+            return payment
 
         payment = order.payment
         if not payment:
@@ -234,23 +254,35 @@ class PaymentService:
 
         if payment.payment_method != PaymentMethod.CASH:
             raise ValidationError(get_translation('error.payment.invalid_method'))
-        
-        # Update payment status
-        payment.status = PaymentStatus.COMPLETED
-        payment.paid_at = datetime.now(timezone.utc)
+
+        from business_app.services.cash_collection_service import CashCollectionService
+
         payment.collected_by = collected_by
-        
-        # Create transaction record
+        CashCollectionService().post_collection(
+            customer_id=payment.user_id,
+            amount=payment.amount,
+            source='admin_adjustment',
+            collector_user_id=collected_by,
+            recorded_by_user_id=collected_by,
+            order_id=payment.order_id,
+            notes='Cash payment processed via payment service',
+            manual_allocations=[{
+                'payment_id': payment.id,
+                'amount': payment.amount,
+            }],
+            allocation_mode='manual',
+        )
+        db.session.refresh(payment)
+
+        if payment.status == PaymentStatus.COMPLETED:
+            self._handle_successful_payment(payment)
+
         self._create_transaction(payment, 'payment_completed', {
             'collected_by': collected_by,
-            'collection_method': 'cash_on_delivery'
+            'collection_method': 'cash_on_delivery',
         })
-        
         db.session.commit()
-        
-        # Update order status
-        self._handle_successful_payment(payment)
-        
+
         return payment
     
     def process_loyalty_points_payment(self, payment_id: int, points_used: int) -> Payment:

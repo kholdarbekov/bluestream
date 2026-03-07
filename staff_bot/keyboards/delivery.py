@@ -125,17 +125,70 @@ class DeliveryKeyboards:
         return InlineKeyboardMarkup(keyboard)
 
     @staticmethod
-    def cash_collection_confirm(
+    def cash_collection_options(
         language: str, delivery_id: int, amount: float
     ) -> InlineKeyboardMarkup:
-        """Confirm cash collection amount"""
+        """Explicit delivery-completion cash collection options."""
         return InlineKeyboardMarkup([
             [InlineKeyboardButton(
                 f"\u2705 {i18n.get('staff.delivery.confirm_cash', language, amount=f'{amount:,.0f}')}",
-                callback_data=f"staff_confirm_cash_{delivery_id}"
+                callback_data=f"staff_cash_full_{delivery_id}"
             )],
             [InlineKeyboardButton(
                 f"\u270f\ufe0f {i18n.get('staff.delivery.edit_cash', language)}",
-                callback_data=f"staff_edit_cash_{delivery_id}"
-            )]
+                callback_data=f"staff_cash_partial_{delivery_id}"
+            )],
+            [InlineKeyboardButton(
+                f"\u274c {i18n.get('staff.delivery.no_cash_collected', language)}",
+                callback_data=f"staff_cash_none_{delivery_id}"
+            )],
         ])
+
+    @staticmethod
+    def reconciliation_actions(language: str, can_submit: bool = True) -> InlineKeyboardMarkup:
+        """Actions for the driver's reconciliation session view."""
+        keyboard = []
+        if can_submit:
+            keyboard.append([InlineKeyboardButton(
+                f"\U0001f4b5 {i18n.get('staff.delivery.submit_reconciliation', language)}",
+                callback_data="staff_reconcile_submit"
+            )])
+        keyboard.append([InlineKeyboardButton(
+            f"\u2b05\ufe0f {i18n.get('staff.back', language)}",
+            callback_data="staff_back_to_main"
+        )])
+        return InlineKeyboardMarkup(keyboard)
+
+    @staticmethod
+    def cod_customer_result(language: str, customer_id: int) -> InlineKeyboardMarkup:
+        """View COD debt details for a searched customer."""
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton(
+                f"\U0001f4dc {i18n.get('staff.delivery.view_cod_statement', language)}",
+                callback_data=f"staff_cod_customer_{customer_id}"
+            )],
+        ])
+
+    @staticmethod
+    def cod_statement_actions(
+        language: str,
+        customer_id: int,
+        *,
+        can_collect: bool = True,
+    ) -> InlineKeyboardMarkup:
+        """Actions available from a customer's COD debt statement."""
+        keyboard = []
+        if can_collect:
+            keyboard.append([InlineKeyboardButton(
+                f"\U0001f4b8 {i18n.get('staff.delivery.collect_full_cod', language)}",
+                callback_data=f"staff_cod_collect_full_{customer_id}"
+            )])
+            keyboard.append([InlineKeyboardButton(
+                f"\u270f\ufe0f {i18n.get('staff.delivery.collect_custom_cod', language)}",
+                callback_data=f"staff_cod_collect_custom_{customer_id}"
+            )])
+        keyboard.append([InlineKeyboardButton(
+            f"\u2b05\ufe0f {i18n.get('staff.back', language)}",
+            callback_data="staff_back_to_main"
+        )])
+        return InlineKeyboardMarkup(keyboard)

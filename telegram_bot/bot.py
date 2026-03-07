@@ -301,6 +301,11 @@ class WaterBusinessBot:
             # Profile callbacks
             CallbackQueryHandler(profile_handlers.profile_menu, pattern="^menu_profile$"),
             CallbackQueryHandler(profile_handlers.phone_verification_menu, pattern="^phone_verification$"),
+            CallbackQueryHandler(profile_handlers.notification_settings, pattern="^notification_settings$"),
+            CallbackQueryHandler(
+                profile_handlers.toggle_delivery_telegram_status_notifications,
+                pattern="^toggle_delivery_telegram_status_(on|off)$",
+            ),
             # add_phone_number is now handled by phone_verification_handler ConversationHandler
             CallbackQueryHandler(profile_handlers.verify_phone_number, pattern="^verify_phone_number$"),
             CallbackQueryHandler(profile_handlers.edit_profile, pattern="^edit_profile$"),

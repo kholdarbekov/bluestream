@@ -1,5 +1,5 @@
 from datetime import datetime, timedelta, UTC
-from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, Text, ForeignKey, Enum, JSON, Index
+from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, Text, ForeignKey, Enum, JSON, Index, UniqueConstraint
 from sqlalchemy.orm import relationship, backref
 from sqlalchemy.ext.hybrid import hybrid_property
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -37,6 +37,7 @@ class Notification(db.Model, TimestampMixin):
     # Related entities
     order_id = Column(Integer, ForeignKey('orders.id'), nullable=True)
     delivery_id = Column(Integer, ForeignKey('deliveries.id'), nullable=True)
+    campaign_id = Column(Integer, ForeignKey('notification_campaigns.id'), nullable=True, index=True)
     
     # Scheduling
     scheduled_for = Column(DateTime(timezone=True), nullable=True)
@@ -48,6 +49,7 @@ class Notification(db.Model, TimestampMixin):
     user = relationship('User', back_populates='notifications')
     order = relationship('Order')
     delivery = relationship('Delivery')
+    campaign = relationship('NotificationCampaign', back_populates='notifications')
     
     def mark_as_sent(self, status=NotificationStatus.SENT):
         """Mark notification as sent"""
@@ -72,7 +74,72 @@ class Notification(db.Model, TimestampMixin):
             'delivery_status': self.delivery_status.value if hasattr(self.delivery_status, 'value') else self.delivery_status,
             'scheduled_for': self.scheduled_for.isoformat() if self.scheduled_for else None,
             'priority': self.priority.value if hasattr(self.priority, 'value') else self.priority,
+            'campaign_id': self.campaign_id,
             'created_at': self.created_at.isoformat() if self.created_at else None
+        }
+
+
+class NotificationCampaign(db.Model, TimestampMixin):
+    """Admin-managed bulk notification campaign."""
+    __tablename__ = 'notification_campaigns'
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String(200), nullable=False)
+    template_id = Column(Integer, ForeignKey('notification_templates.id'), nullable=True, index=True)
+    notification_type = Column(String(50), nullable=False, index=True)
+    channel = Column(String(20), nullable=False, index=True)
+    subject_override = Column(String(255), nullable=True)
+    content_override = Column(Text, nullable=True)
+    target_audience = Column(String(50), nullable=False, default='all_customers', index=True)
+    target_segment_id = Column(Integer, ForeignKey('user_segments.id'), nullable=True, index=True)
+    specific_user_ids = Column(JSON, default=list)
+    status = Column(String(20), nullable=False, default='draft', index=True)
+    priority = Column(String(20), nullable=False, default=Priority.NORMAL.value)
+    scheduled_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    queued_at = Column(DateTime(timezone=True), nullable=True)
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    cancelled_at = Column(DateTime(timezone=True), nullable=True)
+    created_by_user_id = Column(Integer, ForeignKey('users.id'), nullable=False, index=True)
+    updated_by_user_id = Column(Integer, ForeignKey('users.id'), nullable=True, index=True)
+    celery_task_id = Column(String(255), nullable=True, index=True)
+    recipient_count = Column(Integer, nullable=False, default=0)
+    recipient_ids_snapshot = Column(JSON, default=list)
+    last_error = Column(Text, nullable=True)
+
+    template = relationship('NotificationTemplate', backref=backref('campaigns', lazy='dynamic'))
+    target_segment = relationship('UserSegment')
+    created_by = relationship('User', foreign_keys=[created_by_user_id])
+    updated_by = relationship('User', foreign_keys=[updated_by_user_id])
+    notifications = relationship('Notification', back_populates='campaign')
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'name': self.name,
+            'template_id': self.template_id,
+            'notification_type': self.notification_type,
+            'channel': self.channel,
+            'subject_override': self.subject_override,
+            'content_override': self.content_override,
+            'target_audience': self.target_audience,
+            'target_segment_id': self.target_segment_id,
+            'specific_user_ids': list(self.specific_user_ids or []),
+            'status': self.status,
+            'priority': self.priority,
+            'scheduled_at': self.scheduled_at.isoformat() if self.scheduled_at else None,
+            'queued_at': self.queued_at.isoformat() if self.queued_at else None,
+            'started_at': self.started_at.isoformat() if self.started_at else None,
+            'completed_at': self.completed_at.isoformat() if self.completed_at else None,
+            'cancelled_at': self.cancelled_at.isoformat() if self.cancelled_at else None,
+            'created_by_user_id': self.created_by_user_id,
+            'updated_by_user_id': self.updated_by_user_id,
+            'celery_task_id': self.celery_task_id,
+            'recipient_count': self.recipient_count,
+            'recipient_ids_snapshot': list(self.recipient_ids_snapshot or []),
+            'last_error': self.last_error,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
         }
 
 
@@ -100,6 +167,14 @@ class NotificationTemplate(db.Model, TimestampMixin, TranslatableMixin):
 class NotificationPreference(db.Model, TimestampMixin):
     """User notification preferences"""
     __tablename__ = 'notification_preferences'
+    __table_args__ = (
+        UniqueConstraint(
+            'user_id',
+            'notification_type',
+            'channel',
+            name='uq_notification_preferences_user_type_channel',
+        ),
+    )
 
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)

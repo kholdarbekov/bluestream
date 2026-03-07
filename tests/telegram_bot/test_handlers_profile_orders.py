@@ -143,6 +143,103 @@ class TestProfileHandlerFlows:
             reply_markup="menu-kbd",
         )
 
+    async def test_notification_settings_renders_toggle_screen(self, monkeypatch):
+        handler = profile_module.ProfileHandlers()
+        update = DummyUpdate(user_id=303)
+        update.callback_query = DummyCallbackQuery(data="notification_settings")
+        context = make_context()
+
+        monkeypatch.setattr(profile_module, "user_middleware", AsyncMock(return_value={"id": 303}))
+        monkeypatch.setattr(profile_module, "get_auth_token", AsyncMock(return_value="jwt-token"))
+        monkeypatch.setattr(profile_module.i18n, "get_user_language", AsyncMock(return_value="en"))
+        monkeypatch.setattr(profile_module.i18n, "get", lambda key, lang, **_: f"{key}:{lang}")
+        monkeypatch.setattr(
+            profile_module.ProfileKeyboards,
+            "notification_settings",
+            lambda language, delivery_telegram_status_updates_enabled: (
+                f"kbd:{language}:{delivery_telegram_status_updates_enabled}"
+            ),
+        )
+        monkeypatch.setattr(
+            profile_module,
+            "api_client",
+            FakeAPIClientContext(
+                get_notification_preferences=_resp(
+                    success=True,
+                    data={
+                        "data": {
+                            "preferences": {
+                                "delivery_telegram_status_updates_enabled": False,
+                            }
+                        }
+                    },
+                )
+            ),
+        )
+
+        await handler.notification_settings(update, context)
+
+        update.callback_query.edit_message_text.assert_awaited_once()
+        call_kwargs = update.callback_query.edit_message_text.call_args.kwargs
+        assert "telegram.notifications.current_status_disabled:en" in call_kwargs["text"]
+        assert call_kwargs["reply_markup"] == "kbd:en:False"
+        update.callback_query.answer.assert_awaited_once()
+
+    async def test_toggle_delivery_telegram_status_notifications_updates_preferences_and_refreshes(self, monkeypatch):
+        handler = profile_module.ProfileHandlers()
+        update = DummyUpdate(user_id=304)
+        update.callback_query = DummyCallbackQuery(data="toggle_delivery_telegram_status_off")
+        context = make_context()
+        calls = []
+
+        class _APIContext:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc_val, exc_tb):
+                return False
+
+            async def update_notification_preferences(self, user_token, payload):
+                calls.append((user_token, payload))
+                return _resp(
+                    success=True,
+                    data={
+                        "data": {
+                            "preferences": {
+                                "delivery_telegram_status_updates_enabled": payload[
+                                    "delivery_telegram_status_updates_enabled"
+                                ]
+                            }
+                        }
+                    },
+                )
+
+        monkeypatch.setattr(profile_module, "user_middleware", AsyncMock(return_value={"id": 304}))
+        monkeypatch.setattr(profile_module, "get_auth_token", AsyncMock(return_value="jwt-token"))
+        monkeypatch.setattr(profile_module.i18n, "get_user_language", AsyncMock(return_value="en"))
+        monkeypatch.setattr(profile_module.i18n, "get", lambda key, lang, **_: f"{key}:{lang}")
+        monkeypatch.setattr(
+            profile_module.ProfileKeyboards,
+            "notification_settings",
+            lambda language, delivery_telegram_status_updates_enabled: (
+                f"kbd:{language}:{delivery_telegram_status_updates_enabled}"
+            ),
+        )
+        monkeypatch.setattr(profile_module, "api_client", _APIContext())
+
+        await handler.toggle_delivery_telegram_status_notifications(update, context)
+
+        assert calls == [
+            ("jwt-token", {"delivery_telegram_status_updates_enabled": False})
+        ]
+        update.callback_query.edit_message_text.assert_awaited_once()
+        call_kwargs = update.callback_query.edit_message_text.call_args.kwargs
+        assert "telegram.notifications.current_status_disabled:en" in call_kwargs["text"]
+        assert call_kwargs["reply_markup"] == "kbd:en:False"
+        update.callback_query.answer.assert_awaited_once_with(
+            "telegram.notifications.update_success:en"
+        )
+
 
 @pytest.mark.unit
 @pytest.mark.anyio

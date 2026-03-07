@@ -420,6 +420,14 @@ class StaffAPIClient:
             token=token
         )
 
+    async def get_operator_payment_methods(self, token: str, user_id: int) -> APIResponse:
+        """Get debt-aware payment methods for an operator-created client order."""
+        return await self._make_request(
+            'GET',
+            f'{config.business_api.operator_endpoint}/users/{user_id}/payment-methods',
+            token=token,
+        )
+
     async def add_client_address(self, token: str, user_id: int, address_data: Dict) -> APIResponse:
         """Add address for a client"""
         return await self._make_request(
@@ -453,6 +461,68 @@ class StaffAPIClient:
             'GET',
             f'{config.business_api.operator_endpoint}/users/{user_id}/addresses',
             token=token
+        )
+
+    async def get_customer_cod_statement(self, token: str, customer_id: int) -> APIResponse:
+        """Get COD statement for a customer in staff flows."""
+        return await self._make_request(
+            'GET',
+            f'/api/v1/staff/customers/{customer_id}/cod-statement',
+            token=token,
+        )
+
+    async def search_customers(
+        self,
+        token: str,
+        query_text: str,
+        *,
+        search_type: str = 'phone',
+        only_with_open_cod: bool = True,
+    ) -> APIResponse:
+        """Search customers for COD collection workflows."""
+        return await self._make_request(
+            'GET',
+            '/api/v1/staff/customers/search',
+            token=token,
+            params={
+                'q': query_text,
+                'type': search_type,
+                'only_with_open_cod': str(only_with_open_cod).lower(),
+            },
+        )
+
+    async def record_cash_collection(self, token: str, payload: Dict) -> APIResponse:
+        """Record a COD cash collection event."""
+        return await self._make_request(
+            'POST',
+            '/api/v1/staff/cash-collections',
+            token=token,
+            data=payload,
+        )
+
+    async def get_reconciliation_session(
+        self,
+        token: str,
+        business_date: Optional[str] = None,
+    ) -> APIResponse:
+        """Get the driver's open reconciliation session."""
+        params = {}
+        if business_date:
+            params['business_date'] = business_date
+        return await self._make_request(
+            'GET',
+            '/api/v1/staff/reconciliation/session',
+            token=token,
+            params=params or None,
+        )
+
+    async def submit_reconciliation_session(self, token: str, payload: Dict) -> APIResponse:
+        """Submit the driver's reconciliation session."""
+        return await self._make_request(
+            'POST',
+            '/api/v1/staff/reconciliation/session/submit',
+            token=token,
+            data=payload,
         )
 
     # --- Try-out Operations ---

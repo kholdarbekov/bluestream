@@ -20,6 +20,36 @@ logger = logging.getLogger('handlers')
 
 class OrderHandlers(BaseHandler):
     """Order-related handlers"""
+
+    @staticmethod
+    def _build_checkout_payment_methods(available_methods: List[Dict[str, Any]], language: str) -> List[Dict[str, str]]:
+        method_codes = {
+            str(method.get('method'))
+            for method in (available_methods or [])
+            if method.get('is_active', True)
+        }
+        payment_methods: List[Dict[str, str]] = []
+        if 'cash' in method_codes:
+            payment_methods.append({
+                'type': 'cash',
+                'name': i18n.get('telegram.payment_cash', language),
+            })
+        if any(code != 'cash' for code in method_codes):
+            payment_methods.append({
+                'type': 'card',
+                'name': i18n.get('telegram.payment_card', language),
+            })
+        return payment_methods
+
+    @staticmethod
+    def _cod_restriction_notice(restrictions: Dict[str, Any]) -> str:
+        active_debt_count = restrictions.get('active_cod_debt_count') or 0
+        if active_debt_count:
+            return (
+                f"Cash on delivery is unavailable because you already have "
+                f"{active_debt_count} outstanding COD debts. Please choose a card payment method."
+            )
+        return "Cash on delivery is temporarily unavailable. Please choose a card payment method."
     
     async def orders_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Show user's orders"""
@@ -447,14 +477,35 @@ class OrderHandlers(BaseHandler):
             
             # Store selected address
             context.user_data['selected_address_id'] = address_id
-            
-            # Show payment methods
-            payment_methods = [
-                {'type': 'cash', 'name': i18n.get('telegram.payment_cash', language)},
-                {'type': 'card', 'name': i18n.get('telegram.payment_card', language)},
-            ]
+
+            async with api_client as client:
+                user_token = await get_auth_token(update, context, client)
+                if not user_token:
+                    await self._handle_auth_error(update, language)
+                    return
+
+                response = await client.get_payment_methods(user_token)
+                if not response.success:
+                    await self._handle_api_error(update, response.error, language)
+                    return
+
+            payment_payload = response.data.get('data', {})
+            payment_methods = self._build_checkout_payment_methods(
+                payment_payload.get('available_methods', []),
+                language,
+            )
+            if not payment_methods:
+                await self._handle_api_error(
+                    update,
+                    "No payment methods are available right now. Please try again later.",
+                    language,
+                )
+                return
 
             payment_text = i18n.get('telegram.orders.select_payment', language)
+            restrictions = payment_payload.get('payment_restrictions') or {}
+            if restrictions.get('cod_restricted'):
+                payment_text += "\n\n" + self._cod_restriction_notice(restrictions)
             keyboard = OrderKeyboards.payment_methods(payment_methods, language)
             
             await query.edit_message_text(

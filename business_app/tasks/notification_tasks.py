@@ -21,6 +21,20 @@ from business_app import db
 logger = get_task_logger(__name__)
 
 
+@shared_task(bind=True, max_retries=3, default_retry_delay=30, time_limit=1800, soft_time_limit=1700)
+def execute_notification_campaign_task(self, campaign_id: int):
+    """Execute one queued notification campaign."""
+    try:
+        logger.info("Executing notification campaign %s", campaign_id)
+        notification_service = NotificationService()
+        result = notification_service.execute_notification_campaign(campaign_id)
+        logger.info("Notification campaign %s finished with result: %s", campaign_id, result)
+        return result
+    except Exception as exc:
+        logger.error("Failed to execute notification campaign %s: %s", campaign_id, exc)
+        raise self.retry(exc=exc)
+
+
 @shared_task(bind=True, max_retries=3, default_retry_delay=30, time_limit=120, soft_time_limit=100)
 def send_telegram_security_alert_task(self, user_id: int, alert_type: str, message: str):
     """

@@ -6,8 +6,10 @@ from unittest.mock import Mock, patch
 
 import pytest
 
+from business_app.models.audit import AuditEventType, AuditLog
 from business_app.models.delivery import Delivery, DeliveryStatusHistory
 from business_app.models.notification import Notification, NotificationPreference, NotificationTemplate
+from business_app.models.translation import Translation
 from business_app.services.notification_service import NotificationService
 from business_app.utils.constants import DeliveryStatus, NotificationChannel, NotificationStatus, NotificationType
 from business_app.utils.exceptions import ForbiddenError, ValidationError
@@ -27,6 +29,24 @@ def _create_notification(db, user_id: int, status: NotificationStatus) -> Notifi
     db.session.add(notification)
     db.session.commit()
     return notification
+
+
+def _upsert_translation(db, key: str, language: str, value: str) -> Translation:
+    translation = Translation.query.filter_by(key=key, language=language).first()
+    if translation:
+        translation.value = value
+        translation.is_active = True
+    else:
+        translation = Translation(
+            key=key,
+            language=language,
+            value=value,
+            category='general',
+            is_active=True,
+        )
+        db.session.add(translation)
+    db.session.flush()
+    return translation
 
 
 def test_mark_all_notifications_read_updates_delivery_status_and_metadata(db, sample_user):
@@ -115,6 +135,84 @@ def test_queue_bulk_notification_requires_admin(db, sample_user):
         )
 
 
+def test_create_notification_campaign_persists_audit_log_and_normalizes_phone_channel(
+    db, admin_user, sample_user
+):
+    service = NotificationService()
+
+    campaign = service.create_notification_campaign(
+        sender_id=admin_user.id,
+        payload={
+            'name': 'Weekend retention push',
+            'channel': 'phone',
+            'subject': 'Weekend special',
+            'content': 'Save 10% this weekend',
+            'target_audience': 'all_customers',
+            'priority': 'high',
+            'status': 'scheduled',
+        },
+    )
+
+    audit_log = AuditLog.query.filter_by(
+        resource_type=service.NOTIFICATION_CAMPAIGN_RESOURCE_TYPE,
+        action=service.NOTIFICATION_CAMPAIGN_CREATE_ACTION,
+    ).one()
+
+    assert campaign['name'] == 'Weekend retention push'
+    assert campaign['channel'] == 'sms'
+    assert campaign['recipient_count'] == 1
+    assert campaign['status'] == 'scheduled'
+    assert audit_log.new_values['name'] == 'Weekend retention push'
+    assert audit_log.new_values['channel'] == 'sms'
+    assert audit_log.new_values['recipient_count'] == 1
+    assert audit_log.user_id == admin_user.id
+
+
+def test_get_notification_campaigns_paginated_filters_by_search_status_and_channel(
+    db, admin_user, sample_user
+):
+    service = NotificationService()
+
+    first = service.create_notification_campaign(
+        sender_id=admin_user.id,
+        payload={
+            'name': 'VIP delivery alert',
+            'channel': 'push',
+            'subject': 'Driver is nearby',
+            'content': 'Your order is almost there',
+            'target_audience': 'active_customers',
+            'priority': 'medium',
+            'status': 'draft',
+        },
+    )
+    second = service.create_notification_campaign(
+        sender_id=admin_user.id,
+        payload={
+            'name': 'Loyalty reminder',
+            'channel': 'email',
+            'subject': 'Use your points',
+            'content': 'Redeem your loyalty balance',
+            'target_audience': 'loyalty_members',
+            'priority': 'low',
+            'status': 'scheduled',
+        },
+    )
+
+    result = service.get_notification_campaigns_paginated(
+        requester_id=admin_user.id,
+        page=1,
+        per_page=10,
+        search='loyalty',
+        status='scheduled',
+        channel='email',
+    )
+
+    assert result['total'] == 1
+    assert result['items'][0]['id'] == second['id']
+    assert result['items'][0]['name'] == 'Loyalty reminder'
+    assert all(item['id'] != first['id'] for item in result['items'])
+
+
 def test_get_delivery_reports_paginated_uses_delivery_status_summary(db, admin_user, sample_user):
     service = NotificationService()
 
@@ -133,6 +231,29 @@ def test_get_delivery_reports_paginated_uses_delivery_status_summary(db, admin_u
     assert reports['summary']['delivered'] == 1
     assert reports['summary']['failed'] == 1
     assert reports['summary']['pending'] == 1
+
+
+def test_get_localized_delivery_status_label_prefers_same_language_api_key_over_english_fallback(db):
+    service = NotificationService()
+
+    _upsert_translation(db, 'notification.delivery_status.arrived', 'en', 'Arrived')
+    _upsert_translation(db, 'api.delivery.arrived', 'uz', 'Buyurtma yetib keldi')
+    db.session.commit()
+
+    label = service._get_localized_delivery_status_label(DeliveryStatus.ARRIVED.value, 'uz')
+
+    assert label == 'Buyurtma yetib keldi'
+
+
+def test_get_localized_delivery_status_label_uses_bundled_uz_fallback_when_db_is_incomplete(db):
+    service = NotificationService()
+
+    _upsert_translation(db, 'notification.delivery_status.arrived', 'en', 'Arrived')
+    db.session.commit()
+
+    label = service._get_localized_delivery_status_label(DeliveryStatus.ARRIVED.value, 'uz')
+
+    assert label == 'Yetib keldi'
 
 
 def test_send_delivery_status_change_notification_forces_telegram_for_connected_user(db, sample_user, sample_order):
@@ -195,6 +316,58 @@ def test_send_delivery_status_change_notification_skips_forced_telegram_when_bot
             user_id=sample_user.id,
             notification_type=NotificationType.DELIVERY_UPDATE.value,
             channel=NotificationChannel.SMS,
+            is_enabled=True,
+        )
+    )
+    delivery = Delivery(
+        order_id=sample_order.id,
+        status=DeliveryStatus.IN_TRANSIT,
+        scheduled_date=datetime.now(UTC),
+        scheduled_time_slot='09:00-12:00',
+    )
+    db.session.add(delivery)
+    db.session.flush()
+    history = DeliveryStatusHistory(
+        delivery_id=delivery.id,
+        old_status=DeliveryStatus.ASSIGNED,
+        new_status=DeliveryStatus.IN_TRANSIT,
+        changed_at=datetime.now(UTC),
+    )
+    db.session.add(history)
+    db.session.commit()
+
+    service = NotificationService()
+    captured = {}
+
+    def _fake_send_notification(user_id, notification_type, channels=None, template_data=None, priority='normal'):
+        captured['channels'] = channels
+        return {'sms': {'success': True}}
+
+    service.send_notification = _fake_send_notification
+
+    service.send_delivery_status_change_notification(history.id)
+
+    assert captured['channels'] == [NotificationChannel.SMS]
+
+
+def test_send_delivery_status_change_notification_removes_preferred_telegram_when_bot_not_connected(
+    db, sample_user, sample_order
+):
+    sample_user.telegram_id = None
+    sample_user.is_bot_active = False
+    db.session.add(
+        NotificationPreference(
+            user_id=sample_user.id,
+            notification_type=NotificationType.DELIVERY_UPDATE.value,
+            channel=NotificationChannel.SMS,
+            is_enabled=True,
+        )
+    )
+    db.session.add(
+        NotificationPreference(
+            user_id=sample_user.id,
+            notification_type=NotificationType.DELIVERY_UPDATE.value,
+            channel=NotificationChannel.TELEGRAM,
             is_enabled=True,
         )
     )
@@ -538,3 +711,106 @@ def test_send_telegram_notification_allows_in_transit_delivery_status(app, db, s
     assert result['success'] is True
     assert result.get('skipped') is None
     post_mock.assert_called_once()
+
+
+def test_get_delivery_telegram_setting_defaults_to_enabled_without_override(db, sample_user):
+    service = NotificationService()
+
+    result = service.get_delivery_telegram_status_updates_setting(sample_user.id)
+
+    assert result['delivery_telegram_status_updates_enabled'] is True
+    assert result['delivery_telegram_status_updates_source'] == 'default'
+    assert result['updated_at'] is None
+
+
+def test_set_delivery_telegram_setting_persists_explicit_override(db, sample_user):
+    service = NotificationService()
+
+    updated = service.set_delivery_telegram_status_updates_setting(sample_user.id, enabled=False)
+    reloaded = service.get_delivery_telegram_status_updates_setting(sample_user.id)
+
+    assert updated['delivery_telegram_status_updates_enabled'] is False
+    assert updated['delivery_telegram_status_updates_source'] == 'explicit'
+    assert reloaded['delivery_telegram_status_updates_enabled'] is False
+
+    row = NotificationPreference.query.filter_by(
+        user_id=sample_user.id,
+        notification_type=NotificationService.DELIVERY_TELEGRAM_STATUS_UPDATES_PREF_KEY,
+        channel=NotificationChannel.TELEGRAM,
+    ).first()
+    assert row is not None
+    assert row.is_enabled is False
+
+
+def test_resolve_delivery_status_channels_honors_explicit_delivery_telegram_disable(db, sample_user):
+    sample_user.telegram_id = '998900001500'
+    sample_user.is_bot_active = True
+    db.session.add(sample_user)
+    db.session.add(
+        NotificationPreference(
+            user_id=sample_user.id,
+            notification_type=NotificationType.DELIVERY_UPDATE.value,
+            channel=NotificationChannel.SMS,
+            is_enabled=True,
+        )
+    )
+    db.session.add(
+        NotificationPreference(
+            user_id=sample_user.id,
+            notification_type=NotificationService.DELIVERY_TELEGRAM_STATUS_UPDATES_PREF_KEY,
+            channel=NotificationChannel.TELEGRAM,
+            is_enabled=False,
+        )
+    )
+    db.session.commit()
+
+    service = NotificationService()
+    channels = service._resolve_delivery_status_channels(sample_user, DeliveryStatus.IN_TRANSIT.value)
+
+    assert channels == [NotificationChannel.SMS]
+
+
+def test_set_delivery_telegram_setting_requires_reason_for_admin_source(db, sample_user):
+    service = NotificationService()
+
+    with pytest.raises(ValidationError):
+        service.set_delivery_telegram_status_updates_setting(
+            sample_user.id,
+            enabled=False,
+            source='admin',
+            actor_user_id=101,
+            reason='',
+        )
+
+
+def test_set_delivery_telegram_setting_writes_admin_audit_log(db, admin_user, sample_user):
+    service = NotificationService()
+
+    service.set_delivery_telegram_status_updates_setting(
+        sample_user.id,
+        enabled=False,
+        source='admin',
+        actor_user_id=admin_user.id,
+        reason='Customer requested disable via phone',
+    )
+
+    audit_entry = AuditLog.query.filter_by(
+        action='admin_update_delivery_telegram_notification_setting',
+        resource_type='user',
+        resource_id=str(sample_user.id),
+    ).order_by(AuditLog.created_at.desc()).first()
+
+    assert audit_entry is not None
+    assert audit_entry.event_type == AuditEventType.USER_UPDATED
+    assert audit_entry.additional_data['reason'] == 'Customer requested disable via phone'
+
+
+def test_set_delivery_telegram_setting_rejects_unknown_source(db, sample_user):
+    service = NotificationService()
+
+    with pytest.raises(ValidationError):
+        service.set_delivery_telegram_status_updates_setting(
+            sample_user.id,
+            enabled=True,
+            source='system',
+        )

@@ -129,6 +129,132 @@ class ProfileHandlers(BaseHandler):
             logger.error(f"Error in profile menu: {e}")
             await self._handle_error(update)
 
+    def _extract_delivery_telegram_status_updates_enabled(self, api_payload: Dict[str, Any]) -> bool:
+        """Extract Telegram delivery-status toggle from notifications preferences payload."""
+        preferences = (api_payload or {}).get('data', {}).get('preferences', {})
+        enabled = preferences.get('delivery_telegram_status_updates_enabled')
+        return enabled if isinstance(enabled, bool) else True
+
+    async def _render_notification_settings(
+        self,
+        update: Update,
+        language: str,
+        delivery_telegram_status_updates_enabled: bool,
+        callback_toast: str | None = None,
+    ) -> None:
+        """Render notification settings UI."""
+        status_key = (
+            'telegram.notifications.current_status_enabled'
+            if delivery_telegram_status_updates_enabled
+            else 'telegram.notifications.current_status_disabled'
+        )
+        text = (
+            f"{i18n.get('telegram.notifications.title', language)}\n\n"
+            f"{i18n.get('telegram.notifications.delivery_status_updates_label', language)}\n"
+            f"{i18n.get('telegram.notifications.delivery_status_updates_description', language)}\n\n"
+            f"{i18n.get(status_key, language)}"
+        )
+        keyboard = ProfileKeyboards.notification_settings(
+            language=language,
+            delivery_telegram_status_updates_enabled=delivery_telegram_status_updates_enabled,
+        )
+
+        if update.callback_query:
+            await update.callback_query.edit_message_text(
+                text=text,
+                reply_markup=keyboard,
+            )
+            if callback_toast:
+                await update.callback_query.answer(callback_toast)
+            else:
+                await update.callback_query.answer()
+            return
+
+        await update.message.reply_text(text=text, reply_markup=keyboard)
+
+    async def notification_settings(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Show Telegram delivery-status notification toggle screen."""
+        try:
+            user = await user_middleware(update)
+            if not user:
+                return
+
+            user_id = update.effective_user.id
+            language = await i18n.get_user_language(user_id)
+
+            async with api_client as client:
+                user_token = await get_auth_token(update, context, client)
+                if not user_token:
+                    await self._handle_auth_error(update, language)
+                    return
+
+                response = await client.get_notification_preferences(user_token)
+                if not response.success:
+                    await self._handle_api_error(update, response.error, language)
+                    return
+
+                enabled = self._extract_delivery_telegram_status_updates_enabled(response.data)
+
+            await self._render_notification_settings(
+                update,
+                language,
+                delivery_telegram_status_updates_enabled=enabled,
+            )
+        except Exception as e:
+            logger.error(f"Error in notification settings: {e}")
+            await self._handle_error(update)
+
+    async def toggle_delivery_telegram_status_notifications(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+    ):
+        """Toggle Telegram delivery status notifications and refresh notification settings screen."""
+        try:
+            user = await user_middleware(update)
+            if not user:
+                return
+
+            query = update.callback_query
+            user_id = update.effective_user.id
+            language = await i18n.get_user_language(user_id)
+
+            toggle_to = query.data.rsplit('_', 1)[-1]
+            enabled = toggle_to == 'on'
+
+            async with api_client as client:
+                user_token = await get_auth_token(update, context, client)
+                if not user_token:
+                    await self._handle_auth_error(update, language)
+                    return
+
+                response = await client.update_notification_preferences(
+                    user_token,
+                    {'delivery_telegram_status_updates_enabled': enabled},
+                )
+                if not response.success:
+                    await query.answer(
+                        i18n.get('telegram.notifications.update_failed', language),
+                        show_alert=True,
+                    )
+                    return
+
+                refreshed_enabled = self._extract_delivery_telegram_status_updates_enabled(response.data)
+
+            await self._render_notification_settings(
+                update,
+                language,
+                delivery_telegram_status_updates_enabled=refreshed_enabled,
+                callback_toast=i18n.get('telegram.notifications.update_success', language),
+            )
+        except Exception as e:
+            logger.error(f"Error toggling delivery telegram notifications: {e}")
+            if update.callback_query:
+                await update.callback_query.answer(
+                    i18n.get('telegram.notifications.update_failed', 'en'),
+                    show_alert=True,
+                )
+
     async def phone_verification_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Show phone verification menu with add/verify options"""
         try:

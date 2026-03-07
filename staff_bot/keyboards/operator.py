@@ -118,26 +118,34 @@ class OperatorKeyboards:
         return InlineKeyboardMarkup(keyboard)
 
     @staticmethod
-    def payment_methods(language: str) -> InlineKeyboardMarkup:
-        """Payment method selection"""
-        return InlineKeyboardMarkup([
-            [InlineKeyboardButton(
-                f"\U0001f4b5 {i18n.get('staff.operator.payment_cash', language)}",
-                callback_data="staff_op_pay_cash"
-            )],
-            [InlineKeyboardButton(
-                f"\U0001f4b3 {i18n.get('staff.operator.payment_payme', language)}",
-                callback_data="staff_op_pay_payme"
-            )],
-            [InlineKeyboardButton(
-                f"\U0001f4b3 {i18n.get('staff.operator.payment_click', language)}",
-                callback_data="staff_op_pay_click"
-            )],
-            [InlineKeyboardButton(
-                f"\U0001f3e6 {i18n.get('staff.operator.payment_business_account', language)}",
-                callback_data="staff_op_pay_business_account"
-            )]
-        ])
+    def payment_methods(language: str, methods: List[Dict]) -> InlineKeyboardMarkup:
+        """Payment method selection."""
+        emoji_map = {
+            'cash': '\U0001f4b5',
+            'payme': '\U0001f4b3',
+            'click': '\U0001f4b3',
+            'business_account': '\U0001f3e6',
+        }
+        default_emoji = '\U0001f4b3'
+        keyboard = []
+        for method in methods:
+            method_code = method.get('method')
+            if not method_code:
+                continue
+            label = i18n.get(f'staff.operator.payment_{method_code}', language)
+            emoji = emoji_map.get(method_code, default_emoji)
+            keyboard.append([
+                InlineKeyboardButton(
+                    f"{emoji} {label}",
+                    callback_data=f"staff_op_pay_{method_code}"
+                )
+            ])
+
+        keyboard.append([InlineKeyboardButton(
+            f"\u274c {i18n.get('staff.cancel', language)}",
+            callback_data="staff_back_to_main"
+        )])
+        return InlineKeyboardMarkup(keyboard)
 
     @staticmethod
     def order_confirm(language: str) -> InlineKeyboardMarkup:

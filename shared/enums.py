@@ -21,6 +21,7 @@ class OrderStatus(Enum):
 class PaymentStatus(Enum):
     """Payment status enumeration"""
     PENDING = 'pending'
+    PARTIALLY_PAID = 'partially_paid'
     PROCESSING = 'processing'
     COMPLETED = 'completed'
     FAILED = 'failed'
@@ -37,6 +38,27 @@ class PaymentMethod(Enum):
     CLICK = 'click'
     LOYALTY_POINTS = 'loyalty_points'
     BUSINESS_ACCOUNT = 'business_account'
+
+
+class CashCollectionSource(Enum):
+    """COD cash collection source enumeration."""
+
+    DELIVERY_COMPLETION = 'delivery_completion'
+    NEXT_DELIVERY = 'next_delivery'
+    STANDALONE_MEETING = 'standalone_meeting'
+    ADMIN_ADJUSTMENT = 'admin_adjustment'
+    BACKFILL = 'backfill'
+
+
+class DriverCashSessionStatus(Enum):
+    """Driver cash reconciliation session state."""
+
+    OPEN = 'open'
+    SUBMITTED = 'submitted'
+    VERIFIED = 'verified'
+    MISMATCH = 'mismatch'
+    OVERDUE = 'overdue'
+    RESOLVED = 'resolved'
 
 
 class DeliveryStatus(Enum):

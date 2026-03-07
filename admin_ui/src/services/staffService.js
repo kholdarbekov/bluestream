@@ -128,6 +128,30 @@ class StaffServiceClass {
     return api.get('/admin/staff/cash-reconciliation', { params });
   }
 
+  recordCashCollection(payload) {
+    return api.post('/admin/staff/cash-reconciliation/collections', payload);
+  }
+
+  getCashReconciliationSession(sessionId) {
+    return api.get(`/admin/staff/cash-reconciliation/sessions/${sessionId}`);
+  }
+
+  verifyCashReconciliationSession(sessionId, payload) {
+    return api.post(`/admin/staff/cash-reconciliation/sessions/${sessionId}/verify`, payload);
+  }
+
+  resolveCashReconciliationSession(sessionId, payload) {
+    return api.post(`/admin/staff/cash-reconciliation/sessions/${sessionId}/resolve`, payload);
+  }
+
+  getCustomerCodStatement(customerId) {
+    return api.get(`/admin/staff/cash-reconciliation/customers/${customerId}/statement`);
+  }
+
+  getOrderPaymentTimeline(orderId) {
+    return api.get(`/admin/staff/cash-reconciliation/orders/${orderId}/timeline`);
+  }
+
   // ─── Invite Link ──────────────────────────────────────
 
   /**

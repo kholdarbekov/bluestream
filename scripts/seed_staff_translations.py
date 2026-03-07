@@ -73,6 +73,11 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "uz": "Mening statistikam",
         "ru": "Моя статистика",
     },
+    "staff.menu.cash_reconciliation": {
+        "en": "Cash Reconciliation",
+        "uz": "Naqd pul yarashtiruvi",
+        "ru": "Сверка наличных",
+    },
     "staff.menu.create_client": {
         "en": "Create Client",
         "uz": "Mijoz yaratish",
@@ -142,6 +147,16 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "en": "Business Account",
         "uz": "Hisob raqami orqali",
         "ru": "Безналичный счёт",
+    },
+    "staff.operator.cod_restricted": {
+        "en": "Cash on delivery is unavailable for this customer until earlier COD debts are settled.",
+        "uz": "Avvalgi COD qarzlari yopilmaguncha bu mijoz uchun yetkazib berishda naqd tolov mavjud emas.",
+        "ru": "Оплата наличными при доставке недоступна для этого клиента, пока не будут погашены прежние долги COD.",
+    },
+    "staff.operator.payment_unavailable": {
+        "en": "This payment method is not available for the selected customer.",
+        "uz": "Tanlangan mijoz uchun bu tolov usuli mavjud emas.",
+        "ru": "Этот способ оплаты недоступен для выбранного клиента.",
     },
     "staff.back": {"en": "Back", "uz": "Orqaga", "ru": "Назад"},
     "staff.confirm": {"en": "Confirm", "uz": "Tasdiqlash", "ru": "Подтвердить"},
@@ -214,6 +229,66 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "en": "Order #{number} was cancelled.",
         "uz": "#{number} buyurtma bekor qilindi.",
         "ru": "Заказ #{number} отменен.",
+    },
+    "staff.delivery.cash_collected_label": {
+        "en": "Collected",
+        "uz": "Yigildi",
+        "ru": "Собрано",
+    },
+    "staff.delivery.cash_outstanding_label": {
+        "en": "Outstanding",
+        "uz": "Qoldiq qarz",
+        "ru": "Остаток долга",
+    },
+    "staff.delivery.no_cash_collected": {
+        "en": "No cash collected",
+        "uz": "Naqd pul olinmadi",
+        "ru": "Наличные не получены",
+    },
+    "staff.delivery.enter_no_cash_reason": {
+        "en": "Enter why no cash was collected for this delivery.",
+        "uz": "Bu yetkazib berishda nima uchun naqd pul olinmaganini kiriting.",
+        "ru": "Укажите, почему наличные не были получены по этой доставке.",
+    },
+    "staff.delivery.enter_partial_cash_reason": {
+        "en": "Enter a note explaining the partial cash collection.",
+        "uz": "Qisman olingan naqd pul uchun izoh kiriting.",
+        "ru": "Укажите примечание по частичному получению наличных.",
+    },
+    "staff.delivery.note_required": {
+        "en": "A note is required for this cash exception.",
+        "uz": "Bu naqd pul istisnosi uchun izoh majburiy.",
+        "ru": "Для этого исключения по наличным требуется примечание.",
+    },
+    "staff.delivery.submit_reconciliation": {
+        "en": "Submit Reconciliation",
+        "uz": "Yarashtiruvni yuborish",
+        "ru": "Отправить сверку",
+    },
+    "staff.delivery.enter_declared_cash": {
+        "en": "Enter the cash amount you counted for reconciliation.",
+        "uz": "Yarashtiruv uchun sanagan naqd pul summasini kiriting.",
+        "ru": "Введите сумму наличных, которую вы пересчитали для сверки.",
+    },
+    "staff.delivery.reconciliation_submitted": {
+        "en": "Reconciliation submitted.",
+        "uz": "Yarashtiruv yuborildi.",
+        "ru": "Сверка отправлена.",
+    },
+    "staff.delivery.expected_cash_label": {
+        "en": "Expected cash",
+        "uz": "Kutilgan naqd pul",
+        "ru": "Ожидаемые наличные",
+    },
+    "staff.delivery.declared_cash_label": {
+        "en": "Declared cash",
+        "uz": "Topshirilgan naqd pul",
+        "ru": "Заявленные наличные",
+    },
+    "staff.delivery.cash_variance_label": {
+        "en": "Variance",
+        "uz": "Farq",
+        "ru": "Расхождение",
     },
     "staff.command.start": {
         "en": "Start bot and authenticate",

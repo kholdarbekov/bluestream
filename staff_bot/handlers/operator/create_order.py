@@ -277,6 +277,10 @@ class CreateOrderHandler(BaseHandler):
         query = update.callback_query
         await query.answer()
         language = await self._get_language(update, context)
+        token = await self._get_auth_token(update, context)
+        if not token:
+            await self._handle_auth_error(update, language)
+            return ConversationHandler.END
 
         order_data = context.user_data.get('new_order', {})
         items = order_data.get('items', [])
@@ -288,10 +292,39 @@ class CreateOrderHandler(BaseHandler):
             )
             return
 
+        client_id = order_data.get('client_id')
+        async with api_client as client:
+            response = await client.get_operator_payment_methods(token, client_id)
+
+        if not response.success:
+            await self._handle_api_response_error(update, response, language)
+            return SELECT_PRODUCTS
+
+        payment_payload = response.data or {}
+        available_methods = payment_payload.get('available_methods', [])
+        restrictions = payment_payload.get('payment_restrictions', {})
+        context.user_data['new_order']['payment_restrictions'] = restrictions
+        context.user_data['new_order']['available_payment_methods'] = [
+            method.get('method') for method in available_methods if method.get('method')
+        ]
+
         text = self._format_cart_summary(context, language)
+        if restrictions.get('cod_restricted'):
+            text += (
+                f"\n\n\u26a0\ufe0f "
+                f"{i18n.get('staff.operator.cod_restricted', language)}"
+            )
         text += f"\n\n{i18n.get('staff.operator.select_payment', language)}"
 
-        keyboard = OperatorKeyboards.payment_methods(language)
+        if not available_methods:
+            await query.edit_message_text(
+                text,
+                reply_markup=CommonKeyboards.back_button(language, "staff_back_to_main"),
+                parse_mode='HTML',
+            )
+            return SELECT_PRODUCTS
+
+        keyboard = OperatorKeyboards.payment_methods(language, available_methods)
         await query.edit_message_text(text, reply_markup=keyboard, parse_mode='HTML')
         return SELECT_PAYMENT
 
@@ -309,6 +342,13 @@ class CreateOrderHandler(BaseHandler):
                 return SELECT_PAYMENT
 
             method = query.data[len(prefix):]
+            allowed_methods = set(context.user_data.get('new_order', {}).get('available_payment_methods') or [])
+            if allowed_methods and method not in allowed_methods:
+                await query.answer(
+                    i18n.get('staff.operator.payment_unavailable', language),
+                    show_alert=True,
+                )
+                return SELECT_PAYMENT
             context.user_data['new_order']['payment_method'] = method
 
             # Ask for delivery notes
@@ -354,6 +394,10 @@ class CreateOrderHandler(BaseHandler):
         payment = order_data.get('payment_method', 'cash')
         payment_label = i18n.get(f'staff.operator.payment_{payment}', language)
         text += f"\n\U0001f4b3 {payment_label}"
+
+        restrictions = order_data.get('payment_restrictions') or {}
+        if restrictions.get('cod_restricted'):
+            text += f"\n\u26a0\ufe0f {i18n.get('staff.operator.cod_restricted', language)}"
 
         notes = order_data.get('delivery_notes')
         if notes:

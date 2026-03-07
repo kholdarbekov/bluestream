@@ -96,6 +96,15 @@ class ActiveDeliveryHandler(BaseHandler):
                     lines.append(f"\U0001f4b0 {total} ({payment_label})")
                 else:
                     lines.append(f"\U0001f4b0 {total}")
+                if payment == 'cash':
+                    lines.append(
+                        f"\U0001f9fe {i18n.get('staff.delivery.cash_collected_label', language)}: "
+                        f"{format_currency(delivery.get('amount_collected'), language=language)}"
+                    )
+                    lines.append(
+                        f"\U0001f4b8 {i18n.get('staff.delivery.cash_outstanding_label', language)}: "
+                        f"{format_currency(delivery.get('outstanding_amount'), language=language)}"
+                    )
 
                 text = '\n'.join(lines)
                 delivery_id = delivery.get('delivery_id') or delivery.get('id')
@@ -199,6 +208,15 @@ class ActiveDeliveryHandler(BaseHandler):
                 payment_label = i18n.get(f'staff.delivery.payment.{payment}', language)
                 payment_info += f" ({payment_label})"
             lines.append(payment_info)
+            if payment == 'cash':
+                lines.append(
+                    f"\U0001f9fe {i18n.get('staff.delivery.cash_collected_label', language)}: "
+                    f"{format_currency(delivery.get('amount_collected'), language=language)}"
+                )
+                lines.append(
+                    f"\U0001f4b8 {i18n.get('staff.delivery.cash_outstanding_label', language)}: "
+                    f"{format_currency(delivery.get('outstanding_amount'), language=language)}"
+                )
 
             # Delivery notes
             notes = delivery.get('delivery_notes', '')
@@ -208,9 +226,14 @@ class ActiveDeliveryHandler(BaseHandler):
             # Store delivery info in context for status updates/navigation
             context.user_data['current_delivery'] = {
                 'delivery_id': delivery_id,
+                'order_id': delivery.get('order_id'),
+                'customer_id': delivery.get('customer_id'),
                 'status': status,
                 'total_amount': delivery.get('total_amount', 0),
                 'payment_method': payment,
+                'payment_status': delivery.get('payment_status'),
+                'amount_collected': delivery.get('amount_collected', 0),
+                'outstanding_amount': delivery.get('outstanding_amount', 0),
                 'customer_phone': customer_phone,
                 'address': address,
                 # Origin: driver's last known point

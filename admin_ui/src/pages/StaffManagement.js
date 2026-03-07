@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import {
     Card, Tabs, Row, Col, Statistic, Button, Typography, Space, Table,
-    Select, message, Input, Modal,
+    Select, message, Input, Modal, Tag,
 } from 'antd';
 import {
     TeamOutlined, UserOutlined, CarOutlined, LinkOutlined,
@@ -9,6 +9,7 @@ import {
 } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from 'react-query';
 import { useTranslation } from 'react-i18next';
+import { useNavigate } from 'react-router-dom';
 import staffService from '../services/staffService';
 
 const { Title, Text } = Typography;
@@ -18,6 +19,7 @@ const { Option } = Select;
 const StaffManagement = () => {
     const { t } = useTranslation(['staff', 'common']);
     const queryClient = useQueryClient();
+    const navigate = useNavigate();
 
     const [activeTab, setActiveTab] = useState('overview');
     const [cashPeriod, setCashPeriod] = useState('day');
@@ -85,6 +87,8 @@ const StaffManagement = () => {
 
     const overview = overviewData?.data?.data?.overview || {};
     const cashReport = cashData?.data?.data?.report || [];
+    const cashSessions = cashData?.data?.data?.sessions || [];
+    const cashSummary = cashData?.data?.data?.summary || {};
     const cashGrandTotal = cashData?.data?.data?.grand_total_cash || 0;
     const deliveryPersons = deliveryPersonsData?.data?.data?.items || [];
     const operators = operatorsData?.data?.data?.items || [];
@@ -193,6 +197,71 @@ const StaffManagement = () => {
             dataIndex: 'total_cash_collected',
             key: 'total_cash_collected',
             render: (val) => `${(val || 0).toLocaleString()} UZS`,
+        },
+        {
+            title: t('staff:blocked_sessions', 'Blocked'),
+            dataIndex: 'blocked_session_count',
+            key: 'blocked_session_count',
+        },
+        {
+            title: t('staff:mismatch_sessions', 'Mismatches'),
+            dataIndex: 'mismatch_session_count',
+            key: 'mismatch_session_count',
+        },
+        {
+            title: t('staff:overdue_sessions', 'Overdue'),
+            dataIndex: 'overdue_session_count',
+            key: 'overdue_session_count',
+        },
+    ];
+
+    const sessionColumns = [
+        {
+            title: t('staff:driver_name'),
+            dataIndex: 'driver_name',
+            key: 'driver_name',
+        },
+        {
+            title: t('staff:business_date', 'Business Date'),
+            dataIndex: 'business_date',
+            key: 'business_date',
+        },
+        {
+            title: t('staff:status', 'Status'),
+            dataIndex: 'status',
+            key: 'status',
+            render: (value, record) => (
+                <Tag color={record.blocked_from_cod ? 'red' : value === 'verified' ? 'green' : 'blue'}>
+                    {value}
+                </Tag>
+            ),
+        },
+        {
+            title: t('staff:expected_cash', 'Expected Cash'),
+            dataIndex: 'expected_cash',
+            key: 'expected_cash',
+            render: (value) => `${(value || 0).toLocaleString()} UZS`,
+        },
+        {
+            title: t('staff:declared_cash', 'Declared Cash'),
+            dataIndex: 'declared_cash',
+            key: 'declared_cash',
+            render: (value) => (value == null ? '—' : `${value.toLocaleString()} UZS`),
+        },
+        {
+            title: t('staff:verified_cash', 'Verified Cash'),
+            dataIndex: 'verified_cash',
+            key: 'verified_cash',
+            render: (value) => (value == null ? '—' : `${value.toLocaleString()} UZS`),
+        },
+        {
+            title: t('staff:variance', 'Variance'),
+            dataIndex: 'verified_variance',
+            key: 'verified_variance',
+            render: (value, record) => {
+                const variance = value == null ? record.declared_variance : value;
+                return `${(variance || 0).toLocaleString()} UZS`;
+            },
         },
     ];
 
@@ -383,6 +452,11 @@ const StaffManagement = () => {
                                     {t('common:refresh')}
                                 </Button>
                             </Col>
+                            <Col>
+                                <Button type="primary" onClick={() => navigate('/delivery/reports')}>
+                                    {t('staff:open_reconciliation_workbench', 'Open Delivery Reports Workbench')}
+                                </Button>
+                            </Col>
                             <Col flex="auto" style={{ textAlign: 'right' }}>
                                 <Statistic
                                     title={t('staff:grand_total')}
@@ -394,13 +468,53 @@ const StaffManagement = () => {
                             </Col>
                         </Row>
 
+                        <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
+                            <Col xs={24} sm={8} md={6}>
+                                <Statistic
+                                    title={t('staff:blocked_sessions', 'Blocked Sessions')}
+                                    value={cashSummary.blocked_session_count || 0}
+                                    valueStyle={{ color: '#ff4d4f' }}
+                                />
+                            </Col>
+                            <Col xs={24} sm={8} md={6}>
+                                <Statistic
+                                    title={t('staff:mismatch_sessions', 'Mismatches')}
+                                    value={cashSummary.mismatch_session_count || 0}
+                                    valueStyle={{ color: '#faad14' }}
+                                />
+                            </Col>
+                            <Col xs={24} sm={8} md={6}>
+                                <Statistic
+                                    title={t('staff:overdue_sessions', 'Overdue')}
+                                    value={cashSummary.overdue_session_count || 0}
+                                    valueStyle={{ color: '#cf1322' }}
+                                />
+                            </Col>
+                            <Col xs={24} sm={8} md={6}>
+                                <Statistic
+                                    title={t('staff:open_sessions', 'Open Sessions')}
+                                    value={cashSummary.open_session_count || 0}
+                                />
+                            </Col>
+                        </Row>
+
                         <Table
                             columns={cashColumns}
                             dataSource={cashReport}
                             rowKey="driver_id"
                             loading={cashLoading}
                             pagination={false}
-                            scroll={{ x: 600 }}
+                            scroll={{ x: 900 }}
+                        />
+
+                        <Table
+                            style={{ marginTop: 24 }}
+                            columns={sessionColumns}
+                            dataSource={cashSessions}
+                            rowKey="id"
+                            loading={cashLoading}
+                            pagination={false}
+                            scroll={{ x: 960 }}
                         />
                     </Card>
                 </TabPane>

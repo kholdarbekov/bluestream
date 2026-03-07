@@ -79,7 +79,11 @@ class User(db.Model, TimestampMixin):
     addresses = relationship('UserAddress', back_populates='user', cascade='all, delete-orphan')
     orders = relationship('Order', foreign_keys='Order.user_id', back_populates='user')
     subscriptions = relationship('Subscription', back_populates='user')
-    payments = relationship('Payment', back_populates='user')
+    payments = relationship(
+        'Payment',
+        foreign_keys='Payment.user_id',
+        back_populates='user',
+    )
     loyalty_transactions = relationship('LoyaltyTransaction', back_populates='user')
     reviews = relationship('Review', back_populates='user')
     notifications = relationship('Notification', back_populates='user')

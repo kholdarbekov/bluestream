@@ -17,12 +17,104 @@ from shared.staff_constants import DELIVERY_STATUS_TRANSITIONS
 
 logger = logging.getLogger(__name__)
 
-# Conversation state for cash input
+# Conversation states handled via the global text router in staff_bot.bot.
 CASH_INPUT = 100
+CASH_NOTE_INPUT = 101
+RECONCILIATION_INPUT = 102
 
 
 class StatusUpdateHandler(BaseHandler):
     """Handle delivery status transitions"""
+
+    @staticmethod
+    def _parse_amount(raw_text: str) -> float:
+        text = raw_text.strip().replace(',', '').replace(' ', '')
+        cash_amount = float(text)
+        if cash_amount < 0:
+            raise ValueError("Negative amount")
+        return cash_amount
+
+    @staticmethod
+    def _clear_delivery_cash_flow(context: ContextTypes.DEFAULT_TYPE):
+        context.user_data.pop('pending_delivery_cash_flow', None)
+        context.user_data.pop('pending_reconciliation_flow', None)
+
+    @staticmethod
+    def _format_session_summary(session: dict, language: str) -> str:
+        status = session.get('status') or i18n.get('staff.common.not_available', language)
+        expected_cash = format_currency(session.get('expected_cash'), language=language)
+        declared_cash = session.get('declared_cash')
+        declared_variance = format_currency(session.get('declared_variance'), language=language)
+        lines = [
+            f"\U0001f9fe <b>{i18n.get('staff.menu.cash_reconciliation', language)}</b>",
+            f"{i18n.get('staff.delivery.current_status', language)}: {status}",
+            f"\U0001f4b0 {i18n.get('staff.delivery.expected_cash_label', language)}: {expected_cash}",
+        ]
+        if declared_cash is not None:
+            lines.append(
+                f"\U0001f4b5 {i18n.get('staff.delivery.declared_cash_label', language)}: "
+                f"{format_currency(declared_cash, language=language)}"
+            )
+            lines.append(
+                f"\u26a0\ufe0f {i18n.get('staff.delivery.cash_variance_label', language)}: {declared_variance}"
+            )
+        notes = session.get('notes')
+        if notes:
+            lines.append(f"\U0001f4ac {notes}")
+        return '\n'.join(lines)
+
+    async def _submit_delivery_completion(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        *,
+        delivery_id: int,
+        cash_amount: float,
+        notes: str = None,
+    ):
+        language = await self._get_language(update, context)
+        token = await self._get_auth_token(update, context)
+        if not token:
+            await self._handle_auth_error(update, language)
+            return ConversationHandler.END
+
+        metadata = {'cash_collected': cash_amount}
+        if notes:
+            metadata['notes'] = notes
+
+        async with api_client as client:
+            response = await client.update_delivery_status(
+                token, delivery_id, 'delivered', metadata=metadata
+            )
+
+        if not response.success:
+            await self._handle_api_response_error(update, response, language)
+            return ConversationHandler.END
+
+        self._clear_delivery_cash_flow(context)
+        if context.user_data.get('current_delivery'):
+            context.user_data['current_delivery']['status'] = 'delivered'
+
+        message = (
+            f"\u2705 {i18n.get('staff.delivery.delivered_success', language)}\n"
+            f"\U0001f4b5 {i18n.get('staff.delivery.cash_recorded', language, amount=format_currency(cash_amount, language=language))}"
+        )
+        if notes:
+            message += f"\n\U0001f4ac {notes}"
+
+        if update.callback_query:
+            await update.callback_query.edit_message_text(
+                message,
+                reply_markup=CommonKeyboards.back_button(language, "staff_active_deliveries"),
+                parse_mode='HTML',
+            )
+        else:
+            await update.message.reply_text(
+                message,
+                reply_markup=CommonKeyboards.back_button(language, "staff_active_deliveries"),
+                parse_mode='HTML',
+            )
+        return ConversationHandler.END
 
     @require_auth
     @require_delivery_driver
@@ -61,8 +153,7 @@ class StatusUpdateHandler(BaseHandler):
                 total_amount = delivery_info.get('total_amount', 0)
 
                 if payment_method == 'cash' and total_amount > 0:
-                    # Cash payment - confirm collection amount
-                    keyboard = DeliveryKeyboards.cash_collection_confirm(
+                    keyboard = DeliveryKeyboards.cash_collection_options(
                         language, delivery_id, total_amount
                     )
                     await query.edit_message_text(
@@ -187,54 +278,39 @@ class StatusUpdateHandler(BaseHandler):
 
     @require_auth
     @require_delivery_driver
-    async def confirm_cash_collection(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Confirm cash collection with the order total amount"""
+    async def confirm_full_cash_collection(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Complete delivery and record the full cash amount."""
         query = update.callback_query
         await query.answer()
-        language = await self._get_language(update, context)
-        token = await self._get_auth_token(update, context)
-        if not token:
-            await self._handle_auth_error(update, language)
-            return
 
         try:
-            # Parse: staff_confirm_cash_{delivery_id}
             delivery_id = int(query.data.split('_')[-1])
             delivery_info = context.user_data.get('current_delivery', {})
             cash_amount = delivery_info.get('total_amount', 0)
-
-            async with api_client as client:
-                response = await client.update_delivery_status(
-                    token, delivery_id, 'delivered',
-                    metadata={'cash_collected': cash_amount}
-                )
-
-            if not response.success:
-                await self._handle_api_response_error(update, response, language)
-                return
-
-            await query.edit_message_text(
-                f"\u2705 {i18n.get('staff.delivery.delivered_success', language)}\n"
-                f"\U0001f4b5 {i18n.get('staff.delivery.cash_recorded', language, amount=format_currency(cash_amount, language=language))}",
-                reply_markup=CommonKeyboards.back_button(language, "staff_active_deliveries"),
-                parse_mode='HTML'
+            await self._submit_delivery_completion(
+                update,
+                context,
+                delivery_id=delivery_id,
+                cash_amount=cash_amount,
             )
-
         except Exception as e:
             logger.error(f"Error confirming cash collection: {e}", exc_info=True)
             await self._handle_error(update, context)
 
     @require_auth
     @require_delivery_driver
-    async def edit_cash_amount(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Prompt user to enter custom cash amount"""
+    async def start_partial_cash_collection(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Prompt for a partial cash amount before delivery completion."""
         query = update.callback_query
         await query.answer()
         language = await self._get_language(update, context)
 
         try:
             delivery_id = int(query.data.split('_')[-1])
-            context.user_data['editing_cash_delivery_id'] = delivery_id
+            context.user_data['pending_delivery_cash_flow'] = {
+                'delivery_id': delivery_id,
+                'flow_type': 'partial',
+            }
 
             await query.edit_message_text(
                 i18n.get('staff.delivery.enter_cash_amount', language),
@@ -249,54 +325,197 @@ class StatusUpdateHandler(BaseHandler):
 
     @require_auth
     @require_delivery_driver
+    async def start_no_cash_collection(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Prompt for the required note when no cash was collected."""
+        query = update.callback_query
+        await query.answer()
+        language = await self._get_language(update, context)
+
+        try:
+            delivery_id = int(query.data.split('_')[-1])
+            context.user_data['pending_delivery_cash_flow'] = {
+                'delivery_id': delivery_id,
+                'flow_type': 'none',
+                'cash_amount': 0.0,
+            }
+            await query.edit_message_text(
+                i18n.get('staff.delivery.enter_no_cash_reason', language),
+                parse_mode='HTML',
+            )
+            return CASH_NOTE_INPUT
+
+        except Exception as e:
+            logger.error(f"Error starting zero-cash delivery flow: {e}", exc_info=True)
+            await self._handle_error(update, context)
+
+    @require_auth
+    @require_delivery_driver
     async def receive_cash_amount(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Receive and process custom cash amount"""
+        """Receive a partial cash amount and then require an audit note."""
+        language = await self._get_language(update, context)
+        flow = context.user_data.get('pending_delivery_cash_flow') or {}
+        if flow.get('flow_type') != 'partial':
+            return ConversationHandler.END
+
+        try:
+            try:
+                cash_amount = self._parse_amount(update.message.text)
+            except (TypeError, ValueError):
+                await update.message.reply_text(
+                    i18n.get('staff.delivery.invalid_amount', language)
+                )
+                return CASH_INPUT
+
+            delivery_info = context.user_data.get('current_delivery', {})
+            order_total = float(delivery_info.get('total_amount') or 0)
+            if cash_amount <= 0 or (order_total and cash_amount > order_total):
+                await update.message.reply_text(
+                    i18n.get('staff.delivery.invalid_amount', language)
+                )
+                return CASH_INPUT
+
+            flow['cash_amount'] = cash_amount
+            context.user_data['pending_delivery_cash_flow'] = flow
+            await update.message.reply_text(
+                i18n.get('staff.delivery.enter_partial_cash_reason', language),
+                parse_mode='HTML',
+            )
+            return CASH_NOTE_INPUT
+
+        except Exception as e:
+            logger.error(f"Error receiving cash amount: {e}", exc_info=True)
+            await self._handle_error(update, context)
+            return ConversationHandler.END
+
+    @require_auth
+    @require_delivery_driver
+    async def receive_cash_note(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Receive the required note for a partial or zero-cash delivery completion."""
+        language = await self._get_language(update, context)
+        flow = context.user_data.get('pending_delivery_cash_flow') or {}
+        if flow.get('flow_type') not in {'partial', 'none'}:
+            return ConversationHandler.END
+
+        try:
+            note = (update.message.text or '').strip()
+            if not note:
+                await update.message.reply_text(
+                    i18n.get('staff.delivery.note_required', language)
+                )
+                return CASH_NOTE_INPUT
+
+            delivery_id = flow.get('delivery_id')
+            cash_amount = flow.get('cash_amount', 0.0)
+            return await self._submit_delivery_completion(
+                update,
+                context,
+                delivery_id=delivery_id,
+                cash_amount=cash_amount,
+                notes=note,
+            )
+
+        except Exception as e:
+            logger.error(f"Error receiving cash collection note: {e}", exc_info=True)
+            await self._handle_error(update, context)
+            return ConversationHandler.END
+
+    @require_auth
+    @require_delivery_driver
+    async def show_reconciliation_session(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Show the driver's open reconciliation session."""
+        language = await self._get_language(update, context)
+        token = await self._get_auth_token(update, context)
+        if not token:
+            await self._handle_auth_error(update, language)
+            return
+
+        try:
+            async with api_client as client:
+                response = await client.get_reconciliation_session(token)
+
+            if not response.success:
+                await self._handle_api_response_error(update, response, language)
+                return
+
+            session = response.data or {}
+            text = self._format_session_summary(session, language)
+            keyboard = DeliveryKeyboards.reconciliation_actions(
+                language,
+                can_submit=session.get('status') in {'open', 'overdue'},
+            )
+
+            if update.callback_query:
+                await update.callback_query.answer()
+                await update.callback_query.edit_message_text(text, reply_markup=keyboard, parse_mode='HTML')
+            else:
+                await update.message.reply_text(text, reply_markup=keyboard, parse_mode='HTML')
+
+        except Exception as e:
+            logger.error(f"Error showing reconciliation session: {e}", exc_info=True)
+            await self._handle_error(update, context)
+
+    @require_auth
+    @require_delivery_driver
+    async def start_reconciliation_submit(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Prompt the driver to enter the counted cash for reconciliation."""
+        query = update.callback_query
+        await query.answer()
+        language = await self._get_language(update, context)
+
+        context.user_data['pending_reconciliation_flow'] = {'action': 'submit'}
+        await query.edit_message_text(
+            i18n.get('staff.delivery.enter_declared_cash', language),
+            parse_mode='HTML',
+        )
+        return RECONCILIATION_INPUT
+
+    @require_auth
+    @require_delivery_driver
+    async def receive_reconciliation_declared_cash(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Submit the declared driver cash amount for reconciliation."""
         language = await self._get_language(update, context)
         token = await self._get_auth_token(update, context)
         if not token:
             await self._handle_auth_error(update, language)
             return ConversationHandler.END
 
+        if not context.user_data.get('pending_reconciliation_flow'):
+            return ConversationHandler.END
+
         try:
-            text = update.message.text.strip().replace(',', '').replace(' ', '')
             try:
-                cash_amount = float(text)
-                if cash_amount < 0:
-                    raise ValueError("Negative amount")
-            except ValueError:
+                declared_cash = self._parse_amount(update.message.text)
+            except (TypeError, ValueError):
                 await update.message.reply_text(
                     i18n.get('staff.delivery.invalid_amount', language)
                 )
-                return CASH_INPUT
-
-            delivery_id = context.user_data.pop('editing_cash_delivery_id', None)
-            if not delivery_id:
-                await update.message.reply_text(
-                    i18n.get('staff.error_occurred', language)
-                )
-                return ConversationHandler.END
+                return RECONCILIATION_INPUT
 
             async with api_client as client:
-                response = await client.update_delivery_status(
-                    token, delivery_id, 'delivered',
-                    metadata={'cash_collected': cash_amount}
+                response = await client.submit_reconciliation_session(
+                    token,
+                    {'declared_cash': declared_cash},
                 )
 
             if not response.success:
                 await self._handle_api_response_error(update, response, language)
                 return ConversationHandler.END
 
-            await update.message.reply_text(
-                f"\u2705 {i18n.get('staff.delivery.delivered_success', language)}\n"
-                f"\U0001f4b5 {i18n.get('staff.delivery.cash_recorded', language, amount=format_currency(cash_amount, language=language))}",
-                reply_markup=CommonKeyboards.back_button(language, "staff_active_deliveries"),
-                parse_mode='HTML'
+            self._clear_delivery_cash_flow(context)
+            session = response.data or {}
+            message = (
+                f"\u2705 {i18n.get('staff.delivery.reconciliation_submitted', language)}\n\n"
+                f"{self._format_session_summary(session, language)}"
             )
-
+            await update.message.reply_text(
+                message,
+                reply_markup=CommonKeyboards.back_button(language, "staff_back_to_main"),
+                parse_mode='HTML',
+            )
             return ConversationHandler.END
 
         except Exception as e:
-            logger.error(f"Error receiving cash amount: {e}", exc_info=True)
+            logger.error(f"Error submitting reconciliation session: {e}", exc_info=True)
             await self._handle_error(update, context)
             return ConversationHandler.END
 

@@ -122,6 +122,13 @@ def get_order_pool():
             'address': get_address_line(address),
             'total_amount': float(order.total_amount) if order and order.total_amount else 0,
             'payment_method': order.payment_method.value if order and order.payment_method else 'cash',
+            'payment_status': (
+                order.payment.status.value
+                if order and getattr(order, 'payment', None) and hasattr(order.payment.status, 'value')
+                else None
+            ),
+            'amount_collected': float(order.payment.amount_collected or 0) if order and getattr(order, 'payment', None) else 0,
+            'outstanding_amount': float(order.payment.outstanding_amount or 0) if order and getattr(order, 'payment', None) else 0,
             'item_count': len(order.order_items) if order and order.order_items else 0,
             'items': order_items,
             'delivery_notes': order.delivery_notes or '',
@@ -228,6 +235,8 @@ def get_active_deliveries():
 
         items.append({
             'delivery_id': delivery.id,
+            'order_id': order.id if order else None,
+            'customer_id': order.user_id if order else None,
             'order_number': order.order_number if order else None,
             'status': delivery.status.value if hasattr(delivery.status, 'value') else delivery.status,
             'customer_name': f"{order.user.first_name} {order.user.last_name or ''}".strip() if order and order.user else '',
@@ -236,6 +245,13 @@ def get_active_deliveries():
             'district': address.district if address else '',
             'total_amount': float(order.total_amount) if order and order.total_amount else 0,
             'payment_method': order.payment_method.value if order and order.payment_method else 'cash',
+            'payment_status': (
+                order.payment.status.value
+                if order and getattr(order, 'payment', None) and hasattr(order.payment.status, 'value')
+                else None
+            ),
+            'amount_collected': float(order.payment.amount_collected or 0) if order and getattr(order, 'payment', None) else 0,
+            'outstanding_amount': float(order.payment.outstanding_amount or 0) if order and getattr(order, 'payment', None) else 0,
             'items': item_list,
             'delivery_notes': order.delivery_notes or '',
             # Destination coordinates (order address)
@@ -275,6 +291,13 @@ def get_delivery_history():
             'delivered_at': delivery.delivered_at.isoformat() if delivery.delivered_at else None,
             'updated_at': delivery.updated_at.isoformat() if delivery.updated_at else None,
             'cash_collected': float(delivery.cash_collected) if delivery.cash_collected else None,
+            'payment_status': (
+                order.payment.status.value
+                if order and getattr(order, 'payment', None) and hasattr(order.payment.status, 'value')
+                else None
+            ),
+            'amount_collected': float(order.payment.amount_collected or 0) if order and getattr(order, 'payment', None) else 0,
+            'outstanding_amount': float(order.payment.outstanding_amount or 0) if order and getattr(order, 'payment', None) else 0,
         })
 
     return success_response({
@@ -294,6 +317,128 @@ def get_delivery_stats():
 
     stats = StaffService.get_delivery_stats(current_user_id, period)
     return success_response(stats)
+
+
+@staff_bp.route('/cash-collections', methods=['POST'])
+@handle_api_exception
+@jwt_required()
+@require_staff_roles('delivery_driver')
+def record_cash_collection():
+    """Record a standalone COD cash collection."""
+    current_user_id = get_jwt_identity()
+    data = request.get_json() or {}
+
+    customer_id = data.get('customer_id')
+    amount = data.get('amount')
+    if customer_id is None:
+        raise ValidationError("customer_id is required", error_code='STAFF_CUSTOMER_ID_REQUIRED')
+    if amount is None:
+        raise ValidationError("amount is required", error_code='STAFF_COLLECTION_AMOUNT_REQUIRED')
+
+    from business_app.services.cash_collection_service import CashCollectionService
+    from business_app.services.driver_reconciliation_service import DriverReconciliationService
+
+    source = data.get('source')
+    if not source:
+        source = 'next_delivery' if data.get('delivery_id') else 'standalone_meeting'
+
+    event = CashCollectionService().post_collection(
+        customer_id=customer_id,
+        amount=amount,
+        source=source,
+        collector_user_id=current_user_id,
+        recorded_by_user_id=current_user_id,
+        order_id=data.get('order_id'),
+        delivery_id=data.get('delivery_id'),
+        notes=data.get('notes'),
+        proof_data=data.get('proof_data') or {},
+        occurred_at=data.get('occurred_at'),
+        manual_allocations=data.get('manual_allocations'),
+        allocation_mode=data.get('allocation_mode', 'auto'),
+        idempotency_key=data.get('idempotency_key'),
+    )
+
+    session_payload = None
+    if event.driver_cash_session_id:
+        session_payload = DriverReconciliationService().get_session_detail(event.driver_cash_session_id)
+
+    return success_response({
+        'cash_collection_event': event.to_dict(),
+        'driver_cash_session': session_payload,
+    }, status_code=201)
+
+
+@staff_bp.route('/reconciliation/session', methods=['GET'])
+@handle_api_exception
+@jwt_required()
+@require_staff_roles('delivery_driver')
+def get_reconciliation_session():
+    """Get the driver's open reconciliation session for a business date."""
+    current_user_id = get_jwt_identity()
+    business_date = request.args.get('business_date')
+
+    from business_app.services.driver_reconciliation_service import DriverReconciliationService
+
+    session = DriverReconciliationService().get_open_session_for_driver(
+        current_user_id,
+        business_date=business_date,
+    )
+    payload = DriverReconciliationService().get_session_detail(session.id)
+    return success_response(payload)
+
+
+@staff_bp.route('/reconciliation/session/submit', methods=['POST'])
+@handle_api_exception
+@jwt_required()
+@require_staff_roles('delivery_driver')
+def submit_reconciliation_session():
+    """Submit end-of-day driver reconciliation."""
+    current_user_id = get_jwt_identity()
+    data = request.get_json() or {}
+    if data.get('declared_cash') is None:
+        raise ValidationError("declared_cash is required", error_code='STAFF_DECLARED_CASH_REQUIRED')
+
+    from business_app.services.driver_reconciliation_service import DriverReconciliationService
+
+    session = DriverReconciliationService().submit_session(
+        driver_user_id=current_user_id,
+        declared_cash=data.get('declared_cash'),
+        notes=data.get('notes'),
+        business_date=data.get('business_date'),
+        submitted_by_user_id=current_user_id,
+    )
+    payload = DriverReconciliationService().get_session_detail(session.id)
+    return success_response(payload)
+
+
+@staff_bp.route('/customers/<int:customer_id>/cod-statement', methods=['GET'])
+@handle_api_exception
+@jwt_required()
+@require_staff_roles('delivery_driver', 'operator')
+def get_staff_customer_cod_statement(customer_id):
+    """Get COD receivable statement for a customer in staff workflows."""
+    from business_app.services.cash_collection_service import CashCollectionService
+
+    statement = CashCollectionService().get_customer_cod_statement(customer_id)
+    return success_response(statement)
+
+
+@staff_bp.route('/customers/search', methods=['GET'])
+@handle_api_exception
+@jwt_required()
+@require_staff_roles('delivery_driver', 'operator')
+def search_customers_for_cod_collection():
+    """Search customers for COD collection workflows."""
+    query = request.args.get('q', '')
+    search_type = request.args.get('type', 'phone')
+    only_with_open_cod = request.args.get('only_with_open_cod', 'true').lower() != 'false'
+
+    items = StaffService.search_customers_for_cod_collection(
+        query,
+        search_type,
+        only_with_open_cod=only_with_open_cod,
+    )
+    return success_response({'items': items, 'total': len(items)})
 
 
 # --- Operator Operations ---
@@ -436,6 +581,15 @@ def get_client_addresses(user_id):
         })
 
     return success_response({'items': items, 'total': len(items)})
+
+
+@staff_bp.route('/operator/users/<int:user_id>/payment-methods', methods=['GET'])
+@handle_api_exception
+@jwt_required()
+@require_staff_roles('operator')
+def get_client_payment_methods(user_id):
+    """Get debt-aware payment methods for an operator-created client order."""
+    return success_response(StaffService.get_client_payment_methods(user_id))
 
 
 @staff_bp.route('/operator/users/<int:user_id>/corporate-balance', methods=['GET'])

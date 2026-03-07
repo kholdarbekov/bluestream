@@ -99,3 +99,31 @@ class TestBusinessAPIClient:
 
         assert response.success is False
         assert "circuit breaker open" in (response.error or "").lower()
+
+    async def test_get_notification_preferences_calls_expected_endpoint(self):
+        client = BusinessAPIClient()
+        client._make_request = AsyncMock(return_value=APIResponse(success=True, data={"ok": True}))
+
+        result = await client.get_notification_preferences("user-token")
+
+        assert result.success is True
+        client._make_request.assert_awaited_once_with(
+            "GET",
+            "/api/v1/notifications/preferences",
+            user_token="user-token",
+        )
+
+    async def test_update_notification_preferences_calls_expected_endpoint(self):
+        client = BusinessAPIClient()
+        client._make_request = AsyncMock(return_value=APIResponse(success=True, data={"ok": True}))
+        payload = {"delivery_telegram_status_updates_enabled": False}
+
+        result = await client.update_notification_preferences("user-token", payload)
+
+        assert result.success is True
+        client._make_request.assert_awaited_once_with(
+            "PUT",
+            "/api/v1/notifications/preferences",
+            user_token="user-token",
+            data=payload,
+        )

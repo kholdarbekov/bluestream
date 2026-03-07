@@ -10,6 +10,8 @@ from shared.enums import (  # noqa: F401
     OrderStatus,
     PaymentStatus,
     PaymentMethod,
+    CashCollectionSource,
+    DriverCashSessionStatus,
     DeliveryStatus,
     SubscriptionStatus,
     SubscriptionFrequency,

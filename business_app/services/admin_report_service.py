@@ -1,6 +1,7 @@
 """Admin report generation service."""
 
 from datetime import datetime, UTC
+from decimal import Decimal
 from typing import Any, Dict
 
 from sqlalchemy import desc, func
@@ -9,12 +10,20 @@ from business_app import db
 from business_app.models.audit import AuditEventType, AuditLog
 from business_app.models.delivery import Delivery, DeliveryPerson
 from business_app.models.order import Order, OrderItem
-from business_app.models.payment import Payment
+from business_app.models.payment import CashCollectionAllocation, CashCollectionEvent, DriverCashSession, Payment
 from business_app.models.product import Product
 from business_app.models.subscription import Subscription
 from business_app.models.user import User
 from business_app.utils.api_responses import success_response
-from business_app.utils.constants import DeliveryStatus, OrderStatus, PaymentStatus, SubscriptionFrequency, UserRole
+from business_app.utils.constants import (
+    DeliveryStatus,
+    DriverCashSessionStatus,
+    OrderStatus,
+    PaymentMethod,
+    PaymentStatus,
+    SubscriptionFrequency,
+    UserRole,
+)
 from business_app.utils.exceptions import ValidationError
 
 
@@ -330,67 +339,227 @@ class AdminReportService:
 
     @staticmethod
     def _generate_financial_summary_report(start_dt, end_dt, filters):
-        """Generate financial summary report."""
-        total_revenue = db.session.query(
-            func.sum(Payment.amount)
-        ).filter(
-            Payment.created_at >= start_dt,
-            Payment.created_at <= end_dt,
-            Payment.status == PaymentStatus.COMPLETED
-        ).scalar() or 0
+        """Generate financial summary report from ledger/session truth."""
+        settled_at = func.coalesce(Payment.paid_at, Payment.created_at)
 
-        by_method = db.session.query(
-            Payment.payment_method,
-            func.count(Payment.id),
-            func.sum(Payment.amount)
-        ).filter(
-            Payment.created_at >= start_dt,
-            Payment.created_at <= end_dt,
-            Payment.status == PaymentStatus.COMPLETED
-        ).group_by(Payment.payment_method).all()
+        electronic_total = (
+            db.session.query(func.sum(Payment.amount))
+            .filter(
+                settled_at >= start_dt,
+                settled_at <= end_dt,
+                Payment.payment_method != PaymentMethod.CASH,
+                Payment.status == PaymentStatus.COMPLETED,
+            )
+            .scalar()
+            or 0
+        )
+
+        electronic_by_method = (
+            db.session.query(
+                Payment.payment_method,
+                func.count(Payment.id),
+                func.sum(Payment.amount),
+            )
+            .filter(
+                settled_at >= start_dt,
+                settled_at <= end_dt,
+                Payment.payment_method != PaymentMethod.CASH,
+                Payment.status == PaymentStatus.COMPLETED,
+            )
+            .group_by(Payment.payment_method)
+            .all()
+        )
+
+        cash_allocations_query = (
+            db.session.query(
+                CashCollectionEvent.source,
+                func.count(func.distinct(CashCollectionEvent.id)),
+                func.sum(CashCollectionAllocation.allocated_amount),
+            )
+            .join(
+                CashCollectionAllocation,
+                CashCollectionAllocation.cash_collection_event_id == CashCollectionEvent.id,
+            )
+            .filter(
+                CashCollectionEvent.occurred_at >= start_dt,
+                CashCollectionEvent.occurred_at <= end_dt,
+                CashCollectionEvent.voided_at.is_(None),
+                CashCollectionAllocation.reversed_at.is_(None),
+            )
+            .group_by(CashCollectionEvent.source)
+            .all()
+        )
+
+        cash_collected_total = sum(
+            Decimal(str(amount or 0))
+            for _source, _count, amount in cash_allocations_query
+        )
+
+        delivered_revenue_total = (
+            db.session.query(func.sum(Order.total_amount))
+            .join(Delivery, Delivery.order_id == Order.id)
+            .filter(
+                Delivery.status == DeliveryStatus.DELIVERED,
+                Delivery.delivered_at >= start_dt,
+                Delivery.delivered_at <= end_dt,
+            )
+            .scalar()
+            or 0
+        )
+
+        total_refunds = (
+            db.session.query(func.sum(Payment.amount))
+            .filter(
+                settled_at >= start_dt,
+                settled_at <= end_dt,
+                Payment.status == PaymentStatus.REFUNDED,
+            )
+            .scalar()
+            or 0
+        )
+
+        outstanding_rows = (
+            db.session.query(Payment.outstanding_amount, Delivery.delivered_at)
+            .join(Order, Payment.order_id == Order.id)
+            .join(Delivery, Delivery.order_id == Order.id)
+            .filter(
+                Payment.payment_method == PaymentMethod.CASH,
+                Payment.outstanding_amount > 0,
+                Delivery.status == DeliveryStatus.DELIVERED,
+            )
+            .all()
+        )
+
+        outstanding_total = sum(Decimal(str(amount or 0)) for amount, _ in outstanding_rows)
+        aging = {'0_7_days': 0.0, '8_30_days': 0.0, '31_plus_days': 0.0}
+        now = datetime.now(UTC)
+        for amount, delivered_at in outstanding_rows:
+            bucket_amount = float(amount or 0)
+            if delivered_at and delivered_at.tzinfo is None:
+                delivered_at = delivered_at.replace(tzinfo=UTC)
+            age_days = (now - delivered_at).days if delivered_at else 0
+            if age_days <= 7:
+                aging['0_7_days'] += bucket_amount
+            elif age_days <= 30:
+                aging['8_30_days'] += bucket_amount
+            else:
+                aging['31_plus_days'] += bucket_amount
+
+        daily_collected = (
+            db.session.query(
+                func.date(CashCollectionEvent.occurred_at).label('date'),
+                func.sum(CashCollectionAllocation.allocated_amount).label('revenue'),
+            )
+            .join(
+                CashCollectionAllocation,
+                CashCollectionAllocation.cash_collection_event_id == CashCollectionEvent.id,
+            )
+            .filter(
+                CashCollectionEvent.occurred_at >= start_dt,
+                CashCollectionEvent.occurred_at <= end_dt,
+                CashCollectionEvent.voided_at.is_(None),
+                CashCollectionAllocation.reversed_at.is_(None),
+            )
+            .group_by('date')
+            .order_by('date')
+            .all()
+        )
+
+        daily_delivered_revenue = (
+            db.session.query(
+                func.date(Delivery.delivered_at).label('date'),
+                func.sum(Order.total_amount).label('revenue'),
+            )
+            .join(Order, Delivery.order_id == Order.id)
+            .filter(
+                Delivery.status == DeliveryStatus.DELIVERED,
+                Delivery.delivered_at >= start_dt,
+                Delivery.delivered_at <= end_dt,
+            )
+            .group_by('date')
+            .order_by('date')
+            .all()
+        )
+
+        reconciliation_summary = (
+            db.session.query(
+                func.count(DriverCashSession.id),
+                func.coalesce(func.sum(DriverCashSession.expected_cash), 0),
+                func.count().filter(DriverCashSession.status == DriverCashSessionStatus.MISMATCH),
+                func.count().filter(DriverCashSession.status == DriverCashSessionStatus.OVERDUE),
+            )
+            .filter(
+                DriverCashSession.business_date >= start_dt.date(),
+                DriverCashSession.business_date <= end_dt.date(),
+            )
+            .one()
+        )
 
         method_breakdown = [
             {
-                'method': method,
+                'method': method.value if hasattr(method, 'value') else method,
                 'count': count,
-                'amount': float(amount or 0)
+                'amount': float(amount or 0),
             }
-            for method, count, amount in by_method
+            for method, count, amount in electronic_by_method
         ]
+        method_breakdown.append(
+            {
+                'method': PaymentMethod.CASH.value,
+                'count': sum(int(count or 0) for _source, count, _amount in cash_allocations_query),
+                'amount': float(cash_collected_total),
+            }
+        )
 
-        total_refunds = db.session.query(
-            func.sum(Payment.amount)
-        ).filter(
-            Payment.created_at >= start_dt,
-            Payment.created_at <= end_dt,
-            Payment.status == PaymentStatus.REFUNDED
-        ).scalar() or 0
-
-        daily_revenue = db.session.query(
-            func.date(Payment.created_at).label('date'),
-            func.sum(Payment.amount).label('revenue')
-        ).filter(
-            Payment.created_at >= start_dt,
-            Payment.created_at <= end_dt,
-            Payment.status == PaymentStatus.COMPLETED
-        ).group_by('date').order_by('date').all()
+        cash_collection_source_breakdown = [
+            {
+                'source': source.value if hasattr(source, 'value') else source,
+                'count': int(count or 0),
+                'amount': float(amount or 0),
+            }
+            for source, count, amount in cash_allocations_query
+        ]
 
         revenue_trend = [
             {
-                'date': date.isoformat() if date else None,
-                'revenue': float(revenue or 0)
+                'date': date.isoformat() if hasattr(date, 'isoformat') else (str(date) if date else None),
+                'revenue': float(revenue or 0),
             }
-            for date, revenue in daily_revenue
+            for date, revenue in daily_collected
         ]
+
+        delivered_revenue_trend = [
+            {
+                'date': date.isoformat() if hasattr(date, 'isoformat') else (str(date) if date else None),
+                'revenue': float(revenue or 0),
+            }
+            for date, revenue in daily_delivered_revenue
+        ]
+
+        total_collected = Decimal(str(electronic_total or 0)) + cash_collected_total
 
         return {
             'summary': {
-                'total_revenue': float(total_revenue),
+                'total_revenue': float(total_collected),
+                'total_cash_collected': float(cash_collected_total),
+                'total_electronic_collected': float(electronic_total or 0),
+                'delivered_order_revenue': float(delivered_revenue_total),
                 'total_refunds': float(total_refunds),
-                'net_revenue': float(total_revenue - total_refunds)
+                'net_revenue': float(total_collected - Decimal(str(total_refunds or 0))),
+                'outstanding_cod_total': float(outstanding_total),
+                'outstanding_cod_count': len(outstanding_rows),
             },
             'payment_method_breakdown': method_breakdown,
-            'revenue_trend': revenue_trend
+            'cash_collection_source_breakdown': cash_collection_source_breakdown,
+            'revenue_trend': revenue_trend,
+            'delivered_revenue_trend': delivered_revenue_trend,
+            'outstanding_cod_aging': aging,
+            'reconciliation_summary': {
+                'session_count': int(reconciliation_summary[0] or 0),
+                'expected_cash_total': float(reconciliation_summary[1] or 0),
+                'mismatch_session_count': int(reconciliation_summary[2] or 0),
+                'overdue_session_count': int(reconciliation_summary[3] or 0),
+            },
         }
 
     @staticmethod

@@ -71,6 +71,247 @@ describe('AdminService', () => {
     });
   });
 
+  describe('getUserPaymentMethods', () => {
+    it('fetches admin user payment methods', async () => {
+      const mockData = {
+        data: {
+          available_methods: [{ method: 'payme' }],
+          payment_restrictions: { cod_restricted: true }
+        }
+      };
+      api.get.mockResolvedValue({ data: mockData });
+
+      const result = await adminService.getUserPaymentMethods(42);
+
+      expect(api.get).toHaveBeenCalledWith('/admin/users/42/payment-methods');
+      expect(result).toEqual(mockData);
+    });
+  });
+
+  describe('user notification settings', () => {
+    it('fetches user notification settings', async () => {
+      const mockData = {
+        data: {
+          notification_settings: {
+            delivery_telegram_status_updates_enabled: true
+          }
+        }
+      };
+      api.get.mockResolvedValue({ data: mockData });
+
+      const result = await adminService.getUserNotificationSettings(15);
+
+      expect(api.get).toHaveBeenCalledWith('/admin/users/15/notification-settings');
+      expect(result).toEqual(mockData);
+    });
+
+    it('updates user notification settings', async () => {
+      const payload = {
+        delivery_telegram_status_updates_enabled: false,
+        reason: 'Customer requested via phone'
+      };
+      const mockData = { message: 'ok' };
+      api.put.mockResolvedValue({ data: mockData });
+
+      const result = await adminService.updateUserNotificationSettings(15, payload);
+
+      expect(api.put).toHaveBeenCalledWith('/admin/users/15/notification-settings', payload);
+      expect(result).toEqual(mockData);
+    });
+  });
+
+  describe('notification collections', () => {
+    it('normalizes notification campaigns for the notifications page', async () => {
+      api.get.mockResolvedValue({
+        data: {
+          success: true,
+          data: {
+            items: [
+              {
+                id: 4,
+                name: 'Weekend retention push',
+                channel: 'sms',
+                status: 'scheduled',
+                recipient_count: '12',
+                sent_count: '0'
+              }
+            ]
+          },
+          meta: {
+            total: 1,
+            page: 1,
+            per_page: 20,
+            pages: 1,
+            has_next: false,
+            has_prev: false
+          }
+        }
+      });
+
+      const result = await adminService.getNotificationCampaigns({
+        page: 1,
+        per_page: 20,
+        channel: 'telegram'
+      });
+
+      expect(api.get).toHaveBeenCalledWith('/admin/notification-campaigns', {
+        params: { page: 1, per_page: 20, channel: 'telegram' }
+      });
+      expect(result).toEqual({
+        campaigns: [
+          {
+            id: 4,
+            name: 'Weekend retention push',
+            channel: 'sms',
+            category: 'general',
+            status: 'scheduled',
+            recipient_count: 12,
+            sent_count: 0,
+            delivered_count: 0,
+            failed_count: 0,
+            pending_count: 0,
+            specific_user_ids: [],
+            recipient_ids_snapshot: [],
+            summary: {
+              total: 0,
+              sent: 0,
+              delivered: 0,
+              failed: 0,
+              pending: 0,
+              delivery_rate: 0
+            },
+            recent_notifications: []
+          }
+        ],
+        pagination: {
+          total: 1,
+          page: 1,
+          per_page: 20,
+          pages: 1,
+          has_next: false,
+          has_prev: false
+        }
+      });
+    });
+
+    it('normalizes notification templates for the notifications page', async () => {
+      api.get.mockResolvedValue({
+        data: {
+          success: true,
+          data: {
+            items: [
+              {
+                id: 8,
+                name: 'Delivery reminder',
+                channel: 'push',
+                notification_type: 'delivery_update',
+                subject: 'Driver is nearby'
+              }
+            ]
+          },
+          meta: {
+            total: 1,
+            page: 1,
+            per_page: 20
+          }
+        }
+      });
+
+      const result = await adminService.getNotificationTemplates({ page: 1, per_page: 20 });
+
+      expect(api.get).toHaveBeenCalledWith('/admin/notification-templates', {
+        params: { page: 1, per_page: 20 }
+      });
+      expect(result).toEqual({
+        templates: [
+          {
+            id: 8,
+            name: 'Delivery reminder',
+            channel: 'push',
+            notification_type: 'delivery_update',
+            subject: 'Driver is nearby',
+            category: 'delivery',
+            description: 'Driver is nearby',
+            usage_count: 0,
+            translations: {}
+          }
+        ],
+        pagination: {
+          total: 1,
+          page: 1,
+          per_page: 20,
+          pages: 1,
+          has_next: false,
+          has_prev: false
+        }
+      });
+    });
+
+    it('loads notification campaign detail', async () => {
+      api.get.mockResolvedValue({
+        data: {
+          data: {
+            campaign: {
+              id: 12,
+              name: 'Spring sale',
+              notification_type: 'promotional',
+              channel: 'telegram',
+              summary: { sent: 10, failed: 1 }
+            }
+          }
+        }
+      });
+
+      const result = await adminService.getNotificationCampaign(12);
+
+      expect(api.get).toHaveBeenCalledWith('/admin/notification-campaigns/12');
+      expect(result).toEqual({
+        id: 12,
+        name: 'Spring sale',
+        notification_type: 'promotional',
+        channel: 'telegram',
+        category: 'promotion',
+        sent_count: 10,
+        delivered_count: 0,
+        failed_count: 1,
+        pending_count: 0,
+        recipient_count: 0,
+        specific_user_ids: [],
+        recipient_ids_snapshot: [],
+        summary: {
+          total: 0,
+          sent: 10,
+          delivered: 0,
+          failed: 1,
+          pending: 0,
+          delivery_rate: 0
+        },
+        recent_notifications: []
+      });
+    });
+
+    it('loads notification template channels metadata', async () => {
+      api.get.mockResolvedValue({
+        data: {
+          data: {
+            channels: [
+              { value: 'email', label: 'Email' },
+              { value: 'telegram', label: 'Telegram' }
+            ]
+          }
+        }
+      });
+
+      const result = await adminService.getNotificationTemplateChannels();
+
+      expect(api.get).toHaveBeenCalledWith('/admin/notification-templates/channels');
+      expect(result).toEqual([
+        { value: 'email', label: 'Email' },
+        { value: 'telegram', label: 'Telegram' }
+      ]);
+    });
+  });
+
   describe('updateUserStatus', () => {
     it('updates user status successfully', async () => {
       const mockResponse = { message: 'User status updated' };

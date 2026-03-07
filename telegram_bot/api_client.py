@@ -683,6 +683,23 @@ class BusinessAPIClient:
         return await self._make_request('PUT', '/api/v1/auth/profile',
                                        user_token=user_token, data=profile_data)
 
+    async def get_notification_preferences(self, user_token: str) -> APIResponse:
+        """Get user notification preferences."""
+        return await self._make_request(
+            'GET',
+            '/api/v1/notifications/preferences',
+            user_token=user_token,
+        )
+
+    async def update_notification_preferences(self, user_token: str, payload: Dict) -> APIResponse:
+        """Update user notification preferences."""
+        return await self._make_request(
+            'PUT',
+            '/api/v1/notifications/preferences',
+            user_token=user_token,
+            data=payload,
+        )
+
     async def send_phone_verification(self, user_token: str, phone: str) -> APIResponse:
         """Send phone verification SMS with OTP"""
         return await self._make_request('POST', '/api/v1/auth/send-otp',

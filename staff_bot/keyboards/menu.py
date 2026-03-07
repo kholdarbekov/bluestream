@@ -37,6 +37,10 @@ class MenuKeyboards:
                 f"\U0001f4cb {i18n.get('staff.menu.delivery_history', language)}",
                 f"\U0001f4ca {i18n.get('staff.menu.my_stats', language)}"
             ])
+            keyboard.append([
+                f"\U0001f9fe {i18n.get('staff.menu.cash_reconciliation', language)}",
+                f"\U0001f4b8 {i18n.get('staff.menu.collect_cod_debt', language)}",
+            ])
 
         # Operator menu items
         if 'operator' in staff_roles:
@@ -109,6 +113,16 @@ class MenuKeyboards:
                     f"\U0001f4ca {i18n.get('staff.menu.my_stats', language)}",
                     callback_data="staff_my_stats"
                 )
+            ])
+            keyboard.append([
+                InlineKeyboardButton(
+                    f"\U0001f9fe {i18n.get('staff.menu.cash_reconciliation', language)}",
+                    callback_data="staff_reconcile_session"
+                ),
+                InlineKeyboardButton(
+                    f"\U0001f4b8 {i18n.get('staff.menu.collect_cod_debt', language)}",
+                    callback_data="staff_cod_collect_menu"
+                ),
             ])
 
         # Operator items

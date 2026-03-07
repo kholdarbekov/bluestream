@@ -802,6 +802,16 @@ class StaffService:
         if delivery.delivery_person_id is not None:
             raise ValidationError("This delivery has already been accepted by another driver", error_code='STAFF_DELIVERY_ALREADY_TAKEN')
 
+        order_payment_method = delivery.order.payment_method if delivery.order else None
+        if order_payment_method == PaymentMethod.CASH:
+            from business_app.services.driver_reconciliation_service import DriverReconciliationService
+
+            if DriverReconciliationService().is_driver_blocked_from_cod(delivery_person_id):
+                raise ValidationError(
+                    "Driver is blocked from new cash on delivery assignments until reconciliation issues are resolved",
+                    error_code='STAFF_DRIVER_COD_BLOCKED',
+                )
+
         # Check delivery person's capacity
         dp = DeliveryPerson.query.filter_by(user_id=delivery_person_id).with_for_update().first()
         if dp:
@@ -891,6 +901,18 @@ class StaffService:
         if not delivery:
             raise NotFoundError("Delivery not found", error_code='STAFF_DELIVERY_NOT_FOUND')
 
+        cash_collection_service = None
+        pre_cod_debt_count = None
+        is_cash_order = bool(
+            delivery.order
+            and delivery.order.payment_method == PaymentMethod.CASH
+        )
+        if is_cash_order:
+            from business_app.services.cash_collection_service import CashCollectionService
+
+            cash_collection_service = CashCollectionService()
+            pre_cod_debt_count = cash_collection_service.get_active_cod_debt_count(delivery.order.user_id)
+
         old_status_value = delivery.status.value if hasattr(delivery.status, 'value') else delivery.status
 
         # Validate transition against allowed transitions
@@ -933,16 +955,10 @@ class StaffService:
         elif new_status == 'delivered':
             delivery.delivered_at = now
             delivery.actual_delivery_time = now
-            # Handle cash collection
-            cash_amount = metadata.get('cash_collected')
-            if cash_amount is not None:
-                delivery.cash_collected = Decimal(str(cash_amount))
-                # Update delivery person's total cash collected
-                dp = DeliveryPerson.query.filter_by(user_id=delivery.delivery_person_id).first()
-                if dp:
-                    dp.total_cash_collected = (dp.total_cash_collected or Decimal('0')) + Decimal(str(cash_amount))
-                    dp.total_deliveries = (dp.total_deliveries or 0) + 1
-                    dp.successful_deliveries = (dp.successful_deliveries or 0) + 1
+            dp = DeliveryPerson.query.filter_by(user_id=delivery.delivery_person_id).first()
+            if dp:
+                dp.total_deliveries = (dp.total_deliveries or 0) + 1
+                dp.successful_deliveries = (dp.successful_deliveries or 0) + 1
         elif new_status == 'failed':
             delivery.failed_delivery_reason = metadata.get('fail_reason', 'other')
             delivery.delivery_attempts = (delivery.delivery_attempts or 0) + 1
@@ -995,6 +1011,39 @@ class StaffService:
 
         db.session.commit()
 
+        if new_status == 'delivered' and is_cash_order and cash_collection_service:
+            cash_amount = metadata.get('cash_collected')
+            if cash_amount is None:
+                cash_amount = Decimal('0.00')
+            collection_notes = metadata.get('notes')
+            if Decimal(str(cash_amount)) <= Decimal('0.00') and not collection_notes:
+                collection_notes = 'No cash collected at delivery'
+
+            cash_collection_service.post_collection(
+                customer_id=delivery.order.user_id,
+                amount=cash_amount,
+                source='delivery_completion',
+                collector_user_id=staff_user_id,
+                recorded_by_user_id=staff_user_id,
+                order_id=delivery.order_id,
+                delivery_id=delivery.id,
+                notes=collection_notes,
+                proof_data={
+                    'delivery_status_history_id': history_id,
+                    'status_metadata': metadata,
+                },
+                occurred_at=delivery.delivered_at or now,
+            )
+            db.session.refresh(delivery)
+
+            post_cod_debt_count = cash_collection_service.get_active_cod_debt_count(delivery.order.user_id)
+            if (
+                pre_cod_debt_count is not None
+                and pre_cod_debt_count < 2
+                and post_cod_debt_count >= 2
+            ):
+                StaffService._notify_customer_cod_debt_limit(delivery.order.user_id)
+
         # Notify customer about delivery status updates.
         try:
             from business_app.tasks.notification_tasks import send_delivery_update_task
@@ -1026,6 +1075,49 @@ class StaffService:
         )
 
         return delivery
+
+    @staticmethod
+    def _notify_customer_cod_debt_limit(user_id: int) -> None:
+        user = User.query.get(user_id)
+        if not user or not getattr(user, 'telegram_id', None):
+            return
+
+        try:
+            from types import SimpleNamespace
+
+            from business_app.services.notification_service import NotificationService
+            from business_app.utils.constants import NotificationChannel, NotificationType
+
+            template = SimpleNamespace(
+                subject='Cash on delivery is restricted',
+                content=(
+                    'You have 2 outstanding cash on delivery debts. '
+                    'Cash on delivery is now unavailable for new orders. '
+                    'Please use card payment methods until your outstanding COD debts are settled.'
+                ),
+                get_translated=lambda field_name, _language: (
+                    'Cash on delivery is restricted'
+                    if field_name == 'subject'
+                    else (
+                        'You have 2 outstanding cash on delivery debts. '
+                        'Cash on delivery is now unavailable for new orders. '
+                        'Please use card payment methods until your outstanding COD debts are settled.'
+                    )
+                ),
+            )
+            NotificationService().send_notification(
+                user_id,
+                NotificationType.SYSTEM,
+                channels=[NotificationChannel.TELEGRAM],
+                template_data={},
+                template_override=template,
+            )
+        except Exception as exc:
+            current_app.logger.warning(
+                "Failed to send COD debt-limit Telegram warning for user %s: %s",
+                user_id,
+                exc,
+            )
 
     @staticmethod
     def update_delivery_location(delivery_id: int, lat: float, lng: float) -> Delivery:
@@ -1420,6 +1512,10 @@ class StaffService:
                 payment_method = PaymentMethod(payment_method_str)
             except ValueError:
                 pass
+        if payment_method == PaymentMethod.CASH:
+            from business_app.services.cash_collection_service import CashCollectionService
+
+            CashCollectionService().validate_customer_can_use_cod(client_id)
         if payment_method == PaymentMethod.BUSINESS_ACCOUNT:
             corporate_service.validate_business_account_order(
                 user=client,
@@ -1564,6 +1660,55 @@ class StaffService:
         return UserAddress.query.filter_by(user_id=user_id).all()
 
     @staticmethod
+    def get_client_payment_methods(user_id: int) -> Dict[str, Any]:
+        """Return debt-aware payment methods for an operator-created customer order."""
+        user = User.query.get(user_id)
+        if not user:
+            raise NotFoundError("User not found", error_code='STAFF_USER_NOT_FOUND')
+
+        from business_app.services.cash_collection_service import CashCollectionService
+        from business_app.services.corporate_contract_service import CorporateContractService
+
+        methods = [
+            {
+                'method': PaymentMethod.CASH.value,
+                'name': 'Cash on Delivery',
+                'description': 'Pay with cash when the order is delivered',
+            },
+            {
+                'method': PaymentMethod.PAYME.value,
+                'name': 'Payme',
+                'description': 'Pay with Payme wallet or linked card',
+            },
+            {
+                'method': PaymentMethod.CLICK.value,
+                'name': 'Click',
+                'description': 'Pay with Click wallet or linked card',
+            },
+        ]
+
+        corporate_balances = CorporateContractService().get_active_contract_balances_for_user(user_id)
+        if corporate_balances:
+            methods.append(
+                {
+                    'method': PaymentMethod.BUSINESS_ACCOUNT.value,
+                    'name': 'Business Account',
+                    'description': 'Charge the active corporate prepayment balance',
+                }
+            )
+
+        cod_context = CashCollectionService().get_cod_restriction_context(user_id)
+        if cod_context['cod_restricted']:
+            methods = [method for method in methods if method['method'] != PaymentMethod.CASH.value]
+
+        return {
+            'customer_id': user_id,
+            'available_methods': methods,
+            'payment_restrictions': cod_context,
+            'has_business_account': bool(corporate_balances),
+        }
+
+    @staticmethod
     def search_users(query_text: str, search_type: str = 'phone') -> List[User]:
         """
         Search users by phone or name.
@@ -1595,6 +1740,39 @@ class StaffService:
             raise ValidationError("search_type must be 'phone' or 'name'", error_code='STAFF_SEARCH_TYPE_INVALID')
 
         return users
+
+    @staticmethod
+    def search_customers_for_cod_collection(
+        query_text: str,
+        search_type: str = 'phone',
+        *,
+        only_with_open_cod: bool = True,
+    ) -> List[Dict[str, Any]]:
+        """Search customers and attach COD debt summary for collection workflows."""
+        users = StaffService.search_users(query_text, search_type)
+
+        from business_app.services.cash_collection_service import CashCollectionService
+
+        cash_collection_service = CashCollectionService()
+        items: List[Dict[str, Any]] = []
+        for user in users:
+            statement = cash_collection_service.get_customer_cod_statement(user.id)
+            if only_with_open_cod and statement['active_cod_debt_count'] <= 0:
+                continue
+
+            items.append({
+                'id': user.id,
+                'first_name': user.first_name,
+                'last_name': user.last_name,
+                'phone': user.phone,
+                'address_count': len(user.addresses) if hasattr(user, 'addresses') and user.addresses else 0,
+                'order_count': len(user.orders) if hasattr(user, 'orders') and user.orders else 0,
+                'active_cod_debt_count': statement['active_cod_debt_count'],
+                'total_outstanding_amount': statement['total_outstanding_amount'],
+                'cod_restricted': statement['cod_restricted'],
+            })
+
+        return items
 
     @staticmethod
     def get_staff_overview() -> Dict[str, Any]:

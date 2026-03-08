@@ -17,6 +17,7 @@ class _CartStub:
 @pytest.fixture
 def mocked_cart_service():
     service = MagicMock()
+    service.get_cart_details.return_value = {"cart_items": [{"product_id": 1, "quantity": 2}], "item_count": 2}
     service.get_cart_by_user_id.return_value = _CartStub([{"product_id": 1, "quantity": 2}])
     service.add_item_to_cart.return_value = _CartStub([{"product_id": 1, "quantity": 3}])
     service.update_item_quantity.return_value = _CartStub([{"product_id": 1, "quantity": 5}])
@@ -50,8 +51,8 @@ class TestCartAPI:
         assert response.status_code == 200
         body = response.get_json()
         assert body["success"] is True
-        assert body["data"]["cart"]["total_items"] == 1
-        mocked_cart_service.get_cart_by_user_id.assert_called_once()
+        assert body["data"]["cart"]["item_count"] == 2
+        mocked_cart_service.get_cart_details.assert_called_once()
 
     def test_add_update_remove_item(self, client, auth_headers, mocked_cart_service):
         with patch("business_app.api.carts.get_cart_service", return_value=mocked_cart_service):

@@ -12,6 +12,20 @@ from shared.constants import ORDER_STATUS_ICONS, SUBSCRIPTION_STATUS_ICONS, DEFA
 MAX_DISPLAYED_ADDRESSES = 5
 
 
+def get_product_display_price(product: Dict[str, Any]) -> Any:
+    """Return effective product price with schema-compatible fallbacks."""
+    pricing = product.get('pricing') or {}
+    for candidate in (
+        pricing.get('current_price'),
+        product.get('current_price'),
+        pricing.get('base_price'),
+        product.get('base_price'),
+    ):
+        if candidate is not None:
+            return candidate
+    return 0
+
+
 def i18n_button(key: str, language: str, callback_data: str, **fmt) -> Dict[str, str]:
     """Create a button dict with translated text.
 
@@ -222,8 +236,9 @@ class ProductKeyboards:
         
         # Add product buttons
         for product in products:
+            price = get_product_display_price(product)
             buttons.append([{
-                'text': f"{product['name']} - {product['pricing']['base_price']} UZS",
+                'text': f"{product['name']} - {price} UZS",
                 'callback_data': f"product_{product['id']}"
             }])
         
@@ -272,7 +287,7 @@ class ProductKeyboards:
 
         # Add product buttons
         for product in products:
-            price = product.get('pricing', {}).get('base_price', product.get('base_price', 0))
+            price = get_product_display_price(product)
             buttons.append([{
                 'text': f"{product['name']} - {price} UZS",
                 'callback_data': f"sub_product_{product['id']}"

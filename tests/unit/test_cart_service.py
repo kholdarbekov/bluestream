@@ -2,6 +2,9 @@
 Unit tests for CartService aligned with current implementation.
 """
 
+from decimal import Decimal
+from unittest.mock import MagicMock, patch
+
 import pytest
 
 from business_app.services.cart_service import CartService
@@ -57,3 +60,39 @@ class TestCartService:
         assert estimate["pricing"]["items_subtotal"] > 0
         assert "delivery" in estimate
         assert "validation" in estimate
+
+    def test_validate_cart_items_uses_contract_price_for_entity_user(
+        self,
+        cart_service,
+        sample_user,
+        sample_product,
+        db,
+    ):
+        sample_user.user_type = "entity"
+        db.session.add(sample_user)
+        db.session.commit()
+
+        corporate_service = MagicMock()
+        corporate_service.resolve_contract_pricing_for_user_product.return_value = {
+            "unit_price": Decimal("12500.00"),
+            "contract": None,
+            "contract_price_row": None,
+        }
+
+        with patch(
+            "business_app.utils.service_factory.get_corporate_contract_service",
+            return_value=corporate_service,
+        ):
+            validated, errors = cart_service.validate_cart_items(
+                [{"product_id": sample_product.id, "quantity": 2}],
+                sample_user,
+            )
+
+        assert errors == []
+        assert validated[0]["unit_price"] == 12500.0
+        assert validated[0]["subtotal"] == 25000.0
+        corporate_service.resolve_contract_pricing_for_user_product.assert_called_once_with(
+            user_id=sample_user.id,
+            product_id=sample_product.id,
+            fallback_price=Decimal("15000.0"),
+        )

@@ -237,9 +237,19 @@ const DeliveryReports = () => {
 
     setCustomerSearchLoading(true);
     try {
-      const response = await adminService.getUsers({ search: query, per_page: 10 });
+      const response = await adminService.getUsers({
+        search: query,
+        role: 'customer',
+        per_page: 20,
+      });
       const items = response?.data?.items || [];
-      setCustomerOptions(items.filter((item) => item.role === 'customer'));
+      setCustomerOptions(
+        items.filter((item) => {
+          const role = String(item?.role || '').toLowerCase();
+          const userType = String(item?.user_type || '').toLowerCase();
+          return role === 'customer' || (userType && userType !== 'staff');
+        })
+      );
     } catch (_error) {
       setCustomerOptions([]);
     } finally {

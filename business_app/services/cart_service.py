@@ -434,6 +434,43 @@ class CartService:
     def get_cart_by_user_id(self, user_id: int) -> Optional['Cart']:
         """Retrieve cart for a given user"""
         return Cart.query.filter_by(user_id=user_id).first()
+
+    def get_cart_details(self, user_id: int) -> Optional[Dict[str, Any]]:
+        """Return cart payload enriched with effective pricing for each line item."""
+        cart = self.get_cart_by_user_id(user_id)
+        if not cart:
+            return None
+
+        cart_payload = cart.to_dict()
+        summary = self.get_cart_summary(user_id)
+        pricing_by_product_id = {
+            item['product_id']: item
+            for item in summary.get('items', [])
+        }
+
+        enriched_items = []
+        for cart_item in cart_payload.get('cart_items', []):
+            product_id = cart_item.get('product_id')
+            pricing = pricing_by_product_id.get(product_id)
+            if not pricing:
+                enriched_items.append(cart_item)
+                continue
+
+            product_payload = cart_item.get('product') or {}
+            product_payload['current_price'] = float(pricing.get('unit_price', 0) or 0)
+            cart_item['product'] = product_payload
+            cart_item['unit_price'] = float(pricing.get('unit_price', 0) or 0)
+            cart_item['total_price'] = float(pricing.get('total_price', 0) or 0)
+            cart_item['in_stock'] = bool(pricing.get('in_stock', True))
+            cart_item['stock_quantity'] = pricing.get('stock_quantity')
+            enriched_items.append(cart_item)
+
+        cart_payload['cart_items'] = enriched_items
+        cart_payload['item_count'] = int(summary.get('item_count', 0) or 0)
+        cart_payload['subtotal'] = float(summary.get('subtotal', 0) or 0)
+        cart_payload['estimated_delivery_fee'] = float(summary.get('estimated_delivery_fee', 0) or 0)
+        cart_payload['estimated_total'] = float(summary.get('estimated_total', 0) or 0)
+        return cart_payload
     
     def add_item_to_cart(
         self,
@@ -653,14 +690,37 @@ class CartService:
     ) -> float:
         """Calculate unit price with volume discounts"""
         base_price = float(product.discount_price if product.discount_price else product.base_price)
+        effective_price = base_price
 
         # Check for volume-based price rules
         price_rule = self._get_best_price_rule(product.id, quantity, user)
         if price_rule:
             discount = self._calculate_rule_discount(price_rule, base_price)
-            return max(0, base_price - discount)
+            effective_price = max(0, base_price - discount)
 
-        return base_price
+        # Contract pricing overrides fallback product/rule pricing for entity users.
+        user_id = getattr(user, 'id', None)
+        if user_id:
+            try:
+                from business_app.utils.service_factory import get_corporate_contract_service
+
+                resolution = get_corporate_contract_service().resolve_contract_pricing_for_user_product(
+                    user_id=user_id,
+                    product_id=product.id,
+                    fallback_price=Decimal(str(effective_price)),
+                )
+                return float(resolution['unit_price'])
+            except ValidationError:
+                raise
+            except Exception as exc:
+                logger.warning(
+                    "Failed to resolve contract price for cart user_id=%s product_id=%s: %s",
+                    user_id,
+                    product.id,
+                    exc,
+                )
+
+        return effective_price
 
     def _get_best_price_rule(
         self,

@@ -514,36 +514,60 @@ def get_localized_field(obj, field_name: str, language: str) -> Optional[str]:
 def calculate_product_price(product, user, quantity: int) -> float:
     """Calculate product price with discounts"""
     base_price = float(product.base_price)
-    
+    effective_price = base_price
+    bulk_rule_applied = False
+
     # Apply bulk discounts
     if hasattr(product, 'price_rules') and product.price_rules:
         for rule in product.price_rules:
             if rule.is_active and quantity >= rule.min_quantity:
                 if rule.max_quantity is None or quantity <= rule.max_quantity:
                     if rule.discount_type == 'percentage':
-                        discount = base_price * (rule.discount_value / 100)
+                        discount = base_price * (float(rule.discount_value) / 100)
                     else:
-                        discount = rule.discount_value
-                    return max(0, base_price - discount)
-    
-    # Apply user-specific discounts (VIP, loyalty tier, etc.)
-    if user:
+                        discount = float(rule.discount_value)
+                    effective_price = max(0, base_price - discount)
+                    bulk_rule_applied = True
+                    break
+
+    # Apply user-specific discounts (VIP, loyalty tier, etc.) when no bulk rule was applied.
+    if user and not bulk_rule_applied:
         discount_percentage = 0
-        
+
         # VIP discount
         if getattr(user, 'is_vip', False):
             discount_percentage += 5  # 5% VIP discount
-        
+
         # Loyalty tier discount
         if hasattr(user, 'loyalty_tier'):
             tier_discounts = {'bronze': 0, 'silver': 2, 'gold': 5, 'platinum': 10}
             discount_percentage += tier_discounts.get(user.loyalty_tier, 0)
-        
+
         if discount_percentage > 0:
             discount = base_price * (discount_percentage / 100)
-            return max(0, base_price - discount)
-    
-    return base_price
+            effective_price = max(0, base_price - discount)
+
+    # Corporate contract pricing is the canonical override for legal-entity users.
+    user_id = getattr(user, 'id', None)
+    if user_id:
+        try:
+            from business_app.utils.service_factory import get_corporate_contract_service
+
+            resolution = get_corporate_contract_service().resolve_contract_pricing_for_user_product(
+                user_id=user_id,
+                product_id=product.id,
+                fallback_price=Decimal(str(effective_price)),
+            )
+            return float(resolution['unit_price'])
+        except Exception as exc:
+            logger.warning(
+                "Failed to resolve contract price for user_id=%s product_id=%s: %s",
+                user_id,
+                getattr(product, 'id', None),
+                exc,
+            )
+
+    return effective_price
 
 
 def is_product_low_stock(product) -> bool:

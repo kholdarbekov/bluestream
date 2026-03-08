@@ -28,6 +28,25 @@ class ProductHandlers(BaseHandler):
     """Product-related handlers"""
 
     @staticmethod
+    def _get_effective_unit_price(product: Dict[str, Any]) -> float:
+        """Resolve the best available display price with safe schema fallbacks."""
+        pricing = product.get('pricing') or {}
+        candidates = (
+            pricing.get('current_price'),
+            product.get('current_price'),
+            pricing.get('base_price'),
+            product.get('base_price'),
+        )
+        for candidate in candidates:
+            if candidate is None:
+                continue
+            try:
+                return float(candidate)
+            except (TypeError, ValueError):
+                continue
+        return 0.0
+
+    @staticmethod
     def _extract_product_image_url(product: Dict[str, Any]) -> str | None:
         """Extract primary product image URL across API schema variants."""
         media = product.get('media') or {}
@@ -491,7 +510,12 @@ class ProductHandlers(BaseHandler):
                     logger.error(f"Error parsing cart response: {e}")
             
             # Show quantity selector
-            quantity_text = f"🛒 {product['name']}\n\n{i18n.get('telegram.quantity', language)}: {current_qty}\n{i18n.get('telegram.price', language)}: {format_price(product['pricing']['base_price'] * current_qty)} UZS"
+            unit_price = self._get_effective_unit_price(product)
+            quantity_text = (
+                f"🛒 {product['name']}\n\n"
+                f"{i18n.get('telegram.quantity', language)}: {current_qty}\n"
+                f"{i18n.get('telegram.price', language)}: {format_price(unit_price * current_qty)} UZS"
+            )
             keyboard = ProductKeyboards.quantity_selector(product_id, current_qty, language)
             
             await self._edit_or_replace_callback_message(
@@ -532,7 +556,7 @@ class ProductHandlers(BaseHandler):
                 response = await client.get_product(user_token, product_id, language=language)
                 if response.success:
                     product = response.data['data']['product']
-                    total_price = product['pricing']['base_price'] * new_qty
+                    total_price = self._get_effective_unit_price(product) * new_qty
 
                     # Update quantity display
                     quantity_text = f"🛒 {product['name']}\n\n{i18n.get('telegram.quantity', language)}: {new_qty}\n{i18n.get('telegram.total', language)}: {format_price(total_price)} UZS"
@@ -645,7 +669,7 @@ class ProductHandlers(BaseHandler):
         
         formatted_lines = []
         for product in products:
-            price_str = escape_markdown(format_price(product['pricing']['base_price']), version=2)
+            price_str = escape_markdown(format_price(self._get_effective_unit_price(product)), version=2)
             stock_indicator = "✅" if product['inventory'].get('stock_quantity', 0) > 0 else "❌"
             
             formatted_lines.append(
@@ -657,7 +681,7 @@ class ProductHandlers(BaseHandler):
     
     def _format_product_details(self, product: Dict, language: str) -> str:
         """Format single product details"""
-        price_str = escape_markdown(format_price(product['pricing']['base_price']), version=2)
+        price_str = escape_markdown(format_price(self._get_effective_unit_price(product)), version=2)
         stock = product['inventory'].get('stock_quantity', 0)
         stock_status = i18n.get('telegram.products.in_stock', language) if stock > 0 else i18n.get('telegram.products.out_of_stock', language)
         

@@ -48,11 +48,7 @@ def get_cart():
     """Get current user's cart"""
     user_id = get_jwt_identity()
     cart_service = get_cart_service()
-    cart = cart_service.get_cart_by_user_id(user_id)
-    if cart:
-        cart_data = cart.to_dict()
-    else:
-        cart_data = None
+    cart_data = cart_service.get_cart_details(user_id)
     return success_response(
         data={'cart': cart_data}
     )

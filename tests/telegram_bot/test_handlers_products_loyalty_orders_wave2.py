@@ -81,6 +81,51 @@ class TestProductHandlerWave2:
         await handler.quantity_handler(update, context)
         handler._handle_api_error.assert_awaited_once_with(update, "update failed", "en")
 
+    async def test_quantity_handler_prefers_current_price_over_base_price(self, monkeypatch):
+        handler = products_module.ProductHandlers()
+        update = DummyUpdate()
+        update.callback_query = DummyCallbackQuery(data="qty_inc_9_1")
+        context = make_context()
+
+        monkeypatch.setattr(products_module.i18n, "get_user_language", AsyncMock(return_value="en"))
+        monkeypatch.setattr(products_module.i18n, "get", _i18n_get)
+        monkeypatch.setattr(products_module, "get_auth_token", AsyncMock(return_value="jwt"))
+        monkeypatch.setattr(products_module.ProductKeyboards, "quantity_selector", lambda *_a, **_k: "qty-kbd")
+        monkeypatch.setattr(
+            products_module,
+            "api_client",
+            FakeAPIClientContext(
+                get_product=_resp(
+                    success=True,
+                    data={"data": {"product": {"name": "Water", "pricing": {"base_price": 20000, "current_price": 14000}}}},
+                ),
+                update_cart_item=_resp(success=True),
+            ),
+        )
+
+        await handler.quantity_handler(update, context)
+
+        text = update.callback_query.edit_message_text.await_args.kwargs["text"]
+        assert "28,000 UZS" in text
+        assert "40,000 UZS" not in text
+
+    async def test_format_product_details_prefers_current_price(self, monkeypatch):
+        handler = products_module.ProductHandlers()
+        monkeypatch.setattr(products_module.i18n, "get", _i18n_get)
+
+        details = handler._format_product_details(
+            {
+                "name": "Water",
+                "pricing": {"base_price": 20000, "current_price": 15000},
+                "inventory": {"stock_quantity": 5},
+                "specifications": {"volume": 19, "volume_unit": "L"},
+            },
+            "en",
+        )
+
+        assert "15,000" in details
+        assert "20,000" not in details
+
     async def test_show_cart_empty_cart(self, monkeypatch):
         handler = products_module.ProductHandlers()
         update = DummyUpdate()

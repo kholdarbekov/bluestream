@@ -25,6 +25,7 @@ from business_app.utils.constants import (
     UserRole,
 )
 from business_app.utils.exceptions import NotFoundError, ValidationError
+from business_app.utils.payment_projection import get_payment_projection
 
 
 class CashCollectionService:
@@ -462,12 +463,13 @@ class CashCollectionService:
                 'timeline': [],
             }
 
+        payment_projection = get_payment_projection(payment)
         timeline = [{
             'type': 'payment_created',
             'timestamp': payment.created_at.isoformat() if payment.created_at else None,
-            'amount': float(payment.amount or 0),
-            'amount_collected': float(payment.amount_collected or 0),
-            'outstanding_amount': float(payment.outstanding_amount or 0),
+            'amount': float(payment_projection['amount']),
+            'amount_collected': float(payment_projection['amount_collected']),
+            'outstanding_amount': float(payment_projection['outstanding_amount']),
             'status': payment.status.value if hasattr(payment.status, 'value') else payment.status,
         }]
 
@@ -498,9 +500,9 @@ class CashCollectionService:
             'order_id': order_id,
             'order_number': order.order_number,
             'payment_id': payment.id,
-            'amount': float(payment.amount or 0),
-            'amount_collected': float(payment.amount_collected or 0),
-            'outstanding_amount': float(payment.outstanding_amount or 0),
+            'amount': float(payment_projection['amount']),
+            'amount_collected': float(payment_projection['amount_collected']),
+            'outstanding_amount': float(payment_projection['outstanding_amount']),
             'status': payment.status.value if hasattr(payment.status, 'value') else payment.status,
             'timeline': timeline,
         }

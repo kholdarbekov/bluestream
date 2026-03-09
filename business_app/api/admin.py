@@ -1886,6 +1886,8 @@ def update_order_status(order_id):
 def get_order_details(order_id):
     """Get detailed information about a specific order including all items"""
     try:
+        from business_app.utils.payment_projection import get_payment_projection
+
         # Get order with all related data
         order = Order.query.options(
             db.joinedload(Order.user),
@@ -1897,6 +1899,8 @@ def get_order_details(order_id):
 
         if not order:
             return not_found_response(resource_type='Order')
+
+        payment_projection = get_payment_projection(order.payment) if order.payment else None
 
         # Build response with full order details
         order_data = {
@@ -1911,8 +1915,8 @@ def get_order_details(order_id):
             'delivery_fee': float(getattr(order, 'delivery_fee', 0)),
             'payment_method': order.payment_method.value if order.payment_method else None,
             'payment_status': order.payment.status.value if order.payment and hasattr(order.payment.status, 'value') else ('pending' if not order.payment else str(order.payment.status)),
-            'amount_collected': float(getattr(order.payment, 'amount_collected', 0) or 0) if order.payment else 0,
-            'outstanding_amount': float(getattr(order.payment, 'outstanding_amount', 0) or 0) if order.payment else 0,
+            'amount_collected': float(payment_projection['amount_collected']) if payment_projection else 0,
+            'outstanding_amount': float(payment_projection['outstanding_amount']) if payment_projection else 0,
             'collection_events_count': len(getattr(order.payment, 'cash_collection_allocations', []) or []) if order.payment else 0,
             'delivery_date': order.delivery_date.isoformat() if order.delivery_date else None,
             'special_instructions': getattr(order, 'special_instructions', None),

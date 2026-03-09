@@ -8,6 +8,7 @@ import json
 import random
 import uuid
 import time
+from decimal import Decimal
 from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, Optional, List
 from flask import current_app, request
@@ -23,6 +24,10 @@ from business_app.utils.constants import OrderStatus, PaymentStatus, PaymentMeth
 from business_app.utils.helpers import generate_random_string, to_ms
 from business_app.utils.audit_logger import audit_logger, AuditEventType, AuditSeverity
 from business_app.utils.card_validation import CardValidator, CardSecurityValidator
+from business_app.utils.payment_projection import (
+    get_payment_projection,
+    is_settled_prepayment,
+)
 from business_app.utils.translations import get_translation
 from business_app import db
 
@@ -2276,6 +2281,16 @@ class PaymentService:
         order.is_paid = is_completed
         order.paid_at = paid_at if is_completed else None
 
+    @staticmethod
+    def _sync_completed_prepayment_projection(payment: Optional[Payment]) -> None:
+        """Keep persisted projection fields aligned for completed prepaid payments."""
+        if not payment or not is_settled_prepayment(payment):
+            return
+
+        projection = get_payment_projection(payment)
+        payment.amount_collected = projection["amount_collected"]
+        payment.outstanding_amount = projection["outstanding_amount"]
+
     def _handle_successful_payment(
         self,
         payment: Payment,
@@ -2284,6 +2299,8 @@ class PaymentService:
         allow_order_confirmation: bool = True,
     ):
         """Handle successful payment"""
+        self._sync_completed_prepayment_projection(payment)
+
         # Update order status
         order = payment.order
         if not order:

@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field, field_validator, ConfigDict
 from pydantic.alias_generators import to_camel
 
 from business_app.utils.constants import OrderStatus, PaymentMethod, PaymentStatus, DeliveryStatus
+from business_app.utils.payment_projection import get_payment_projection
 from business_app.models.order import Order, OrderItem
 
 
@@ -441,14 +442,16 @@ def serialize_order_delivery(delivery) -> Dict[str, Any]:
 
 def serialize_order_payment(payment) -> Dict[str, Any]:
     """Serialize payment information"""
+    projection = get_payment_projection(payment)
+
     try:
         return {
             'id': payment.id,
             'payment_method': payment.payment_method.value if hasattr(payment.payment_method, 'value') else str(payment.payment_method),
             'payment_status': payment.status.value if hasattr(payment.status, 'value') else str(payment.status),
-            'amount': float(payment.amount),
-            'amount_collected': float(getattr(payment, 'amount_collected', 0) or 0),
-            'outstanding_amount': float(getattr(payment, 'outstanding_amount', 0) or 0),
+            'amount': float(projection['amount']),
+            'amount_collected': float(projection['amount_collected']),
+            'outstanding_amount': float(projection['outstanding_amount']),
             'currency': getattr(payment, 'currency', 'UZS'),
             'transaction_id': getattr(payment, 'transaction_id', None),
             'payment_provider': getattr(payment, 'payment_provider', None),
@@ -465,9 +468,9 @@ def serialize_order_payment(payment) -> Dict[str, Any]:
             'id': payment.id,
             'payment_method': str(payment.payment_method),
             'payment_status': str(payment.status),
-            'amount': float(payment.amount),
-            'amount_collected': float(getattr(payment, 'amount_collected', 0) or 0),
-            'outstanding_amount': float(getattr(payment, 'outstanding_amount', 0) or 0),
+            'amount': float(projection['amount']),
+            'amount_collected': float(projection['amount_collected']),
+            'outstanding_amount': float(projection['outstanding_amount']),
         }
 
 

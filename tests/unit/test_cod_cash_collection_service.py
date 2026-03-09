@@ -169,6 +169,35 @@ class TestCashCollectionService:
             assert session is not None
             assert session.expected_cash == Decimal("5000.00")
 
+    def test_get_order_payment_timeline_normalizes_completed_prepaid_projection(
+        self,
+        app,
+        db,
+        sample_order,
+    ):
+        with app.app_context():
+            sample_order.payment_method = PaymentMethod.CARD
+            payment = Payment(
+                order_id=sample_order.id,
+                user_id=sample_order.user_id,
+                payment_method=PaymentMethod.PAYME,
+                amount=sample_order.total_amount,
+                currency="UZS",
+                status=PaymentStatus.COMPLETED,
+                amount_collected=Decimal("0.00"),
+                outstanding_amount=sample_order.total_amount,
+                payment_id="payme_projection_test_1",
+            )
+            db.session.add(payment)
+            db.session.commit()
+
+            timeline = CashCollectionService().get_order_payment_timeline(sample_order.id)
+
+            assert timeline["amount_collected"] == float(sample_order.total_amount)
+            assert timeline["outstanding_amount"] == 0.0
+            assert timeline["timeline"][0]["amount_collected"] == float(sample_order.total_amount)
+            assert timeline["timeline"][0]["outstanding_amount"] == 0.0
+
     def test_customer_reaches_cod_debt_cap_with_two_open_delivered_cod_orders(
         self,
         app,

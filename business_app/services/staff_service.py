@@ -94,6 +94,39 @@ class StaffService:
         return StaffService.ACTIVE_DELIVERY_STATUSES
 
     @staticmethod
+    def get_cod_collection_projection(order: Optional[Order]) -> Dict[str, float]:
+        """Compute COD cash collection projection for driver-facing workflows."""
+        total_amount = Decimal(str(getattr(order, 'total_amount', 0) or 0))
+        if not order:
+            return {
+                'cod_reserved_prepayment_amount': 0.0,
+                'expected_cash_to_collect': float(total_amount),
+            }
+
+        payment_method = order.payment_method.value if hasattr(order.payment_method, 'value') else order.payment_method
+        if payment_method != PaymentMethod.CASH.value:
+            return {
+                'cod_reserved_prepayment_amount': 0.0,
+                'expected_cash_to_collect': float(total_amount),
+            }
+
+        payment = getattr(order, 'payment', None)
+        outstanding_amount = Decimal(str(getattr(payment, 'outstanding_amount', total_amount) or total_amount))
+        provider_data = dict(getattr(payment, 'provider_data', {}) or {})
+        reserved_amount = Decimal(str(provider_data.get('cod_prepayment_reserved_amount') or 0))
+
+        if reserved_amount < Decimal('0.00'):
+            reserved_amount = Decimal('0.00')
+        if reserved_amount > outstanding_amount:
+            reserved_amount = outstanding_amount
+
+        expected_cash_to_collect = max(Decimal('0.00'), outstanding_amount - reserved_amount)
+        return {
+            'cod_reserved_prepayment_amount': float(reserved_amount),
+            'expected_cash_to_collect': float(expected_cash_to_collect),
+        }
+
+    @staticmethod
     def get_active_delivery_counts(delivery_person_ids: List[int]) -> Dict[int, int]:
         """Return live active-delivery counts keyed by delivery-person user ID."""
         person_ids = sorted({int(person_id) for person_id in delivery_person_ids if person_id})
@@ -747,6 +780,7 @@ class StaffService:
             joinedload(Delivery.order).joinedload(Order.order_items).joinedload(OrderItem.product),
             joinedload(Delivery.order).joinedload(Order.delivery_address),
             joinedload(Delivery.order).joinedload(Order.user),
+            joinedload(Delivery.order).joinedload(Order.payment),
             joinedload(Delivery.delivery_person),
         )
 
@@ -1178,6 +1212,7 @@ class StaffService:
             joinedload(Delivery.order).joinedload(Order.order_items).joinedload(OrderItem.product),
             joinedload(Delivery.order).joinedload(Order.delivery_address),
             joinedload(Delivery.order).joinedload(Order.user),
+            joinedload(Delivery.order).joinedload(Order.payment),
         ).order_by(Delivery.created_at.asc()).all()
 
         return deliveries
@@ -1207,6 +1242,7 @@ class StaffService:
         ).options(
             joinedload(Delivery.order).joinedload(Order.user),
             joinedload(Delivery.order).joinedload(Order.delivery_address),
+            joinedload(Delivery.order).joinedload(Order.payment),
         ).order_by(Delivery.updated_at.desc())
 
         pagination = query.paginate(page=page, per_page=per_page, error_out=False)
@@ -1742,14 +1778,41 @@ class StaffService:
         return users
 
     @staticmethod
+    def search_cod_collection_users(query_text: str, search_type: str = 'phone') -> List[User]:
+        """Search COD collection targets by phone or name without role restrictions."""
+        normalized_query = (query_text or '').strip()
+        if not normalized_query:
+            raise ValidationError("Search query must be at least 2 characters", error_code='STAFF_SEARCH_QUERY_TOO_SHORT')
+        if normalized_query.isdigit():
+            return User.query.filter(User.id == int(normalized_query)).limit(20).all()
+        if len(normalized_query) < 2:
+            raise ValidationError("Search query must be at least 2 characters", error_code='STAFF_SEARCH_QUERY_TOO_SHORT')
+
+        if search_type == 'phone':
+            users = User.query.filter(
+                User.phone.ilike(f'%{normalized_query}%'),
+            ).limit(20).all()
+        elif search_type == 'name':
+            users = User.query.filter(
+                or_(
+                    User.first_name.ilike(f'%{normalized_query}%'),
+                    User.last_name.ilike(f'%{normalized_query}%')
+                ),
+            ).limit(20).all()
+        else:
+            raise ValidationError("search_type must be 'phone' or 'name'", error_code='STAFF_SEARCH_TYPE_INVALID')
+
+        return users
+
+    @staticmethod
     def search_customers_for_cod_collection(
         query_text: str,
         search_type: str = 'phone',
         *,
         only_with_open_cod: bool = True,
     ) -> List[Dict[str, Any]]:
-        """Search customers and attach COD debt summary for collection workflows."""
-        users = StaffService.search_users(query_text, search_type)
+        """Search users and attach COD debt summary for collection workflows."""
+        users = StaffService.search_cod_collection_users(query_text, search_type)
 
         from business_app.services.cash_collection_service import CashCollectionService
 

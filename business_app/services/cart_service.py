@@ -38,11 +38,20 @@ class CartService:
     - Cart preparation for checkout
     """
 
-    def __init__(self):
+    def __init__(self, inventory_service=None):
         self.min_order_amount = current_app.config.get('MIN_ORDER_AMOUNT', 10000)
         self.max_cart_items = current_app.config.get('MAX_CART_ITEMS', 50)
         self.free_delivery_threshold = current_app.config.get('FREE_DELIVERY_THRESHOLD', 100000)
         self.standard_delivery_fee = current_app.config.get('STANDARD_DELIVERY_FEE', 10000)
+        self._inventory_service = inventory_service
+
+    @property
+    def inventory_service(self):
+        """Lazy-initialise inventory service if not injected for testing."""
+        if self._inventory_service is None:
+            from business_app.services.inventory_service import get_inventory_service
+            self._inventory_service = get_inventory_service()
+        return self._inventory_service
 
     @log_service_call(operation_type='cart_validate', track_performance=True)
     def validate_cart_items(
@@ -101,12 +110,12 @@ class CartService:
                 errors.append(f"Product {product_id}: Not found or inactive")
                 continue
 
-            # Check inventory
+            # Check inventory against reservation-aware availability.
             if product.track_inventory:
-                if product.stock_quantity < quantity:
+                is_available, error_message = self._check_product_quantity_availability(product, quantity)
+                if not is_available:
                     errors.append(
-                        f"Product {product_id} ({product.name}): "
-                        f"Only {product.stock_quantity} available, requested {quantity}"
+                        f"Product {product_id} ({product.name}): {error_message}"
                     )
                     continue
 
@@ -463,6 +472,8 @@ class CartService:
             cart_item['total_price'] = float(pricing.get('total_price', 0) or 0)
             cart_item['in_stock'] = bool(pricing.get('in_stock', True))
             cart_item['stock_quantity'] = pricing.get('stock_quantity')
+            cart_item['available_quantity'] = pricing.get('available_quantity')
+            cart_item['reserved_quantity'] = pricing.get('reserved_quantity')
             enriched_items.append(cart_item)
 
         cart_payload['cart_items'] = enriched_items
@@ -470,6 +481,18 @@ class CartService:
         cart_payload['subtotal'] = float(summary.get('subtotal', 0) or 0)
         cart_payload['estimated_delivery_fee'] = float(summary.get('estimated_delivery_fee', 0) or 0)
         cart_payload['estimated_total'] = float(summary.get('estimated_total', 0) or 0)
+        from business_app.services.cash_collection_service import CashCollectionService
+
+        prepaid_balance = float(CashCollectionService().get_customer_prepaid_balance(user_id))
+        potential_applied_amount = min(prepaid_balance, float(cart_payload.get('estimated_total') or 0))
+        cart_payload['cod_prepayment'] = {
+            'available_balance': prepaid_balance,
+            'potential_applied_amount': potential_applied_amount,
+            'estimated_payable_after_prepayment': max(
+                0.0,
+                float(cart_payload.get('estimated_total') or 0) - potential_applied_amount,
+            ),
+        }
         return cart_payload
     
     def add_item_to_cart(
@@ -483,14 +506,28 @@ class CartService:
         if not user:
             raise NotFoundError(f"User with ID {user_id} not found")
 
+        if not isinstance(quantity, int) or quantity <= 0:
+            raise ValidationError("Quantity must be a positive integer")
+
+        product = Product.query.filter_by(id=product_id, is_active=True).first()
+        if not product:
+            raise NotFoundError(f"Product {product_id} not found or inactive")
+
         cart = self.get_cart_by_user_id(user_id)
+        cart_item = None
+        if cart:
+            cart_item = CartItem.query.filter_by(cart_id=cart.id, product_id=product_id).first()
+        requested_quantity = quantity + (cart_item.quantity if cart_item else 0)
+        self._ensure_product_quantity_available(product, requested_quantity)
+
         if not cart:
             cart = Cart(user_id=user_id)
             db.session.add(cart)
             db.session.commit()
-        
+
         # Check if item already in cart
-        cart_item: CartItem = CartItem.query.filter_by(cart_id=cart.id, product_id=product_id).first()
+        if cart_item is None:
+            cart_item = CartItem.query.filter_by(cart_id=cart.id, product_id=product_id).first()
         if cart_item:
             cart_item.quantity += quantity
         else:
@@ -515,9 +552,16 @@ class CartService:
         if not cart_item:
             raise NotFoundError("Item not found in cart")
         
+        if not isinstance(quantity, int):
+            raise ValidationError("Quantity must be an integer")
+
         if quantity <= 0:
             db.session.delete(cart_item)
         else:
+            product = Product.query.filter_by(id=product_id, is_active=True).first()
+            if not product:
+                raise NotFoundError(f"Product {product_id} not found or inactive")
+            self._ensure_product_quantity_available(product, quantity)
             cart_item.quantity = quantity
         
         db.session.commit()
@@ -652,17 +696,33 @@ class CartService:
             unit_price = self._calculate_unit_price(product, cart_item.quantity, user)
             item_total = unit_price * cart_item.quantity
             subtotal += item_total
+            product_images = product.images or []
+            product_image = product_images[0] if isinstance(product_images, list) and product_images else None
+            in_stock = True
+            available_quantity = None
+            reserved_quantity = None
+
+            if product.track_inventory:
+                availability_result = self.inventory_service.check_product_availability(
+                    product.id,
+                    cart_item.quantity,
+                )
+                in_stock = availability_result.is_available
+                available_quantity = availability_result.available_quantity
+                reserved_quantity = availability_result.reserved_quantity
 
             items_with_details.append({
                 'cart_item_id': cart_item.id,
                 'product_id': product.id,
                 'product_name': product.name,
-                'product_image': product.image_url,
+                'product_image': product_image,
                 'quantity': cart_item.quantity,
                 'unit_price': unit_price,
                 'total_price': item_total,
-                'in_stock': not product.track_inventory or product.stock_quantity >= cart_item.quantity,
-                'stock_quantity': product.stock_quantity if product.track_inventory else None
+                'in_stock': in_stock,
+                'stock_quantity': product.stock_quantity if product.track_inventory else None,
+                'available_quantity': available_quantity,
+                'reserved_quantity': reserved_quantity,
             })
 
         # Calculate delivery fee
@@ -721,6 +781,35 @@ class CartService:
                 )
 
         return effective_price
+
+    def _check_product_quantity_availability(
+        self,
+        product: Product,
+        requested_quantity: int,
+    ) -> Tuple[bool, str]:
+        """Return availability verdict and user-facing error for inventory-tracked products."""
+        if not product.track_inventory:
+            return True, ""
+
+        result = self.inventory_service.check_product_availability(product.id, requested_quantity)
+        if result.is_available:
+            return True, ""
+
+        if result.reason == "Insufficient stock":
+            return (
+                False,
+                f"Only {result.available_quantity} available (reserved: {result.reserved_quantity}), "
+                f"requested {requested_quantity}",
+            )
+        return False, result.reason or "Unavailable"
+
+    def _ensure_product_quantity_available(self, product: Product, requested_quantity: int) -> None:
+        """Raise validation error when requested quantity exceeds reservation-aware availability."""
+        is_available, error_message = self._check_product_quantity_availability(product, requested_quantity)
+        if not is_available:
+            raise ValidationError(
+                f"Product {product.id} ({product.name}): {error_message}"
+            )
 
     def _get_best_price_rule(
         self,

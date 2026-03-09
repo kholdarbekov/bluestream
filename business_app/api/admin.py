@@ -10623,6 +10623,47 @@ def record_cash_collection_admin():
         return internal_error_response('Failed to record cash collection')
 
 
+@admin_bp.route('/staff/cash-reconciliation/users/search', methods=['GET'])
+@jwt_required()
+@manager_or_higher_required
+def search_cod_collection_users_admin():
+    """Search users for COD collection workflows in admin surfaces."""
+    try:
+        from business_app.services.staff_service import StaffService
+
+        query = request.args.get('q', '')
+        search_type = request.args.get('type', 'phone')
+        only_with_open_cod = request.args.get('only_with_open_cod', 'true').lower() != 'false'
+
+        items = StaffService.search_customers_for_cod_collection(
+            query,
+            search_type,
+            only_with_open_cod=only_with_open_cod,
+        )
+        return success_response({'items': items, 'total': len(items)})
+    except ValidationError as e:
+        return validation_error_response(e.message)
+    except Exception as e:
+        current_app.logger.error(f"Admin COD collection user search error: {e}")
+        return internal_error_response('Failed to search COD collection users')
+
+
+@admin_bp.route('/staff/cash-reconciliation/users/with-open-cod', methods=['GET'])
+@jwt_required()
+@manager_or_higher_required
+def list_cod_collection_users_with_open_debts_admin():
+    """List users that currently have open delivered COD debts."""
+    try:
+        from business_app.services.cash_collection_service import CashCollectionService
+
+        limit = request.args.get('limit', 200, type=int)
+        items = CashCollectionService().list_users_with_open_cod_debts(limit=limit)
+        return success_response({'items': items, 'total': len(items)})
+    except Exception as e:
+        current_app.logger.error(f"Admin COD debtors listing error: {e}")
+        return internal_error_response('Failed to load users with open COD debts')
+
+
 @admin_bp.route('/staff/cash-reconciliation/sessions/<int:session_id>', methods=['GET'])
 @jwt_required()
 @manager_or_higher_required
@@ -10646,10 +10687,12 @@ def get_cash_reconciliation_session(session_id):
 def verify_cash_reconciliation_session(session_id):
     """Verify a driver reconciliation session."""
     try:
-        actor_user_id = get_jwt_identity()
+        actor_user_id = int(get_jwt_identity())
         data = request.get_json() or {}
         if data.get('verified_cash') is None:
             return validation_error_response('verified_cash is required')
+        if not data.get('reason_code'):
+            return validation_error_response('reason_code is required')
 
         from business_app.services.driver_reconciliation_service import DriverReconciliationService
 
@@ -10657,6 +10700,7 @@ def verify_cash_reconciliation_session(session_id):
             session_id=session_id,
             verified_cash=data.get('verified_cash'),
             actor_user_id=actor_user_id,
+            reason_code=data.get('reason_code'),
             notes=data.get('notes'),
         )
         payload = DriverReconciliationService().get_session_detail(session.id)
@@ -10676,17 +10720,21 @@ def verify_cash_reconciliation_session(session_id):
 def resolve_cash_reconciliation_session(session_id):
     """Resolve a mismatched or overdue reconciliation session."""
     try:
-        actor_user_id = get_jwt_identity()
+        actor_user_id = int(get_jwt_identity())
         data = request.get_json() or {}
         resolution_notes = data.get('resolution_notes')
+        reason_code = data.get('reason_code')
         if not resolution_notes:
             return validation_error_response('resolution_notes is required')
+        if not reason_code:
+            return validation_error_response('reason_code is required')
 
         from business_app.services.driver_reconciliation_service import DriverReconciliationService
 
         session = DriverReconciliationService().resolve_session(
             session_id=session_id,
             actor_user_id=actor_user_id,
+            reason_code=reason_code,
             resolution_notes=resolution_notes,
             verified_cash=data.get('verified_cash'),
         )
@@ -10699,6 +10747,41 @@ def resolve_cash_reconciliation_session(session_id):
     except Exception as e:
         current_app.logger.error(f"Resolve cash reconciliation session error: {e}")
         return internal_error_response('Failed to resolve reconciliation session')
+
+
+@admin_bp.route('/staff/cash-reconciliation/transfers/<int:transfer_id>/confirm', methods=['POST'])
+@jwt_required()
+@manager_or_higher_required
+def confirm_cash_reconciliation_transfer(transfer_id):
+    """Confirm a driver checkpoint custody transfer with counted cash."""
+    try:
+        actor_user_id = int(get_jwt_identity())
+        data = request.get_json() or {}
+        if data.get('counted_transfer_cash') is None:
+            return validation_error_response('counted_transfer_cash is required')
+
+        from business_app.services.driver_cash_custody_service import DriverCashCustodyService
+        from business_app.services.driver_reconciliation_service import DriverReconciliationService
+
+        transfer = DriverCashCustodyService().confirm_transfer(
+            transfer_id=transfer_id,
+            actor_user_id=actor_user_id,
+            counted_transfer_cash=data.get('counted_transfer_cash'),
+            notes=data.get('notes'),
+            reason_code=data.get('reason_code'),
+        )
+        session_payload = DriverReconciliationService().get_session_detail(transfer.driver_cash_session_id)
+        return success_response(data={
+            'transfer': transfer.to_dict(),
+            'session': session_payload,
+        })
+    except NotFoundError:
+        return not_found_response('Driver cash transfer not found')
+    except ValidationError as e:
+        return validation_error_response(e.message)
+    except Exception as e:
+        current_app.logger.error(f"Confirm cash reconciliation transfer error: {e}")
+        return internal_error_response('Failed to confirm cash reconciliation transfer')
 
 
 @admin_bp.route('/staff/cash-reconciliation/customers/<int:customer_id>/statement', methods=['GET'])

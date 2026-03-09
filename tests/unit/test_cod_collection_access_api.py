@@ -97,3 +97,73 @@ def test_admin_can_record_standalone_cash_collection(
     assert payload['data']['driver_cash_session'] is None
     mocked_post_collection.assert_called_once()
     mocked_session_detail.assert_not_called()
+
+
+def test_manager_can_search_cod_collection_users_from_admin_surface(
+    client,
+    app,
+    admin_user,
+    monkeypatch,
+):
+    mocked_search = Mock(return_value=[
+        {
+            'id': 1,
+            'first_name': 'Delivery',
+            'last_name': 'person 1',
+            'phone': '+998909150172',
+            'active_cod_debt_count': 2,
+            'total_outstanding_amount': 130000,
+            'cod_restricted': True,
+        }
+    ])
+    monkeypatch.setattr(
+        'business_app.services.staff_service.StaffService.search_customers_for_cod_collection',
+        mocked_search,
+    )
+
+    response = client.get(
+        '/api/v1/admin/staff/cash-reconciliation/users/search?q=1&type=phone',
+        headers=_manager_headers(app, admin_user.id, UserRole.ADMIN.value),
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload['data']['total'] == 1
+    assert payload['data']['items'][0]['id'] == 1
+    mocked_search.assert_called_once_with('1', 'phone', only_with_open_cod=True)
+
+
+def test_manager_can_list_users_with_open_cod_debts_from_admin_surface(
+    client,
+    app,
+    admin_user,
+    monkeypatch,
+):
+    mocked_list = Mock(return_value=[
+        {
+            'id': 1,
+            'first_name': 'Delivery',
+            'last_name': 'person 1',
+            'phone': '+998909150172',
+            'role': 'admin',
+            'user_type': 'staff',
+            'active_cod_debt_count': 2,
+            'total_outstanding_amount': 130000.0,
+            'cod_restricted': True,
+        }
+    ])
+    monkeypatch.setattr(
+        'business_app.services.cash_collection_service.CashCollectionService.list_users_with_open_cod_debts',
+        mocked_list,
+    )
+
+    response = client.get(
+        '/api/v1/admin/staff/cash-reconciliation/users/with-open-cod',
+        headers=_manager_headers(app, admin_user.id, UserRole.ADMIN.value),
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload['data']['total'] == 1
+    assert payload['data']['items'][0]['id'] == 1
+    mocked_list.assert_called_once_with(limit=200)

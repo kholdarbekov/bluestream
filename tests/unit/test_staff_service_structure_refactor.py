@@ -5,10 +5,11 @@ from decimal import Decimal
 
 import pytest
 
+from business_app.models.payment import Payment
 from business_app.models.order import Order
 from business_app.models.user import User
 from business_app.services.staff_service import StaffService
-from business_app.utils.constants import OrderStatus, UserRole
+from business_app.utils.constants import OrderStatus, PaymentMethod, PaymentStatus, UserRole
 from business_app.utils.exceptions import NotFoundError
 from business_app.utils.password_security import hash_password
 
@@ -90,3 +91,55 @@ def test_staff_service_address_methods_raise_for_missing_user(db):
 
     with pytest.raises(NotFoundError):
         StaffService.get_client_addresses(999999)
+
+
+def test_get_cod_collection_projection_subtracts_reserved_prepayment(db, sample_order):
+    sample_order.payment_method = PaymentMethod.CASH
+    sample_order.total_amount = Decimal("90000")
+
+    payment = sample_order.payment or Payment(
+        order_id=sample_order.id,
+        user_id=sample_order.user_id,
+        amount=Decimal("90000"),
+        payment_method=PaymentMethod.CASH,
+        status=PaymentStatus.PENDING,
+        amount_collected=Decimal("0"),
+        outstanding_amount=Decimal("90000"),
+        provider_data={},
+    )
+    payment.provider_data = {"cod_prepayment_reserved_amount": 15000}
+    payment.outstanding_amount = Decimal("90000")
+    if sample_order.payment is None:
+        db.session.add(payment)
+    db.session.commit()
+
+    projection = StaffService.get_cod_collection_projection(sample_order)
+
+    assert projection["cod_reserved_prepayment_amount"] == 15000.0
+    assert projection["expected_cash_to_collect"] == 75000.0
+
+
+def test_get_cod_collection_projection_clamps_reserved_prepayment_to_outstanding(db, sample_order):
+    sample_order.payment_method = PaymentMethod.CASH
+    sample_order.total_amount = Decimal("90000")
+
+    payment = sample_order.payment or Payment(
+        order_id=sample_order.id,
+        user_id=sample_order.user_id,
+        amount=Decimal("90000"),
+        payment_method=PaymentMethod.CASH,
+        status=PaymentStatus.PENDING,
+        amount_collected=Decimal("0"),
+        outstanding_amount=Decimal("5000"),
+        provider_data={},
+    )
+    payment.provider_data = {"cod_prepayment_reserved_amount": 15000}
+    payment.outstanding_amount = Decimal("5000")
+    if sample_order.payment is None:
+        db.session.add(payment)
+    db.session.commit()
+
+    projection = StaffService.get_cod_collection_projection(sample_order)
+
+    assert projection["cod_reserved_prepayment_amount"] == 5000.0
+    assert projection["expected_cash_to_collect"] == 0.0

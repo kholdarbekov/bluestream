@@ -10,7 +10,7 @@ from handlers.base import BaseHandler
 from api_client import api_client
 from keyboards.delivery import DeliveryKeyboards
 from keyboards.common import CommonKeyboards
-from utils.formatters import format_order_card, format_currency, escape_html
+from utils.formatters import format_order_card, format_currency, escape_html, get_cod_cash_projection
 from permissions import require_auth, require_delivery_driver
 from i18n import i18n
 
@@ -191,6 +191,21 @@ class OrdersPoolHandler(BaseHandler):
                 payment_label = i18n.get(f'staff.delivery.payment.{payment}', language)
                 payment_info += f" ({payment_label})"
             lines.append(payment_info)
+            if payment == 'cash':
+                cod_projection = get_cod_cash_projection(order)
+                lines.append(
+                    f"\U0001f4b8 {i18n.get('staff.delivery.cash_outstanding_label', language)}: "
+                    f"{format_currency(order.get('outstanding_amount'), language=language)}"
+                )
+                if cod_projection['cod_reserved_prepayment_amount'] > 0:
+                    lines.append(
+                        f"\U0001f4b3 COD prepaid reserved: "
+                        f"{format_currency(cod_projection['cod_reserved_prepayment_amount'], language=language)}"
+                    )
+                lines.append(
+                    f"\U0001f4b5 Cash to collect now: "
+                    f"{format_currency(cod_projection['expected_cash_to_collect'], language=language)}"
+                )
 
             # Delivery notes
             notes = order.get('delivery_notes', '')

@@ -4,6 +4,7 @@ from datetime import datetime, UTC
 from decimal import Decimal
 from typing import Any, Dict, Iterable, List, Optional
 
+from sqlalchemy import func
 from sqlalchemy.orm import contains_eager, joinedload
 
 from business_app import db
@@ -128,12 +129,273 @@ class CashCollectionService:
         return {
             'active_cod_debt_count': active_debt_count,
             'cod_restricted': active_debt_count >= self.COD_ACTIVE_DEBT_LIMIT,
+            'available_prepayment_balance': float(self.get_customer_prepaid_balance(customer_id)),
             'cod_restriction_reason': (
                 'customer_has_max_active_cod_debts'
                 if active_debt_count >= self.COD_ACTIVE_DEBT_LIMIT
                 else None
             ),
         }
+
+    def get_customer_prepaid_balance(self, customer_id: int) -> Decimal:
+        """Return customer's unapplied COD over-collection balance."""
+        total = (
+            db.session.query(func.coalesce(func.sum(CashCollectionEvent.unapplied_amount), Decimal('0.00')))
+            .filter(
+                CashCollectionEvent.customer_id == customer_id,
+                CashCollectionEvent.voided_at.is_(None),
+                CashCollectionEvent.unapplied_amount > 0,
+            )
+            .scalar()
+            or Decimal('0.00')
+        )
+        return self._to_decimal(total)
+
+    def apply_customer_prepaid_credit_to_payment(self, payment: Payment) -> Payment:
+        """Auto-apply unapplied customer cash credit to a COD payment."""
+        if not payment:
+            return payment
+        if payment.payment_method != PaymentMethod.CASH:
+            return payment
+        if self._to_decimal(payment.outstanding_amount) <= Decimal('0.00'):
+            return payment
+
+        unapplied_events = (
+            CashCollectionEvent.query
+            .filter(
+                CashCollectionEvent.customer_id == payment.user_id,
+                CashCollectionEvent.voided_at.is_(None),
+                CashCollectionEvent.unapplied_amount > 0,
+            )
+            .order_by(CashCollectionEvent.occurred_at.asc(), CashCollectionEvent.id.asc())
+            .with_for_update(of=CashCollectionEvent)
+            .all()
+        )
+
+        for event in unapplied_events:
+            outstanding = self._to_decimal(payment.outstanding_amount)
+            if outstanding <= Decimal('0.00'):
+                break
+
+            available = self._to_decimal(event.unapplied_amount)
+            if available <= Decimal('0.00'):
+                continue
+
+            allocatable = min(available, outstanding)
+            self._allocate_to_payment(
+                event=event,
+                payment=payment,
+                amount=allocatable,
+                allocation_order=self._next_allocation_order(event.id),
+                allocation_mode='prepaid_credit',
+                trigger_completion_notification=False,
+            )
+
+        return payment
+
+    def reserve_customer_prepaid_credit_for_payment(
+        self,
+        payment: Payment,
+        *,
+        actor_user_id: Optional[int] = None,
+    ) -> Decimal:
+        """Reserve available customer COD prepayment for a pending COD order payment."""
+        if not payment or payment.payment_method != PaymentMethod.CASH:
+            return Decimal('0.00')
+
+        outstanding = self._to_decimal(payment.outstanding_amount)
+        existing_reserved = self._get_reserved_prepayment_amount(payment.id)
+        remaining_capacity = max(Decimal('0.00'), outstanding - existing_reserved)
+        if remaining_capacity <= Decimal('0.00'):
+            self._sync_reserved_prepayment_projection(payment)
+            return Decimal('0.00')
+
+        unapplied_events = (
+            CashCollectionEvent.query
+            .filter(
+                CashCollectionEvent.customer_id == payment.user_id,
+                CashCollectionEvent.voided_at.is_(None),
+                CashCollectionEvent.unapplied_amount > 0,
+            )
+            .order_by(CashCollectionEvent.occurred_at.asc(), CashCollectionEvent.id.asc())
+            .with_for_update(of=CashCollectionEvent)
+            .all()
+        )
+
+        total_reserved = Decimal('0.00')
+        for event in unapplied_events:
+            remaining = remaining_capacity - total_reserved
+            if remaining <= Decimal('0.00'):
+                break
+
+            available = self._to_decimal(event.unapplied_amount)
+            if available <= Decimal('0.00'):
+                continue
+
+            reservable = min(remaining, available)
+            self._allocate_to_payment(
+                event=event,
+                payment=payment,
+                amount=reservable,
+                allocation_order=self._next_allocation_order(event.id),
+                allocation_mode='prepaid_reservation',
+                trigger_completion_notification=False,
+                affect_payment_projection=False,
+                allocation_metadata={
+                    'reservation_state': 'reserved',
+                    'reserved_by_user_id': actor_user_id,
+                },
+            )
+            total_reserved += reservable
+
+        self._sync_reserved_prepayment_projection(payment)
+        return self._to_decimal(total_reserved)
+
+    def consume_reserved_prepayment_for_payment(
+        self,
+        payment: Payment,
+        *,
+        collected_at: Optional[datetime] = None,
+    ) -> Decimal:
+        """Convert reserved prepayment allocations into settled COD payment amounts."""
+        if not payment or payment.payment_method != PaymentMethod.CASH:
+            return Decimal('0.00')
+
+        now = datetime.now(UTC)
+        effective_collected_at = collected_at or now
+        if effective_collected_at.tzinfo is None:
+            effective_collected_at = effective_collected_at.replace(tzinfo=UTC)
+
+        reservations = (
+            CashCollectionAllocation.query
+            .filter(
+                CashCollectionAllocation.payment_id == payment.id,
+                CashCollectionAllocation.reversed_at.is_(None),
+                CashCollectionAllocation.allocation_mode == 'prepaid_reservation',
+            )
+            .order_by(CashCollectionAllocation.allocated_at.asc(), CashCollectionAllocation.id.asc())
+            .with_for_update(of=CashCollectionAllocation)
+            .all()
+        )
+
+        consumed_total = Decimal('0.00')
+        for allocation in reservations:
+            amount = self._to_decimal(allocation.allocated_amount)
+            if amount <= Decimal('0.00'):
+                continue
+            payment.amount_collected = self._to_decimal(payment.amount_collected) + amount
+            consumed_total += amount
+            allocation.allocation_mode = 'prepaid_credit'
+            metadata = dict(allocation.allocation_metadata or {})
+            metadata['reservation_state'] = 'consumed'
+            metadata['reservation_consumed_at'] = now.isoformat()
+            metadata['affects_payment_projection'] = True
+            allocation.allocation_metadata = metadata
+
+        if consumed_total > Decimal('0.00'):
+            self.sync_payment_projection(payment, collected_at=effective_collected_at)
+
+        self._sync_reserved_prepayment_projection(payment)
+        return self._to_decimal(consumed_total)
+
+    def release_reserved_prepayment_for_order(
+        self,
+        order_id: int,
+        *,
+        actor_user_id: Optional[int] = None,
+        reason: Optional[str] = None,
+    ) -> Decimal:
+        """Release reserved prepayment back to customer balance for a non-delivered order."""
+        payment = Payment.query.options(
+            joinedload(Payment.order),
+            joinedload(Payment.cash_collection_allocations).joinedload(CashCollectionAllocation.cash_collection_event),
+        ).filter_by(order_id=order_id).first()
+        if not payment or payment.payment_method != PaymentMethod.CASH:
+            return Decimal('0.00')
+
+        if payment.order and payment.order.status == OrderStatus.DELIVERED:
+            self._sync_reserved_prepayment_projection(payment)
+            return Decimal('0.00')
+
+        now = datetime.now(UTC)
+        release_reason = reason or 'Order was cancelled/returned before delivery'
+        released_total = Decimal('0.00')
+
+        for allocation in payment.cash_collection_allocations:
+            if allocation.reversed_at or allocation.allocation_mode != 'prepaid_reservation':
+                continue
+            amount = self._to_decimal(allocation.allocated_amount)
+            event = allocation.cash_collection_event
+            if event:
+                event.unapplied_amount = self._to_decimal(event.unapplied_amount) + amount
+            allocation.reversed_at = now
+            allocation.reversed_by_user_id = actor_user_id
+            allocation.reversal_reason = release_reason
+            metadata = dict(allocation.allocation_metadata or {})
+            metadata['reservation_state'] = 'released'
+            metadata['reservation_released_at'] = now.isoformat()
+            metadata['affects_payment_projection'] = False
+            allocation.allocation_metadata = metadata
+            released_total += amount
+
+        self._sync_reserved_prepayment_projection(payment)
+        return self._to_decimal(released_total)
+
+    def list_users_with_open_cod_debts(self, *, limit: int = 200) -> List[Dict[str, Any]]:
+        """Return users that currently have at least one open delivered COD debt."""
+        safe_limit = max(1, min(int(limit or 200), 1000))
+        rows = (
+            db.session.query(
+                User.id.label('user_id'),
+                User.first_name,
+                User.last_name,
+                User.phone,
+                User.role,
+                User.user_type,
+                func.count(Payment.id).label('active_cod_debt_count'),
+                func.coalesce(func.sum(Payment.outstanding_amount), Decimal('0.00')).label('total_outstanding_amount'),
+            )
+            .join(Payment, Payment.user_id == User.id)
+            .join(Order, Order.id == Payment.order_id)
+            .filter(
+                Payment.payment_method == PaymentMethod.CASH,
+                Payment.outstanding_amount > 0,
+                Order.status == OrderStatus.DELIVERED,
+            )
+            .group_by(
+                User.id,
+                User.first_name,
+                User.last_name,
+                User.phone,
+                User.role,
+                User.user_type,
+            )
+            .order_by(
+                func.sum(Payment.outstanding_amount).desc(),
+                func.count(Payment.id).desc(),
+                User.id.asc(),
+            )
+            .limit(safe_limit)
+            .all()
+        )
+
+        items: List[Dict[str, Any]] = []
+        for row in rows:
+            active_count = int(row.active_cod_debt_count or 0)
+            role_value = row.role.value if hasattr(row.role, 'value') else row.role
+            user_type_value = row.user_type.value if hasattr(row.user_type, 'value') else row.user_type
+            items.append({
+                'id': int(row.user_id),
+                'first_name': row.first_name,
+                'last_name': row.last_name,
+                'phone': row.phone,
+                'role': role_value,
+                'user_type': user_type_value,
+                'active_cod_debt_count': active_count,
+                'total_outstanding_amount': float(row.total_outstanding_amount or 0),
+                'cod_restricted': active_count >= self.COD_ACTIVE_DEBT_LIMIT,
+            })
+        return items
 
     def validate_customer_can_use_cod(self, customer_id: int) -> Dict[str, Any]:
         context = self.get_cod_restriction_context(customer_id)
@@ -183,6 +445,7 @@ class CashCollectionService:
             'active_cod_debt_count': self.get_active_cod_debt_count(customer_id),
             'cod_restricted': self.is_customer_cod_restricted(customer_id),
             'total_outstanding_amount': float(total_outstanding),
+            'available_prepayment_balance': float(self.get_customer_prepaid_balance(customer_id)),
             'items': items,
         }
 
@@ -522,13 +785,24 @@ class CashCollectionService:
             allocation.reversed_by_user_id = reversed_by_user_id
             allocation.reversal_reason = reason
             payment = allocation.payment
-            payment.amount_collected = self._to_decimal(payment.amount_collected) - self._to_decimal(allocation.allocated_amount)
-            self.sync_payment_projection(payment)
+            if self._allocation_affects_payment_projection(allocation):
+                payment.amount_collected = self._to_decimal(payment.amount_collected) - self._to_decimal(allocation.allocated_amount)
+                self.sync_payment_projection(payment)
+            else:
+                self._sync_reserved_prepayment_projection(payment)
 
         event.unapplied_amount = self._to_decimal(event.amount)
         event.voided_at = now
         event.voided_by_user_id = reversed_by_user_id
         event.void_reason = reason
+
+        if event.driver_cash_session_id:
+            from business_app.services.driver_reconciliation_service import DriverReconciliationService
+            from business_app.models.payment import DriverCashSession
+
+            session = DriverCashSession.query.get(event.driver_cash_session_id)
+            if session:
+                DriverReconciliationService().refresh_expected_cash(session)
 
         self._refresh_legacy_cash_projections(
             delivery_id=event.delivery_id,
@@ -600,15 +874,21 @@ class CashCollectionService:
         amount: Decimal,
         allocation_order: int,
         allocation_mode: str,
+        trigger_completion_notification: bool = True,
+        affect_payment_projection: bool = True,
+        allocation_metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
         amount = self._to_decimal(amount)
         if amount <= Decimal('0.00'):
             return
         if amount > self._to_decimal(event.unapplied_amount):
             raise ValidationError("Allocated amount exceeds unapplied event balance")
-        if amount > self._to_decimal(payment.outstanding_amount):
+        if affect_payment_projection and amount > self._to_decimal(payment.outstanding_amount):
             raise ValidationError("Allocated amount exceeds payment outstanding balance")
 
+        metadata = dict(allocation_metadata or {})
+        metadata.setdefault('order_number', payment.order.order_number if payment.order else None)
+        metadata['affects_payment_projection'] = bool(affect_payment_projection)
         allocation = CashCollectionAllocation(
             cash_collection_event_id=event.id,
             payment_id=payment.id,
@@ -616,23 +896,67 @@ class CashCollectionService:
             allocated_amount=amount,
             allocation_order=allocation_order,
             allocation_mode=allocation_mode,
-            allocation_metadata={
-                'order_number': payment.order.order_number if payment.order else None,
-            },
+            allocation_metadata=metadata,
         )
         db.session.add(allocation)
-        payment.amount_collected = self._to_decimal(payment.amount_collected) + amount
         event.unapplied_amount = self._to_decimal(event.unapplied_amount) - amount
         previous_status = payment.status
-        self.sync_payment_projection(payment, collected_at=event.occurred_at)
 
-        if previous_status != PaymentStatus.COMPLETED and payment.status == PaymentStatus.COMPLETED:
+        if affect_payment_projection:
+            payment.amount_collected = self._to_decimal(payment.amount_collected) + amount
+            self.sync_payment_projection(payment, collected_at=event.occurred_at)
+        else:
+            self._sync_reserved_prepayment_projection(payment)
+
+        if (
+            affect_payment_projection
+            and trigger_completion_notification
+            and previous_status != PaymentStatus.COMPLETED
+            and payment.status == PaymentStatus.COMPLETED
+        ):
             try:
                 from business_app.tasks.notification_tasks import send_payment_confirmation_task
 
                 send_payment_confirmation_task.delay(payment.id)
             except Exception:
                 pass
+
+    @staticmethod
+    def _next_allocation_order(event_id: int) -> int:
+        return int((
+            db.session.query(func.coalesce(func.max(CashCollectionAllocation.allocation_order), 0))
+            .filter(CashCollectionAllocation.cash_collection_event_id == event_id)
+            .scalar()
+            or 0
+        ) + 1)
+
+    @staticmethod
+    def _allocation_affects_payment_projection(allocation: CashCollectionAllocation) -> bool:
+        metadata = allocation.allocation_metadata or {}
+        if isinstance(metadata, dict) and 'affects_payment_projection' in metadata:
+            return bool(metadata.get('affects_payment_projection'))
+        return allocation.allocation_mode != 'prepaid_reservation'
+
+    def _sync_reserved_prepayment_projection(self, payment: Payment) -> None:
+        if not payment:
+            return
+        reserved_total = self._get_reserved_prepayment_amount(payment.id)
+        provider_data = dict(payment.provider_data or {})
+        provider_data['cod_prepayment_reserved_amount'] = float(self._to_decimal(reserved_total))
+        payment.provider_data = provider_data
+
+    @staticmethod
+    def _get_reserved_prepayment_amount(payment_id: int) -> Decimal:
+        return (
+            db.session.query(func.coalesce(func.sum(CashCollectionAllocation.allocated_amount), Decimal('0.00')))
+            .filter(
+                CashCollectionAllocation.payment_id == payment_id,
+                CashCollectionAllocation.reversed_at.is_(None),
+                CashCollectionAllocation.allocation_mode == 'prepaid_reservation',
+            )
+            .scalar()
+            or Decimal('0.00')
+        )
 
     def _refresh_legacy_cash_projections(
         self,

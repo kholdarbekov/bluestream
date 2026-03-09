@@ -185,6 +185,37 @@ class TestProductHandlerWave2:
         assert captured["args"] == ("en", False, False)
         assert "telegram.cart_min_order_warning:en" in update.callback_query.edit_message_text.await_args.kwargs["text"]
 
+    async def test_show_cart_includes_cod_prepayment_summary(self, monkeypatch):
+        handler = products_module.ProductHandlers()
+        update = DummyUpdate()
+        update.callback_query = DummyCallbackQuery(data="cart_view")
+        context = make_context()
+
+        cart_payload = {
+            "data": {
+                "cart": {
+                    "cart_items": [
+                        {"product": {"name": "Bottle", "current_price": 25000}, "quantity": 1},
+                    ],
+                    "cod_prepayment": {
+                        "available_balance": 40000,
+                        "potential_applied_amount": 25000,
+                        "estimated_payable_after_prepayment": 0,
+                    },
+                }
+            }
+        }
+        monkeypatch.setattr(products_module.i18n, "get_user_language", AsyncMock(return_value="en"))
+        monkeypatch.setattr(products_module.i18n, "get", _i18n_get)
+        monkeypatch.setattr(products_module, "get_auth_token", AsyncMock(return_value="jwt"))
+        monkeypatch.setattr(products_module, "api_client", FakeAPIClientContext(get_cart=_resp(success=True, data=cart_payload)))
+
+        await handler.show_cart(update, context)
+
+        text = update.callback_query.edit_message_text.await_args.kwargs["text"]
+        assert "COD prepaid balance" in text
+        assert "Auto-applied on next COD order" in text
+
     async def test_clear_cart_success_answers_and_refreshes(self, monkeypatch):
         handler = products_module.ProductHandlers()
         handler.show_cart = AsyncMock()
@@ -295,7 +326,12 @@ class TestOrderHandlerWave2:
                 "cart": {
                     "cart_items": [
                         {"product": {"id": 1, "name": "Bottle", "current_price": 25000}, "quantity": 2},
-                    ]
+                    ],
+                    "cod_prepayment": {
+                        "available_balance": 90000,
+                        "potential_applied_amount": 50000,
+                        "estimated_payable_after_prepayment": 0,
+                    },
                 }
             }
         }
@@ -314,6 +350,10 @@ class TestOrderHandlerWave2:
 
         assert context.user_data == {}
         update.callback_query.edit_message_text.assert_awaited_once()
+        text = update.callback_query.edit_message_text.await_args.kwargs["text"]
+        assert "COD prepaid used" in text
+        assert "50,000 UZS" in text
+        assert "Pay on delivery: 0 UZS" in text
         update.callback_query.answer.assert_awaited_once_with("telegram.orders.placed_success:en")
 
     async def test_show_order_confirmation_auth_error(self, monkeypatch):
@@ -362,6 +402,41 @@ class TestOrderHandlerWave2:
         assert "telegram.orders.items_header:en" in text
         assert "telegram.orders.payment_info:en" in text
         update.callback_query.answer.assert_awaited_once()
+
+    async def test_show_order_confirmation_includes_cod_prepayment_summary(self, monkeypatch):
+        handler = orders_module.OrderHandlers()
+        update = DummyUpdate()
+        update.callback_query = DummyCallbackQuery(data="payment_cash")
+        context = make_context()
+        context.user_data["selected_address_id"] = 5
+        context.user_data["selected_payment_method"] = "cash"
+
+        cart_data = {
+            "data": {
+                "cart": {
+                    "cart_items": [
+                        {"product": {"name": "Bottle", "current_price": 12000}, "quantity": 2},
+                    ],
+                    "cod_prepayment": {
+                        "available_balance": 40000,
+                        "potential_applied_amount": 24000,
+                        "estimated_payable_after_prepayment": 0,
+                    },
+                }
+            }
+        }
+        monkeypatch.setattr(orders_module.i18n, "get_user_language", AsyncMock(return_value="en"))
+        monkeypatch.setattr(orders_module.i18n, "get", _i18n_get)
+        monkeypatch.setattr(orders_module, "get_auth_token", AsyncMock(return_value="jwt"))
+        monkeypatch.setattr(orders_module.OrderKeyboards, "order_confirmation", lambda _l: "confirm-kbd")
+        monkeypatch.setattr(orders_module, "api_client", FakeAPIClientContext(get_cart=_resp(success=True, data=cart_data)))
+
+        await handler._show_order_confirmation(update, context)
+
+        text = update.callback_query.edit_message_text.await_args.kwargs["text"]
+        assert "COD prepaid balance" in text
+        assert "Auto-applied on this COD order" in text
+        assert "Estimated COD payable after prepaid" in text
 
 
 @pytest.mark.unit

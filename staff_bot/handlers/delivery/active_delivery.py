@@ -10,7 +10,12 @@ from handlers.base import BaseHandler
 from api_client import api_client
 from keyboards.delivery import DeliveryKeyboards
 from keyboards.common import CommonKeyboards
-from utils.formatters import format_delivery_status, format_currency, escape_html
+from utils.formatters import (
+    format_delivery_status,
+    format_currency,
+    escape_html,
+    get_cod_cash_projection,
+)
 from permissions import require_auth, require_delivery_driver
 from i18n import i18n
 
@@ -97,6 +102,7 @@ class ActiveDeliveryHandler(BaseHandler):
                 else:
                     lines.append(f"\U0001f4b0 {total}")
                 if payment == 'cash':
+                    cod_projection = get_cod_cash_projection(delivery)
                     lines.append(
                         f"\U0001f9fe {i18n.get('staff.delivery.cash_collected_label', language)}: "
                         f"{format_currency(delivery.get('amount_collected'), language=language)}"
@@ -104,6 +110,15 @@ class ActiveDeliveryHandler(BaseHandler):
                     lines.append(
                         f"\U0001f4b8 {i18n.get('staff.delivery.cash_outstanding_label', language)}: "
                         f"{format_currency(delivery.get('outstanding_amount'), language=language)}"
+                    )
+                    if cod_projection['cod_reserved_prepayment_amount'] > 0:
+                        lines.append(
+                            f"\U0001f4b3 COD prepaid reserved: "
+                            f"{format_currency(cod_projection['cod_reserved_prepayment_amount'], language=language)}"
+                        )
+                    lines.append(
+                        f"\U0001f4b5 Cash to collect now: "
+                        f"{format_currency(cod_projection['expected_cash_to_collect'], language=language)}"
                     )
 
                 text = '\n'.join(lines)
@@ -209,6 +224,7 @@ class ActiveDeliveryHandler(BaseHandler):
                 payment_info += f" ({payment_label})"
             lines.append(payment_info)
             if payment == 'cash':
+                cod_projection = get_cod_cash_projection(delivery)
                 lines.append(
                     f"\U0001f9fe {i18n.get('staff.delivery.cash_collected_label', language)}: "
                     f"{format_currency(delivery.get('amount_collected'), language=language)}"
@@ -216,6 +232,15 @@ class ActiveDeliveryHandler(BaseHandler):
                 lines.append(
                     f"\U0001f4b8 {i18n.get('staff.delivery.cash_outstanding_label', language)}: "
                     f"{format_currency(delivery.get('outstanding_amount'), language=language)}"
+                )
+                if cod_projection['cod_reserved_prepayment_amount'] > 0:
+                    lines.append(
+                        f"\U0001f4b3 COD prepaid reserved: "
+                        f"{format_currency(cod_projection['cod_reserved_prepayment_amount'], language=language)}"
+                    )
+                lines.append(
+                    f"\U0001f4b5 Cash to collect now: "
+                    f"{format_currency(cod_projection['expected_cash_to_collect'], language=language)}"
                 )
 
             # Delivery notes
@@ -234,6 +259,8 @@ class ActiveDeliveryHandler(BaseHandler):
                 'payment_status': delivery.get('payment_status'),
                 'amount_collected': delivery.get('amount_collected', 0),
                 'outstanding_amount': delivery.get('outstanding_amount', 0),
+                'cod_reserved_prepayment_amount': delivery.get('cod_reserved_prepayment_amount', 0),
+                'expected_cash_to_collect': delivery.get('expected_cash_to_collect', 0),
                 'customer_phone': customer_phone,
                 'address': address,
                 # Origin: driver's last known point

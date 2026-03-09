@@ -10,7 +10,7 @@ from handlers.base import BaseHandler
 from api_client import api_client
 from keyboards.delivery import DeliveryKeyboards
 from keyboards.common import CommonKeyboards
-from utils.formatters import format_delivery_status, format_currency
+from utils.formatters import format_delivery_status, format_currency, get_cod_cash_projection
 from permissions import require_auth, require_delivery_driver
 from i18n import i18n
 from shared.staff_constants import DELIVERY_STATUS_TRANSITIONS
@@ -40,15 +40,23 @@ class StatusUpdateHandler(BaseHandler):
         context.user_data.pop('pending_reconciliation_flow', None)
 
     @staticmethod
+    def _get_expected_cash_to_collect(delivery_info: dict) -> float:
+        return get_cod_cash_projection(delivery_info)['expected_cash_to_collect']
+
+    @staticmethod
     def _format_session_summary(session: dict, language: str) -> str:
         status = session.get('status') or i18n.get('staff.common.not_available', language)
         expected_cash = format_currency(session.get('expected_cash'), language=language)
+        expected_on_hand = format_currency(session.get('expected_cash_on_hand'), language=language)
+        transferred_cash_total = format_currency(session.get('transferred_cash_total'), language=language)
         declared_cash = session.get('declared_cash')
         declared_variance = format_currency(session.get('declared_variance'), language=language)
         lines = [
             f"\U0001f9fe <b>{i18n.get('staff.menu.cash_reconciliation', language)}</b>",
             f"{i18n.get('staff.delivery.current_status', language)}: {status}",
             f"\U0001f4b0 {i18n.get('staff.delivery.expected_cash_label', language)}: {expected_cash}",
+            f"\U0001f4e5 {i18n.get('staff.delivery.transferred_cash_label', language)}: {transferred_cash_total}",
+            f"\U0001f45b {i18n.get('staff.delivery.expected_cash_on_hand_label', language)}: {expected_on_hand}",
         ]
         if declared_cash is not None:
             lines.append(
@@ -61,6 +69,12 @@ class StatusUpdateHandler(BaseHandler):
         notes = session.get('notes')
         if notes:
             lines.append(f"\U0001f4ac {notes}")
+        risk_flags = session.get('risk_flags') or []
+        if risk_flags:
+            lines.append(
+                f"\u26a0\ufe0f {i18n.get('staff.delivery.risk_flags', language)}: "
+                f"{', '.join(str(flag) for flag in risk_flags)}"
+            )
         return '\n'.join(lines)
 
     async def _submit_delivery_completion(
@@ -81,6 +95,8 @@ class StatusUpdateHandler(BaseHandler):
         metadata = {'cash_collected': cash_amount}
         if notes:
             metadata['notes'] = notes
+        elif cash_amount <= 0:
+            metadata['notes'] = 'No cash due after COD prepaid deduction'
 
         async with api_client as client:
             response = await client.update_delivery_status(
@@ -150,15 +166,25 @@ class StatusUpdateHandler(BaseHandler):
             if new_status == 'delivered':
                 delivery_info = context.user_data.get('current_delivery', {})
                 payment_method = delivery_info.get('payment_method', '')
-                total_amount = delivery_info.get('total_amount', 0)
+                cash_due_amount = self._get_expected_cash_to_collect(delivery_info)
+                reserved_prepayment = float(delivery_info.get('cod_reserved_prepayment_amount') or 0)
 
-                if payment_method == 'cash' and total_amount > 0:
+                if payment_method == 'cash' and cash_due_amount > 0:
                     keyboard = DeliveryKeyboards.cash_collection_options(
-                        language, delivery_id, total_amount
+                        language, delivery_id, cash_due_amount
                     )
+                    message_text = i18n.get(
+                        'staff.delivery.cash_collection',
+                        language,
+                        amount=format_currency(cash_due_amount, language=language),
+                    )
+                    if reserved_prepayment > 0:
+                        message_text += (
+                            f"\n\U0001f4b3 COD prepaid deduction: "
+                            f"{format_currency(reserved_prepayment, language=language)}"
+                        )
                     await query.edit_message_text(
-                        i18n.get('staff.delivery.cash_collection', language,
-                                 amount=format_currency(total_amount, language=language)),
+                        message_text,
                         reply_markup=keyboard,
                         parse_mode='HTML'
                     )
@@ -286,7 +312,7 @@ class StatusUpdateHandler(BaseHandler):
         try:
             delivery_id = int(query.data.split('_')[-1])
             delivery_info = context.user_data.get('current_delivery', {})
-            cash_amount = delivery_info.get('total_amount', 0)
+            cash_amount = self._get_expected_cash_to_collect(delivery_info)
             await self._submit_delivery_completion(
                 update,
                 context,
@@ -367,8 +393,8 @@ class StatusUpdateHandler(BaseHandler):
                 return CASH_INPUT
 
             delivery_info = context.user_data.get('current_delivery', {})
-            order_total = float(delivery_info.get('total_amount') or 0)
-            if cash_amount <= 0 or (order_total and cash_amount > order_total):
+            cash_due_amount = self._get_expected_cash_to_collect(delivery_info)
+            if cash_amount <= 0 or (cash_due_amount and cash_amount > cash_due_amount):
                 await update.message.reply_text(
                     i18n.get('staff.delivery.invalid_amount', language)
                 )
@@ -442,6 +468,7 @@ class StatusUpdateHandler(BaseHandler):
             keyboard = DeliveryKeyboards.reconciliation_actions(
                 language,
                 can_submit=session.get('status') in {'open', 'overdue'},
+                can_handoff=session.get('status') in {'open', 'submitted', 'overdue', 'mismatch'},
             )
 
             if update.callback_query:
@@ -471,6 +498,21 @@ class StatusUpdateHandler(BaseHandler):
 
     @require_auth
     @require_delivery_driver
+    async def start_reconciliation_transfer(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Prompt the driver to enter checkpoint handoff amount."""
+        query = update.callback_query
+        await query.answer()
+        language = await self._get_language(update, context)
+
+        context.user_data['pending_reconciliation_flow'] = {'action': 'transfer'}
+        await query.edit_message_text(
+            i18n.get('staff.delivery.enter_transfer_cash', language),
+            parse_mode='HTML',
+        )
+        return RECONCILIATION_INPUT
+
+    @require_auth
+    @require_delivery_driver
     async def receive_reconciliation_declared_cash(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Submit the declared driver cash amount for reconciliation."""
         language = await self._get_language(update, context)
@@ -491,11 +533,19 @@ class StatusUpdateHandler(BaseHandler):
                 )
                 return RECONCILIATION_INPUT
 
+            flow = context.user_data.get('pending_reconciliation_flow') or {}
+            flow_action = flow.get('action', 'submit')
             async with api_client as client:
-                response = await client.submit_reconciliation_session(
-                    token,
-                    {'declared_cash': declared_cash},
-                )
+                if flow_action == 'transfer':
+                    response = await client.create_reconciliation_transfer(
+                        token,
+                        {'declared_transfer_cash': declared_cash},
+                    )
+                else:
+                    response = await client.submit_reconciliation_session(
+                        token,
+                        {'declared_cash': declared_cash},
+                    )
 
             if not response.success:
                 await self._handle_api_response_error(update, response, language)
@@ -503,10 +553,11 @@ class StatusUpdateHandler(BaseHandler):
 
             self._clear_delivery_cash_flow(context)
             session = response.data or {}
-            message = (
-                f"\u2705 {i18n.get('staff.delivery.reconciliation_submitted', language)}\n\n"
-                f"{self._format_session_summary(session, language)}"
-            )
+            if flow_action == 'transfer':
+                success_title = i18n.get('staff.delivery.transfer_created', language)
+            else:
+                success_title = i18n.get('staff.delivery.reconciliation_submitted', language)
+            message = f"\u2705 {success_title}\n\n{self._format_session_summary(session, language)}"
             await update.message.reply_text(
                 message,
                 reply_markup=CommonKeyboards.back_button(language, "staff_back_to_main"),

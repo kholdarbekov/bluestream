@@ -67,7 +67,7 @@ from handlers.profile import (
     ADDRESS_STREET, ADDRESS_BUILDING, ADDRESS_APARTMENT, ADDRESS_FLOOR,
     ADDRESS_ENTRANCE, ADDRESS_DELIVERY_INSTRUCTIONS, ADDRESS_GEOCODE_CONFIRM
 )
-from utils import error_handler, rate_limiter, user_middleware, get_auth_token
+from utils import error_handler, rate_limiter, user_middleware, get_auth_token, maybe_remove_stale_reply_keyboard
 from keyboards import MenuKeyboards
 
 logger = logging.getLogger('bot')
@@ -348,6 +348,7 @@ class WaterBusinessBot:
         # Add logging callback handler to catch all callbacks for debugging
         async def debug_callback_handler(update, context):
             if update.callback_query:
+                await maybe_remove_stale_reply_keyboard(update, context)
                 logger.error(f"========================================")
                 logger.error(f"=== CALLBACK QUERY RECEIVED ===")
                 logger.error(f"User: {update.effective_user.id}")
@@ -485,6 +486,7 @@ class WaterBusinessBot:
             states={
                 profile_handlers.PHONE_VERIFY_PHONE: [
                     MessageHandler(filters.CONTACT, profile_handlers.phone_verify_contact_received),
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, profile_handlers.phone_verify_text_received),
                 ],
                 profile_handlers.PHONE_VERIFY_NAME: [
                     MessageHandler(filters.TEXT & ~filters.COMMAND, profile_handlers.phone_verify_name_received),

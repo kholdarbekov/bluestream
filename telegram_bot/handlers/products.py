@@ -748,6 +748,16 @@ class ProductHandlers(BaseHandler):
                 )
             cart_is_empty = total_amount <= 0
             lines.append(f"\n💰 {i18n.get('telegram.cart_total', language)}: {format_price(total_amount)} UZS")
+
+            cod_prepayment = cart.get('cod_prepayment') or {}
+            available_balance = float(cod_prepayment.get('available_balance') or 0)
+            potential_applied = float(cod_prepayment.get('potential_applied_amount') or 0)
+            payable_after = float(cod_prepayment.get('estimated_payable_after_prepayment') or total_amount)
+            if available_balance > 0:
+                lines.append("")
+                lines.append(f"💳 COD prepaid balance: {format_price(available_balance)} UZS")
+                lines.append(f"🔁 Auto-applied on next COD order: {format_price(potential_applied)} UZS")
+                lines.append(f"🧾 Estimated COD payable after prepaid: {format_price(payable_after)} UZS")
             
             # Add minimum order warning if needed
             if total_amount < MIN_ORDER_AMOUNT:

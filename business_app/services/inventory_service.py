@@ -534,6 +534,8 @@ class InventoryService:
     def _get_reserved_quantity(self, product_id: int, exclude_order_id: Optional[int] = None) -> int:
         """Get total reserved quantity for a product"""
         if not self.redis_client:
+            self.redis_client = self._get_redis_client()
+        if not self.redis_client:
             return 0
         
         try:

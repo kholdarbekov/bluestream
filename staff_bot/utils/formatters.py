@@ -46,6 +46,25 @@ def format_quantity(value: Any) -> str:
     return text or '0'
 
 
+def get_cod_cash_projection(payload: Dict[str, Any]) -> Dict[str, float]:
+    """Extract reserved COD prepayment and expected cash-to-collect values from payload."""
+    reserved_prepayment = float(payload.get('cod_reserved_prepayment_amount') or 0)
+    expected_cash_to_collect = float(
+        payload.get('expected_cash_to_collect')
+        or payload.get('outstanding_amount')
+        or payload.get('total_amount')
+        or 0
+    )
+    if reserved_prepayment < 0:
+        reserved_prepayment = 0.0
+    if expected_cash_to_collect < 0:
+        expected_cash_to_collect = 0.0
+    return {
+        'cod_reserved_prepayment_amount': reserved_prepayment,
+        'expected_cash_to_collect': expected_cash_to_collect,
+    }
+
+
 def format_order_card(order: Dict[str, Any], language: str) -> str:
     """
     Format order details as a compact card for Telegram message.
@@ -82,6 +101,21 @@ def format_order_card(order: Dict[str, Any], language: str) -> str:
         lines.append(f"\U0001f4b0 {total} ({payment_label})")
     else:
         lines.append(f"\U0001f4b0 {total}")
+    if payment == 'cash':
+        cod_projection = get_cod_cash_projection(order)
+        lines.append(
+            f"\U0001f4b8 {i18n.get('staff.delivery.cash_outstanding_label', language)}: "
+            f"{format_currency(order.get('outstanding_amount'), language=language)}"
+        )
+        if cod_projection['cod_reserved_prepayment_amount'] > 0:
+            lines.append(
+                f"\U0001f4b3 COD prepaid reserved: "
+                f"{format_currency(cod_projection['cod_reserved_prepayment_amount'], language=language)}"
+            )
+        lines.append(
+            f"\U0001f4b5 Cash to collect now: "
+            f"{format_currency(cod_projection['expected_cash_to_collect'], language=language)}"
+        )
     lines.append(f"\U0001f4dd {item_count} {i18n.get('staff.items', language)}")
 
     if delivery_notes:

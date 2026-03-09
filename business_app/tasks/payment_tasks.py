@@ -240,11 +240,42 @@ def mark_overdue_cod_reconciliation_sessions(self):
     try:
         from business_app.services.driver_reconciliation_service import DriverReconciliationService
 
-        updated = DriverReconciliationService().mark_overdue_sessions()
-        logger.info("Marked %s driver COD reconciliation sessions as overdue", updated)
-        return {'updated_sessions': updated}
+        service = DriverReconciliationService()
+        updated = service.mark_overdue_sessions()
+        manager_notifications = service.notify_managers_about_exception_sessions()
+        logger.info(
+            "Marked %s driver COD reconciliation sessions as overdue (manager notifications=%s)",
+            updated,
+            manager_notifications,
+        )
+        return {'updated_sessions': updated, 'manager_notifications': manager_notifications}
     except Exception as exc:
         logger.error("Failed to mark overdue COD reconciliation sessions: %s", exc)
+        raise self.retry(exc=exc)
+
+
+@shared_task(bind=True, max_retries=2, default_retry_delay=300, time_limit=300, soft_time_limit=270)
+def send_cod_reconciliation_reminders(self):
+    """Send periodic reconciliation reminders to drivers with open sessions."""
+    try:
+        from business_app.services.driver_reconciliation_service import DriverReconciliationService
+
+        service = DriverReconciliationService()
+        result = service.send_due_reconciliation_reminders()
+        manager_notifications = service.notify_managers_about_exception_sessions()
+        logger.info(
+            "Sent COD reconciliation reminders: sent=%s failed=%s (manager notifications=%s)",
+            result.get('sent', 0),
+            result.get('failed', 0),
+            manager_notifications,
+        )
+        return {
+            'sent': result.get('sent', 0),
+            'failed': result.get('failed', 0),
+            'manager_notifications': manager_notifications,
+        }
+    except Exception as exc:
+        logger.error("Failed to send COD reconciliation reminders: %s", exc)
         raise self.retry(exc=exc)
 
 

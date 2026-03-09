@@ -11,7 +11,14 @@ from business_app.models.delivery import Delivery, DeliveryStatusHistory
 from business_app.models.notification import Notification, NotificationPreference, NotificationTemplate
 from business_app.models.translation import Translation
 from business_app.services.notification_service import NotificationService
-from business_app.utils.constants import DeliveryStatus, NotificationChannel, NotificationStatus, NotificationType
+from business_app.utils.constants import (
+    DeliveryStatus,
+    NotificationChannel,
+    NotificationStatus,
+    NotificationType,
+    OrderStatus,
+    PaymentMethod,
+)
 from business_app.utils.exceptions import ForbiddenError, ValidationError
 
 
@@ -711,6 +718,123 @@ def test_send_telegram_notification_allows_in_transit_delivery_status(app, db, s
     assert result['success'] is True
     assert result.get('skipped') is None
     post_mock.assert_called_once()
+
+
+def test_send_staff_telegram_message_uses_staff_bot_token(app, db, sample_user):
+    sample_user.telegram_id = '104933915'
+    sample_user.is_bot_active = True
+    db.session.commit()
+
+    service = NotificationService()
+    service.telegram_bot_token = 'customer-token'
+    service.staff_telegram_bot_token = 'staff-token'
+
+    fake_response = Mock()
+    fake_response.raise_for_status.return_value = None
+    fake_response.json.return_value = {'ok': True, 'result': {'message_id': 790}}
+
+    with patch('business_app.services.notification_service.requests.post', return_value=fake_response) as post_mock:
+        result = service.send_staff_telegram_message(sample_user, "Staff reminder")
+
+    assert result['success'] is True
+    called_url = post_mock.call_args.args[0]
+    assert '/botstaff-token/sendMessage' in called_url
+    assert '/botcustomer-token/sendMessage' not in called_url
+
+
+def test_send_payment_notification_uses_delivered_follow_up_message_for_cod_order(
+    db,
+    sample_user,
+    sample_order,
+    sample_payment,
+):
+    service = NotificationService()
+
+    sample_user.preferred_language = 'en'
+    sample_order.status = OrderStatus.DELIVERED
+    sample_payment.payment_method = PaymentMethod.CASH
+    delivery = Delivery(
+        order_id=sample_order.id,
+        status=DeliveryStatus.DELIVERED,
+        scheduled_date=datetime.now(UTC),
+        scheduled_time_slot='09:00-12:00',
+    )
+    db.session.add(delivery)
+    db.session.commit()
+
+    send_mock = Mock(return_value={'telegram': {'success': True}})
+    service.send_notification = send_mock
+
+    result = service.send_payment_notification(sample_payment.id)
+
+    assert result == {'telegram': {'success': True}}
+    send_mock.assert_called_once()
+    payload = send_mock.call_args.args[3]
+    assert payload['payment_follow_up_message'] == (
+        "Your order has already been delivered. "
+        "This message confirms that we have received your payment."
+    )
+
+
+def test_send_telegram_payment_confirmation_rewrites_legacy_processing_copy(app, db, sample_user):
+    sample_user.telegram_id = '104933915'
+    sample_user.is_bot_active = True
+    sample_user.preferred_language = 'en'
+    db.session.commit()
+
+    service = NotificationService()
+    app.config['TELEGRAM_BOT_TOKEN'] = 'test-token'
+    service.telegram_bot_token = 'test-token'
+
+    legacy_line = "Your order is now being processed. We'll notify you when it's ready for delivery."
+    replacement_line = (
+        "Your order has already been delivered. "
+        "This message confirms that we have received your payment."
+    )
+
+    fake_template = SimpleNamespace(
+        content=f'''✅ <b>Payment Confirmed!</b>
+
+Order: #{{order_number}}
+Amount: {{payment_amount}} UZS
+Method: {{payment_method}}
+
+{legacy_line}
+
+Thank you for your purchase!''',
+        get_translated=lambda field, language: f'''✅ <b>Payment Confirmed!</b>
+
+Order: #{{order_number}}
+Amount: {{payment_amount}} UZS
+Method: {{payment_method}}
+
+{legacy_line}
+
+Thank you for your purchase!''' if field == 'content' else None,
+    )
+
+    fake_response = Mock()
+    fake_response.raise_for_status.return_value = None
+    fake_response.json.return_value = {'ok': True, 'result': {'message_id': 780}}
+
+    with patch('business_app.services.notification_service.requests.post', return_value=fake_response) as post_mock:
+        result = service._send_telegram_notification(
+            sample_user,
+            NotificationType.PAYMENT_CONFIRMATION,
+            {
+                'order_number': 'TG_000040_26',
+                'payment_amount': '18000',
+                'payment_method': 'cash',
+                'payment_follow_up_message': replacement_line,
+            },
+            'en',
+            template_override=fake_template,
+        )
+
+    assert result['success'] is True
+    payload_text = post_mock.call_args.kwargs['json']['text']
+    assert replacement_line in payload_text
+    assert legacy_line not in payload_text
 
 
 def test_get_delivery_telegram_setting_defaults_to_enabled_without_override(db, sample_user):

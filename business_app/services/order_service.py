@@ -188,7 +188,15 @@ class OrderService:
             db.session.commit()
 
             from business_app.services.payment_service import PaymentService
-            PaymentService().initialize_order_payment(order.id)
+            payment = PaymentService().initialize_order_payment(order.id)
+            if payment_method == PaymentMethod.CASH and payment:
+                from business_app.services.cash_collection_service import CashCollectionService
+
+                CashCollectionService().reserve_customer_prepaid_credit_for_payment(
+                    payment,
+                    actor_user_id=user_id,
+                )
+                db.session.commit()
             db.session.refresh(order)
             
         except ValidationError:
@@ -1209,6 +1217,16 @@ class OrderService:
                 self._confirm_inventory_for_order(order)
                 # Process loyalty points for cash orders
                 self._process_loyalty_points_for_order(order)
+                # Auto-apply any customer COD prepayment balance to this delivered COD order.
+                from business_app.services.cash_collection_service import CashCollectionService
+
+                cash_collection_service = CashCollectionService()
+                payment = order.payment or cash_collection_service.ensure_cod_payment_for_order(order)
+                cash_collection_service.consume_reserved_prepayment_for_payment(
+                    payment,
+                    collected_at=order.delivered_at,
+                )
+                cash_collection_service.apply_customer_prepaid_credit_to_payment(payment)
 
             # --- LOYALTY OVERHAUL TRIGGERS ---
             # Triggers that must happen only on successful delivery
@@ -1232,6 +1250,16 @@ class OrderService:
                 delivery_id=order.delivery.id if order.delivery else None,
             )
             db.session.commit()
+        elif new_status in {OrderStatus.CANCELLED, OrderStatus.RETURNED}:
+            if order.payment_method == PaymentMethod.CASH:
+                from business_app.services.cash_collection_service import CashCollectionService
+
+                CashCollectionService().release_reserved_prepayment_for_order(
+                    order_id=order.id,
+                    actor_user_id=getattr(order, 'updated_by', None),
+                    reason=f"Order moved to {new_status.value}",
+                )
+                db.session.commit()
     
     def _process_loyalty_points_for_order(self, order: Order):
         """

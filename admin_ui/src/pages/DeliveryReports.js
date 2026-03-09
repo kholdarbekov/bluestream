@@ -33,7 +33,6 @@ import {
 } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from 'react-query';
 import { useTranslation } from 'react-i18next';
-import adminService from '../services/adminService';
 import staffService from '../services/staffService';
 
 const { Title, Text } = Typography;
@@ -56,6 +55,20 @@ const statusColor = (status, blocked) => {
 };
 
 const money = (value) => `${(value || 0).toLocaleString()} UZS`;
+const VERIFY_REASON_OPTIONS = [
+  { value: 'cash_count_matched', label: 'Cash count matched' },
+  { value: 'cash_count_short', label: 'Cash short' },
+  { value: 'cash_count_excess', label: 'Cash excess' },
+  { value: 'manual_override', label: 'Manual override' },
+  { value: 'evidence_reviewed', label: 'Evidence reviewed' },
+];
+const RESOLVE_REASON_OPTIONS = [
+  { value: 'manager_approved_adjustment', label: 'Manager approved adjustment' },
+  { value: 'cash_recovered_later', label: 'Cash recovered later' },
+  { value: 'transfer_variance_settled', label: 'Transfer variance settled' },
+  { value: 'clerical_correction', label: 'Clerical correction' },
+  { value: 'other', label: 'Other' },
+];
 
 const DeliveryReports = () => {
   const { t } = useTranslation(['staff', 'common']);
@@ -67,15 +80,16 @@ const DeliveryReports = () => {
   const [detailOpen, setDetailOpen] = useState(false);
   const [verifyOpen, setVerifyOpen] = useState(false);
   const [resolveOpen, setResolveOpen] = useState(false);
+  const [transferConfirmOpen, setTransferConfirmOpen] = useState(false);
   const [verifyMode, setVerifyMode] = useState('approve');
+  const [selectedTransfer, setSelectedTransfer] = useState(null);
   const [customerStatementId, setCustomerStatementId] = useState(null);
   const [orderTimelineId, setOrderTimelineId] = useState(null);
   const [recordCollectionOpen, setRecordCollectionOpen] = useState(false);
   const [recordCollectionCustomerId, setRecordCollectionCustomerId] = useState(null);
-  const [customerOptions, setCustomerOptions] = useState([]);
-  const [customerSearchLoading, setCustomerSearchLoading] = useState(false);
   const [verifyForm] = Form.useForm();
   const [resolveForm] = Form.useForm();
+  const [transferConfirmForm] = Form.useForm();
   const [recordCollectionForm] = Form.useForm();
   const collectionSource = Form.useWatch('source', recordCollectionForm) || 'standalone_meeting';
 
@@ -119,6 +133,12 @@ const DeliveryReports = () => {
     ['deliveryReportRecordCollectionStatement', recordCollectionCustomerId],
     () => staffService.getCustomerCodStatement(recordCollectionCustomerId),
     { enabled: recordCollectionOpen && !!recordCollectionCustomerId }
+  );
+
+  const codDebtUsersQuery = useQuery(
+    ['deliveryReportCodDebtUsers'],
+    () => staffService.getCodCollectionUsersWithOpenDebts({ limit: 500 }),
+    { enabled: recordCollectionOpen }
   );
 
   const refreshReportQueries = () => {
@@ -165,6 +185,23 @@ const DeliveryReports = () => {
     }
   );
 
+  const confirmTransferMutation = useMutation(
+    ({ transferId, payload }) => staffService.confirmCashReconciliationTransfer(transferId, payload),
+    {
+      onSuccess: () => {
+        message.success(t('staff:transfer_confirmed', 'Checkpoint transfer confirmed'));
+        setTransferConfirmOpen(false);
+        setSelectedTransfer(null);
+        transferConfirmForm.resetFields();
+        refreshReportQueries();
+      },
+      onError: (error) => {
+        const backendMessage = error?.response?.data?.message;
+        message.error(backendMessage || t('common:error_occurred'));
+      },
+    }
+  );
+
   const recordCollectionMutation = useMutation(
     (payload) => staffService.recordCashCollection(payload),
     {
@@ -172,7 +209,6 @@ const DeliveryReports = () => {
         message.success(t('staff:cash_collection_recorded', 'Cash collection recorded'));
         setRecordCollectionOpen(false);
         setRecordCollectionCustomerId(null);
-        setCustomerOptions([]);
         recordCollectionForm.resetFields();
         refreshReportQueries();
       },
@@ -191,6 +227,7 @@ const DeliveryReports = () => {
   const customerStatement = customerStatementQuery.data?.data?.data || null;
   const orderTimeline = orderTimelineQuery.data?.data?.data || null;
   const recordCollectionStatement = recordCollectionStatementQuery.data?.data?.data || null;
+  const codDebtUsers = codDebtUsersQuery.data?.data?.data?.items || [];
   const deliveryDrivers = driverOptionsQuery.data?.data?.data?.items || [];
 
   const selectedSession = useMemo(
@@ -212,8 +249,9 @@ const DeliveryReports = () => {
     verifyForm.setFieldsValue({
       verified_cash:
         mode === 'reject'
-          ? Math.max(0, (session.expected_cash ?? session.declared_cash ?? 0) - 1)
-          : (session.declared_cash ?? session.expected_cash ?? 0),
+          ? Math.max(0, (session.expected_cash_on_hand ?? session.expected_cash ?? session.declared_cash ?? 0) - 1)
+          : (session.declared_cash ?? session.expected_cash_on_hand ?? session.expected_cash ?? 0),
+      reason_code: mode === 'reject' ? 'cash_count_short' : 'cash_count_matched',
       notes: session.verification_notes || '',
     });
     setVerifyOpen(true);
@@ -222,39 +260,21 @@ const DeliveryReports = () => {
   const openResolveModal = (session) => {
     setSelectedSessionId(session.id);
     resolveForm.setFieldsValue({
-      verified_cash: session.verified_cash ?? session.declared_cash ?? session.expected_cash ?? 0,
+      verified_cash: session.verified_cash ?? session.declared_cash ?? session.expected_cash_on_hand ?? session.expected_cash ?? 0,
+      reason_code: session.resolution_reason_code || 'manager_approved_adjustment',
       resolution_notes: session.resolution_notes || '',
     });
     setResolveOpen(true);
   };
 
-  const handleCustomerSearch = async (searchValue) => {
-    const query = (searchValue || '').trim();
-    if (query.length < 2) {
-      setCustomerOptions([]);
-      return;
-    }
-
-    setCustomerSearchLoading(true);
-    try {
-      const response = await adminService.getUsers({
-        search: query,
-        role: 'customer',
-        per_page: 20,
-      });
-      const items = response?.data?.items || [];
-      setCustomerOptions(
-        items.filter((item) => {
-          const role = String(item?.role || '').toLowerCase();
-          const userType = String(item?.user_type || '').toLowerCase();
-          return role === 'customer' || (userType && userType !== 'staff');
-        })
-      );
-    } catch (_error) {
-      setCustomerOptions([]);
-    } finally {
-      setCustomerSearchLoading(false);
-    }
+  const openTransferConfirmModal = (transfer) => {
+    setSelectedTransfer(transfer);
+    transferConfirmForm.setFieldsValue({
+      counted_transfer_cash: transfer.declared_transfer_cash ?? 0,
+      reason_code: transfer.transfer_status === 'pending' ? 'cash_count_matched' : 'manual_override',
+      notes: transfer.notes || '',
+    });
+    setTransferConfirmOpen(true);
   };
 
   const reportColumns = [
@@ -310,6 +330,19 @@ const DeliveryReports = () => {
         <Tag color={statusColor(value, record.blocked_from_cod)}>
           {value}
         </Tag>
+      ),
+    },
+    {
+      title: t('staff:risk_flags', 'Risk'),
+      dataIndex: 'risk_flags',
+      key: 'risk_flags',
+      render: (flags) => (
+        <Space wrap>
+          {(flags || []).map((flag) => (
+            <Tag color="orange" key={flag}>{flag}</Tag>
+          ))}
+          {(!flags || flags.length === 0) ? '—' : null}
+        </Space>
       ),
     },
     {
@@ -416,6 +449,55 @@ const DeliveryReports = () => {
     },
   ];
 
+  const transferColumns = [
+    {
+      title: t('staff:created_at', 'Created'),
+      dataIndex: 'created_at',
+      key: 'created_at',
+    },
+    {
+      title: t('staff:status', 'Status'),
+      dataIndex: 'transfer_status',
+      key: 'transfer_status',
+      render: (value) => <Tag>{value}</Tag>,
+    },
+    {
+      title: t('staff:declared_transfer_cash', 'Declared Transfer'),
+      dataIndex: 'declared_transfer_cash',
+      key: 'declared_transfer_cash',
+      render: money,
+    },
+    {
+      title: t('staff:counted_transfer_cash', 'Counted Transfer'),
+      dataIndex: 'counted_transfer_cash',
+      key: 'counted_transfer_cash',
+      render: (value) => (value == null ? '—' : money(value)),
+    },
+    {
+      title: t('staff:transfer_variance', 'Variance'),
+      dataIndex: 'transfer_variance',
+      key: 'transfer_variance',
+      render: money,
+    },
+    {
+      title: t('staff:actions', 'Actions'),
+      key: 'actions',
+      render: (_, record) => (
+        <Space wrap>
+          {record.transfer_status === 'pending' ? (
+            <Button
+              size="small"
+              type="primary"
+              onClick={() => openTransferConfirmModal(record)}
+            >
+              {t('staff:confirm_transfer', 'Confirm Transfer')}
+            </Button>
+          ) : null}
+        </Space>
+      ),
+    },
+  ];
+
   const statementColumns = [
     {
       title: t('staff:order_number', 'Order'),
@@ -509,7 +591,15 @@ const DeliveryReports = () => {
             <Button icon={<ReloadOutlined />} onClick={() => refetch()}>
               {t('common:refresh')}
             </Button>
-            <Button type="primary" icon={<DollarOutlined />} onClick={() => setRecordCollectionOpen(true)}>
+            <Button
+              type="primary"
+              icon={<DollarOutlined />}
+              onClick={() => {
+                setRecordCollectionCustomerId(null);
+                recordCollectionForm.resetFields();
+                setRecordCollectionOpen(true);
+              }}
+            >
               {t('staff:record_cash_collection', 'Record Collection')}
             </Button>
           </Space>
@@ -610,6 +700,12 @@ const DeliveryReports = () => {
               </Descriptions.Item>
               <Descriptions.Item label={t('staff:business_date', 'Business Date')}>{selectedSession.business_date}</Descriptions.Item>
               <Descriptions.Item label={t('staff:expected_cash', 'Expected Cash')}>{money(selectedSession.expected_cash)}</Descriptions.Item>
+              <Descriptions.Item label={t('staff:transferred_cash_total', 'Transferred Cash')}>
+                {money(selectedSession.transferred_cash_total)}
+              </Descriptions.Item>
+              <Descriptions.Item label={t('staff:expected_cash_on_hand', 'Expected On Hand')}>
+                {money(selectedSession.expected_cash_on_hand)}
+              </Descriptions.Item>
               <Descriptions.Item label={t('staff:declared_cash', 'Declared Cash')}>
                 {selectedSession.declared_cash == null ? '—' : money(selectedSession.declared_cash)}
               </Descriptions.Item>
@@ -620,6 +716,17 @@ const DeliveryReports = () => {
               <Descriptions.Item label={t('staff:verified_variance', 'Verified Variance')}>{money(selectedSession.verified_variance)}</Descriptions.Item>
               <Descriptions.Item label={t('staff:block_reason', 'Block Reason')}>{selectedSession.block_reason || '—'}</Descriptions.Item>
               <Descriptions.Item label={t('staff:event_count', 'Collection Events')}>{selectedSession.event_count || 0}</Descriptions.Item>
+              <Descriptions.Item label={t('staff:submission_due_at', 'Submission Due')}>
+                {selectedSession.submission_due_at || '—'}
+              </Descriptions.Item>
+              <Descriptions.Item label={t('staff:risk_flags', 'Risk Flags')}>
+                <Space wrap>
+                  {(selectedSession.risk_flags || []).map((flag) => (
+                    <Tag color="orange" key={flag}>{flag}</Tag>
+                  ))}
+                  {(!selectedSession.risk_flags || selectedSession.risk_flags.length === 0) ? '—' : null}
+                </Space>
+              </Descriptions.Item>
             </Descriptions>
 
             {selectedSession.blocked_from_cod ? (
@@ -635,6 +742,14 @@ const DeliveryReports = () => {
             <Table
               columns={eventColumns}
               dataSource={selectedSession.events || []}
+              rowKey="id"
+              pagination={false}
+              scroll={{ x: 900 }}
+            />
+            <Divider>{t('staff:checkpoint_transfers', 'Checkpoint Transfers')}</Divider>
+            <Table
+              columns={transferColumns}
+              dataSource={selectedSession.transfers || []}
               rowKey="id"
               pagination={false}
               scroll={{ x: 900 }}
@@ -680,7 +795,9 @@ const DeliveryReports = () => {
             if (
               verifyMode === 'reject' &&
               selectedSession &&
-              Number(values.verified_cash) === Number(selectedSession.expected_cash || 0)
+              Number(values.verified_cash) === Number(
+                selectedSession.expected_cash_on_hand ?? selectedSession.expected_cash ?? 0
+              )
             ) {
               message.error(
                 t(
@@ -703,6 +820,17 @@ const DeliveryReports = () => {
             rules={[{ required: true, message: t('staff:verified_cash_required', 'Verified cash is required') }]}
           >
             <InputNumber min={0} style={{ width: '100%' }} />
+          </Form.Item>
+          <Form.Item
+            name="reason_code"
+            label={t('staff:reason_code', 'Reason Code')}
+            rules={[{ required: true, message: t('staff:reason_code_required', 'Reason code is required') }]}
+          >
+            <Select>
+              {VERIFY_REASON_OPTIONS.map((option) => (
+                <Option value={option.value} key={option.value}>{option.label}</Option>
+              ))}
+            </Select>
           </Form.Item>
           <Form.Item
             name="notes"
@@ -739,11 +867,70 @@ const DeliveryReports = () => {
             <InputNumber min={0} style={{ width: '100%' }} />
           </Form.Item>
           <Form.Item
+            name="reason_code"
+            label={t('staff:reason_code', 'Reason Code')}
+            rules={[{ required: true, message: t('staff:reason_code_required', 'Reason code is required') }]}
+          >
+            <Select>
+              {RESOLVE_REASON_OPTIONS.map((option) => (
+                <Option value={option.value} key={option.value}>{option.label}</Option>
+              ))}
+            </Select>
+          </Form.Item>
+          <Form.Item
             name="resolution_notes"
             label={t('staff:resolution_notes', 'Resolution Notes')}
             rules={[{ required: true, message: t('staff:resolution_notes_required', 'Resolution notes are required') }]}
           >
             <Input.TextArea rows={4} />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
+        title={t('staff:confirm_transfer', 'Confirm Transfer')}
+        open={transferConfirmOpen}
+        onCancel={() => {
+          setTransferConfirmOpen(false);
+          setSelectedTransfer(null);
+        }}
+        onOk={() => transferConfirmForm.submit()}
+        confirmLoading={confirmTransferMutation.isLoading}
+      >
+        <Form
+          form={transferConfirmForm}
+          layout="vertical"
+          onFinish={(values) => {
+            if (!selectedTransfer?.id) {
+              message.error(t('staff:transfer_not_selected', 'No transfer selected'));
+              return;
+            }
+            confirmTransferMutation.mutate({
+              transferId: selectedTransfer.id,
+              payload: values,
+            });
+          }}
+        >
+          <Form.Item
+            name="counted_transfer_cash"
+            label={t('staff:counted_transfer_cash', 'Counted Transfer Cash')}
+            rules={[{ required: true, message: t('staff:counted_transfer_cash_required', 'Counted amount is required') }]}
+          >
+            <InputNumber min={0} style={{ width: '100%' }} />
+          </Form.Item>
+          <Form.Item
+            name="reason_code"
+            label={t('staff:reason_code', 'Reason Code')}
+            rules={[{ required: true, message: t('staff:reason_code_required', 'Reason code is required') }]}
+          >
+            <Select>
+              {VERIFY_REASON_OPTIONS.map((option) => (
+                <Option value={option.value} key={option.value}>{option.label}</Option>
+              ))}
+            </Select>
+          </Form.Item>
+          <Form.Item name="notes" label={t('staff:notes', 'Notes')}>
+            <Input.TextArea rows={3} />
           </Form.Item>
         </Form>
       </Modal>
@@ -819,7 +1006,6 @@ const DeliveryReports = () => {
         onCancel={() => {
           setRecordCollectionOpen(false);
           setRecordCollectionCustomerId(null);
-          setCustomerOptions([]);
           recordCollectionForm.resetFields();
         }}
         onOk={() => recordCollectionForm.submit()}
@@ -860,15 +1046,15 @@ const DeliveryReports = () => {
           >
             <Select
               showSearch
-              filterOption={false}
-              onSearch={handleCustomerSearch}
-              loading={customerSearchLoading}
+              optionFilterProp="children"
+              filterOption
+              loading={codDebtUsersQuery.isLoading}
               onChange={(value) => setRecordCollectionCustomerId(value)}
-              placeholder={t('staff:search_customer', 'Search customer by phone or name')}
+              placeholder={t('staff:search_customer', 'Select user with COD debt')}
             >
-              {customerOptions.map((customer) => (
+              {codDebtUsers.map((customer) => (
                 <Option key={customer.id} value={customer.id}>
-                  {customer.first_name} {customer.last_name} - {customer.phone}
+                  {customer.first_name} {customer.last_name} - {customer.phone} | {t('staff:active_cod_debts', 'Active COD debts')}: {customer.active_cod_debt_count || 0}
                 </Option>
               ))}
             </Select>

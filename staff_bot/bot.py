@@ -386,6 +386,7 @@ class StaffBot:
             CallbackQueryHandler(status_update_handler.start_no_cash_collection, pattern=r"^staff_cash_none_\d+$"),
             CallbackQueryHandler(status_update_handler.show_reconciliation_session, pattern="^staff_reconcile_session$"),
             CallbackQueryHandler(status_update_handler.start_reconciliation_submit, pattern="^staff_reconcile_submit$"),
+            CallbackQueryHandler(status_update_handler.start_reconciliation_transfer, pattern="^staff_reconcile_transfer$"),
             CallbackQueryHandler(cash_collection_handler.start_collection_search, pattern="^staff_cod_collect_menu$"),
             CallbackQueryHandler(cash_collection_handler.show_customer_statement, pattern=r"^staff_cod_customer_\d+$"),
             CallbackQueryHandler(cash_collection_handler.start_full_collection, pattern=r"^staff_cod_collect_full_\d+$"),

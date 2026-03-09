@@ -132,6 +132,14 @@ class StaffServiceClass {
     return api.post('/admin/staff/cash-reconciliation/collections', payload);
   }
 
+  searchCodCollectionUsers(params = {}) {
+    return api.get('/admin/staff/cash-reconciliation/users/search', { params });
+  }
+
+  getCodCollectionUsersWithOpenDebts(params = {}) {
+    return api.get('/admin/staff/cash-reconciliation/users/with-open-cod', { params });
+  }
+
   getCashReconciliationSession(sessionId) {
     return api.get(`/admin/staff/cash-reconciliation/sessions/${sessionId}`);
   }
@@ -142,6 +150,10 @@ class StaffServiceClass {
 
   resolveCashReconciliationSession(sessionId, payload) {
     return api.post(`/admin/staff/cash-reconciliation/sessions/${sessionId}/resolve`, payload);
+  }
+
+  confirmCashReconciliationTransfer(transferId, payload) {
+    return api.post(`/admin/staff/cash-reconciliation/transfers/${transferId}/confirm`, payload);
   }
 
   getCustomerCodStatement(customerId) {

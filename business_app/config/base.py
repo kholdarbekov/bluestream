@@ -339,6 +339,12 @@ For complete documentation, examples, and SDKs visit: [API Documentation](/docs/
     DATE_FORMAT = '%Y-%m-%d'
     TIME_FORMAT = '%H:%M:%S'
     ISO_DATETIME_FORMAT = '%Y-%m-%dT%H:%M:%S.%fZ'
+
+    # COD reconciliation and custody controls
+    COD_CASH_WARNING_THRESHOLD_UZS = int(os.environ.get('COD_CASH_WARNING_THRESHOLD_UZS', 200000))
+    COD_CASH_ESCALATION_THRESHOLD_UZS = int(os.environ.get('COD_CASH_ESCALATION_THRESHOLD_UZS', 400000))
+    COD_RECONCILIATION_CUTOFF_LOCAL = os.environ.get('COD_RECONCILIATION_CUTOFF_LOCAL', '23:00')
+    COD_REMINDER_INTERVAL_MINUTES = int(os.environ.get('COD_REMINDER_INTERVAL_MINUTES', 60))
     
     # Health Check Configuration
     HEALTH_CHECK_ENABLED = True

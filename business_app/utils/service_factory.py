@@ -128,6 +128,12 @@ def get_driver_reconciliation_service():
     return ServiceFactory.get_service(DriverReconciliationService, 'driver_reconciliation_service')
 
 
+def get_driver_cash_custody_service():
+    """Get DriverCashCustodyService instance"""
+    from business_app.services.driver_cash_custody_service import DriverCashCustodyService
+    return ServiceFactory.get_service(DriverCashCustodyService, 'driver_cash_custody_service')
+
+
 def get_delivery_service():
     """Get DeliveryService instance"""
     from business_app.services.delivery_service import DeliveryService
@@ -227,6 +233,7 @@ def inject_services(*service_names):
                 'payment_service': get_payment_service,
                 'cash_collection_service': get_cash_collection_service,
                 'driver_reconciliation_service': get_driver_reconciliation_service,
+                'driver_cash_custody_service': get_driver_cash_custody_service,
                 'delivery_service': get_delivery_service,
                 'notification_service': get_notification_service,
                 'loyalty_service': get_loyalty_service,

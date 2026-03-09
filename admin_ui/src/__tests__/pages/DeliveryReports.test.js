@@ -81,6 +81,7 @@ const reconciliationPayload = {
           business_date: '2026-03-06',
           status: 'submitted',
           expected_cash: 100000,
+          expected_cash_on_hand: 100000,
           declared_cash: 100000,
           verified_cash: null,
           declared_variance: 0,
@@ -93,6 +94,7 @@ const reconciliationPayload = {
           business_date: '2026-03-06',
           status: 'mismatch',
           expected_cash: 200000,
+          expected_cash_on_hand: 200000,
           declared_cash: 150000,
           verified_cash: 150000,
           declared_variance: -50000,
@@ -117,6 +119,7 @@ describe('DeliveryReports page', () => {
           status: 'submitted',
           business_date: '2026-03-06',
           expected_cash: 100000,
+          expected_cash_on_hand: 100000,
           declared_cash: 100000,
           verified_cash: null,
           declared_variance: 0,
@@ -173,6 +176,7 @@ describe('DeliveryReports page', () => {
     const [sessionId, payload] = staffService.verifyCashReconciliationSession.mock.calls[0];
     expect(sessionId).toBe(101);
     expect(Number(payload.verified_cash)).toBe(70000);
+    expect(payload.reason_code).toBe('cash_count_short');
     expect(payload.notes).toBe('Cash short by 30,000 UZS after count');
     expect(message.success).toHaveBeenCalledWith('Reconciliation rejected and marked as mismatch');
   });

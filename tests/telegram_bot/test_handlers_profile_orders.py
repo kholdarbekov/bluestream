@@ -42,6 +42,27 @@ class TestProfileHandlerFlows:
             reply_markup="phone-kbd",
         )
 
+    async def test_start_registration_new_existing_user_cleans_stale_reply_keyboard(self, monkeypatch):
+        handler = profile_module.ProfileHandlers()
+        update = DummyUpdate(user_id=707)
+        context = make_context()
+        cleanup_mock = AsyncMock(return_value=True)
+
+        user_repo = SimpleNamespace(get_user_by_telegram_id=AsyncMock(return_value={"id": 1}))
+        monkeypatch.setattr(profile_module, "BotUserRepository", lambda _db: user_repo)
+        monkeypatch.setattr(profile_module.i18n, "get", lambda key, lang, **_: f"{key}:{lang}")
+        monkeypatch.setattr(profile_module.MenuKeyboards, "main_menu", lambda _lang: "menu-kbd")
+        monkeypatch.setattr(profile_module, "maybe_remove_stale_reply_keyboard", cleanup_mock)
+
+        state = await handler.start_registration_new(update, context)
+
+        assert state == ConversationHandler.END
+        cleanup_mock.assert_awaited_once_with(update, context)
+        update.message.reply_text.assert_awaited_once_with(
+            text="telegram.welcome:en",
+            reply_markup="menu-kbd",
+        )
+
     async def test_phone_verify_contact_rejects_other_users_contact(self, monkeypatch):
         handler = profile_module.ProfileHandlers()
         update = DummyUpdate(user_id=777)
@@ -84,6 +105,55 @@ class TestProfileHandlerFlows:
         handler.user_repo.set_user_phone_verified.assert_awaited_once_with(777, "+998901112233")
         assert update.message.reply_text.await_count == 2
 
+    async def test_phone_verify_text_accepts_valid_phone_removes_keyboard_and_moves_to_name_step(self, monkeypatch):
+        handler = profile_module.ProfileHandlers()
+        handler.user_repo = SimpleNamespace(set_user_phone=AsyncMock())
+        update = DummyUpdate(user_id=778)
+        update.message.text = "+998901112233"
+        context = make_context()
+
+        monkeypatch.setattr(profile_module.i18n, "get_user_language", AsyncMock(return_value="en"))
+        monkeypatch.setattr(profile_module.i18n, "get", lambda key, lang, **_: f"{key}:{lang}")
+        monkeypatch.setattr(profile_module, "validate_phone_number", AsyncMock(return_value=True))
+        monkeypatch.setattr(profile_module, "normalize_phone_number", lambda p: p)
+        monkeypatch.setattr(profile_module, "get_auth_token", AsyncMock(return_value="jwt-token"))
+        monkeypatch.setattr(
+            profile_module,
+            "api_client",
+            FakeAPIClientContext(update_user_profile=_resp(success=True)),
+        )
+
+        state = await handler.phone_verify_text_received(update, context)
+
+        assert state == PHONE_VERIFY_NAME
+        assert context.user_data["pending_phone"] == "+998901112233"
+        handler.user_repo.set_user_phone.assert_awaited_once_with(778, "+998901112233")
+        assert update.message.reply_text.await_count == 2
+        first_call = update.message.reply_text.await_args_list[0]
+        second_call = update.message.reply_text.await_args_list[1]
+        assert first_call.args == ("telegram.phone.phone_accepted:en",)
+        assert isinstance(first_call.kwargs["reply_markup"], profile_module.ReplyKeyboardRemove)
+        assert second_call.args == ("telegram.enter_name:en",)
+
+    async def test_phone_verify_text_rejects_invalid_phone_and_keeps_phone_state(self, monkeypatch):
+        handler = profile_module.ProfileHandlers()
+        update = DummyUpdate(user_id=779)
+        update.message.text = "not-a-phone"
+        context = make_context()
+
+        monkeypatch.setattr(profile_module.i18n, "get_user_language", AsyncMock(return_value="en"))
+        monkeypatch.setattr(profile_module.i18n, "get", lambda key, lang, **_: f"{key}:{lang}")
+        monkeypatch.setattr(profile_module, "validate_phone_number", AsyncMock(return_value=False))
+        monkeypatch.setattr(profile_module.ProfileKeyboards, "phone_request", lambda _lang: "phone-kbd")
+
+        state = await handler.phone_verify_text_received(update, context)
+
+        assert state == PHONE_VERIFY_PHONE
+        update.message.reply_text.assert_awaited_once_with(
+            "telegram.phone.invalid_format:en",
+            reply_markup="phone-kbd",
+        )
+
     async def test_phone_verify_name_validates_input(self, monkeypatch):
         handler = profile_module.ProfileHandlers()
         update = DummyUpdate(user_id=888)
@@ -124,6 +194,88 @@ class TestProfileHandlerFlows:
             reply_markup="menu-kbd",
         )
 
+    async def test_phone_received_available_removes_phone_keyboard_before_main_menu(self, monkeypatch):
+        handler = profile_module.ProfileHandlers()
+        handler.user_repo = SimpleNamespace(set_user_phone_verified=AsyncMock())
+        update = DummyUpdate(user_id=1101)
+        update.message.contact = SimpleNamespace(user_id=1101, phone_number="+998901112233")
+        context = make_context()
+
+        class _APIContext:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc_val, exc_tb):
+                return False
+
+            async def check_phone_availability(self, *_args, **_kwargs):
+                return _resp(success=True, data={"data": {"available": True}})
+
+        monkeypatch.setattr(profile_module.i18n, "get_user_language", AsyncMock(return_value="en"))
+        monkeypatch.setattr(profile_module.i18n, "get", lambda key, lang, **_: f"{key}:{lang}")
+        monkeypatch.setattr(profile_module, "normalize_phone_number", lambda phone: phone)
+        monkeypatch.setattr(profile_module.MenuKeyboards, "main_menu", lambda _lang: "menu-kbd")
+        monkeypatch.setattr(profile_module, "api_client", _APIContext())
+
+        state = await handler.phone_received(update, context)
+
+        assert state == ConversationHandler.END
+        handler.user_repo.set_user_phone_verified.assert_awaited_once_with(1101, "+998901112233")
+        assert update.message.reply_text.await_count == 2
+        first_call = update.message.reply_text.await_args_list[0]
+        second_call = update.message.reply_text.await_args_list[1]
+        assert first_call.args == ("telegram.phone.phone_accepted:en",)
+        assert isinstance(first_call.kwargs["reply_markup"], profile_module.ReplyKeyboardRemove)
+        assert second_call.kwargs == {
+            "text": "telegram.registration_complete:en",
+            "reply_markup": "menu-kbd",
+        }
+
+    async def test_phone_received_linkable_removes_phone_keyboard_before_link_prompt(self, monkeypatch):
+        handler = profile_module.ProfileHandlers()
+        update = DummyUpdate(user_id=1102)
+        update.message.contact = SimpleNamespace(user_id=1102, phone_number="+998901112233")
+        context = make_context()
+
+        class _APIContext:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc_val, exc_tb):
+                return False
+
+            async def check_phone_availability(self, *_args, **_kwargs):
+                return _resp(
+                    success=True,
+                    data={
+                        "data": {
+                            "available": False,
+                            "can_link": True,
+                            "existing_user_masked": {"name": "J***"},
+                        }
+                    },
+                )
+
+        monkeypatch.setattr(profile_module.i18n, "get_user_language", AsyncMock(return_value="en"))
+        monkeypatch.setattr(profile_module.i18n, "get", lambda key, lang, **_: f"{key}:{lang}")
+        monkeypatch.setattr(profile_module, "normalize_phone_number", lambda phone: phone)
+        monkeypatch.setattr(profile_module.KeyboardBuilder, "build_inline_keyboard", lambda _buttons: "inline-kbd")
+        monkeypatch.setattr(profile_module, "api_client", _APIContext())
+
+        state = await handler.phone_received(update, context)
+
+        assert state == profile_module.LINK_ACCOUNT_CONFIRM
+        assert context.user_data["pending_link_phone"] == "+998901112233"
+        assert update.message.reply_text.await_count == 2
+        first_call = update.message.reply_text.await_args_list[0]
+        second_call = update.message.reply_text.await_args_list[1]
+        assert first_call.args == ("telegram.phone.phone_accepted:en",)
+        assert isinstance(first_call.kwargs["reply_markup"], profile_module.ReplyKeyboardRemove)
+        assert second_call.kwargs == {
+            "text": "telegram.phone.already_registered_link_prompt:en",
+            "reply_markup": "inline-kbd",
+        }
+
     async def test_cancel_phone_verification_clears_state(self, monkeypatch):
         handler = profile_module.ProfileHandlers()
         update = DummyUpdate(user_id=101)
@@ -138,9 +290,112 @@ class TestProfileHandlerFlows:
 
         assert state == ConversationHandler.END
         assert "pending_phone" not in context.user_data
-        update.message.reply_text.assert_awaited_once_with(
-            text="telegram.action_cancelled:en",
-            reply_markup="menu-kbd",
+        assert update.message.reply_text.await_count == 2
+        first_call = update.message.reply_text.await_args_list[0]
+        second_call = update.message.reply_text.await_args_list[1]
+        assert first_call.kwargs["text"] == "telegram.action_cancelled_short:en"
+        assert isinstance(first_call.kwargs["reply_markup"], profile_module.ReplyKeyboardRemove)
+        assert second_call.kwargs == {
+            "text": "telegram.action_cancelled:en",
+            "reply_markup": "menu-kbd",
+        }
+
+    async def test_cancel_registration_removes_reply_keyboard_before_main_menu(self, monkeypatch):
+        handler = profile_module.ProfileHandlers()
+        update = DummyUpdate(user_id=1010)
+        context = make_context()
+
+        monkeypatch.setattr(profile_module.i18n, "get_user_language", AsyncMock(return_value="en"))
+        monkeypatch.setattr(profile_module.i18n, "get", lambda key, lang, **_: f"{key}:{lang}")
+        monkeypatch.setattr(profile_module.MenuKeyboards, "main_menu", lambda _lang: "menu-kbd")
+
+        state = await handler.cancel_registration(update, context)
+
+        assert state == ConversationHandler.END
+        assert update.message.reply_text.await_count == 2
+        first_call = update.message.reply_text.await_args_list[0]
+        second_call = update.message.reply_text.await_args_list[1]
+        assert first_call.kwargs["text"] == "telegram.action_cancelled_short:en"
+        assert isinstance(first_call.kwargs["reply_markup"], profile_module.ReplyKeyboardRemove)
+        assert second_call.kwargs == {
+            "text": "telegram.action_cancelled:en",
+            "reply_markup": "menu-kbd",
+        }
+
+    async def test_link_account_confirm_link_yes_api_failure_sends_clean_retry_prompt(self, monkeypatch):
+        handler = profile_module.ProfileHandlers()
+        update = DummyUpdate(user_id=1201)
+        update.callback_query = DummyCallbackQuery(data="link_yes")
+        update.effective_chat = SimpleNamespace(id=1201)
+        context = make_context()
+        context.user_data["pending_link_phone"] = "+998901112233"
+
+        class _APIContext:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc_val, exc_tb):
+                return False
+
+            async def link_phone_send_otp(self, *_args, **_kwargs):
+                return _resp(success=False, error="sms down")
+
+        monkeypatch.setattr(profile_module.i18n, "get_user_language", AsyncMock(return_value="en"))
+        monkeypatch.setattr(profile_module.i18n, "get", lambda key, lang, **_: f"{key}:{lang}")
+        monkeypatch.setattr(profile_module.otp_rate_limiter, "allow_otp_request", AsyncMock(return_value=True))
+        monkeypatch.setattr(profile_module.ProfileKeyboards, "phone_request", lambda _lang: "phone-kbd")
+        monkeypatch.setattr(profile_module, "api_client", _APIContext())
+
+        state = await handler.link_account_confirm(update, context)
+
+        assert state == profile_module.PHONE
+        update.callback_query.answer.assert_awaited_once()
+        update.callback_query.edit_message_text.assert_awaited_once_with(
+            "telegram.phone.verification_code_send_failed_retry_or_different:en",
+            reply_markup=None,
+        )
+        context.bot.send_message.assert_awaited_once_with(
+            chat_id=1201,
+            text="telegram.phone.share_phone_using_button:en",
+            reply_markup="phone-kbd",
+        )
+
+    async def test_link_account_confirm_link_yes_api_exception_sends_clean_retry_prompt(self, monkeypatch):
+        handler = profile_module.ProfileHandlers()
+        update = DummyUpdate(user_id=1202)
+        update.callback_query = DummyCallbackQuery(data="link_yes")
+        update.effective_chat = SimpleNamespace(id=1202)
+        context = make_context()
+        context.user_data["pending_link_phone"] = "+998901112233"
+
+        class _APIContext:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc_val, exc_tb):
+                return False
+
+            async def link_phone_send_otp(self, *_args, **_kwargs):
+                raise RuntimeError("network")
+
+        monkeypatch.setattr(profile_module.i18n, "get_user_language", AsyncMock(return_value="en"))
+        monkeypatch.setattr(profile_module.i18n, "get", lambda key, lang, **_: f"{key}:{lang}")
+        monkeypatch.setattr(profile_module.otp_rate_limiter, "allow_otp_request", AsyncMock(return_value=True))
+        monkeypatch.setattr(profile_module.ProfileKeyboards, "phone_request", lambda _lang: "phone-kbd")
+        monkeypatch.setattr(profile_module, "api_client", _APIContext())
+
+        state = await handler.link_account_confirm(update, context)
+
+        assert state == profile_module.PHONE
+        update.callback_query.answer.assert_awaited_once()
+        update.callback_query.edit_message_text.assert_awaited_once_with(
+            "telegram.phone.verification_code_send_failed_generic:en",
+            reply_markup=None,
+        )
+        context.bot.send_message.assert_awaited_once_with(
+            chat_id=1202,
+            text="telegram.phone.share_phone_using_button:en",
+            reply_markup="phone-kbd",
         )
 
     async def test_notification_settings_renders_toggle_screen(self, monkeypatch):

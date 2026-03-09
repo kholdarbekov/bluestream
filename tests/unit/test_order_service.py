@@ -10,7 +10,7 @@ import pytest
 
 from business_app.models.delivery import Delivery
 from business_app.services.order_service import OrderService
-from business_app.utils.constants import DeliveryStatus, OrderStatus
+from business_app.utils.constants import DeliveryStatus, OrderStatus, PaymentMethod
 from business_app.utils.exceptions import ConflictError, ValidationError
 
 
@@ -68,11 +68,13 @@ class TestOrderService:
             scheduled_time_slot="09:00-12:00",
         )
         db.session.add(delivery)
+        sample_order.payment_method = PaymentMethod.CASH
         db.session.commit()
         monkeypatch.setattr(order_service.inventory_service, "release_reservations", lambda *_args, **_kwargs: {"success": True})
 
         with patch("business_app.services.corporate_contract_service.CorporateContractService.release_for_order") as release_for_order:
-            cancelled = order_service.cancel_order(sample_order.id, user_id=sample_user.id, reason="Customer request")
+            with patch("business_app.services.cash_collection_service.CashCollectionService.release_reserved_prepayment_for_order") as release_reserved:
+                cancelled = order_service.cancel_order(sample_order.id, user_id=sample_user.id, reason="Customer request")
 
         db.session.refresh(sample_order)
         db.session.refresh(delivery)
@@ -80,6 +82,11 @@ class TestOrderService:
         assert cancelled.status == OrderStatus.CANCELLED
         assert sample_order.status == OrderStatus.CANCELLED
         assert delivery.status == DeliveryStatus.CANCELLED
+        release_reserved.assert_called_once_with(
+            order_id=sample_order.id,
+            actor_user_id=sample_user.id,
+            reason=f"Order moved to {OrderStatus.CANCELLED.value}",
+        )
         release_for_order.assert_called_once()
 
     def test_cancel_order_rejects_when_delivery_in_transit(self, order_service, sample_order, sample_user, db):

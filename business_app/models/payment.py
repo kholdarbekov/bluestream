@@ -208,10 +208,16 @@ class DriverCashSession(db.Model, TimestampMixin):
     session_started_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC))
     session_ended_at = Column(DateTime(timezone=True), nullable=True)
     expected_cash = Column(Numeric(precision=12, scale=2), nullable=False, default=Decimal('0.00'))
+    gross_cash_collected = Column(Numeric(precision=12, scale=2), nullable=False, default=Decimal('0.00'))
+    transferred_cash_total = Column(Numeric(precision=12, scale=2), nullable=False, default=Decimal('0.00'))
+    expected_cash_on_hand = Column(Numeric(precision=12, scale=2), nullable=False, default=Decimal('0.00'))
     declared_cash = Column(Numeric(precision=12, scale=2), nullable=True)
     verified_cash = Column(Numeric(precision=12, scale=2), nullable=True)
     declared_variance = Column(Numeric(precision=12, scale=2), nullable=False, default=Decimal('0.00'))
     verified_variance = Column(Numeric(precision=12, scale=2), nullable=False, default=Decimal('0.00'))
+    submission_due_at = Column(DateTime(timezone=True), nullable=True)
+    last_reminder_at = Column(DateTime(timezone=True), nullable=True)
+    reminder_stage = Column(String(32), nullable=False, default='none')
     submitted_at = Column(DateTime(timezone=True), nullable=True)
     verified_at = Column(DateTime(timezone=True), nullable=True)
     submitted_by_user_id = Column(Integer, ForeignKey('users.id'), nullable=True, index=True)
@@ -221,6 +227,9 @@ class DriverCashSession(db.Model, TimestampMixin):
     notes = Column(Text, nullable=True)
     verification_notes = Column(Text, nullable=True)
     resolution_notes = Column(Text, nullable=True)
+    verification_reason_code = Column(String(64), nullable=True)
+    resolution_reason_code = Column(String(64), nullable=True)
+    risk_flags = Column(JSON, nullable=False, default=list)
     resolution_metadata = Column(JSON, nullable=True, default=dict)
 
     driver_user = relationship('User', foreign_keys=[driver_user_id], backref='driver_cash_sessions')
@@ -229,6 +238,11 @@ class DriverCashSession(db.Model, TimestampMixin):
     cash_collection_events = relationship(
         'CashCollectionEvent',
         back_populates='driver_cash_session',
+    )
+    cash_transfers = relationship(
+        'DriverCashTransfer',
+        back_populates='driver_cash_session',
+        cascade='all, delete-orphan',
     )
 
     def __init__(self, **kwargs):
@@ -246,18 +260,84 @@ class DriverCashSession(db.Model, TimestampMixin):
             'session_started_at': self.session_started_at.isoformat() if self.session_started_at else None,
             'session_ended_at': self.session_ended_at.isoformat() if self.session_ended_at else None,
             'expected_cash': float(self.expected_cash or 0),
+            'gross_cash_collected': float(self.gross_cash_collected or 0),
+            'transferred_cash_total': float(self.transferred_cash_total or 0),
+            'expected_cash_on_hand': float(self.expected_cash_on_hand or 0),
             'declared_cash': float(self.declared_cash) if self.declared_cash is not None else None,
             'verified_cash': float(self.verified_cash) if self.verified_cash is not None else None,
             'declared_variance': float(self.declared_variance or 0),
             'verified_variance': float(self.verified_variance or 0),
+            'submission_due_at': self.submission_due_at.isoformat() if self.submission_due_at else None,
+            'last_reminder_at': self.last_reminder_at.isoformat() if self.last_reminder_at else None,
+            'reminder_stage': self.reminder_stage,
             'submitted_at': self.submitted_at.isoformat() if self.submitted_at else None,
             'verified_at': self.verified_at.isoformat() if self.verified_at else None,
             'blocked_from_cod': self.blocked_from_cod,
             'block_reason': self.block_reason,
             'notes': self.notes,
             'verification_notes': self.verification_notes,
+            'verification_reason_code': self.verification_reason_code,
             'resolution_notes': self.resolution_notes,
+            'resolution_reason_code': self.resolution_reason_code,
+            'risk_flags': list(self.risk_flags or []),
             'resolution_metadata': self.resolution_metadata or {},
+        }
+
+
+class DriverCashTransfer(db.Model, TimestampMixin):
+    """Checkpoint custody transfer record within a driver cash session."""
+
+    __tablename__ = 'driver_cash_transfers'
+    __table_args__ = (
+        Index('idx_driver_cash_transfers_session_created', 'driver_cash_session_id', 'created_at'),
+        Index('idx_driver_cash_transfers_status_created', 'transfer_status', 'created_at'),
+    )
+
+    id = Column(Integer, primary_key=True)
+    transfer_id = Column(String(100), unique=True, nullable=False, index=True)
+    driver_cash_session_id = Column(Integer, ForeignKey('driver_cash_sessions.id'), nullable=False, index=True)
+    driver_user_id = Column(Integer, ForeignKey('users.id'), nullable=False, index=True)
+    declared_transfer_cash = Column(Numeric(precision=12, scale=2), nullable=False, default=Decimal('0.00'))
+    counted_transfer_cash = Column(Numeric(precision=12, scale=2), nullable=True)
+    transfer_variance = Column(Numeric(precision=12, scale=2), nullable=False, default=Decimal('0.00'))
+    transfer_status = Column(String(32), nullable=False, default='pending', index=True)
+    notes = Column(Text, nullable=True)
+    transfer_metadata = Column(JSON, nullable=False, default=dict)
+    driver_confirmed_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC))
+    driver_confirmed_by_user_id = Column(Integer, ForeignKey('users.id'), nullable=False, index=True)
+    checkpoint_confirmed_at = Column(DateTime(timezone=True), nullable=True)
+    checkpoint_confirmed_by_user_id = Column(Integer, ForeignKey('users.id'), nullable=True, index=True)
+
+    driver_cash_session = relationship('DriverCashSession', back_populates='cash_transfers')
+    driver_user = relationship('User', foreign_keys=[driver_user_id])
+    driver_confirmed_by_user = relationship('User', foreign_keys=[driver_confirmed_by_user_id])
+    checkpoint_confirmed_by_user = relationship('User', foreign_keys=[checkpoint_confirmed_by_user_id])
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        if not self.transfer_id:
+            self.transfer_id = str(uuid.uuid4())
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'transfer_id': self.transfer_id,
+            'driver_cash_session_id': self.driver_cash_session_id,
+            'driver_user_id': self.driver_user_id,
+            'declared_transfer_cash': float(self.declared_transfer_cash or 0),
+            'counted_transfer_cash': (
+                float(self.counted_transfer_cash) if self.counted_transfer_cash is not None else None
+            ),
+            'transfer_variance': float(self.transfer_variance or 0),
+            'transfer_status': self.transfer_status,
+            'notes': self.notes,
+            'transfer_metadata': self.transfer_metadata or {},
+            'driver_confirmed_at': self.driver_confirmed_at.isoformat() if self.driver_confirmed_at else None,
+            'driver_confirmed_by_user_id': self.driver_confirmed_by_user_id,
+            'checkpoint_confirmed_at': (
+                self.checkpoint_confirmed_at.isoformat() if self.checkpoint_confirmed_at else None
+            ),
+            'checkpoint_confirmed_by_user_id': self.checkpoint_confirmed_by_user_id,
         }
 
 

@@ -114,12 +114,15 @@ class TestMainMenuHandlerFlows:
         update = DummyUpdate()
         update.callback_query = DummyCallbackQuery(data="back_to_main")
         context = make_context()
+        cleanup_mock = AsyncMock(return_value=True)
         monkeypatch.setattr(menu_module.i18n, "get_user_language", AsyncMock(return_value="en"))
         monkeypatch.setattr(menu_module.i18n, "get", lambda key, lang, **_: f"{key}:{lang}")
         monkeypatch.setattr(menu_module.MenuKeyboards, "main_menu", lambda _lang: "menu-kbd")
+        monkeypatch.setattr(menu_module, "maybe_remove_stale_reply_keyboard", cleanup_mock)
 
         await menu_module.main_menu_handler(update, context)
 
+        cleanup_mock.assert_awaited_once_with(update, context)
         update.callback_query.edit_message_text.assert_awaited_once_with(
             text="telegram.welcome:en",
             reply_markup="menu-kbd",
@@ -129,12 +132,15 @@ class TestMainMenuHandlerFlows:
     async def test_main_menu_handler_with_message(self, monkeypatch):
         update = DummyUpdate()
         context = make_context()
+        cleanup_mock = AsyncMock(return_value=True)
         monkeypatch.setattr(menu_module.i18n, "get_user_language", AsyncMock(return_value="ru"))
         monkeypatch.setattr(menu_module.i18n, "get", lambda key, lang, **_: f"{key}:{lang}")
         monkeypatch.setattr(menu_module.MenuKeyboards, "main_menu", lambda _lang: "menu-kbd")
+        monkeypatch.setattr(menu_module, "maybe_remove_stale_reply_keyboard", cleanup_mock)
 
         await menu_module.main_menu_handler(update, context)
 
+        cleanup_mock.assert_awaited_once_with(update, context)
         update.message.reply_text.assert_awaited_once_with(
             text="telegram.welcome:ru",
             reply_markup="menu-kbd",

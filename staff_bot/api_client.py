@@ -525,6 +525,15 @@ class StaffAPIClient:
             data=payload,
         )
 
+    async def create_reconciliation_transfer(self, token: str, payload: Dict) -> APIResponse:
+        """Create a driver checkpoint custody transfer."""
+        return await self._make_request(
+            'POST',
+            '/api/v1/staff/reconciliation/transfers',
+            token=token,
+            data=payload,
+        )
+
     # --- Try-out Operations ---
 
     async def create_tryout(self, token: str, payload: Dict) -> APIResponse:

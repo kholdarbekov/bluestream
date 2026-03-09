@@ -13,7 +13,7 @@ from shared.constants import DISPLAY_TIMEZONE
 
 import redis.asyncio as aioredis
 import sentry_sdk
-from telegram import Update
+from telegram import Update, ReplyKeyboardRemove
 from telegram.ext import ContextTypes
 from telegram.error import TelegramError, NetworkError, TimedOut
 
@@ -25,6 +25,7 @@ logger = logging.getLogger('utils')
 
 _NETWORK_ERROR_LOG_COOLDOWN_SECONDS = 60
 _last_network_error_log_at: Optional[datetime] = None
+_REPLY_KEYBOARD_CLEANUP_COOLDOWN_SECONDS = 6 * 3600
 
 
 def _is_transient_polling_network_error(update: object, error: Exception) -> bool:
@@ -623,6 +624,54 @@ async def send_typing_action(update: Update, context: ContextTypes.DEFAULT_TYPE)
             )
     except Exception as e:
         logger.warning(f"Failed to send typing action: {e}")
+
+
+async def maybe_remove_stale_reply_keyboard(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    *,
+    force: bool = False,
+) -> bool:
+    """
+    Best-effort cleanup for lingering reply keyboards from older flows.
+
+    Telegram keeps reply keyboards client-side until explicitly removed.
+    This sends a transient cleanup message with ReplyKeyboardRemove and
+    deletes it immediately to avoid chat clutter.
+    """
+    try:
+        if not update or not context or not getattr(update, "effective_chat", None):
+            return False
+
+        user_data = getattr(context, "user_data", None)
+        if user_data is None:
+            return False
+
+        now_ts = datetime.now(timezone.utc).timestamp()
+        last_cleanup_ts = user_data.get("reply_keyboard_cleanup_at_ts")
+        if (
+            not force
+            and isinstance(last_cleanup_ts, (int, float))
+            and now_ts - last_cleanup_ts < _REPLY_KEYBOARD_CLEANUP_COOLDOWN_SECONDS
+        ):
+            return False
+
+        cleanup_message = await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="\u2060",
+            reply_markup=ReplyKeyboardRemove(),
+        )
+        user_data["reply_keyboard_cleanup_at_ts"] = now_ts
+
+        try:
+            await cleanup_message.delete()
+        except Exception as delete_error:
+            logger.debug("Reply-keyboard cleanup message deletion skipped: %s", delete_error)
+
+        return True
+    except Exception as cleanup_error:
+        logger.debug("Reply-keyboard cleanup skipped due to error: %s", cleanup_error)
+        return False
 
 
 async def validate_phone_number(phone: str) -> bool:

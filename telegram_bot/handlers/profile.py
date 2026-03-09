@@ -15,7 +15,14 @@ from shared.constants import TASHKENT_DISTRICTS, get_district_name, get_district
 from handlers.menu import main_menu_handler
 from api_client import api_client
 from database import db_manager, BotUserRepository
-from utils import user_middleware, validate_phone_number, normalize_phone_number, get_auth_token, otp_rate_limiter
+from utils import (
+    user_middleware,
+    validate_phone_number,
+    normalize_phone_number,
+    get_auth_token,
+    otp_rate_limiter,
+    maybe_remove_stale_reply_keyboard,
+)
 from config import config
 from handlers.base import BaseHandler
 
@@ -416,6 +423,51 @@ class ProfileHandlers(BaseHandler):
             logger.error(f"Traceback: {traceback.format_exc()}")
             return ConversationHandler.END
 
+    async def phone_verify_text_received(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle typed phone number during phone verification flow."""
+        try:
+            user_id = update.effective_user.id
+            language = await i18n.get_user_language(user_id)
+            phone_text = update.message.text.strip()
+
+            if not await validate_phone_number(phone_text):
+                await update.message.reply_text(
+                    i18n.get('telegram.phone.invalid_format', language),
+                    reply_markup=ProfileKeyboards.phone_request(language)
+                )
+                return PHONE_VERIFY_PHONE
+
+            phone = normalize_phone_number(phone_text)
+            logger.info(f"Phone text received for user {user_id}: {phone}")
+
+            # Typed phone input is not Telegram-trusted contact, keep it unverified.
+            await self.user_repo.set_user_phone(user_id, phone)
+            context.user_data['pending_phone'] = phone
+
+            # Keep backend profile phone in sync.
+            async with api_client as client:
+                user_token = await get_auth_token(update, context, client)
+                if user_token:
+                    try:
+                        await client.update_user_profile(user_token, {'phone': phone})
+                        logger.info(f"Phone updated via API for user {user_id} from text input")
+                    except Exception as api_error:
+                        logger.warning(f"Failed to update phone via API from text input: {api_error}")
+
+            await update.message.reply_text(
+                i18n.get('telegram.phone.phone_accepted', language),
+                reply_markup=ReplyKeyboardRemove()
+            )
+            await update.message.reply_text(i18n.get('telegram.enter_name', language))
+
+            return PHONE_VERIFY_NAME
+
+        except Exception as e:
+            logger.error(f"Error in phone_verify_text_received: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            return ConversationHandler.END
+
     async def phone_verify_name_received(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle name input during phone verification flow"""
         try:
@@ -494,10 +546,18 @@ class ProfileHandlers(BaseHandler):
             if update.callback_query:
                 await update.callback_query.answer()
                 await update.callback_query.message.reply_text(
+                    text=i18n.get('telegram.action_cancelled_short', language),
+                    reply_markup=ReplyKeyboardRemove()
+                )
+                await update.callback_query.message.reply_text(
                     text=cancel_text,
                     reply_markup=keyboard
                 )
             else:
+                await update.message.reply_text(
+                    text=i18n.get('telegram.action_cancelled_short', language),
+                    reply_markup=ReplyKeyboardRemove()
+                )
                 await update.message.reply_text(
                     text=cancel_text,
                     reply_markup=keyboard
@@ -611,6 +671,7 @@ class ProfileHandlers(BaseHandler):
                 # Already registered, show main menu
                 complete_text = i18n.get('telegram.welcome', telegram_language_code)
                 keyboard = MenuKeyboards.main_menu(telegram_language_code)
+                await maybe_remove_stale_reply_keyboard(update, context)
 
                 await update.message.reply_text(
                     text=complete_text,
@@ -774,6 +835,12 @@ class ProfileHandlers(BaseHandler):
                     if response.success and response_data.get('available'):
                         # Contact sharing is trusted by Telegram, mark phone as verified
                         await self.user_repo.set_user_phone_verified(user_id, phone)
+
+                        # Clean up the temporary phone-share keyboard before moving on.
+                        await update.message.reply_text(
+                            i18n.get('telegram.phone.phone_accepted', language),
+                            reply_markup=ReplyKeyboardRemove()
+                        )
                         
                         # Registration complete
                         complete_text = i18n.get('telegram.registration_complete', language)
@@ -798,6 +865,12 @@ class ProfileHandlers(BaseHandler):
                         if can_link:
                             # Store phone for linking
                             context.user_data['pending_link_phone'] = phone
+
+                            # Clean up the temporary phone-share keyboard before next inline step.
+                            await update.message.reply_text(
+                                i18n.get('telegram.phone.phone_accepted', language),
+                                reply_markup=ReplyKeyboardRemove()
+                            )
                             
                             # Show linking option
                             masked_name = existing_user.get('name', '***') if existing_user else '***'
@@ -839,6 +912,12 @@ class ProfileHandlers(BaseHandler):
                 logger.error(f"API error checking phone: {api_error}")
                 # Fall back to direct save (will fail if duplicate, which is caught below)
                 await self.user_repo.set_user_phone_verified(user_id, phone)
+
+                # Clean up the temporary phone-share keyboard before moving on.
+                await update.message.reply_text(
+                    i18n.get('telegram.phone.phone_accepted', language),
+                    reply_markup=ReplyKeyboardRemove()
+                )
                 
                 complete_text = i18n.get('telegram.registration_complete', language)
                 keyboard = MenuKeyboards.main_menu(language)
@@ -1074,6 +1153,11 @@ class ProfileHandlers(BaseHandler):
                                     language,
                                     error=error_msg
                                 ),
+                                reply_markup=None
+                            )
+                            await context.bot.send_message(
+                                chat_id=update.effective_chat.id,
+                                text=i18n.get('telegram.phone.share_phone_using_button', language),
                                 reply_markup=ProfileKeyboards.phone_request(language)
                             )
                             return PHONE
@@ -1083,6 +1167,11 @@ class ProfileHandlers(BaseHandler):
                     await query.edit_message_text(
                         i18n.get('telegram.phone.verification_code_send_failed_generic', language),
                         reply_markup=None
+                    )
+                    await context.bot.send_message(
+                        chat_id=update.effective_chat.id,
+                        text=i18n.get('telegram.phone.share_phone_using_button', language),
+                        reply_markup=ProfileKeyboards.phone_request(language)
                     )
                     return PHONE
                     
@@ -1312,6 +1401,10 @@ class ProfileHandlers(BaseHandler):
             cancel_text = i18n.get('telegram.action_cancelled', language)
             keyboard = MenuKeyboards.main_menu(language)
             
+            await update.message.reply_text(
+                text=i18n.get('telegram.action_cancelled_short', language),
+                reply_markup=ReplyKeyboardRemove()
+            )
             await update.message.reply_text(
                 text=cancel_text,
                 reply_markup=keyboard

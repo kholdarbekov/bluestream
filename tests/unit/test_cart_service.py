@@ -3,6 +3,7 @@ Unit tests for CartService aligned with current implementation.
 """
 
 from decimal import Decimal
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -96,3 +97,41 @@ class TestCartService:
             product_id=sample_product.id,
             fallback_price=Decimal("15000.0"),
         )
+
+    def test_validate_cart_items_uses_reservation_aware_inventory(self, cart_service, sample_product):
+        cart_service._inventory_service = MagicMock()
+        cart_service._inventory_service.check_product_availability.return_value = SimpleNamespace(
+            is_available=False,
+            reason="Insufficient stock",
+            available_quantity=4,
+            reserved_quantity=3,
+        )
+
+        validated, errors = cart_service.validate_cart_items([
+            {"product_id": sample_product.id, "quantity": 5}
+        ])
+
+        assert validated == []
+        assert len(errors) == 1
+        assert "Only 4 available (reserved: 3), requested 5" in errors[0]
+
+    def test_add_item_to_cart_rejects_insufficient_available_quantity(
+        self,
+        cart_service,
+        sample_user,
+        sample_product,
+    ):
+        cart_service._inventory_service = MagicMock()
+        cart_service._inventory_service.check_product_availability.return_value = SimpleNamespace(
+            is_available=False,
+            reason="Insufficient stock",
+            available_quantity=2,
+            reserved_quantity=5,
+        )
+
+        with pytest.raises(ValidationError, match="Only 2 available"):
+            cart_service.add_item_to_cart(
+                user_id=sample_user.id,
+                product_id=sample_product.id,
+                quantity=3,
+            )

@@ -50,6 +50,29 @@ class OrderHandlers(BaseHandler):
                 f"{active_debt_count} outstanding COD debts. Please choose a card payment method."
             )
         return "Cash on delivery is temporarily unavailable. Please choose a card payment method."
+
+    @staticmethod
+    def _build_cod_prepayment_brief(cart: Dict[str, Any], order_total: float) -> str:
+        """Build a short COD prepayment summary for post-order success message."""
+        cod_prepayment = (cart or {}).get('cod_prepayment') or {}
+        available_balance = float(cod_prepayment.get('available_balance') or 0)
+        if available_balance <= 0:
+            return ""
+
+        normalized_order_total = float(order_total or 0)
+        potential_applied = float(
+            cod_prepayment.get('potential_applied_amount')
+            or min(available_balance, normalized_order_total)
+        )
+        potential_applied = max(0.0, min(potential_applied, normalized_order_total))
+        if potential_applied <= 0:
+            return ""
+
+        payable_after = max(0.0, normalized_order_total - potential_applied)
+        return (
+            f"\n🔁 COD prepaid used: {format_price(potential_applied)} UZS."
+            f" Pay on delivery: {format_price(payable_after)} UZS."
+        )
     
     async def orders_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Show user's orders"""
@@ -641,6 +664,10 @@ class OrderHandlers(BaseHandler):
 
             if payment_method == 'cash':
                 success_text += "\n\n" + i18n.get('telegram.orders.cash_note', language)
+                success_text += self._build_cod_prepayment_brief(
+                    cart=cart,
+                    order_total=order.get('total_amount', 0)
+                )
 
             keyboard = MenuKeyboards.main_menu(language)
 
@@ -716,6 +743,23 @@ class OrderHandlers(BaseHandler):
         confirmation_text += f"🚚 {i18n.get('telegram.orders.delivery_fee', language, amount=0)}\n"
         confirmation_text += "────────────────\n"
         confirmation_text += f"💳 {i18n.get('telegram.orders.grand_total', language, amount=format_price(cart_total_amount))}"
+
+        if payment_method == 'cash':
+            cod_prepayment = cart.get('cod_prepayment') or {}
+            available_balance = float(cod_prepayment.get('available_balance') or 0)
+            if available_balance > 0:
+                potential_applied = float(
+                    cod_prepayment.get('potential_applied_amount')
+                    or min(available_balance, float(cart_total_amount))
+                )
+                payable_after = float(
+                    cod_prepayment.get('estimated_payable_after_prepayment')
+                    or max(0.0, float(cart_total_amount) - potential_applied)
+                )
+                confirmation_text += "\n\n"
+                confirmation_text += f"💳 COD prepaid balance: {format_price(available_balance)} UZS\n"
+                confirmation_text += f"🔁 Auto-applied on this COD order: {format_price(potential_applied)} UZS\n"
+                confirmation_text += f"🧾 Estimated COD payable after prepaid: {format_price(payable_after)} UZS"
         
         keyboard = OrderKeyboards.order_confirmation(language)
         

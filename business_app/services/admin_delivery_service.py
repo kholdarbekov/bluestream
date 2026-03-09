@@ -11,7 +11,7 @@ from business_app.models.delivery import Delivery, DeliveryPerson, DeliveryStatu
 from business_app.models.order import Order, OrderItem
 from business_app.models.user import User, UserAddress
 from business_app.services.staff_service import StaffService
-from business_app.utils.constants import DeliveryStatus, OrderStatus
+from business_app.utils.constants import DeliveryStatus, OrderStatus, PaymentMethod
 from business_app.utils.exceptions import NotFoundError, ValidationError
 
 
@@ -371,6 +371,14 @@ class AdminDeliveryService:
             if delivery.order:
                 delivery.order.status = OrderStatus.RETURNED
                 delivery.order.updated_at = now
+                if delivery.order.payment_method == PaymentMethod.CASH:
+                    from business_app.services.cash_collection_service import CashCollectionService
+
+                    CashCollectionService().release_reserved_prepayment_for_order(
+                        order_id=delivery.order.id,
+                        actor_user_id=actor_id,
+                        reason="Order marked as returned via admin delivery workflow",
+                    )
 
         history = DeliveryStatusHistory(
             delivery_id=delivery.id,

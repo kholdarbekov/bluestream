@@ -92,6 +92,7 @@ def get_order_pool():
         order = delivery.order
         address = order.delivery_address if order else None
         assignee = delivery.delivery_person if delivery else None
+        cod_projection = StaffService.get_cod_collection_projection(order)
 
         order_items = []
         if order and order.order_items:
@@ -129,6 +130,8 @@ def get_order_pool():
             ),
             'amount_collected': float(order.payment.amount_collected or 0) if order and getattr(order, 'payment', None) else 0,
             'outstanding_amount': float(order.payment.outstanding_amount or 0) if order and getattr(order, 'payment', None) else 0,
+            'cod_reserved_prepayment_amount': cod_projection['cod_reserved_prepayment_amount'],
+            'expected_cash_to_collect': cod_projection['expected_cash_to_collect'],
             'item_count': len(order.order_items) if order and order.order_items else 0,
             'items': order_items,
             'delivery_notes': order.delivery_notes or '',
@@ -223,6 +226,7 @@ def get_active_deliveries():
     for delivery in deliveries:
         order = delivery.order
         address = order.delivery_address if order else None
+        cod_projection = StaffService.get_cod_collection_projection(order)
 
         item_list = []
         if order and order.order_items:
@@ -252,6 +256,8 @@ def get_active_deliveries():
             ),
             'amount_collected': float(order.payment.amount_collected or 0) if order and getattr(order, 'payment', None) else 0,
             'outstanding_amount': float(order.payment.outstanding_amount or 0) if order and getattr(order, 'payment', None) else 0,
+            'cod_reserved_prepayment_amount': cod_projection['cod_reserved_prepayment_amount'],
+            'expected_cash_to_collect': cod_projection['expected_cash_to_collect'],
             'items': item_list,
             'delivery_notes': order.delivery_notes or '',
             # Destination coordinates (order address)
@@ -281,6 +287,7 @@ def get_delivery_history():
     for delivery in result['items']:
         order = delivery.order
         address = order.delivery_address if order else None
+        cod_projection = StaffService.get_cod_collection_projection(order)
         items.append({
             'delivery_id': delivery.id,
             'order_number': order.order_number if order else None,
@@ -298,6 +305,8 @@ def get_delivery_history():
             ),
             'amount_collected': float(order.payment.amount_collected or 0) if order and getattr(order, 'payment', None) else 0,
             'outstanding_amount': float(order.payment.outstanding_amount or 0) if order and getattr(order, 'payment', None) else 0,
+            'cod_reserved_prepayment_amount': cod_projection['cod_reserved_prepayment_amount'],
+            'expected_cash_to_collect': cod_projection['expected_cash_to_collect'],
         })
 
     return success_response({
@@ -395,8 +404,6 @@ def submit_reconciliation_session():
     """Submit end-of-day driver reconciliation."""
     current_user_id = get_jwt_identity()
     data = request.get_json() or {}
-    if data.get('declared_cash') is None:
-        raise ValidationError("declared_cash is required", error_code='STAFF_DECLARED_CASH_REQUIRED')
 
     from business_app.services.driver_reconciliation_service import DriverReconciliationService
 
@@ -409,6 +416,41 @@ def submit_reconciliation_session():
     )
     payload = DriverReconciliationService().get_session_detail(session.id)
     return success_response(payload)
+
+
+@staff_bp.route('/reconciliation/transfers', methods=['POST'])
+@handle_api_exception
+@jwt_required()
+@require_staff_roles('delivery_driver')
+def create_reconciliation_transfer():
+    """Create a checkpoint custody transfer for the driver's reconciliation session."""
+    current_user_id = int(get_jwt_identity())
+    data = request.get_json() or {}
+    declared_transfer_cash = data.get('declared_transfer_cash')
+    if declared_transfer_cash is None:
+        raise ValidationError(
+            "declared_transfer_cash is required",
+            error_code='STAFF_DECLARED_TRANSFER_CASH_REQUIRED',
+        )
+
+    from business_app.services.driver_reconciliation_service import DriverReconciliationService
+    from business_app.services.driver_cash_custody_service import DriverCashCustodyService
+
+    business_date = data.get('business_date')
+    session = DriverReconciliationService().get_open_session_for_driver(
+        current_user_id,
+        business_date=business_date,
+    )
+    transfer = DriverCashCustodyService().create_transfer(
+        session_id=session.id,
+        driver_user_id=current_user_id,
+        declared_transfer_cash=declared_transfer_cash,
+        notes=data.get('notes'),
+        transfer_metadata=data.get('transfer_metadata') or {},
+    )
+    payload = DriverReconciliationService().get_session_detail(session.id)
+    payload['created_transfer'] = transfer.to_dict()
+    return success_response(payload, status_code=201)
 
 
 @staff_bp.route('/customers/<int:customer_id>/cod-statement', methods=['GET'])

@@ -7,7 +7,7 @@ from telegram.ext import ContextTypes
 
 from i18n import i18n
 from keyboards import MenuKeyboards
-from utils import user_middleware
+from utils import maybe_remove_stale_reply_keyboard
 
 logger = logging.getLogger('handlers')
 
@@ -24,6 +24,7 @@ async def main_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = update.effective_user.id
         logger.info(f"Main menu requested by user {user_id}")
         language = await i18n.get_user_language(user_id)
+        await maybe_remove_stale_reply_keyboard(update, context)
 
         # menu_text = i18n.get('telegram.main_menu', language)
         menu_text = i18n.get('telegram.welcome', language)

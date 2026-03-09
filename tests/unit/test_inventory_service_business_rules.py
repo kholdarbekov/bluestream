@@ -46,6 +46,9 @@ class FakeRedis:
                 del self.expiry[key]
         return deleted
 
+    def get(self, key):
+        return self.values.get(key)
+
 
 @pytest.fixture
 def inventory_service(app):
@@ -86,6 +89,28 @@ class TestInventoryServiceBusinessRules:
 
         assert result.is_available is False
         assert "minimum stock level" in result.reason
+
+    def test_check_product_availability_reads_reservations_after_lazy_redis_init(
+        self,
+        inventory_service,
+        sample_product,
+        db,
+        monkeypatch,
+    ):
+        fake_redis = FakeRedis()
+        reservation_key = f"inventory_reservation:999:{sample_product.id}"
+        fake_redis.values[reservation_key] = "3"
+        inventory_service.redis_client = None
+        monkeypatch.setattr(inventory_service, "_get_redis_client", lambda: fake_redis)
+
+        sample_product.stock_quantity = 7
+        db.session.commit()
+
+        result = inventory_service.check_product_availability(sample_product.id, requested_quantity=5)
+
+        assert result.available_quantity == 4
+        assert result.reserved_quantity == 3
+        assert result.is_available is False
 
     def test_reserve_inventory_success_writes_reservation_keys(self, inventory_service, sample_product, monkeypatch):
         fake_redis = FakeRedis()

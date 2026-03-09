@@ -4,6 +4,7 @@ Handles SMS, Email, Telegram, and Push notifications
 """
 import json
 import logging
+import os
 import re
 import uuid
 from celery.utils.log import get_task_logger
@@ -152,6 +153,33 @@ class NotificationService:
             'returned': 'Returned',
         },
     }
+
+    PAYMENT_FOLLOW_UP_MESSAGES = {
+        'uz': {
+            'processing': "Buyurtmangiz qayta ishlanmoqda. Keyingi holat bo'yicha sizni xabardor qilamiz.",
+            'delivered': "Buyurtmangiz allaqachon yetkazib berilgan. Ushbu xabar to'lovingiz qabul qilinganini tasdiqlaydi.",
+        },
+        'en': {
+            'processing': "Your order is being processed. We'll notify you about the next status update.",
+            'delivered': "Your order has already been delivered. This message confirms that we have received your payment.",
+        },
+        'ru': {
+            'processing': "Ваш заказ обрабатывается. Мы сообщим вам о следующем обновлении статуса.",
+            'delivered': "Ваш заказ уже доставлен. Это сообщение подтверждает, что ваша оплата получена.",
+        },
+    }
+
+    LEGACY_PAYMENT_FOLLOW_UP_PHRASES = (
+        "Your order is now being processed.",
+        "Your order is now being processed. We'll notify you when it's ready for delivery.",
+        "Your order is now being processed and will be delivered soon. You can track your order status using the button above.",
+        "Buyurtmangiz qayta ishlanmoqda.",
+        "Buyurtmangiz qayta ishlanmoqda. Yetkazib berishga tayyor bo'lganda xabar beramiz.",
+        "Buyurtmangiz hozir qayta ishlanmoqda va tez orada yetkazib beriladi. Yuqoridagi tugma orqali buyurtma holatini kuzatishingiz mumkin.",
+        "Ваш заказ обрабатывается.",
+        "Ваш заказ обрабатывается. Мы уведомим вас, когда он будет готов к доставке.",
+        "Ваш заказ обрабатывается и скоро будет доставлен. Вы можете отслеживать статус заказа по кнопке выше.",
+    )
     
     def __init__(self):
         # Email configuration (Brevo)
@@ -166,6 +194,12 @@ class NotificationService:
         
         # Telegram configuration
         self.telegram_bot_token = current_app.config.get('TELEGRAM_BOT_TOKEN')
+        self.staff_telegram_bot_token = (
+            current_app.config.get('STAFF_BOT_TOKEN')
+            or current_app.config.get('STAFF_TELEGRAM_BOT_TOKEN')
+            or os.environ.get('STAFF_BOT_TOKEN')
+            or os.environ.get('STAFF_TELEGRAM_BOT_TOKEN')
+        )
         
         # Company information
         self.company_name = current_app.config.get('COMPANY_NAME', 'Aqua Element')
@@ -437,11 +471,14 @@ class NotificationService:
         if not user:
             raise NotificationError(get_translation('error.not_found'))
 
+        language = self._normalize_language_code(getattr(user, 'preferred_language', 'en') or 'en')
+
         template_data = {
             'order_number': payment.order.order_number if payment.order else 'N/A',
             'payment_amount': payment.amount,
             'payment_method': payment.payment_method.value if payment.payment_method else 'unknown',
-            'payment_reference': payment.payment_id  # Use payment_id as reference
+            'payment_reference': payment.payment_id,  # Use payment_id as reference
+            'payment_follow_up_message': self._get_payment_follow_up_message(payment, language),
         }
 
         # Determine channels: use Telegram if user has telegram_id, otherwise email
@@ -2642,6 +2679,47 @@ class NotificationService:
             'order_id': delivery.order.id if delivery.order else None,
             'history_id': history.id,
         }
+
+    def _is_payment_order_delivered(self, payment: Payment) -> bool:
+        """Return True when payment is attached to an order already marked as delivered."""
+        order = getattr(payment, 'order', None)
+        if not order:
+            return False
+
+        order_status = self._normalize_delivery_status_code(getattr(order, 'status', None))
+        if order_status == DeliveryStatus.DELIVERED.value:
+            return True
+
+        delivery = getattr(order, 'delivery', None)
+        delivery_status = self._normalize_delivery_status_code(getattr(delivery, 'status', None)) if delivery else None
+        return delivery_status == DeliveryStatus.DELIVERED.value
+
+    def _get_payment_follow_up_message(self, payment: Payment, language: Optional[str]) -> str:
+        """Resolve localized payment follow-up copy based on fulfillment stage."""
+        normalized_language = self._normalize_language_code(language)
+        message_key = 'delivered' if self._is_payment_order_delivered(payment) else 'processing'
+        language_messages = self.PAYMENT_FOLLOW_UP_MESSAGES.get(
+            normalized_language,
+            self.PAYMENT_FOLLOW_UP_MESSAGES['en'],
+        )
+        return language_messages.get(message_key, self.PAYMENT_FOLLOW_UP_MESSAGES['en'][message_key])
+
+    @classmethod
+    def _rewrite_legacy_payment_follow_up_content(
+        cls,
+        content: str,
+        follow_up_message: Optional[str],
+    ) -> str:
+        """Replace legacy hardcoded payment follow-up lines with contextual copy."""
+        if not content or not follow_up_message:
+            return content
+
+        updated_content = content
+        for phrase in cls.LEGACY_PAYMENT_FOLLOW_UP_PHRASES:
+            if phrase in updated_content:
+                updated_content = updated_content.replace(phrase, follow_up_message)
+
+        return updated_content
     
     # Private methods for different channels
     def _send_email_notification(self, user: User, notification_type: NotificationType,
@@ -2694,6 +2772,12 @@ class NotificationService:
             # Render template
             subject = self._render_template(template_subject, template_data_with_user, language)
             content = self._render_template(template_content, template_data_with_user, language)
+
+        if notification_type_str == NotificationType.PAYMENT_CONFIRMATION.value:
+            content = self._rewrite_legacy_payment_follow_up_content(
+                content,
+                template_data_with_user.get('payment_follow_up_message'),
+            )
 
         # Build Brevo API request
         url = 'https://api.brevo.com/v3/smtp/email'
@@ -2932,11 +3016,43 @@ class NotificationService:
             logger.error(f"Eskiz SMS error: {e}", exc_info=True)
             return {'success': False, 'error': str(e)}
 
+    def send_staff_telegram_message(self, user: User, message: str, *, language: Optional[str] = None) -> Dict[str, Any]:
+        """Send a one-off Telegram message via staff bot token."""
+        if not message:
+            return {'success': False, 'error': 'Message content is required'}
+
+        template = SimpleNamespace(
+            subject='Staff bot message',
+            content=message,
+            get_translated=lambda field_name, _language: (
+                'Staff bot message' if field_name == 'subject' else message
+            ),
+        )
+
+        try:
+            return self._send_telegram_notification(
+                user=user,
+                notification_type=NotificationType.SYSTEM_ALERT,
+                template_data={},
+                language=language or getattr(user, 'preferred_language', 'en') or 'en',
+                template_override=template,
+                bot_token=self.staff_telegram_bot_token,
+            )
+        except ConfigurationError as exc:
+            logger.warning(
+                "Staff Telegram notification skipped: user_id=%s reason=%s",
+                getattr(user, 'id', None),
+                exc,
+            )
+            return {'success': False, 'error': str(exc)}
+
     def _send_telegram_notification(self, user: User, notification_type: NotificationType,
                                    template_data: Dict[str, Any], language: str,
-                                   template_override=None) -> Dict[str, Any]:
+                                   template_override=None,
+                                   bot_token: Optional[str] = None) -> Dict[str, Any]:
         """Send Telegram notification"""
-        if not self.telegram_bot_token:
+        effective_bot_token = bot_token or self.telegram_bot_token
+        if not effective_bot_token:
             raise ConfigurationError(get_translation('error.configuration.telegram_not_configured'))
 
         notification_type_value = self._status_value(notification_type)
@@ -2974,9 +3090,14 @@ class NotificationService:
         content = self._render_template(template_content, template_data, language)
         if notification_type_value == NotificationType.DELIVERY_UPDATE.value:
             content = self._strip_driver_info_from_delivery_message(content)
+        elif notification_type_value == NotificationType.PAYMENT_CONFIRMATION.value:
+            content = self._rewrite_legacy_payment_follow_up_content(
+                content,
+                (template_data or {}).get('payment_follow_up_message'),
+            )
         
         # Send via Telegram Bot API
-        url = f"https://api.telegram.org/bot{self.telegram_bot_token}/sendMessage"
+        url = f"https://api.telegram.org/bot{effective_bot_token}/sendMessage"
         payload = {
             'chat_id': telegram_chat_id,
             'text': content,
@@ -3357,7 +3478,7 @@ Tracking: {tracking_code}
     <li>Usul: {payment_method}</li>
     <li>Havola: {payment_reference}</li>
 </ul>
-<p>Buyurtmangiz qayta ishlanmoqda.</p>'''
+<p>{payment_follow_up_message}</p>'''
             },
             'en': {
                 'subject': 'Payment Confirmation - {{company_name}}',
@@ -3369,7 +3490,7 @@ Tracking: {tracking_code}
     <li>Method: {payment_method}</li>
     <li>Reference: {payment_reference}</li>
 </ul>
-<p>Your order is now being processed.</p>'''
+<p>{payment_follow_up_message}</p>'''
             },
             'ru': {
                 'subject': 'Подтверждение оплаты - {{company_name}}',
@@ -3381,7 +3502,7 @@ Tracking: {tracking_code}
     <li>Способ: {payment_method}</li>
     <li>Ссылка: {payment_reference}</li>
 </ul>
-<p>Ваш заказ обрабатывается.</p>'''
+<p>{payment_follow_up_message}</p>'''
             }
         }
     },
@@ -3397,7 +3518,7 @@ Buyurtma: #{order_number}
 Summa: {payment_amount} so'm
 Usul: {payment_method}
 
-Buyurtmangiz qayta ishlanmoqda. Yetkazib berishga tayyor bo'lganda xabar beramiz.
+{payment_follow_up_message}
 
 Xaridingiz uchun rahmat!'''
             },
@@ -3408,7 +3529,7 @@ Order: #{order_number}
 Amount: {payment_amount} UZS
 Method: {payment_method}
 
-Your order is now being processed. We'll notify you when it's ready for delivery.
+{payment_follow_up_message}
 
 Thank you for your purchase!'''
             },
@@ -3419,7 +3540,7 @@ Thank you for your purchase!'''
 Сумма: {payment_amount} сум
 Способ: {payment_method}
 
-Ваш заказ обрабатывается. Мы уведомим вас, когда он будет готов к доставке.
+{payment_follow_up_message}
 
 Спасибо за покупку!'''
             }

@@ -40,6 +40,15 @@ def make_celery(app=None):
     # Update configuration from Flask config
     celery.conf.update(app.config['CELERY'])
     
+    reminder_interval = int(app.config.get('COD_REMINDER_INTERVAL_MINUTES', 60) or 60)
+    if reminder_interval <= 0:
+        reminder_interval = 60
+
+    if reminder_interval >= 60:
+        reminder_schedule = crontab(minute=0)
+    else:
+        reminder_schedule = crontab(minute=f'*/{reminder_interval}')
+
     # Configure periodic tasks
     celery.conf.beat_schedule = {
         # Process subscription billing daily at 9 AM
@@ -82,6 +91,12 @@ def make_celery(app=None):
         'mark-overdue-cod-reconciliation-sessions': {
             'task': 'business_app.tasks.payment_tasks.mark_overdue_cod_reconciliation_sessions',
             'schedule': crontab(minute=15),
+        },
+
+        # Send COD reconciliation reminders based on configured cadence.
+        'send-cod-reconciliation-reminders': {
+            'task': 'business_app.tasks.payment_tasks.send_cod_reconciliation_reminders',
+            'schedule': reminder_schedule,
         },
         
         # Generate daily analytics report

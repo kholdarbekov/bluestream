@@ -671,6 +671,34 @@ class TestOrderHandlerFlows:
         )
         update.callback_query.answer.assert_awaited_once()
 
+    async def test_cancel_checkout_clears_selection_and_returns_main_menu(self, monkeypatch):
+        handler = orders_module.OrderHandlers()
+        update = DummyUpdate()
+        update.callback_query = DummyCallbackQuery(data="cancel_order")
+        context = make_context()
+        context.user_data.update(
+            {
+                "selected_address_id": 11,
+                "selected_payment_method": "cash",
+                "keep_me": "value",
+            }
+        )
+
+        monkeypatch.setattr(orders_module.i18n, "get_user_language", AsyncMock(return_value="en"))
+        monkeypatch.setattr(orders_module.i18n, "get", lambda key, lang, **_: f"{key}:{lang}")
+        monkeypatch.setattr(orders_module.MenuKeyboards, "main_menu", lambda _lang: "main-menu-kbd")
+
+        await handler.cancel_checkout(update, context)
+
+        assert "selected_address_id" not in context.user_data
+        assert "selected_payment_method" not in context.user_data
+        assert context.user_data["keep_me"] == "value"
+        update.callback_query.edit_message_text.assert_awaited_once_with(
+            text="telegram.action_cancelled:en",
+            reply_markup="main-menu-kbd",
+        )
+        update.callback_query.answer.assert_awaited_once_with("telegram.action_cancelled_short:en")
+
     async def test_cancel_order_confirm_yes_success(self, monkeypatch):
         handler = orders_module.OrderHandlers()
         handler.orders_menu = AsyncMock()

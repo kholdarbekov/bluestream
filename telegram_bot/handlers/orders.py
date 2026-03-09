@@ -560,6 +560,28 @@ class OrderHandlers(BaseHandler):
         except Exception as e:
             logger.error(f"Error in payment handler: {e}")
             await self._handle_error(update)
+
+    async def cancel_checkout(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Cancel checkout from order confirmation screen."""
+        try:
+            query = update.callback_query
+            user_id = update.effective_user.id
+            language = await i18n.get_user_language(user_id)
+
+            # Clear only checkout-related selections and keep unrelated context.
+            context.user_data.pop('selected_address_id', None)
+            context.user_data.pop('selected_payment_method', None)
+
+            await query.edit_message_text(
+                text=i18n.get('telegram.action_cancelled', language),
+                reply_markup=MenuKeyboards.main_menu(language),
+            )
+            await query.answer(i18n.get('telegram.action_cancelled_short', language))
+
+            logger.info(f"Checkout cancelled by user {user_id}")
+        except Exception as e:
+            logger.error(f"Error cancelling checkout: {e}")
+            await self._handle_error(update)
     
     async def confirm_order(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle order confirmation"""

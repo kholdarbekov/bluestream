@@ -470,10 +470,21 @@ const Delivery = () => {
         title: t('ui.delivery.in_transit'),
         description: renderStepDescription(
           t('ui.delivery.package_on_way'),
-          timestamps.in_transit || timestamps.arrived
+          timestamps.in_transit
         ),
         status: ['in_transit', 'arrived', 'delivered'].includes(delivery.status) ? 'finish' : ['failed', 'cancelled'].includes(delivery.status) ? 'error' : 'wait',
-        icon: ['in_transit', 'arrived'].includes(delivery.status) ? <TruckOutlined /> : ['delivered'].includes(delivery.status) ? <CheckCircleOutlined /> : <ClockCircleOutlined />
+        icon: delivery.status === 'in_transit' ? <TruckOutlined /> : ['arrived', 'delivered'].includes(delivery.status) ? <CheckCircleOutlined /> : <ClockCircleOutlined />
+      },
+      {
+        title: t('ui.delivery.status_arrived', 'Arrived'),
+        description: renderStepDescription(
+          ['arrived', 'delivered'].includes(delivery.status)
+            ? t('ui.delivery.package_arrived_destination', 'Package arrived at destination')
+            : t('ui.delivery.waiting_for_arrival', 'Waiting to arrive at destination'),
+          timestamps.arrived
+        ),
+        status: ['arrived', 'delivered'].includes(delivery.status) ? 'finish' : ['failed', 'cancelled'].includes(delivery.status) ? 'error' : 'wait',
+        icon: delivery.status === 'arrived' ? <EnvironmentOutlined /> : delivery.status === 'delivered' ? <CheckCircleOutlined /> : <ClockCircleOutlined />
       },
       {
         title: t('ui.delivery.delivered'),

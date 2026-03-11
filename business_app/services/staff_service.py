@@ -111,7 +111,11 @@ class StaffService:
             }
 
         payment = getattr(order, 'payment', None)
-        outstanding_amount = Decimal(str(getattr(payment, 'outstanding_amount', total_amount) or total_amount))
+        raw_outstanding_amount = getattr(payment, 'outstanding_amount', None)
+        if raw_outstanding_amount is None:
+            outstanding_amount = total_amount
+        else:
+            outstanding_amount = Decimal(str(raw_outstanding_amount))
         provider_data = dict(getattr(payment, 'provider_data', {}) or {})
         reserved_amount = Decimal(str(provider_data.get('cod_prepayment_reserved_amount') or 0))
 

@@ -1,0 +1,176 @@
+import React from 'react';
+import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { QueryClient, QueryClientProvider } from 'react-query';
+
+import Orders from '../../pages/Orders';
+import adminService from '../../services/adminService';
+import api from '../../services/api';
+
+jest.mock('../../services/adminService');
+jest.mock('../../services/api', () => ({
+  __esModule: true,
+  default: {
+    get: jest.fn(),
+    post: jest.fn(),
+    put: jest.fn(),
+    delete: jest.fn(),
+  },
+  getCookie: jest.fn(),
+}));
+jest.mock('react-i18next', () => ({
+  useTranslation: () => ({
+    t: (key, fallback) => fallback || key,
+  }),
+}));
+
+jest.mock('antd', () => {
+  const actual = jest.requireActual('antd');
+  return {
+    ...actual,
+    Dropdown: ({ menu, children }) => (
+      <div>
+        {children}
+        {menu?.items
+          ?.filter((item) => item && item.type !== 'divider' && item.onClick)
+          .map((item) => (
+            <button key={item.key} onClick={item.onClick} type="button" disabled={item.disabled}>
+              {typeof item.label === 'string' ? item.label : item.key}
+            </button>
+          ))}
+      </div>
+    ),
+  };
+});
+
+const createWrapper = () => {
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      queries: {
+        retry: false,
+      },
+    },
+  });
+
+  return ({ children }) => (
+    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+  );
+};
+
+describe('Orders personal card payment flow', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+
+    api.get.mockResolvedValue({
+      data: {
+        data: {
+          statuses: [
+            { value: 'pending', label: 'Pending' },
+            { value: 'confirmed', label: 'Confirmed' },
+            { value: 'delivered', label: 'Delivered' },
+          ],
+        },
+      },
+    });
+
+    adminService.getOrders.mockResolvedValue({
+      data: {
+        items: [
+          {
+            id: 456,
+            order_number: 'ORD-TEST-456',
+            user_id: 77,
+            status: 'confirmed',
+            payment_method: 'cash',
+            payment_status: 'partially_paid',
+            total_amount: 18000,
+            outstanding_amount: 13000,
+            customer_name: 'Ali Buyer',
+            customer_email: 'ali@example.com',
+            customer_phone: '+998901234500',
+            created_at: '2026-03-11T10:00:00+00:00',
+            items_summary: [],
+            items_count: 0,
+          },
+        ],
+      },
+      meta: {
+        total: 1,
+      },
+    });
+
+    adminService.getOrderDetails.mockResolvedValue({
+      success: true,
+      data: {
+        order: {
+          id: 456,
+          order_number: 'ORD-TEST-456',
+          user_id: 77,
+          status: 'confirmed',
+          payment_method: 'cash',
+          payment_status: 'partially_paid',
+          total_amount: 18000,
+          amount_collected: 5000,
+          outstanding_amount: 13000,
+          customer_name: 'Ali Buyer',
+          customer_email: 'ali@example.com',
+          customer_phone: '+998901234500',
+          created_at: '2026-03-11T10:00:00+00:00',
+          items: [],
+        },
+      },
+    });
+
+    adminService.recordStaffCashCollection.mockResolvedValue({
+      data: {
+        cash_collection_event: {
+          id: 901,
+          source: 'personal_card_transfer',
+        },
+      },
+    });
+  });
+
+  it('submits personal card payment from order details and refreshes details', async () => {
+    const user = userEvent.setup();
+    render(<Orders />, { wrapper: createWrapper() });
+
+    await waitFor(() => {
+      expect(adminService.getOrders).toHaveBeenCalled();
+    });
+
+    await user.click(await screen.findByText(/view_details|View Details/i));
+
+    await waitFor(() => {
+      expect(adminService.getOrderDetails).toHaveBeenCalledWith(456);
+    });
+
+    await user.click(await screen.findByText(/record_personal_card_payment|Record Personal Card Payment/i));
+
+    const amountInput = screen.getByRole('spinbutton');
+    await user.clear(amountInput);
+    await user.type(amountInput, '12000');
+    await user.type(
+      screen.getByPlaceholderText('Example: Customer transferred to owner personal card'),
+      'Customer paid owner personal card',
+    );
+    await user.click(screen.getByRole('button', { name: 'OK' }));
+
+    await waitFor(() => {
+      expect(adminService.recordStaffCashCollection).toHaveBeenCalledTimes(1);
+    });
+
+    expect(adminService.recordStaffCashCollection).toHaveBeenCalledWith({
+      customer_id: 77,
+      order_id: 456,
+      amount: '12000',
+      notes: 'Customer paid owner personal card',
+      source: 'personal_card_transfer',
+      proof_data: { channel: 'admin_ui_orders' },
+    });
+
+    await waitFor(() => {
+      expect(adminService.getOrderDetails).toHaveBeenCalledTimes(2);
+    });
+  });
+});

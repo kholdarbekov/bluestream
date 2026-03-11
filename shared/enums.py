@@ -47,6 +47,7 @@ class CashCollectionSource(Enum):
     NEXT_DELIVERY = 'next_delivery'
     STANDALONE_MEETING = 'standalone_meeting'
     ADMIN_ADJUSTMENT = 'admin_adjustment'
+    PERSONAL_CARD_TRANSFER = 'personal_card_transfer'
     BACKFILL = 'backfill'
 
 

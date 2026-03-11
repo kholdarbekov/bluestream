@@ -358,6 +358,11 @@ class AdminService {
     return response.data;
   }
 
+  async recordStaffCashCollection(payload) {
+    const response = await api.post('/admin/staff/cash-reconciliation/collections', payload);
+    return response.data;
+  }
+
   // Corporate contract management
   async getCorporateContracts(params = {}) {
     const response = await api.get('/admin/corporate/contracts', { params });

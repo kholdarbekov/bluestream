@@ -26,8 +26,38 @@ jest.mock('react-i18next', () => ({
 
 jest.mock('antd', () => {
   const actual = jest.requireActual('antd');
+  const MockSelect = ({
+    children,
+    value,
+    defaultValue,
+    onChange,
+    disabled,
+    id,
+    name,
+    className,
+    style,
+    'aria-label': ariaLabel,
+  }) => (
+    <select
+      id={id}
+      name={name}
+      className={className}
+      style={style}
+      aria-label={ariaLabel}
+      disabled={disabled}
+      value={value ?? defaultValue ?? ''}
+      onChange={(event) => onChange?.(event.target.value)}
+    >
+      {children}
+    </select>
+  );
+  MockSelect.Option = ({ value: optionValue, children }) => (
+    <option value={optionValue}>{children}</option>
+  );
+
   return {
     ...actual,
+    Select: MockSelect,
     message: {
       success: jest.fn(),
       error: jest.fn(),
@@ -133,8 +163,54 @@ describe('DeliveryReports page', () => {
     });
     staffService.verifyCashReconciliationSession.mockResolvedValue({ data: { success: true } });
     staffService.resolveCashReconciliationSession.mockResolvedValue({ data: { success: true } });
-    staffService.getCustomerCodStatement.mockResolvedValue({ data: { data: { items: [] } } });
+    staffService.getCustomerCodStatement.mockResolvedValue({
+      data: {
+        data: {
+          active_cod_debt_count: 0,
+          total_outstanding_amount: 18000,
+          items: [
+            {
+              order_id: 456,
+              order_number: 'ORD-TEST-456',
+              outstanding_amount: 18000,
+            },
+          ],
+        },
+      },
+    });
     staffService.getOrderPaymentTimeline.mockResolvedValue({ data: { data: { timeline: [] } } });
+    staffService.getCodCollectionUsersWithOpenDebts.mockResolvedValue({
+      data: {
+        data: {
+          items: [
+            {
+              id: 77,
+              first_name: 'Ali',
+              last_name: 'Buyer',
+              phone: '+998901234500',
+              active_cod_debt_count: 0,
+            },
+          ],
+        },
+      },
+    });
+    staffService.searchCodCollectionUsers.mockResolvedValue({
+      data: {
+        data: {
+          items: [
+            {
+              id: 77,
+              first_name: 'Ali',
+              last_name: 'Buyer',
+              phone: '+998901234500',
+              active_cod_debt_count: 0,
+            },
+          ],
+        },
+      },
+    });
+    staffService.getDeliveryPersons.mockResolvedValue({ data: { data: { items: [] } } });
+    staffService.recordCashCollection.mockResolvedValue({ data: { success: true } });
   });
 
   it('renders explicit approve, reject, and resolve actions for reconciliation sessions', async () => {
@@ -179,5 +255,39 @@ describe('DeliveryReports page', () => {
     expect(payload.reason_code).toBe('cash_count_short');
     expect(payload.notes).toBe('Cash short by 30,000 UZS after count');
     expect(message.success).toHaveBeenCalledWith('Reconciliation rejected and marked as mismatch');
+  });
+
+  it('records personal card transfer with required target order', async () => {
+    const user = userEvent.setup();
+    render(<DeliveryReports />, { wrapper: createWrapper() });
+
+    await waitFor(() => {
+      expect(staffService.getCashReconciliation).toHaveBeenCalled();
+    });
+
+    const recordCollectionButton = (await screen.findAllByRole('button')).find((button) =>
+      /Record Collection|staff:record_cash_collection/i.test(button.textContent || '')
+    );
+    expect(recordCollectionButton).toBeTruthy();
+    await user.click(recordCollectionButton);
+
+    await user.selectOptions(screen.getByLabelText('Customer'), '77');
+    await user.selectOptions(screen.getByLabelText('Collection Type'), 'personal_card_transfer');
+    await user.selectOptions(screen.getByLabelText('Target Order'), '456');
+
+    const amountInput = screen.getByRole('spinbutton');
+    fireEvent.change(amountInput, { target: { value: '12000' } });
+    await user.type(screen.getByLabelText('Notes'), 'Customer paid to owner personal card');
+    await user.click(screen.getByRole('button', { name: 'OK' }));
+
+    await waitFor(() => {
+      expect(staffService.recordCashCollection).toHaveBeenCalledTimes(1);
+    });
+
+    const payload = staffService.recordCashCollection.mock.calls[0][0];
+    expect(payload.source).toBe('personal_card_transfer');
+    expect(Number(payload.order_id)).toBe(456);
+    expect(Number(payload.customer_id)).toBe(77);
+    expect(payload.collector_user_id).toBeNull();
   });
 });

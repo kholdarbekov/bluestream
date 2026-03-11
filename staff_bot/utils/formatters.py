@@ -49,12 +49,15 @@ def format_quantity(value: Any) -> str:
 def get_cod_cash_projection(payload: Dict[str, Any]) -> Dict[str, float]:
     """Extract reserved COD prepayment and expected cash-to-collect values from payload."""
     reserved_prepayment = float(payload.get('cod_reserved_prepayment_amount') or 0)
-    expected_cash_to_collect = float(
-        payload.get('expected_cash_to_collect')
-        or payload.get('outstanding_amount')
-        or payload.get('total_amount')
-        or 0
-    )
+
+    # Keep explicit zero values from API payloads. Using chained `or` would
+    # treat 0 as falsy and incorrectly fall back to total/outstanding amounts.
+    expected_cash_to_collect_raw = payload.get('expected_cash_to_collect')
+    if expected_cash_to_collect_raw is None:
+        expected_cash_to_collect_raw = payload.get('outstanding_amount')
+    if expected_cash_to_collect_raw is None:
+        expected_cash_to_collect_raw = payload.get('total_amount')
+    expected_cash_to_collect = float(expected_cash_to_collect_raw or 0)
     if reserved_prepayment < 0:
         reserved_prepayment = 0.0
     if expected_cash_to_collect < 0:
@@ -116,6 +119,11 @@ def format_order_card(order: Dict[str, Any], language: str) -> str:
             f"\U0001f4b5 Cash to collect now: "
             f"{format_currency(cod_projection['expected_cash_to_collect'], language=language)}"
         )
+        payment_status = str(order.get('payment_status') or '').lower()
+        if payment_status == 'completed' or cod_projection['expected_cash_to_collect'] <= 0:
+            lines.append(f"\u2705 {i18n.get('staff.delivery.cash_already_collected', language)}")
+        elif payment_status == 'partially_paid':
+            lines.append(f"\u2139\ufe0f {i18n.get('staff.delivery.cash_partially_collected', language)}")
     lines.append(f"\U0001f4dd {item_count} {i18n.get('staff.items', language)}")
 
     if delivery_notes:

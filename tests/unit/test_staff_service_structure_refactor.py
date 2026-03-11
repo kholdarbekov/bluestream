@@ -143,3 +143,29 @@ def test_get_cod_collection_projection_clamps_reserved_prepayment_to_outstanding
 
     assert projection["cod_reserved_prepayment_amount"] == 5000.0
     assert projection["expected_cash_to_collect"] == 0.0
+
+
+def test_get_cod_collection_projection_keeps_zero_outstanding_without_total_fallback(db, sample_order):
+    sample_order.payment_method = PaymentMethod.CASH
+    sample_order.total_amount = Decimal("90000")
+
+    payment = sample_order.payment or Payment(
+        order_id=sample_order.id,
+        user_id=sample_order.user_id,
+        amount=Decimal("90000"),
+        payment_method=PaymentMethod.CASH,
+        status=PaymentStatus.COMPLETED,
+        amount_collected=Decimal("90000"),
+        outstanding_amount=Decimal("0"),
+        provider_data={},
+    )
+    payment.provider_data = {"cod_prepayment_reserved_amount": 0}
+    payment.outstanding_amount = Decimal("0")
+    if sample_order.payment is None:
+        db.session.add(payment)
+    db.session.commit()
+
+    projection = StaffService.get_cod_collection_projection(sample_order)
+
+    assert projection["cod_reserved_prepayment_amount"] == 0.0
+    assert projection["expected_cash_to_collect"] == 0.0

@@ -6,6 +6,7 @@ from unittest.mock import Mock
 from flask_jwt_extended import create_access_token
 
 from business_app.utils.constants import UserRole
+from business_app.utils.exceptions import ValidationError
 
 def _auth_headers(app, user_id: int) -> dict:
     with app.app_context():
@@ -97,6 +98,78 @@ def test_admin_can_record_standalone_cash_collection(
     assert payload['data']['driver_cash_session'] is None
     mocked_post_collection.assert_called_once()
     mocked_session_detail.assert_not_called()
+
+
+def test_admin_can_record_personal_card_transfer_collection(
+    client,
+    app,
+    admin_user,
+    sample_user,
+    monkeypatch,
+):
+    fake_event = SimpleNamespace(
+        driver_cash_session_id=None,
+        to_dict=lambda: {
+            'id': 109,
+            'customer_id': sample_user.id,
+            'order_id': 456,
+            'amount': 12000,
+            'source': 'personal_card_transfer',
+        },
+    )
+    mocked_post_collection = Mock(return_value=fake_event)
+    monkeypatch.setattr(
+        'business_app.services.cash_collection_service.CashCollectionService.post_collection',
+        mocked_post_collection,
+    )
+
+    response = client.post(
+        '/api/v1/admin/staff/cash-reconciliation/collections',
+        headers=_manager_headers(app, admin_user.id, UserRole.ADMIN.value),
+        json={
+            'customer_id': sample_user.id,
+            'order_id': 456,
+            'amount': 12000,
+            'source': 'personal_card_transfer',
+            'notes': 'Customer paid to owner personal card.',
+        },
+    )
+
+    assert response.status_code == 201
+    payload = response.get_json()
+    assert payload['data']['cash_collection_event']['source'] == 'personal_card_transfer'
+    mocked_post_collection.assert_called_once()
+    called_kwargs = mocked_post_collection.call_args.kwargs
+    assert called_kwargs['source'] == 'personal_card_transfer'
+    assert called_kwargs['order_id'] == 456
+
+
+def test_admin_personal_card_transfer_validation_error_returns_400(
+    client,
+    app,
+    admin_user,
+    sample_user,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        'business_app.services.cash_collection_service.CashCollectionService.post_collection',
+        Mock(side_effect=ValidationError('order_id is required for personal card transfer collections')),
+    )
+
+    response = client.post(
+        '/api/v1/admin/staff/cash-reconciliation/collections',
+        headers=_manager_headers(app, admin_user.id, UserRole.ADMIN.value),
+        json={
+            'customer_id': sample_user.id,
+            'amount': 12000,
+            'source': 'personal_card_transfer',
+            'notes': 'Missing order should fail.',
+        },
+    )
+
+    assert response.status_code == 400
+    payload = response.get_json()
+    assert 'order_id is required for personal card transfer collections' in payload.get('errors', [])
 
 
 def test_manager_can_search_cod_collection_users_from_admin_surface(

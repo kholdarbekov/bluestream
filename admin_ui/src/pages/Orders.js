@@ -61,8 +61,10 @@ const Orders = () => {
   const [pagination, setPagination] = useState({ page: 1, per_page: 20 });
   const [orderDetailsLoading, setOrderDetailsLoading] = useState(false);
   const [createOrderErrors, setCreateOrderErrors] = useState([]);
+  const [isPersonalCardModalVisible, setIsPersonalCardModalVisible] = useState(false);
   const [form] = Form.useForm();
   const [createOrderForm] = Form.useForm();
+  const [personalCardForm] = Form.useForm();
 
   const queryClient = useQueryClient();
 
@@ -137,6 +139,36 @@ const Orders = () => {
         setCreateOrderErrors(errorMessages);
         message.error(errorMessages[0]);
       }
+    }
+  );
+
+  const recordPersonalCardPaymentMutation = useMutation(
+    (payload) => adminService.recordStaffCashCollection(payload),
+    {
+      onSuccess: async () => {
+        message.success(t('ui.orders.personal_card_payment_recorded', 'Personal card payment recorded'));
+        queryClient.invalidateQueries('orders');
+        setIsPersonalCardModalVisible(false);
+        personalCardForm.resetFields();
+
+        if (selectedOrder?.id) {
+          try {
+            const response = await adminService.getOrderDetails(selectedOrder.id);
+            if (response.success && response.data?.order) {
+              setSelectedOrder(response.data.order);
+            }
+          } catch (_error) {
+            // Keep current order details if refresh fails.
+          }
+        }
+      },
+      onError: (error) => {
+        const errorMessages = extractApiErrorMessages(
+          error,
+          t('ui.orders.personal_card_payment_failed', 'Failed to record personal card payment')
+        );
+        message.error(errorMessages[0]);
+      },
     }
   );
 
@@ -293,7 +325,7 @@ const Orders = () => {
       key: 'payment_status',
       width: 100,
       render: (status) => (
-        <Tag color={status === 'completed' ? 'green' : status === 'pending' ? 'orange' : 'red'}>
+        <Tag color={status === 'completed' ? 'green' : ['pending', 'partially_paid'].includes(status) ? 'orange' : 'red'}>
           {t(`ui.orders.payment_${status}`)}
         </Tag>
       )
@@ -568,7 +600,7 @@ const Orders = () => {
                 </span>
               </Descriptions.Item>
             <Descriptions.Item label={t('ui.orders.payment_status')}>
-                <Tag color={selectedOrder.payment_status === 'completed' ? 'green' : 'orange'}>
+                <Tag color={selectedOrder.payment_status === 'completed' ? 'green' : ['pending', 'partially_paid'].includes(selectedOrder.payment_status) ? 'orange' : 'red'}>
                   {t(`ui.orders.payment_${selectedOrder.payment_status}`)}
                 </Tag>
               </Descriptions.Item>
@@ -689,6 +721,21 @@ const Orders = () => {
 
             <div style={{ marginTop: 16, textAlign: 'right' }}>
               <Space>
+                {selectedOrder.payment_method === 'cash' ? (
+                  <Button
+                    icon={<DollarOutlined />}
+                    disabled={['cancelled', 'returned'].includes(selectedOrder.status)}
+                    onClick={() => {
+                      personalCardForm.setFieldsValue({
+                        amount: selectedOrder.outstanding_amount || 0,
+                        notes: '',
+                      });
+                      setIsPersonalCardModalVisible(true);
+                    }}
+                  >
+                    {t('ui.orders.record_personal_card_payment', 'Record Personal Card Payment')}
+                  </Button>
+                ) : null}
                 <Button
                   type="primary"
                   onClick={() => {
@@ -999,6 +1046,64 @@ const Orders = () => {
                 {t('ui.orders.create_order', 'Create Order')}
               </Button>
             </Space>
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
+        title={t('ui.orders.record_personal_card_payment', 'Record Personal Card Payment')}
+        open={isPersonalCardModalVisible}
+        onCancel={() => {
+          setIsPersonalCardModalVisible(false);
+          personalCardForm.resetFields();
+        }}
+        onOk={() => personalCardForm.submit()}
+        confirmLoading={recordPersonalCardPaymentMutation.isLoading}
+      >
+        <Form
+          form={personalCardForm}
+          layout="vertical"
+          onFinish={(values) => {
+            if (!selectedOrder?.id || !selectedOrder?.user_id) {
+              message.error(t('ui.orders.order_context_missing', 'Order context is missing'));
+              return;
+            }
+            recordPersonalCardPaymentMutation.mutate({
+              customer_id: selectedOrder.user_id,
+              order_id: selectedOrder.id,
+              amount: values.amount,
+              notes: values.notes,
+              source: 'personal_card_transfer',
+              proof_data: { channel: 'admin_ui_orders' },
+            });
+          }}
+        >
+          <Form.Item
+            label={t('ui.orders.order_number')}
+          >
+            <Input value={selectedOrder?.order_number} disabled />
+          </Form.Item>
+          <Form.Item
+            label={t('ui.orders.outstanding_amount', 'Outstanding')}
+          >
+            <Input value={`${(selectedOrder?.outstanding_amount || 0).toLocaleString()} UZS`} disabled />
+          </Form.Item>
+          <Form.Item
+            name="amount"
+            label={t('ui.orders.amount', 'Amount')}
+            rules={[{ required: true, message: t('ui.orders.amount_required', 'Amount is required') }]}
+          >
+            <Input type="number" min={0} />
+          </Form.Item>
+          <Form.Item
+            name="notes"
+            label={t('ui.orders.notes', 'Notes')}
+            rules={[{ required: true, message: t('ui.orders.notes_required', 'Notes are required') }]}
+          >
+            <Input.TextArea
+              rows={3}
+              placeholder={t('ui.orders.personal_card_notes_placeholder', 'Example: Customer transferred to owner personal card')}
+            />
           </Form.Item>
         </Form>
       </Modal>

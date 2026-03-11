@@ -120,6 +120,11 @@ class ActiveDeliveryHandler(BaseHandler):
                         f"\U0001f4b5 Cash to collect now: "
                         f"{format_currency(cod_projection['expected_cash_to_collect'], language=language)}"
                     )
+                    payment_status = str(delivery.get('payment_status') or '').lower()
+                    if payment_status == 'completed' or cod_projection['expected_cash_to_collect'] <= 0:
+                        lines.append(f"\u2705 {i18n.get('staff.delivery.cash_already_collected', language)}")
+                    elif payment_status == 'partially_paid':
+                        lines.append(f"\u2139\ufe0f {i18n.get('staff.delivery.cash_partially_collected', language)}")
 
                 text = '\n'.join(lines)
                 delivery_id = delivery.get('delivery_id') or delivery.get('id')
@@ -242,6 +247,11 @@ class ActiveDeliveryHandler(BaseHandler):
                     f"\U0001f4b5 Cash to collect now: "
                     f"{format_currency(cod_projection['expected_cash_to_collect'], language=language)}"
                 )
+                payment_status = str(delivery.get('payment_status') or '').lower()
+                if payment_status == 'completed' or cod_projection['expected_cash_to_collect'] <= 0:
+                    lines.append(f"\u2705 {i18n.get('staff.delivery.cash_already_collected', language)}")
+                elif payment_status == 'partially_paid':
+                    lines.append(f"\u2139\ufe0f {i18n.get('staff.delivery.cash_partially_collected', language)}")
 
             # Delivery notes
             notes = delivery.get('delivery_notes', '')

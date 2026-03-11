@@ -640,6 +640,132 @@ class TestCashCollectionService:
                     notes="Attempted late collection while blocked.",
                 )
 
+    def test_personal_card_transfer_can_settle_pending_cod_order_before_delivery(
+        self,
+        app,
+        db,
+        sample_user,
+        admin_user,
+        sample_order,
+    ):
+        with app.app_context():
+            service = CashCollectionService()
+            sample_order.status = OrderStatus.CONFIRMED
+            sample_order.payment_method = PaymentMethod.CASH
+            db.session.commit()
+
+            payment = service.ensure_cod_payment_for_order(sample_order)
+            db.session.commit()
+
+            event = service.post_collection(
+                customer_id=sample_user.id,
+                amount=Decimal("5000.00"),
+                source="personal_card_transfer",
+                recorded_by_user_id=admin_user.id,
+                order_id=sample_order.id,
+                notes="Customer transferred to owner personal card.",
+            )
+            db.session.refresh(payment)
+            refreshed_order = Order.query.get(sample_order.id)
+
+            assert event.driver_cash_session_id is None
+            assert event.unapplied_amount == Decimal("0.00")
+            assert payment.status == PaymentStatus.PARTIALLY_PAID
+            assert payment.amount_collected == Decimal("5000.00")
+            assert payment.outstanding_amount == Decimal("13000.00")
+            assert refreshed_order.is_paid is False
+            assert DriverCashSession.query.count() == 0
+
+    def test_personal_card_transfer_overflow_becomes_customer_prepayment_balance(
+        self,
+        app,
+        db,
+        sample_user,
+        admin_user,
+        sample_order,
+    ):
+        with app.app_context():
+            service = CashCollectionService()
+            sample_order.status = OrderStatus.PREPARING
+            sample_order.payment_method = PaymentMethod.CASH
+            db.session.commit()
+
+            payment = service.ensure_cod_payment_for_order(sample_order)
+            db.session.commit()
+
+            event = service.post_collection(
+                customer_id=sample_user.id,
+                amount=Decimal("25000.00"),
+                source="personal_card_transfer",
+                recorded_by_user_id=admin_user.id,
+                order_id=sample_order.id,
+                notes="Customer transferred full amount plus extra to personal card.",
+            )
+            db.session.refresh(payment)
+            refreshed_order = Order.query.get(sample_order.id)
+
+            assert payment.status == PaymentStatus.COMPLETED
+            assert payment.amount_collected == refreshed_order.total_amount
+            assert payment.outstanding_amount == Decimal("0.00")
+            assert refreshed_order.is_paid is True
+            assert event.unapplied_amount == Decimal("7000.00")
+            assert service.get_customer_prepaid_balance(sample_user.id) == Decimal("7000.00")
+
+    def test_personal_card_transfer_requires_target_order_and_disallows_driver_context(
+        self,
+        app,
+        db,
+        sample_user,
+        admin_user,
+        delivery_driver,
+    ):
+        with app.app_context():
+            service = CashCollectionService()
+
+            with pytest.raises(ValidationError, match="order_id is required"):
+                service.post_collection(
+                    customer_id=sample_user.id,
+                    amount=Decimal("1000.00"),
+                    source="personal_card_transfer",
+                    recorded_by_user_id=admin_user.id,
+                    notes="Missing target order",
+                )
+
+            with pytest.raises(ValidationError, match="collector_user_id is not allowed"):
+                service.post_collection(
+                    customer_id=sample_user.id,
+                    amount=Decimal("1000.00"),
+                    source="personal_card_transfer",
+                    recorded_by_user_id=admin_user.id,
+                    collector_user_id=delivery_driver.id,
+                    order_id=999999,
+                    notes="Driver attribution is not allowed for personal transfers.",
+                )
+
+    def test_personal_card_transfer_rejects_cancelled_cod_order(
+        self,
+        app,
+        db,
+        sample_user,
+        admin_user,
+        sample_order,
+    ):
+        with app.app_context():
+            service = CashCollectionService()
+            sample_order.status = OrderStatus.CANCELLED
+            sample_order.payment_method = PaymentMethod.CASH
+            db.session.commit()
+
+            with pytest.raises(ValidationError, match="Cancelled or returned COD orders cannot be targeted"):
+                service.post_collection(
+                    customer_id=sample_user.id,
+                    amount=Decimal("1000.00"),
+                    source="personal_card_transfer",
+                    recorded_by_user_id=admin_user.id,
+                    order_id=sample_order.id,
+                    notes="Customer claimed personal transfer after cancellation.",
+                )
+
 
 @pytest.mark.unit
 class TestDriverReconciliationService:

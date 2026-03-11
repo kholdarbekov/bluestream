@@ -92,6 +92,7 @@ const DeliveryReports = () => {
   const [transferConfirmForm] = Form.useForm();
   const [recordCollectionForm] = Form.useForm();
   const collectionSource = Form.useWatch('source', recordCollectionForm) || 'standalone_meeting';
+  const isPersonalCardTransfer = collectionSource === 'personal_card_transfer';
 
   const reportQueryKey = ['deliveryReports', period, statusFilter, blockedOnly];
   const { data, isLoading, refetch } = useQuery(
@@ -136,8 +137,16 @@ const DeliveryReports = () => {
   );
 
   const codDebtUsersQuery = useQuery(
-    ['deliveryReportCodDebtUsers'],
-    () => staffService.getCodCollectionUsersWithOpenDebts({ limit: 500 }),
+    ['deliveryReportCodDebtUsers', isPersonalCardTransfer],
+    () => (
+      isPersonalCardTransfer
+        ? staffService.searchCodCollectionUsers({
+          q: '',
+          type: 'phone',
+          only_with_open_cod: false,
+        })
+        : staffService.getCodCollectionUsersWithOpenDebts({ limit: 500 })
+    ),
     { enabled: recordCollectionOpen }
   );
 
@@ -1018,6 +1027,7 @@ const DeliveryReports = () => {
           onFinish={(values) => {
             if (
               values.source !== 'admin_adjustment' &&
+              values.source !== 'personal_card_transfer' &&
               recordCollectionStatement &&
               Number(recordCollectionStatement.active_cod_debt_count || 0) <= 0
             ) {
@@ -1050,7 +1060,9 @@ const DeliveryReports = () => {
               filterOption
               loading={codDebtUsersQuery.isLoading}
               onChange={(value) => setRecordCollectionCustomerId(value)}
-              placeholder={t('staff:search_customer', 'Select user with COD debt')}
+              placeholder={isPersonalCardTransfer
+                ? t('staff:search_customer_any', 'Select customer')
+                : t('staff:search_customer', 'Select user with COD debt')}
             >
               {codDebtUsers.map((customer) => (
                 <Option key={customer.id} value={customer.id}>
@@ -1076,6 +1088,18 @@ const DeliveryReports = () => {
             />
           ) : null}
 
+          {isPersonalCardTransfer ? (
+            <Alert
+              type="warning"
+              showIcon
+              style={{ marginBottom: 16 }}
+              message={t(
+                'staff:personal_card_transfer_help',
+                'Personal card transfer: this records non-cash settlement and does not assign driver cash custody.'
+              )}
+            />
+          ) : null}
+
           <Form.Item
             name="source"
             label={t('staff:collection_type', 'Collection Type')}
@@ -1083,13 +1107,14 @@ const DeliveryReports = () => {
           >
             <Select
               onChange={(value) => {
-                if (value === 'admin_adjustment') {
+                if (value === 'admin_adjustment' || value === 'personal_card_transfer') {
                   recordCollectionForm.setFieldsValue({ collector_user_id: undefined });
                 }
               }}
             >
               <Option value="standalone_meeting">{t('staff:standalone_office_collection', 'Standalone / office collection')}</Option>
               <Option value="admin_adjustment">{t('staff:admin_correction', 'Admin correction')}</Option>
+              <Option value="personal_card_transfer">{t('staff:personal_card_transfer', 'Personal card transfer')}</Option>
             </Select>
           </Form.Item>
 
@@ -1098,7 +1123,7 @@ const DeliveryReports = () => {
               allowClear
               showSearch
               optionFilterProp="children"
-              disabled={collectionSource === 'admin_adjustment'}
+              disabled={collectionSource === 'admin_adjustment' || isPersonalCardTransfer}
               placeholder={t('staff:collector_driver_optional', 'Optional driver attribution')}
             >
               {deliveryDrivers.map((driver) => (
@@ -1109,7 +1134,15 @@ const DeliveryReports = () => {
             </Select>
           </Form.Item>
 
-          <Form.Item name="order_id" label={t('staff:target_order_optional', 'Target Order (optional)')}>
+          <Form.Item
+            name="order_id"
+            label={isPersonalCardTransfer
+              ? t('staff:target_order_required', 'Target Order')
+              : t('staff:target_order_optional', 'Target Order (optional)')}
+            rules={isPersonalCardTransfer
+              ? [{ required: true, message: t('staff:target_order_required_error', 'Target order is required for personal card transfers') }]
+              : []}
+          >
             <Select
               allowClear
               placeholder={t('staff:auto_allocate_oldest_first', 'Leave blank to auto-allocate oldest debt first')}

@@ -576,6 +576,7 @@ class CashCollectionService:
         if occurred_at.tzinfo is None:
             occurred_at = occurred_at.replace(tzinfo=UTC)
 
+        target_payment: Optional[Payment] = None
         self._validate_collection_context(
             customer_id=customer_id,
             source=source_enum,
@@ -583,9 +584,15 @@ class CashCollectionService:
             recorded_by_user_id=recorded_by_user_id,
             order_id=order_id,
             delivery_id=delivery_id,
+            driver_cash_session_id=driver_cash_session_id,
             notes=notes,
             manual_allocations=manual_allocations,
         )
+        if source_enum == CashCollectionSource.PERSONAL_CARD_TRANSFER:
+            target_payment = self._resolve_target_payment_for_personal_card_transfer(
+                order_id=order_id,
+                actor_user_id=recorded_by_user_id,
+            )
 
         event = CashCollectionEvent(
             customer_id=customer_id,
@@ -616,7 +623,21 @@ class CashCollectionService:
             event.driver_cash_session_id = session.id
 
         allocations = list(manual_allocations or [])
-        if allocations:
+        if source_enum == CashCollectionSource.PERSONAL_CARD_TRANSFER:
+            allocatable = min(
+                self._to_decimal(event.unapplied_amount),
+                self._to_decimal(target_payment.outstanding_amount if target_payment else 0),
+            )
+            if allocatable > Decimal('0.00') and target_payment:
+                self._allocate_to_payment(
+                    event=event,
+                    payment=target_payment,
+                    amount=allocatable,
+                    allocation_order=1,
+                    allocation_mode='manual',
+                    allocation_metadata={'allocation_origin': CashCollectionSource.PERSONAL_CARD_TRANSFER.value},
+                )
+        elif allocations:
             allocation_order = 0
             for allocation in allocations:
                 allocation_order += 1
@@ -689,9 +710,26 @@ class CashCollectionService:
         recorded_by_user_id: Optional[int],
         order_id: Optional[int],
         delivery_id: Optional[int],
+        driver_cash_session_id: Optional[int],
         notes: Optional[str],
         manual_allocations: Optional[Iterable[Dict[str, Any]]],
     ) -> None:
+        if source == CashCollectionSource.PERSONAL_CARD_TRANSFER:
+            if order_id is None:
+                raise ValidationError("order_id is required for personal card transfer collections")
+            if not notes:
+                raise ValidationError("Notes are required for personal card transfer collections")
+            if recorded_by_user_id is None:
+                raise ValidationError("recorded_by_user_id is required for personal card transfer collections")
+            if collector_user_id is not None:
+                raise ValidationError("collector_user_id is not allowed for personal card transfer collections")
+            if delivery_id is not None:
+                raise ValidationError("delivery_id is not allowed for personal card transfer collections")
+            if driver_cash_session_id is not None:
+                raise ValidationError("driver_cash_session_id is not allowed for personal card transfer collections")
+            if manual_allocations:
+                raise ValidationError("manual_allocations are not allowed for personal card transfer collections")
+
         if source == CashCollectionSource.DELIVERY_COMPLETION and not delivery_id:
             raise ValidationError("delivery_id is required for delivery completion collections")
         if source == CashCollectionSource.NEXT_DELIVERY and not delivery_id:
@@ -729,7 +767,11 @@ class CashCollectionService:
                 raise ValidationError("Order does not belong to the selected customer")
             if order.payment_method != PaymentMethod.CASH:
                 raise ValidationError("Only COD orders can be targeted for COD collections")
-            if order.status != OrderStatus.DELIVERED:
+            order_status = order.status.value if hasattr(order.status, 'value') else str(order.status or '')
+            if source == CashCollectionSource.PERSONAL_CARD_TRANSFER:
+                if order_status in {OrderStatus.CANCELLED.value, OrderStatus.RETURNED.value}:
+                    raise ValidationError("Cancelled or returned COD orders cannot be targeted for personal card transfer collection")
+            elif order_status != OrderStatus.DELIVERED.value:
                 raise ValidationError("Only delivered COD orders can be targeted for collection")
 
         if delivery_id:
@@ -761,6 +803,35 @@ class CashCollectionService:
 
         if source == CashCollectionSource.ADMIN_ADJUSTMENT and not recorded_by_user_id:
             raise ValidationError("recorded_by_user_id is required for admin adjustments")
+
+    def _resolve_target_payment_for_personal_card_transfer(
+        self,
+        *,
+        order_id: Optional[int],
+        actor_user_id: Optional[int],
+    ) -> Payment:
+        if order_id is None:
+            raise ValidationError("order_id is required for personal card transfer collections")
+
+        order = Order.query.options(joinedload(Order.payment)).get(order_id)
+        if not order:
+            raise NotFoundError("Order not found")
+        if order.payment_method != PaymentMethod.CASH:
+            raise ValidationError("Only COD orders can be targeted for personal card transfer collection")
+
+        payment = order.payment
+        if not payment:
+            payment = self.ensure_cod_payment_for_order(
+                order,
+                actor_user_id=actor_user_id,
+                metadata={'collection_origin': CashCollectionSource.PERSONAL_CARD_TRANSFER.value},
+            )
+            db.session.flush()
+
+        locked_payment = Payment.query.with_for_update(of=Payment).get(payment.id)
+        if not locked_payment:
+            raise NotFoundError("Payment not found")
+        return locked_payment
 
     def reverse_collection_event(
         self,

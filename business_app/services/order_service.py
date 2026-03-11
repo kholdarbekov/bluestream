@@ -1251,6 +1251,8 @@ class OrderService:
             )
             db.session.commit()
         elif new_status in {OrderStatus.CANCELLED, OrderStatus.RETURNED}:
+            payment_synced = self._sync_payment_status_for_terminal_order_state(order, new_status)
+            released_reserved_prepayment = False
             if order.payment_method == PaymentMethod.CASH:
                 from business_app.services.cash_collection_service import CashCollectionService
 
@@ -1259,7 +1261,40 @@ class OrderService:
                     actor_user_id=getattr(order, 'updated_by', None),
                     reason=f"Order moved to {new_status.value}",
                 )
+                released_reserved_prepayment = True
+
+            if payment_synced or released_reserved_prepayment:
                 db.session.commit()
+
+    def _sync_payment_status_for_terminal_order_state(self, order: Order, new_status: OrderStatus) -> bool:
+        """Cancel non-settled payments when the order reaches a terminal non-delivered state."""
+        payment = getattr(order, 'payment', None)
+        if not payment:
+            return False
+
+        current_status = payment.status
+        if isinstance(current_status, str):
+            try:
+                current_status = PaymentStatus(current_status)
+            except ValueError:
+                return False
+
+        non_settled_statuses = {
+            PaymentStatus.PENDING,
+            PaymentStatus.PROCESSING,
+        }
+        if current_status not in non_settled_statuses:
+            return False
+
+        payment.status = PaymentStatus.CANCELLED
+        payment.paid_at = None
+        payment.failure_reason = (
+            payment.failure_reason
+            or f"Payment cancelled because order moved to {new_status.value}"
+        )
+        order.is_paid = False
+        order.paid_at = None
+        return True
     
     def _process_loyalty_points_for_order(self, order: Order):
         """

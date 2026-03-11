@@ -766,6 +766,61 @@ class TestCashCollectionService:
                     notes="Customer claimed personal transfer after cancellation.",
                 )
 
+    def test_delivery_without_cash_then_later_personal_card_transfer_settles_order_without_driver_cash_impact(
+        self,
+        app,
+        db,
+        sample_user,
+        admin_user,
+        delivery_driver,
+        delivery_driver_profile,
+        cod_order,
+        cod_delivery,
+    ):
+        with app.app_context():
+            cash_service = CashCollectionService()
+            payment = cash_service.ensure_cod_payment_for_order(cod_order)
+            db.session.commit()
+
+            no_cash_event = cash_service.post_collection(
+                customer_id=sample_user.id,
+                amount=Decimal("0.00"),
+                source="delivery_completion",
+                collector_user_id=delivery_driver.id,
+                recorded_by_user_id=delivery_driver.id,
+                order_id=cod_order.id,
+                delivery_id=cod_delivery.id,
+                notes="Customer will transfer to owner card later.",
+            )
+            db.session.refresh(payment)
+            assert no_cash_event.driver_cash_session_id is not None
+            assert payment.status == PaymentStatus.PENDING
+            assert payment.outstanding_amount == cod_order.total_amount
+
+            driver_session = DriverCashSession.query.get(no_cash_event.driver_cash_session_id)
+            assert driver_session is not None
+            assert driver_session.expected_cash == Decimal("0.00")
+
+            personal_event = cash_service.post_collection(
+                customer_id=sample_user.id,
+                amount=cod_order.total_amount,
+                source="personal_card_transfer",
+                recorded_by_user_id=admin_user.id,
+                order_id=cod_order.id,
+                notes="Customer transferred to owner personal card after delivery.",
+            )
+            db.session.refresh(payment)
+            refreshed_order = Order.query.get(cod_order.id)
+
+            DriverReconciliationService().refresh_expected_cash(driver_session)
+            db.session.flush()
+
+            assert personal_event.driver_cash_session_id is None
+            assert payment.status == PaymentStatus.COMPLETED
+            assert payment.outstanding_amount == Decimal("0.00")
+            assert refreshed_order.is_paid is True
+            assert driver_session.expected_cash == Decimal("0.00")
+
 
 @pytest.mark.unit
 class TestDriverReconciliationService:

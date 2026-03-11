@@ -10,7 +10,7 @@ import pytest
 
 from business_app.models.delivery import Delivery
 from business_app.services.order_service import OrderService
-from business_app.utils.constants import DeliveryStatus, OrderStatus, PaymentMethod
+from business_app.utils.constants import DeliveryStatus, OrderStatus, PaymentMethod, PaymentStatus
 from business_app.utils.exceptions import ConflictError, ValidationError
 
 
@@ -102,3 +102,27 @@ class TestOrderService:
 
         with pytest.raises(ConflictError, match="in transit"):
             order_service.cancel_order(sample_order.id, user_id=sample_user.id, reason="Customer request")
+
+    def test_cancel_order_cancels_pending_payment(self, order_service, sample_order, sample_payment, sample_user, db, monkeypatch):
+        sample_order.payment_method = PaymentMethod.PAYME
+        sample_payment.status = PaymentStatus.PENDING
+        db.session.commit()
+
+        monkeypatch.setattr(
+            order_service.inventory_service,
+            "release_reservations",
+            lambda *_args, **_kwargs: {"success": True},
+        )
+
+        with patch("business_app.services.corporate_contract_service.CorporateContractService.release_for_order"):
+            cancelled = order_service.cancel_order(
+                sample_order.id,
+                user_id=sample_user.id,
+                reason="Customer request",
+            )
+
+        db.session.refresh(cancelled)
+        db.session.refresh(sample_payment)
+
+        assert cancelled.status == OrderStatus.CANCELLED
+        assert sample_payment.status == PaymentStatus.CANCELLED

@@ -20,6 +20,11 @@ logger = logging.getLogger('handlers')
 
 class OrderHandlers(BaseHandler):
     """Order-related handlers"""
+    # TODO: remove when enabling back card payments
+    CHECKOUT_ENABLED_PAYMENT_METHODS = {'cash'}
+    CARD_PAYMENT_TEMPORARILY_DISABLED_MESSAGE = (
+        "Card payment is temporarily unavailable in Telegram bot. Please choose cash."
+    )
 
     @staticmethod
     def _build_checkout_payment_methods(available_methods: List[Dict[str, Any]], language: str) -> List[Dict[str, str]]:
@@ -28,28 +33,40 @@ class OrderHandlers(BaseHandler):
             for method in (available_methods or [])
             if method.get('is_active', True)
         }
-        payment_methods: List[Dict[str, str]] = []
-        if 'cash' in method_codes:
-            payment_methods.append({
-                'type': 'cash',
-                'name': i18n.get('telegram.payment_cash', language),
-            })
-        if any(code != 'cash' for code in method_codes):
-            payment_methods.append({
-                'type': 'card',
-                'name': i18n.get('telegram.payment_card', language),
-            })
-        return payment_methods
+        # TODO: uncomment when enabling back card payments
+        # payment_methods: List[Dict[str, str]] = []
+        # if 'cash' in method_codes:
+        #     payment_methods.append({
+        #         'type': 'cash',
+        #         'name': i18n.get('telegram.payment_cash', language),
+        #     })
+        # if any(code != 'cash' for code in method_codes):
+        #     payment_methods.append({
+        #         'type': 'card',
+        #         'name': i18n.get('telegram.payment_card', language),
+        #     })
+        # return payment_methods
+
+        if 'cash' not in method_codes:
+            return []
+
+        return [{
+            'type': 'cash',
+            'name': i18n.get('telegram.payment_cash', language),
+        }]
 
     @staticmethod
     def _cod_restriction_notice(restrictions: Dict[str, Any]) -> str:
         active_debt_count = restrictions.get('active_cod_debt_count') or 0
         if active_debt_count:
+            # TODO: uncomment when enabling back card payments
             return (
                 f"Cash on delivery is unavailable because you already have "
-                f"{active_debt_count} outstanding COD debts. Please choose a card payment method."
+                # f"{active_debt_count} outstanding COD debts. Please choose a card payment method."
+                f"{active_debt_count} outstanding COD debts."
             )
-        return "Cash on delivery is temporarily unavailable. Please choose a card payment method."
+        # return "Cash on delivery is temporarily unavailable. Please choose a card payment method."
+        return "Cash on delivery is temporarily unavailable right now. Please try again later."
 
     @staticmethod
     def _build_cod_prepayment_brief(cart: Dict[str, Any], order_total: float) -> str:
@@ -550,7 +567,16 @@ class OrderHandlers(BaseHandler):
             
             # Extract payment method
             payment_method = query.data.split('_')[1]
-            
+            # TODO: remove when enabling back card payments
+
+            if payment_method not in self.CHECKOUT_ENABLED_PAYMENT_METHODS:
+                await query.answer(
+                    self.CARD_PAYMENT_TEMPORARILY_DISABLED_MESSAGE,
+                    show_alert=True
+                )
+                logger.info(f"Blocked disabled payment method '{payment_method}' for user {user_id}")
+                return
+
             # Store payment method
             context.user_data['selected_payment_method'] = payment_method
             
@@ -596,6 +622,18 @@ class OrderHandlers(BaseHandler):
 
             if not address_id or not payment_method:
                 await query.answer(i18n.get('telegram.orders.missing_info', language))
+                return
+
+            # TODO: remove when enabling back card payments
+            if payment_method not in self.CHECKOUT_ENABLED_PAYMENT_METHODS:
+                context.user_data.pop('selected_payment_method', None)
+                await query.answer(
+                    self.CARD_PAYMENT_TEMPORARILY_DISABLED_MESSAGE,
+                    show_alert=True
+                )
+                logger.info(
+                    f"Blocked checkout confirmation with disabled payment method '{payment_method}' for user {user_id}"
+                )
                 return
 
             # Create order

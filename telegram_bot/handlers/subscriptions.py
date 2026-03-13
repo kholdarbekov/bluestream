@@ -24,6 +24,11 @@ logger = logging.getLogger('handlers')
 
 class SubscriptionHandlers(BaseHandler):
     """Subscription-related handlers with full functionality"""
+    # TODO: remove when enabling back card payments
+    ALLOWED_SUBSCRIPTION_PAYMENT_METHODS = {'cash', 'payme'}
+    CARD_PAYMENT_TEMPORARILY_DISABLED_MESSAGE = (
+        "Card payment is temporarily unavailable in Telegram bot. Please choose another method."
+    )
 
     async def subscriptions_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Show user subscriptions"""
@@ -343,6 +348,16 @@ class SubscriptionHandlers(BaseHandler):
 
             # Save payment method
             payment_method = query.data.split('_')[2]
+            # TODO: remove when enabling back card payments
+            if payment_method not in self.ALLOWED_SUBSCRIPTION_PAYMENT_METHODS:
+                await query.answer(
+                    self.CARD_PAYMENT_TEMPORARILY_DISABLED_MESSAGE,
+                    show_alert=True
+                )
+                logger.info(
+                    f"Blocked disabled subscription payment method '{payment_method}' for user {user_id}"
+                )
+                return CONFIRM_SUBSCRIPTION
             context.user_data['subscription_creation']['payment_method'] = payment_method
 
             # Get preview from API
@@ -1022,6 +1037,16 @@ class SubscriptionHandlers(BaseHandler):
 
             payment_method = query.data.split('_')[2]
             sub_id = context.user_data.get('editing_subscription_id')
+            # TODO: remove when enabling back card payments
+            if payment_method not in self.ALLOWED_SUBSCRIPTION_PAYMENT_METHODS:
+                await query.answer(
+                    self.CARD_PAYMENT_TEMPORARILY_DISABLED_MESSAGE,
+                    show_alert=True
+                )
+                logger.info(
+                    f"Blocked disabled subscription payment method '{payment_method}' for user {user_id}"
+                )
+                return
 
             async with api_client as client:
                 user_token = await get_auth_token(update, context, client)

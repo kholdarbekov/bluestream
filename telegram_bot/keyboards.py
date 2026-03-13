@@ -624,10 +624,11 @@ class SubscriptionKeyboards:
     @staticmethod
     def payment_methods(language: str = 'en') -> InlineKeyboardMarkup:
         """Payment method selection for subscription"""
+        # TODO: uncomment when enabling back card payments
         buttons = [
-            [{'text': i18n.get('telegram.payment_card', language), 'callback_data': 'sub_payment_card'}],
+            # [{'text': i18n.get('telegram.payment_card', language), 'callback_data': 'sub_payment_card'}],
             [{'text': i18n.get('telegram.payment_cash', language), 'callback_data': 'sub_payment_cash'}],
-            [{'text': i18n.get('telegram.payment_payme', language), 'callback_data': 'sub_payment_payme'}],
+            # [{'text': i18n.get('telegram.payment_payme', language), 'callback_data': 'sub_payment_payme'}],
             [{'text': i18n.get('telegram.back', language), 'callback_data': 'back_to_address_selection'}]
         ]
         return KeyboardBuilder.build_inline_keyboard(buttons)

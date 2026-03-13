@@ -5,10 +5,10 @@ import logging
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from handlers.base import BaseHandler
-from i18n import i18n
-from keyboards.menu import MenuKeyboards
-from permissions import is_delivery_driver, is_operator
+from staff_bot.handlers.base import BaseHandler
+from staff_bot.i18n import i18n
+from staff_bot.keyboards.menu import MenuKeyboards
+from staff_bot.permissions import is_delivery_driver, is_operator
 
 logger = logging.getLogger(__name__)
 

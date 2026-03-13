@@ -739,16 +739,16 @@
                                         <div class="payment-method-desc">{{ 'Pay when you receive'|t }}</div>
                                     </div>
 
-                                    <div class="payment-method" onclick="selectPaymentMethod('payme')" data-method="payme">
+                                    <div class="payment-method" onclick="selectPaymentMethod('click')" data-method="click">
                                         <i class="far fa-credit-card"></i>
                                         <div class="payment-method-name">{{ 'Card'|t }}</div>
-                                        <div class="payment-method-desc">{{ 'Pay with card'|t }}</div>
+                                        <div class="payment-method-desc">{{ 'Pay online via Click'|t }}</div>
                                     </div>
                                 </div>
 
-                                <!-- Card Input Form (Initially Hidden) -->
+                                <!-- Legacy card form kept hidden for fallback compatibility. -->
                                 <div id="card-input-container" style="display: none; margin-top: 25px; padding: 20px; background: #f9f9f9; border-radius: 8px;">
-                                    <h5 style="margin-bottom: 15px; font-weight: 600;">{{ 'Enter Card Details'|t }}</h5>
+                                    <h5 style="margin-bottom: 15px; font-weight: 600;">{{ 'Online Card Payment'|t }}</h5>
                                     
                                     <div class="form-group" style="margin-bottom: 15px;">
                                         <label style="display: block; margin-bottom: 5px;">{{ 'Card Number'|t }}</label>
@@ -771,7 +771,7 @@
                                         </div>
                                     </div>
                                     <div style="margin-top: 15px; font-size: 12px; color: #666;">
-                                        <i class="fas fa-lock"></i> {{ 'Your card details are securely processed by Payme.'|t }}
+                                        <i class="fas fa-lock"></i> {{ 'Card payments are handled through integrated payment providers.'|t }}
                                     </div>
                                 </div>
 
@@ -1414,13 +1414,9 @@ function selectPaymentMethod(method) {
     selectedPaymentMethod = method;
     document.getElementById('selected-payment-method').value = method;
 
-    // Show/Hide card input
+    // Web checkout routes card payments through Click redirect.
     const cardContainer = document.getElementById('card-input-container');
-    if (method === 'payme') {
-        cardContainer.style.display = 'block';
-    } else {
-        cardContainer.style.display = 'none';
-    }
+    cardContainer.style.display = 'none';
 }
 
 // Format Card Number
@@ -1695,9 +1691,7 @@ async function placeOrder() {
     }
 
     // Route based on payment method
-    if (selectedPaymentMethod === 'payme') {
-        await placeOrderWithPayme();
-    } else if (selectedPaymentMethod === 'click') {
+    if (selectedPaymentMethod === 'click') {
         await placeOrderWithClick();
     } else {
         // Cash on delivery

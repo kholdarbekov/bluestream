@@ -74,6 +74,11 @@ class PaymentSchema(BaseModel):
     is_recurring: bool = Field(default=False)
     provider_payment_id: Optional[str] = None
     provider_response: Optional[Dict[str, Any]] = None
+    provider_transaction_id: Optional[str] = None
+    payment_provider: Optional[str] = None
+    payment_link: Optional[str] = None
+    fiscalization_status: Optional[str] = None
+    fiscalization: Optional[Dict[str, Any]] = None
     failure_reason: Optional[str] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
@@ -321,6 +326,19 @@ def serialize_payment(payment, include_sensitive: bool = False) -> Dict[str, Any
     try:
         schema = PaymentSchema.model_validate(payment)
         result = schema.model_dump(by_alias=True, exclude_none=True)
+        if getattr(payment, 'provider_transaction_id', None):
+            result['providerTransactionId'] = payment.provider_transaction_id
+        if getattr(payment, 'payment_provider', None):
+            result['paymentProvider'] = payment.payment_provider
+        if getattr(payment, 'payment_link', None):
+            result['paymentLink'] = payment.payment_link
+        if getattr(payment, 'fiscalization', None):
+            result['fiscalization'] = payment.fiscalization.to_dict()
+            result['fiscalizationStatus'] = (
+                payment.fiscalization.status.value
+                if hasattr(payment.fiscalization.status, 'value')
+                else str(payment.fiscalization.status)
+            )
         
         # Filter sensitive data if needed
         if not include_sensitive and 'provider_response' in result:
@@ -338,6 +356,13 @@ def serialize_payment(payment, include_sensitive: bool = False) -> Dict[str, Any
             'currency': payment.currency,
             'status': payment.status.value if payment.status else None,
             'payment_method': payment.payment_method.value if payment.payment_method else None,
+            'payment_provider': getattr(payment, 'payment_provider', None),
+            'provider_transaction_id': getattr(payment, 'provider_transaction_id', None),
+            'payment_link': getattr(payment, 'payment_link', None),
+            'fiscalization_status': (
+                payment.fiscalization.status.value if getattr(payment, 'fiscalization', None) and hasattr(payment.fiscalization.status, 'value')
+                else None
+            ),
             'amount_collected': float(getattr(payment, 'amount_collected', 0) or 0),
             'outstanding_amount': float(getattr(payment, 'outstanding_amount', 0) or 0),
             'last_collected_at': (
@@ -397,20 +422,6 @@ def get_available_payment_methods() -> List[Dict[str, Any]]:
     """Get available payment methods"""
     methods_config = [
         {
-            'method': 'payme',
-            'name': 'payme',
-            'display_name': 'Payme',
-            'icon_url': '/static/images/payment/payme.png',
-            'description': 'Pay with Payme wallet or linked card',
-            'is_active': True,
-            'supported_currencies': ['UZS'],
-            'min_amount': 1000,
-            'max_amount': 50000000,
-            'processing_fee': 0.0,
-            'supports_recurring': True,
-            'supports_refunds': True
-        },
-        {
             'method': 'click',
             'name': 'click',
             'display_name': 'Click',
@@ -425,31 +436,17 @@ def get_available_payment_methods() -> List[Dict[str, Any]]:
             'supports_refunds': True
         },
         {
-            'method': 'uzcard',
-            'name': 'uzcard',
-            'display_name': 'UzCard',
-            'icon_url': '/static/images/payment/uzcard.png',
-            'description': 'Pay directly with UzCard',
+            'method': 'payme',
+            'name': 'payme',
+            'display_name': 'Payme',
+            'icon_url': '/static/images/payment/payme.png',
+            'description': 'Pay with Payme wallet or linked card',
             'is_active': True,
             'supported_currencies': ['UZS'],
             'min_amount': 1000,
-            'max_amount': 10000000,
-            'processing_fee': 0.005,
-            'supports_recurring': False,
-            'supports_refunds': True
-        },
-        {
-            'method': 'humo',
-            'name': 'humo',
-            'display_name': 'Humo',
-            'icon_url': '/static/images/payment/humo.png',
-            'description': 'Pay directly with Humo card',
-            'is_active': True,
-            'supported_currencies': ['UZS'],
-            'min_amount': 1000,
-            'max_amount': 10000000,
-            'processing_fee': 0.005,
-            'supports_recurring': False,
+            'max_amount': 50000000,
+            'processing_fee': 0.0,
+            'supports_recurring': True,
             'supports_refunds': True
         },
         {
@@ -468,4 +465,4 @@ def get_available_payment_methods() -> List[Dict[str, Any]]:
         }
     ]
     
-    return [PaymentMethodInfoSchema(**method).model_dump() for method in methods_config]
+    return [PaymentMethodInfoSchema(**method).model_dump(mode='json') for method in methods_config]

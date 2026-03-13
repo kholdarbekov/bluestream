@@ -11,9 +11,9 @@ from typing import Optional
 from aiohttp import web
 import redis.asyncio as redis
 
-from config import config
-from database import db_manager
-from i18n import i18n
+from staff_bot.config import config
+from staff_bot.database import db_manager
+from staff_bot.i18n import i18n
 
 logger = logging.getLogger(__name__)
 

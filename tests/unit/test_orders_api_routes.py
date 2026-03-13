@@ -132,3 +132,47 @@ def test_schedule_order_route_delegates_to_service_and_schedules_task(client, ap
     assert response.status_code == 201
     service.create_scheduled_order.assert_called_once()
     apply_async.assert_called_once()
+
+
+def test_retry_payment_route_returns_payment_url(client, app, db, sample_user, monkeypatch):
+    created_order = _create_order(db, sample_user.id)
+    created_order.payment_method = PaymentMethod.CLICK
+    db.session.commit()
+
+    order_service = Mock()
+    order_service.get_order.return_value = created_order
+    payment_service = Mock()
+    payment_service.create_payment.return_value = SimpleNamespace(
+        id=55,
+        payment_method=PaymentMethod.CLICK,
+        status='pending',
+        amount=created_order.total_amount,
+        currency='UZS',
+        provider_transaction_id=None,
+        payment_provider='click',
+        payment_link='https://click.example/pay/55',
+        fiscalization=None,
+        paid_at=None,
+        amount_collected=0,
+        outstanding_amount=created_order.total_amount,
+        last_collected_at=None,
+        cash_collection_allocations=[],
+    )
+    payment_service.create_payment_link.return_value = {
+        'payment_url': 'https://click.example/pay/55',
+        'reference': 'payment-55',
+    }
+
+    monkeypatch.setattr('business_app.api.orders.get_order_service', lambda: order_service)
+    monkeypatch.setattr('business_app.api.orders.get_payment_service', lambda: payment_service)
+
+    response = client.post(
+        f'/api/v1/orders/{created_order.id}/retry-payment',
+        headers=_auth_headers(app, sample_user.id),
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload['data']['payment_url'] == 'https://click.example/pay/55'
+    payment_service.create_payment.assert_called_once()
+    payment_service.create_payment_link.assert_called_once_with(55)

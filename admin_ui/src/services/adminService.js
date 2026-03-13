@@ -353,6 +353,11 @@ class AdminService {
     return response.data;
   }
 
+  async retryPaymentFiscalization(paymentId) {
+    const response = await api.post(`/admin/payments/${paymentId}/fiscalization/retry`);
+    return response.data;
+  }
+
   async updateOrderStatus(orderId, status, notes) {
     const response = await api.put(`/admin/orders/${orderId}/status`, { status, notes });
     return response.data;
@@ -435,6 +440,56 @@ class AdminService {
 
   async deleteProduct(productId) {
     const response = await api.delete(`/admin/products/${productId}`);
+    return response.data;
+  }
+
+  async listProductMarkingCodes(productId, params = {}) {
+    const response = await api.get(`/admin/products/${productId}/marking-codes`, { params });
+    return response.data;
+  }
+
+  async createProductMarkingCodes(productId, payload) {
+    const response = await api.post(`/admin/products/${productId}/marking-codes`, payload);
+    return response.data;
+  }
+
+  async updateProductMarkingCode(productId, markingCodeId, payload) {
+    const response = await api.put(
+      `/admin/products/${productId}/marking-codes/${markingCodeId}`,
+      payload,
+    );
+    return response.data;
+  }
+
+  async importProductMarkingCodesCsv(productId, input) {
+    if (input instanceof File || input instanceof Blob) {
+      const formData = new FormData();
+      formData.append('file', input);
+
+      const csrfToken = getCookie('csrf_access_token');
+      const response = await api.post(
+        `/admin/products/${productId}/marking-codes/import`,
+        formData,
+        {
+          headers: {
+            'Content-Type': 'multipart/form-data',
+            'X-CSRF-TOKEN': csrfToken,
+          },
+          withCredentials: true,
+        },
+      );
+      return response.data;
+    }
+
+    const response = await api.post(`/admin/products/${productId}/marking-codes/import`, input);
+    return response.data;
+  }
+
+  async exportProductMarkingCodes(productId, params = {}) {
+    const response = await api.get(`/admin/products/${productId}/marking-codes/export`, {
+      params,
+      responseType: 'blob',
+    });
     return response.data;
   }
 

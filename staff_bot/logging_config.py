@@ -116,7 +116,7 @@ def log_bot_startup_info():
     logger.info("STAFF BOT STARTING UP")
     logger.info("=" * 60)
 
-    from config import config
+    from staff_bot.config import config
 
     logger.info(f"Bot Token: {'*' * 20}...{config.telegram.bot_token[-10:] if config.telegram.bot_token else 'NOT SET'}")
     logger.info(f"Webhook URL: {config.telegram.webhook_url or 'POLLING MODE'}")

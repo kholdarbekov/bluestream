@@ -636,8 +636,9 @@ class OrderHandlers(BaseHandler):
                 order = response.data['data']['order']
 
             # Handle different payment methods
-            if payment_method in ['payme', 'card']:
-                # Payme payment flow
+            if payment_method in ['payme', 'card', 'click']:
+                provider_method = 'payme' if payment_method == 'payme' else 'click'
+                # Redirect payment flow
                 # Don't clear cart yet - wait for successful payment
                 from handlers.payments import payment_handlers
 
@@ -653,9 +654,9 @@ class OrderHandlers(BaseHandler):
                     'order_items': order.get('order_items', [])
                 }
 
-                # Send Payme invoice
-                invoice_sent = await payment_handlers.send_payme_invoice(
-                    update, context, order_for_payment
+                # Send external payment link
+                invoice_sent = await payment_handlers.send_payment_link(
+                    update, context, order_for_payment, payment_method=provider_method
                 )
 
                 if not invoice_sent:
@@ -670,7 +671,7 @@ class OrderHandlers(BaseHandler):
                     )
 
                 # Don't clear context data - needed for payment flow
-                logger.info(f"Payme invoice sent for order {order['id']} to user {user_id}")
+                logger.info(f"{provider_method} payment link sent for order {order['id']} to user {user_id}")
                 return
 
             # Cash or other payment methods - process immediately

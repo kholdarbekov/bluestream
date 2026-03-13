@@ -7,14 +7,14 @@ from typing import Dict, Optional
 from telegram import ReplyKeyboardRemove, Update
 from telegram.ext import ContextTypes, ConversationHandler
 
-from api_client import api_client
-from handlers.base import BaseHandler
-from i18n import i18n
-from keyboards.common import CommonKeyboards
-from keyboards.tryouts import TryoutKeyboards
-from permissions import require_auth, require_delivery_driver
-from utils.formatters import escape_html, format_quantity
-from utils.validators import validate_name, validate_phone
+from staff_bot.api_client import api_client
+from staff_bot.handlers.base import BaseHandler
+from staff_bot.i18n import i18n
+from staff_bot.keyboards.common import CommonKeyboards
+from staff_bot.keyboards.tryouts import TryoutKeyboards
+from staff_bot.permissions import require_auth, require_delivery_driver
+from staff_bot.utils.formatters import escape_html, format_quantity
+from staff_bot.utils.validators import validate_name, validate_phone
 
 
 logger = logging.getLogger(__name__)

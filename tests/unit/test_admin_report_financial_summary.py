@@ -18,17 +18,16 @@ def test_financial_summary_uses_cash_collection_ledger_for_cod(app, sample_order
     with app.app_context():
         sample_order.status = OrderStatus.DELIVERED
         sample_order.payment_method = PaymentMethod.CASH
-        db.session.add(
-            Delivery(
-                order_id=sample_order.id,
-                delivery_person_id=delivery_driver.id,
-                status=DeliveryStatus.DELIVERED,
-                scheduled_date=datetime.now(UTC),
-                scheduled_time_slot="09:00-12:00",
-                actual_delivery_time=datetime.now(UTC),
-                delivered_at=datetime.now(UTC),
-            )
+        delivery = Delivery(
+            order_id=sample_order.id,
+            delivery_person_id=delivery_driver.id,
+            status=DeliveryStatus.DELIVERED,
+            scheduled_date=datetime.now(UTC),
+            scheduled_time_slot="09:00-12:00",
+            actual_delivery_time=datetime.now(UTC),
+            delivered_at=datetime.now(UTC),
         )
+        db.session.add(delivery)
         db.session.commit()
 
         cash_service = CashCollectionService()
@@ -40,6 +39,7 @@ def test_financial_summary_uses_cash_collection_ledger_for_cod(app, sample_order
             collector_user_id=delivery_driver.id,
             recorded_by_user_id=delivery_driver.id,
             order_id=sample_order.id,
+            delivery_id=delivery.id,
             notes="Collected part of the COD balance",
             occurred_at=datetime.now(UTC),
         )

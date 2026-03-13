@@ -182,6 +182,31 @@ class BaseConfig:
     CLICK_MERCHANT_ID = get_secret('click_merchant_id', 'CLICK_MERCHANT_ID', required=False)
     CLICK_SERVICE_ID = get_secret('click_service_id', 'CLICK_SERVICE_ID', required=False)
     CLICK_SECRET_KEY = get_secret('click_secret_key', 'CLICK_SECRET_KEY', required=False)
+    CLICK_SHOP_MERCHANT_ID = get_secret('click_shop_merchant_id', 'CLICK_SHOP_MERCHANT_ID', required=False) or CLICK_MERCHANT_ID
+    CLICK_SHOP_SERVICE_ID = get_secret('click_shop_service_id', 'CLICK_SHOP_SERVICE_ID', required=False) or CLICK_SERVICE_ID
+    CLICK_SHOP_SECRET_KEY = get_secret('click_shop_secret_key', 'CLICK_SHOP_SECRET_KEY', required=False) or CLICK_SECRET_KEY
+    CLICK_CHECKOUT_URL = os.environ.get('CLICK_CHECKOUT_URL', 'https://my.click.uz/services/pay')
+    CLICK_SHOP_CALLBACK_URL = os.environ.get('CLICK_SHOP_CALLBACK_URL')
+    CLICK_MERCHANT_API_URL = os.environ.get('CLICK_MERCHANT_API_URL', os.environ.get('CLICK_ENDPOINT_URL', 'https://api.click.uz/v2/merchant'))
+    CLICK_MERCHANT_STATUS_URL = os.environ.get('CLICK_MERCHANT_STATUS_URL')
+    CLICK_MERCHANT_REFUND_URL = os.environ.get('CLICK_MERCHANT_REFUND_URL')
+    CLICK_MERCHANT_FISCALIZATION_URL = os.environ.get('CLICK_MERCHANT_FISCALIZATION_URL')
+    CLICK_MERCHANT_API_TOKEN = get_secret('click_merchant_api_token', 'CLICK_MERCHANT_API_TOKEN', required=False)
+    CLICK_MERCHANT_API_USERNAME = os.environ.get('CLICK_MERCHANT_API_USERNAME')
+    CLICK_MERCHANT_API_USER = os.environ.get('CLICK_MERCHANT_API_USER', CLICK_MERCHANT_API_USERNAME)
+    CLICK_MERCHANT_API_PASSWORD = get_secret('click_merchant_api_password', 'CLICK_MERCHANT_API_PASSWORD', required=False)
+    CLICK_MERCHANT_API_SECRET = get_secret('click_merchant_api_secret', 'CLICK_MERCHANT_API_SECRET', required=False) or CLICK_SECRET_KEY
+    CLICK_MERCHANT_API_TIMEOUT_SECONDS = int(
+        os.environ.get('CLICK_MERCHANT_API_TIMEOUT_SECONDS', os.environ.get('CLICK_TIMEOUT_SECONDS', 30)) or 30
+    )
+    CLICK_CALLBACK_ALLOWLIST = [
+        ip.strip()
+        for ip in os.environ.get('CLICK_CALLBACK_ALLOWLIST', '').split(',')
+        if ip.strip()
+    ]
+    CLICK_TEST_MODE = os.environ.get('CLICK_TEST_MODE', os.environ.get('TESTING', 'false')).lower() == 'true'
+    CLICK_TIMEOUT_SECONDS = int(os.environ.get('CLICK_TIMEOUT_SECONDS', 30) or 30)
+    PAYMENT_TIMEOUT_MINUTES = int(os.environ.get('PAYMENT_TIMEOUT_MINUTES', 60) or 60)
     
     # Payme Configuration
     PAYME_TIMEOUT_MS = int(os.environ.get('PAYME_TIMEOUT_MS', 43200000))  # 12 hours timeout for transactions
@@ -192,6 +217,7 @@ class BaseConfig:
     COMPANY_EMAIL = os.environ.get('COMPANY_EMAIL', 'info@bluestream.uz')
     COMPANY_ADDRESS = os.environ.get('COMPANY_ADDRESS', 'Tashkent, Uzbekistan')
     COMPANY_WEBSITE = os.environ.get('COMPANY_WEBSITE', 'https://bluestream.uz')
+    COMPANY_TIN = os.environ.get('COMPANY_TIN', '')
     
     # Delivery Configuration
     DEFAULT_DELIVERY_FEE = int(os.environ.get('DEFAULT_DELIVERY_FEE', 5000))  # UZS

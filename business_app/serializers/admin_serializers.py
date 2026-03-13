@@ -678,9 +678,32 @@ def serialize_order_admin(order: Order) -> Dict[str, Any]:
         
         # Add payment status from related Payment model
         if hasattr(order, 'payment') and order.payment:
+            data['payment_id'] = order.payment.id
             data['payment_status'] = order.payment.status.value if hasattr(order.payment.status, 'value') else str(order.payment.status)
+            data['payment_provider'] = getattr(order.payment, 'payment_provider', None)
+            data['payment_link'] = getattr(order.payment, 'payment_link', None)
+            data['provider_transaction_id'] = getattr(order.payment, 'provider_transaction_id', None)
+            data['consume_marking_codes'] = bool(getattr(order.payment, 'consume_marking_codes', False))
+            fiscalization = getattr(order.payment, 'fiscalization', None)
+            data['fiscalization_status'] = (
+                fiscalization.status.value if fiscalization and hasattr(fiscalization.status, 'value') else None
+            )
+            data['fiscalization'] = fiscalization.to_dict() if fiscalization else None
         else:
+            data['payment_id'] = None
             data['payment_status'] = 'pending'
+            data['payment_provider'] = None
+            data['payment_link'] = None
+            data['provider_transaction_id'] = None
+            data['consume_marking_codes'] = False
+            data['fiscalization_status'] = None
+
+        if getattr(order, 'payment', None):
+            from business_app.services.payment_fiscalization_service import PaymentFiscalizationService
+
+            data['marking_code_summary'] = PaymentFiscalizationService().marking_code_allocation_summary(order)
+        else:
+            data['marking_code_summary'] = {'events': {}, 'codes_by_order_item': {}}
         
         return data
         
@@ -753,7 +776,11 @@ def serialize_product_admin(product: Product) -> Dict[str, Any]:
         # Add category information
         if product.category:
             data['category_name'] = product.category.name
-        
+
+        from business_app.services.product_fiscal_service import ProductFiscalService
+
+        data.update(ProductFiscalService().build_product_fiscal_snapshot(product))
+
         # Add performance metrics
         data['total_sold'] = getattr(product, 'total_sold', 0)
         data['total_revenue'] = float(getattr(product, 'total_revenue', 0))

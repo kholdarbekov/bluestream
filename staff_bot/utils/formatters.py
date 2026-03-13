@@ -6,7 +6,7 @@ import html
 from decimal import Decimal, InvalidOperation
 from typing import Dict, Any, Optional
 from datetime import datetime
-from i18n import i18n
+from staff_bot.i18n import i18n
 
 
 def escape_html(value: Any) -> str:

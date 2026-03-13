@@ -1,8 +1,7 @@
 """
-Telegram Payments Handler for Payme Integration
+Telegram payment-link handler.
 
-Implements payment flow via external Payme payment links.
-Handles invoice link generation, payment retry, method switching, and cancellation.
+Implements redirect-based external payment links for the configured PSP.
 """
 import logging
 from typing import Dict, Any
@@ -20,15 +19,7 @@ logger = logging.getLogger('handlers.payments')
 
 
 class PaymentHandlers(BaseHandler):
-    """
-    Telegram Payments handler for Payme integration.
-
-    Uses external Payme payment links (redirect method):
-    1. send_payme_invoice - Send payment link to user
-    2. retry_payment - Re-send payment link
-    3. switch_payment_method - Change payment method
-    4. cancel_payment - Cancel payment
-    """
+    """Handle redirect-based PSP payment links in Telegram."""
 
     def __init__(self):
         super().__init__()
@@ -38,17 +29,18 @@ class PaymentHandlers(BaseHandler):
     # CORE PAYMENT METHODS
     # =========================================================================
 
-    async def send_payme_invoice(
+    async def send_payment_link(
         self,
         update: Update,
         context: ContextTypes.DEFAULT_TYPE,
-        order_data: Dict[str, Any]
+        order_data: Dict[str, Any],
+        payment_method: str = 'click',
     ) -> bool:
         """
-        Send Payme payment link to user via Redirect Method.
+        Send external payment link to user via Redirect Method.
         
         Differs from native invoice: sends a message with an inline button
-        that redirects to Payme checkout page.
+        that redirects to the configured PSP checkout page.
         """
         try:
             user_id = update.effective_user.id
@@ -63,7 +55,7 @@ class PaymentHandlers(BaseHandler):
             async with api_client as client:
                 token = await get_auth_token(update, context, client)
                 if not token:
-                    logger.error("Failed to get auth token for Payme link generation")
+                    logger.error("Failed to get auth token for payment-link generation")
                     await self._send_error_message(
                         update, context, 
                         i18n.get('telegram.auth.login_required', language)
@@ -79,12 +71,12 @@ class PaymentHandlers(BaseHandler):
 
                 result = await client.create_payment(token, {
                     'order_id': order_id,
-                    'payment_method': 'payme',
+                    'payment_method': payment_method,
                     'return_url': return_url
                 })
                 
                 if not result.success:
-                    logger.error(f"Failed to create Payme link: {result.error}")
+                    logger.error(f"Failed to create {payment_method} link: {result.error}")
                     await self._send_error_message(
                         update, context, 
                         i18n.get('telegram.payment.create_link_failed_with_error', language, error=result.error)
@@ -136,17 +128,32 @@ class PaymentHandlers(BaseHandler):
                 reply_markup=keyboard
             )
             
-            logger.info(f"Payme link sent for order {order_id}")
+            logger.info(f"{payment_method} link sent for order {order_id}")
             return True
             
         except Exception as e:
-            logger.error(f"Error sending Payme invoice: {e}", exc_info=True)
+            logger.error(f"Error sending payment link: {e}", exc_info=True)
             language = await i18n.get_user_language(update.effective_user.id)
             await self._send_error_message(
                 update, context, 
                 i18n.get('telegram.payment.failed_message', language)
             )
             return False
+
+    async def send_payme_invoice(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        order_data: Dict[str, Any],
+        payment_method: str = 'click',
+    ) -> bool:
+        """Backward-compatible wrapper for old call sites."""
+        return await self.send_payment_link(
+            update,
+            context,
+            order_data,
+            payment_method=payment_method,
+        )
 
     # =========================================================================
     # ERROR HANDLING & RECOVERY
@@ -196,8 +203,13 @@ class PaymentHandlers(BaseHandler):
                 )
                 return
 
-            # Send new invoice
-            await self.send_payme_invoice(update, context, order)
+            payment_info = order.get('payment_info') or {}
+            provider_method = payment_info.get('payment_provider') or order.get('payment_method') or 'click'
+            if provider_method == 'card':
+                provider_method = 'click'
+
+            # Send new payment link
+            await self.send_payment_link(update, context, order, payment_method=provider_method)
 
             logger.info(f"Payment retry initiated for order {order_id} by user {user_id}")
 

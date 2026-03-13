@@ -102,7 +102,10 @@ def test_order_service_create_order_supports_business_account_and_reserve(
     assert order.order_items[0].contract_id == 91
     assert order.order_items[0].contract_product_price_id == 901
     reserve_for_order.assert_called_once_with(order.id)
-    initialize_payment.assert_called_once_with(order.id)
+    initialize_payment.assert_called_once_with(
+        order.id,
+        metadata={'consume_marking_codes': False},
+    )
 
 
 def test_staff_service_create_phone_order_supports_business_account_and_reserve(

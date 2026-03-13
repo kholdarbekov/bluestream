@@ -1716,14 +1716,14 @@ class StaffService:
                 'description': 'Pay with cash when the order is delivered',
             },
             {
-                'method': PaymentMethod.PAYME.value,
-                'name': 'Payme',
-                'description': 'Pay with Payme wallet or linked card',
-            },
-            {
                 'method': PaymentMethod.CLICK.value,
                 'name': 'Click',
                 'description': 'Pay with Click wallet or linked card',
+            },
+            {
+                'method': PaymentMethod.PAYME.value,
+                'name': 'Payme',
+                'description': 'Pay with Payme wallet or linked card',
             },
         ]
 

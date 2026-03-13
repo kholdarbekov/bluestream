@@ -25,6 +25,7 @@ from business_app import db
 from business_app.utils.constants import (
     PaymentMethod,
     PaymentStatus,
+    FiscalizationStatus,
     CashCollectionSource,
     DriverCashSessionStatus,
 )
@@ -75,6 +76,7 @@ class Payment(db.Model, TimestampMixin):
     description = Column(String(255), nullable=True)
     callback_url = Column(String(500), nullable=True)
     failure_reason = Column(String(500), nullable=True)
+    consume_marking_codes = Column(Boolean, nullable=False, default=False)
     
     user = relationship('User', foreign_keys=[user_id], back_populates='payments')
     order = relationship('Order', back_populates='payment')
@@ -84,6 +86,16 @@ class Payment(db.Model, TimestampMixin):
         'CashCollectionAllocation',
         back_populates='payment',
         cascade='all, delete-orphan',
+    )
+    fiscalization = relationship(
+        'PaymentFiscalization',
+        back_populates='payment',
+        uselist=False,
+        cascade='all, delete-orphan',
+    )
+    marking_code_allocations = relationship(
+        'OrderItemMarkingCodeAllocation',
+        back_populates='payment',
     )
     
     def __init__(self, **kwargs):
@@ -104,6 +116,46 @@ class Payment(db.Model, TimestampMixin):
     @property
     def is_settled(self) -> bool:
         return Decimal(str(self.outstanding_amount or 0)) <= Decimal('0.00')
+
+    @property
+    def payment_provider(self) -> str:
+        method_value = self.payment_method.value if hasattr(self.payment_method, 'value') else self.payment_method
+        if method_value == PaymentMethod.CARD.value:
+            return PaymentMethod.CLICK.value
+        return method_value
+
+    @property
+    def gateway_reference(self):
+        return self.provider_transaction_id
+
+    @gateway_reference.setter
+    def gateway_reference(self, value):
+        self.provider_transaction_id = value
+
+    @property
+    def gateway_response(self):
+        return self.provider_data or {}
+
+    @gateway_response.setter
+    def gateway_response(self, value):
+        self.provider_data = value or {}
+
+    @property
+    def refunded_amount(self):
+        return Decimal(str((self.provider_data or {}).get('refunded_amount') or 0))
+
+    @property
+    def refunded_at(self):
+        value = (self.provider_data or {}).get('refunded_at')
+        if not value:
+            return None
+        if isinstance(value, datetime):
+            return value
+        try:
+            normalized = str(value).replace('Z', '+00:00')
+            return datetime.fromisoformat(normalized)
+        except (TypeError, ValueError):
+            return None
     
     def to_dict(self):
         return {
@@ -114,6 +166,7 @@ class Payment(db.Model, TimestampMixin):
             'payment_method': self.payment_method.value,
             'status': self.status.value,
             'payment_link': self.payment_link,
+            'payment_provider': self.payment_provider,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'paid_at': self.paid_at.isoformat() if self.paid_at else None,
             'last_collected_at': self.last_collected_at.isoformat() if self.last_collected_at else None,
@@ -121,6 +174,11 @@ class Payment(db.Model, TimestampMixin):
             'subscription_id': self.subscription_id,
             'amount_collected': self.amount_collected,
             'outstanding_amount': self.outstanding_amount,
+            'consume_marking_codes': bool(self.consume_marking_codes),
+            'fiscalization_status': (
+                self.fiscalization.status.value if self.fiscalization and hasattr(self.fiscalization.status, 'value')
+                else None
+            ),
         }
 
 
@@ -161,6 +219,10 @@ class PaymentTransaction(db.Model, TimestampMixin):
     
     payment = relationship('Payment', backref='transactions')
     initiated_by_user = relationship('User', foreign_keys=[initiated_by])
+
+    @property
+    def gateway_response(self):
+        return self.provider_response or {}
     
     def to_dict(self):
         return {
@@ -178,6 +240,68 @@ class PaymentTransaction(db.Model, TimestampMixin):
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'initiated_by': self.initiated_by,
             'notes': self.notes
+        }
+
+
+class PaymentFiscalization(db.Model, TimestampMixin):
+    """Canonical fiscalization state and provider receipt payload for a payment."""
+
+    __tablename__ = 'payment_fiscalizations'
+    __table_args__ = (
+        Index('idx_payment_fiscalizations_status_attempt', 'status', 'last_attempt_at'),
+        Index('idx_payment_fiscalizations_provider_receipt', 'provider_receipt_id'),
+    )
+
+    id = Column(Integer, primary_key=True)
+    payment_id = Column(Integer, ForeignKey('payments.id'), nullable=False, unique=True, index=True)
+    status = Column(
+        Enum(
+            FiscalizationStatus,
+            name='payment_fiscalization_status',
+            values_callable=lambda x: [e.value for e in x],
+        ),
+        nullable=False,
+        default=FiscalizationStatus.PENDING,
+        index=True,
+    )
+    provider_name = Column(String(32), nullable=False, default='click')
+    provider_receipt_id = Column(String(255), nullable=True, index=True)
+    provider_receipt_url = Column(String(500), nullable=True)
+    provider_status = Column(String(64), nullable=True)
+    request_payload = Column(JSON, nullable=False, default=dict)
+    response_payload = Column(JSON, nullable=False, default=dict)
+    receipt_payload = Column(JSON, nullable=False, default=dict)
+    failure_reason = Column(String(500), nullable=True)
+    attempts = Column(Integer, nullable=False, default=0)
+    queued_at = Column(DateTime(timezone=True), nullable=True)
+    last_attempt_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    next_retry_at = Column(DateTime(timezone=True), nullable=True)
+
+    payment = relationship('Payment', back_populates='fiscalization')
+    marking_code_allocations = relationship(
+        'OrderItemMarkingCodeAllocation',
+        back_populates='payment_fiscalization',
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'payment_id': self.payment_id,
+            'status': self.status.value if hasattr(self.status, 'value') else self.status,
+            'provider_name': self.provider_name,
+            'provider_receipt_id': self.provider_receipt_id,
+            'provider_receipt_url': self.provider_receipt_url,
+            'provider_status': self.provider_status,
+            'request_payload': self.request_payload or {},
+            'response_payload': self.response_payload or {},
+            'receipt_payload': self.receipt_payload or {},
+            'failure_reason': self.failure_reason,
+            'attempts': self.attempts,
+            'queued_at': self.queued_at.isoformat() if self.queued_at else None,
+            'last_attempt_at': self.last_attempt_at.isoformat() if self.last_attempt_at else None,
+            'completed_at': self.completed_at.isoformat() if self.completed_at else None,
+            'next_retry_at': self.next_retry_at.isoformat() if self.next_retry_at else None,
         }
 
 

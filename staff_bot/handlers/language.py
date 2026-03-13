@@ -5,9 +5,9 @@ import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 
-from handlers.base import BaseHandler
-from i18n import i18n
-from keyboards.menu import MenuKeyboards
+from staff_bot.handlers.base import BaseHandler
+from staff_bot.i18n import i18n
+from staff_bot.keyboards.menu import MenuKeyboards
 
 logger = logging.getLogger(__name__)
 

@@ -184,25 +184,26 @@ const maxAttempts = 20; // Check for 20 times (about 2 minutes with 6 second int
 
 // Auto-refresh to check payment status
 function checkPaymentStatus() {
-    fetch('/api/v1/orders/{{ order.id }}', {
+    fetch('/api/v1/payments/{{ payment.id }}/status', {
         headers: {
             'Authorization': 'Bearer ' + localStorage.getItem('access_token')
         }
     })
     .then(response => response.json())
     .then(data => {
-        if (data.success && data.data.order) {
-            const order = data.data.order;
+        if (data.success && data.data.payment) {
+            const payment = data.data.payment;
+            const paymentStatus = payment.status || payment.payment_status;
 
             // Check if payment is completed
-            if (order.payment_status === 'completed' || order.payment_status === 'paid') {
+            if (paymentStatus === 'completed' || paymentStatus === 'paid') {
                 // Redirect to order confirmation
-                window.location.href = `/order-confirmation?order_id=${order.id}`;
-            } else if (order.payment_status === 'failed') {
+                window.location.href = `/order-confirmation?order_id={{ order.id }}`;
+            } else if (paymentStatus === 'failed' || paymentStatus === 'cancelled') {
                 // Payment failed
                 showNotification('{{ "Payment failed. Please try again."|t }}', 'error');
                 setTimeout(() => {
-                    window.location.href = `/payment/cancel?order_id=${order.id}`;
+                    window.location.href = `/payment/cancel?order_id={{ order.id }}`;
                 }, 2000);
             } else {
                 // Still pending, continue checking

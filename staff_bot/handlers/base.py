@@ -11,8 +11,8 @@ from telegram import Update
 from telegram.error import NetworkError, TelegramError, TimedOut
 from telegram.ext import ContextTypes
 
-from i18n import i18n
-from database import db_manager, StaffUserRepository
+from staff_bot.i18n import i18n
+from staff_bot.database import db_manager, StaffUserRepository
 
 logger = logging.getLogger(__name__)
 
@@ -114,7 +114,7 @@ class BaseHandler:
         user_id = update.effective_user.id
 
         if token_manager:
-            from api_client import api_client
+            from staff_bot.api_client import api_client
             token = await token_manager.get_valid_token(user_id, api_client)
             if token:
                 context.user_data['access_token'] = token
@@ -192,7 +192,7 @@ class BaseHandler:
         token_manager=None
     ) -> Optional[str]:
         """Re-authenticate staff by telegram_id and update runtime context."""
-        from api_client import api_client
+        from staff_bot.api_client import api_client
 
         user_id = update.effective_user.id
         try:

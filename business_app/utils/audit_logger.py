@@ -11,7 +11,7 @@ from typing import Dict, Any, Optional, List
 from enum import Enum
 from functools import wraps
 
-from flask import request, g, current_app
+from flask import request, g, current_app, has_app_context, has_request_context
 from flask_jwt_extended import get_jwt_identity, get_jwt
 
 from business_app import db
@@ -33,8 +33,8 @@ class AuditLogger:
     def _get_request_context(self) -> Dict[str, Any]:
         """Extract request context information."""
         context = {}
-        
-        if request:
+
+        if has_request_context():
             context.update({
                 'ip_address': request.remote_addr,
                 'user_agent': request.headers.get('User-Agent'),
@@ -51,17 +51,19 @@ class AuditLogger:
         context = {}
         
         try:
-            user_id = get_jwt_identity() if hasattr(g, 'current_user_id') or request.headers.get('Authorization') else None
+            user_id = None
+            if has_request_context() and (hasattr(g, 'current_user_id') or request.headers.get('Authorization')):
+                user_id = get_jwt_identity()
             if user_id:
                 context['user_id'] = user_id
-                
-                claims = get_jwt()
+
+                claims = get_jwt() if has_request_context() else {}
                 if claims:
                     context['user_role'] = claims.get('role')
                     context['session_id'] = claims.get('jti')  # JWT ID
             
             # Get additional context from Flask g if available
-            if hasattr(g, 'current_user'):
+            if has_app_context() and hasattr(g, 'current_user'):
                 context['user_id'] = g.current_user.id
                 # Convert enum to string value for database storage
                 role = g.current_user.role

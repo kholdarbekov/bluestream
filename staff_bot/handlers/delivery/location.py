@@ -6,11 +6,11 @@ import logging
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from handlers.base import BaseHandler
-from api_client import api_client
-from keyboards.common import CommonKeyboards
-from permissions import require_auth, require_delivery_driver
-from i18n import i18n
+from staff_bot.handlers.base import BaseHandler
+from staff_bot.api_client import api_client
+from staff_bot.keyboards.common import CommonKeyboards
+from staff_bot.permissions import require_auth, require_delivery_driver
+from staff_bot.i18n import i18n
 
 logger = logging.getLogger(__name__)
 

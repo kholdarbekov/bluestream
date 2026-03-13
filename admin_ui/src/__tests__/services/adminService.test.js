@@ -120,6 +120,52 @@ describe('AdminService', () => {
     });
   });
 
+  describe('Click fiscalization operations', () => {
+    it('retries payment fiscalization from admin orders', async () => {
+      const mockData = { success: true, data: { fiscalization: { status: 'processing' } } };
+      api.post.mockResolvedValue({ data: mockData });
+
+      const result = await adminService.retryPaymentFiscalization(91);
+
+      expect(api.post).toHaveBeenCalledWith('/admin/payments/91/fiscalization/retry');
+      expect(result).toEqual(mockData);
+    });
+
+    it('loads product marking-code inventory', async () => {
+      const mockData = { success: true, data: { items: [], total: 0 } };
+      api.get.mockResolvedValue({ data: mockData });
+
+      const result = await adminService.listProductMarkingCodes(44, { page: 2, status: 'available' });
+
+      expect(api.get).toHaveBeenCalledWith('/admin/products/44/marking-codes', {
+        params: { page: 2, status: 'available' },
+      });
+      expect(result).toEqual(mockData);
+    });
+
+    it('creates product marking codes', async () => {
+      const payload = { codes: ['CODE-1', 'CODE-2'], notes: 'manual seed' };
+      const mockData = { success: true, data: { created: 2 } };
+      api.post.mockResolvedValue({ data: mockData });
+
+      const result = await adminService.createProductMarkingCodes(44, payload);
+
+      expect(api.post).toHaveBeenCalledWith('/admin/products/44/marking-codes', payload);
+      expect(result).toEqual(mockData);
+    });
+
+    it('updates one product marking code', async () => {
+      const payload = { status: 'archived', notes: 'used externally' };
+      const mockData = { success: true, data: { marking_code: { id: 9 } } };
+      api.put.mockResolvedValue({ data: mockData });
+
+      const result = await adminService.updateProductMarkingCode(44, 9, payload);
+
+      expect(api.put).toHaveBeenCalledWith('/admin/products/44/marking-codes/9', payload);
+      expect(result).toEqual(mockData);
+    });
+  });
+
   describe('notification collections', () => {
     it('normalizes notification campaigns for the notifications page', async () => {
       api.get.mockResolvedValue({

@@ -9,7 +9,7 @@ import asyncio
 from datetime import datetime, timezone
 import os
 
-from config import config
+from staff_bot.config import config
 
 logger = logging.getLogger('api_client')
 

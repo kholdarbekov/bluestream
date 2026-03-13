@@ -6,11 +6,11 @@ import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 
-from handlers.base import BaseHandler
-from keyboards.common import CommonKeyboards
-from permissions import require_auth, require_any_staff_role
-from i18n import i18n
-from utils.formatters import escape_html
+from staff_bot.handlers.base import BaseHandler
+from staff_bot.keyboards.common import CommonKeyboards
+from staff_bot.permissions import require_auth, require_any_staff_role
+from staff_bot.i18n import i18n
+from staff_bot.utils.formatters import escape_html
 
 logger = logging.getLogger(__name__)
 

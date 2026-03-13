@@ -11,8 +11,9 @@ from flask import current_app
 from business_app.models.payment import Payment, PaymentTransaction
 from business_app.models.order import Order
 from business_app.services.payment_service import PaymentService
+from business_app.services.payment_fiscalization_service import PaymentFiscalizationService
 from business_app.services.notification_service import NotificationService
-from business_app.utils.constants import PaymentStatus, OrderStatus
+from business_app.utils.constants import PaymentMethod, PaymentStatus, OrderStatus
 from business_app import db
 
 logger = get_task_logger(__name__)
@@ -102,33 +103,46 @@ def process_pending_payments():
     """Process pending payments and check their status"""
     try:
         logger.info("Processing pending payments")
-        
-        # Get payments that are pending for more than 10 minutes
-        threshold_time = datetime.now(timezone.utc) - timedelta(minutes=10)
+
+        timeout_minutes = int(current_app.config.get('PAYMENT_TIMEOUT_MINUTES', 60) or 60)
+        threshold_time = datetime.now(timezone.utc) - timedelta(minutes=timeout_minutes)
         pending_payments = Payment.query.filter(
             Payment.status == PaymentStatus.PENDING,
             Payment.created_at < threshold_time
         ).all()
-        
+
         payment_service = PaymentService()
+        fiscalization_service = PaymentFiscalizationService()
         processed_count = 0
-        
         confirmed_payment_ids = []
         for payment in pending_payments:
             try:
-                # Check payment status with gateway
-                if payment.payment_method.value in ['payme', 'click']:
+                method_value = payment.payment_method.value if hasattr(payment.payment_method, 'value') else payment.payment_method
+                provider_value = payment.payment_provider
+
+                if method_value in [PaymentMethod.PAYME.value, PaymentMethod.CLICK.value, PaymentMethod.CARD.value]:
                     status = payment_service.check_payment_status(payment.id)
-                    if status.get('status') == 'completed':
-                        payment.status = PaymentStatus.COMPLETED
-                        payment.paid_at = datetime.now(timezone.utc)
+                    normalized_status = str(status.get('status') or '').lower()
+                    if normalized_status in {'completed', 'success', PaymentStatus.COMPLETED.value}:
                         confirmed_payment_ids.append(payment.id)
                         processed_count += 1
+                        continue
+                    if normalized_status in {'cancelled', 'canceled', PaymentStatus.CANCELLED.value}:
+                        payment.status = PaymentStatus.CANCELLED
+                    elif normalized_status in {'failed', PaymentStatus.FAILED.value}:
+                        payment.status = PaymentStatus.FAILED
+                    elif payment.created_at < threshold_time:
+                        payment.status = PaymentStatus.CANCELLED
+                        logger.info("Auto-cancelling payment %s due to timeout", payment.id)
+                    else:
+                        continue
 
-                elif payment.created_at < datetime.now(timezone.utc) - timedelta(hours=1):
-                    # Auto-cancel payments pending for more than 1 hour
-                    payment.status = PaymentStatus.CANCELLED
-                    logger.info(f"Auto-cancelling payment {payment.id} due to timeout")
+                    if provider_value == PaymentMethod.CLICK.value:
+                        fiscalization_service.release_reserved_marking_codes(
+                            payment,
+                            reason='payment_timeout',
+                        )
+                    processed_count += 1
 
             except Exception as e:
                 logger.error(f"Error processing pending payment {payment.id}: {e}")
@@ -181,6 +195,44 @@ def process_refund(self, payment_id: int, amount: int, reason: str = None):
             
     except Exception as exc:
         logger.error(f"Refund processing failed: {exc}")
+        raise self.retry(exc=exc)
+
+
+@shared_task(bind=True, max_retries=3, default_retry_delay=60, time_limit=300, soft_time_limit=270)
+def process_payment_fiscalization(self, payment_id: int, force: bool = False):
+    """Process Click fiscalization asynchronously after payment success."""
+    try:
+        logger.info("Processing payment fiscalization for payment %s", payment_id)
+        service = PaymentFiscalizationService()
+        fiscalization = service.process_click_fiscalization(payment_id, force=force)
+        db.session.commit()
+        return {
+            'success': True,
+            'payment_id': payment_id,
+            'status': fiscalization.status.value if hasattr(fiscalization.status, 'value') else fiscalization.status,
+        }
+    except Exception as exc:
+        db.session.rollback()
+        logger.error("Payment fiscalization failed for payment %s: %s", payment_id, exc)
+        raise self.retry(exc=exc)
+
+
+@shared_task(bind=True, max_retries=3, default_retry_delay=60, time_limit=300, soft_time_limit=270)
+def process_click_fiscalization_task(self, payment_id: int, force: bool = False):
+    """Compatibility alias for Click fiscalization task name."""
+    try:
+        logger.info("Processing Click fiscalization task for payment %s", payment_id)
+        service = PaymentFiscalizationService()
+        fiscalization = service.process_click_fiscalization(payment_id, force=force)
+        db.session.commit()
+        return {
+            'success': True,
+            'payment_id': payment_id,
+            'status': fiscalization.status.value if hasattr(fiscalization.status, 'value') else fiscalization.status,
+        }
+    except Exception as exc:
+        db.session.rollback()
+        logger.error("Click fiscalization task failed for payment %s: %s", payment_id, exc)
         raise self.retry(exc=exc)
 
 
@@ -476,35 +528,42 @@ def validate_payment_integrity(self, payment_id: int):
 
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=30, time_limit=300, soft_time_limit=270)
-def process_payment_verification(self, payment_id: int, verification_data: Dict[str, Any]):
+def process_payment_verification(self, payment_id: int, verification_data: Dict[str, Any] = None):
     """Process payment verification from external gateway"""
     try:
         logger.info(f"Processing payment verification for payment {payment_id}")
-        
+
+        verification_data = verification_data or {}
         payment = Payment.query.get(payment_id)
         if not payment:
             logger.error(f"Payment {payment_id} not found")
             return {'success': False, 'error': 'Payment not found'}
-        
+
         payment_service = PaymentService()
-        
+
         # Verify payment with gateway
         verification_result = payment_service.verify_payment(payment_id, verification_data)
-        
-        if verification_result.get('verified'):
+
+        if verification_result.get('success'):
             # Update payment status
             payment.status = PaymentStatus.COMPLETED
             payment.paid_at = datetime.now(timezone.utc)
-            payment.provider_transaction_id = verification_data.get('transaction_id')
-            
+            payment.provider_transaction_id = (
+                verification_result.get('transaction_id')
+                or verification_data.get('transaction_id')
+            )
+
             # Create transaction record
             transaction = PaymentTransaction(
                 payment_id=payment.id,
                 transaction_type='verification',
                 amount=payment.amount,
                 status='success',
-                provider_transaction_id=verification_data.get('transaction_id'),
-                provider_response=verification_data,
+                provider_transaction_id=payment.provider_transaction_id,
+                provider_response={
+                    'verification_data': verification_data,
+                    'verification_result': verification_result,
+                },
                 success=True,
                 processed_at=datetime.now(timezone.utc)
             )
@@ -527,7 +586,10 @@ def process_payment_verification(self, payment_id: int, verification_data: Dict[
                 transaction_type='verification',
                 amount=payment.amount,
                 status='failed',
-                provider_response=verification_data,
+                provider_response={
+                    'verification_data': verification_data,
+                    'verification_result': verification_result,
+                },
                 success=False,
                 failure_reason=payment.failure_reason,
                 processed_at=datetime.now(timezone.utc)

@@ -6,10 +6,10 @@ import logging
 from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import ContextTypes, ConversationHandler
 
-from handlers.base import BaseHandler
-from i18n import i18n
-from api_client import api_client
-from keyboards.menu import MenuKeyboards
+from staff_bot.handlers.base import BaseHandler
+from staff_bot.i18n import i18n
+from staff_bot.api_client import api_client
+from staff_bot.keyboards.menu import MenuKeyboards
 from shared.staff_constants import STAFF_BOT_ROLES
 
 logger = logging.getLogger(__name__)

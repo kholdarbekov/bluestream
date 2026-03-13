@@ -96,8 +96,8 @@ def test_staff_bot_search_type_detection_is_shared():
     create_order_text = STAFF_BOT_CREATE_ORDER_HANDLER.read_text(encoding="utf-8")
     shared_util_text = STAFF_BOT_SEARCH_UTIL.read_text(encoding="utf-8")
 
-    assert "from utils.search import detect_search_type" in search_user_text
-    assert "from utils.search import detect_search_type" in create_order_text
+    assert "from staff_bot.utils.search import detect_search_type" in search_user_text
+    assert "from staff_bot.utils.search import detect_search_type" in create_order_text
     assert "def _detect_search_type(" not in search_user_text
     assert "def _detect_search_type(" not in create_order_text
     assert "def detect_search_type(" in shared_util_text

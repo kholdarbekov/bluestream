@@ -4,7 +4,14 @@ from decimal import Decimal
 from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, Text, ForeignKey, Enum, JSON, Index, Numeric, text
 from sqlalchemy.orm import relationship, backref
 from business_app import db
-from business_app.utils.constants import OrderStatus, PaymentMethod, PaymentStatus, DeliveryStatus, ORDER_SOURCE_PREFIXES
+from business_app.utils.constants import (
+    OrderStatus,
+    PaymentMethod,
+    PaymentStatus,
+    DeliveryStatus,
+    MarkingCodeLedgerEventType,
+    ORDER_SOURCE_PREFIXES,
+)
 from business_app.models import TimestampMixin
 from business_app.models.order_sequence import OrderSequence
 from business_app.utils.helpers import generate_random_string
@@ -179,6 +186,11 @@ class OrderItem(db.Model):
     product = relationship('Product')
     contract = relationship('CorporateContract')
     contract_product_price = relationship('CorporateContractProductPrice')
+    marking_code_allocations = relationship(
+        'OrderItemMarkingCodeAllocation',
+        back_populates='order_item',
+        cascade='all, delete-orphan',
+    )
     
     def calculate_total(self):
         """Calculate total price for this item"""
@@ -233,6 +245,60 @@ class OrderStatusHistory(db.Model, TimestampMixin):
                 'name': f"{self.changed_by_user.first_name} {self.changed_by_user.last_name}",
                 'role': self.changed_by_user.role.value
             } if self.changed_by_user else None
+        }
+
+
+class OrderItemMarkingCodeAllocation(db.Model, TimestampMixin):
+    """Audit/event ledger for marking-code reservations, releases, and usage."""
+
+    __tablename__ = 'order_item_marking_code_allocations'
+    __table_args__ = (
+        Index('idx_order_item_marking_code_allocations_item_created', 'order_item_id', 'created_at'),
+        Index('idx_order_item_marking_code_allocations_code_created', 'product_marking_code_id', 'created_at'),
+        Index('idx_order_item_marking_code_allocations_payment_created', 'payment_id', 'created_at'),
+    )
+
+    id = Column(Integer, primary_key=True)
+    order_item_id = Column(Integer, ForeignKey('order_items.id'), nullable=False, index=True)
+    order_id = Column(Integer, ForeignKey('orders.id'), nullable=False, index=True)
+    payment_id = Column(Integer, ForeignKey('payments.id'), nullable=True, index=True)
+    product_marking_code_id = Column(Integer, ForeignKey('product_marking_codes.id'), nullable=False, index=True)
+    payment_fiscalization_id = Column(Integer, ForeignKey('payment_fiscalizations.id'), nullable=True, index=True)
+    action = Column(
+        Enum(
+            MarkingCodeLedgerEventType,
+            name='marking_code_ledger_event_type',
+            values_callable=lambda x: [e.value for e in x],
+        ),
+        nullable=False,
+        index=True,
+    )
+    actor_user_id = Column(Integer, ForeignKey('users.id'), nullable=True, index=True)
+    notes = Column(Text, nullable=True)
+    event_metadata = Column(JSON, nullable=False, default=dict)
+    occurred_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+    order_item = relationship('OrderItem', back_populates='marking_code_allocations')
+    order = relationship('Order', backref='marking_code_allocations')
+    payment = relationship('Payment', back_populates='marking_code_allocations')
+    marking_code = relationship('ProductMarkingCode', back_populates='allocation_events')
+    payment_fiscalization = relationship('PaymentFiscalization', back_populates='marking_code_allocations')
+    actor_user = relationship('User', foreign_keys=[actor_user_id])
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'order_item_id': self.order_item_id,
+            'order_id': self.order_id,
+            'payment_id': self.payment_id,
+            'product_marking_code_id': self.product_marking_code_id,
+            'payment_fiscalization_id': self.payment_fiscalization_id,
+            'action': self.action.value if hasattr(self.action, 'value') else self.action,
+            'actor_user_id': self.actor_user_id,
+            'notes': self.notes,
+            'event_metadata': self.event_metadata or {},
+            'occurred_at': self.occurred_at.isoformat() if self.occurred_at else None,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
         }
 
 

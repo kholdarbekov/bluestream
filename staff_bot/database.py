@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 import json
 from datetime import datetime, timezone
 
-from config import config
+from staff_bot.config import config
 
 logger = logging.getLogger(__name__)
 

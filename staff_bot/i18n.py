@@ -7,8 +7,8 @@ import re
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Set
 
-from config import config
-from database import db_manager
+from staff_bot.config import config
+from staff_bot.database import db_manager
 from shared.staff_constants import FAILED_DELIVERY_REASONS, STAFF_BOT_ROLES
 from shared.enums import OrderStatus, PaymentMethod
 

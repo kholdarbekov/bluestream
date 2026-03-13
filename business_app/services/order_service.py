@@ -96,7 +96,7 @@ class OrderService:
                 'cash': PaymentMethod.CASH,
                 'payme': PaymentMethod.PAYME,
                 'click': PaymentMethod.CLICK,
-                'card': PaymentMethod.CARD,
+                'card': PaymentMethod.CLICK,
                 'loyalty_points': PaymentMethod.LOYALTY_POINTS,
                 'business_account': PaymentMethod.BUSINESS_ACCOUNT,
             }
@@ -188,7 +188,12 @@ class OrderService:
             db.session.commit()
 
             from business_app.services.payment_service import PaymentService
-            payment = PaymentService().initialize_order_payment(order.id)
+            payment = PaymentService().initialize_order_payment(
+                order.id,
+                metadata={
+                    'consume_marking_codes': bool(order_data.get('consume_marking_codes', False)),
+                },
+            )
             if payment_method == PaymentMethod.CASH and payment:
                 from business_app.services.cash_collection_service import CashCollectionService
 
@@ -864,6 +869,18 @@ class OrderService:
             reason=reason,
             actor_user_id=actor_id,
         )
+
+        if order.payment and order.payment.payment_provider == PaymentMethod.CLICK.value:
+            try:
+                from business_app.services.payment_fiscalization_service import PaymentFiscalizationService
+
+                PaymentFiscalizationService().release_reserved_marking_codes(
+                    order.payment,
+                    reason=reason or 'order_cancelled',
+                    actor_user_id=actor_id,
+                )
+            except Exception as exc:
+                logger.error("Failed to release reserved marking codes for order %s: %s", order.id, exc)
         db.session.commit()
         
         # Handle refund if payment was made

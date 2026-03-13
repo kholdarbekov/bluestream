@@ -443,6 +443,7 @@ def serialize_order_delivery(delivery) -> Dict[str, Any]:
 def serialize_order_payment(payment) -> Dict[str, Any]:
     """Serialize payment information"""
     projection = get_payment_projection(payment)
+    fiscalization = getattr(payment, 'fiscalization', None)
 
     try:
         return {
@@ -453,8 +454,10 @@ def serialize_order_payment(payment) -> Dict[str, Any]:
             'amount_collected': float(projection['amount_collected']),
             'outstanding_amount': float(projection['outstanding_amount']),
             'currency': getattr(payment, 'currency', 'UZS'),
-            'transaction_id': getattr(payment, 'transaction_id', None),
+            'transaction_id': getattr(payment, 'provider_transaction_id', None),
+            'provider_transaction_id': getattr(payment, 'provider_transaction_id', None),
             'payment_provider': getattr(payment, 'payment_provider', None),
+            'payment_link': getattr(payment, 'payment_link', None),
             'paid_at': payment.paid_at.isoformat() if getattr(payment, 'paid_at', None) else None,
             'last_collected_at': (
                 payment.last_collected_at.isoformat()
@@ -462,6 +465,11 @@ def serialize_order_payment(payment) -> Dict[str, Any]:
                 else None
             ),
             'collection_events_count': len(getattr(payment, 'cash_collection_allocations', []) or []),
+            'fiscalization_status': (
+                fiscalization.status.value if fiscalization and hasattr(fiscalization.status, 'value')
+                else None
+            ),
+            'fiscalization': fiscalization.to_dict() if fiscalization else None,
         }
     except Exception:
         return {
@@ -471,6 +479,7 @@ def serialize_order_payment(payment) -> Dict[str, Any]:
             'amount': float(projection['amount']),
             'amount_collected': float(projection['amount_collected']),
             'outstanding_amount': float(projection['outstanding_amount']),
+            'payment_link': getattr(payment, 'payment_link', None),
         }
 
 

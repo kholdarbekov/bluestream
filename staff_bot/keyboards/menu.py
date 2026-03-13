@@ -4,7 +4,7 @@ Main menu keyboards for Staff Bot - Role-aware keyboard generation
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
 from typing import List
 
-from i18n import i18n
+from staff_bot.i18n import i18n
 
 
 class MenuKeyboards:

@@ -81,16 +81,24 @@ class TestPaymentCreation:
                 amount=sample_order.total_amount + Decimal('1.00'),
             )
 
-    def test_create_payment_link_unsupported_method(self, payment_service, sample_payment):
+    def test_create_payment_link_unsupported_method(self, payment_service, cash_payment):
         with pytest.raises(PaymentError):
-            payment_service.create_payment_link(sample_payment.id)
+            payment_service.create_payment_link(cash_payment.id)
 
 
 @pytest.mark.unit
 @pytest.mark.payment
 class TestPaymentProcessing:
     def test_process_cash_payment_success(self, payment_service, cash_payment, db):
-        with patch.object(payment_service, '_handle_successful_payment') as mock_handle:
+        def _mock_post_collection(*args, **kwargs):
+            cash_payment.status = PaymentStatus.COMPLETED
+            cash_payment.paid_at = datetime.now(UTC)
+            db.session.flush()
+
+        with patch(
+            'business_app.services.cash_collection_service.CashCollectionService.post_collection',
+            side_effect=_mock_post_collection,
+        ), patch.object(payment_service, '_handle_successful_payment') as mock_handle:
             processed = payment_service.process_cash_payment(cash_payment.id, collected_by=1)
 
         db.session.refresh(cash_payment)
@@ -249,10 +257,10 @@ class TestCardManagement:
 @pytest.mark.unit
 @pytest.mark.payment
 class TestWebhookSignatures:
-    def test_verify_click_signature_valid_and_invalid(self, payment_service):
-        payment_service.click_secret_key = 'test-click-secret'
+    def test_verify_click_signature_valid_and_invalid(self, app, payment_service):
+        app.config['CLICK_SHOP_SECRET_KEY'] = 'test-click-secret'
 
-        data = {
+        prepare_data = {
             'click_trans_id': '123',
             'service_id': '55',
             'merchant_trans_id': 'PAY_1',
@@ -261,19 +269,77 @@ class TestWebhookSignatures:
             'sign_time': '1700000000',
         }
         signature_payload = (
-            f"{data['click_trans_id']}{data['service_id']}"
-            f"{payment_service.click_secret_key}{data['merchant_trans_id']}"
-            f"{data['amount']}{data['action']}{data['sign_time']}"
+            f"{prepare_data['click_trans_id']}{prepare_data['service_id']}"
+            f"{app.config['CLICK_SHOP_SECRET_KEY']}{prepare_data['merchant_trans_id']}"
+            f"{prepare_data['amount']}{prepare_data['action']}{prepare_data['sign_time']}"
         )
         valid_signature = hashlib.md5(signature_payload.encode('utf-8')).hexdigest()
 
-        signed_data = dict(data)
+        signed_data = dict(prepare_data)
         signed_data['sign_string'] = valid_signature
 
         assert payment_service._verify_click_signature(signed_data) is True
 
         signed_data['sign_string'] = 'bad-signature'
         assert payment_service._verify_click_signature(signed_data) is False
+
+        complete_data = {
+            'click_trans_id': '123',
+            'service_id': '55',
+            'merchant_trans_id': 'PAY_1',
+            'merchant_prepare_id': '91',
+            'amount': '18000.00',
+            'action': '1',
+            'sign_time': '1700000000',
+        }
+        complete_signature_payload = (
+            f"{complete_data['click_trans_id']}{complete_data['service_id']}"
+            f"{app.config['CLICK_SHOP_SECRET_KEY']}{complete_data['merchant_trans_id']}"
+            f"{complete_data['merchant_prepare_id']}{complete_data['amount']}"
+            f"{complete_data['action']}{complete_data['sign_time']}"
+        )
+        complete_signature = hashlib.md5(complete_signature_payload.encode('utf-8')).hexdigest()
+        signed_complete_data = dict(complete_data, sign_string=complete_signature)
+
+        assert payment_service._verify_click_signature(signed_complete_data) is True
+
+        signed_complete_data['merchant_prepare_id'] = '92'
+        assert payment_service._verify_click_signature(signed_complete_data) is False
+
+    def test_validate_click_webhook_signature_uses_callback_allowlist(self, app, payment_service):
+        app.config['CLICK_SHOP_SECRET_KEY'] = 'test-click-secret'
+        app.config['CLICK_CALLBACK_ALLOWLIST'] = ['10.10.10.10']
+
+        payload = {
+            'click_trans_id': '123',
+            'service_id': '55',
+            'merchant_trans_id': 'PAY_1',
+            'amount': '18000.00',
+            'action': '0',
+            'sign_time': '1700000000',
+        }
+        signature_payload = (
+            f"{payload['click_trans_id']}{payload['service_id']}"
+            f"{app.config['CLICK_SHOP_SECRET_KEY']}{payload['merchant_trans_id']}"
+            f"{payload['amount']}{payload['action']}{payload['sign_time']}"
+        )
+        payload['sign_string'] = hashlib.md5(signature_payload.encode('utf-8')).hexdigest()
+
+        class DummyRequest:
+            content_type = 'application/x-www-form-urlencoded'
+            remote_addr = '10.10.10.10'
+            form = payload
+
+            @staticmethod
+            def get_json():
+                return None
+
+        assert payment_service._validate_click_webhook_signature(DummyRequest()) is True
+
+        class UnauthorizedDummyRequest(DummyRequest):
+            remote_addr = '10.10.10.11'
+
+        assert payment_service._validate_click_webhook_signature(UnauthorizedDummyRequest()) is False
 
     def test_validate_webhook_signature_unknown_provider(self, payment_service):
         class DummyRequest:

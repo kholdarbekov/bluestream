@@ -1,6 +1,7 @@
 """Business-rule unit tests for InventoryService reservation behavior."""
 
 from datetime import datetime, timezone
+import fnmatch
 
 import pytest
 
@@ -27,11 +28,8 @@ class FakeRedis:
         return True
 
     def keys(self, pattern):
-        if pattern.endswith("*"):
-            prefix = pattern[:-1]
-            all_keys = list(self.values.keys()) + list(self.hashes.keys())
-            return [key for key in all_keys if key.startswith(prefix)]
-        return [pattern] if pattern in self.values or pattern in self.hashes else []
+        all_keys = list(self.values.keys()) + list(self.hashes.keys())
+        return [key for key in all_keys if fnmatch.fnmatch(key, pattern)]
 
     def delete(self, *keys):
         deleted = 0

@@ -2,7 +2,7 @@
 Admin API endpoints for the Water Business Platform
 This file should be placed in business_app/api/admin.py
 """
-from flask import Blueprint, request, jsonify, current_app, g
+from flask import Blueprint, request, jsonify, current_app, g, Response
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from sqlalchemy import and_, or_, desc, func, text, cast, String
 from datetime import datetime, UTC, timedelta
@@ -10,7 +10,7 @@ from decimal import Decimal
 from shared.constants import DISPLAY_TIMEZONE
 
 from business_app.models.user import User, UserAddress
-from business_app.models.order import Order, OrderItem
+from business_app.models.order import Order, OrderItem, OrderItemMarkingCodeAllocation
 from business_app.models.product import Product, ProductCategory, ProductSizeEnum
 from business_app.models.payment import Payment, PaymentTransaction
 from business_app.models.delivery import Delivery, DeliveryPerson, DeliveryRoute, DeliveryTimeSlot, DeliveryStatusHistory
@@ -31,6 +31,8 @@ from business_app.services.admin_report_service import AdminReportService
 from business_app.services.admin_bulk_action_service import AdminBulkActionService
 from business_app.services.admin_delivery_service import AdminDeliveryService
 from business_app.services.admin_loyalty_service import AdminLoyaltyService
+from business_app.services.product_fiscal_service import ProductFiscalService
+from business_app.services.payment_fiscalization_service import PaymentFiscalizationService
 from business_app.serializers.admin_serializers import (
     serialize_user_admin, serialize_order_admin, serialize_product_admin,
     serialize_delivery_person_admin, serialize_category_admin,
@@ -1766,6 +1768,7 @@ def create_order_for_user():
     Optional fields:
     - payment_method: cash, payme, click, business_account (default: cash)
     - delivery_notes: Special delivery instructions
+    - consume_marking_codes: only applies to business_account orders; default false
     """
     try:
         current_user_id = get_jwt_identity()
@@ -1776,6 +1779,7 @@ def create_order_for_user():
         delivery_address_id = data.get('delivery_address_id')
         payment_method = data.get('payment_method', 'cash')
         delivery_notes = data.get('delivery_notes', '')
+        consume_marking_codes = bool(data.get('consume_marking_codes', False))
 
         # Validate user exists
         user = User.query.get(user_id)
@@ -1809,6 +1813,7 @@ def create_order_for_user():
                 'longitude': address.longitude
             },
             'payment_method': payment_method,
+            'consume_marking_codes': consume_marking_codes,
             'delivery_notes': delivery_notes,
             'order_source': 'admin'
         }
@@ -1819,8 +1824,14 @@ def create_order_for_user():
             f"Admin {current_user_id} created order {order.id} for user {user_id}"
         )
 
+        response_data = {'order': serialize_order_admin(order)}
+        if getattr(order, 'payment', None) and payment_method in {'click', 'card', 'payme'}:
+            payment_link = PaymentService().create_payment_link(order.payment.id)
+            response_data['payment_link'] = payment_link
+            response_data['payment_url'] = payment_link.get('payment_url') if isinstance(payment_link, dict) else payment_link
+
         return created_response(
-            data={'order': serialize_order_admin(order)},
+            data=response_data,
             message='Order created successfully'
         )
 
@@ -1894,13 +1905,16 @@ def get_order_details(order_id):
             db.joinedload(Order.order_items).joinedload(OrderItem.product),
             db.joinedload(Order.delivery_address),
             db.joinedload(Order.delivery),
-            db.joinedload(Order.payment)
+            db.joinedload(Order.payment).joinedload(Payment.transactions),
+            db.joinedload(Order.payment).joinedload(Payment.fiscalization),
+            db.joinedload(Order.marking_code_allocations).joinedload(OrderItemMarkingCodeAllocation.marking_code),
         ).get(order_id)
 
         if not order:
             return not_found_response(resource_type='Order')
 
         payment_projection = get_payment_projection(order.payment) if order.payment else None
+        fiscalization_service = PaymentFiscalizationService()
 
         # Build response with full order details
         order_data = {
@@ -1915,6 +1929,11 @@ def get_order_details(order_id):
             'delivery_fee': float(getattr(order, 'delivery_fee', 0)),
             'payment_method': order.payment_method.value if order.payment_method else None,
             'payment_status': order.payment.status.value if order.payment and hasattr(order.payment.status, 'value') else ('pending' if not order.payment else str(order.payment.status)),
+            'payment_id': order.payment.id if order.payment else None,
+            'payment_provider': getattr(order.payment, 'payment_provider', None) if order.payment else None,
+            'payment_link': getattr(order.payment, 'payment_link', None) if order.payment else None,
+            'provider_transaction_id': getattr(order.payment, 'provider_transaction_id', None) if order.payment else None,
+            'consume_marking_codes': bool(getattr(order.payment, 'consume_marking_codes', False)) if order.payment else False,
             'amount_collected': float(payment_projection['amount_collected']) if payment_projection else 0,
             'outstanding_amount': float(payment_projection['outstanding_amount']) if payment_projection else 0,
             'collection_events_count': len(getattr(order.payment, 'cash_collection_allocations', []) or []) if order.payment else 0,
@@ -1981,6 +2000,71 @@ def get_order_details(order_id):
 
         cash_collection_service = CashCollectionService()
         order_data['payment_timeline'] = cash_collection_service.get_order_payment_timeline(order.id)
+        if order.payment:
+            order_data['fiscalization'] = order.payment.fiscalization.to_dict() if getattr(order.payment, 'fiscalization', None) else None
+            if getattr(order.payment, 'fiscalization', None) and hasattr(order.payment.fiscalization.status, 'value'):
+                order_data['fiscalization_status'] = order.payment.fiscalization.status.value
+            elif fiscalization_service.payment_requires_click_fiscalization(order.payment):
+                order_data['fiscalization_status'] = 'pending'
+            else:
+                order_data['fiscalization_status'] = 'not_required'
+            order_data['marking_code_summary'] = fiscalization_service.marking_code_allocation_summary(order)
+            order_data['payment_transactions'] = [
+                {
+                    'id': txn.id,
+                    'transaction_type': txn.transaction_type,
+                    'amount': float(txn.amount),
+                    'currency': txn.currency,
+                    'status': txn.status,
+                    'provider_transaction_id': txn.provider_transaction_id,
+                    'provider_reference': txn.provider_reference,
+                    'success': txn.success,
+                    'failure_reason': txn.failure_reason,
+                    'notes': txn.notes,
+                    'created_at': txn.created_at.isoformat() if txn.created_at else None,
+                    'processed_at': txn.processed_at.isoformat() if txn.processed_at else None,
+                }
+                for txn in sorted(
+                    order.payment.transactions or [],
+                    key=lambda txn: txn.created_at or datetime.min.replace(tzinfo=UTC),
+                    reverse=True,
+                )
+            ]
+            click_callbacks = (
+                ((order.payment.provider_data or {}).get('click') or {}).get('callbacks')
+                or []
+            )
+            order_data['click_callback_history'] = list(reversed(click_callbacks))
+            order_data['fiscalization_audit_trail'] = list(
+                reversed((order.payment.provider_data or {}).get('fiscalization_audit_trail') or [])
+            )
+        else:
+            order_data['fiscalization'] = None
+            order_data['fiscalization_status'] = 'not_required'
+            order_data['marking_code_summary'] = {'events': {}, 'codes_by_order_item': {}}
+            order_data['payment_transactions'] = []
+            order_data['click_callback_history'] = []
+            order_data['fiscalization_audit_trail'] = []
+
+        order_data['marking_code_activity'] = [
+            {
+                'id': allocation.id,
+                'order_item_id': allocation.order_item_id,
+                'action': allocation.action.value if hasattr(allocation.action, 'value') else allocation.action,
+                'code': allocation.marking_code.code if allocation.marking_code else None,
+                'actor_user_id': allocation.actor_user_id,
+                'notes': allocation.notes,
+                'payment_id': allocation.payment_id,
+                'payment_fiscalization_id': allocation.payment_fiscalization_id,
+                'event_metadata': allocation.event_metadata or {},
+                'occurred_at': allocation.occurred_at.isoformat() if allocation.occurred_at else None,
+            }
+            for allocation in sorted(
+                order.marking_code_allocations or [],
+                key=lambda allocation: allocation.occurred_at or datetime.min.replace(tzinfo=UTC),
+                reverse=True,
+            )
+        ]
 
         return success_response(data={'order': order_data})
 
@@ -2180,6 +2264,25 @@ def create_product():
         )
 
         db.session.add(product)
+        db.session.flush()
+
+        fiscal_payload_keys = {
+            'barcode',
+            'spic',
+            'package_code',
+            'units',
+            'vat_percent',
+            'fiscalization_enabled',
+            'requires_marking_codes',
+            'fiscal_extra_data',
+        }
+        if any(key in data for key in fiscal_payload_keys):
+            ProductFiscalService().update_product_fiscal_profile(
+                product,
+                data,
+                actor_user_id=get_jwt_identity(),
+            )
+
         db.session.commit()
 
         # Handle translations if provided
@@ -2304,6 +2407,23 @@ def update_product(product_id):
         if 'translations' in data:
             product.set_translations(data['translations'])
 
+        fiscal_payload_keys = {
+            'barcode',
+            'spic',
+            'package_code',
+            'units',
+            'vat_percent',
+            'fiscalization_enabled',
+            'requires_marking_codes',
+            'fiscal_extra_data',
+        }
+        if any(key in data for key in fiscal_payload_keys):
+            ProductFiscalService().update_product_fiscal_profile(
+                product,
+                data,
+                actor_user_id=get_jwt_identity(),
+            )
+
         product.updated_at = datetime.now(UTC)
         db.session.commit()
 
@@ -2341,6 +2461,145 @@ def delete_product(product_id):
         db.session.rollback()
         current_app.logger.error(f"Delete product error: {e}")
         return internal_error_response('Failed to delete product')
+
+
+@admin_bp.route('/products/<int:product_id>/marking-codes', methods=['GET'])
+@jwt_required()
+@validate_admin_action(['view_products', 'manage_products'])
+def list_product_marking_codes(product_id):
+    """List marking codes for a product."""
+    try:
+        payload = ProductFiscalService().list_marking_codes(
+            product_id,
+            page=request.args.get('page', 1, type=int),
+            per_page=request.args.get('per_page', 50, type=int),
+            search=request.args.get('search', '').strip(),
+            status=request.args.get('status'),
+        )
+        return success_response(data=payload)
+    except ValidationError as e:
+        return validation_error_response(str(e))
+    except NotFoundError as e:
+        return not_found_response(message=str(e))
+    except Exception as e:
+        current_app.logger.error(f"List product marking codes error: {e}")
+        return internal_error_response('Failed to load product marking codes')
+
+
+@admin_bp.route('/products/<int:product_id>/marking-codes', methods=['POST'])
+@jwt_required()
+@validate_admin_action(['manage_products'])
+def create_product_marking_codes(product_id):
+    """Create marking codes manually for a product."""
+    try:
+        payload = request.get_json() or {}
+        codes = payload.get('codes')
+        if codes is None and payload.get('code'):
+            codes = [payload.get('code')]
+        result = ProductFiscalService().create_marking_codes(
+            product_id,
+            codes or [],
+            actor_user_id=get_jwt_identity(),
+            notes=payload.get('notes'),
+        )
+        db.session.commit()
+        return created_response(data=result, message='Marking codes created successfully')
+    except ValidationError as e:
+        db.session.rollback()
+        return validation_error_response(str(e))
+    except NotFoundError as e:
+        db.session.rollback()
+        return not_found_response(message=str(e))
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(f"Create product marking codes error: {e}")
+        return internal_error_response('Failed to create product marking codes')
+
+
+@admin_bp.route('/products/<int:product_id>/marking-codes/import', methods=['POST'])
+@jwt_required()
+@validate_admin_action(['manage_products'])
+def import_product_marking_codes(product_id):
+    """Import marking codes from CSV for a product."""
+    try:
+        csv_content = None
+        if request.files.get('file'):
+            csv_content = request.files['file'].read().decode('utf-8')
+        else:
+            payload = request.get_json() or {}
+            csv_content = payload.get('csv_content') or ''
+
+        result = ProductFiscalService().import_marking_codes_csv(
+            product_id,
+            csv_content,
+            actor_user_id=get_jwt_identity(),
+        )
+        db.session.commit()
+        return created_response(data=result, message='Marking codes imported successfully')
+    except ValidationError as e:
+        db.session.rollback()
+        return validation_error_response(str(e))
+    except NotFoundError as e:
+        db.session.rollback()
+        return not_found_response(message=str(e))
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(f"Import product marking codes error: {e}")
+        return internal_error_response('Failed to import product marking codes')
+
+
+@admin_bp.route('/products/<int:product_id>/marking-codes/export', methods=['GET'])
+@jwt_required()
+@validate_admin_action(['view_products', 'manage_products'])
+def export_product_marking_codes(product_id):
+    """Export product marking codes as CSV."""
+    try:
+        csv_payload = ProductFiscalService().export_marking_codes_csv(
+            product_id,
+            status=request.args.get('status'),
+        )
+        return Response(
+            csv_payload,
+            mimetype='text/csv',
+            headers={'Content-Disposition': f'attachment; filename=product-{product_id}-marking-codes.csv'},
+        )
+    except ValidationError as e:
+        return validation_error_response(str(e))
+    except NotFoundError as e:
+        return not_found_response(message=str(e))
+    except Exception as e:
+        current_app.logger.error(f"Export product marking codes error: {e}")
+        return internal_error_response('Failed to export product marking codes')
+
+
+@admin_bp.route('/products/<int:product_id>/marking-codes/<int:marking_code_id>', methods=['PUT'])
+@jwt_required()
+@validate_admin_action(['manage_products'])
+def update_product_marking_code(product_id, marking_code_id):
+    """Update one marking code record."""
+    try:
+        payload = request.get_json() or {}
+        marking_code = ProductFiscalService().update_marking_code(
+            product_id,
+            marking_code_id,
+            payload,
+            actor_user_id=get_jwt_identity(),
+        )
+        db.session.commit()
+        return success_response(
+            data={'marking_code': marking_code.to_dict()},
+            message='Marking code updated successfully',
+        )
+    except ValidationError as e:
+        db.session.rollback()
+        return validation_error_response(str(e))
+    except NotFoundError as e:
+        db.session.rollback()
+        return not_found_response(message=str(e))
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(f"Update product marking code error: {e}")
+        return internal_error_response('Failed to update product marking code')
 
 
 @admin_bp.route('/products/<int:product_id>/stock', methods=['PUT'])
@@ -3941,6 +4200,7 @@ def get_payment(payment_id):
             'currency': payment.currency,
             'payment_method': payment.payment_method,
             'status': payment.status,
+            'payment_provider': getattr(payment, 'payment_provider', None),
             'provider_transaction_id': payment.provider_transaction_id,
             'provider_data': payment.provider_data,
             'payment_link': payment.payment_link,
@@ -3950,6 +4210,8 @@ def get_payment(payment_id):
             'description': payment.description,
             'callback_url': payment.callback_url,
             'failure_reason': payment.failure_reason,
+            'consume_marking_codes': bool(getattr(payment, 'consume_marking_codes', False)),
+            'fiscalization': payment.fiscalization.to_dict() if getattr(payment, 'fiscalization', None) else None,
             'transactions': transaction_data,
             'created_at': payment.created_at.isoformat() if payment.created_at else None,
             'updated_at': payment.updated_at.isoformat() if payment.updated_at else None
@@ -3960,6 +4222,49 @@ def get_payment(payment_id):
     except Exception as e:
         current_app.logger.error(f"Get payment error: {e}")
         return internal_error_response('Failed to get payment')
+
+
+@admin_bp.route('/payments/<int:payment_id>/fiscalization/retry', methods=['POST'])
+@jwt_required()
+@validate_admin_action(['manage_orders'])
+def retry_payment_fiscalization(payment_id):
+    """Retry Click fiscalization for a payment."""
+    try:
+        from business_app.utils.audit_logger import audit_logger
+
+        actor_user_id = get_jwt_identity()
+        audit_logger.log_event(
+            event_type=AuditEventType.PAYMENT_PROCESSED,
+            action='payment_fiscalization_retry_requested',
+            severity=AuditSeverity.MEDIUM,
+            resource_type='payment',
+            resource_id=str(payment_id),
+            description=f'Requested fiscalization retry for payment {payment_id}',
+            additional_data={
+                'payment_id': payment_id,
+                'actor_user_id': actor_user_id,
+            },
+        )
+        fiscalization = PaymentFiscalizationService().process_click_fiscalization(
+            payment_id,
+            force=True,
+            actor_user_id=actor_user_id,
+        )
+        db.session.commit()
+        return success_response(
+            data={'fiscalization': fiscalization.to_dict()},
+            message='Payment fiscalization retried successfully'
+        )
+    except ValidationError as e:
+        db.session.rollback()
+        return validation_error_response(str(e))
+    except NotFoundError as e:
+        db.session.rollback()
+        return not_found_response(message=str(e))
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(f"Retry payment fiscalization error: {e}")
+        return internal_error_response('Failed to retry payment fiscalization')
 
 
 @admin_bp.route('/payments/<int:payment_id>/refund', methods=['POST'])

@@ -1,7 +1,7 @@
 """
 Staff Bot Keyboards
 """
-from keyboards.menu import MenuKeyboards
-from keyboards.common import CommonKeyboards
+from staff_bot.keyboards.menu import MenuKeyboards
+from staff_bot.keyboards.common import CommonKeyboards
 
 __all__ = ['MenuKeyboards', 'CommonKeyboards']

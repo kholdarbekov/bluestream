@@ -6,7 +6,7 @@ from sqlalchemy.ext.hybrid import hybrid_property
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask_sqlalchemy import SQLAlchemy
 from business_app import db
-from business_app.utils.constants import PriceRuleType
+from business_app.utils.constants import PriceRuleType, MarkingCodeStatus
 from business_app.models import TimestampMixin
 from business_app.models.translatable import TranslatableMixin, translatable
 import enum
@@ -96,6 +96,41 @@ class Product(db.Model, TimestampMixin, TranslatableMixin):
     
     # Relationships
     category = relationship('ProductCategory', backref='products')
+    fiscal_profile = relationship(
+        'ProductFiscalProfile',
+        back_populates='product',
+        uselist=False,
+        cascade='all, delete-orphan',
+    )
+    marking_codes = relationship(
+        'ProductMarkingCode',
+        back_populates='product',
+        cascade='all, delete-orphan',
+    )
+
+    @property
+    def fiscalization_enabled(self) -> bool:
+        return bool(self.fiscal_profile and self.fiscal_profile.fiscalization_enabled)
+
+    @property
+    def requires_marking_codes(self) -> bool:
+        return bool(self.fiscal_profile and self.fiscal_profile.requires_marking_codes)
+
+    @property
+    def spic(self):
+        return self.fiscal_profile.spic if self.fiscal_profile else None
+
+    @property
+    def package_code(self):
+        return self.fiscal_profile.package_code if self.fiscal_profile else None
+
+    @property
+    def units(self):
+        return self.fiscal_profile.units if self.fiscal_profile else None
+
+    @property
+    def vat_percent(self):
+        return self.fiscal_profile.vat_percent if self.fiscal_profile else None
     
     def calculate_price(self, user=None, quantity=1):
         """Calculate dynamic price based on user and quantity"""
@@ -120,9 +155,95 @@ class Product(db.Model, TimestampMixin, TranslatableMixin):
             'is_tryout_eligible': bool(self.is_tryout_eligible),
             'tracks_returnable_bottles': bool(self.tracks_returnable_bottles),
             'returnable_bottles_per_unit': float(self.returnable_bottles_per_unit or 0),
+            'fiscal_profile': self.fiscal_profile.to_dict() if self.fiscal_profile else None,
         })
         
         return result
+
+
+class ProductFiscalProfile(db.Model, TimestampMixin):
+    __tablename__ = 'product_fiscal_profiles'
+    __table_args__ = (
+        Index('idx_product_fiscal_profiles_enabled', 'fiscalization_enabled'),
+        Index('idx_product_fiscal_profiles_marking_required', 'requires_marking_codes'),
+    )
+
+    id = Column(Integer, primary_key=True)
+    product_id = Column(Integer, ForeignKey('products.id'), nullable=False, unique=True, index=True)
+    spic = Column(String(100), nullable=True)
+    package_code = Column(String(100), nullable=True)
+    units = Column(String(50), nullable=True)
+    vat_percent = Column(Numeric(precision=5, scale=2), nullable=False, default=Decimal('0.00'))
+    fiscalization_enabled = Column(Boolean, nullable=False, default=False)
+    requires_marking_codes = Column(Boolean, nullable=False, default=False)
+    extra_data = Column(JSON, nullable=False, default=dict)
+
+    product = relationship('Product', back_populates='fiscal_profile')
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'product_id': self.product_id,
+            'spic': self.spic,
+            'package_code': self.package_code,
+            'units': self.units,
+            'vat_percent': float(self.vat_percent or 0),
+            'fiscalization_enabled': bool(self.fiscalization_enabled),
+            'requires_marking_codes': bool(self.requires_marking_codes),
+            'extra_data': self.extra_data or {},
+        }
+
+
+class ProductMarkingCode(db.Model, TimestampMixin):
+    __tablename__ = 'product_marking_codes'
+    __table_args__ = (
+        Index('idx_product_marking_codes_product_status', 'product_id', 'status'),
+        Index('idx_product_marking_codes_status_created', 'status', 'created_at'),
+    )
+
+    id = Column(Integer, primary_key=True)
+    product_id = Column(Integer, ForeignKey('products.id'), nullable=False, index=True)
+    code = Column(String(255), nullable=False, unique=True, index=True)
+    status = Column(
+        Enum(
+            MarkingCodeStatus,
+            name='product_marking_code_status',
+            values_callable=lambda x: [e.value for e in x],
+        ),
+        nullable=False,
+        default=MarkingCodeStatus.AVAILABLE,
+        index=True,
+    )
+    created_by_user_id = Column(Integer, ForeignKey('users.id'), nullable=True, index=True)
+    reserved_at = Column(DateTime(timezone=True), nullable=True)
+    used_at = Column(DateTime(timezone=True), nullable=True)
+    archived_at = Column(DateTime(timezone=True), nullable=True)
+    notes = Column(Text, nullable=True)
+    extra_data = Column(JSON, nullable=False, default=dict)
+
+    product = relationship('Product', back_populates='marking_codes')
+    created_by_user = relationship('User', foreign_keys=[created_by_user_id])
+    allocation_events = relationship(
+        'OrderItemMarkingCodeAllocation',
+        back_populates='marking_code',
+        cascade='all, delete-orphan',
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'product_id': self.product_id,
+            'code': self.code,
+            'status': self.status.value if hasattr(self.status, 'value') else self.status,
+            'created_by_user_id': self.created_by_user_id,
+            'reserved_at': self.reserved_at.isoformat() if self.reserved_at else None,
+            'used_at': self.used_at.isoformat() if self.used_at else None,
+            'archived_at': self.archived_at.isoformat() if self.archived_at else None,
+            'notes': self.notes,
+            'extra_data': self.extra_data or {},
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+        }
     
 
 @translatable('name', 'description')

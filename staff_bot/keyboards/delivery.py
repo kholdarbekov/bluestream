@@ -4,7 +4,7 @@ Delivery-related keyboards for Staff Bot
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from typing import List, Dict
 
-from i18n import i18n
+from staff_bot.i18n import i18n
 from shared.staff_constants import DELIVERY_STATUS_TRANSITIONS, FAILED_DELIVERY_REASONS
 
 

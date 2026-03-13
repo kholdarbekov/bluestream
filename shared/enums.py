@@ -40,6 +40,37 @@ class PaymentMethod(Enum):
     BUSINESS_ACCOUNT = 'business_account'
 
 
+class FiscalizationStatus(Enum):
+    """Canonical fiscalization state for payment receipts."""
+
+    NOT_REQUIRED = 'not_required'
+    PENDING = 'pending'
+    PROCESSING = 'processing'
+    COMPLETED = 'completed'
+    FAILED = 'failed'
+
+
+class MarkingCodeStatus(Enum):
+    """Current lifecycle state of a product marking code."""
+
+    AVAILABLE = 'available'
+    RESERVED = 'reserved'
+    USED = 'used'
+    ARCHIVED = 'archived'
+
+
+class MarkingCodeLedgerEventType(Enum):
+    """Audit/event history for marking code inventory transitions."""
+
+    CREATED = 'created'
+    IMPORTED = 'imported'
+    RESERVED = 'reserved'
+    RELEASED = 'released'
+    USED = 'used'
+    ARCHIVED = 'archived'
+    RESTORED = 'restored'
+
+
 class CashCollectionSource(Enum):
     """COD cash collection source enumeration."""
 

@@ -1,9 +1,9 @@
 """
 Staff Bot Handlers
 """
-from handlers.start import StartHandler
-from handlers.menu import menu_handler, main_menu_handler
-from handlers.language import LanguageHandler
+from staff_bot.handlers.start import StartHandler
+from staff_bot.handlers.menu import menu_handler, main_menu_handler
+from staff_bot.handlers.language import LanguageHandler
 
 start_handler = StartHandler()
 language_handler = LanguageHandler()

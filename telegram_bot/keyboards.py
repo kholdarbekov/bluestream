@@ -393,6 +393,7 @@ class OrderKeyboards:
         icons = {
             'cash': '💵',
             'card': '💳',
+            'click': '💳',
             'payme': '💳',
             'loyalty_points': '🏆',
             'business_account': '🏢'

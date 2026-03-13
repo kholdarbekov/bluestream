@@ -22,7 +22,7 @@ def _get_user_staff_roles(context: ContextTypes.DEFAULT_TYPE) -> List[str]:
 
 def _get_user_language(context: ContextTypes.DEFAULT_TYPE) -> str:
     """Get user language from context."""
-    from i18n import i18n
+    from staff_bot.i18n import i18n
 
     return i18n.normalize_language(context.user_data.get('language'))
 
@@ -48,7 +48,7 @@ def require_auth(func):
             context = args[1] if len(args) > 1 else kwargs.get('context')
 
         if not context.user_data.get('authenticated'):
-            from i18n import i18n
+            from staff_bot.i18n import i18n
             lang = _get_user_language(context)
             await _send_unauthorized(update, i18n.get('staff.session_expired', lang))
             return
@@ -83,7 +83,7 @@ def require_role(*roles: str):
 
             user_roles = _get_user_staff_roles(context)
             if not any(role in user_roles for role in roles):
-                from i18n import i18n
+                from staff_bot.i18n import i18n
                 lang = _get_user_language(context)
                 await _send_unauthorized(
                     update,

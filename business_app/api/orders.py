@@ -8,7 +8,7 @@ from datetime import datetime, UTC, timedelta
 
 from business_app.utils.service_factory import (
     get_order_service, get_delivery_service,
-    get_notification_service, get_analytics_service, get_cart_service
+    get_notification_service, get_analytics_service, get_cart_service, get_payment_service
 )
 from business_app.utils.translations import get_translation
 from business_app.serializers.order_serializers import (
@@ -16,7 +16,7 @@ from business_app.serializers.order_serializers import (
     serialize_order_payment, CreateOrderRequest, OrderFeedbackRequest, CartEstimateRequest
 )
 from business_app.utils.decorators import validate_json, rate_limit, require_verification
-from business_app.utils.constants import OrderStatus, NotificationType
+from business_app.utils.constants import OrderStatus, NotificationType, PaymentMethod
 from business_app.utils.validation_helpers import validate_list_request_params
 from business_app.utils.error_handlers import handle_api_exception
 from business_app.utils.exceptions import (
@@ -32,6 +32,10 @@ from business_app import db
 from pydantic import ValidationError as PydanticValidationError
 
 orders_bp = Blueprint('orders', __name__)
+
+
+def _rollback_session():
+    db.session.rollback()
 
 
 @orders_bp.route('/', methods=['GET'])
@@ -202,7 +206,7 @@ def create_emergency_order():
     except PydanticValidationError as e:
         return validation_error_response(e.errors())
     except Exception as e:
-        db.session.rollback()
+        _rollback_session()
         current_app.logger.error(f"Create emergency order error: {e}")
         return internal_error_response(message=get_translation('error.server_error'))
 
@@ -283,7 +287,7 @@ def submit_order_feedback(order_id):
     except (ValidationError, ConflictError) as e:
         return error_response(message=e.message, status_code=400)
     except Exception as e:
-        db.session.rollback()
+        _rollback_session()
         current_app.logger.error(f"Submit order feedback error: {e}")
         return internal_error_response(message=get_translation('error.server_error'))
 
@@ -366,6 +370,12 @@ def create_order():
             'order': serialize_order(order, include_items=True, include_payment=True)
         }
 
+        payment_method_value = order.payment_method.value if hasattr(order.payment_method, 'value') else order.payment_method
+        if payment_method_value in {'click', 'card', 'payme'} and getattr(order, 'payment', None):
+            payment_link = get_payment_service().create_payment_link(order.payment.id)
+            response_data['payment_link'] = payment_link
+            response_data['payment_url'] = payment_link.get('payment_url') if isinstance(payment_link, dict) else payment_link
+
         if (order.payment_method.value if hasattr(order.payment_method, 'value') else order.payment_method) == 'cash':
             from business_app.services.cash_collection_service import CashCollectionService
 
@@ -379,21 +389,66 @@ def create_order():
     except NotFoundError:
         return not_found_response(message=get_translation('error.not_found'))
     except ValidationError as e:
-        db.session.rollback()
+        _rollback_session()
         return error_response(message=e.message, status_code=400)
     except PydanticValidationError as e:
-        db.session.rollback()
+        _rollback_session()
         return validation_error_response(e.errors())
     except ValueError as e:
-        db.session.rollback()
+        _rollback_session()
         current_app.logger.warning(f"Create order validation error: {e}")
         return error_response(
             message=get_translation('api.orders.error.invalid_request_data'),
             status_code=400
         )
     except Exception as e:
-        db.session.rollback()
+        _rollback_session()
         current_app.logger.error(f"Create order error: {e}")
+        return internal_error_response(message=get_translation('error.server_error'))
+
+
+@orders_bp.route('/<int:order_id>/retry-payment', methods=['POST'])
+@jwt_required()
+def retry_order_payment(order_id):
+    """Create or refresh a payment link for an existing unpaid order."""
+    try:
+        current_user_id = get_jwt_identity()
+        order = get_order_service().get_order(order_id, current_user_id)
+
+        if getattr(order, 'is_paid', False):
+            return error_response(
+                message=get_translation('api.payments.error.already_paid'),
+                status_code=409,
+            )
+
+        payment_method_value = order.payment_method.value if hasattr(order.payment_method, 'value') else order.payment_method
+        if payment_method_value not in {'click', 'card', 'payme'}:
+            return validation_error_response('Order does not have a retryable online payment method')
+
+        payment_enum = PaymentMethod(payment_method_value)
+        payment = get_payment_service().create_payment(
+            order_id=order.id,
+            payment_method=payment_enum,
+            amount=order.total_amount,
+            description=f'Payment for order #{order.order_number}',
+        )
+        payment_link = get_payment_service().create_payment_link(payment.id)
+
+        return success_response(
+            data={
+                'payment': serialize_order_payment(payment),
+                'payment_link': payment_link,
+                'payment_url': payment_link.get('payment_url') if isinstance(payment_link, dict) else payment_link,
+            },
+            message=get_translation('api.payments.initiated'),
+        )
+    except NotFoundError:
+        return not_found_response(message=get_translation('api.orders.not_found'))
+    except ValidationError as e:
+        return error_response(message=e.message, status_code=400)
+    except Exception as e:
+        _rollback_session()
+        current_app.logger.error(f"Retry order payment error: {e}")
         return internal_error_response(message=get_translation('error.server_error'))
 
 
@@ -431,7 +486,7 @@ def cancel_order(order_id):
     except ConflictError:
         return error_response(message=get_translation('api.orders.cannot_cancel'), status_code=400)
     except Exception as e:
-        db.session.rollback()
+        _rollback_session()
         current_app.logger.error(f"Cancel order error: {e}")
         return internal_error_response(message=get_translation('error.server_error'))
 
@@ -588,7 +643,7 @@ def repeat_order(order_id):
             status_code=400
         )
     except Exception as e:
-        db.session.rollback()
+        _rollback_session()
         current_app.logger.error(f"Repeat order error: {e}")
         return internal_error_response(message=get_translation('error.server_error'))
 
@@ -807,7 +862,7 @@ def create_subscription_order():
             status_code=400
         )
     except Exception as e:
-        db.session.rollback()
+        _rollback_session()
         current_app.logger.error(f"Create subscription order error: {e}")
         return internal_error_response(message=get_translation('error.server_error'))
 
@@ -881,7 +936,7 @@ def schedule_order():
             status_code=400
         )
     except Exception as e:
-        db.session.rollback()
+        _rollback_session()
         current_app.logger.error(f"Schedule order error: {e}")
         return internal_error_response(message=get_translation('error.server_error'))
 

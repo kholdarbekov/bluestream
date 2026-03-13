@@ -20,7 +20,14 @@ from business_app.models.order import Order, OrderItem
 from business_app.models.payment import Payment, PaymentTransaction, CreditCard
 from business_app.models.user import User
 from business_app.utils.exceptions import ConflictError, PaymentError, ValidationError, NotFoundError
-from business_app.utils.constants import OrderStatus, PaymentStatus, PaymentMethod, PaymeErrors, PaymeState
+from business_app.utils.constants import (
+    OrderStatus,
+    PaymentStatus,
+    PaymentMethod,
+    FiscalizationStatus,
+    PaymeErrors,
+    PaymeState,
+)
 from business_app.utils.helpers import generate_random_string, to_ms
 from business_app.utils.audit_logger import audit_logger, AuditEventType, AuditSeverity
 from business_app.utils.card_validation import CardValidator, CardSecurityValidator
@@ -45,10 +52,10 @@ class PaymentService:
         self.payme_test_mode = current_app.config.get('PAYME_TEST_MODE', True)
         
         # Click configuration
-        self.click_merchant_id = current_app.config.get('CLICK_MERCHANT_ID')
-        self.click_service_id = current_app.config.get('CLICK_SERVICE_ID')
-        self.click_secret_key = current_app.config.get('CLICK_SECRET_KEY')
-        self.click_endpoint = current_app.config.get('CLICK_ENDPOINT_URL')
+        self.click_merchant_id = current_app.config.get('CLICK_SHOP_MERCHANT_ID') or current_app.config.get('CLICK_MERCHANT_ID')
+        self.click_service_id = current_app.config.get('CLICK_SHOP_SERVICE_ID') or current_app.config.get('CLICK_SERVICE_ID')
+        self.click_secret_key = current_app.config.get('CLICK_SHOP_SECRET_KEY') or current_app.config.get('CLICK_SECRET_KEY')
+        self.click_endpoint = current_app.config.get('CLICK_CHECKOUT_URL') or current_app.config.get('CLICK_ENDPOINT_URL')
         self.click_test_mode = current_app.config.get('CLICK_TEST_MODE', True)
         
         # Webhook replay protection configuration
@@ -68,6 +75,25 @@ class PaymentService:
         except Exception as e:
             current_app.logger.warning(f"Redis not available for webhook nonce tracking: {e}")
             self.redis_client = None
+
+        self._click_provider_service = None
+        self._payment_fiscalization_service = None
+
+    def _get_click_provider_service(self):
+        if self._click_provider_service is None:
+            from business_app.services.click_payment_provider_service import ClickPaymentProviderService
+
+            self._click_provider_service = ClickPaymentProviderService(payment_service=self)
+        return self._click_provider_service
+
+    def _get_payment_fiscalization_service(self):
+        if self._payment_fiscalization_service is None:
+            from business_app.services.payment_fiscalization_service import PaymentFiscalizationService
+
+            self._payment_fiscalization_service = PaymentFiscalizationService(
+                click_provider_service=self._get_click_provider_service(),
+            )
+        return self._payment_fiscalization_service
     
     def create_payment(self, order_id: int, payment_method: PaymentMethod,
                       amount: int = None, **kwargs) -> Payment:
@@ -104,6 +130,12 @@ class PaymentService:
         
         payment = Payment.query.filter_by(order_id=order_id).first()
         provider_data = dict(kwargs)
+        consume_marking_codes = bool(
+            provider_data.pop(
+                'consume_marking_codes',
+                payment_method in {PaymentMethod.CLICK, PaymentMethod.CARD},
+            )
+        )
 
         if payment:
             payment.user_id = order.user_id
@@ -114,6 +146,7 @@ class PaymentService:
             payment.callback_url = provider_data.pop('return_url', payment.callback_url)
             payment.failure_reason = None
             payment.provider_data = provider_data
+            payment.consume_marking_codes = consume_marking_codes
             if payment_method != PaymentMethod.CASH:
                 payment.status = PaymentStatus.PENDING
         else:
@@ -127,6 +160,7 @@ class PaymentService:
                 description=provider_data.pop('description', None),
                 callback_url=provider_data.pop('return_url', None),
                 provider_data=provider_data,
+                consume_marking_codes=consume_marking_codes,
             )
             db.session.add(payment)
 
@@ -168,6 +202,7 @@ class PaymentService:
         if payment_method not in {
             PaymentMethod.PAYME,
             PaymentMethod.CLICK,
+            PaymentMethod.CARD,
             PaymentMethod.BUSINESS_ACCOUNT,
             PaymentMethod.CASH,
         }:
@@ -195,13 +230,19 @@ class PaymentService:
                 status=PaymentStatus.PENDING,
                 description=f'Payment for order #{order.order_number}',
                 provider_data={},
+                consume_marking_codes=payment_method in {PaymentMethod.CLICK, PaymentMethod.CARD},
             )
             db.session.add(payment)
             db.session.flush()
         elif payment.payment_method != payment_method:
             payment.payment_method = payment_method
 
-        if payment_method in {PaymentMethod.PAYME, PaymentMethod.CLICK}:
+        if payment_method == PaymentMethod.BUSINESS_ACCOUNT and metadata and 'consume_marking_codes' in metadata:
+            payment.consume_marking_codes = bool(metadata.get('consume_marking_codes'))
+        elif payment_method in {PaymentMethod.CLICK, PaymentMethod.CARD}:
+            payment.consume_marking_codes = True
+
+        if payment_method in {PaymentMethod.PAYME, PaymentMethod.CLICK, PaymentMethod.CARD}:
             db.session.commit()
             return payment
 
@@ -227,6 +268,12 @@ class PaymentService:
                 allow_order_confirmation=allow_order_confirmation,
             )
 
+        if payment_method == PaymentMethod.BUSINESS_ACCOUNT and payment.consume_marking_codes:
+            self._get_payment_fiscalization_service().consume_marking_codes_for_business_account(
+                payment,
+                actor_user_id=actor_user_id,
+            )
+
         db.session.commit()
         return payment
     
@@ -246,7 +293,7 @@ class PaymentService:
         
         if payment.payment_method == PaymentMethod.PAYME:
             return self._create_payme_link(payment)
-        elif payment.payment_method == PaymentMethod.CLICK:
+        elif payment.payment_method in {PaymentMethod.CLICK, PaymentMethod.CARD}:
             return self._create_click_link(payment)
         else:
             raise PaymentError(get_translation('error.payment.unsupported_method'))
@@ -1287,22 +1334,13 @@ class PaymentService:
             }
     
     def handle_click_webhook(self, webhook_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Handle Click webhook"""
+        """Handle Click Shop API callbacks synchronously."""
         try:
-            # Verify webhook signature
-            if not self._verify_click_signature(webhook_data):
-                raise PaymentError(get_translation('error.payment.invalid_signature'))
-            
-            action = webhook_data.get('action')
-            
-            if action == 'prepare':
-                return self._click_prepare(webhook_data)
-            elif action == 'complete':
-                return self._click_complete(webhook_data)
-            else:
-                raise PaymentError(get_translation('error.payment.unknown_action'))
-                
+            response = self._get_click_provider_service().handle_callback(webhook_data)
+            db.session.commit()
+            return response
         except Exception as e:
+            db.session.rollback()
             current_app.logger.error(f"Click webhook error: {e}")
             return {'error': -1, 'error_note': 'Bad Request'}
     
@@ -1321,6 +1359,24 @@ class PaymentService:
         # Process refund based on payment method
         if payment.payment_method == PaymentMethod.LOYALTY_POINTS:
             success = self._process_points_refund(payment, amount, reason)
+        elif payment.payment_method in {PaymentMethod.CLICK, PaymentMethod.CARD}:
+            response = self._get_click_provider_service().refund_payment(payment, amount, reason)
+            success = bool(response.get('success', True))
+            if success:
+                provider_data = dict(payment.provider_data or {})
+                provider_data['refunded_amount'] = float(amount)
+                provider_data['refunded_at'] = datetime.now(timezone.utc).isoformat()
+                provider_data['click_refund_response'] = response
+                payment.provider_data = provider_data
+                fiscalization = getattr(payment, 'fiscalization', None)
+                fiscalization_status = (
+                    fiscalization.status.value if fiscalization and hasattr(fiscalization.status, 'value') else fiscalization
+                )
+                if fiscalization_status != FiscalizationStatus.COMPLETED.value:
+                    self._get_payment_fiscalization_service().release_reserved_marking_codes(
+                        payment,
+                        reason='payment_refunded_before_fiscalization',
+                    )
         else:
             # Cash refund - manual process
             success = True
@@ -1335,6 +1391,124 @@ class PaymentService:
             db.session.commit()
         
         return success
+
+    def request_refund(self, payment: Payment, reason: Optional[str] = None) -> PaymentTransaction:
+        """Create and process a refund request for a completed payment."""
+        refund_reason = reason or 'Refund requested'
+        refund_success = self.process_refund(payment.id, payment.amount, refund_reason)
+        transaction = PaymentTransaction(
+            payment_id=payment.id,
+            transaction_type='refund',
+            amount=payment.amount,
+            currency=payment.currency,
+            status='completed' if refund_success else 'failed',
+            provider_transaction_id=payment.provider_transaction_id,
+            provider_reference=payment.payment_id,
+            provider_response=dict(payment.provider_data or {}),
+            success=refund_success,
+            failure_reason=None if refund_success else refund_reason,
+            processed_at=datetime.now(timezone.utc),
+            notes=refund_reason,
+        )
+        db.session.add(transaction)
+        db.session.commit()
+        return transaction
+
+    def queue_click_fiscalization(self, payment_id: int):
+        payment = Payment.query.get(payment_id)
+        if not payment:
+            raise NotFoundError("Payment not found")
+        fiscalization = self._get_payment_fiscalization_service().queue_click_fiscalization(payment.id)
+        db.session.commit()
+
+        if current_app.config.get('TESTING'):
+            fiscalization = self._get_payment_fiscalization_service().process_click_fiscalization(payment.id)
+            db.session.commit()
+            return fiscalization
+
+        try:
+            from business_app.tasks.payment_tasks import process_click_fiscalization_task
+
+            process_click_fiscalization_task.delay(payment.id)
+        except Exception as exc:
+            current_app.logger.error("Failed to enqueue Click fiscalization for payment %s: %s", payment.id, exc)
+        return fiscalization
+
+    def update_payment_status(self, payment: Payment) -> Payment:
+        if not payment:
+            raise NotFoundError(get_translation('error.not_found'))
+
+        if payment.status != PaymentStatus.PENDING:
+            return payment
+
+        provider = payment.payment_provider
+        if provider == PaymentMethod.CLICK.value:
+            status_data = self._get_click_provider_service().check_payment_status(payment)
+            provider_status = str(status_data.get('status') or '').lower()
+            if provider_status in {'completed', PaymentStatus.COMPLETED.value, 'success'}:
+                payment.status = PaymentStatus.COMPLETED
+                payment.paid_at = payment.paid_at or datetime.now(timezone.utc)
+                payment.provider_transaction_id = (
+                    status_data.get('provider_transaction_id')
+                    or payment.provider_transaction_id
+                )
+                self._handle_successful_payment(payment)
+                self.queue_click_fiscalization(payment.id)
+                db.session.commit()
+            elif provider_status in {
+                'cancelled',
+                'canceled',
+                PaymentStatus.CANCELLED.value,
+                'failed',
+                PaymentStatus.FAILED.value,
+                'error',
+            }:
+                payment.status = (
+                    PaymentStatus.CANCELLED
+                    if provider_status in {'cancelled', 'canceled', PaymentStatus.CANCELLED.value}
+                    else PaymentStatus.FAILED
+                )
+                payment.failure_reason = (
+                    str(status_data.get('error_note') or '')
+                    or str((status_data.get('raw') or {}).get('error_note') or '')
+                    or str((status_data.get('raw') or {}).get('error') or '')
+                    or 'Provider reported payment failure'
+                )
+                self._get_payment_fiscalization_service().release_reserved_marking_codes(
+                    payment,
+                    reason='provider_status_cancelled',
+                )
+                db.session.commit()
+        return payment
+
+    def check_payment_status(self, payment_id: int) -> Dict[str, Any]:
+        payment = Payment.query.get(payment_id)
+        if not payment:
+            raise NotFoundError(get_translation('error.not_found'))
+
+        self.update_payment_status(payment)
+        return self.get_payment_status(payment_id)
+
+    def verify_payment(self, payment_id: int, verification_data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Compatibility wrapper used by background verification tasks."""
+        verification_data = verification_data or {}
+        payment = Payment.query.get(payment_id)
+        if not payment:
+            raise NotFoundError(get_translation('error.not_found'))
+
+        status_payload = self.check_payment_status(payment_id)
+        status_value = str(status_payload.get('status') or '').lower()
+        if status_value in {PaymentStatus.COMPLETED.value, 'completed', 'success'}:
+            return {
+                'success': True,
+                'transaction_id': verification_data.get('transaction_id') or payment.provider_transaction_id,
+                'status': PaymentStatus.COMPLETED.value,
+            }
+        return {
+            'success': False,
+            'error': verification_data.get('error') or 'Verification failed',
+            'status': status_value or PaymentStatus.PENDING.value,
+        }
     
     def validate_webhook_signature(self, provider: str, request) -> bool:
         """
@@ -1526,7 +1700,8 @@ class PaymentService:
                 return False
             
             # Validate request content-type
-            if request.content_type != 'application/json' and request.content_type != 'application/json; charset=UTF-8':
+            content_type = (request.content_type or '').lower()
+            if not content_type.startswith('application/json'):
                 current_app.logger.warning(f"Invalid content-type for Payme webhook: {request.content_type}")
                 return False
             
@@ -1550,14 +1725,20 @@ class PaymentService:
                 return False
             
             # Additional IP validation (if configured)
-            allowed_ips = current_app.config.get('CLICK_WEBHOOK_IPS', [])
+            allowed_ips = (
+                current_app.config.get('CLICK_CALLBACK_ALLOWLIST')
+                or current_app.config.get('CLICK_WEBHOOK_IPS', [])
+            )
             if allowed_ips and request.remote_addr not in allowed_ips:
                 current_app.logger.warning(f"Webhook from unauthorized IP: {request.remote_addr}")
                 return False
             
             # Validate request content-type
-            valid_content_types = ['application/x-www-form-urlencoded', 'application/json']
-            if request.content_type not in valid_content_types:
+            content_type = (request.content_type or '').lower()
+            if not (
+                content_type.startswith('application/x-www-form-urlencoded')
+                or content_type.startswith('application/json')
+            ):
                 current_app.logger.warning(f"Invalid content-type for Click webhook: {request.content_type}")
                 return False
             
@@ -1572,11 +1753,24 @@ class PaymentService:
         payment = Payment.query.get(payment_id)
         if not payment:
             raise NotFoundError(get_translation('error.not_found'))
+
+        fiscalization_data = (
+            payment.fiscalization.to_dict()
+            if getattr(payment, 'fiscalization', None)
+            else {
+                'status': (
+                    FiscalizationStatus.PENDING.value
+                    if payment.payment_provider == PaymentMethod.CLICK.value
+                    else FiscalizationStatus.NOT_REQUIRED.value
+                )
+            }
+        )
         
         return {
             'id': payment.id,
             'status': payment.status.value,
             'method': payment.payment_method.value,
+            'payment_provider': payment.payment_provider,
             'amount': payment.amount,
             'currency': payment.currency,
             'payment_id': payment.payment_id,
@@ -1586,6 +1780,10 @@ class PaymentService:
             'gateway_response': payment.gateway_response,
             'refunded_amount': payment.refunded_amount or 0,
             'refunded_at': payment.refunded_at.isoformat() if payment.refunded_at else None,
+            'payment_link': payment.payment_link,
+            'provider_transaction_id': payment.provider_transaction_id,
+            'fiscalization': fiscalization_data,
+            'fiscalization_status': fiscalization_data.get('status'),
             'transactions': [
                 {
                     'id': tx.id,
@@ -2129,90 +2327,20 @@ class PaymentService:
     
     # Private methods for Click integration
     def _create_click_link(self, payment: Payment) -> Dict[str, str]:
-        """Create Click payment link"""
-        base_url = current_app.config.get('COMPANY_WEBSITE', 'http://localhost:5000')
-        params = {
-            'service_id': self.click_service_id,
-            'merchant_id': self.click_merchant_id,
-            'amount': payment.amount,
-            'transaction_param': payment.payment_id,
-            'return_url': f"{base_url}/payment/success?order_id={payment.order_id}",
-            'cancel_url': f"{base_url}/payment/cancel?order_id={payment.order_id}"
-        }
-
-        query_string = '&'.join([f"{k}={v}" for k, v in params.items()])
-        payment_url = f"{self.click_endpoint}?{query_string}"
-
-        return {
-            'payment_url': payment_url,
-            'reference': payment.payment_id,
-            'expires_at': (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
-        }
+        """Create Click payment link via dedicated provider service."""
+        return self._get_click_provider_service().create_payment_link(payment)
     
     def _verify_click_signature(self, data: Dict[str, Any]) -> bool:
-        """Verify Click webhook signature"""
-        if not self.click_secret_key:
-            current_app.logger.error("Click secret key not configured")
-            return False
-        
-        try:
-            # Extract signature verification parameters
-            click_trans_id = data.get('click_trans_id', '')
-            service_id = data.get('service_id', '')
-            merchant_trans_id = data.get('merchant_trans_id', '')
-            amount = data.get('amount', '')
-            action = data.get('action', '')
-            sign_time = data.get('sign_time', '')
-            sign_string = data.get('sign_string', '')
-            
-            # Build signature string according to Click specification
-            # Format: click_trans_id + service_id + secret_key + merchant_trans_id + amount + action + sign_time
-            signature_data = f"{click_trans_id}{service_id}{self.click_secret_key}{merchant_trans_id}{amount}{action}{sign_time}"
-            
-            # Calculate MD5 hash
-            expected_signature = hashlib.md5(signature_data.encode('utf-8')).hexdigest()
-            
-            if sign_string != expected_signature:
-                current_app.logger.warning(f"Invalid Click webhook signature. Expected: {expected_signature}, Got: {sign_string}")
-                return False
-            
-            return True
-            
-        except Exception as e:
-            current_app.logger.error(f"Failed to verify Click signature: {e}")
-            return False
+        """Verify Click webhook signature."""
+        return self._get_click_provider_service().verify_signature(data)
     
     def _click_prepare(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """Handle Click prepare request"""
-        transaction_param = data.get('merchant_trans_id')
-        amount = data.get('amount')
-        
-        payment = Payment.query.filter_by(payment_id=transaction_param).first()
-        if not payment or payment.amount != amount:
-            return {'error': -5, 'error_note': 'Transaction not found'}
-        
-        return {'click_trans_id': data.get('click_trans_id'), 'merchant_trans_id': transaction_param, 'merchant_prepare_id': payment.id, 'error': 0, 'error_note': 'Success'}
+        """Handle Click prepare request."""
+        return self._get_click_provider_service().handle_prepare(data)
     
     def _click_complete(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """Handle Click complete request"""
-        payment_id = data.get('merchant_prepare_id')
-        
-        payment = Payment.query.get(payment_id)
-        if not payment:
-            return {'error': -6, 'error_note': 'Transaction not found'}
-        
-        # Update payment status
-        payment.status = PaymentStatus.COMPLETED
-        payment.paid_at = datetime.now(timezone.utc)
-        payment.gateway_reference = data.get('click_trans_id')
-        payment.gateway_response = data
-        
-        self._create_transaction(payment, 'completed', data)
-        db.session.commit()
-        
-        self._handle_successful_payment(payment)
-        
-        return {'click_trans_id': data.get('click_trans_id'), 'merchant_trans_id': data.get('merchant_trans_id'), 'merchant_confirm_id': payment.id, 'error': 0, 'error_note': 'Success'}
+        """Handle Click complete request."""
+        return self._get_click_provider_service().handle_complete(data)
     
     # Helper methods
     def _generate_payment_id(self) -> str:

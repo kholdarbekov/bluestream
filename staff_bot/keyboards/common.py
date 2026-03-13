@@ -4,7 +4,7 @@ Common/shared keyboard components for Staff Bot
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup
 from typing import List
 
-from i18n import i18n
+from staff_bot.i18n import i18n
 
 
 class CommonKeyboards:

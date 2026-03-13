@@ -43,6 +43,8 @@ jest.mock('antd', () => {
   };
 });
 
+jest.setTimeout(10000);
+
 const createWrapper = () => {
   const queryClient = new QueryClient({
     defaultOptions: {

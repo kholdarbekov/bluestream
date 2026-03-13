@@ -5,8 +5,8 @@ from typing import Optional
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
-from i18n import i18n
-from utils.formatters import format_quantity
+from staff_bot.i18n import i18n
+from staff_bot.utils.formatters import format_quantity
 
 
 class TryoutKeyboards:

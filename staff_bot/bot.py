@@ -42,27 +42,27 @@ log_level = os.getenv('LOG_LEVEL', 'INFO')
 setup_logging(log_level=log_level, log_to_file=False)
 
 # Bot modules
-from config import config
-from database import db_manager, StaffUserRepository
-from i18n import i18n
-from api_client import api_client
+from staff_bot.config import config
+from staff_bot.database import db_manager, StaffUserRepository
+from staff_bot.i18n import i18n
+from staff_bot.api_client import api_client
 from webhook_server import webhook_server
-from token_manager import TokenManager
-from handlers.start import StartHandler, SELECT_LANGUAGE
-from handlers.menu import main_menu_handler, menu_handler
-from handlers.language import LanguageHandler
-from handlers.tryouts import TryoutHandler
-from handlers.tryouts import ENTER_TRYOUT_PHONE, ENTER_TRYOUT_NAME, ENTER_TRYOUT_ADDRESS
-from handlers.delivery import (
+from staff_bot.token_manager import TokenManager
+from staff_bot.handlers.start import StartHandler, SELECT_LANGUAGE
+from staff_bot.handlers.menu import main_menu_handler, menu_handler
+from staff_bot.handlers.language import LanguageHandler
+from staff_bot.handlers.tryouts import TryoutHandler
+from staff_bot.handlers.tryouts import ENTER_TRYOUT_PHONE, ENTER_TRYOUT_NAME, ENTER_TRYOUT_ADDRESS
+from staff_bot.handlers.delivery import (
     OrdersPoolHandler, ActiveDeliveryHandler, StatusUpdateHandler, CashCollectionHandler,
     HistoryHandler, LocationHandler
 )
-from handlers.operator.create_user import CreateUserHandler
-from handlers.operator.create_user import ENTER_PHONE, ENTER_FIRST_NAME, ENTER_LAST_NAME
-from handlers.operator.create_user import SELECT_LANGUAGE as CREATE_USER_LANG
-from handlers.operator.create_user import CONFIRM_CREATE
-from handlers.operator.search_user import SearchUserHandler, SEARCH_INPUT
-from handlers.operator.create_order import (
+from staff_bot.handlers.operator.create_user import CreateUserHandler
+from staff_bot.handlers.operator.create_user import ENTER_PHONE, ENTER_FIRST_NAME, ENTER_LAST_NAME
+from staff_bot.handlers.operator.create_user import SELECT_LANGUAGE as CREATE_USER_LANG
+from staff_bot.handlers.operator.create_user import CONFIRM_CREATE
+from staff_bot.handlers.operator.search_user import SearchUserHandler, SEARCH_INPUT
+from staff_bot.handlers.operator.create_order import (
     CreateOrderHandler,
     SELECT_CLIENT as ORDER_SELECT_CLIENT,
     SELECT_ADDRESS as ORDER_SELECT_ADDRESS,
@@ -72,15 +72,15 @@ from handlers.operator.create_order import (
     ENTER_NOTES as ORDER_ENTER_NOTES,
     CONFIRM_ORDER as ORDER_CONFIRM_ORDER,
 )
-from handlers.operator.manage_address import (
+from staff_bot.handlers.operator.manage_address import (
     ManageAddressHandler,
     ENTER_LABEL, ENTER_ADDRESS, ENTER_DISTRICT,
     ENTER_NOTES as ADDR_ENTER_NOTES, CONFIRM_ADDRESS
 )
-from handlers.operator.recent_orders import RecentOrdersHandler
-from handlers.operator.orders_pool_view import OperatorOrdersPoolViewHandler
-from handlers.common.profile import ProfileHandler
-from handlers.common.help import HelpHandler
+from staff_bot.handlers.operator.recent_orders import RecentOrdersHandler
+from staff_bot.handlers.operator.orders_pool_view import OperatorOrdersPoolViewHandler
+from staff_bot.handlers.common.profile import ProfileHandler
+from staff_bot.handlers.common.help import HelpHandler
 
 logger = logging.getLogger('staff_bot')
 

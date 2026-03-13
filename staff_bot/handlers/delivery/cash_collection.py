@@ -5,14 +5,14 @@ import logging
 from telegram import Update
 from telegram.ext import ContextTypes, ConversationHandler
 
-from api_client import api_client
-from handlers.base import BaseHandler
-from i18n import i18n
-from keyboards.common import CommonKeyboards
-from keyboards.delivery import DeliveryKeyboards
-from permissions import require_auth, require_delivery_driver
-from utils.formatters import escape_html, format_currency, format_user_card
-from utils.search import detect_search_type
+from staff_bot.api_client import api_client
+from staff_bot.handlers.base import BaseHandler
+from staff_bot.i18n import i18n
+from staff_bot.keyboards.common import CommonKeyboards
+from staff_bot.keyboards.delivery import DeliveryKeyboards
+from staff_bot.permissions import require_auth, require_delivery_driver
+from staff_bot.utils.formatters import escape_html, format_currency, format_user_card
+from staff_bot.utils.search import detect_search_type
 
 logger = logging.getLogger(__name__)
 

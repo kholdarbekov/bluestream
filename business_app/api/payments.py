@@ -2,6 +2,10 @@
 Payments API endpoints for the Water Business Platform
 This file should be placed in business_app/api/payments.py
 """
+import business_app.models.order as order_models
+import business_app.models.payment as payment_models
+import business_app.models.subscription as subscription_models
+import business_app.models.user as user_models
 from flask import Blueprint, request, jsonify, current_app, g
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from sqlalchemy import and_, or_, desc, func
@@ -13,10 +17,6 @@ except ImportError:
     from datetime import timezone
     UTC = timezone.utc
 
-from business_app.models.payment import Payment, CreditCard
-from business_app.models.order import Order
-from business_app.models.user import User
-from business_app.models.subscription import Subscription
 from business_app.utils.service_factory import get_payment_service, get_notification_service
 from business_app.utils.helpers import get_current_language
 from business_app.utils.translations import get_translation
@@ -33,7 +33,6 @@ from business_app.utils.validation_helpers import (
 )
 from business_app.utils.error_handlers import handle_api_exception
 from business_app.utils.exceptions import ValidationError, NotFoundError
-from business_app.utils.exceptions import ValidationError, NotFoundError
 from business_app.tasks.payment_tasks import process_payment_verification, handle_payment_webhook
 from business_app.utils.api_responses import (
     success_response, error_response, paginated_response, created_response,
@@ -43,6 +42,12 @@ from business_app.utils.api_responses import (
 from business_app import db
 
 payments_bp = Blueprint('payments', __name__)
+
+Payment = payment_models.Payment
+CreditCard = payment_models.CreditCard
+Order = order_models.Order
+User = user_models.User
+Subscription = subscription_models.Subscription
 
 
 
@@ -65,48 +70,17 @@ def get_payment_methods():
             is_active=True
         ).all()
 
-        # Available payment providers
         available_methods = [
             {
-                'method': 'payme',
-                'name': 'Payme',
-                'icon_url': '/static/images/payment/payme.png',
-                'description': 'Pay with Payme wallet or card',
-                'is_active': True,
-                'supported_currencies': ['UZS']
-            },
-            {
-                'method': 'click',
-                'name': 'Click',
-                'icon_url': '/static/images/payment/click.png',
-                'description': 'Pay with Click wallet or card',
-                'is_active': True,
-                'supported_currencies': ['UZS']
-            },
-            {
-                'method': 'uzcard',
-                'name': 'UzCard',
-                'icon_url': '/static/images/payment/uzcard.png',
-                'description': 'Pay with UzCard',
-                'is_active': True,
-                'supported_currencies': ['UZS']
-            },
-            {
-                'method': 'humo',
-                'name': 'Humo',
-                'icon_url': '/static/images/payment/humo.png',
-                'description': 'Pay with Humo card',
-                'is_active': True,
-                'supported_currencies': ['UZS']
-            },
-            {
-                'method': 'cash',
-                'name': 'Cash on Delivery',
-                'icon_url': '/static/images/payment/cash.png',
-                'description': 'Pay with cash when order is delivered',
-                'is_active': True,
-                'supported_currencies': ['UZS']
+                'method': method['method'],
+                'name': method['display_name'],
+                'icon_url': method['icon_url'],
+                'description': method['description'],
+                'is_active': method['is_active'],
+                'supported_currencies': method['supported_currencies'],
             }
+            for method in get_available_payment_methods()
+            if method.get('is_active')
         ]
 
         cod_context = CashCollectionService().get_cod_restriction_context(current_user_id)
@@ -183,10 +157,12 @@ def create_payment():
 
         # Check for existing pending payment for this order with same payment method
         # This prevents duplicate payments when user retries payment
+        requested_payment_method = PaymentMethod(payment_method)
         existing_payment = Payment.query.filter(
             Payment.order_id == order_id,
             Payment.user_id == current_user_id,
-            Payment.status == PaymentStatus.PENDING
+            Payment.status == PaymentStatus.PENDING,
+            Payment.payment_method == requested_payment_method,
         ).first()
 
         if existing_payment:
@@ -216,7 +192,7 @@ def create_payment():
             'user_id': current_user_id,
             'amount': order.total_amount,
             'currency': 'UZS',
-            'payment_method': PaymentMethod(payment_method),
+            'payment_method': requested_payment_method,
             'description': f'Payment for order #{order.order_number}',
             'return_url': data.get('return_url'),
             'cancel_url': data.get('cancel_url'),
@@ -741,8 +717,12 @@ def payment_webhook(provider):
             # Payme REQUIRES synchronous response with JSON-RPC result
             response_data = payment_service.handle_payme_webhook(webhook_data)
             return jsonify(response_data)
-        
-        # Add metadata for processing
+
+        if provider.lower() == 'click':
+            # Click Prepare/Complete requires an immediate provider-formatted response.
+            response_data = payment_service.handle_click_webhook(webhook_data)
+            return jsonify(response_data), 200
+
         webhook_metadata = {
             'provider': provider.lower(),
             'webhook_data': webhook_data,
@@ -751,15 +731,8 @@ def payment_webhook(provider):
             'received_at': datetime.now(UTC).isoformat(),
             'content_type': request.content_type
         }
-
-        # Process webhook asynchronously
         handle_payment_webhook.delay(webhook_metadata, provider.lower())
-
-        # Return provider-specific response format
-        if provider.lower() == 'click':
-            return jsonify({'error': 0, 'error_note': 'Success'}), 200
-        else:
-            return jsonify({'status': 'received'}), 200
+        return jsonify({'status': 'received'}), 200
 
     except Exception as e:
         current_app.logger.error(f"Payment webhook error for {provider}: {e}")
@@ -857,7 +830,7 @@ def request_refund():
             data={
                 'message': get_translation('api.payments.refund_requested'),
                 'refund_id': refund.id,
-                'status': refund.status.value
+                'status': refund.status.value if hasattr(refund.status, 'value') else refund.status
             }
         )
 

@@ -1,8 +1,8 @@
 """
 Common handler modules for Staff Bot
 """
-from handlers.common.profile import ProfileHandler
-from handlers.common.help import HelpHandler
+from staff_bot.handlers.common.profile import ProfileHandler
+from staff_bot.handlers.common.help import HelpHandler
 
 __all__ = [
     'ProfileHandler',

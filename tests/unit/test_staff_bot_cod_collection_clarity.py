@@ -1,16 +1,7 @@
 """Regression tests for COD settlement clarity text in staff bot order cards."""
 
-from pathlib import Path
-import sys
-
-
-ROOT = Path(__file__).resolve().parents[2]
-STAFF_BOT_ROOT = ROOT / "staff_bot"
-if str(STAFF_BOT_ROOT) not in sys.path:
-    sys.path.insert(0, str(STAFF_BOT_ROOT))
-
-from handlers.delivery.status_update import StatusUpdateHandler  # noqa: E402
-from utils.formatters import format_order_card, get_cod_cash_projection  # noqa: E402
+from staff_bot.handlers.delivery.status_update import StatusUpdateHandler
+from staff_bot.utils.formatters import format_order_card, get_cod_cash_projection
 
 
 def test_format_order_card_marks_cash_as_already_collected_when_settled():

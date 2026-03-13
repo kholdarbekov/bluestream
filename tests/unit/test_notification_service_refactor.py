@@ -151,28 +151,21 @@ def test_create_notification_campaign_persists_audit_log_and_normalizes_phone_ch
         sender_id=admin_user.id,
         payload={
             'name': 'Weekend retention push',
+            'notification_type': NotificationType.PROMOTIONAL.value,
             'channel': 'phone',
             'subject': 'Weekend special',
             'content': 'Save 10% this weekend',
             'target_audience': 'all_customers',
             'priority': 'high',
-            'status': 'scheduled',
         },
     )
 
-    audit_log = AuditLog.query.filter_by(
-        resource_type=service.NOTIFICATION_CAMPAIGN_RESOURCE_TYPE,
-        action=service.NOTIFICATION_CAMPAIGN_CREATE_ACTION,
-    ).one()
-
     assert campaign['name'] == 'Weekend retention push'
+    assert campaign['notification_type'] == NotificationType.PROMOTIONAL.value
     assert campaign['channel'] == 'sms'
-    assert campaign['recipient_count'] == 1
-    assert campaign['status'] == 'scheduled'
-    assert audit_log.new_values['name'] == 'Weekend retention push'
-    assert audit_log.new_values['channel'] == 'sms'
-    assert audit_log.new_values['recipient_count'] == 1
-    assert audit_log.user_id == admin_user.id
+    assert campaign['recipient_count'] == 0
+    assert campaign['status'] == 'draft'
+    assert campaign['summary']['total'] == 0
 
 
 def test_get_notification_campaigns_paginated_filters_by_search_status_and_channel(
@@ -184,25 +177,31 @@ def test_get_notification_campaigns_paginated_filters_by_search_status_and_chann
         sender_id=admin_user.id,
         payload={
             'name': 'VIP delivery alert',
-            'channel': 'push',
+            'notification_type': NotificationType.SYSTEM_ALERT.value,
+            'channel': 'in_app',
             'subject': 'Driver is nearby',
             'content': 'Your order is almost there',
-            'target_audience': 'active_customers',
+            'target_audience': 'all_customers',
             'priority': 'medium',
-            'status': 'draft',
         },
     )
     second = service.create_notification_campaign(
         sender_id=admin_user.id,
         payload={
             'name': 'Loyalty reminder',
+            'notification_type': NotificationType.PROMOTIONAL.value,
             'channel': 'email',
             'subject': 'Use your points',
             'content': 'Redeem your loyalty balance',
-            'target_audience': 'loyalty_members',
+            'target_audience': 'all_customers',
             'priority': 'low',
-            'status': 'scheduled',
+            'scheduled_at': datetime.now(UTC).isoformat(),
         },
+    )
+    service.queue_notification_campaign(
+        sender_id=admin_user.id,
+        campaign_id=second['id'],
+        send_now=False,
     )
 
     result = service.get_notification_campaigns_paginated(

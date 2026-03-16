@@ -18,7 +18,7 @@ from business_app.utils.exceptions import NotFoundError, ValidationError
 class ProductFiscalService:
     """Manage product fiscal metadata and marking-code inventory."""
 
-    REQUIRED_FISCAL_FIELDS = ("barcode", "spic", "units")
+    REQUIRED_FISCAL_FIELDS = ("spic",)
     LOW_STOCK_THRESHOLD = 10
 
     def get_product_or_raise(self, product_id: int) -> Product:
@@ -69,6 +69,7 @@ class ProductFiscalService:
                 raise ValidationError(
                     f"Fiscalization cannot be enabled until these fields are set: {', '.join(missing_fields)}"
                 )
+            self._validate_click_contract_fields(product)
 
         if profile.requires_marking_codes and not profile.fiscalization_enabled:
             raise ValidationError("Marked products must have fiscalization enabled")
@@ -91,13 +92,17 @@ class ProductFiscalService:
 
     def get_missing_required_fiscal_fields(self, product: Product) -> List[str]:
         missing: List[str] = []
-        if not product.barcode:
-            missing.append("barcode")
         if not product.spic:
             missing.append("spic")
-        if not product.units:
-            missing.append("units")
         return missing
+
+    @staticmethod
+    def _validate_click_contract_fields(product: Product) -> None:
+        vat_value = Decimal(str(product.vat_percent or 0)).quantize(Decimal('0.01'))
+        if vat_value < Decimal('0') or vat_value > Decimal('100'):
+            raise ValidationError("VAT percent must be between 0 and 100")
+        if vat_value != vat_value.to_integral_value():
+            raise ValidationError("VAT percent must be an integer for Click fiscalization")
 
     def get_marking_code_counts(self, product_id: int) -> Dict[str, int]:
         rows = (

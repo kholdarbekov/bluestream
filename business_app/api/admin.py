@@ -4216,6 +4216,19 @@ def get_payment(payment_id):
             'created_at': payment.created_at.isoformat() if payment.created_at else None,
             'updated_at': payment.updated_at.isoformat() if payment.updated_at else None
         }
+        try:
+            payment_data['fiscalization_diagnostic'] = PaymentFiscalizationService().diagnose_fiscalization_gap(payment)
+        except Exception as diag_exc:  # noqa: BLE001
+            current_app.logger.warning(
+                "Failed to build fiscalization diagnostic for payment %s: %s",
+                payment.id,
+                diag_exc,
+            )
+            payment_data['fiscalization_diagnostic'] = {
+                'payment_id': payment.id,
+                'is_ready': False,
+                'issues': [f'diagnostic_error:{diag_exc}'],
+            }
 
         return success_response(data={'payment': payment_data})
 

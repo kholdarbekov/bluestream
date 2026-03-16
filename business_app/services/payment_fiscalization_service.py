@@ -57,6 +57,7 @@ class PaymentFiscalizationService:
             ),
             'fiscalization_attempts': int(fiscalization.attempts or 0),
             'provider_status': fiscalization.provider_status,
+            'payload': fiscalization.request_payload if hasattr(fiscalization, 'request_payload') else ''
         }
 
     def _log_fiscal_step(

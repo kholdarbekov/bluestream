@@ -1,12 +1,15 @@
 """Unit tests for profile/address/merge methods extracted to AuthService."""
 
+from datetime import datetime, UTC, timedelta
+from decimal import Decimal
 from unittest.mock import patch
 
 import pytest
 
+from business_app.models.subscription import Subscription
 from business_app.models.user import User
 from business_app.services.auth_service import AuthService
-from business_app.utils.constants import UserRole, UserStatus
+from business_app.utils.constants import PaymentMethod, SubscriptionFrequency, UserRole, UserStatus
 from business_app.utils.exceptions import ValidationError, ConflictError
 from business_app.utils.password_security import hash_password
 
@@ -63,6 +66,35 @@ def test_delete_user_address_blocks_default_when_other_addresses_exist(auth_serv
 
     with pytest.raises(ValidationError):
         auth_service.delete_user_address(sample_user.id, first.id)
+
+
+def test_delete_user_address_blocks_subscription_linked_address(auth_service, db, sample_user):
+    auth_service.add_user_address(
+        sample_user.id,
+        {"title": "Home", "full_address": "A", "is_default": True},
+    )
+    linked = auth_service.add_user_address(
+        sample_user.id,
+        {"title": "Work", "full_address": "B", "is_default": False},
+    )
+
+    subscription = Subscription(
+        subscription_number='SUB-AUTH-SERVICE-ADDR-1',
+        user_id=sample_user.id,
+        name='Auth service address lock',
+        billing_cycle=SubscriptionFrequency.WEEKLY,
+        billing_amount=Decimal('20000.00'),
+        next_billing_date=datetime.now(UTC) + timedelta(days=7),
+        delivery_frequency=SubscriptionFrequency.WEEKLY,
+        delivery_address_id=linked.id,
+        start_date=datetime.now(UTC),
+        payment_method=PaymentMethod.CARD,
+    )
+    db.session.add(subscription)
+    db.session.commit()
+
+    with pytest.raises(ValidationError):
+        auth_service.delete_user_address(sample_user.id, linked.id)
 
 
 def test_link_web_account_uses_merge_service_and_returns_tokens(auth_service, db, sample_user):

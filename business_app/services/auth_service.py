@@ -9,6 +9,7 @@ from typing import Optional, Dict, Any, Tuple, List
 from flask import current_app, request
 from flask_jwt_extended import get_jwt_identity
 import redis
+from sqlalchemy.exc import IntegrityError
 
 from business_app.models.user import User, UserAddress, UserSession
 from business_app.utils.exceptions import ValidationError, UnauthorizedError, ConflictError, NotFoundError
@@ -1315,6 +1316,21 @@ class AuthService:
         if not address:
             raise NotFoundError(get_translation('api.auth.address_not_found'))
 
+        from business_app.models.subscription import Subscription
+
+        has_subscription_reference = (
+            Subscription.query.filter_by(
+                user_id=user_id,
+                delivery_address_id=address_id,
+            ).first()
+            is not None
+        )
+        if has_subscription_reference:
+            message = get_translation('api.addresses.error.in_use_by_subscription')
+            if message == 'api.addresses.error.in_use_by_subscription':
+                message = 'Cannot delete an address used by subscriptions'
+            raise ValidationError(message)
+
         if address.is_default:
             other_addresses_count = UserAddress.query.filter(
                 UserAddress.user_id == user_id,
@@ -1323,8 +1339,14 @@ class AuthService:
             if other_addresses_count > 0:
                 raise ValidationError(get_translation('error.forbidden'))
 
-        db.session.delete(address)
-        db.session.commit()
+        try:
+            db.session.delete(address)
+            db.session.commit()
+        except IntegrityError:
+            db.session.rollback()
+            raise ValidationError(
+                'Cannot delete an address referenced by existing records'
+            )
 
     def set_default_user_address(self, user_id: int, address_id: int) -> UserAddress:
         """Set a specific user-owned address as default."""

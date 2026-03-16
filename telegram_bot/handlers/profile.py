@@ -3,6 +3,7 @@ User profile and registration handlers
 """
 import logging
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from typing import Dict, Any
 from telegram import constants, Update, ReplyKeyboardRemove
 from telegram.helpers import escape_markdown
@@ -1502,6 +1503,12 @@ class ProfileHandlers(BaseHandler):
                 logger.info(f"Callback data: {update.callback_query.data}")
             logger.info(f"Starting add address conversation for user {user_id}")
 
+            # Preserve source so successful save can route users back into checkout.
+            if update.callback_query and update.callback_query.data == 'add_new_address_checkout':
+                context.user_data['address_flow_origin'] = 'checkout'
+            else:
+                context.user_data.pop('address_flow_origin', None)
+
             # Initialize temp address data
             context.user_data['temp_address_data'] = {}
             context.user_data['conversation_state'] = 'address_location'
@@ -1741,6 +1748,7 @@ class ProfileHandlers(BaseHandler):
             context.user_data.pop('temp_location', None)
             context.user_data.pop('temp_address', None)
             context.user_data.pop('temp_address_data', None)
+            context.user_data.pop('address_flow_origin', None)
 
             return ConversationHandler.END
 
@@ -1773,6 +1781,7 @@ class ProfileHandlers(BaseHandler):
             context.user_data.pop('temp_location', None)
             context.user_data.pop('temp_address', None)
             context.user_data.pop('temp_address_data', None)
+            context.user_data.pop('address_flow_origin', None)
 
             return ConversationHandler.END
 
@@ -2396,6 +2405,25 @@ class ProfileHandlers(BaseHandler):
             logger.error(f"Error in address_title_callback: {e}")
             return ConversationHandler.END
 
+    async def _resume_checkout_after_address(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Continue checkout flow after address is saved from checkout path."""
+        from handlers.orders import order_handlers
+
+        callback_query = getattr(update, 'callback_query', None)
+        callback_message = callback_query.message if callback_query else None
+        resume_message = update.message or callback_message
+
+        if resume_message is not None:
+            synthetic_update = SimpleNamespace(
+                effective_user=update.effective_user,
+                callback_query=None,
+                message=resume_message,
+            )
+            await order_handlers.checkout_handler(synthetic_update, context)
+            return
+
+        await order_handlers.checkout_handler(update, context)
+
     async def save_address_final(self, update: Update, context: ContextTypes.DEFAULT_TYPE, is_callback: bool = False):
         """Save the address to API"""
         try:
@@ -2434,10 +2462,16 @@ class ProfileHandlers(BaseHandler):
                     else:
                         logger.error(f"Failed to save address: {response.error}")
 
+            resume_checkout_after_save = context.user_data.pop('address_flow_origin', None) == 'checkout'
+
             # Clear temp data
             context.user_data.pop('temp_address_data', None)
             context.user_data.pop('temp_location', None)
             context.user_data.pop('temp_address', None)
+
+            if success and resume_checkout_after_save:
+                await self._resume_checkout_after_address(update, context)
+                return ConversationHandler.END
 
             if success:
                 success_text = i18n.get('telegram.address.saved_successfully', language)

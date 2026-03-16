@@ -8,7 +8,7 @@ from telegram.ext import ContextTypes
 from telegram.helpers import escape_markdown
 
 from i18n import i18n
-from keyboards import OrderKeyboards, MenuKeyboards, ProfileKeyboards, PaymentKeyboards
+from keyboards import OrderKeyboards, MenuKeyboards, PaymentKeyboards
 from api_client import api_client
 from database import db_manager, BotUserRepository
 from utils import user_middleware, format_price, MessageBuilder, get_auth_token
@@ -468,17 +468,17 @@ class OrderHandlers(BaseHandler):
             if not addresses:
                 # No addresses, prompt to add one
                 add_address_text = i18n.get('telegram.orders.no_address_prompt', language)
-                keyboard = ProfileKeyboards.location_request(language)
+                keyboard = OrderKeyboards.delivery_addresses([], language)
                 if update.callback_query:
                     await update.callback_query.edit_message_text(
                         text=add_address_text,
-                        reply_markup=MenuKeyboards.back_button(language)
+                        reply_markup=keyboard
                     )
                     await update.callback_query.answer()
                 else:
                     await update.message.reply_text(
                         text=add_address_text,
-                        reply_markup=MenuKeyboards.back_button(language)
+                        reply_markup=keyboard
                     )
                 
                 # Set state for address input

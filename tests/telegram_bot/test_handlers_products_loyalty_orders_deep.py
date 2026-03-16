@@ -324,7 +324,7 @@ class TestOrderHandlerDeepFlows:
         monkeypatch.setattr(orders_module.i18n, "get_user_language", AsyncMock(return_value="en"))
         monkeypatch.setattr(orders_module.i18n, "get", _i18n_get)
         monkeypatch.setattr(orders_module, "get_auth_token", AsyncMock(return_value="jwt"))
-        monkeypatch.setattr(orders_module.MenuKeyboards, "back_button", lambda _l: "back-kbd")
+        monkeypatch.setattr(orders_module.OrderKeyboards, "delivery_addresses", lambda _a, _l: "address-kbd")
         monkeypatch.setattr(
             orders_module,
             "api_client",
@@ -335,7 +335,7 @@ class TestOrderHandlerDeepFlows:
 
         update.callback_query.edit_message_text.assert_awaited_once_with(
             text="telegram.orders.no_address_prompt:en",
-            reply_markup="back-kbd",
+            reply_markup="address-kbd",
         )
         handler.user_repo.update_user_state.assert_awaited_once_with(update.effective_user.id, {"awaiting_input": "address_location"})
 

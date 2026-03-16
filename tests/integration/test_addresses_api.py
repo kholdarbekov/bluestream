@@ -1,8 +1,13 @@
 """Integration tests for address management API endpoints."""
 
+from datetime import datetime, UTC, timedelta
+from decimal import Decimal
+
 import pytest
 
+from business_app.models.subscription import Subscription
 from business_app.models.user import UserAddress
+from business_app.utils.constants import PaymentMethod, SubscriptionFrequency
 
 
 def _create_address(client, headers, **overrides):
@@ -83,6 +88,34 @@ class TestAddressesAPI:
         delete_response = client.delete(f"/api/v1/addresses/{created['id']}", headers=auth_headers)
         assert delete_response.status_code == 200
         assert delete_response.get_json()["success"] is True
+
+    def test_delete_address_used_by_subscription_is_blocked(self, client, auth_headers, db, sample_user):
+        _create_address(client, auth_headers, title="Primary", full_address="Main 1")
+        linked = _create_address(
+            client,
+            auth_headers,
+            title="Linked",
+            full_address="Subscription street 2",
+        ).get_json()["data"]["address"]
+
+        subscription = Subscription(
+            subscription_number='SUB-ADDR-TEST-1',
+            user_id=sample_user.id,
+            name='Address lock test',
+            billing_cycle=SubscriptionFrequency.WEEKLY,
+            billing_amount=Decimal('15000.00'),
+            next_billing_date=datetime.now(UTC) + timedelta(days=7),
+            delivery_frequency=SubscriptionFrequency.WEEKLY,
+            delivery_address_id=linked["id"],
+            start_date=datetime.now(UTC),
+            payment_method=PaymentMethod.CARD,
+        )
+        db.session.add(subscription)
+        db.session.commit()
+
+        delete_response = client.delete(f"/api/v1/addresses/{linked['id']}", headers=auth_headers)
+        assert delete_response.status_code == 400
+        assert delete_response.get_json()["success"] is False
 
     def test_not_found_paths(self, client, auth_headers):
         get_missing = client.get("/api/v1/addresses/999999", headers=auth_headers)

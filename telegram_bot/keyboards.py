@@ -378,7 +378,7 @@ class OrderKeyboards:
             }])
         
         buttons.extend([
-            [{'text': i18n.get('telegram.address.add_new', language), 'callback_data': 'add_new_address'}],
+            [{'text': i18n.get('telegram.address.add_new', language), 'callback_data': 'add_new_address_checkout'}],
             [{'text': i18n.get('telegram.back', language), 'callback_data': 'back_to_cart'}]
         ])
         

@@ -5,8 +5,10 @@ Manages user delivery addresses with geocoding support
 from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from sqlalchemy import desc
+from sqlalchemy.exc import IntegrityError
 
 from business_app.models.user import User, UserAddress
+from business_app.models.subscription import Subscription
 from business_app.utils.error_handlers import handle_api_exception
 from business_app.utils.exceptions import ValidationError, NotFoundError, ForbiddenError
 from business_app.utils.decorators import validate_json, rate_limit
@@ -212,6 +214,19 @@ def delete_address(address_id):
             errors={'address': get_translation('api.addresses.error.cannot_delete_only_address')}
         )
 
+    has_subscription_reference = (
+        Subscription.query.filter_by(
+            user_id=user_id,
+            delivery_address_id=address_id,
+        ).first()
+        is not None
+    )
+    if has_subscription_reference:
+        message = get_translation('api.addresses.error.in_use_by_subscription')
+        if message == 'api.addresses.error.in_use_by_subscription':
+            message = 'Cannot delete an address used by subscriptions'
+        return validation_error_response(errors={'address': message})
+
     # If deleting default address, set another as default
     if address.is_default:
         other_address = UserAddress.query.filter(
@@ -221,8 +236,14 @@ def delete_address(address_id):
         if other_address:
             other_address.is_default = True
 
-    db.session.delete(address)
-    db.session.commit()
+    try:
+        db.session.delete(address)
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        return validation_error_response(
+            errors={'address': 'Cannot delete an address referenced by existing records'}
+        )
 
     current_app.logger.info(f"User {user_id} deleted address {address_id}")
 

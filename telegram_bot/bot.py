@@ -397,7 +397,7 @@ class WaterBusinessBot:
         
         # Address input conversation - Enhanced flow with manual entry support
         address_handler = ConversationHandler(
-            entry_points=[CallbackQueryHandler(profile_handlers.add_address, pattern="^add_new_address$")],
+            entry_points=[CallbackQueryHandler(profile_handlers.add_address, pattern="^add_new_address(_checkout)?$")],
             states={
                 # Location sharing or manual entry choice
                 ADDRESS_LOCATION: [

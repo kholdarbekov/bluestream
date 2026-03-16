@@ -5,6 +5,7 @@ This file should be placed in business_app/api/admin.py
 from flask import Blueprint, request, jsonify, current_app, g, Response
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from sqlalchemy import and_, or_, desc, func, text, cast, String
+from sqlalchemy.exc import IntegrityError
 from datetime import datetime, UTC, timedelta
 from decimal import Decimal
 from shared.constants import DISPLAY_TIMEZONE
@@ -1623,6 +1624,19 @@ def delete_user_address(user_id, address_id):
         if address_count == 1:
             return validation_error_response('Cannot delete the only address for this user')
 
+        has_subscription_reference = (
+            Subscription.query.filter_by(
+                user_id=user_id,
+                delivery_address_id=address_id,
+            ).first()
+            is not None
+        )
+        if has_subscription_reference:
+            message = get_translation('api.addresses.error.in_use_by_subscription')
+            if message == 'api.addresses.error.in_use_by_subscription':
+                message = 'Cannot delete an address used by subscriptions'
+            return validation_error_response(message)
+
         # If deleting default address, set another as default
         if address.is_default:
             other_address = UserAddress.query.filter(
@@ -1641,6 +1655,9 @@ def delete_user_address(user_id, address_id):
 
         return success_response(message='Address deleted successfully')
 
+    except IntegrityError:
+        db.session.rollback()
+        return validation_error_response('Cannot delete an address referenced by existing records')
     except Exception as e:
         db.session.rollback()
         current_app.logger.error(f"Delete user address error: {e}")

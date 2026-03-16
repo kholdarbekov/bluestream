@@ -573,6 +573,69 @@ class TestProfileAddressHandlerFlows:
             parse_mode="Markdown",
         )
 
+    async def test_add_address_from_checkout_marks_checkout_origin(self, monkeypatch):
+        handler = profile_module.ProfileHandlers()
+        handler.user_repo = SimpleNamespace(update_user_state=AsyncMock())
+        update = DummyUpdate(user_id=205)
+        update.callback_query = DummyCallbackQuery(data="add_new_address_checkout")
+        context = make_context()
+
+        monkeypatch.setattr(profile_module.i18n, "get_user_language", AsyncMock(return_value="en"))
+        monkeypatch.setattr(profile_module.i18n, "get", lambda key, lang, **_: f"{key}:{lang}")
+        monkeypatch.setattr(profile_module.ProfileKeyboards, "location_request_with_skip", lambda _lang: "loc-kbd")
+
+        state = await handler.add_address(update, context)
+
+        assert state == ADDRESS_LOCATION
+        assert context.user_data["address_flow_origin"] == "checkout"
+
+    async def test_save_address_final_from_checkout_resumes_checkout(self, monkeypatch):
+        handler = profile_module.ProfileHandlers()
+        update = DummyUpdate(user_id=206)
+        update.callback_query = DummyCallbackQuery(data="addr_title_home")
+        context = make_context()
+        context.user_data["temp_address_data"] = {
+            "title": "Home",
+            "full_address": "Sample address",
+            "city": "Tashkent",
+            "latitude": 41.3,
+            "longitude": 69.2,
+        }
+        context.user_data["address_flow_origin"] = "checkout"
+
+        saved_payloads = []
+
+        class _APIContext:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc_val, exc_tb):
+                return False
+
+            async def add_user_address(self, token, payload):
+                saved_payloads.append((token, payload))
+                return _resp(success=True)
+
+        resume_checkout = AsyncMock()
+
+        monkeypatch.setattr(profile_module.i18n, "get_user_language", AsyncMock(return_value="en"))
+        monkeypatch.setattr(profile_module.i18n, "get", lambda key, lang, **_: f"{key}:{lang}")
+        monkeypatch.setattr(profile_module, "get_auth_token", AsyncMock(return_value="jwt-token"))
+        monkeypatch.setattr(profile_module, "api_client", _APIContext())
+        monkeypatch.setattr(orders_module.order_handlers, "checkout_handler", resume_checkout)
+
+        state = await handler.save_address_final(update, context, is_callback=True)
+
+        assert state == ConversationHandler.END
+        assert saved_payloads and saved_payloads[0][0] == "jwt-token"
+        resume_checkout.assert_awaited_once()
+        resumed_update = resume_checkout.await_args.args[0]
+        assert resumed_update.callback_query is None
+        assert resumed_update.message is update.callback_query.message
+        assert "temp_address_data" not in context.user_data
+        assert "address_flow_origin" not in context.user_data
+        update.callback_query.edit_message_text.assert_not_awaited()
+
 
 @pytest.mark.unit
 @pytest.mark.anyio

@@ -438,17 +438,13 @@ def setup_enhanced_logging(app):
     
     # Console handler for both development and production
     # Docker containers need stdout/stderr logging for `docker logs` to work
+    # Keep console output human-readable in all environments.
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.addFilter(security_filter)
-
-    if app.debug:
-        # Development: Human-readable format
-        console_handler.setFormatter(human_formatter)
-        console_handler.setLevel(logging.DEBUG)
-    else:
-        # Production: Structured JSON format for log aggregation
-        console_handler.setFormatter(structured_formatter)
-        console_handler.setLevel(getattr(logging, app.config['LOG_LEVEL']))
+    console_handler.setFormatter(human_formatter)
+    console_handler.setLevel(
+        logging.DEBUG if app.debug else getattr(logging, app.config['LOG_LEVEL'])
+    )
 
     handlers['console'] = console_handler
     

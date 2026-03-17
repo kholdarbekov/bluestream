@@ -3105,15 +3105,36 @@ class NotificationService:
         }
         
         try:
-            response = requests.post(url, json=payload)
-            response.raise_for_status()
-            
-            result = response.json()
+            response = requests.post(url, json=payload, timeout=15)
+            try:
+                result = response.json()
+            except ValueError:
+                result = {}
+
+            if response.status_code >= 400 or not result.get('ok', False):
+                description = (
+                    result.get('description')
+                    or result.get('error')
+                    or f"Telegram API error (status={response.status_code})"
+                )
+                logger.warning(
+                    "Telegram notification rejected: user_id=%s notification_type=%s status=%s description=%s",
+                    getattr(user, 'id', None),
+                    self._status_value(notification_type),
+                    response.status_code,
+                    description,
+                )
+                return {
+                    'success': False,
+                    'error': description,
+                    'status_code': response.status_code,
+                }
+
             return {
-                'success': result.get('ok', False),
+                'success': True,
                 'message_id': result.get('result', {}).get('message_id')
             }
-        except Exception as e:
+        except requests.RequestException as e:
             logger.warning(
                 "Telegram notification failed: user_id=%s notification_type=%s error=%s",
                 getattr(user, 'id', None),

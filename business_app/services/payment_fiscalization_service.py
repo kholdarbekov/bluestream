@@ -775,9 +775,9 @@ class PaymentFiscalizationService:
             'service_id': service_id,
             'payment_id': click_payment_id,
             'received_cash': 0,
-            'received_ecash': 0,
+            'received_ecash': received_card_tiyin,
             # Card payments in this flow charge the full order amount from card.
-            'received_card': received_card_tiyin,
+            'received_card': 0,
             'items': items_payload,
         }
         self._log_fiscal_step(

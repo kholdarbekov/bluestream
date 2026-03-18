@@ -922,6 +922,7 @@ class ClickPaymentProviderService:
         self._log_flow_step(
             'fiscalize_payment_started',
             payment=payment,
+            payload=payload,
             payload_hash=self._payload_hash(payload),
             items_count=len(payload.get('items') or []),
         )
@@ -955,6 +956,7 @@ class ClickPaymentProviderService:
             'fiscalize_payment_submit_items_completed',
             payment=payment,
             error_code=submit_response.get('error_code'),
+            error_note=submit_response.get('error_note'),
         )
         click_payment_id = self._resolve_click_payment_id(payment)
         provider_status = 'submitted'

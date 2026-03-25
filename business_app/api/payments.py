@@ -683,6 +683,7 @@ def payment_webhook(provider):
     """Handle payment webhooks from providers with replay protection"""
     # Note: This endpoint must use jsonify() directly for provider-specific response formats
     # as payment providers (Payme, Click) expect specific JSON structures
+    current_app.logger.info(f"/webhook/{provider} started with payload: {request.get_json(silent=True)}")
     try:
         # Comprehensive webhook validation with replay protection
         payment_service = get_payment_service()

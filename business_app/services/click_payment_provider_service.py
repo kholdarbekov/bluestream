@@ -316,6 +316,7 @@ class ClickPaymentProviderService:
             click_trans_id=str(payload.get('click_trans_id') or ''),
             merchant_trans_id=str(payload.get('merchant_trans_id') or payload.get('transaction_param') or ''),
             action=str(payload.get('action') or ''),
+            payload=payload
         )
         if not self.verify_signature(payload):
             self._log_flow_step('handle_callback_signature_invalid', level='warning')
@@ -738,6 +739,14 @@ class ClickPaymentProviderService:
                 status_code=response.status_code,
             )
             raise PaymentError(f"Click merchant API invalid JSON response for {method} {url}") from exc
+        self._log_flow_step(
+            'merchant_request_http_response',
+            endpoint=endpoint_label or fallback_path,
+            method=method,
+            url=url,
+            status_code=response.status_code,
+            response_preview=data,
+        )
         normalized = self._normalize_merchant_response(data)
         error_code = self._extract_error_code(normalized) if isinstance(normalized, dict) else None
         error_note = self._extract_error_note(normalized) if isinstance(normalized, dict) else None

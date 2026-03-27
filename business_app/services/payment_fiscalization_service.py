@@ -720,7 +720,7 @@ class PaymentFiscalizationService:
                 'SPIC': spic,
                 'PackageCode': package_code,
                 'Price': self._to_tiyin(total_price),
-                'Amount': quantity,
+                'Amount': quantity * 1000, # Click developers informed that 'Amount' field should be multiplied by 1000
                 'VAT': self._to_tiyin(vat_amount),
                 'VATPercent': int(vat_percent),
             }

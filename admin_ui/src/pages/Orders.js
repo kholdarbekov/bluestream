@@ -1227,7 +1227,7 @@ const Orders = () => {
                         initialValue={1}
                       >
                         <Select placeholder={t('ui.orders.quantity', 'Qty')}>
-                          {Array.from({ length: 40 }, (_, index) => index + 1).map((value) => (
+                          {Array.from({ length: 100 }, (_, index) => index + 1).map((value) => (
                             <Option key={value} value={value}>{value}</Option>
                           ))}
                         </Select>

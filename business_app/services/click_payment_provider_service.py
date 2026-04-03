@@ -12,6 +12,7 @@ import requests
 from flask import current_app
 
 from business_app import db
+from business_app.models.order import Order
 from business_app.models.payment import Payment, PaymentTransaction
 from business_app.utils.constants import PaymentMethod, PaymentStatus
 from business_app.utils.exceptions import PaymentError, ValidationError
@@ -116,8 +117,8 @@ class ClickPaymentProviderService:
             'service_id': self.service_id,
             'merchant_id': self.merchant_id,
             'amount': f"{amount}",
-            'transaction_param': payment.payment_id,
-            'merchant_trans_id': payment.payment_id,
+            'transaction_param': payment.order.order_number,
+            'merchant_trans_id': payment.order.order_number,
             'return_url': success_url,
             'cancel_url': cancel_url,
         }
@@ -236,7 +237,7 @@ class ClickPaymentProviderService:
     ) -> Dict[str, Any]:
         return {
             'click_trans_id': payload.get('click_trans_id'),
-            'merchant_trans_id': payment.payment_id,
+            'merchant_trans_id': payment.order.order_number,
             'merchant_confirm_id': payment.id,
             'error': 0,
             'error_note': 'Success',
@@ -335,7 +336,8 @@ class ClickPaymentProviderService:
             merchant_trans_id=merchant_trans_id,
             click_trans_id=str(payload.get('click_trans_id') or ''),
         )
-        payment = Payment.query.filter_by(payment_id=merchant_trans_id).with_for_update().first()
+        order = Order.query.filter_by(order_number=merchant_trans_id).first()
+        payment = Payment.query.filter_by(order_id=order.id).with_for_update().first() if order else None
         if not payment:
             self._log_flow_step(
                 'prepare_payment_not_found',
@@ -382,7 +384,7 @@ class ClickPaymentProviderService:
 
         response = {
             'click_trans_id': payload.get('click_trans_id'),
-            'merchant_trans_id': payment.payment_id,
+            'merchant_trans_id': payment.order.order_number,
             'merchant_prepare_id': payment.id,
             'error': 0,
             'error_note': 'Success',
@@ -406,7 +408,8 @@ class ClickPaymentProviderService:
         if merchant_prepare_id:
             payment = Payment.query.filter_by(id=merchant_prepare_id).with_for_update().first()
         if not payment and merchant_trans_id:
-            payment = Payment.query.filter_by(payment_id=merchant_trans_id).with_for_update().first()
+            order = Order.query.filter_by(order_number=merchant_trans_id).first()
+            payment = Payment.query.filter_by(order_id=order.id).with_for_update().first() if order else None
         if not payment:
             self._log_flow_step(
                 'complete_payment_not_found',

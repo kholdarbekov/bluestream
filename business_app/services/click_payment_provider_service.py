@@ -1026,6 +1026,3 @@ class ClickPaymentProviderService:
         )
         return result
 
-    def submit_fiscalization(self, payment: Payment, payload: Dict[str, Any]) -> Dict[str, Any]:
-        """Compatibility wrapper used by the fiscalization service."""
-        return self.fiscalize_payment(payment, payload)

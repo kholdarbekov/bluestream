@@ -332,7 +332,7 @@ class PaymentFiscalizationService:
 
         try:
             self._log_fiscal_step('process_click_fiscalization_submit_started', payment=payment, fiscalization=fiscalization)
-            response = self.click_provider_service.submit_fiscalization(payment, payload)
+            response = self.click_provider_service.fiscalize_payment(payment, payload)
             self._log_fiscal_step(
                 'process_click_fiscalization_submit_completed',
                 payment=payment,
@@ -645,6 +645,7 @@ class PaymentFiscalizationService:
         click_payment_id = self.click_provider_service.resolve_click_payment_id(payment)
         self._log_fiscal_step('build_payload_click_payment_id_resolved', payment=payment, click_payment_id=click_payment_id)
         reserved_lookup = self._reserved_code_lookup(payment)
+        commission_info = self._build_commission_info(payment)
         items_payload: List[Dict[str, Any]] = []
         for order_item in order.order_items or []:
             product = order_item.product
@@ -740,7 +741,6 @@ class PaymentFiscalizationService:
                     )
                 item_payload['Labels'] = labels
 
-            commission_info = self._build_commission_info(payment)
             if commission_info:
                 item_payload['CommissionInfo'] = commission_info
             items_payload.append(item_payload)
@@ -775,9 +775,8 @@ class PaymentFiscalizationService:
             'service_id': service_id,
             'payment_id': click_payment_id,
             'received_cash': 0,
-            'received_ecash': received_card_tiyin,
-            # Card payments in this flow charge the full order amount from card.
-            'received_card': 0,
+            'received_ecash': 0,
+            'received_card': received_card_tiyin,
             'items': items_payload,
         }
         self._log_fiscal_step(

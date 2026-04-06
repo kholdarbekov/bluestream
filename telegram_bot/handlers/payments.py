@@ -242,10 +242,9 @@ class PaymentHandlers(BaseHandler):
             # Show payment method selection
             from handlers.orders import order_handlers
 
-            # TODO: uncomment when enabling back card payments
             payment_methods = [
                 {'type': 'cash', 'name': i18n.get('telegram.payment_cash', language)},
-                # {'type': 'card', 'name': i18n.get('telegram.payment_card', language)},
+                {'type': 'card', 'name': i18n.get('telegram.payment_card', language)},
             ]
 
             from keyboards import OrderKeyboards

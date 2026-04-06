@@ -485,7 +485,7 @@ const Products = () => {
 
   const handleCreateCodesSubmit = (values) => {
     const codes = (values.codes || '')
-      .split(/\r?\n|,/) 
+      .split(/\r?\n/)
       .map((item) => item.trim())
       .filter(Boolean);
 
@@ -1369,7 +1369,7 @@ const Products = () => {
             name="codes"
             label={t('ui.products.marking_codes', 'Marking Codes')}
             rules={[{ required: true, message: t('ui.products.marking_codes_required', 'Enter at least one code') }]}
-            extra={t('ui.products.marking_codes_help', 'Enter one code per line or comma-separated')}
+            extra={t('ui.products.marking_codes_help', 'Enter one code per line')}
           >
             <TextArea rows={8} placeholder={'000000000001\n000000000002'} />
           </Form.Item>

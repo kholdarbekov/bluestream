@@ -104,6 +104,22 @@ class ProductFiscalService:
         if vat_value != vat_value.to_integral_value():
             raise ValidationError("VAT percent must be an integer for Click fiscalization")
 
+    @staticmethod
+    def sync_stock_from_marking_codes(product: Product) -> int:
+        """Recalculate stock_quantity from available marking codes.
+
+        Only applies when the product requires marking codes. Returns the
+        updated stock_quantity value.
+        """
+        if not product.requires_marking_codes:
+            return product.stock_quantity or 0
+        count = ProductMarkingCode.query.filter_by(
+            product_id=product.id,
+            status=MarkingCodeStatus.AVAILABLE,
+        ).count()
+        product.stock_quantity = count
+        return count
+
     def get_marking_code_counts(self, product_id: int) -> Dict[str, int]:
         rows = (
             db.session.query(
@@ -217,6 +233,8 @@ class ProductFiscalService:
             db.session.add(item)
             created_items.append(item)
 
+        self.sync_stock_from_marking_codes(product)
+
         audit_logger.log_event(
             event_type=AuditEventType.PRODUCT_UPDATED,
             action="product_marking_codes_created",
@@ -297,6 +315,11 @@ class ProductFiscalService:
                 "status": marking_code.status.value if hasattr(marking_code.status, 'value') else marking_code.status,
             },
         )
+
+        product = Product.query.get(product_id)
+        if product:
+            self.sync_stock_from_marking_codes(product)
+
         return marking_code
 
     def archive_marking_code(

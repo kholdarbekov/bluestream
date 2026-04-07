@@ -67,6 +67,7 @@ class MarkingCodeLedgerEventType(Enum):
     RESERVED = 'reserved'
     RELEASED = 'released'
     USED = 'used'
+    UTILISED = 'utilised'
     ARCHIVED = 'archived'
     RESTORED = 'restored'
 

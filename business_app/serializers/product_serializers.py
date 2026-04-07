@@ -247,7 +247,8 @@ class CreateProductRequest(BaseModel):
     is_tryout_eligible: bool = Field(default=True)
     tracks_returnable_bottles: bool = Field(default=False)
     returnable_bottles_per_unit: Decimal = Field(default=Decimal("0.00"), ge=0)
-    
+    expire_days: Optional[int] = Field(None, ge=1)
+
     @field_validator('base_price')
     @classmethod
     def validate_base_price(cls, v):
@@ -276,7 +277,8 @@ class UpdateProductRequest(BaseModel):
     is_tryout_eligible: Optional[bool] = None
     tracks_returnable_bottles: Optional[bool] = None
     returnable_bottles_per_unit: Optional[Decimal] = Field(None, ge=0)
-    
+    expire_days: Optional[int] = Field(None, ge=1)
+
     @field_validator('base_price')
     @classmethod
     def validate_base_price(cls, v):

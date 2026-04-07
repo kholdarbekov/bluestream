@@ -770,7 +770,8 @@ def serialize_product_admin(product: Product) -> Dict[str, Any]:
             'short_description_translations': product.get_all_translations('short_description'),
             'ingredients_translations': product.get_all_translations('ingredients'),
             'meta_title_translations': product.get_all_translations('meta_title'),
-            'meta_description_translations': product.get_all_translations('meta_description')
+            'meta_description_translations': product.get_all_translations('meta_description'),
+            'expire_days': product.expire_days,
         }
 
         # Add category information

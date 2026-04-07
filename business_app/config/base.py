@@ -233,7 +233,17 @@ class BaseConfig:
     COMPANY_ADDRESS = os.environ.get('COMPANY_ADDRESS', 'Tashkent, Uzbekistan')
     COMPANY_WEBSITE = os.environ.get('COMPANY_WEBSITE', 'https://bluestream.uz')
     COMPANY_TIN = os.environ.get('COMPANY_TIN', '')
-    
+
+    # Tax Committee (Asl Belgisi / xTrace) Configuration
+    TAX_COMMITTEE_API_URL = os.environ.get('TAX_COMMITTEE_API_URL', 'https://xtrace.aslbelgisi.uz')
+    TAX_COMMITTEE_BUSINESS_PLACE_ID = os.environ.get('TAX_COMMITTEE_BUSINESS_PLACE_ID', '')
+    TAX_COMMITTEE_PRODUCT_GROUP = os.environ.get('TAX_COMMITTEE_PRODUCT_GROUP', 'water')
+    TAX_COMMITTEE_RELEASE_TYPE = os.environ.get('TAX_COMMITTEE_RELEASE_TYPE', 'PRODUCTION')
+    TAX_COMMITTEE_MANUFACTURER_COUNTRY = os.environ.get('TAX_COMMITTEE_MANUFACTURER_COUNTRY', 'UZ')
+    TAX_COMMITTEE_API_TIMEOUT_SECONDS = int(os.environ.get('TAX_COMMITTEE_API_TIMEOUT_SECONDS', 30) or 30)
+    TAX_COMMITTEE_API_TOKEN = get_secret('tax_committee_api_token', 'TAX_COMMITTEE_API_TOKEN', required=False)
+    TAX_COMMITTEE_UTILISATION_ENABLED = os.environ.get('TAX_COMMITTEE_UTILISATION_ENABLED', 'true').lower() == 'true'
+
     # Delivery Configuration
     DEFAULT_DELIVERY_FEE = int(os.environ.get('DEFAULT_DELIVERY_FEE', 5000))  # UZS
     FREE_DELIVERY_THRESHOLD = int(os.environ.get('FREE_DELIVERY_THRESHOLD', 50000))  # UZS

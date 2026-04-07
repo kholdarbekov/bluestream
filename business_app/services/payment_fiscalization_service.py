@@ -87,6 +87,14 @@ class PaymentFiscalizationService:
             self._click_provider_service = ClickProviderService()
         return self._click_provider_service
 
+    @property
+    def tax_committee_service(self):
+        if not hasattr(self, '_tax_committee_service') or self._tax_committee_service is None:
+            from business_app.services.tax_committee_service import TaxCommitteeService
+
+            self._tax_committee_service = TaxCommitteeService()
+        return self._tax_committee_service
+
     def _append_payment_audit_trail(
         self,
         payment: Payment,
@@ -320,17 +328,26 @@ class PaymentFiscalizationService:
             payment=payment,
             fiscalization=fiscalization,
         )
-        payload = self.build_click_fiscalization_payload(payment)
-        fiscalization.request_payload = payload
-        self._log_fiscal_step(
-            'process_click_fiscalization_payload_built',
-            payment=payment,
-            fiscalization=fiscalization,
-            items_count=len(payload.get('items') or []),
-            received_card=payload.get('received_card'),
-        )
 
         try:
+            # Preprocessing: change marking codes from "Received" to "Applied" in Tax Committee
+            self.utilise_marking_codes_with_tax_committee(payment, actor_user_id=actor_user_id)
+            self._log_fiscal_step(
+                'process_click_fiscalization_marking_codes_utilised',
+                payment=payment,
+                fiscalization=fiscalization,
+            )
+
+            payload = self.build_click_fiscalization_payload(payment)
+            fiscalization.request_payload = payload
+            self._log_fiscal_step(
+                'process_click_fiscalization_payload_built',
+                payment=payment,
+                fiscalization=fiscalization,
+                items_count=len(payload.get('items') or []),
+                received_card=payload.get('received_card'),
+            )
+
             self._log_fiscal_step('process_click_fiscalization_submit_started', payment=payment, fiscalization=fiscalization)
             response = self.click_provider_service.fiscalize_payment(payment, payload)
             self._log_fiscal_step(
@@ -635,6 +652,290 @@ class PaymentFiscalizationService:
         )
         return fiscalization
 
+    MAX_PRECHECK_ROUNDS = 3
+
+    def _precheck_and_replace_invalid_codes(
+        self,
+        payment: Payment,
+        codes_by_product: Dict[int, List[Tuple[OrderItem, ProductMarkingCode]]],
+        *,
+        actor_user_id: Optional[int] = None,
+    ) -> Dict[int, List[Tuple[OrderItem, ProductMarkingCode]]]:
+        """Check Tax Committee statuses and replace WITHDRAWN/WRITTEN_OFF codes.
+
+        For each product batch:
+        - RECEIVED codes are kept (need utilisation).
+        - APPLIED/INTRODUCED codes are kept (already utilised, skip utilisation later).
+        - WITHDRAWN/WRITTEN_OFF codes are archived and replaced with fresh AVAILABLE codes.
+
+        Replacement codes are re-checked in subsequent rounds (up to MAX_PRECHECK_ROUNDS)
+        to avoid picking another invalid code.
+
+        Returns the updated codes_by_product dict with all codes valid.
+        """
+        from business_app.services.tax_committee_service import TaxCommitteeService
+
+        order = payment.order
+
+        for round_num in range(1, self.MAX_PRECHECK_ROUNDS + 1):
+            # Collect all identification codes across products for a single API call
+            all_id_codes: List[str] = []
+            code_to_full: Dict[str, Tuple[int, int]] = {}  # id_code -> (product_id, index in list)
+            for product_id, items in codes_by_product.items():
+                for idx, (order_item, code) in enumerate(items):
+                    if not order_item.product or not order_item.product.requires_marking_codes:
+                        continue
+                    id_code = self._extract_identification_code(code.code)
+                    all_id_codes.append(id_code)
+                    code_to_full[id_code] = (product_id, idx)
+
+            if not all_id_codes:
+                break
+
+            status_map = self.tax_committee_service.check_marking_code_statuses(all_id_codes)
+
+            self._log_fiscal_step(
+                'precheck_round_completed',
+                payment=payment,
+                round_num=round_num,
+                statuses={code: status for code, status in status_map.items()},
+            )
+
+            # Identify codes that need replacement
+            codes_to_replace: List[Tuple[int, int, str, str]] = []  # (product_id, idx, id_code, tc_status)
+            for id_code, (product_id, idx) in code_to_full.items():
+                tc_status = status_map.get(id_code, '')
+                if tc_status in TaxCommitteeService.INVALID_STATUSES:
+                    codes_to_replace.append((product_id, idx, id_code, tc_status))
+
+            if not codes_to_replace:
+                # All codes are valid (RECEIVED, APPLIED, or INTRODUCED)
+                break
+
+            self._log_fiscal_step(
+                'precheck_replacing_invalid_codes',
+                payment=payment,
+                round_num=round_num,
+                invalid_count=len(codes_to_replace),
+                invalid_codes=[
+                    {'code': c[2], 'status': c[3]} for c in codes_to_replace
+                ],
+            )
+
+            # Archive invalid codes and reserve replacements
+            for product_id, idx, id_code, tc_status in codes_to_replace:
+                order_item, bad_code = codes_by_product[product_id][idx]
+
+                # Archive the invalid code
+                bad_code.status = MarkingCodeStatus.ARCHIVED
+                bad_code.archived_at = datetime.now(timezone.utc)
+                db.session.add(
+                    OrderItemMarkingCodeAllocation(
+                        order_item_id=order_item.id,
+                        order_id=order.id,
+                        payment_id=payment.id,
+                        product_marking_code_id=bad_code.id,
+                        action=MarkingCodeLedgerEventType.ARCHIVED,
+                        actor_user_id=actor_user_id,
+                        event_metadata={
+                            'reason': f'Tax Committee status: {tc_status}',
+                            'tax_committee_status': tc_status,
+                        },
+                    )
+                )
+
+                # Reserve a replacement
+                replacement = (
+                    ProductMarkingCode.query.filter_by(
+                        product_id=product_id,
+                        status=MarkingCodeStatus.AVAILABLE,
+                    )
+                    .order_by(ProductMarkingCode.created_at.asc(), ProductMarkingCode.id.asc())
+                    .with_for_update()
+                    .first()
+                )
+                if not replacement:
+                    product_name = order_item.product.name if order_item.product else product_id
+                    raise ValidationError(
+                        f"No replacement marking code available for product {product_name}. "
+                        f"Code {id_code} is {tc_status} in Tax Committee."
+                    )
+
+                replacement.status = MarkingCodeStatus.RESERVED
+                replacement.reserved_at = datetime.now(timezone.utc)
+                db.session.add(
+                    OrderItemMarkingCodeAllocation(
+                        order_item_id=order_item.id,
+                        order_id=order.id,
+                        payment_id=payment.id,
+                        product_marking_code_id=replacement.id,
+                        action=MarkingCodeLedgerEventType.RESERVED,
+                        actor_user_id=actor_user_id,
+                        event_metadata={
+                            'reason': f'Replacement for {tc_status} code',
+                            'replaced_code_id': bad_code.id,
+                        },
+                    )
+                )
+
+                # Swap in the replacement
+                codes_by_product[product_id][idx] = (order_item, replacement)
+
+            db.session.flush()
+
+            # Sync stock for affected products
+            replaced_product_ids = {pid for pid, _, _, _ in codes_to_replace}
+            for product_id in replaced_product_ids:
+                items = codes_by_product[product_id]
+                product = items[0][0].product
+                if product and product.requires_marking_codes:
+                    self._product_fiscal_service.sync_stock_from_marking_codes(product)
+
+            self._log_fiscal_step(
+                'precheck_replacements_completed',
+                payment=payment,
+                round_num=round_num,
+                replaced_count=len(codes_to_replace),
+            )
+            # Loop back to re-check the replacement codes
+        else:
+            # Exhausted all rounds — still have invalid codes
+            self._log_fiscal_step(
+                'precheck_max_rounds_exceeded',
+                level='error',
+                payment=payment,
+                max_rounds=self.MAX_PRECHECK_ROUNDS,
+            )
+            raise ValidationError(
+                f"Could not find valid replacement marking codes after {self.MAX_PRECHECK_ROUNDS} attempts"
+            )
+
+        return codes_by_product
+
+    def utilise_marking_codes_with_tax_committee(
+        self,
+        payment: Payment,
+        *,
+        actor_user_id: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Preprocessing: check Tax Committee statuses, replace invalid codes, then utilise RECEIVED ones."""
+        from business_app.services.tax_committee_service import TaxCommitteeService
+
+        if not current_app.config.get('TAX_COMMITTEE_UTILISATION_ENABLED', True):
+            self._log_fiscal_step('tax_committee_utilisation_skipped_disabled', payment=payment)
+            return {'utilised': 0, 'skipped': True}
+
+        self._log_fiscal_step('tax_committee_utilisation_started', payment=payment)
+        order = payment.order
+        if not order:
+            return {'utilised': 0, 'skipped': True}
+
+        reserved_codes = self._get_reserved_codes(payment)
+        if not reserved_codes:
+            self._log_fiscal_step('tax_committee_utilisation_skipped_no_codes', payment=payment)
+            return {'utilised': 0, 'skipped': True}
+
+        # Group codes by product for per-product expire_days
+        codes_by_product: Dict[int, List[Tuple[OrderItem, ProductMarkingCode]]] = defaultdict(list)
+        for order_item, code in reserved_codes:
+            codes_by_product[order_item.product_id].append((order_item, code))
+
+        # Pre-check statuses and replace WITHDRAWN/WRITTEN_OFF codes
+        codes_by_product = self._precheck_and_replace_invalid_codes(
+            payment, codes_by_product, actor_user_id=actor_user_id,
+        )
+
+        total_utilised = 0
+        total_already_applied = 0
+        for product_id, items in codes_by_product.items():
+            product = items[0][0].product
+            if not product or not product.requires_marking_codes:
+                continue
+
+            # Separate codes by Tax Committee status: only utilise RECEIVED ones
+            codes_to_utilise: List[Tuple[OrderItem, ProductMarkingCode]] = []
+            codes_already_applied: List[Tuple[OrderItem, ProductMarkingCode]] = []
+
+            # Get current statuses for this batch
+            id_codes = [self._extract_identification_code(code.code) for _, code in items]
+            status_map = self.tax_committee_service.check_marking_code_statuses(id_codes)
+
+            for order_item, code in items:
+                id_code = self._extract_identification_code(code.code)
+                tc_status = status_map.get(id_code, TaxCommitteeService.STATUS_RECEIVED)
+                if tc_status in TaxCommitteeService.ALREADY_UTILISED_STATUSES:
+                    codes_already_applied.append((order_item, code))
+                else:
+                    codes_to_utilise.append((order_item, code))
+
+            # Utilise only RECEIVED codes
+            if codes_to_utilise:
+                full_codes = [code.code for _, code in codes_to_utilise]
+                result = self.tax_committee_service.utilise_marking_codes(full_codes, product)
+                report_id = result.get('reportId')
+                self._log_fiscal_step(
+                    'tax_committee_utilisation_batch_completed',
+                    payment=payment,
+                    product_id=product_id,
+                    codes_count=len(full_codes),
+                    report_id=report_id,
+                )
+
+                for order_item, code in codes_to_utilise:
+                    db.session.add(
+                        OrderItemMarkingCodeAllocation(
+                            order_item_id=order_item.id,
+                            order_id=order.id,
+                            payment_id=payment.id,
+                            product_marking_code_id=code.id,
+                            action=MarkingCodeLedgerEventType.UTILISED,
+                            actor_user_id=actor_user_id,
+                            event_metadata={
+                                'report_id': report_id,
+                                'tax_committee_api': True,
+                            },
+                        )
+                    )
+                total_utilised += len(codes_to_utilise)
+
+            # Log already-applied codes (no utilisation needed, but still record ledger event)
+            if codes_already_applied:
+                self._log_fiscal_step(
+                    'tax_committee_codes_already_applied',
+                    payment=payment,
+                    product_id=product_id,
+                    codes_count=len(codes_already_applied),
+                )
+                for order_item, code in codes_already_applied:
+                    id_code = self._extract_identification_code(code.code)
+                    tc_status = status_map.get(id_code, 'APPLIED')
+                    db.session.add(
+                        OrderItemMarkingCodeAllocation(
+                            order_item_id=order_item.id,
+                            order_id=order.id,
+                            payment_id=payment.id,
+                            product_marking_code_id=code.id,
+                            action=MarkingCodeLedgerEventType.UTILISED,
+                            actor_user_id=actor_user_id,
+                            event_metadata={
+                                'tax_committee_status': tc_status,
+                                'already_applied': True,
+                            },
+                        )
+                    )
+                total_already_applied += len(codes_already_applied)
+
+        self._log_fiscal_step(
+            'tax_committee_utilisation_completed',
+            payment=payment,
+            total_utilised=total_utilised,
+            total_already_applied=total_already_applied,
+        )
+        return {
+            'utilised': total_utilised,
+            'already_applied': total_already_applied,
+        }
+
     def build_click_fiscalization_payload(self, payment: Payment) -> Dict[str, Any]:
         self._log_fiscal_step('build_payload_started', payment=payment)
         order = payment.order
@@ -881,6 +1182,11 @@ class PaymentFiscalizationService:
             )
 
         if reserved_count:
+            # Sync stock for all affected products
+            for order_item in order.order_items or []:
+                product = order_item.product
+                if product and product.requires_marking_codes:
+                    self._product_fiscal_service.sync_stock_from_marking_codes(product)
             self._log_payment_activity(
                 payment,
                 action='payment_marking_codes_reserved',
@@ -927,6 +1233,13 @@ class PaymentFiscalizationService:
             )
             released += 1
         if released:
+            # Sync stock for affected products (codes returned to AVAILABLE)
+            synced_products = set()
+            for order_item, code in reserved_codes:
+                if order_item.product_id not in synced_products and order_item.product:
+                    if order_item.product.requires_marking_codes:
+                        self._product_fiscal_service.sync_stock_from_marking_codes(order_item.product)
+                        synced_products.add(order_item.product_id)
             self._log_payment_activity(
                 payment,
                 action='payment_marking_codes_released',
@@ -1000,6 +1313,11 @@ class PaymentFiscalizationService:
                 reserved_count += 1
 
         if reserved_count:
+            # Sync stock for affected products
+            for order_item in order.order_items or []:
+                product = order_item.product
+                if product and product.requires_marking_codes:
+                    self._product_fiscal_service.sync_stock_from_marking_codes(product)
             self._log_payment_activity(
                 payment,
                 action='payment_marking_codes_reserved',
@@ -1044,6 +1362,13 @@ class PaymentFiscalizationService:
             )
             used += 1
         if used:
+            # Sync stock for affected products
+            synced_products = set()
+            for order_item, code in self._get_reserved_codes(payment):
+                if order_item.product_id not in synced_products and order_item.product:
+                    if order_item.product.requires_marking_codes:
+                        self._product_fiscal_service.sync_stock_from_marking_codes(order_item.product)
+                        synced_products.add(order_item.product_id)
             self._log_payment_activity(
                 payment,
                 action='payment_marking_codes_used',
@@ -1062,10 +1387,23 @@ class PaymentFiscalizationService:
         )
         return used
 
+    @staticmethod
+    def _extract_identification_code(full_code: str) -> str:
+        """Extract the identification code portion (before the first ASCII 29 / GS character)."""
+        gs_char = '\x1d'  # ASCII 29 (Group Separator)
+        idx = full_code.find(gs_char)
+        if idx == -1:
+            return full_code
+        return full_code[:idx]
+
     def _reserved_code_lookup(self, payment: Payment) -> Dict[int, List[str]]:
+        """Return {order_item_id: [identification_code, ...]} for Click Labels.
+
+        Only the identification code (before ASCII 29) is sent in fiscalization receipts.
+        """
         lookup: Dict[int, List[str]] = defaultdict(list)
         for order_item, code in self._get_reserved_codes(payment):
-            lookup[order_item.id].append(code.code)
+            lookup[order_item.id].append(self._extract_identification_code(code.code))
         return lookup
 
     def _get_reserved_codes(self, payment: Payment) -> List[Tuple[OrderItem, ProductMarkingCode]]:

@@ -80,6 +80,7 @@ class Product(db.Model, TimestampMixin, TranslatableMixin):
     is_tryout_eligible = Column(Boolean, nullable=False, default=True, index=True)
     tracks_returnable_bottles = Column(Boolean, nullable=False, default=False, index=True)
     returnable_bottles_per_unit = Column(Numeric(precision=12, scale=2), nullable=False, default=Decimal('0.00'))
+    expire_days = Column(Integer, nullable=True, default=180)
     
     # Media and content
     images = Column(JSON, default=[])
@@ -155,6 +156,7 @@ class Product(db.Model, TimestampMixin, TranslatableMixin):
             'is_tryout_eligible': bool(self.is_tryout_eligible),
             'tracks_returnable_bottles': bool(self.tracks_returnable_bottles),
             'returnable_bottles_per_unit': float(self.returnable_bottles_per_unit or 0),
+            'expire_days': self.expire_days,
             'fiscal_profile': self.fiscal_profile.to_dict() if self.fiscal_profile else None,
         })
         

@@ -305,6 +305,33 @@ class PaymentFiscalization(db.Model, TimestampMixin):
         }
 
 
+class TaxCommitteeApiToken(db.Model, TimestampMixin):
+    """Stores Tax Committee (xTrace / Asl Belgisi) API bearer tokens.
+
+    Only one row should have is_active=True at any time. Tokens expire
+    every ~90 days and are refreshed via the Tax Committee refresh endpoint.
+    """
+
+    __tablename__ = 'tax_committee_api_tokens'
+
+    id = Column(Integer, primary_key=True)
+    token = Column(Text, nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=True)
+    is_active = Column(Boolean, nullable=False, default=True, index=True)
+    last_checked_at = Column(DateTime(timezone=True), nullable=True)
+    last_refreshed_at = Column(DateTime(timezone=True), nullable=True)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'is_active': self.is_active,
+            'expires_at': self.expires_at.isoformat() if self.expires_at else None,
+            'last_checked_at': self.last_checked_at.isoformat() if self.last_checked_at else None,
+            'last_refreshed_at': self.last_refreshed_at.isoformat() if self.last_refreshed_at else None,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+        }
+
+
 class DriverCashSession(db.Model, TimestampMixin):
     """End-of-day or shift-level driver COD reconciliation session."""
 

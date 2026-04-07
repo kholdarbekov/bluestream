@@ -2277,7 +2277,8 @@ def create_product():
             barcode=data.get('barcode'),
             slug=data.get('slug'),
             meta_title=data.get('meta_title'),
-            meta_description=data.get('meta_description')
+            meta_description=data.get('meta_description'),
+            expire_days=data.get('expire_days'),
         )
 
         db.session.add(product)
@@ -2399,8 +2400,10 @@ def update_product(product_id):
             product.tracks_returnable_bottles = data['tracks_returnable_bottles']
         if 'returnable_bottles_per_unit' in data:
             product.returnable_bottles_per_unit = data['returnable_bottles_per_unit']
-        if 'stock_quantity' in data:
+        if 'stock_quantity' in data and not product.requires_marking_codes:
             product.stock_quantity = data['stock_quantity']
+        if 'expire_days' in data:
+            product.expire_days = data['expire_days']
         if 'min_stock_level' in data:
             product.min_stock_level = data['min_stock_level']
         if 'max_stock_level' in data:
@@ -2638,7 +2641,13 @@ def update_product_stock(product_id):
 
         if not isinstance(new_stock, int) or new_stock < 0:
             return validation_error_response('Invalid stock quantity')
-        
+
+        if product.requires_marking_codes:
+            return validation_error_response(
+                'Stock quantity is derived from available marking codes for this product. '
+                'Add or manage marking codes instead of setting stock directly.'
+            )
+
         old_stock = product.stock_quantity
         product.stock_quantity = new_stock
         product.updated_at = datetime.now(UTC)

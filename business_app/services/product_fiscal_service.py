@@ -430,31 +430,30 @@ class ProductFiscalService:
         return [code for code in (self._clean_optional_string(item) for item in codes) if code]
 
     def _parse_csv_codes(self, csv_content: str) -> List[Dict[str, Any]]:
-        stream = io.StringIO(csv_content or "")
-        sample = stream.read(1024)
-        stream.seek(0)
-        try:
-            dialect = csv.Sniffer().sniff(sample or "code\n")
-        except csv.Error:
-            dialect = csv.excel
+        # Normalize literal \u001d escape sequences that some exporters write as a
+        # 6-character string instead of the actual GS character (U+001D / ASCII 29).
+        normalized = (csv_content or "").replace('\\u001d', '\x1d')
 
-        reader = csv.reader(stream, dialect)
-        rows = list(reader)
-        if not rows:
+        # Marking codes can contain commas, semicolons, and other characters that
+        # csv.Sniffer would misdetect as field delimiters. The file format is one
+        # code per line, so we split on newlines and treat each line as a single code.
+        #
+        # IMPORTANT: use split('\n') rather than splitlines() — Python's splitlines()
+        # treats \x1d (ASCII 29 / GS) as a line separator, which would silently split
+        # marking codes that contain embedded GS characters.
+        _HEADER_WORDS = {"code", "marking_code", "label", "labels"}
+        normalized_lines = normalized.replace('\r\n', '\n').replace('\r', '\n')
+        lines = [line.strip() for line in normalized_lines.split('\n')]
+        lines = [line for line in lines if line]
+
+        if not lines:
             return []
 
-        header_candidates = [cell.strip().lower() for cell in rows[0]]
-        has_header = any(candidate in {"code", "marking_code", "label", "labels"} for candidate in header_candidates)
-        parsed: List[Dict[str, Any]] = []
+        has_header = lines[0].lower() in _HEADER_WORDS
+        data_lines = lines[1:] if has_header else lines
+        start_index = 2 if has_header else 1
 
-        if has_header:
-            dict_reader = csv.DictReader(io.StringIO(csv_content), dialect=dialect)
-            for index, row in enumerate(dict_reader, start=2):
-                code = row.get("code") or row.get("marking_code") or row.get("label") or row.get("labels")
-                parsed.append({"row": index, "code": code})
-            return parsed
-
-        for index, row in enumerate(rows, start=1):
-            code = row[0] if row else None
-            parsed.append({"row": index, "code": code})
-        return parsed
+        return [
+            {"row": index, "code": line}
+            for index, line in enumerate(data_lines, start=start_index)
+        ]

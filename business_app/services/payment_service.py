@@ -2433,6 +2433,11 @@ class PaymentService:
         order = payment.order
         if not order:
             return
+
+        # Sync order payment method to the actual method used (e.g. cash → click)
+        if order.payment_method != payment.payment_method:
+            order.payment_method = payment.payment_method
+
         self._sync_order_paid_projection(order, payment.status, payment.paid_at)
 
         # Handle both Enum and string status values

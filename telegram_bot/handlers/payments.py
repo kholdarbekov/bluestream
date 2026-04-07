@@ -226,7 +226,7 @@ class PaymentHandlers(BaseHandler):
 
             payment_info = order.get('payment_info') or {}
             provider_method = payment_info.get('payment_provider') or order.get('payment_method') or 'click'
-            if provider_method == 'card':
+            if provider_method in ('card', 'cash'):
                 provider_method = 'click'
 
             # Send new payment link

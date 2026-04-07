@@ -256,8 +256,8 @@ class TaxCommitteeService:
             'businessPlaceId': int(current_app.config['TAX_COMMITTEE_BUSINESS_PLACE_ID']),
             'releaseType': current_app.config.get('TAX_COMMITTEE_RELEASE_TYPE', 'PRODUCTION'),
             'manufacturerCountry': current_app.config.get('TAX_COMMITTEE_MANUFACTURER_COUNTRY', 'UZ'),
-            'productionDate': now.strftime('%Y-%m-%dT%H:%M:%SZ'),
-            'expirationDate': expiration.strftime('%Y-%m-%dT%H:%M:%SZ'),
+            'productionDate': now.strftime('%Y-%m-%dT%I:%M:%SZ'),
+            'expirationDate': expiration.strftime('%Y-%m-%dT%I:%M:%SZ'),
         }
 
         self._log_step(

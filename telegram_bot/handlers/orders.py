@@ -447,7 +447,13 @@ class OrderHandlers(BaseHandler):
                     return
                 
                 addresses = response.data.get('data', {}).get('addresses', [])
-            
+
+            # Store addresses for display in order confirmation
+            context.user_data['checkout_addresses'] = {
+                addr['id']: {'title': addr.get('title', ''), 'full_address': addr.get('full_address', '')}
+                for addr in addresses
+            }
+
             if not addresses:
                 # No addresses, prompt to add one
                 add_address_text = i18n.get('telegram.orders.no_address_prompt', language)
@@ -498,8 +504,12 @@ class OrderHandlers(BaseHandler):
             # Extract address ID
             address_id = int(query.data.split('_')[1])
             
-            # Store selected address
+            # Store selected address and its display info
             context.user_data['selected_address_id'] = address_id
+            address_map = context.user_data.get('checkout_addresses', {})
+            address_info = address_map.get(address_id, {})
+            context.user_data['selected_address_title'] = address_info.get('title', '')
+            context.user_data['selected_address_full'] = address_info.get('full_address', '')
 
             async with api_client as client:
                 user_token = await get_auth_token(update, context, client)
@@ -570,7 +580,10 @@ class OrderHandlers(BaseHandler):
 
             # Clear only checkout-related selections and keep unrelated context.
             context.user_data.pop('selected_address_id', None)
+            context.user_data.pop('selected_address_title', None)
+            context.user_data.pop('selected_address_full', None)
             context.user_data.pop('selected_payment_method', None)
+            context.user_data.pop('checkout_addresses', None)
 
             await query.edit_message_text(
                 text=i18n.get('telegram.action_cancelled', language),
@@ -745,7 +758,10 @@ class OrderHandlers(BaseHandler):
         # Add address info
         address_id = context.user_data.get('selected_address_id')
         if address_id:
-            confirmation_text += f"{i18n.get('telegram.delivery_address', language)}: {i18n.get('telegram.orders.selected_address', language, address_id=address_id)}\n\n"
+            address_title = context.user_data.get('selected_address_title', '')
+            address_full = context.user_data.get('selected_address_full', '')
+            display_address = address_title if address_title else address_full
+            confirmation_text += f"{i18n.get('telegram.delivery_address', language)}: {display_address}\n\n"
 
         # Add payment method
         payment_method = context.user_data.get('selected_payment_method')
@@ -791,7 +807,14 @@ class OrderHandlers(BaseHandler):
             reply_markup=keyboard
         )
         await update.callback_query.answer()
-    
+
+    async def back_to_order_confirm(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle back button from payment screen to order confirmation"""
+        try:
+            await self._show_order_confirmation(update, context)
+        except Exception as e:
+            logger.error(f"Error in back_to_order_confirm: {e}")
+            await self._handle_error(update)
 
 
 # Global handler instance

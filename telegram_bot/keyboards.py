@@ -993,6 +993,21 @@ class PaymentKeyboards:
         """Shown when user cancels payment - same as failed but different context"""
         return PaymentKeyboards.payment_failed(order_id, language)
 
+    @staticmethod
+    def payment_link(payment_url: str, language: str = 'en') -> InlineKeyboardMarkup:
+        """Payment link with Pay button and Back button"""
+        buttons = [
+            [InlineKeyboardButton(
+                text=i18n.get('telegram.payment.pay_btn', language),
+                url=payment_url
+            )],
+            [InlineKeyboardButton(
+                text=i18n.get('telegram.back', language),
+                callback_data='back_to_order_confirm'
+            )]
+        ]
+        return InlineKeyboardMarkup(buttons)
+
 
 class AdminKeyboards:
     """Admin panel keyboards"""

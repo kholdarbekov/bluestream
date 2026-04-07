@@ -267,6 +267,7 @@ class WaterBusinessBot:
             CallbackQueryHandler(order_handlers.confirm_order, pattern="^confirm_order"),
             CallbackQueryHandler(order_handlers.cancel_checkout, pattern="^cancel_order$"),
             CallbackQueryHandler(order_handlers.checkout_handler, pattern="^edit_order$"),
+            CallbackQueryHandler(order_handlers.back_to_order_confirm, pattern="^back_to_order_confirm$"),
             CallbackQueryHandler(order_handlers.track_order, pattern="^track_order_"),
             CallbackQueryHandler(order_handlers.orders_menu, pattern="^back_to_orders$"),
             CallbackQueryHandler(order_handlers.cancel_order, pattern="^cancel_order_\\d+"),

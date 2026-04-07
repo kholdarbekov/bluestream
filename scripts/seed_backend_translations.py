@@ -3455,14 +3455,14 @@ BACKEND_TRANSLATIONS = {
     # Telegram Order Buttons (telegram.order.*)
     # ============================================================================
     'telegram.order.confirm': {
-        'en': '✅ Confirm Order',
-        'uz': '✅ Buyurtmani tasdiqlash',
-        'ru': '✅ Подтвердить заказ'
+        'en': '✅ Confirm',
+        'uz': '✅ Tasdiqlash',
+        'ru': '✅ Подтвердить'
     },
     'telegram.order.edit': {
-        'en': '✏️ Edit Order',
-        'uz': '✏️ Buyurtmani tahrirlash',
-        'ru': '✏️ Редактировать заказ'
+        'en': '✏️ Edit',
+        'uz': '✏️ Tahrirlash',
+        'ru': '✏️ Изменить'
     },
     'telegram.order.track': {
         'en': '📍 Track Order',

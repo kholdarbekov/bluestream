@@ -114,19 +114,40 @@ class PaymentHandlers(BaseHandler):
                 order_number=order_number,
                 amount=format_price(total_amount)
             )
-            pay_btn_text = i18n.get('telegram.payment.pay_btn', language)
-            
-            keyboard = InlineKeyboardMarkup([
-                [InlineKeyboardButton(
-                    text=pay_btn_text,
-                    url=payment_url
-                )]
-            ])
-            
-            await update.effective_message.reply_text(
-                text=msg_text,
-                reply_markup=keyboard
-            )
+
+            keyboard = PaymentKeyboards.payment_link(payment_url, language)
+
+            # Edit the existing confirmation message instead of sending a new one
+            query = update.callback_query
+            if query:
+                sent_message = await query.edit_message_text(
+                    text=msg_text,
+                    reply_markup=keyboard
+                )
+            else:
+                sent_message = await update.effective_message.reply_text(
+                    text=msg_text,
+                    reply_markup=keyboard
+                )
+
+            # Store payment message_id in Redis for webhook to edit on success
+            message_id = None
+            if query:
+                if hasattr(sent_message, 'message_id'):
+                    message_id = sent_message.message_id
+                else:
+                    message_id = query.message.message_id
+            elif hasattr(sent_message, 'message_id'):
+                message_id = sent_message.message_id
+
+            if message_id and order_id:
+                try:
+                    from token_manager import token_manager
+                    if token_manager and token_manager.redis:
+                        redis_key = f"bot:payment_msg:{order_id}"
+                        await token_manager.redis.setex(redis_key, 3600, str(message_id))
+                except Exception as redis_err:
+                    logger.warning(f"Failed to store payment message_id in Redis: {redis_err}")
             
             logger.info(f"{payment_method} link sent for order {order_id}")
             return True

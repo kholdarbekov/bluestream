@@ -311,11 +311,33 @@ class WebhookServer:
                 currency=currency
             )
 
-            # Send message
-            await self.bot_app.bot.send_message(
-                chat_id=telegram_id,
-                text=message_text
-            )
+            # Try to edit the existing payment message, fall back to sending new
+            message_edited = False
+            try:
+                from token_manager import token_manager
+                if token_manager and token_manager.redis:
+                    redis_key = f"bot:payment_msg:{order_id}"
+                    stored_message_id = await token_manager.redis.get(redis_key)
+                    if stored_message_id:
+                        from keyboards import PaymentKeyboards
+                        keyboard = PaymentKeyboards.payment_success(order_id, language)
+                        await self.bot_app.bot.edit_message_text(
+                            chat_id=telegram_id,
+                            message_id=int(stored_message_id),
+                            text=message_text,
+                            reply_markup=keyboard
+                        )
+                        message_edited = True
+                        await token_manager.redis.delete(redis_key)
+                        logger.info(f"Edited payment message {stored_message_id} for order {order_id}")
+            except Exception as edit_err:
+                logger.warning(f"Failed to edit payment message, falling back to send_message: {edit_err}")
+
+            if not message_edited:
+                await self.bot_app.bot.send_message(
+                    chat_id=telegram_id,
+                    text=message_text
+                )
             
             return web.json_response({
                 'success': True,

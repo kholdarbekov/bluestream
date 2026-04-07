@@ -2445,9 +2445,13 @@ class PaymentService:
         if not trigger_notifications:
             return
 
-        # Send notification
-        from ..tasks.notification_tasks import send_payment_confirmation_task
-        send_payment_confirmation_task.delay(payment.id)
+        # Send notification via Celery (email/SMS) for non-Telegram orders.
+        # Telegram orders are notified via the bot webhook below to avoid
+        # duplicate messages.
+        order_source = getattr(order, 'order_source', None)
+        if order_source != 'telegram':
+            from ..tasks.notification_tasks import send_payment_confirmation_task
+            send_payment_confirmation_task.delay(payment.id)
 
         # Trigger telegram bot notification
         try:

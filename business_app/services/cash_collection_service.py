@@ -1,5 +1,6 @@
 """Service for COD cash collection, receivable allocation, and debt rules."""
 
+import logging
 from datetime import datetime, UTC
 from decimal import Decimal
 from typing import Any, Dict, Iterable, List, Optional
@@ -26,6 +27,9 @@ from business_app.utils.constants import (
 )
 from business_app.utils.exceptions import NotFoundError, ValidationError
 from business_app.utils.payment_projection import get_payment_projection
+
+
+logger = logging.getLogger(__name__)
 
 
 class CashCollectionService:
@@ -765,8 +769,10 @@ class CashCollectionService:
                 raise NotFoundError("Order not found")
             if order.user_id != customer_id:
                 raise ValidationError("Order does not belong to the selected customer")
+            _electronic_methods = {PaymentMethod.CLICK, PaymentMethod.PAYME, PaymentMethod.CARD}
             if order.payment_method != PaymentMethod.CASH:
-                raise ValidationError("Only COD orders can be targeted for COD collections")
+                if not (source == CashCollectionSource.PERSONAL_CARD_TRANSFER and order.payment_method in _electronic_methods):
+                    raise ValidationError("Only COD orders can be targeted for COD collections")
             order_status = order.status.value if hasattr(order.status, 'value') else str(order.status or '')
             if source == CashCollectionSource.PERSONAL_CARD_TRANSFER:
                 if order_status in {OrderStatus.CANCELLED.value, OrderStatus.RETURNED.value}:
@@ -816,6 +822,36 @@ class CashCollectionService:
         order = Order.query.options(joinedload(Order.payment)).get(order_id)
         if not order:
             raise NotFoundError("Order not found")
+
+        _electronic_methods = {PaymentMethod.CLICK, PaymentMethod.PAYME, PaymentMethod.CARD}
+        if order.payment_method in _electronic_methods:
+            payment = order.payment
+            if not payment or payment.status != PaymentStatus.PENDING:
+                raise ValidationError(
+                    "Only orders with a pending electronic payment can be converted to a personal card payment"
+                )
+
+            # Release any marking codes reserved during Click PREPARE — fiscalization must not apply to personal card payments
+            from business_app.services.payment_fiscalization_service import PaymentFiscalizationService
+            try:
+                PaymentFiscalizationService().release_reserved_marking_codes(
+                    payment,
+                    reason='converted_to_cash_personal_card',
+                    actor_user_id=actor_user_id,
+                )
+            except Exception as exc:
+                logger.error("Failed to release marking codes for order %s: %s", order.id, exc)
+
+            # Convert payment and order to CASH in-place
+            payment.payment_method = PaymentMethod.CASH
+            order.payment_method = PaymentMethod.CASH
+            db.session.flush()
+
+            locked_payment = Payment.query.with_for_update(of=Payment).get(payment.id)
+            if not locked_payment:
+                raise NotFoundError("Payment not found")
+            return locked_payment
+
         if order.payment_method != PaymentMethod.CASH:
             raise ValidationError("Only COD orders can be targeted for personal card transfer collection")
 

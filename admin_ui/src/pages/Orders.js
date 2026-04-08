@@ -1021,7 +1021,9 @@ const Orders = () => {
                     {t('ui.orders.open_payment_link', 'Open Payment Link')}
                   </Button>
                 ) : null}
-                {selectedOrder.payment_method === 'cash' ? (
+                {(selectedOrder.payment_method === 'cash' ||
+                  (['click', 'payme', 'card'].includes(selectedOrder.payment_method) &&
+                   selectedOrder.payment_status === 'pending')) ? (
                   <Button
                     icon={<DollarOutlined />}
                     disabled={['cancelled', 'returned'].includes(selectedOrder.status)}

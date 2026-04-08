@@ -248,6 +248,17 @@ class StaffBot:
                 "Apply database migrations before starting staff bot."
             )
 
+    async def _route_new_orders(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """
+        Route the unified `New Orders` entry to the correct pool view based on staff role.
+        Dual-role users default to the delivery driver (actionable) view.
+        """
+        roles = context.user_data.get('staff_roles', []) or []
+        if 'delivery_driver' in roles:
+            await self._delivery_handlers['orders_pool'].show_pool(update, context)
+        elif 'operator' in roles:
+            await self._operator_handlers['orders_pool_view'].show_pool(update, context)
+
     @staticmethod
     def _menu_text_pattern(translation_key: str) -> str:
         """Regex pattern to match reply-keyboard label with or without emoji prefix."""
@@ -343,6 +354,11 @@ class StaffBot:
             CallbackQueryHandler(language_handler.language_menu, pattern="^staff_settings$"),
             CallbackQueryHandler(language_handler.set_language, pattern="^staff_set_language_"),
 
+            # Unified entry points
+            CallbackQueryHandler(self._route_new_orders, pattern="^staff_new_orders_unified$"),
+            CallbackQueryHandler(tryout_handler.show_hub, pattern="^staff_tryouts_hub$"),
+            CallbackQueryHandler(status_update_handler.show_cash_hub, pattern="^staff_cash_hub$"),
+
             # --- Delivery handlers ---
             # Order pool
             CallbackQueryHandler(orders_pool_handler.show_pool, pattern="^staff_new_orders$"),
@@ -422,7 +438,6 @@ class StaffBot:
         create_client_text_pattern = self._menu_text_pattern('staff.menu.create_client')
         search_client_text_pattern = self._menu_text_pattern('staff.menu.search_client')
         create_order_text_pattern = self._menu_text_pattern('staff.menu.create_order')
-        create_tryout_text_pattern = self._menu_text_pattern('staff.menu.create_tryout_now')
 
         # Create User conversation
         create_user_conv = ConversationHandler(
@@ -573,10 +588,6 @@ class StaffBot:
         create_tryout_conv = ConversationHandler(
             entry_points=[
                 CallbackQueryHandler(tryout_handler.start_create_tryout, pattern="^staff_tryout_create$"),
-                MessageHandler(
-                    filters.Regex(create_tryout_text_pattern) & ~filters.COMMAND,
-                    tryout_handler.start_create_tryout
-                ),
             ],
             states={
                 ENTER_TRYOUT_PHONE: [
@@ -688,16 +699,10 @@ class StaffBot:
         # Map reply keyboard text to actions
         # These match the text in MenuKeyboards.main_menu()
         menu_actions = {
-            i18n.get('staff.menu.new_orders', language): 'staff_new_orders',
-            i18n.get('staff.menu.new_orders_view', language): 'staff_op_new_orders',
+            i18n.get('staff.menu.new_orders', language): 'staff_new_orders_unified',
             i18n.get('staff.menu.active_deliveries', language): 'staff_active_deliveries',
-            i18n.get('staff.menu.tryout_tasks', language): 'staff_tryout_tasks',
-            i18n.get('staff.menu.active_tryouts', language): 'staff_tryout_active',
-            i18n.get('staff.menu.delivery_history', language): 'staff_delivery_history',
-            i18n.get('staff.menu.my_stats', language): 'staff_my_stats',
-            i18n.get('staff.menu.cash_reconciliation', language): 'staff_reconcile_session',
-            i18n.get('staff.menu.collect_cod_debt', language): 'staff_cod_collect_menu',
-            i18n.get('staff.menu.recent_orders', language): 'staff_recent_orders',
+            i18n.get('staff.menu.tryouts', language): 'staff_tryouts_hub',
+            i18n.get('staff.menu.cash', language): 'staff_cash_hub',
             i18n.get('staff.menu.profile', language): 'staff_profile',
             i18n.get('staff.menu.settings', language): 'staff_settings',
             i18n.get('staff.menu.help', language): 'staff_help',
@@ -715,18 +720,12 @@ class StaffBot:
             action = menu_actions[clean_text]
             # Route to actual handlers
             handler_map = {
+                # Unified entry points
+                'staff_new_orders_unified': self._route_new_orders,
+                'staff_tryouts_hub': self._delivery_handlers['tryouts'].show_hub,
+                'staff_cash_hub': self._delivery_handlers['status_update'].show_cash_hub,
                 # Delivery
-                'staff_new_orders': self._delivery_handlers['orders_pool'].show_pool,
                 'staff_active_deliveries': self._delivery_handlers['active_delivery'].show_active_deliveries,
-                'staff_tryout_tasks': self._delivery_handlers['tryouts'].show_task_pool,
-                'staff_tryout_active': self._delivery_handlers['tryouts'].show_active_tryouts,
-                'staff_delivery_history': self._delivery_handlers['history'].show_history,
-                'staff_my_stats': self._delivery_handlers['history'].show_stats,
-                'staff_reconcile_session': self._delivery_handlers['status_update'].show_reconciliation_session,
-                'staff_cod_collect_menu': self._delivery_handlers['cash_collection'].start_collection_search,
-                # Operator
-                'staff_op_new_orders': self._operator_handlers['orders_pool_view'].show_pool,
-                'staff_recent_orders': self._operator_handlers['recent_orders'].show_recent_orders,
                 # Common
                 'staff_profile': self._common_handlers['profile'].show_profile,
                 'staff_settings': None,  # Handled by language_handler callback

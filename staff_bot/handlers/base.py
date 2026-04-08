@@ -42,6 +42,7 @@ class BaseHandler:
         'STAFF_DELIVERY_PERSON_EXISTS': 'staff.error.api.conflict',
         'STAFF_EMPLOYEE_ID_EXISTS': 'staff.error.api.conflict',
         'STAFF_DELIVERY_ALREADY_TAKEN': 'staff.error.api.already_taken',
+        'STAFF_DRIVER_COD_BLOCKED': 'staff.error.api.driver_cod_blocked',
         'STAFF_INVALID_INVITE_TOKEN': 'staff.error.api.invalid_invite',
         'STAFF_TELEGRAM_NOT_APPROVED': 'staff.error.api.forbidden',
         'STAFF_NO_ROLE': 'staff.error.api.forbidden',

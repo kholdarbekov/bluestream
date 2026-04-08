@@ -7,7 +7,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 
 from staff_bot.handlers.base import BaseHandler
-from staff_bot.keyboards.common import CommonKeyboards
+from staff_bot.keyboards.menu import MenuKeyboards
 from staff_bot.permissions import require_auth, require_any_staff_role
 from staff_bot.i18n import i18n
 from staff_bot.utils.formatters import escape_html
@@ -48,7 +48,7 @@ class ProfileHandler(BaseHandler):
             ]
 
             text = '\n'.join(lines)
-            keyboard = CommonKeyboards.back_button(language)
+            keyboard = MenuKeyboards.profile_hub(language, staff_roles)
 
             if update.callback_query:
                 await update.callback_query.answer()

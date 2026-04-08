@@ -11,6 +11,7 @@ from staff_bot.api_client import api_client
 from staff_bot.handlers.base import BaseHandler
 from staff_bot.i18n import i18n
 from staff_bot.keyboards.common import CommonKeyboards
+from staff_bot.keyboards.menu import MenuKeyboards
 from staff_bot.keyboards.tryouts import TryoutKeyboards
 from staff_bot.permissions import require_auth, require_delivery_driver
 from staff_bot.utils.formatters import escape_html, format_quantity
@@ -24,6 +25,28 @@ ENTER_TRYOUT_PHONE, ENTER_TRYOUT_NAME, ENTER_TRYOUT_ADDRESS = range(90, 93)
 
 class TryoutHandler(BaseHandler):
     """List and execute try-out tasks for delivery drivers."""
+
+    @require_auth
+    @require_delivery_driver
+    async def show_hub(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Show the try-outs sub-menu (Create / Tasks / Active)."""
+        language = await self._get_language(update, context)
+        title = f"\U0001f9ea <b>{i18n.get('staff.tryouts.hub_title', language)}</b>"
+        keyboard = MenuKeyboards.tryouts_hub(language)
+
+        try:
+            if update.callback_query:
+                await update.callback_query.answer()
+                await update.callback_query.edit_message_text(
+                    title, reply_markup=keyboard, parse_mode='HTML'
+                )
+            else:
+                await update.message.reply_text(
+                    title, reply_markup=keyboard, parse_mode='HTML'
+                )
+        except Exception as e:
+            logger.error(f"Error showing try-outs hub: {e}", exc_info=True)
+            await self._handle_error(update, context)
 
     @require_auth
     @require_delivery_driver

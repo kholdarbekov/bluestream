@@ -23,7 +23,7 @@ from shared.enums import OrderStatus, PaymentMethod  # noqa: E402
 
 
 LANGUAGES = ("en", "uz", "ru")
-RU_ALLOWED_LATIN_TOKENS = ("BlueStream", "Payme", "Click", "UZS", "API")
+RU_ALLOWED_LATIN_TOKENS = ("BlueStream", "Payme", "Click", "UZS", "API", "COD")
 
 
 # Curated high-value strings.
@@ -112,6 +112,51 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "en": "Help",
         "uz": "Yordam",
         "ru": "Помощь",
+    },
+    "staff.menu.tryouts": {
+        "en": "Try-outs",
+        "uz": "Sinovlar",
+        "ru": "Пробные выдачи",
+    },
+    "staff.menu.cash": {
+        "en": "Cash",
+        "uz": "Naqd pul",
+        "ru": "Наличные",
+    },
+    "staff.menu.collect_cod_debt": {
+        "en": "Collect COD Debt",
+        "uz": "COD qarzni yigish",
+        "ru": "Сбор долга COD",
+    },
+    "staff.tryouts.hub_title": {
+        "en": "Try-outs",
+        "uz": "Sinovlar",
+        "ru": "Пробные выдачи",
+    },
+    "staff.tryouts.create": {
+        "en": "Create Try-out",
+        "uz": "Sinov yaratish",
+        "ru": "Создать пробную выдачу",
+    },
+    "staff.cash.hub_title": {
+        "en": "Cash",
+        "uz": "Naqd pul",
+        "ru": "Наличные",
+    },
+    "staff.profile.view_stats": {
+        "en": "My Stats",
+        "uz": "Mening statistikam",
+        "ru": "Моя статистика",
+    },
+    "staff.profile.view_history": {
+        "en": "Delivery History",
+        "uz": "Yetkazish tarixi",
+        "ru": "История доставок",
+    },
+    "staff.profile.view_recent_orders": {
+        "en": "Recent Orders",
+        "uz": "Songgi buyurtmalar",
+        "ru": "Последние заказы",
     },
     "staff.operator.pool_title": {
         "en": "Order Pool (View Only)",
@@ -609,6 +654,11 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "en": "This order has already been taken by another courier.",
         "uz": "Bu buyurtma allaqachon boshqa kuryer tomonidan olingan.",
         "ru": "Этот заказ уже принят другим курьером.",
+    },
+    "staff.error.api.driver_cod_blocked": {
+        "en": "You cannot accept new cash-on-delivery orders until your pending cash reconciliation is resolved. Please complete Cash Reconciliation first.",
+        "uz": "Naqd pul yarashtiruvi hal qilinmaguncha siz yangi naqd tolovli buyurtmalarni qabul qila olmaysiz. Iltimos, avval Naqd pul yarashtiruvini bajaring.",
+        "ru": "Вы не можете принимать новые заказы с оплатой наличными, пока не завершите сверку наличных. Пожалуйста, сначала выполните Сверку наличных.",
     },
     "staff.error.api.invalid_invite": {
         "en": "Invite link is invalid or expired.",

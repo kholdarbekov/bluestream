@@ -278,14 +278,31 @@ class OrdersPoolHandler(BaseHandler):
                 response = await client.accept_order(token, delivery_id)
 
             if not response.success:
+                if response.status_code == 401:
+                    await self._handle_auth_error(update, language)
+                    return
                 if response.status_code == 409:
                     # Already taken by another driver
                     await query.edit_message_text(
                         f"\u274c {i18n.get('staff.delivery.already_taken', language)}",
                         reply_markup=CommonKeyboards.back_button(language, "staff_new_orders")
                     )
-                else:
-                    await self._handle_api_response_error(update, response, language)
+                    return
+                # For any other failure (e.g. STAFF_DRIVER_COD_BLOCKED,
+                # STAFF_MAX_CONCURRENT_REACHED), replace the confirm screen with the
+                # resolved error message + a back button so the user can't re-click
+                # the stale confirm buttons.
+                error_msg = self._resolve_api_error_message(
+                    language,
+                    error=getattr(response, 'error', None),
+                    status_code=getattr(response, 'status_code', None),
+                    error_code=getattr(response, 'error_code', None),
+                )
+                await query.edit_message_text(
+                    f"\u274c {error_msg}",
+                    reply_markup=CommonKeyboards.back_button(language, "staff_new_orders"),
+                    parse_mode='HTML',
+                )
                 return
 
             # Success

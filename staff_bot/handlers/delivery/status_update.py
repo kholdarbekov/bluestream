@@ -10,6 +10,7 @@ from staff_bot.handlers.base import BaseHandler
 from staff_bot.api_client import api_client
 from staff_bot.keyboards.delivery import DeliveryKeyboards
 from staff_bot.keyboards.common import CommonKeyboards
+from staff_bot.keyboards.menu import MenuKeyboards
 from staff_bot.utils.formatters import format_delivery_status, format_currency, get_cod_cash_projection
 from staff_bot.permissions import require_auth, require_delivery_driver
 from staff_bot.i18n import i18n
@@ -25,6 +26,28 @@ RECONCILIATION_INPUT = 102
 
 class StatusUpdateHandler(BaseHandler):
     """Handle delivery status transitions"""
+
+    @require_auth
+    @require_delivery_driver
+    async def show_cash_hub(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Show the cash sub-menu (Reconciliation / Collect COD)."""
+        language = await self._get_language(update, context)
+        title = f"\U0001f4b0 <b>{i18n.get('staff.cash.hub_title', language)}</b>"
+        keyboard = MenuKeyboards.cash_hub(language)
+
+        try:
+            if update.callback_query:
+                await update.callback_query.answer()
+                await update.callback_query.edit_message_text(
+                    title, reply_markup=keyboard, parse_mode='HTML'
+                )
+            else:
+                await update.message.reply_text(
+                    title, reply_markup=keyboard, parse_mode='HTML'
+                )
+        except Exception as e:
+            logger.error(f"Error showing cash hub: {e}", exc_info=True)
+            await self._handle_error(update, context)
 
     @staticmethod
     def _parse_amount(raw_text: str) -> float:

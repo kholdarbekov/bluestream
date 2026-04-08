@@ -219,6 +219,9 @@ class ActiveDeliveryHandler(BaseHandler):
                 lines.append(f"\U0001f4cd {district}")
             if address:
                 lines.append(f"    {address}")
+            delivery_instructions = escape_html(delivery.get('delivery_instructions', ''))
+            if delivery_instructions:
+                lines.append(f"    \U0001f4dd {delivery_instructions}")
 
             # Payment
             total = format_currency(delivery.get('total_amount'), language=language)

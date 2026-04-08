@@ -173,6 +173,9 @@ class OperatorOrdersPoolViewHandler(BaseHandler):
                 lines.append(f"\U0001f4cd {district}")
             if address:
                 lines.append(f"    {address}")
+            delivery_instructions = escape_html(order.get('delivery_instructions', ''))
+            if delivery_instructions:
+                lines.append(f"    \U0001f4dd {delivery_instructions}")
 
             total = format_currency(order.get('total_amount'), language=language)
             payment = order.get('payment_method', '')

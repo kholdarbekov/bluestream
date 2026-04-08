@@ -177,6 +177,9 @@ class OrdersPoolHandler(BaseHandler):
                 lines.append(f"\U0001f4cd {district}")
             if address:
                 lines.append(f"    {address}")
+            delivery_instructions = escape_html(order.get('delivery_instructions', ''))
+            if delivery_instructions:
+                lines.append(f"    \U0001f4dd {delivery_instructions}")
 
             # Delivery time
             time_slot = escape_html(order.get('time_slot', ''))

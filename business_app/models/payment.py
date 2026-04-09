@@ -277,6 +277,7 @@ class PaymentFiscalization(db.Model, TimestampMixin):
     last_attempt_at = Column(DateTime(timezone=True), nullable=True)
     completed_at = Column(DateTime(timezone=True), nullable=True)
     next_retry_at = Column(DateTime(timezone=True), nullable=True)
+    tax_committee_utilised_at = Column(DateTime(timezone=True), nullable=True)
 
     payment = relationship('Payment', back_populates='fiscalization')
     marking_code_allocations = relationship(
@@ -302,6 +303,7 @@ class PaymentFiscalization(db.Model, TimestampMixin):
             'last_attempt_at': self.last_attempt_at.isoformat() if self.last_attempt_at else None,
             'completed_at': self.completed_at.isoformat() if self.completed_at else None,
             'next_retry_at': self.next_retry_at.isoformat() if self.next_retry_at else None,
+            'tax_committee_utilised_at': self.tax_committee_utilised_at.isoformat() if self.tax_committee_utilised_at else None,
         }
 
 

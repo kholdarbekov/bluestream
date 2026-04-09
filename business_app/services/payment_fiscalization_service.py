@@ -331,12 +331,40 @@ class PaymentFiscalizationService:
 
         try:
             # Preprocessing: change marking codes from "Received" to "Applied" in Tax Committee
-            self.utilise_marking_codes_with_tax_committee(payment, actor_user_id=actor_user_id)
+            utilisation_result = self.utilise_marking_codes_with_tax_committee(payment, actor_user_id=actor_user_id)
             self._log_fiscal_step(
                 'process_click_fiscalization_marking_codes_utilised',
                 payment=payment,
                 fiscalization=fiscalization,
             )
+
+            # Record timestamp the first time codes are newly utilised
+            if utilisation_result.get('utilised', 0) > 0 and fiscalization.tax_committee_utilised_at is None:
+                fiscalization.tax_committee_utilised_at = datetime.now(timezone.utc)
+
+            # Enforce configurable delay between Tax Committee utilisation and submit_items
+            if fiscalization.tax_committee_utilised_at is not None:
+                delay_seconds = int(
+                    current_app.config.get('TAX_COMMITTEE_UTILISATION_DELAY_SECONDS', 120) or 120
+                )
+                utilised_at = fiscalization.tax_committee_utilised_at
+                # SQLite returns naive datetimes; treat them as UTC for comparison
+                if utilised_at.tzinfo is None:
+                    utilised_at = utilised_at.replace(tzinfo=timezone.utc)
+                elapsed = (datetime.now(timezone.utc) - utilised_at).total_seconds()
+                if elapsed < delay_seconds:
+                    remaining = delay_seconds - elapsed
+                    self._log_fiscal_step(
+                        'process_click_fiscalization_tc_delay_waiting',
+                        payment=payment,
+                        fiscalization=fiscalization,
+                        elapsed_seconds=int(elapsed),
+                        remaining_seconds=int(remaining),
+                    )
+                    fiscalization.status = FiscalizationStatus.PENDING
+                    fiscalization.next_retry_at = datetime.now(timezone.utc) + timedelta(seconds=remaining)
+                    self._schedule_tc_delay_retry(payment.id, int(remaining))
+                    return fiscalization
 
             payload = self.build_click_fiscalization_payload(payment)
             fiscalization.request_payload = payload
@@ -604,6 +632,42 @@ class PaymentFiscalizationService:
                 error_message=str(exc),
             )
             current_app.logger.error("Failed to schedule OFD data retry for payment %s: %s", payment_id, exc)
+
+    def _schedule_tc_delay_retry(self, payment_id: int, countdown_seconds: int) -> None:
+        """Schedule fiscalization retry after Tax Committee utilisation delay."""
+        self._log_fiscal_step(
+            'schedule_tc_delay_retry_started',
+            payment=None,
+            target_payment_id=payment_id,
+            countdown_seconds=countdown_seconds,
+        )
+        if current_app.config.get('TESTING'):
+            return
+        try:
+            from business_app.tasks.payment_tasks import process_click_fiscalization_task
+
+            process_click_fiscalization_task.apply_async(
+                args=[payment_id],
+                kwargs={'force': False},
+                countdown=countdown_seconds,
+            )
+            self._log_fiscal_step(
+                'schedule_tc_delay_retry_enqueued',
+                payment=None,
+                target_payment_id=payment_id,
+                countdown_seconds=countdown_seconds,
+            )
+        except Exception as exc:  # noqa: BLE001
+            self._log_fiscal_step(
+                'schedule_tc_delay_retry_failed',
+                level='error',
+                payment=None,
+                target_payment_id=payment_id,
+                error_message=str(exc),
+            )
+            current_app.logger.error(
+                "Failed to schedule TC delay retry for payment %s: %s", payment_id, exc
+            )
 
     def _safe_click_payment_id(self, payment: Payment) -> Optional[int]:
         try:

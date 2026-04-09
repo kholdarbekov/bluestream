@@ -243,6 +243,9 @@ class BaseConfig:
     TAX_COMMITTEE_API_TIMEOUT_SECONDS = int(os.environ.get('TAX_COMMITTEE_API_TIMEOUT_SECONDS', 30) or 30)
     TAX_COMMITTEE_API_TOKEN = get_secret('tax_committee_api_token', 'TAX_COMMITTEE_API_TOKEN', required=False)
     TAX_COMMITTEE_UTILISATION_ENABLED = os.environ.get('TAX_COMMITTEE_UTILISATION_ENABLED', 'true').lower() == 'true'
+    TAX_COMMITTEE_UTILISATION_DELAY_SECONDS = int(
+        os.environ.get('TAX_COMMITTEE_UTILISATION_DELAY_SECONDS', 120) or 120
+    )
 
     # Delivery Configuration
     DEFAULT_DELIVERY_FEE = int(os.environ.get('DEFAULT_DELIVERY_FEE', 5000))  # UZS

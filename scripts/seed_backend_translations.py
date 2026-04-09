@@ -295,6 +295,11 @@ BACKEND_TRANSLATIONS = {
         'uz': 'Bu bosqichda buyurtmani bekor qilib bo\'lmaydi',
         'ru': 'Заказ не может быть отменен на этом этапе'
     },
+    'api.orders.tax_committee_unavailable': {
+        'en': 'Tax authority system (Asl belgisi) is temporarily unavailable. Please try again or choose cash payment.',
+        'uz': '«Asl belgisi» tizimi hozirda mavjud emas. Iltimos, qayta urinib ko\'ring yoki naqd to\'lovni tanlang.',
+        'ru': 'Система «Asl belgisi» временно недоступна. Попробуйте снова или выберите оплату наличными.'
+    },
     'api.orders.retrieved': {
         'en': 'Order retrieved successfully',
         'uz': 'Buyurtma muvaffaqiyatli olindi',
@@ -3612,6 +3617,50 @@ BACKEND_TRANSLATIONS = {
         'en': '✅ Order placed successfully!',
         'uz': '✅ Buyurtma muvaffaqiyatli joylashtirildi!',
         'ru': '✅ Заказ успешно оформлен!'
+    },
+    'telegram.orders.preparing_payment_message': {
+        'en': (
+            '⏳ Your order #{order_number} has been received!\n\n'
+            'We are registering your items with the tax authority (Asl belgisi) — '
+            'this is a mandatory step that takes exactly 1 minute.\n\n'
+            'Please wait. Your payment link will arrive automatically. Do not close this chat.'
+        ),
+        'uz': (
+            '⏳ #{order_number}-sonli buyurtmangiz qabul qilindi!\n\n'
+            'Mahsulotlaringizni soliq tizimida (Asl belgisi) ro\'yxatdan o\'tkazmoqdamiz — '
+            'bu majburiy jarayon, atigi 1 daqiqa davom etadi.\n\n'
+            'Iltimos, kuting. To\'lov havolasi avtomatik yuboriladi. Chatni yopmang.'
+        ),
+        'ru': (
+            '⏳ Ваш заказ №{order_number} принят!\n\n'
+            'Мы регистрируем ваши товары в системе Asl belgisi — '
+            'это обязательный процесс, который занимает ровно 1 минуту.\n\n'
+            'Пожалуйста, подождите. Ссылка для оплаты придёт автоматически. Не закрывайте чат.'
+        ),
+    },
+    'telegram.orders.asl_belgisi_error_message': {
+        'en': (
+            '⚠️ The Asl belgisi (tax authority) system is temporarily unavailable.\n\n'
+            'We could not prepare your payment link. What would you like to do?'
+        ),
+        'uz': (
+            '⚠️ Hozirda «Asl belgisi» tizimida texnik nosozlik mavjud.\n\n'
+            'To\'lov havolasini yaratib bo\'lmayapti. Nima qilmoqchisiz?'
+        ),
+        'ru': (
+            '⚠️ Система «Asl belgisi» временно недоступна.\n\n'
+            'Не удаётся создать ссылку для оплаты. Выберите действие:'
+        ),
+    },
+    'telegram.orders.asl_belgisi_switch_cash': {
+        'en': '💵 Pay with cash',
+        'uz': '💵 Naqd pul bilan to\'lash',
+        'ru': '💵 Оплатить наличными',
+    },
+    'telegram.orders.asl_belgisi_retry': {
+        'en': '🔄 Try again',
+        'uz': '🔄 Qayta urinish',
+        'ru': '🔄 Попробовать снова',
     },
     'telegram.orders.cash_note': {
         'en': 'Please have the exact amount ready for the driver.',

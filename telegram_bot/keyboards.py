@@ -519,6 +519,18 @@ class OrderKeyboards:
         
         return KeyboardBuilder.build_inline_keyboard(buttons)
 
+    @staticmethod
+    def asl_belgisi_error(language: str = 'en') -> InlineKeyboardMarkup:
+        """Shown when Tax Committee (Asl belgisi) is unavailable during order creation.
+        Offers two recovery paths: switch to cash or retry the card order."""
+        buttons = [
+            [{'text': i18n.get('telegram.orders.asl_belgisi_switch_cash', language),
+              'callback_data': 'select_payment_cash'}],
+            [{'text': i18n.get('telegram.orders.asl_belgisi_retry', language),
+              'callback_data': 'confirm_order'}],
+        ]
+        return KeyboardBuilder.build_inline_keyboard(buttons)
+
 
 class SubscriptionKeyboards:
     """Subscription-related keyboards"""

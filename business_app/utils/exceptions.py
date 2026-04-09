@@ -162,6 +162,15 @@ class ExternalServiceError(WaterBusinessException):
         self.service_error_code = service_error_code
 
 
+class TaxCommitteeUnavailableError(WaterBusinessException):
+    """Raised when Tax Committee (Asl belgisi) API is unavailable after retries"""
+
+    def __init__(self, message: str = "Tax committee system is temporarily unavailable",
+                 details: Optional[Dict[str, Any]] = None,
+                 error_code: Optional[str] = None):
+        super().__init__(message, details, error_code or 'ASL_BELGISI_UNAVAILABLE')
+
+
 class RateLimitError(WaterBusinessException):
     """Raised when rate limit is exceeded"""
     

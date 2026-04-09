@@ -246,6 +246,9 @@ class BaseConfig:
     TAX_COMMITTEE_UTILISATION_DELAY_SECONDS = int(
         os.environ.get('TAX_COMMITTEE_UTILISATION_DELAY_SECONDS', 120) or 120
     )
+    PRE_PAYMENT_UTILISATION_WAIT_SECONDS = int(
+        os.environ.get('PRE_PAYMENT_UTILISATION_WAIT_SECONDS', 61) or 61
+    )
 
     # Delivery Configuration
     DEFAULT_DELIVERY_FEE = int(os.environ.get('DEFAULT_DELIVERY_FEE', 5000))  # UZS

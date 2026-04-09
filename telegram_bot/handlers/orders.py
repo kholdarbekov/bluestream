@@ -1,7 +1,9 @@
 """
 Order management handlers
 """
+import asyncio
 import logging
+from datetime import datetime, timezone
 from typing import Dict, Any, List
 from telegram import Update, constants
 from telegram.ext import ContextTypes
@@ -643,10 +645,33 @@ class OrderHandlers(BaseHandler):
 
                 response = await client.create_order(user_token, order_data)
                 if not response.success:
+                    # Tax Committee unavailable — show dedicated error with options
+                    if response.status_code == 503:
+                        error_text = i18n.get('telegram.orders.asl_belgisi_error_message', language)
+                        keyboard = OrderKeyboards.asl_belgisi_error(language)
+                        await query.edit_message_text(text=error_text, reply_markup=keyboard)
+                        return
                     await self._handle_api_error(update, response.error, language)
                     return
 
                 order = response.data['data']['order']
+                response_payload = response.data.get('data', {}) or {}
+
+            # For card/click: show "preparing" message and wait until payment_ready_at
+            # so the Tax Committee utilisation is at least PRE_PAYMENT_UTILISATION_WAIT_SECONDS
+            # before the user sees the payment link.
+            if payment_method in ['card', 'click']:
+                payment_ready_at_str = response_payload.get('payment_ready_at')
+                if payment_ready_at_str:
+                    preparing_text = i18n.get('telegram.orders.preparing_payment_message', language).format(
+                        order_number=order.get('order_number', str(order['id']))
+                    )
+                    await query.edit_message_text(text=preparing_text)
+
+                    payment_ready_at = datetime.fromisoformat(payment_ready_at_str.replace('Z', '+00:00'))
+                    remaining = (payment_ready_at - datetime.now(timezone.utc)).total_seconds()
+                    if remaining > 0:
+                        await asyncio.sleep(remaining)
 
             # Handle different payment methods
             if payment_method in ['payme', 'card', 'click']:
@@ -721,7 +746,15 @@ class OrderHandlers(BaseHandler):
         except Exception as e:
             logger.error(f"Error confirming order: {e}")
             await self._handle_error(update)
-    
+
+    async def select_payment_cash(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Switch payment method to cash and retry order confirmation.
+
+        Triggered when the user taps "Pay with cash" on the Asl belgisi error screen.
+        """
+        context.user_data['selected_payment_method'] = 'cash'
+        await self.confirm_order(update, context)
+
     async def _show_order_confirmation(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Show order confirmation screen"""
         user_id = update.effective_user.id

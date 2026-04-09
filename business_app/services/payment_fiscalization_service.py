@@ -1,5 +1,6 @@
 """Click fiscalization and marking-code lifecycle workflows."""
 
+import time
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, ROUND_HALF_UP
@@ -22,7 +23,7 @@ from business_app.utils.constants import (
     PaymentMethod,
     PaymentStatus,
 )
-from business_app.utils.exceptions import NotFoundError, ValidationError
+from business_app.utils.exceptions import NotFoundError, TaxCommitteeUnavailableError, ValidationError
 
 
 class PaymentFiscalizationService:
@@ -196,6 +197,78 @@ class PaymentFiscalizationService:
         self._log_fiscal_step('ensure_fiscalization_record_created', payment=payment, fiscalization=fiscalization)
         return fiscalization
 
+    def pre_utilise_marking_codes_for_payment(
+        self,
+        payment: Payment,
+        max_retries: int = 3,
+    ) -> Optional[datetime]:
+        """Pre-utilise marking codes at order-confirmation time for card/click payments.
+
+        Called synchronously during order creation before the payment link is surfaced
+        to the user.  Guarantees the Tax Committee utilisation happens at least
+        PRE_PAYMENT_UTILISATION_WAIT_SECONDS before the customer actually pays.
+
+        Steps:
+          1. Create / fetch the PaymentFiscalization record.
+          2. Reserve marking codes (idempotent — skips already-allocated codes).
+          3. Send utilisation request to Tax Committee with up to *max_retries* attempts.
+          4. Record tax_committee_utilised_at on the fiscal record.
+
+        Returns:
+            The tax_committee_utilised_at datetime (UTC) if utilisation happened or was
+            already recorded; None if the order has no marking-code products.
+
+        Raises:
+            TaxCommitteeUnavailableError: after *max_retries* exhausted.
+            ValidationError: if there are insufficient available marking codes.
+        """
+        self._log_fiscal_step('pre_utilise_marking_codes_started', payment=payment)
+
+        fiscalization = self.ensure_fiscalization_record(payment)
+        self.reserve_required_marking_codes(payment)
+
+        # Retry Tax Committee utilisation up to max_retries times
+        last_error: Optional[Exception] = None
+        utilisation_result: Optional[Dict[str, Any]] = None
+        for attempt in range(max_retries):
+            try:
+                utilisation_result = self.utilise_marking_codes_with_tax_committee(payment)
+                break
+            except Exception as exc:
+                last_error = exc
+                self._log_fiscal_step(
+                    'pre_utilise_marking_codes_tc_retry',
+                    level='warning',
+                    payment=payment,
+                    attempt=attempt + 1,
+                    max_retries=max_retries,
+                    error=str(exc),
+                )
+                if attempt < max_retries - 1:
+                    time.sleep(1)
+        else:
+            self._log_fiscal_step(
+                'pre_utilise_marking_codes_tc_failed',
+                level='error',
+                payment=payment,
+                max_retries=max_retries,
+                error=str(last_error),
+            )
+            raise TaxCommitteeUnavailableError(str(last_error))
+
+        # Record utilised_at the first time codes are newly utilised
+        if utilisation_result and utilisation_result.get('utilised', 0) > 0 and fiscalization.tax_committee_utilised_at is None:
+            fiscalization.tax_committee_utilised_at = datetime.now(timezone.utc)
+
+        db.session.commit()
+        self._log_fiscal_step(
+            'pre_utilise_marking_codes_completed',
+            payment=payment,
+            fiscalization=fiscalization,
+            utilised_at=fiscalization.tax_committee_utilised_at,
+        )
+        return fiscalization.tax_committee_utilised_at
+
     def payment_requires_click_fiscalization(self, payment: Payment) -> bool:
         method_value = payment.payment_method.value if hasattr(payment.payment_method, 'value') else payment.payment_method
         if method_value not in {PaymentMethod.CLICK.value, PaymentMethod.CARD.value}:
@@ -338,12 +411,18 @@ class PaymentFiscalizationService:
                 fiscalization=fiscalization,
             )
 
-            # Record timestamp the first time codes are newly utilised
-            if utilisation_result.get('utilised', 0) > 0 and fiscalization.tax_committee_utilised_at is None:
+            newly_utilised = utilisation_result.get('utilised', 0) > 0
+
+            # Record timestamp only when we just utilised codes in this Celery run.
+            # If tax_committee_utilised_at is already set it means pre_utilise_marking_codes_for_payment
+            # ran at order-confirmation time — do NOT overwrite that earlier timestamp.
+            if newly_utilised and fiscalization.tax_committee_utilised_at is None:
                 fiscalization.tax_committee_utilised_at = datetime.now(timezone.utc)
 
-            # Enforce configurable delay between Tax Committee utilisation and submit_items
-            if fiscalization.tax_committee_utilised_at is not None:
+            # Enforce delay only when codes were utilised in THIS Celery run (not pre-utilised).
+            # Pre-utilised payments already waited PRE_PAYMENT_UTILISATION_WAIT_SECONDS before
+            # the user even saw the payment link, so the Tax Committee requirement is satisfied.
+            if newly_utilised and fiscalization.tax_committee_utilised_at is not None:
                 delay_seconds = int(
                     current_app.config.get('TAX_COMMITTEE_UTILISATION_DELAY_SECONDS', 120) or 120
                 )

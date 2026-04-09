@@ -20,7 +20,7 @@ from business_app.utils.constants import OrderStatus, NotificationType, PaymentM
 from business_app.utils.validation_helpers import validate_list_request_params
 from business_app.utils.error_handlers import handle_api_exception
 from business_app.utils.exceptions import (
-    ValidationError, NotFoundError, ForbiddenError, ConflictError
+    ValidationError, NotFoundError, ForbiddenError, ConflictError, TaxCommitteeUnavailableError
 )
 from business_app.utils.api_responses import (
     success_response, error_response, created_response,
@@ -371,10 +371,41 @@ def create_order():
         }
 
         payment_method_value = order.payment_method.value if hasattr(order.payment_method, 'value') else order.payment_method
+
+        # Pre-utilise marking codes for card/click payments so the Tax Committee
+        # utilisation request happens before the user sees (and uses) the payment link.
+        pre_utilization_at = None
+        if payment_method_value in {'click', 'card'} and getattr(order, 'payment', None):
+            from business_app.services.payment_fiscalization_service import PaymentFiscalizationService
+            try:
+                pre_utilization_at = PaymentFiscalizationService().pre_utilise_marking_codes_for_payment(
+                    order.payment
+                )
+            except TaxCommitteeUnavailableError as e:
+                current_app.logger.error(f"CREATE ORDER API: Tax Committee unavailable for order {order.id}: {e}")
+                # Cancel the order so inventory and marking codes are released cleanly
+                try:
+                    get_order_service().cancel_order(order.id, reason='tax_committee_unavailable')
+                except Exception:
+                    _rollback_session()
+                return error_response(
+                    message=get_translation('api.orders.tax_committee_unavailable'),
+                    status_code=503,
+                    data={'error_code': 'ASL_BELGISI_UNAVAILABLE'},
+                )
+            except ValidationError:
+                # Bubble up — caught by outer except ValidationError block
+                raise
+
         if payment_method_value in {'click', 'card', 'payme'} and getattr(order, 'payment', None):
             payment_link = get_payment_service().create_payment_link(order.payment.id)
             response_data['payment_link'] = payment_link
             response_data['payment_url'] = payment_link.get('payment_url') if isinstance(payment_link, dict) else payment_link
+
+        if pre_utilization_at is not None:
+            wait_seconds = int(current_app.config.get('PRE_PAYMENT_UTILISATION_WAIT_SECONDS', 61) or 61)
+            response_data['pre_utilization_at'] = pre_utilization_at.isoformat()
+            response_data['payment_ready_at'] = (pre_utilization_at + timedelta(seconds=wait_seconds)).isoformat()
 
         if (order.payment_method.value if hasattr(order.payment_method, 'value') else order.payment_method) == 'cash':
             from business_app.services.cash_collection_service import CashCollectionService

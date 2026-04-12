@@ -247,7 +247,7 @@ class BaseConfig:
         os.environ.get('TAX_COMMITTEE_UTILISATION_DELAY_SECONDS', 120) or 120
     )
     PRE_PAYMENT_UTILISATION_WAIT_SECONDS = int(
-        os.environ.get('PRE_PAYMENT_UTILISATION_WAIT_SECONDS', 30) or 30
+        os.environ.get('PRE_PAYMENT_UTILISATION_WAIT_SECONDS', 45) or 45
     )
 
     # Delivery Configuration

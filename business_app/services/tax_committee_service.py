@@ -1,6 +1,7 @@
 """Tax Committee (xTrace / Asl Belgisi) API integration for marking code utilisation."""
 
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from typing import Any, Dict, List, Optional
 
 import requests
@@ -247,7 +248,7 @@ class TaxCommitteeService:
         product_group = current_app.config.get('TAX_COMMITTEE_PRODUCT_GROUP', 'water')
         url = f"{self._base_url}/api/utilisation?productGroup={product_group}"
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(ZoneInfo("Asia/Tashkent"))
         expire_days = product.expire_days if product.expire_days is not None else 180
         expiration = now + timedelta(days=expire_days)
 
@@ -256,8 +257,8 @@ class TaxCommitteeService:
             'businessPlaceId': int(current_app.config['TAX_COMMITTEE_BUSINESS_PLACE_ID']),
             'releaseType': current_app.config.get('TAX_COMMITTEE_RELEASE_TYPE', 'PRODUCTION'),
             'manufacturerCountry': current_app.config.get('TAX_COMMITTEE_MANUFACTURER_COUNTRY', 'UZ'),
-            'productionDate': now.strftime('%Y-%m-%dT%I:%M:%SZ'),
-            'expirationDate': expiration.strftime('%Y-%m-%dT%I:%M:%SZ'),
+            'productionDate': now.strftime('%Y-%m-%dT%H:%M:%S+05:00'),
+            'expirationDate': expiration.strftime('%Y-%m-%dT%H:%M:%S+05:00'),
         }
 
         self._log_step(

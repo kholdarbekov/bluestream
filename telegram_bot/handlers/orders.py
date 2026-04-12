@@ -670,6 +670,7 @@ class OrderHandlers(BaseHandler):
 
                     payment_ready_at = datetime.fromisoformat(payment_ready_at_str.replace('Z', '+00:00'))
                     remaining = (payment_ready_at - datetime.now(timezone.utc)).total_seconds()
+                    logger.info(f"Payment for order: {order.get('order_number')} will be ready at {payment_ready_at_str}, waiting for {remaining:.2f} seconds before showing payment link to user {user_id}")
                     if remaining > 0:
                         await asyncio.sleep(remaining)
 

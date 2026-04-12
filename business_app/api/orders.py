@@ -403,7 +403,7 @@ def create_order():
             response_data['payment_url'] = payment_link.get('payment_url') if isinstance(payment_link, dict) else payment_link
 
         if pre_utilization_at is not None:
-            wait_seconds = int(current_app.config.get('PRE_PAYMENT_UTILISATION_WAIT_SECONDS', 30) or 30)
+            wait_seconds = int(current_app.config.get('PRE_PAYMENT_UTILISATION_WAIT_SECONDS', 45) or 45)
             response_data['pre_utilization_at'] = pre_utilization_at.isoformat()
             response_data['payment_ready_at'] = (pre_utilization_at + timedelta(seconds=wait_seconds)).isoformat()
 

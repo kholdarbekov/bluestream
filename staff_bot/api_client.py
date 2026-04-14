@@ -177,10 +177,17 @@ class StaffAPIClient:
 
                     if response.status_code in (200, 201):
                         # Unwrap standardized API response shape: {success, data, ...}
-                        data = payload.get('data', payload) if isinstance(payload, dict) else payload
+                        # Use a sentinel to distinguish "data key absent" from "data: null".
+                        # The backend serializes with exclude_none=True, so when data IS null
+                        # the "data" key is omitted entirely.  Without the sentinel,
+                        # payload.get('data', payload) would fall back to the whole payload dict
+                        # (truthy) and every "no data" response would look like a real result.
+                        _MISSING = object()
+                        raw_data = payload.get('data', _MISSING) if isinstance(payload, dict) else _MISSING
+                        response_data = None if raw_data is _MISSING else raw_data
                         return APIResponse(
                             success=True,
-                            data=data,
+                            data=response_data,
                             status_code=response.status_code
                         )
                     elif response.status_code == 401:
@@ -608,6 +615,103 @@ class StaffAPIClient:
             '/api/v1/addresses/reverse-geocode',
             token=token,
             data={'latitude': latitude, 'longitude': longitude},
+        )
+
+    # --- Bottle Tracking ---
+
+    async def get_customer_bottle_summary(self, token: str, customer_id: int) -> APIResponse:
+        return await self._make_request(
+            'GET',
+            f'/api/v1/staff/bottles/customer/{customer_id}/summary',
+            token=token,
+        )
+
+    async def get_customer_bottle_addresses(self, token: str, customer_id: int) -> APIResponse:
+        return await self._make_request(
+            'GET',
+            f'/api/v1/staff/bottles/customer/{customer_id}/addresses',
+            token=token,
+        )
+
+    async def record_bottle_collection(self, token: str, data: dict) -> APIResponse:
+        return await self._make_request(
+            'POST',
+            '/api/v1/staff/bottles/collection',
+            token=token,
+            data=data,
+        )
+
+    async def create_bottle_fine(self, token: str, data: dict) -> APIResponse:
+        return await self._make_request(
+            'POST',
+            '/api/v1/staff/bottles/fine',
+            token=token,
+            data=data,
+        )
+
+    async def record_bottles_loaded(self, token: str, bottles_loaded: int) -> APIResponse:
+        return await self._make_request(
+            'POST',
+            '/api/v1/staff/bottles/load',
+            token=token,
+            data={'bottles_loaded': bottles_loaded},
+        )
+
+    async def record_bottles_returned_to_warehouse(self, token: str, bottles_returned: int) -> APIResponse:
+        return await self._make_request(
+            'POST',
+            '/api/v1/staff/bottles/return-to-warehouse',
+            token=token,
+            data={'bottles_returned_to_warehouse': bottles_returned},
+        )
+
+    async def get_my_bottle_accountability(self, token: str) -> APIResponse:
+        return await self._make_request(
+            'GET',
+            '/api/v1/staff/bottles/my-accountability',
+            token=token,
+        )
+
+    # --- Bottle Session endpoints ---
+
+    async def open_bottle_session(self, token: str, bottles_loaded: int, notes: str = None) -> APIResponse:
+        data = {'bottles_loaded': bottles_loaded}
+        if notes:
+            data['notes'] = notes
+        return await self._make_request('POST', '/api/v1/staff/bottles/session/open', token=token, data=data)
+
+    async def get_current_bottle_session(self, token: str) -> APIResponse:
+        return await self._make_request('GET', '/api/v1/staff/bottles/session/current', token=token)
+
+    async def close_bottle_session(self, token: str, bottles_returned: int, notes: str = None) -> APIResponse:
+        data = {'bottles_returned_to_warehouse': bottles_returned}
+        if notes:
+            data['notes'] = notes
+        return await self._make_request('POST', '/api/v1/staff/bottles/session/close', token=token, data=data)
+
+    async def get_my_bottle_sessions(self, token: str, page: int = 1, per_page: int = 10) -> APIResponse:
+        return await self._make_request(
+            'GET', '/api/v1/staff/bottles/sessions', token=token,
+            params={'page': page, 'per_page': per_page},
+        )
+
+    # --- Bottle Transfer endpoints ---
+
+    async def get_pending_bottle_transfers(self, token: str) -> APIResponse:
+        return await self._make_request('GET', '/api/v1/staff/bottles/transfers/pending', token=token)
+
+    async def initiate_bottle_transfer(self, token: str, receiver_driver_id: int, quantity: int, notes: str = None) -> APIResponse:
+        data = {'receiver_driver_id': receiver_driver_id, 'quantity': quantity}
+        if notes:
+            data['notes'] = notes
+        return await self._make_request('POST', '/api/v1/staff/bottles/transfers', token=token, data=data)
+
+    async def confirm_bottle_transfer(self, token: str, transfer_id: int, confirmed_quantity: int, notes: str = None) -> APIResponse:
+        data = {'confirmed_quantity': confirmed_quantity}
+        if notes:
+            data['notes'] = notes
+        return await self._make_request(
+            'POST', f'/api/v1/staff/bottles/transfers/{transfer_id}/confirm', token=token, data=data
         )
 
 

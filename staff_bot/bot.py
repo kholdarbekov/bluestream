@@ -55,7 +55,17 @@ from staff_bot.handlers.tryouts import TryoutHandler
 from staff_bot.handlers.tryouts import ENTER_TRYOUT_PHONE, ENTER_TRYOUT_NAME, ENTER_TRYOUT_ADDRESS
 from staff_bot.handlers.delivery import (
     OrdersPoolHandler, ActiveDeliveryHandler, StatusUpdateHandler, CashCollectionHandler,
-    HistoryHandler, LocationHandler
+    BottleCollectionHandler, HistoryHandler, LocationHandler
+)
+from staff_bot.handlers.delivery.status_update import BOTTLE_RETURN_INPUT
+from staff_bot.handlers.delivery.bottle_collection import (
+    BOTTLE_COLLECTION_SEARCH_INPUT, BOTTLE_COLLECTION_QTY_INPUT,
+    BOTTLE_COLLECTION_NOTE_INPUT, BOTTLE_FINE_QTY_INPUT,
+    BOTTLE_FINE_AMOUNT_INPUT, BOTTLE_FINE_NOTE_INPUT,
+    BOTTLES_LOADED_INPUT, BOTTLES_RETURNED_WH_INPUT,
+    BOTTLE_SESSION_LOADED_QTY_INPUT, BOTTLE_SESSION_RETURNED_QTY_INPUT,
+    BOTTLE_TRANSFER_DRIVER_SELECT, BOTTLE_TRANSFER_QTY_INPUT,
+    BOTTLE_TRANSFER_CONFIRM_QTY_INPUT,
 )
 from staff_bot.handlers.operator.create_user import CreateUserHandler
 from staff_bot.handlers.operator.create_user import ENTER_PHONE, ENTER_FIRST_NAME, ENTER_LAST_NAME
@@ -287,6 +297,7 @@ class StaffBot:
         active_delivery_handler = ActiveDeliveryHandler()
         status_update_handler = StatusUpdateHandler()
         cash_collection_handler = CashCollectionHandler()
+        bottle_collection_handler = BottleCollectionHandler()
         history_handler = HistoryHandler()
         location_handler = LocationHandler()
         tryout_handler = TryoutHandler()
@@ -309,6 +320,7 @@ class StaffBot:
             'active_delivery': active_delivery_handler,
             'status_update': status_update_handler,
             'cash_collection': cash_collection_handler,
+            'bottle_collection': bottle_collection_handler,
             'history': history_handler,
             'location': location_handler,
             'tryouts': tryout_handler,
@@ -408,6 +420,24 @@ class StaffBot:
             CallbackQueryHandler(cash_collection_handler.start_full_collection, pattern=r"^staff_cod_collect_full_\d+$"),
             CallbackQueryHandler(cash_collection_handler.start_custom_collection, pattern=r"^staff_cod_collect_custom_\d+$"),
             CallbackQueryHandler(status_update_handler.mark_preparing, pattern=r"^staff_mark_preparing_\d+$"),
+
+            # Bottle return during delivery completion
+            CallbackQueryHandler(status_update_handler.confirm_full_bottle_return, pattern=r"^staff_bottles_full_\d+$"),
+            CallbackQueryHandler(status_update_handler.start_custom_bottle_return, pattern=r"^staff_bottles_custom_\d+$"),
+            CallbackQueryHandler(status_update_handler.skip_bottle_return, pattern=r"^staff_bottles_none_\d+$"),
+
+            # Standalone bottle collection
+            CallbackQueryHandler(bottle_collection_handler.show_customer_bottle_statement, pattern=r"^staff_bottle_customer_\d+$"),
+            CallbackQueryHandler(bottle_collection_handler.select_address, pattern=r"^staff_bottle_addr_\d+_\d+$"),
+            CallbackQueryHandler(bottle_collection_handler.start_collection, pattern=r"^staff_bottle_collect_\d+_\d+$"),
+            CallbackQueryHandler(bottle_collection_handler.start_fine, pattern=r"^staff_bottle_fine_\d+_\d+$"),
+
+            # Warehouse bottle accountability (no text input required)
+            CallbackQueryHandler(bottle_collection_handler.show_my_accountability, pattern="^staff_bottle_my_accountability$"),
+
+            # Bottle session & transfer (non-conversation callbacks)
+            CallbackQueryHandler(bottle_collection_handler.show_pending_transfers, pattern="^staff_bottle_transfers_pending$"),
+            CallbackQueryHandler(bottle_collection_handler.receive_transfer_confirm_callback, pattern=r"^staff_transfer_confirm_\d+_\d+$"),
 
             # History & Stats
             CallbackQueryHandler(history_handler.show_history, pattern="^staff_delivery_history$"),
@@ -613,6 +643,127 @@ class StaffBot:
         )
         self.application.add_handler(create_tryout_conv)
 
+        # Standalone bottle collection search conversation
+        bottle_collection_conv = ConversationHandler(
+            entry_points=[
+                CallbackQueryHandler(bottle_collection_handler.start_collection_search, pattern="^staff_bottle_collect_menu$"),
+            ],
+            states={
+                BOTTLE_COLLECTION_SEARCH_INPUT: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, bottle_collection_handler.receive_collection_search)
+                ],
+            },
+            fallbacks=[
+                CommandHandler("cancel", bottle_collection_handler.cancel if hasattr(bottle_collection_handler, 'cancel') else start_handler.cancel),
+                CallbackQueryHandler(main_menu_handler, pattern="^staff_back_to_main$"),
+            ],
+            per_chat=True,
+            per_user=True,
+            name="staff_bottle_collection_search",
+            conversation_timeout=300,
+            allow_reentry=True
+        )
+        self.application.add_handler(bottle_collection_conv)
+
+        # Driver logs bottles loaded from warehouse
+        bottle_loaded_conv = ConversationHandler(
+            entry_points=[
+                CallbackQueryHandler(bottle_collection_handler.start_log_loaded, pattern="^staff_bottle_log_loaded$"),
+                CallbackQueryHandler(bottle_collection_handler.start_log_loaded, pattern="^staff_bottle_session_load$"),
+            ],
+            states={
+                BOTTLES_LOADED_INPUT: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, bottle_collection_handler.receive_bottles_loaded)
+                ],
+                BOTTLE_SESSION_LOADED_QTY_INPUT: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, bottle_collection_handler.receive_bottles_loaded)
+                ],
+            },
+            fallbacks=[
+                CommandHandler("cancel", start_handler.cancel),
+                CallbackQueryHandler(main_menu_handler, pattern="^staff_back_to_main$"),
+            ],
+            per_chat=True,
+            per_user=True,
+            name="staff_bottle_loaded",
+            conversation_timeout=300,
+            allow_reentry=True,
+        )
+        self.application.add_handler(bottle_loaded_conv)
+
+        # Driver logs bottles returned to warehouse
+        bottle_returned_wh_conv = ConversationHandler(
+            entry_points=[
+                CallbackQueryHandler(bottle_collection_handler.start_return_to_warehouse, pattern="^staff_bottle_return_warehouse$"),
+                CallbackQueryHandler(bottle_collection_handler.start_return_to_warehouse, pattern="^staff_bottle_session_return$"),
+            ],
+            states={
+                BOTTLES_RETURNED_WH_INPUT: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, bottle_collection_handler.receive_bottles_returned)
+                ],
+                BOTTLE_SESSION_RETURNED_QTY_INPUT: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, bottle_collection_handler.receive_bottles_returned)
+                ],
+            },
+            fallbacks=[
+                CommandHandler("cancel", start_handler.cancel),
+                CallbackQueryHandler(main_menu_handler, pattern="^staff_back_to_main$"),
+            ],
+            per_chat=True,
+            per_user=True,
+            name="staff_bottle_returned_wh",
+            conversation_timeout=300,
+            allow_reentry=True,
+        )
+        self.application.add_handler(bottle_returned_wh_conv)
+
+        # Driver initiates a bottle transfer to another driver
+        bottle_transfer_conv = ConversationHandler(
+            entry_points=[
+                CallbackQueryHandler(bottle_collection_handler.start_transfer_bottles, pattern="^staff_bottle_transfer_start$"),
+            ],
+            states={
+                BOTTLE_TRANSFER_DRIVER_SELECT: [
+                    CallbackQueryHandler(bottle_collection_handler.receive_transfer_driver_select, pattern=r"^staff_transfer_driver_\d+$"),
+                ],
+                BOTTLE_TRANSFER_QTY_INPUT: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, bottle_collection_handler.receive_transfer_quantity)
+                ],
+            },
+            fallbacks=[
+                CommandHandler("cancel", start_handler.cancel),
+                CallbackQueryHandler(main_menu_handler, pattern="^staff_back_to_main$"),
+            ],
+            per_chat=True,
+            per_user=True,
+            name="staff_bottle_transfer",
+            conversation_timeout=300,
+            allow_reentry=True,
+        )
+        self.application.add_handler(bottle_transfer_conv)
+
+        # Receiver enters a custom confirmed quantity for a pending transfer
+        bottle_transfer_confirm_conv = ConversationHandler(
+            entry_points=[
+                CallbackQueryHandler(bottle_collection_handler.start_transfer_custom_confirm, pattern=r"^staff_transfer_custom_\d+$"),
+            ],
+            states={
+                BOTTLE_TRANSFER_CONFIRM_QTY_INPUT: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, bottle_collection_handler.receive_transfer_custom_confirm)
+                ],
+            },
+            fallbacks=[
+                CommandHandler("cancel", start_handler.cancel),
+                CallbackQueryHandler(main_menu_handler, pattern="^staff_back_to_main$"),
+            ],
+            per_chat=True,
+            per_user=True,
+            name="staff_bottle_transfer_confirm",
+            conversation_timeout=300,
+            allow_reentry=True,
+        )
+        self.application.add_handler(bottle_transfer_confirm_conv)
+
         # Keep main-menu back handler after conversations so their fallbacks can run.
         self.application.add_handler(
             CallbackQueryHandler(main_menu_handler, pattern="^staff_back_to_main$"),
@@ -662,6 +813,12 @@ class StaffBot:
 
         # Delivery COD collection and reconciliation inputs take precedence over menu text.
         cash_flow = context.user_data.get('pending_delivery_cash_flow') or {}
+        # Bottle return count during delivery (must check before cash note)
+        if cash_flow.get('awaiting_bottle_count'):
+            status_update_handler = self._delivery_handlers.get('status_update')
+            if status_update_handler:
+                await status_update_handler.receive_bottle_count(update, context)
+            return
         if cash_flow.get('flow_type') == 'partial' and cash_flow.get('cash_amount') is None:
             status_update_handler = self._delivery_handlers.get('status_update')
             if status_update_handler:
@@ -686,6 +843,27 @@ class StaffBot:
                 else:
                     await cash_collection_handler.receive_collection_note(update, context)
             return
+
+        # Bottle collection and fine flows (standalone)
+        bottle_flow = context.user_data.get('pending_bottle_collection_flow') or {}
+        if bottle_flow:
+            bottle_handler = self._delivery_handlers.get('bottle_collection')
+            if bottle_handler:
+                action = bottle_flow.get('action')
+                if action == 'collect':
+                    if bottle_flow.get('quantity') is None:
+                        await bottle_handler.receive_collection_quantity(update, context)
+                    else:
+                        await bottle_handler.receive_collection_note(update, context)
+                    return
+                elif action == 'fine':
+                    if bottle_flow.get('fine_quantity') is None:
+                        await bottle_handler.receive_fine_bottle_qty(update, context)
+                    elif bottle_flow.get('fine_amount') is None:
+                        await bottle_handler.receive_fine_amount(update, context)
+                    else:
+                        await bottle_handler.receive_fine_note(update, context)
+                    return
 
         if context.user_data.get('tryout_pickup_task_id'):
             tryout_handler = self._delivery_handlers.get('tryouts')

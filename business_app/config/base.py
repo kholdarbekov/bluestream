@@ -149,13 +149,13 @@ class BaseConfig:
     MAIL_USE_TLS = os.environ.get('MAIL_USE_TLS', 'True').lower() == 'true'
     MAIL_USERNAME = os.environ.get('MAIL_USERNAME', 'apikey')
     MAIL_PASSWORD = get_secret('sendgrid_api_key', 'SENDGRID_API_KEY', required=False)
-    MAIL_DEFAULT_SENDER = os.environ.get('MAIL_DEFAULT_SENDER', 'noreply@bluestream.uz')
-    MAIL_SUPPORT_EMAIL = os.environ.get('MAIL_SUPPORT_EMAIL', 'support@bluestream.uz')
+    MAIL_DEFAULT_SENDER = os.environ.get('MAIL_DEFAULT_SENDER', 'noreply@aqua-element.uz')
+    MAIL_SUPPORT_EMAIL = os.environ.get('MAIL_SUPPORT_EMAIL', 'support@aqua-element.uz')
     
     # Email Configuration (Brevo - Primary)
     BREVO_API_KEY = get_secret('brevo_api_key', 'BREVO_API_KEY', required=False)
-    BREVO_SENDER_EMAIL = os.environ.get('BREVO_SENDER_EMAIL', 'noreply@bluestream.uz')
-    BREVO_SENDER_NAME = os.environ.get('BREVO_SENDER_NAME', 'BlueStream Water Delivery')
+    BREVO_SENDER_EMAIL = os.environ.get('BREVO_SENDER_EMAIL', 'noreply@aqua-element.uz')
+    BREVO_SENDER_NAME = os.environ.get('BREVO_SENDER_NAME', 'Aqua Element')
     
     # SMS Configuration - Eskiz SMS (Uzbekistan)
     ESKIZ_EMAIL = os.environ.get('ESKIZ_EMAIL')
@@ -227,11 +227,11 @@ class BaseConfig:
     PAYME_TIMEOUT_MS = int(os.environ.get('PAYME_TIMEOUT_MS', 43200000))  # 12 hours timeout for transactions
     
     # Business Configuration
-    COMPANY_NAME = os.environ.get('COMPANY_NAME', 'BlueStream Water Delivery')
+    COMPANY_NAME = os.environ.get('COMPANY_NAME', 'Aqua Element')
     COMPANY_PHONE = os.environ.get('COMPANY_PHONE', '+998901234567')
-    COMPANY_EMAIL = os.environ.get('COMPANY_EMAIL', 'info@bluestream.uz')
+    COMPANY_EMAIL = os.environ.get('COMPANY_EMAIL', 'info@aqua-element.uz')
     COMPANY_ADDRESS = os.environ.get('COMPANY_ADDRESS', 'Tashkent, Uzbekistan')
-    COMPANY_WEBSITE = os.environ.get('COMPANY_WEBSITE', 'https://bluestream.uz')
+    COMPANY_WEBSITE = os.environ.get('COMPANY_WEBSITE', 'https://aqua-element.uz')
     COMPANY_TIN = os.environ.get('COMPANY_TIN', '')
 
     # Tax Committee (Asl Belgisi / xTrace) Configuration
@@ -323,15 +323,15 @@ All responses follow consistent format with `success`, `message`, `data`/`errors
 
 For complete documentation, examples, and SDKs visit: [API Documentation](/docs/api)
         ''',
-        'termsOfService': 'https://bluestream.uz/terms',
+        'termsOfService': 'https://aqua-element.uz/terms',
         'contact': {
-            'name': 'BlueStream API Support',
-            'url': 'https://bluestream.uz/support',
-            'email': 'api-support@bluestream.uz',
+            'name': 'Aqua Element API Support',
+            'url': 'https://aqua-element.uz/support',
+            'email': 'api-support@aqua-element.uz',
         },
         'license': {
             'name': 'Proprietary',
-            'url': 'https://bluestream.uz/license'
+            'url': 'https://aqua-element.uz/license'
         },
         'externalDocs': {
             'description': 'Complete API Documentation',

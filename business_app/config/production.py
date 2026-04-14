@@ -89,10 +89,10 @@ class ProductionConfig(BaseConfig):
     
     # CORS Configuration - Production domains only
     CORS_ORIGINS = [
-        'https://bluestream.uz',
-        'https://www.bluestream.uz',
-        'https://admin.bluestream.uz',
-        'https://api.bluestream.uz'
+        'https://aqua-element.uz',
+        'https://www.aqua-element.uz',
+        'https://admin.aqua-element.uz',
+        'https://api.aqua-element.uz'
     ]
     
     # Cache Configuration
@@ -106,7 +106,7 @@ class ProductionConfig(BaseConfig):
     JWT_ACCESS_TOKEN_EXPIRES = timedelta(minutes=30)  # Shorter tokens in production
     JWT_REFRESH_TOKEN_EXPIRES = timedelta(days=7)
     JWT_COOKIE_SECURE = True  # Force HTTPS
-    JWT_COOKIE_DOMAIN = '.bluestream.uz'  # Allow cookies across subdomains
+    JWT_COOKIE_DOMAIN = '.aqua-element.uz'  # Allow cookies across subdomains
     JWT_COOKIE_PATH = '/'  # Make cookies available to entire site
     
     # Session Configuration - Maximum security
@@ -167,8 +167,8 @@ class ProductionConfig(BaseConfig):
         'script-src': ["'self'", "'unsafe-inline'", "https://unpkg.com"],  # Allow inline scripts + Leaflet
         'style-src': ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com", "https://unpkg.com"],  # Leaflet CSS
         'font-src': ["'self'", "https://fonts.gstatic.com"],
-        'img-src': ["'self'", "data:", "https://bluestream.uz", "https:"],
-        'connect-src': ["'self'", "https://api.bluestream.uz", "https://bluestream.uz", "wss://bluestream.uz", "wss://api.bluestream.uz"],  # Allow API and WebSocket connections
+        'img-src': ["'self'", "data:", "https://aqua-element.uz", "https:"],
+        'connect-src': ["'self'", "https://api.aqua-element.uz", "https://aqua-element.uz", "wss://aqua-element.uz", "wss://api.aqua-element.uz"],  # Allow API and WebSocket connections
         'frame-src': ["'self'", "https://www.youtube.com", "https://www.youtube-nocookie.com"],  # Allow YouTube embeds
         'object-src': ["'none'"],
         'base-uri': ["'self'"],
@@ -193,7 +193,7 @@ class ProductionConfig(BaseConfig):
         'script-src': ["'self'", "'unsafe-inline'", 'https://unpkg.com'],  # Allow inline scripts + Leaflet
         'style-src': ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com', 'https://unpkg.com'],  # Leaflet CSS
         'img-src': ["'self'", 'data:', 'https:'],
-        'connect-src': ["'self'", 'https://api.bluestream.uz', 'https://bluestream.uz', 'wss://bluestream.uz', 'wss://api.bluestream.uz'],  # Allow API connections
+        'connect-src': ["'self'", 'https://api.aqua-element.uz', 'https://aqua-element.uz', 'wss://aqua-element.uz', 'wss://api.aqua-element.uz'],  # Allow API connections
         'font-src': ["'self'", 'https://fonts.gstatic.com'],
         'media-src': ["'self'"],
         'object-src': ["'none'"],

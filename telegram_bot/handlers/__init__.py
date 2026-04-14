@@ -14,6 +14,9 @@ from handlers.subscriptions import subscription_handlers
 from handlers.profile import profile_handlers
 from handlers.loyalty import loyalty_handlers
 from handlers.payments import payment_handlers
+from handlers.bottles import BottleBalanceHandler
+
+bottle_handlers = BottleBalanceHandler()
 
 # Simple handlers for remaining modules
 class SimpleHandlers:
@@ -87,5 +90,6 @@ __all__ = [
     'loyalty_handlers',
     'admin_handlers',
     'support_handlers',
-    'payment_handlers'
+    'payment_handlers',
+    'bottle_handlers'
 ]

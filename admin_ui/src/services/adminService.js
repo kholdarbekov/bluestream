@@ -358,8 +358,10 @@ class AdminService {
     return response.data;
   }
 
-  async updateOrderStatus(orderId, status, notes) {
-    const response = await api.put(`/admin/orders/${orderId}/status`, { status, notes });
+  async updateOrderStatus(orderId, status, notes, { bottles_returned } = {}) {
+    const body = { status, notes };
+    if (bottles_returned != null) body.bottles_returned = bottles_returned;
+    const response = await api.put(`/admin/orders/${orderId}/status`, body);
     return response.data;
   }
 
@@ -1026,6 +1028,97 @@ class AdminService {
         'Content-Type': 'multipart/form-data',
       },
     });
+    return response.data;
+  }
+
+  // --- Bottle Tracking ---
+
+  async getBottleDashboard() {
+    const response = await api.get('/admin/bottles/dashboard');
+    return response.data;
+  }
+
+  async getBottleBalances(params = {}) {
+    const response = await api.get('/admin/bottles/balances', { params });
+    return response.data;
+  }
+
+  async getCustomerBottleBalances(userId) {
+    const response = await api.get(`/admin/bottles/balances/${userId}`);
+    return response.data;
+  }
+
+  async getBottleLedger(params = {}) {
+    const response = await api.get('/admin/bottles/ledger', { params });
+    return response.data;
+  }
+
+  async getBottleLedgerForAddress(userId, addressId, params = {}) {
+    const response = await api.get(`/admin/bottles/ledger/${userId}/${addressId}`, { params });
+    return response.data;
+  }
+
+  async createBottleAdjustment(data) {
+    const response = await api.post('/admin/bottles/adjustment', data);
+    return response.data;
+  }
+
+  async setBottleInitialBalance(data) {
+    const response = await api.post('/admin/bottles/initial-balance', data);
+    return response.data;
+  }
+
+  async getBottleFines(params = {}) {
+    const response = await api.get('/admin/bottles/fines', { params });
+    return response.data;
+  }
+
+  async createBottleFine(data) {
+    const response = await api.post('/admin/bottles/fines', data);
+    return response.data;
+  }
+
+  async updateBottleFine(fineId, data) {
+    const response = await api.put(`/admin/bottles/fines/${fineId}`, data);
+    return response.data;
+  }
+
+  async reconcileBottleBalance(userId, addressId) {
+    const response = await api.post(`/admin/bottles/reconcile/${userId}/${addressId}`);
+    return response.data;
+  }
+
+  async getDriverBottleAccountability(params = {}) {
+    const response = await api.get('/admin/bottles/driver-accountability', { params });
+    return response.data;
+  }
+
+  // --- Bottle Sessions ---
+
+  async getBottleSessions(params = {}) {
+    const response = await api.get('/admin/bottles/sessions', { params });
+    return response.data;
+  }
+
+  async getBottleSession(sessionId) {
+    const response = await api.get(`/admin/bottles/sessions/${sessionId}`);
+    return response.data;
+  }
+
+  async forceCloseBottleSession(sessionId, data) {
+    const response = await api.post(`/admin/bottles/sessions/${sessionId}/force-close`, data);
+    return response.data;
+  }
+
+  // --- Bottle Transfers ---
+
+  async getBottleTransfers(params = {}) {
+    const response = await api.get('/admin/bottles/transfers', { params });
+    return response.data;
+  }
+
+  async resolveBottleTransferDispute(transferId, data) {
+    const response = await api.post(`/admin/bottles/transfers/${transferId}/resolve`, data);
     return response.data;
   }
 }

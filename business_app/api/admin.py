@@ -2,6 +2,8 @@
 Admin API endpoints for the Water Business Platform
 This file should be placed in business_app/api/admin.py
 """
+from typing import List
+
 from flask import Blueprint, request, jsonify, current_app, g, Response
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from sqlalchemy import and_, or_, desc, func, text, cast, String
@@ -961,7 +963,8 @@ def get_users():
                 User.first_name.ilike(search_term),
                 User.last_name.ilike(search_term),
                 User.email.ilike(search_term),
-                User.phone.ilike(search_term)
+                User.phone.ilike(search_term),
+                User.company_name.ilike(search_term)
             ))
         
         # Apply role filter
@@ -1062,7 +1065,7 @@ def get_user_details(user_id):
         ).limit(10).all()
         
         # Get user's addresses
-        addresses = UserAddress.query.filter_by(user_id=user_id).all()
+        addresses: List[UserAddress] = UserAddress.query.filter_by(user_id=user_id).all()
         
         # Get user statistics
         total_orders = Order.query.filter_by(user_id=user_id).count()
@@ -1083,8 +1086,8 @@ def get_user_details(user_id):
             'addresses': [
                 {
                     'id': addr.id,
-                    'label': addr.label,
-                    'address_line_1': addr.address_line_1,
+                    'title': addr.title,
+                    'full_address': addr.full_address,
                     'city': addr.city,
                     'is_default': addr.is_default
                 }
@@ -1876,22 +1879,24 @@ def update_order_status(order_id):
 
         new_status = data.get('status')
         notes = data.get('notes', '')
+        bottles_returned = data.get('bottles_returned')
 
         try:
             order_status = OrderStatus(new_status)
         except ValueError:
             return validation_error_response('Invalid status value')
-        
+
         # Use OrderService to properly handle status transitions and inventory
         from business_app.services.order_service import OrderService
         order_service = OrderService()
-        
+
         try:
             order = order_service.update_order_status(
                 order_id=order_id,
                 new_status=order_status,
                 updated_by=current_user_id,
-                notes=notes
+                notes=notes,
+                bottles_returned=bottles_returned,
             )
             
             return success_response(

@@ -994,5 +994,19 @@ class BusinessAPIClient:
         )
 
 
+    async def get_my_bottle_balances(self, user_token: str) -> 'APIResponse':
+        """Get current user's bottle balances across all addresses."""
+        return await self._make_request('GET', '/api/v1/orders/bottles/my-balances',
+                                        user_token=user_token)
+
+    async def get_my_bottle_ledger(self, user_token: str, address_id: int,
+                                    page: int = 1, per_page: int = 10) -> 'APIResponse':
+        """Get current user's bottle ledger for a specific address."""
+        return await self._make_request('GET',
+                                        f'/api/v1/orders/bottles/my-ledger/{address_id}',
+                                        params={'page': page, 'per_page': per_page},
+                                        user_token=user_token)
+
+
 # Global API client instance
 api_client = BusinessAPIClient()

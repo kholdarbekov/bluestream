@@ -12,6 +12,7 @@ import ProductCategories from './pages/ProductCategories';
 import Delivery from './pages/Delivery';
 import DeliveryReports from './pages/DeliveryReports';
 import Tryouts from './pages/Tryouts';
+import BottleTracking from './pages/BottleTracking';
 import Loyalty from './pages/Loyalty';
 import LoyaltyMembers from './pages/LoyaltyMembers';
 import LoyaltyPrograms from './pages/LoyaltyPrograms';
@@ -54,6 +55,7 @@ function App() {
                   <Route path="/delivery" element={<Delivery />} />
                   <Route path="/delivery/reports" element={<DeliveryReports />} />
                   <Route path="/tryouts" element={<Tryouts />} />
+                  <Route path="/delivery/bottles" element={<BottleTracking />} />
                   <Route path="/delivery-time-slots" element={<TimeSlots />} />
                   <Route path="/loyalty" element={<Loyalty />} />
                   <Route path="/loyalty/members" element={<LoyaltyMembers />} />

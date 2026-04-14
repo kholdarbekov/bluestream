@@ -1,0 +1,246 @@
+"""Serializers for returnable bottle tracking models."""
+
+from typing import Any, Dict, List, Optional
+
+from pydantic import BaseModel, Field
+from pydantic.alias_generators import to_camel
+
+
+# ------------------------------------------------------------------
+# Pydantic request models
+# ------------------------------------------------------------------
+
+class BottleAdjustmentRequest(BaseModel):
+    user_id: int
+    address_id: int
+    adjustment: float
+    notes: str
+
+    model_config = {"alias_generator": to_camel, "populate_by_name": True}
+
+
+class BottleInitialBalanceRequest(BaseModel):
+    user_id: int
+    address_id: int
+    quantity: float
+    notes: Optional[str] = None
+
+    model_config = {"alias_generator": to_camel, "populate_by_name": True}
+
+
+class BottleFineCreateRequest(BaseModel):
+    user_id: int
+    bottle_balance_id: Optional[int] = None
+    address_id: Optional[int] = None
+    quantity: float
+    fine_amount: float
+    notes: Optional[str] = None
+
+    model_config = {"alias_generator": to_camel, "populate_by_name": True}
+
+
+class BottleFineUpdateRequest(BaseModel):
+    action: str = Field(..., pattern=r"^(waive|mark_paid)$")
+    notes: Optional[str] = None
+
+    model_config = {"alias_generator": to_camel, "populate_by_name": True}
+
+
+class BottleCollectionRequest(BaseModel):
+    customer_id: int
+    address_id: int
+    quantity: float
+    notes: Optional[str] = None
+
+    model_config = {"alias_generator": to_camel, "populate_by_name": True}
+
+
+class DriverBottleLoadRequest(BaseModel):
+    bottles_loaded: Optional[int] = None
+    bottles_returned_to_warehouse: Optional[int] = None
+
+    model_config = {"alias_generator": to_camel, "populate_by_name": True}
+
+
+class DriverBottleSessionOpenRequest(BaseModel):
+    bottles_loaded: int = Field(..., gt=0)
+    notes: Optional[str] = None
+
+    model_config = {"alias_generator": to_camel, "populate_by_name": True}
+
+
+class DriverBottleSessionCloseRequest(BaseModel):
+    bottles_returned_to_warehouse: int = Field(..., ge=0)
+    notes: Optional[str] = None
+
+    model_config = {"alias_generator": to_camel, "populate_by_name": True}
+
+
+class AdminForceCloseSessionRequest(BaseModel):
+    bottles_returned_to_warehouse: int = Field(default=0, ge=0)
+    reason: str
+
+    model_config = {"alias_generator": to_camel, "populate_by_name": True}
+
+
+class DriverBottleTransferCreateRequest(BaseModel):
+    receiver_driver_id: int
+    quantity: int = Field(..., gt=0)
+    notes: Optional[str] = None
+
+    model_config = {"alias_generator": to_camel, "populate_by_name": True}
+
+
+class DriverBottleTransferConfirmRequest(BaseModel):
+    confirmed_quantity: int = Field(..., ge=0)
+    notes: Optional[str] = None
+
+    model_config = {"alias_generator": to_camel, "populate_by_name": True}
+
+
+class AdminResolveTransferRequest(BaseModel):
+    resolved_quantity: int = Field(..., ge=0)
+    resolution_notes: str
+
+    model_config = {"alias_generator": to_camel, "populate_by_name": True}
+
+
+# ------------------------------------------------------------------
+# Serializer functions
+# ------------------------------------------------------------------
+
+def serialize_bottle_balance(balance, include_user: bool = False) -> Dict[str, Any]:
+    """Serialize a BottleBalance with optional user/address details."""
+    data = balance.to_dict()
+
+    if balance.address:
+        data["address_title"] = balance.address.title
+        data["full_address"] = balance.address.full_address
+
+    if include_user and balance.user:
+        data["user_name"] = f"{balance.user.first_name or ''} {balance.user.last_name or ''}".strip()
+        data["user_phone"] = balance.user.phone
+
+    return data
+
+
+def serialize_bottle_balance_list(
+    balances: List, include_user: bool = True
+) -> List[Dict[str, Any]]:
+    """Serialize a list of BottleBalance records."""
+    return [serialize_bottle_balance(b, include_user=include_user) for b in balances]
+
+
+def serialize_bottle_ledger_entry(entry) -> Dict[str, Any]:
+    """Serialize a BottleLedger entry with actor details."""
+    data = entry.to_dict()
+
+    if entry.actor_user:
+        data["actor_name"] = f"{entry.actor_user.first_name or ''} {entry.actor_user.last_name or ''}".strip()
+
+    if entry.user:
+        data["user_name"] = f"{entry.user.first_name or ''} {entry.user.last_name or ''}".strip()
+        data["user_phone"] = entry.user.phone
+
+    if entry.address:
+        data["address_title"] = entry.address.title
+        data["full_address"] = entry.address.full_address
+
+    return data
+
+
+def serialize_bottle_fine(fine) -> Dict[str, Any]:
+    """Serialize a BottleFine with related details."""
+    data = fine.to_dict()
+
+    if fine.user:
+        data["user_name"] = f"{fine.user.first_name or ''} {fine.user.last_name or ''}".strip()
+        data["user_phone"] = fine.user.phone
+
+    if fine.issuer:
+        data["issuer_name"] = f"{fine.issuer.first_name or ''} {fine.issuer.last_name or ''}".strip()
+
+    if fine.bottle_balance and fine.bottle_balance.address:
+        data["address_title"] = fine.bottle_balance.address.title
+        data["full_address"] = fine.bottle_balance.address.full_address
+
+    return data
+
+
+def serialize_driver_bottle_load(load) -> Dict[str, Any]:
+    """Serialize a DriverBottleLoad with driver details."""
+    data = load.to_dict()
+
+    if load.driver:
+        data["driver_name"] = f"{load.driver.first_name or ''} {load.driver.last_name or ''}".strip()
+        data["driver_phone"] = load.driver.phone
+
+    return data
+
+
+def serialize_bottle_session(
+    session,
+    *,
+    include_orders: bool = False,
+    include_transfers: bool = False,
+) -> Dict[str, Any]:
+    """Serialize a DriverBottleSession with driver info and optional relations."""
+    data = session.to_dict()
+
+    if session.driver:
+        data["driver_name"] = (
+            f"{session.driver.first_name or ''} {session.driver.last_name or ''}".strip()
+        )
+        data["driver_phone"] = session.driver.phone
+
+    if include_orders:
+        orders_out = []
+        for so in (session.session_orders or []):
+            o = so.order
+            if o:
+                orders_out.append({
+                    "order_id": so.order_id,
+                    "order_number": o.order_number,
+                    "customer_name": o.user.full_name if o.user else None,
+                    "status": o.status.value if o.status else None,
+                    "total_amount": float(o.total_amount) if o.total_amount else None,
+                    "items": [
+                        {
+                            "product_name": item.product.name if item.product else None,
+                            "quantity": item.quantity,
+                        }
+                        for item in (o.order_items or [])
+                    ],
+                    "added_at": so.added_at.isoformat() if so.added_at else None,
+                })
+            else:
+                orders_out.append({
+                    "order_id": so.order_id,
+                    "added_at": so.added_at.isoformat() if so.added_at else None,
+                })
+        data["orders"] = orders_out
+
+    if include_transfers:
+        data["transfers_out"] = [serialize_bottle_transfer(t) for t in (session.transfers_out or [])]
+        data["transfers_in"] = [serialize_bottle_transfer(t) for t in (session.transfers_in or [])]
+
+    return data
+
+
+def serialize_bottle_transfer(transfer) -> Dict[str, Any]:
+    """Serialize a DriverBottleTransfer with driver names."""
+    data = transfer.to_dict()
+
+    if transfer.sender_driver:
+        data["sender_name"] = (
+            f"{transfer.sender_driver.first_name or ''} {transfer.sender_driver.last_name or ''}".strip()
+        )
+        data["sender_phone"] = transfer.sender_driver.phone
+
+    if transfer.receiver_driver:
+        data["receiver_name"] = (
+            f"{transfer.receiver_driver.first_name or ''} {transfer.receiver_driver.last_name or ''}".strip()
+        )
+        data["receiver_phone"] = transfer.receiver_driver.phone
+
+    return data

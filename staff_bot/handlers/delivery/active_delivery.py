@@ -282,6 +282,8 @@ class ActiveDeliveryHandler(BaseHandler):
                 # Destination: order address coordinates
                 'destination_lat': delivery.get('destination_latitude'),
                 'destination_lng': delivery.get('destination_longitude'),
+                # Returnable bottles
+                'expected_returnable_bottles': delivery.get('expected_returnable_bottles', 0),
             }
 
             text = '\n'.join(lines)

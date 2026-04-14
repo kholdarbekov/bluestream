@@ -20,6 +20,7 @@ import {
   Spin,
   Alert,
   Switch,
+  InputNumber,
 } from 'antd';
 import {
   ShoppingCartOutlined,
@@ -106,6 +107,7 @@ const Orders = () => {
   const [createOrderForm] = Form.useForm();
   const [personalCardForm] = Form.useForm();
   const watchedPaymentMethod = Form.useWatch('payment_method', createOrderForm);
+  const watchedStatusValue = Form.useWatch('status', statusForm);
 
   const { data, isLoading } = useQuery(
     ['orders', pagination, searchText, statusFilter, dateRange],
@@ -147,7 +149,7 @@ const Orders = () => {
   const orderStatuses = statusesData?.data?.statuses || [];
 
   const updateOrderMutation = useMutation(
-    ({ orderId, status, notes }) => adminService.updateOrderStatus(orderId, status, notes),
+    ({ orderId, status, notes, bottles_returned }) => adminService.updateOrderStatus(orderId, status, notes, { bottles_returned }),
     {
       onSuccess: () => {
         message.success(t('ui.orders.status_updated_success', 'Order status updated successfully'));
@@ -1065,6 +1067,9 @@ const Orders = () => {
             orderId: selectedOrder.id,
             status: values.status,
             notes: values.notes,
+            ...(values.status === 'delivered' && values.bottles_returned != null
+              ? { bottles_returned: values.bottles_returned }
+              : {}),
           });
         }}>
           <Form.Item
@@ -1080,6 +1085,15 @@ const Orders = () => {
               ))}
             </Select>
           </Form.Item>
+          {watchedStatusValue === 'delivered' && (
+            <Form.Item
+              name="bottles_returned"
+              label={t('ui.orders.bottles_returned', 'Bottles Returned')}
+              extra={t('ui.orders.bottles_returned_hint', 'Number of returnable bottles collected from customer (optional)')}
+            >
+              <InputNumber min={0} style={{ width: '100%' }} placeholder="0" />
+            </Form.Item>
+          )}
           <Form.Item name="notes" label={t('ui.orders.notes_optional', 'Notes (Optional)')}>
             <Input.TextArea rows={3} placeholder={t('ui.orders.notes_placeholder', 'Notes')} />
           </Form.Item>

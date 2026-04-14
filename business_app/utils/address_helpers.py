@@ -10,7 +10,6 @@ def get_address_line(address) -> str:
     return (
         getattr(address, 'full_address', None)
         or getattr(address, 'street_address', None)
-        or getattr(address, 'address_line_1', None)
         or ''
     )
 

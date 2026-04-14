@@ -61,9 +61,9 @@ class StagingConfig(BaseConfig):
     
     # CORS Configuration - Staging domains
     CORS_ORIGINS = [
-        'https://staging.bluestream.uz',
-        'https://admin-staging.bluestream.uz',
-        'https://api-staging.bluestream.uz'
+        'https://staging.aqua-element.uz',
+        'https://admin-staging.aqua-element.uz',
+        'https://api-staging.aqua-element.uz'
     ]
     
     # Cache Configuration
@@ -122,7 +122,7 @@ class StagingConfig(BaseConfig):
         'style-src': ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com", "https://unpkg.com"],
         'font-src': ["'self'", "https://fonts.gstatic.com"],
         'img-src': ["'self'", "data:", "https:"],
-        'connect-src': ["'self'", "https://api-staging.bluestream.uz"],
+        'connect-src': ["'self'", "https://api-staging.aqua-element.uz"],
     }
     
     # Security Headers

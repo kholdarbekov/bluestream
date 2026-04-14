@@ -741,8 +741,9 @@ class OrderService:
         }
         return self.create_order(user_id, create_payload)
     
-    def update_order_status(self, order_id: int, new_status: OrderStatus, 
-                           updated_by: int = None, notes: str = None) -> Order:
+    def update_order_status(self, order_id: int, new_status: OrderStatus,
+                           updated_by: int = None, notes: str = None,
+                           bottles_returned: int = None) -> Order:
         """Update order status"""
         order = Order.query.get(order_id)
         if not order:
@@ -784,8 +785,10 @@ class OrderService:
         self._send_order_notification(order, f'status_changed_{new_status.value}')
         
         # Handle status-specific actions
-        self._handle_status_change_actions(order, new_status)
-        
+        self._handle_status_change_actions(order, new_status,
+                                           bottles_returned=bottles_returned,
+                                           updated_by=updated_by)
+
         return order
     
     @log_service_call(operation_type='order', track_performance=True)
@@ -1196,7 +1199,9 @@ class OrderService:
         # Confirm order automatically after 10 minutes if not manually confirmed
         auto_confirm_order_task.apply_async(args=[order_id], countdown=600)
     
-    def _handle_status_change_actions(self, order: Order, new_status: OrderStatus):
+    def _handle_status_change_actions(self, order: Order, new_status: OrderStatus,
+                                         bottles_returned: int = None,
+                                         updated_by: int = None):
         """Handle actions when order status changes"""
         from business_app.utils.constants import PaymentMethod
         
@@ -1266,6 +1271,83 @@ class OrderService:
                 order_id=order.id,
                 delivery_id=order.delivery.id if order.delivery else None,
             )
+
+            # --- Returnable bottle tracking ---
+            logger.info(
+                f"[BOTTLE] Starting bottle tracking for order={order.id} user={order.user_id} address={order.delivery_address_id} updated_by={updated_by} bottles_returned={bottles_returned}"
+            )
+            try:
+                from business_app.services.bottle_tracking_service import BottleTrackingService
+                bottle_service = BottleTrackingService()
+                bottles_in_order = bottle_service.calculate_bottles_for_order(order)
+                logger.info(
+                    f"[BOTTLE] order={order.id} calculated bottles_in_order={bottles_in_order}"
+                )
+
+                if bottles_in_order <= 0:
+                    logger.info(f"[BOTTLE] order={order.id} skipping — no returnable bottles in order items")
+                elif not order.delivery_address_id:
+                    logger.info(f"[BOTTLE] order={order.id} skipping — delivery_address_id is None")
+                else:
+                    logger.info(
+                        f"[BOTTLE] order={order.id} recording delivery: user={order.user_id} address={order.delivery_address_id} qty={bottles_in_order} actor={updated_by}",
+                    )
+                    bottle_service.record_bottles_delivered(
+                        order_id=order.id,
+                        user_id=order.user_id,
+                        address_id=order.delivery_address_id,
+                        quantity=bottles_in_order,
+                        actor_user_id=updated_by,
+                    )
+                    logger.info(f"[BOTTLE] order={order.id} record_bottles_delivered OK")
+
+                    bottles_returned_qty = Decimal(str(bottles_returned)) if bottles_returned else Decimal("0")
+                    logger.info(f"[BOTTLE] order={order.id} bottles_returned_qty={bottles_returned_qty}")
+                    if bottles_returned_qty > 0:
+                        logger.info(
+                            f"[BOTTLE] order={order.id} recording return: qty={bottles_returned_qty} delivery={order.delivery.id if order.delivery else None}",
+                        )
+                        bottle_service.record_bottles_returned(
+                            user_id=order.user_id,
+                            address_id=order.delivery_address_id,
+                            quantity=bottles_returned_qty,
+                            order_id=order.id,
+                            delivery_id=order.delivery.id if order.delivery else None,
+                            actor_user_id=updated_by,
+                        )
+                        logger.info(f"[BOTTLE] order={order.id} record_bottles_returned OK", order.id)
+
+                    if updated_by:
+                        open_session = bottle_service.get_open_session(updated_by)
+                        logger.info(
+                            f"[BOTTLE] order={order.id} get_open_session(driver={updated_by}) → {f'session_id={open_session.id} status={open_session.status}' if open_session else 'None'}",
+                        )
+                        if open_session:
+                            bottle_service.bind_order_to_session(open_session.id, order.id)
+                            logger.info(f"[BOTTLE] order={order.id} bound to session={open_session.id}")
+                            bottle_service.update_session_delivery_tally(
+                                updated_by,
+                                bottles_delivered=int(bottles_in_order),
+                                bottles_collected=int(bottles_returned_qty),
+                            )
+                            logger.info(
+                                f"[BOTTLE] order={order.id} session tally updated: delivered={int(bottles_in_order)} collected={int(bottles_returned_qty)}",
+                            )
+                        else:
+                            logger.info(
+                                f"[BOTTLE] order={order.id} no open session for driver={updated_by} — skipping tally",
+                                order.id, updated_by,
+                            )
+                    else:
+                        logger.info(f"[BOTTLE] order={order.id} updated_by is None — skipping session tally")
+
+            except Exception as bottle_exc:
+                logger.error(
+                    "[BOTTLE] FAILED for order=%s: %s",
+                    order.id, bottle_exc,
+                    exc_info=True,
+                )
+
             db.session.commit()
         elif new_status in {OrderStatus.CANCELLED, OrderStatus.RETURNED}:
             payment_synced = self._sync_payment_status_for_terminal_order_state(order, new_status)

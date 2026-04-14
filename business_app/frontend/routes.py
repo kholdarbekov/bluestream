@@ -935,8 +935,8 @@ def set_language_route(language):
     # Domains to attempt cleaning on
     domains = [
         None, # Host only
-        '.bluestream.uz',
-        'bluestream.uz',
+        '.aqua-element.uz',
+        'aqua-element.uz',
         '.localhost',
         'localhost'
     ]
@@ -1013,8 +1013,8 @@ def inject_global_vars():
         cabinet_site_url = ''
     else:
         # In production, use absolute URLs for cross-subdomain navigation
-        main_site_url = f"{scheme}://bluestream.uz"
-        cabinet_site_url = f"{scheme}://cabinet.bluestream.uz"
+        main_site_url = f"{scheme}://aqua-element.uz"
+        cabinet_site_url = f"{scheme}://cabinet.aqua-element.uz"
 
     supported_languages = list(current_app.config['LANGUAGES'].keys())
     default_language = current_app.config.get('DEFAULT_LANGUAGE', 'uz')
@@ -1088,7 +1088,7 @@ def inject_global_vars():
         'current_user': user_info,
         'company_name': 'Blue Stream Group',
         'company_phone': '+998 94 524 4680',
-        'company_email': 'info@bluestream.uz',
+        'company_email': 'info@aqua-element.uz',
         'company_instagram_url': current_app.config.get('COMPANY_INSTAGRAM_URL', 'https://www.instagram.com/aqua_element.uz'),
         'company_instagram_handle': current_app.config.get('COMPANY_INSTAGRAM_HANDLE', '@aqua_element.uz'),
         'company_telegram_channel_url': current_app.config.get('COMPANY_TELEGRAM_CHANNEL_URL', 'https://t.me/aqua_element_uz'),

@@ -58,9 +58,8 @@ class CreatePhoneOrderRequest(BaseModel):
 
 class AddClientAddressRequest(BaseModel):
     """Add address for client (operator)"""
-    label: str = Field(..., min_length=1, max_length=100)
-    address_line_1: str = Field(..., min_length=1, max_length=255)
-    address_line_2: Optional[str] = None
+    title: str = Field(..., min_length=1, max_length=100)
+    full_address: str = Field(..., min_length=1, max_length=255)
     city: str = Field(default='Tashkent')
     district: Optional[str] = None
     latitude: Optional[float] = None

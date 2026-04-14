@@ -63,20 +63,20 @@ The current API version is v1. All endpoints are prefixed with `/api/v1`.
 
 ## Support
 
-For API support, contact: support@bluestream.uz
+For API support, contact: support@aqua-element.uz
             """,
-            "termsOfService": "https://bluestream.uz/terms",
+            "termsOfService": "https://aqua-element.uz/terms",
             "contact": {
-                "name": "BlueStream API Support",
-                "url": "https://bluestream.uz/support",
-                "email": "api-support@bluestream.uz"
+                "name": "Aqua Element API Support",
+                "url": "https://aqua-element.uz/support",
+                "email": "api-support@aqua-element.uz"
             },
             "license": {
                 "name": "Proprietary",
-                "url": "https://bluestream.uz/license"
+                "url": "https://aqua-element.uz/license"
             }
         },
-        "host": LazyString(lambda: "api.bluestream.uz"),
+        "host": LazyString(lambda: "api.aqua-element.uz"),
         "basePath": "/api/v1",
         "schemes": ["https", "http"],
         "consumes": ["application/json"],
@@ -280,7 +280,7 @@ For API support, contact: support@bluestream.uz
                     "image_url": {
                         "type": "string",
                         "format": "uri",
-                        "example": "https://cdn.bluestream.uz/products/water-19l.jpg",
+                        "example": "https://cdn.aqua-element.uz/products/water-19l.jpg",
                         "description": "Product image URL"
                     }
                 }

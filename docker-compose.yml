@@ -342,9 +342,9 @@ services:
     ports:
       - "3000:80"
     environment:
-      - REACT_APP_API_URL=https://bluestream.uz/api/v1
+      - REACT_APP_API_URL=https://aqua-element.uz/api/v1
       - REACT_APP_ENVIRONMENT=${ENVIRONMENT:-production}
-      - REACT_APP_APP_NAME=Blue Stream Admin
+      - REACT_APP_APP_NAME=Aqua Element Admin
       - REACT_APP_VERSION=1.0.0
       - REACT_APP_TIMEZONE_OFFSET=${DISPLAY_TIMEZONE_OFFSET:-+05:00}
     healthcheck:

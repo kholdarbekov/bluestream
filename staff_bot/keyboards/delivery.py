@@ -201,3 +201,147 @@ class DeliveryKeyboards:
             callback_data="staff_back_to_main"
         )])
         return InlineKeyboardMarkup(keyboard)
+
+    # ------------------------------------------------------------------
+    # Bottle return keyboards
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def bottle_return_options(language: str, delivery_id: int, expected_bottles: int) -> InlineKeyboardMarkup:
+        """Options for bottle return during delivery completion."""
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton(
+                f"\u2705 {i18n.get('staff.delivery.bottles_all_returned', language, count=expected_bottles)}",
+                callback_data=f"staff_bottles_full_{delivery_id}"
+            )],
+            [InlineKeyboardButton(
+                f"\u270f\ufe0f {i18n.get('staff.delivery.bottles_enter_count', language)}",
+                callback_data=f"staff_bottles_custom_{delivery_id}"
+            )],
+            [InlineKeyboardButton(
+                f"\u274c {i18n.get('staff.delivery.bottles_none_returned', language)}",
+                callback_data=f"staff_bottles_none_{delivery_id}"
+            )],
+        ])
+
+    @staticmethod
+    def bottle_customer_result(language: str, customer_id: int) -> InlineKeyboardMarkup:
+        """View bottle balance for a searched customer."""
+        return InlineKeyboardMarkup([[
+            InlineKeyboardButton(
+                f"\U0001f4ca {i18n.get('staff.delivery.view_bottle_balance', language)}",
+                callback_data=f"staff_bottle_customer_{customer_id}"
+            )
+        ]])
+
+    @staticmethod
+    def bottle_address_selection(
+        language: str, customer_id: int, addresses: list
+    ) -> InlineKeyboardMarkup:
+        """Select address for standalone bottle collection."""
+        keyboard = []
+        for addr in addresses:
+            addr_id = addr.get('address_id')
+            title = addr.get('address_title') or addr.get('full_address', '')[:30]
+            balance = addr.get('balance', 0)
+            keyboard.append([InlineKeyboardButton(
+                f"\U0001f4cd {title} ({int(balance)})",
+                callback_data=f"staff_bottle_addr_{customer_id}_{addr_id}"
+            )])
+        keyboard.append([InlineKeyboardButton(
+            f"\u2b05\ufe0f {i18n.get('staff.back', language)}",
+            callback_data="staff_back_to_main"
+        )])
+        return InlineKeyboardMarkup(keyboard)
+
+    @staticmethod
+    def bottle_statement_actions(
+        language: str, customer_id: int, address_id: int, *, can_collect: bool = True
+    ) -> InlineKeyboardMarkup:
+        """Actions on a customer's bottle balance at an address."""
+        keyboard = []
+        if can_collect:
+            keyboard.append([InlineKeyboardButton(
+                f"\U0001f4e6 {i18n.get('staff.delivery.collect_bottles', language)}",
+                callback_data=f"staff_bottle_collect_{customer_id}_{address_id}"
+            )])
+        keyboard.append([InlineKeyboardButton(
+            f"\u26a0\ufe0f {i18n.get('staff.delivery.issue_bottle_fine', language)}",
+            callback_data=f"staff_bottle_fine_{customer_id}_{address_id}"
+        )])
+        keyboard.append([InlineKeyboardButton(
+            f"\u2b05\ufe0f {i18n.get('staff.back', language)}",
+            callback_data="staff_back_to_main"
+        )])
+        return InlineKeyboardMarkup(keyboard)
+
+    # ------------------------------------------------------------------
+    # Session & Transfer keyboards
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def bottle_session_menu(language: str) -> InlineKeyboardMarkup:
+        """Main bottle session action menu."""
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton(
+                "\U0001f4e6 Load bottles from WH",
+                callback_data="staff_bottle_session_load"
+            )],
+            [InlineKeyboardButton(
+                "\U0001f3e2 Return to Warehouse",
+                callback_data="staff_bottle_session_return"
+            )],
+            [InlineKeyboardButton(
+                "\U0001f504 Transfer bottles to driver",
+                callback_data="staff_bottle_transfer_start"
+            )],
+            [InlineKeyboardButton(
+                "\U0001f4e5 Incoming transfers",
+                callback_data="staff_bottle_transfers_pending"
+            )],
+            [InlineKeyboardButton(
+                f"\u2b05\ufe0f {i18n.get('staff.back', language)}",
+                callback_data="staff_cash_hub"
+            )],
+        ])
+
+    @staticmethod
+    def driver_select_for_transfer(language: str, drivers: List[Dict]) -> InlineKeyboardMarkup:
+        """Select a driver to transfer bottles to."""
+        keyboard = []
+        for driver in drivers[:10]:  # cap at 10 to avoid overflow
+            driver_id = driver.get('id') or driver.get('user_id')
+            name = driver.get('name') or driver.get('full_name', 'Driver')
+            keyboard.append([InlineKeyboardButton(
+                f"\U0001f464 {name}",
+                callback_data=f"staff_transfer_driver_{driver_id}"
+            )])
+        keyboard.append([InlineKeyboardButton(
+            f"\u2b05\ufe0f {i18n.get('staff.back', language)}",
+            callback_data="staff_cash_hub"
+        )])
+        return InlineKeyboardMarkup(keyboard)
+
+    @staticmethod
+    def pending_transfer_list(language: str, transfers: List[Dict]) -> InlineKeyboardMarkup:
+        """Confirm / enter different count for each pending transfer."""
+        keyboard = []
+        for t in transfers[:5]:
+            transfer_id = t.get('id')
+            qty = t.get('declared_quantity', 0)
+            sender = (t.get('sender_name') or 'Driver')[:15]
+            keyboard.append([
+                InlineKeyboardButton(
+                    f"\u2705 Confirm {qty} from {sender}",
+                    callback_data=f"staff_transfer_confirm_{transfer_id}_{qty}"
+                ),
+                InlineKeyboardButton(
+                    "\u270f\ufe0f Different count",
+                    callback_data=f"staff_transfer_custom_{transfer_id}"
+                ),
+            ])
+        keyboard.append([InlineKeyboardButton(
+            f"\u2b05\ufe0f {i18n.get('staff.back', language)}",
+            callback_data="staff_cash_hub"
+        )])
+        return InlineKeyboardMarkup(keyboard)

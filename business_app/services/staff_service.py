@@ -861,6 +861,19 @@ class StaffService:
                     error_code='STAFF_MAX_CONCURRENT_REACHED',
                 )
 
+        # Check bottle session capacity — driver cannot accept an order if their
+        # active session does not have enough bottles on truck.
+        if delivery.order:
+            from business_app.services.bottle_tracking_service import BottleTrackingService
+            _bottle_svc = BottleTrackingService()
+            _open_session = _bottle_svc.get_open_session(delivery_person_id)
+            if _open_session:
+                _bottles_needed = _bottle_svc.calculate_bottles_for_order(delivery.order)
+                if _bottles_needed > 0:
+                    _bottle_svc.assert_delivery_within_session_capacity(
+                        _open_session, int(_bottles_needed)
+                    )
+
         # Assign the delivery person
         old_status = delivery.status
         delivery.delivery_person_id = delivery_person_id
@@ -1092,6 +1105,51 @@ class StaffService:
                 delivery.id,
                 notify_exc,
             )
+
+        # Returnable bottle tracking on delivery completion
+        if new_status == 'delivered' and delivery.order:
+            try:
+                from business_app.services.bottle_tracking_service import BottleTrackingService
+                bottle_service = BottleTrackingService()
+                bottles_in_order = bottle_service.calculate_bottles_for_order(delivery.order)
+                if bottles_in_order > 0 and delivery.order.delivery_address_id:
+                    bottle_service.record_bottles_delivered(
+                        order_id=delivery.order_id,
+                        user_id=delivery.order.user_id,
+                        address_id=delivery.order.delivery_address_id,
+                        quantity=bottles_in_order,
+                        actor_user_id=staff_user_id,
+                    )
+                    bottles_returned = metadata.get('bottles_returned')
+                    if bottles_returned and Decimal(str(bottles_returned)) > 0:
+                        bottle_service.record_bottles_returned(
+                            user_id=delivery.order.user_id,
+                            address_id=delivery.order.delivery_address_id,
+                            quantity=Decimal(str(bottles_returned)),
+                            order_id=delivery.order_id,
+                            delivery_id=delivery.id,
+                            actor_user_id=staff_user_id,
+                        )
+                    # Update driver bottle accountability for today
+                    if delivery.delivery_person_id:
+                        bottle_service.update_driver_delivery_counts(
+                            driver_user_id=delivery.delivery_person_id,
+                            bottles_delivered=int(bottles_in_order),
+                            bottles_collected=int(Decimal(str(bottles_returned or 0))),
+                        )
+                        # Also update the active session tally so the session's
+                        # delivered/collected counters stay accurate.
+                        bottle_service.update_session_delivery_tally(
+                            driver_user_id=delivery.delivery_person_id,
+                            bottles_delivered=int(bottles_in_order),
+                            bottles_collected=int(Decimal(str(bottles_returned or 0))),
+                        )
+                    db.session.commit()
+            except Exception as bottle_exc:
+                current_app.logger.warning(
+                    "Failed to record bottle tracking for delivery %s: %s",
+                    delivery.id, bottle_exc,
+                )
 
         # Log activity
         StaffService._log_activity(
@@ -1668,9 +1726,9 @@ class StaffService:
 
         address = UserAddress(
             user_id=user_id,
-            title=address_data.get('label', address_data.get('title', 'Home')),
-            full_address=address_data.get('full_address', address_data.get('address_line_1', '')),
-            street_address=address_data.get('street_address', address_data.get('address_line_1')),
+            title=address_data.get('title', 'Home'),
+            full_address=address_data.get('full_address', ''),
+            street_address=address_data.get('street_address', ''),
             city=address_data.get('city', 'Tashkent'),
             district=address_data.get('district'),
             latitude=address_data.get('latitude'),

@@ -993,3 +993,45 @@ def get_order_statuses():
         data={'statuses': statuses},
         message=get_translation('api.orders.statuses_retrieved')
     )
+
+
+# ------------------------------------------------------------------
+# Customer-facing bottle balance endpoints
+# ------------------------------------------------------------------
+
+@orders_bp.route('/bottles/my-balances', methods=['GET'])
+@jwt_required()
+@handle_api_exception
+def get_my_bottle_balances():
+    """Get the current customer's bottle balances across all addresses."""
+    from business_app.services.bottle_tracking_service import BottleTrackingService
+    from business_app.serializers.bottle_serializers import serialize_bottle_balance
+
+    user_id = get_jwt_identity()
+    service = BottleTrackingService()
+    balances = service.get_customer_balances(user_id)
+    return success_response(
+        data=[serialize_bottle_balance(b) for b in balances],
+    )
+
+
+@orders_bp.route('/bottles/my-ledger/<int:address_id>', methods=['GET'])
+@jwt_required()
+@handle_api_exception
+def get_my_bottle_ledger(address_id):
+    """Get the current customer's bottle ledger for a specific address."""
+    from business_app.services.bottle_tracking_service import BottleTrackingService
+    from business_app.serializers.bottle_serializers import serialize_bottle_ledger_entry
+
+    user_id = get_jwt_identity()
+    page = request.args.get('page', 1, type=int)
+    per_page = min(request.args.get('per_page', 20, type=int), 50)
+
+    service = BottleTrackingService()
+    result = service.get_address_ledger(user_id, address_id, page=page, per_page=per_page)
+    return success_response(data={
+        'items': [serialize_bottle_ledger_entry(e) for e in result['items']],
+        'total': result['total'],
+        'page': result['page'],
+        'per_page': result['per_page'],
+    })

@@ -192,3 +192,43 @@ class UserGender(Enum):
     MALE = 'male'
     FEMALE = 'female'
     UNKNOWN = 'unknown'
+
+
+class BottleLedgerEventType(Enum):
+    """Returnable bottle ledger event type."""
+    DELIVERY = 'delivery'
+    RETURN_ON_DELIVERY = 'return_on_delivery'
+    STANDALONE_COLLECTION = 'standalone_collection'
+    ADMIN_ADJUSTMENT = 'admin_adjustment'
+    FINE_ISSUED = 'fine_issued'
+    FINE_REVERSED = 'fine_reversed'
+    FINE_PAID = 'fine_paid'
+    INITIAL_BALANCE = 'initial_balance'
+
+
+class BottleFineStatus(Enum):
+    """Returnable bottle fine status."""
+    PENDING = 'pending'
+    INVOICED = 'invoiced'
+    PAID = 'paid'
+    WAIVED = 'waived'
+
+
+class DriverBottleSessionStatus(Enum):
+    """Driver bottle trip session lifecycle states.
+
+    A driver opens a session when loading from the warehouse and closes it
+    when returning. Only one OPEN session per driver is allowed at a time.
+    """
+    OPEN         = 'open'          # Active trip, bottles loaded from WH
+    CLOSED       = 'closed'        # Returned to WH, discrepancy computed
+    FORCE_CLOSED = 'force_closed'  # Admin override for an abandoned session
+    CANCELLED    = 'cancelled'     # Admin: session opened but no bottles loaded
+
+
+class DriverBottleTransferStatus(Enum):
+    """Status of a driver-to-driver mid-route bottle transfer."""
+    PENDING   = 'pending'    # Sender submitted; receiver not yet confirmed
+    CONFIRMED = 'confirmed'  # Receiver accepted the declared quantity
+    DISPUTED  = 'disputed'   # Receiver claims a different quantity
+    RESOLVED  = 'resolved'   # Admin arbitrated the dispute

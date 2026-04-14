@@ -58,7 +58,7 @@ from handlers import (
     start_handler, main_menu_handler, language_handler,
     product_handlers, order_handlers, subscription_handlers,
     profile_handlers, loyalty_handlers, admin_handlers,
-    support_handlers, payment_handlers
+    support_handlers, payment_handlers, bottle_handlers
 )
 # Import conversation states directly (they are module-level constants)
 from handlers.profile import (
@@ -328,6 +328,9 @@ class WaterBusinessBot:
             CallbackQueryHandler(profile_handlers.edit_details_handler, pattern="^edit_details_"),
             CallbackQueryHandler(profile_handlers.edit_instructions_handler, pattern="^edit_instructions_"),
             
+            # Bottle balance callback
+            CallbackQueryHandler(bottle_handlers.show_bottle_balance, pattern="^my_bottles$"),
+
             # Loyalty callbacks
             CallbackQueryHandler(loyalty_handlers.loyalty_menu, pattern="^menu_loyalty$"),
             CallbackQueryHandler(loyalty_handlers.loyalty_history, pattern="^loyalty_history$"),

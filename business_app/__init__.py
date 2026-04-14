@@ -63,6 +63,7 @@ def register_blueprints(app: Flask):
     from business_app.api.bot import bot_bp
     from business_app.api.staff import staff_bp
     from business_app.api.admin_tryouts import admin_tryouts_bp
+    from business_app.api.admin_bottles import admin_bottles_bp
     from business_app.api.staff_tryouts import staff_tryouts_bp
     from business_app.frontend import frontend_bp
     
@@ -86,6 +87,7 @@ def register_blueprints(app: Flask):
     app.register_blueprint(translations_bp, url_prefix=f'{api_prefix}/translations')
     app.register_blueprint(staff_bp, url_prefix=f'{api_prefix}/staff')
     app.register_blueprint(admin_tryouts_bp, url_prefix=f'{api_prefix}/admin')
+    app.register_blueprint(admin_bottles_bp, url_prefix=f'{api_prefix}/admin')
     app.register_blueprint(staff_tryouts_bp, url_prefix=f'{api_prefix}/staff')
     app.register_blueprint(frontend_bp)
     

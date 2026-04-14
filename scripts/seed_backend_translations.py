@@ -4772,6 +4772,31 @@ BACKEND_TRANSLATIONS = {
         'uz': '💳 To\'lov usullari',
         'ru': '💳 Способы оплаты'
     },
+    'telegram.profile.my_bottles': {
+        'en': '📦 My Bottles',
+        'uz': '📦 Mening idishlarim',
+        'ru': '📦 Моя тара'
+    },
+    'telegram.bottles.title': {
+        'en': 'My Bottle Balance',
+        'uz': 'Mening idish balansim',
+        'ru': 'Мой баланс тары'
+    },
+    'telegram.bottles.no_balance': {
+        'en': 'You have no returnable bottles on record.',
+        'uz': 'Sizda qaytariladigan idish topilmadi.',
+        'ru': 'У вас нет возвратной тары на балансе.'
+    },
+    'telegram.bottles.total': {
+        'en': 'Total bottles',
+        'uz': 'Jami idishlar',
+        'ru': 'Всего тара'
+    },
+    'telegram.bottles.load_error': {
+        'en': 'Could not load bottle balance. Please try again.',
+        'uz': 'Idish balansini yuklab bo\'lmadi. Qayta urinib ko\'ring.',
+        'ru': 'Не удалось загрузить баланс тары. Попробуйте снова.'
+    },
     'telegram.profile.share_phone': {
         'en': '📱 Share Phone Number',
         'uz': '📱 Telefon raqamini ulashish',

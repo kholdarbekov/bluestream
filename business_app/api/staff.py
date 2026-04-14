@@ -268,6 +268,12 @@ def get_active_deliveries():
             # Driver's last known delivery coordinates (origin candidate)
             'current_location_lat': delivery.current_location_lat,
             'current_location_lng': delivery.current_location_lng,
+            # Returnable bottle info
+            'expected_returnable_bottles': sum(
+                float(oi.product.returnable_bottles_per_unit or 0) * (oi.quantity or 0)
+                for oi in (order.order_items or [])
+                if oi.product and oi.product.tracks_returnable_bottles
+            ) if order else 0,
         })
 
     return success_response({'items': items, 'total': len(items)})
@@ -598,7 +604,6 @@ def add_client_address(user_id):
         'id': address.id,
         'label': get_address_label(address),
         'full_address': get_address_line(address),
-        'address_line_1': get_address_line(address),  # Backward-compatible alias for bot payloads
     }, status_code=201)
 
 
@@ -617,7 +622,6 @@ def get_client_addresses(user_id):
             'id': addr.id,
             'label': get_address_label(addr),
             'full_address': display_address,
-            'address_line_1': display_address,  # Backward-compatible alias for bot payloads
             'city': addr.city,
             'district': addr.district,
             'latitude': addr.latitude,
@@ -676,3 +680,396 @@ def mark_order_preparing(order_id):
         'status': order.status.value if hasattr(order.status, 'value') else order.status,
         'message': 'Order marked as preparing',
     })
+
+
+# --- Bottle Tracking ---
+
+@staff_bp.route('/bottles/customer/<int:user_id>/summary', methods=['GET'])
+@handle_api_exception
+@jwt_required()
+@require_staff_roles('delivery_driver', 'operator')
+def get_customer_bottle_summary(user_id):
+    """Get customer's bottle summary (balances across addresses)."""
+    from business_app.services.bottle_tracking_service import BottleTrackingService
+    service = BottleTrackingService()
+    summary = service.get_customer_summary(user_id)
+    return success_response(summary)
+
+
+@staff_bp.route('/bottles/customer/<int:user_id>/addresses', methods=['GET'])
+@handle_api_exception
+@jwt_required()
+@require_staff_roles('delivery_driver', 'operator')
+def get_customer_bottle_addresses(user_id):
+    """Get customer addresses with bottle balances."""
+    from business_app.services.bottle_tracking_service import BottleTrackingService
+    service = BottleTrackingService()
+    balances = service.get_customer_balances(user_id)
+    return success_response([
+        {
+            'address_id': b.address_id,
+            'address_title': b.address.title if b.address else None,
+            'full_address': b.address.full_address if b.address else None,
+            'balance': float(b.balance or 0),
+            'bottle_balance_id': b.id,
+        }
+        for b in balances
+    ])
+
+
+@staff_bp.route('/bottles/collection', methods=['POST'])
+@handle_api_exception
+@jwt_required()
+@require_staff_roles('delivery_driver', 'operator')
+def record_bottle_collection():
+    """Record standalone bottle collection by driver."""
+    from business_app import db
+    from business_app.services.bottle_tracking_service import BottleTrackingService
+
+    current_user_id = get_jwt_identity()
+    data = request.get_json() or {}
+
+    customer_id = data.get('customer_id')
+    address_id = data.get('address_id')
+    quantity = data.get('quantity')
+    notes = data.get('notes')
+
+    if not customer_id or not address_id or not quantity:
+        raise ValidationError("customer_id, address_id, and quantity are required")
+
+    service = BottleTrackingService()
+    entry = service.record_standalone_collection(
+        user_id=customer_id,
+        address_id=address_id,
+        quantity=quantity,
+        actor_user_id=current_user_id,
+        notes=notes,
+    )
+    db.session.commit()
+
+    balance = service.get_balance(customer_id, address_id)
+    return success_response({
+        'ledger_entry_id': entry.id,
+        'quantity_collected': float(abs(entry.quantity)),
+        'remaining_balance': float(balance.balance) if balance else 0,
+    })
+
+
+@staff_bp.route('/bottles/fine', methods=['POST'])
+@handle_api_exception
+@jwt_required()
+@require_staff_roles('delivery_driver', 'operator')
+def create_bottle_fine_staff():
+    """Driver/operator creates a manual fine for missing bottles."""
+    from business_app import db
+    from business_app.services.bottle_tracking_service import BottleTrackingService
+
+    current_user_id = get_jwt_identity()
+    data = request.get_json() or {}
+
+    customer_id = data.get('customer_id')
+    bottle_balance_id = data.get('bottle_balance_id')
+    quantity = data.get('quantity')
+    fine_amount = data.get('fine_amount')
+    notes = data.get('notes')
+
+    if not all([customer_id, bottle_balance_id, quantity, fine_amount]):
+        raise ValidationError("customer_id, bottle_balance_id, quantity, and fine_amount are required")
+
+    service = BottleTrackingService()
+    fine = service.issue_fine(
+        user_id=customer_id,
+        bottle_balance_id=bottle_balance_id,
+        quantity=quantity,
+        fine_amount=fine_amount,
+        actor_user_id=current_user_id,
+        notes=notes,
+    )
+    db.session.commit()
+    return success_response(fine.to_dict())
+
+
+@staff_bp.route('/bottles/load', methods=['POST'])
+@handle_api_exception
+@jwt_required()
+@require_staff_roles('delivery_driver')
+def record_bottles_loaded():
+    """[DEPRECATED] Shim — delegates to session open endpoint for backward compatibility."""
+    from business_app import db
+    from business_app.serializers.bottle_serializers import (
+        DriverBottleSessionOpenRequest,
+        serialize_bottle_session,
+    )
+    from business_app.services.bottle_tracking_service import BottleTrackingService
+    from pydantic import ValidationError as PydanticValidationError
+    from business_app.utils.api_responses import validation_error_response
+
+    current_user_id = get_jwt_identity()
+    data = request.get_json() or {}
+
+    try:
+        payload = DriverBottleSessionOpenRequest(**data)
+    except PydanticValidationError as exc:
+        return validation_error_response(exc.errors())
+
+    service = BottleTrackingService()
+    session = service.open_bottle_session(
+        current_user_id,
+        payload.bottles_loaded,
+        actor_user_id=current_user_id,
+        notes=payload.notes,
+    )
+    db.session.commit()
+    return success_response(serialize_bottle_session(session))
+
+
+@staff_bp.route('/bottles/return-to-warehouse', methods=['POST'])
+@handle_api_exception
+@jwt_required()
+@require_staff_roles('delivery_driver')
+def record_bottles_returned_to_warehouse():
+    """[DEPRECATED] Shim — delegates to session close endpoint for backward compatibility."""
+    from business_app import db
+    from business_app.serializers.bottle_serializers import (
+        DriverBottleSessionCloseRequest,
+        serialize_bottle_session,
+    )
+    from business_app.services.bottle_tracking_service import BottleTrackingService
+    from pydantic import ValidationError as PydanticValidationError
+    from business_app.utils.api_responses import validation_error_response
+
+    current_user_id = get_jwt_identity()
+    data = request.get_json() or {}
+
+    try:
+        payload = DriverBottleSessionCloseRequest(**data)
+    except PydanticValidationError as exc:
+        return validation_error_response(exc.errors())
+
+    service = BottleTrackingService()
+    session = service.close_bottle_session(
+        current_user_id,
+        payload.bottles_returned_to_warehouse,
+        actor_user_id=current_user_id,
+        notes=payload.notes,
+    )
+    db.session.commit()
+    return success_response(serialize_bottle_session(session))
+
+
+@staff_bp.route('/bottles/my-accountability', methods=['GET'])
+@handle_api_exception
+@jwt_required()
+@require_staff_roles('delivery_driver')
+def get_my_bottle_accountability():
+    """Get driver's current open session or most recent closed session."""
+    from business_app.serializers.bottle_serializers import serialize_bottle_session
+    from business_app.services.bottle_tracking_service import BottleTrackingService
+
+    current_user_id = get_jwt_identity()
+    service = BottleTrackingService()
+
+    # Return open session first; fall back to most recent closed one
+    open_session = service.get_open_session(current_user_id)
+    if open_session:
+        return success_response(serialize_bottle_session(open_session))
+
+    result = service.get_driver_sessions(current_user_id, page=1, per_page=1)
+    items = result.get("items", [])
+    return success_response(serialize_bottle_session(items[0]) if items else {})
+
+
+# --- Session endpoints ---
+
+@staff_bp.route('/bottles/session/open', methods=['POST'])
+@handle_api_exception
+@jwt_required()
+@require_staff_roles('delivery_driver')
+def open_bottle_session():
+    """Driver opens a new trip session by loading bottles from the warehouse."""
+    from business_app import db
+    from business_app.serializers.bottle_serializers import (
+        DriverBottleSessionOpenRequest,
+        serialize_bottle_session,
+    )
+    from business_app.services.bottle_tracking_service import BottleTrackingService
+    from pydantic import ValidationError as PydanticValidationError
+    from business_app.utils.api_responses import validation_error_response
+
+    current_user_id = get_jwt_identity()
+    data = request.get_json() or {}
+
+    try:
+        payload = DriverBottleSessionOpenRequest(**data)
+    except PydanticValidationError as exc:
+        return validation_error_response(exc.errors())
+
+    service = BottleTrackingService()
+    session = service.open_bottle_session(
+        current_user_id,
+        payload.bottles_loaded,
+        actor_user_id=current_user_id,
+        notes=payload.notes,
+    )
+    db.session.commit()
+    return success_response(serialize_bottle_session(session), status_code=201)
+
+
+@staff_bp.route('/bottles/session/current', methods=['GET'])
+@handle_api_exception
+@jwt_required()
+@require_staff_roles('delivery_driver')
+def get_current_bottle_session():
+    """Get driver's current open session, or null if none."""
+    from business_app.serializers.bottle_serializers import serialize_bottle_session
+    from business_app.services.bottle_tracking_service import BottleTrackingService
+
+    current_user_id = get_jwt_identity()
+    service = BottleTrackingService()
+    session = service.get_open_session(current_user_id)
+    return success_response(serialize_bottle_session(session) if session else None)
+
+
+@staff_bp.route('/bottles/session/close', methods=['POST'])
+@handle_api_exception
+@jwt_required()
+@require_staff_roles('delivery_driver')
+def close_bottle_session():
+    """Driver closes the active session by returning bottles to the warehouse."""
+    from business_app import db
+    from business_app.serializers.bottle_serializers import (
+        DriverBottleSessionCloseRequest,
+        serialize_bottle_session,
+    )
+    from business_app.services.bottle_tracking_service import BottleTrackingService
+    from pydantic import ValidationError as PydanticValidationError
+    from business_app.utils.api_responses import validation_error_response
+
+    current_user_id = get_jwt_identity()
+    data = request.get_json() or {}
+
+    try:
+        payload = DriverBottleSessionCloseRequest(**data)
+    except PydanticValidationError as exc:
+        return validation_error_response(exc.errors())
+
+    service = BottleTrackingService()
+    session = service.close_bottle_session(
+        current_user_id,
+        payload.bottles_returned_to_warehouse,
+        actor_user_id=current_user_id,
+        notes=payload.notes,
+    )
+    db.session.commit()
+    return success_response(serialize_bottle_session(session))
+
+
+@staff_bp.route('/bottles/sessions', methods=['GET'])
+@handle_api_exception
+@jwt_required()
+@require_staff_roles('delivery_driver')
+def list_my_bottle_sessions():
+    """Get paginated session history for the calling driver."""
+    from business_app.serializers.bottle_serializers import serialize_bottle_session
+    from business_app.services.bottle_tracking_service import BottleTrackingService
+
+    current_user_id = get_jwt_identity()
+    service = BottleTrackingService()
+    result = service.get_driver_sessions(
+        current_user_id,
+        page=request.args.get('page', 1, type=int),
+        per_page=request.args.get('per_page', 20, type=int),
+        status=request.args.get('status'),
+    )
+    return success_response({
+        'items': [serialize_bottle_session(s) for s in result['items']],
+        'total': result['total'],
+        'page': result['page'],
+        'per_page': result['per_page'],
+        'pages': result['pages'],
+    })
+
+
+# --- Transfer endpoints ---
+
+@staff_bp.route('/bottles/transfers/pending', methods=['GET'])
+@handle_api_exception
+@jwt_required()
+@require_staff_roles('delivery_driver')
+def get_pending_bottle_transfers():
+    """Get transfers pending confirmation by the calling driver (receiver inbox)."""
+    from business_app.serializers.bottle_serializers import serialize_bottle_transfer
+    from business_app.services.bottle_tracking_service import BottleTrackingService
+
+    current_user_id = get_jwt_identity()
+    service = BottleTrackingService()
+    transfers = service.get_pending_transfers_for_driver(current_user_id)
+    return success_response([serialize_bottle_transfer(t) for t in transfers])
+
+
+@staff_bp.route('/bottles/transfers', methods=['POST'])
+@handle_api_exception
+@jwt_required()
+@require_staff_roles('delivery_driver')
+def initiate_bottle_transfer():
+    """Driver initiates a mid-route bottle transfer to another driver."""
+    from business_app import db
+    from business_app.serializers.bottle_serializers import (
+        DriverBottleTransferCreateRequest,
+        serialize_bottle_transfer,
+    )
+    from business_app.services.bottle_tracking_service import BottleTrackingService
+    from pydantic import ValidationError as PydanticValidationError
+    from business_app.utils.api_responses import validation_error_response
+
+    current_user_id = get_jwt_identity()
+    data = request.get_json() or {}
+
+    try:
+        payload = DriverBottleTransferCreateRequest(**data)
+    except PydanticValidationError as exc:
+        return validation_error_response(exc.errors())
+
+    service = BottleTrackingService()
+    transfer = service.initiate_bottle_transfer(
+        sender_driver_id=current_user_id,
+        receiver_driver_id=payload.receiver_driver_id,
+        declared_quantity=payload.quantity,
+        notes=payload.notes,
+    )
+    db.session.commit()
+    return success_response(serialize_bottle_transfer(transfer), status_code=201)
+
+
+@staff_bp.route('/bottles/transfers/<int:transfer_id>/confirm', methods=['POST'])
+@handle_api_exception
+@jwt_required()
+@require_staff_roles('delivery_driver')
+def confirm_bottle_transfer(transfer_id: int):
+    """Receiver confirms (or disputes) a pending bottle transfer."""
+    from business_app import db
+    from business_app.serializers.bottle_serializers import (
+        DriverBottleTransferConfirmRequest,
+        serialize_bottle_transfer,
+    )
+    from business_app.services.bottle_tracking_service import BottleTrackingService
+    from pydantic import ValidationError as PydanticValidationError
+    from business_app.utils.api_responses import validation_error_response
+
+    current_user_id = get_jwt_identity()
+    data = request.get_json() or {}
+
+    try:
+        payload = DriverBottleTransferConfirmRequest(**data)
+    except PydanticValidationError as exc:
+        return validation_error_response(exc.errors())
+
+    service = BottleTrackingService()
+    transfer = service.confirm_bottle_transfer(
+        transfer_id=transfer_id,
+        receiver_driver_id=current_user_id,
+        confirmed_quantity=payload.confirmed_quantity,
+        notes=payload.notes,
+    )
+    db.session.commit()
+    return success_response(serialize_bottle_transfer(transfer))

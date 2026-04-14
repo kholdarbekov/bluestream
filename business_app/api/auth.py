@@ -2559,7 +2559,7 @@ def sync_profile():
             'schema': {
                 'type': 'object',
                 'properties': {
-                    'email': {'type': 'string', 'example': 'admin@bluestream.uz'},
+                    'email': {'type': 'string', 'example': 'admin@aqua-element.uz'},
                     'password': {'type': 'string', 'example': 'SecurePassword123'},
                     'first_name': {'type': 'string', 'example': 'John'},
                     'last_name': {'type': 'string', 'example': 'Admin'},
@@ -3553,7 +3553,7 @@ def generate_web_auth():
         return internal_error_response(message=get_translation('api.auth.error.web_token_failed'))
     
     # Create web app authentication link
-    web_app_url = current_app.config.get('WEB_APP_URL', 'https://bluestream.uz')
+    web_app_url = current_app.config.get('WEB_APP_URL', 'https://aqua-element.uz')
     web_auth_link = f"{web_app_url}/auth/telegram-login?token={web_auth_token}"
 
     return success_response(

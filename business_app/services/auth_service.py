@@ -1264,8 +1264,8 @@ class AuthService:
         address = UserAddress(
             user_id=user_id,
             title=data['title'],
-            full_address=data.get('full_address', data.get('address_line_1', '')),
-            street_address=data.get('street_address', data.get('address_line_1')),
+            full_address=data.get('full_address', ''),
+            street_address=data.get('street_address'),
             city=data.get('city', 'Tashkent'),
             district=data.get('district'),
             postal_code=data.get('postal_code'),

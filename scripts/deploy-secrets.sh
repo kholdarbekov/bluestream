@@ -169,7 +169,7 @@ REDIS_DB=0
 # Business Configuration
 COMPANY_NAME=Aqua Element
 COMPANY_PHONE=+998901234567
-COMPANY_EMAIL=info@bluestream.uz
+COMPANY_EMAIL=info@aqua-element.uz
 COMPANY_ADDRESS=Tashkent, Uzbekistan
 
 # Payment Configuration
@@ -180,7 +180,7 @@ CLICK_SERVICE_ID=your_click_service_id
 # Notification Configuration (Optional)
 TWILIO_ACCOUNT_SID=your_twilio_account_sid
 TWILIO_PHONE_NUMBER=+1234567890
-SENDGRID_FROM_EMAIL=noreply@bluestream.uz
+SENDGRID_FROM_EMAIL=noreply@aqua-element.uz
 
 # Storage Configuration
 STORAGE_TYPE=local

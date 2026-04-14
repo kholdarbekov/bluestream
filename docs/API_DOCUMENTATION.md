@@ -8,7 +8,7 @@ The BlueStream API is a RESTful web service that provides access to all platform
 
 ## Base Information
 
-- **Base URL**: `https://api.bluestream.uz/api/v1`
+- **Base URL**: `https://api.aqua-element.uz/api/v1`
 - **Protocol**: HTTPS
 - **Authentication**: JWT Bearer Tokens
 - **Content Type**: `application/json`
@@ -226,7 +226,7 @@ Get paginated list of products.
         "base_price": 15000.00,
         "stock_quantity": 100,
         "is_active": true,
-        "image_url": "https://cdn.bluestream.uz/products/water-19l.jpg"
+        "image_url": "https://cdn.aqua-element.uz/products/water-19l.jpg"
       }
     ],
     "pagination": {
@@ -262,7 +262,7 @@ Get detailed information about a specific product.
       "stock_quantity": 100,
       "min_stock_level": 10,
       "is_active": true,
-      "image_url": "https://cdn.bluestream.uz/products/water-19l.jpg",
+      "image_url": "https://cdn.aqua-element.uz/products/water-19l.jpg",
       "created_at": "2024-01-01T12:00:00Z",
       "updated_at": "2024-01-01T12:00:00Z"
     }
@@ -363,8 +363,8 @@ Process payment for an order.
   "currency": "UZS",
   "payment_method": "card",
   "card_token": "card_token_from_frontend",
-  "return_url": "https://app.bluestream.uz/payment/return",
-  "callback_url": "https://api.bluestream.uz/payments/callback"
+  "return_url": "https://app.aqua-element.uz/payment/return",
+  "callback_url": "https://api.aqua-element.uz/payments/callback"
 }
 ```
 
@@ -424,7 +424,7 @@ Add a new address for the user.
   "base_price": 15000.00,
   "stock_quantity": 100,
   "is_active": true,
-  "image_url": "https://cdn.bluestream.uz/products/water-19l.jpg"
+  "image_url": "https://cdn.aqua-element.uz/products/water-19l.jpg"
 }
 ```
 
@@ -461,7 +461,7 @@ Add a new address for the user.
 const BlueStreamAPI = require('@bluestream/api-client');
 
 const api = new BlueStreamAPI({
-  baseURL: 'https://api.bluestream.uz/api/v1',
+  baseURL: 'https://api.aqua-element.uz/api/v1',
   apiKey: 'your-api-key'
 });
 
@@ -493,7 +493,7 @@ const order = await api.orders.create({
 from bluestream_api import BlueStreamClient
 
 client = BlueStreamClient(
-    base_url='https://api.bluestream.uz/api/v1',
+    base_url='https://api.aqua-element.uz/api/v1',
     api_key='your-api-key'
 )
 
@@ -525,7 +525,7 @@ order = client.orders.create(
 ### Using cURL
 ```bash
 # Register user
-curl -X POST https://api.bluestream.uz/api/v1/auth/register \
+curl -X POST https://api.aqua-element.uz/api/v1/auth/register \
   -H "Content-Type: application/json" \
   -d '{
     "email": "user@example.com",
@@ -536,11 +536,11 @@ curl -X POST https://api.bluestream.uz/api/v1/auth/register \
   }'
 
 # Get products (authenticated)
-curl -X GET https://api.bluestream.uz/api/v1/products \
+curl -X GET https://api.aqua-element.uz/api/v1/products \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
 
 # Create order
-curl -X POST https://api.bluestream.uz/api/v1/orders \
+curl -X POST https://api.aqua-element.uz/api/v1/orders \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -550,7 +550,7 @@ curl -X POST https://api.bluestream.uz/api/v1/orders \
 ```
 
 ### Postman Collection
-A complete Postman collection is available at: [BlueStream API Collection](https://api.bluestream.uz/postman/collection.json)
+A complete Postman collection is available at: [BlueStream API Collection](https://api.aqua-element.uz/postman/collection.json)
 
 ## Webhooks
 
@@ -618,10 +618,10 @@ The API supports webhooks for real-time notifications:
 ## Support
 
 For API support and questions:
-- **Email**: api-support@bluestream.uz
-- **Documentation**: https://api.bluestream.uz/docs
-- **Status Page**: https://status.bluestream.uz
-- **Support Portal**: https://support.bluestream.uz
+- **Email**: api-support@aqua-element.uz
+- **Documentation**: https://api.aqua-element.uz/docs
+- **Status Page**: https://status.aqua-element.uz
+- **Support Portal**: https://support.aqua-element.uz
 
 ## Rate Limits and Quotas
 
@@ -634,6 +634,6 @@ For API support and questions:
 
 ## Legal
 
-- **Terms of Service**: https://bluestream.uz/terms
-- **Privacy Policy**: https://bluestream.uz/privacy
-- **API License**: https://bluestream.uz/api-license
+- **Terms of Service**: https://aqua-element.uz/terms
+- **Privacy Policy**: https://aqua-element.uz/privacy
+- **API License**: https://aqua-element.uz/api-license

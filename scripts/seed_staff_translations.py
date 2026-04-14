@@ -670,6 +670,180 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "uz": "Kutilmagan server javobi. Qayta urinib koring.",
         "ru": "Неожиданный ответ сервера. Попробуйте снова.",
     },
+
+    # --- Bottle tracking translations ---
+    "staff.menu.bottle_collection": {
+        "en": "Bottle Collection",
+        "uz": "Idish yigish",
+        "ru": "Сбор тары",
+    },
+    "staff.delivery.bottle_statement_title": {
+        "en": "Bottle Statement",
+        "uz": "Idish hisoboti",
+        "ru": "Отчёт по таре",
+    },
+    "staff.delivery.total_bottles": {
+        "en": "Total bottles",
+        "uz": "Jami idishlar",
+        "ru": "Всего тара",
+    },
+    "staff.delivery.active_fines": {
+        "en": "Active fines",
+        "uz": "Faol jarimalar",
+        "ru": "Активные штрафы",
+    },
+    "staff.delivery.no_bottle_balance": {
+        "en": "No bottle balance on record.",
+        "uz": "Idish balansi topilmadi.",
+        "ru": "Баланс тары не обнаружен.",
+    },
+    "staff.delivery.bottle_collection_search_prompt": {
+        "en": "Enter a customer name or phone number to find their bottle balance.",
+        "uz": "Mijoz ismi yoki telefon raqamini kiriting.",
+        "ru": "Введите имя клиента или номер телефона для поиска баланса тары.",
+    },
+    "staff.delivery.no_customer_bottle_results": {
+        "en": "No customers with bottles found for \"{query}\".",
+        "uz": "\"{query}\" uchun idishli mijoz topilmadi.",
+        "ru": "Клиенты с тарой по запросу «{query}» не найдены.",
+    },
+    "staff.delivery.view_bottle_balance": {
+        "en": "View Bottle Balance",
+        "uz": "Idish balansini korish",
+        "ru": "Баланс тары",
+    },
+    "staff.delivery.bottle_address_selected": {
+        "en": "Address selected. Choose an action:",
+        "uz": "Manzil tanlandi. Amalni tanlang:",
+        "ru": "Адрес выбран. Выберите действие:",
+    },
+    "staff.delivery.collect_bottles": {
+        "en": "Collect Bottles",
+        "uz": "Idish yigish",
+        "ru": "Собрать тару",
+    },
+    "staff.delivery.issue_bottle_fine": {
+        "en": "Issue Fine",
+        "uz": "Jarima berish",
+        "ru": "Выписать штраф",
+    },
+    "staff.delivery.enter_bottle_collection_qty": {
+        "en": "Enter the number of bottles collected:",
+        "uz": "Yigilgan idishlar sonini kiriting:",
+        "ru": "Введите количество собранной тары:",
+    },
+    "staff.delivery.enter_bottle_collection_note": {
+        "en": "Add a note for this collection (or type '-' to skip):",
+        "uz": "Yigish uchun izoh kiriting (yoki '-' bosing):",
+        "ru": "Добавьте примечание (или введите '-' для пропуска):",
+    },
+    "staff.delivery.invalid_bottle_count": {
+        "en": "Please enter a valid positive number.",
+        "uz": "Iltimos, musbat son kiriting.",
+        "ru": "Пожалуйста, введите положительное число.",
+    },
+    "staff.delivery.bottle_collection_recorded": {
+        "en": "Collected {quantity} bottle(s). Remaining balance: {remaining}.",
+        "uz": "{quantity} ta idish yigib olindi. Qolgan balans: {remaining}.",
+        "ru": "Собрано {quantity} ед. тары. Остаток: {remaining}.",
+    },
+    "staff.delivery.enter_fine_bottle_qty": {
+        "en": "How many bottles to fine for?",
+        "uz": "Necha idish uchun jarima?",
+        "ru": "За сколько единиц тары штраф?",
+    },
+    "staff.delivery.enter_fine_amount": {
+        "en": "Enter the fine amount (in UZS):",
+        "uz": "Jarima miqdorini kiriting (UZS):",
+        "ru": "Введите сумму штрафа (в UZS):",
+    },
+    "staff.delivery.enter_fine_note": {
+        "en": "Add a note for this fine:",
+        "uz": "Jarima uchun izoh kiriting:",
+        "ru": "Добавьте примечание для штрафа:",
+    },
+    "staff.delivery.invalid_amount": {
+        "en": "Please enter a valid amount.",
+        "uz": "Iltimos, togri miqdor kiriting.",
+        "ru": "Пожалуйста, введите корректную сумму.",
+    },
+    "staff.delivery.bottle_fine_created": {
+        "en": "Fine created: {quantity} bottle(s), amount {amount}.",
+        "uz": "Jarima yaratildi: {quantity} ta idish, miqdori {amount}.",
+        "ru": "Штраф создан: {quantity} ед. тары, сумма {amount}.",
+    },
+    # Bottle return during delivery
+    "staff.delivery.bottles_returned_prompt": {
+        "en": "How many bottles did the customer return?",
+        "uz": "Mijoz necha idish qaytardi?",
+        "ru": "Сколько тары вернул клиент?",
+    },
+    "staff.delivery.bottles_all_returned": {
+        "en": "All {count} bottles returned",
+        "uz": "Barcha {count} ta idish qaytarildi",
+        "ru": "Все {count} ед. тары возвращены",
+    },
+    "staff.delivery.bottles_enter_count": {
+        "en": "Enter count",
+        "uz": "Sonini kiriting",
+        "ru": "Ввести количество",
+    },
+    "staff.delivery.bottles_none_returned": {
+        "en": "No bottles returned",
+        "uz": "Idish qaytarilmadi",
+        "ru": "Тара не возвращена",
+    },
+    "staff.delivery.enter_bottle_count": {
+        "en": "Enter the number of bottles returned:",
+        "uz": "Qaytarilgan idishlar sonini kiriting:",
+        "ru": "Введите количество возвращённой тары:",
+    },
+    # Warehouse accountability flows
+    "staff.menu.log_bottles_loaded": {
+        "en": "Log Bottles Loaded",
+        "uz": "Yuklangan idishlarni kiritish",
+        "ru": "Внести загруженные бутылки",
+    },
+    "staff.menu.return_to_warehouse": {
+        "en": "Return to Warehouse",
+        "uz": "Omborga qaytarish",
+        "ru": "Возврат на склад",
+    },
+    "staff.menu.my_bottle_accountability": {
+        "en": "My Bottle Accountability",
+        "uz": "Mening idish hisobotim",
+        "ru": "Мой учёт тары",
+    },
+    "staff.delivery.enter_bottles_loaded_qty": {
+        "en": "Enter the number of bottles you loaded from the warehouse today:",
+        "uz": "Bugun ombordan nechta idish yuborgingizni kiriting:",
+        "ru": "Введите количество бутылок, загруженных со склада сегодня:",
+    },
+    "staff.delivery.bottles_loaded_recorded": {
+        "en": "\u2705 Recorded: {quantity} bottle(s) loaded from warehouse.",
+        "uz": "\u2705 Qayd etildi: ombordan {quantity} ta idish yuklandi.",
+        "ru": "\u2705 Записано: {quantity} ед. тары загружено со склада.",
+    },
+    "staff.delivery.enter_bottles_returned_qty": {
+        "en": "Enter the number of bottles you returned to the warehouse:",
+        "uz": "Omborga nechta idish qaytarganingizni kiriting:",
+        "ru": "Введите количество бутылок, возвращённых на склад:",
+    },
+    "staff.delivery.bottles_returned_wh_recorded": {
+        "en": "\u2705 Recorded: {quantity} bottle(s) returned to warehouse.",
+        "uz": "\u2705 Qayd etildi: {quantity} ta idish omborga qaytarildi.",
+        "ru": "\u2705 Записано: {quantity} ед. тары возвращено на склад.",
+    },
+    "staff.delivery.bottle_accountability_title": {
+        "en": "Today's Bottle Accountability",
+        "uz": "Bugungi idish hisobi",
+        "ru": "Учёт тары за сегодня",
+    },
+    "staff.delivery.bottle_accountability_no_data": {
+        "en": "No bottle accountability data for today yet.",
+        "uz": "Bugun uchun idish hisobi yo\u02bcq.",
+        "ru": "Данных по учёту тары за сегодня нет.",
+    },
 }
 
 

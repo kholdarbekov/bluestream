@@ -69,9 +69,8 @@ class OrderAddressSchema(BaseModel):
     model_config = ConfigDict(from_attributes=True, alias_generator=to_camel)
     
     id: int
-    label: str
-    address_line_1: str
-    address_line_2: Optional[str] = None
+    title: str
+    full_address: str
     city: str
     district: Optional[str] = None
     postal_code: Optional[str] = None

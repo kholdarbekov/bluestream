@@ -20,7 +20,7 @@ The Telegram Bot API client now enforces SSL certificate validation by default t
 BUSINESS_API_SSL_VERIFY=true
 
 # Use HTTPS URL for production
-BUSINESS_APP_URL=https://api.bluestream.uz
+BUSINESS_APP_URL=https://api.aqua-element.uz
 
 # Optional: Custom certificate path
 # BUSINESS_API_SSL_CERT_PATH=/etc/ssl/certs/bluestream.pem

@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 CASH_INPUT = 100
 CASH_NOTE_INPUT = 101
 RECONCILIATION_INPUT = 102
+BOTTLE_RETURN_INPUT = 106
 
 
 class StatusUpdateHandler(BaseHandler):
@@ -120,6 +121,12 @@ class StatusUpdateHandler(BaseHandler):
             metadata['notes'] = notes
         elif cash_amount <= 0:
             metadata['notes'] = 'No cash due after COD prepaid deduction'
+
+        # Include bottles_returned from the flow context
+        flow = context.user_data.get('pending_delivery_cash_flow') or {}
+        bottles_returned = flow.get('bottles_returned')
+        if bottles_returned is not None:
+            metadata['bottles_returned'] = bottles_returned
 
         async with api_client as client:
             response = await client.update_delivery_status(
@@ -247,6 +254,29 @@ class StatusUpdateHandler(BaseHandler):
             delivery_id = int(parts[3])
             new_status = '_'.join(parts[4:])
 
+            # For non-cash delivered orders: check for returnable bottles first
+            if new_status == 'delivered':
+                expected_bottles = self._get_expected_bottles(context)
+                if expected_bottles > 0:
+                    # Set up flow context and show bottle prompt
+                    context.user_data['pending_delivery_cash_flow'] = {
+                        'delivery_id': delivery_id,
+                        'cash_amount': 0,
+                        'flow_type': 'non_cash_delivered',
+                        'awaiting_bottle_count': False,
+                    }
+                    keyboard = DeliveryKeyboards.bottle_return_options(
+                        language, delivery_id, int(expected_bottles)
+                    )
+                    message = i18n.get(
+                        'staff.delivery.bottles_return_prompt', language,
+                        count=int(expected_bottles),
+                    )
+                    await query.edit_message_text(
+                        message, reply_markup=keyboard, parse_mode='HTML'
+                    )
+                    return
+
             metadata = context.user_data.pop('status_metadata', {})
 
             async with api_client as client:
@@ -336,7 +366,7 @@ class StatusUpdateHandler(BaseHandler):
             delivery_id = int(query.data.split('_')[-1])
             delivery_info = context.user_data.get('current_delivery', {})
             cash_amount = self._get_expected_cash_to_collect(delivery_info)
-            await self._submit_delivery_completion(
+            await self._maybe_show_bottle_prompt_or_submit(
                 update,
                 context,
                 delivery_id=delivery_id,
@@ -455,7 +485,7 @@ class StatusUpdateHandler(BaseHandler):
 
             delivery_id = flow.get('delivery_id')
             cash_amount = flow.get('cash_amount', 0.0)
-            return await self._submit_delivery_completion(
+            return await self._maybe_show_bottle_prompt_or_submit(
                 update,
                 context,
                 delivery_id=delivery_id,
@@ -623,4 +653,161 @@ class StatusUpdateHandler(BaseHandler):
 
         except Exception as e:
             logger.error(f"Error marking as preparing: {e}", exc_info=True)
+            await self._handle_error(update, context)
+
+    # ------------------------------------------------------------------
+    # Returnable bottle return step (inserted between cash and submission)
+    # ------------------------------------------------------------------
+
+    def _get_expected_bottles(self, context: ContextTypes.DEFAULT_TYPE) -> float:
+        """Get expected returnable bottles from the current delivery context."""
+        delivery_info = context.user_data.get('current_delivery', {})
+        return float(delivery_info.get('expected_returnable_bottles', 0))
+
+    async def _maybe_show_bottle_prompt_or_submit(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        *,
+        delivery_id: int,
+        cash_amount: float,
+        notes: str = None,
+    ):
+        """Check if order has returnable bottles. If yes, show bottle prompt.
+        Otherwise proceed directly to delivery completion."""
+        expected_bottles = self._get_expected_bottles(context)
+        if expected_bottles > 0:
+            # Store cash info for later submission
+            flow = context.user_data.get('pending_delivery_cash_flow') or {}
+            flow['delivery_id'] = delivery_id
+            flow['cash_amount'] = cash_amount
+            flow['cash_notes'] = notes
+            flow['awaiting_bottle_count'] = False
+            context.user_data['pending_delivery_cash_flow'] = flow
+
+            language = await self._get_language(update, context)
+            keyboard = DeliveryKeyboards.bottle_return_options(
+                language, delivery_id, int(expected_bottles)
+            )
+            message = i18n.get(
+                'staff.delivery.bottles_return_prompt', language,
+                count=int(expected_bottles),
+            )
+            if update.callback_query:
+                await update.callback_query.edit_message_text(
+                    message, reply_markup=keyboard, parse_mode='HTML'
+                )
+            else:
+                await update.message.reply_text(
+                    message, reply_markup=keyboard, parse_mode='HTML'
+                )
+            return
+        else:
+            # No returnable bottles — submit directly
+            return await self._submit_delivery_completion(
+                update, context,
+                delivery_id=delivery_id,
+                cash_amount=cash_amount,
+                notes=notes,
+            )
+
+    @require_auth
+    @require_delivery_driver
+    async def confirm_full_bottle_return(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """All expected bottles returned — proceed to delivery completion."""
+        query = update.callback_query
+        await query.answer()
+        try:
+            flow = context.user_data.get('pending_delivery_cash_flow') or {}
+            expected = self._get_expected_bottles(context)
+            flow['bottles_returned'] = int(expected)
+            context.user_data['pending_delivery_cash_flow'] = flow
+
+            return await self._submit_delivery_completion(
+                update, context,
+                delivery_id=flow['delivery_id'],
+                cash_amount=flow.get('cash_amount', 0),
+                notes=flow.get('cash_notes'),
+            )
+        except Exception as e:
+            logger.error(f"Error confirming full bottle return: {e}", exc_info=True)
+            await self._handle_error(update, context)
+
+    @require_auth
+    @require_delivery_driver
+    async def start_custom_bottle_return(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Prompt driver to enter custom bottle count."""
+        query = update.callback_query
+        await query.answer()
+        language = await self._get_language(update, context)
+
+        flow = context.user_data.get('pending_delivery_cash_flow') or {}
+        flow['awaiting_bottle_count'] = True
+        context.user_data['pending_delivery_cash_flow'] = flow
+
+        await query.edit_message_text(
+            i18n.get('staff.delivery.enter_bottle_count', language),
+            parse_mode='HTML'
+        )
+        return BOTTLE_RETURN_INPUT
+
+    @require_auth
+    @require_delivery_driver
+    async def receive_bottle_count(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Receive typed bottle count from driver."""
+        language = await self._get_language(update, context)
+        flow = context.user_data.get('pending_delivery_cash_flow') or {}
+        if not flow.get('awaiting_bottle_count'):
+            return ConversationHandler.END
+
+        try:
+            text = update.message.text.strip()
+            try:
+                count = int(text)
+            except (TypeError, ValueError):
+                await update.message.reply_text(
+                    i18n.get('staff.delivery.invalid_bottle_count', language)
+                )
+                return BOTTLE_RETURN_INPUT
+
+            if count < 0:
+                await update.message.reply_text(
+                    i18n.get('staff.delivery.invalid_bottle_count', language)
+                )
+                return BOTTLE_RETURN_INPUT
+
+            flow['bottles_returned'] = count
+            flow['awaiting_bottle_count'] = False
+            context.user_data['pending_delivery_cash_flow'] = flow
+
+            return await self._submit_delivery_completion(
+                update, context,
+                delivery_id=flow['delivery_id'],
+                cash_amount=flow.get('cash_amount', 0),
+                notes=flow.get('cash_notes'),
+            )
+        except Exception as e:
+            logger.error(f"Error receiving bottle count: {e}", exc_info=True)
+            await self._handle_error(update, context)
+            return ConversationHandler.END
+
+    @require_auth
+    @require_delivery_driver
+    async def skip_bottle_return(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """No bottles returned — proceed to delivery completion."""
+        query = update.callback_query
+        await query.answer()
+        try:
+            flow = context.user_data.get('pending_delivery_cash_flow') or {}
+            flow['bottles_returned'] = 0
+            context.user_data['pending_delivery_cash_flow'] = flow
+
+            return await self._submit_delivery_completion(
+                update, context,
+                delivery_id=flow['delivery_id'],
+                cash_amount=flow.get('cash_amount', 0),
+                notes=flow.get('cash_notes'),
+            )
+        except Exception as e:
+            logger.error(f"Error skipping bottle return: {e}", exc_info=True)
             await self._handle_error(update, context)

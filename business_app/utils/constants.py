@@ -27,6 +27,10 @@ from shared.enums import (  # noqa: F401
     TryoutTaskType,
     TryoutTaskStatus,
     TryoutBottleLedgerEventType,
+    BottleLedgerEventType,
+    BottleFineStatus,
+    DriverBottleSessionStatus,
+    DriverBottleTransferStatus,
 )
 
 
@@ -139,6 +143,8 @@ class LoyaltyActionType(Enum):
     SOCIAL_SHARE = 'social_share'
     BIRTHDAY_BONUS = 'birthday_bonus'
     WELCOME_BONUS = 'welcome_bonus'
+    STREAK_BONUS = 'streak_bonus'
+    SURPRICE_REWARD = 'surprise_reward'
 
 
 class LoyaltyTransactionType(Enum):

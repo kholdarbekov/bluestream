@@ -112,6 +112,10 @@ const AdminLayout = ({ children }) => {
         {
           key: '/delivery-time-slots',
           label: t('ui.nav.time_slots')
+        },
+        {
+          key: '/delivery/bottles',
+          label: t('ui.nav.bottle_tracking', 'Bottle Tracking')
         }
       ]
     },

@@ -57,10 +57,10 @@ class DevelopmentConfig(BaseConfig):
     
     # CORS Configuration - Allow local development
     CORS_ORIGINS = [
-        'https://bluestream.uz',
-        'https://www.bluestream.uz',
-        'https://admin.bluestream.uz',
-        'https://api.bluestream.uz',
+        'https://aqua-element.uz',
+        'https://www.aqua-element.uz',
+        'https://admin.aqua-element.uz',
+        'https://api.aqua-element.uz',
         'http://localhost:3000',
         'http://localhost:3001',
         'http://127.0.0.1:3000',

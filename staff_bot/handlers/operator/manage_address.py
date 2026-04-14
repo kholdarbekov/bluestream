@@ -67,8 +67,8 @@ class ManageAddressHandler(BaseHandler):
             lines = [f"\U0001f4cd <b>{i18n.get('staff.operator.addresses_title', language)}</b>\n"]
 
             for addr in addresses:
-                label = escape_html(addr.get('label', ''))
-                address_line = escape_html(addr.get('address_line_1', ''))
+                label = escape_html(addr.get('title', ''))
+                address_line = escape_html(addr.get('full_address', ''))
                 district = escape_html(addr.get('district', ''))
 
                 lines.append(f"\U0001f4cd <b>{label}</b>")
@@ -151,7 +151,7 @@ class ManageAddressHandler(BaseHandler):
             )
             return ENTER_ADDRESS
 
-        context.user_data['new_address']['address_line_1'] = address
+        context.user_data['new_address']['full_address'] = address
 
         await update.message.reply_text(
             i18n.get('staff.operator.enter_district', language),
@@ -189,8 +189,8 @@ class ManageAddressHandler(BaseHandler):
         addr = context.user_data['new_address']
         lines = [
             f"\U0001f4cd <b>{i18n.get('staff.operator.confirm_address', language)}</b>\n",
-            f"\U0001f3f7 {escape_html(addr.get('label', ''))}",
-            f"\U0001f4cd {escape_html(addr.get('address_line_1', ''))}",
+            f"\U0001f3f7 {escape_html(addr.get('title', ''))}",
+            f"\U0001f4cd {escape_html(addr.get('full_address', ''))}",
         ]
         if addr.get('district'):
             lines.append(f"\U0001f3d8 {escape_html(addr['district'])}")

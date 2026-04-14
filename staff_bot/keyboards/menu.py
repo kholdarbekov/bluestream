@@ -201,6 +201,22 @@ class MenuKeyboards:
                 callback_data="staff_cod_collect_menu",
             )],
             [InlineKeyboardButton(
+                f"\U0001f4e6 {i18n.get('staff.menu.bottle_collection', language)}",
+                callback_data="staff_bottle_collect_menu",
+            )],
+            [InlineKeyboardButton(
+                f"\U0001f4e6 {i18n.get('staff.menu.log_bottles_loaded', language)}",
+                callback_data="staff_bottle_log_loaded",
+            )],
+            [InlineKeyboardButton(
+                f"\u21a9\ufe0f {i18n.get('staff.menu.return_to_warehouse', language)}",
+                callback_data="staff_bottle_return_warehouse",
+            )],
+            [InlineKeyboardButton(
+                f"\U0001f4ca {i18n.get('staff.menu.my_bottle_accountability', language)}",
+                callback_data="staff_bottle_my_accountability",
+            )],
+            [InlineKeyboardButton(
                 f"\u2b05\ufe0f {i18n.get('staff.back', language)}",
                 callback_data="staff_back_to_main",
             )],

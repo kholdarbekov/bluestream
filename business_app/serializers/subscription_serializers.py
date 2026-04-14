@@ -48,9 +48,8 @@ class SubscriptionAddressSchema(BaseModel):
     model_config = ConfigDict(from_attributes=True, alias_generator=to_camel)
     
     id: int
-    label: str
-    address_line_1: str
-    address_line_2: Optional[str] = None
+    title: str
+    full_address: str
     city: str
     district: Optional[str] = None
     postal_code: Optional[str] = None
@@ -429,9 +428,8 @@ def serialize_subscription_address(address) -> Dict[str, Any]:
     try:
         return {
             'id': address.id,
-            'label': address.label,
-            'address_line_1': address.address_line_1,
-            'address_line_2': getattr(address, 'address_line_2', None),
+            'title': address.title,
+            'full_address': address.full_address,
             'city': address.city,
             'district': getattr(address, 'district', None),
             'postal_code': getattr(address, 'postal_code', None),
@@ -442,8 +440,8 @@ def serialize_subscription_address(address) -> Dict[str, Any]:
     except Exception:
         return {
             'id': address.id,
-            'label': address.label,
-            'address_line_1': address.address_line_1,
+            'title': address.title,
+            'full_address': address.full_address,
             'city': address.city
         }
 

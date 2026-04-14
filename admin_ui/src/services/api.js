@@ -5,7 +5,7 @@ import { extractApiErrorMessage } from '../utils/apiError';
 // Create axios instance with cookie support
 console.log('API URL:', process.env.REACT_APP_API_URL);
 const api = axios.create({
-  baseURL: process.env.REACT_APP_API_URL || 'https://bluestream.uz/api/v1',
+  baseURL: process.env.REACT_APP_API_URL || 'https://aqua-element.uz/api/v1',
   timeout: 10000,
   withCredentials: true  // Enable sending cookies with requests
 });
@@ -31,7 +31,7 @@ const getJWTCSRFToken = () => {
 const fetchCSRFToken = async () => {
   try {
     const response = await axios.get(
-      `${process.env.REACT_APP_API_URL || 'https://bluestream.uz/api/v1'}/csrf-token`,
+      `${process.env.REACT_APP_API_URL || 'https://aqua-element.uz/api/v1'}/csrf-token`,
       { withCredentials: true }
     );
     csrfToken = response.data.csrf_token;

@@ -100,9 +100,9 @@ class OperatorKeyboards:
         """Address selection for order"""
         keyboard = []
         for addr in addresses:
-            label = addr.get('label') or addr.get('address_line_1') or i18n.get('staff.operator.address', language)
+            title = addr.get('title') or addr.get('full_address') or i18n.get('staff.operator.address', language)
             keyboard.append([InlineKeyboardButton(
-                f"\U0001f4cd {label}",
+                f"\U0001f4cd {title}",
                 callback_data=f"staff_op_addr_{addr['id']}"
             )])
 

@@ -1254,7 +1254,7 @@ class LoyaltyService:
         if recent_orders_count >= 3 and not last_streak_tx:
             # Award Bonus
             self.award_points(
-                user_id, 300, "Streak Bonus: 3 Orders in 30 days", LoyaltyActionType.BONUS
+                user_id, 300, "Streak Bonus: 3 Orders in 30 days", LoyaltyActionType.STREAK_BONUS
             )
             
             # Update Streak Counter (Consecutive Months Logic is complex without Monthly Job, 
@@ -1270,7 +1270,7 @@ class LoyaltyService:
                  # Value of 10L bottle ~? Let's say 500 bonus points or Create a special Reward).
                  # User said "Free 10L bottle". We'll award points for it for now to be safe or a voucher.
                  self.award_points(
-                     user_id, 1000, "6-Month Streak Milestone Bonus", LoyaltyActionType.BONUS
+                     user_id, 1000, "6-Month Streak Milestone Bonus", LoyaltyActionType.STREAK_BONUS
                  )
             
             db.session.commit()
@@ -1284,7 +1284,7 @@ class LoyaltyService:
         if random.random() < 0.05:
             bonus = random.choice([50, 100, 200]) # Small delight
             self.award_points(
-                user_id, bonus, "Surprise Reward! Thanks for being loyal 💙", LoyaltyActionType.BONUS
+                user_id, bonus, "Surprise Reward! Thanks for being loyal 💙", LoyaltyActionType.SURPRICE_REWARD
             )
     
     def _get_tier_benefits(self, tier_name: str, program_id: int = None) -> Dict[str, Any]:

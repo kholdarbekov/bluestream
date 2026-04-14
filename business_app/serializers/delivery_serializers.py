@@ -10,6 +10,8 @@ from decimal import Decimal
 from pydantic import BaseModel, Field, field_validator, ConfigDict
 from pydantic.alias_generators import to_camel
 
+from business_app.models.user import UserAddress
+
 
 class DeliveryStatus(str, Enum):
     CREATED = "created"
@@ -34,9 +36,8 @@ class DeliveryAddressSchema(BaseModel):
     model_config = ConfigDict(from_attributes=True, alias_generator=to_camel)
     
     id: int
-    label: Optional[str] = None
-    address_line_1: str
-    address_line_2: Optional[str] = None
+    title: Optional[str] = None
+    full_address: str
     city: str
     district: Optional[str] = None
     postal_code: Optional[str] = None
@@ -573,20 +574,17 @@ def serialize_time_slot(time_slot, include_capacity: bool = False) -> Dict[str, 
 
 
 # Helper functions
-def serialize_delivery_address(address) -> Dict[str, Any]:
+def serialize_delivery_address(address: UserAddress) -> Dict[str, Any]:
     """Serialize delivery address"""
     return {
         'id': address.id,
-        'label': address.label,
-        'address_line_1': address.address_line_1,
-        'address_line_2': address.address_line_2,
+        'title': address.title,
+        'full_address': address.full_address,
         'city': address.city,
         'district': getattr(address, 'district', None),
         'postal_code': address.postal_code,
         'latitude': address.latitude,
         'longitude': address.longitude,
-        'phone': address.phone,
-        'contact_name': address.contact_name
     }
 
 

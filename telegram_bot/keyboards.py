@@ -697,6 +697,9 @@ class ProfileKeyboards:
             [
                 {'text': i18n.get('telegram.profile.payment_methods', language), 'callback_data': 'payment_methods'}
             ],
+            [
+                {'text': i18n.get('telegram.profile.my_bottles', language), 'callback_data': 'my_bottles'}
+            ],
             [{'text': i18n.get('telegram.back', language), 'callback_data': 'back_to_main'}]
         ]
 

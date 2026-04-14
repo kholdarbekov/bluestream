@@ -18,4 +18,4 @@ Disallow: /addresses
 Disallow: /profile-settings
 Disallow: /account-security
 
-Sitemap: https://bluestream.uz/sitemap.xml
+Sitemap: https://aqua-element.uz/sitemap.xml

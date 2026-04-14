@@ -205,6 +205,7 @@ class ProductMarkingCode(db.Model, TimestampMixin):
 
     id = Column(Integer, primary_key=True)
     product_id = Column(Integer, ForeignKey('products.id'), nullable=False, index=True)
+    order_id = Column(Integer, ForeignKey('orders.id', ondelete='SET NULL'), nullable=True, index=True)
     code = Column(String(255), nullable=False, unique=True, index=True)
     status = Column(
         Enum(
@@ -224,6 +225,7 @@ class ProductMarkingCode(db.Model, TimestampMixin):
     extra_data = Column(JSON, nullable=False, default=dict)
 
     product = relationship('Product', back_populates='marking_codes')
+    order = relationship('Order', foreign_keys=[order_id], backref='marking_codes')
     created_by_user = relationship('User', foreign_keys=[created_by_user_id])
     allocation_events = relationship(
         'OrderItemMarkingCodeAllocation',
@@ -241,6 +243,7 @@ class ProductMarkingCode(db.Model, TimestampMixin):
             'reserved_at': self.reserved_at.isoformat() if self.reserved_at else None,
             'used_at': self.used_at.isoformat() if self.used_at else None,
             'archived_at': self.archived_at.isoformat() if self.archived_at else None,
+            'order_id': self.order_id,
             'notes': self.notes,
             'extra_data': self.extra_data or {},
             'created_at': self.created_at.isoformat() if self.created_at else None,

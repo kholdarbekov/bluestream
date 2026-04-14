@@ -1300,6 +1300,7 @@ class PaymentFiscalizationService:
             for code in available_codes:
                 code.status = MarkingCodeStatus.RESERVED
                 code.reserved_at = datetime.now(timezone.utc)
+                code.order_id = order.id
                 db.session.add(
                     OrderItemMarkingCodeAllocation(
                         order_item_id=order_item.id,
@@ -1362,6 +1363,7 @@ class PaymentFiscalizationService:
                 continue
             code.status = MarkingCodeStatus.AVAILABLE
             code.reserved_at = None
+            code.order_id = None
             db.session.add(
                 OrderItemMarkingCodeAllocation(
                     order_item_id=order_item.id,
@@ -1442,6 +1444,7 @@ class PaymentFiscalizationService:
             for code in available_codes:
                 code.status = MarkingCodeStatus.RESERVED
                 code.reserved_at = datetime.now(timezone.utc)
+                code.order_id = order.id
                 db.session.add(
                     OrderItemMarkingCodeAllocation(
                         order_item_id=order_item.id,

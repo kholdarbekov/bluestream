@@ -873,7 +873,7 @@ class OrderService:
             actor_user_id=actor_id,
         )
 
-        if order.payment and order.payment.payment_provider == PaymentMethod.CLICK.value:
+        if order.payment:
             try:
                 from business_app.services.payment_fiscalization_service import PaymentFiscalizationService
 

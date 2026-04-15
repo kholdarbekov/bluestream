@@ -655,6 +655,7 @@ class StaffBot:
             },
             fallbacks=[
                 CommandHandler("cancel", bottle_collection_handler.cancel if hasattr(bottle_collection_handler, 'cancel') else start_handler.cancel),
+                CallbackQueryHandler(status_update_handler.show_cash_hub, pattern="^staff_cash_hub$"),
                 CallbackQueryHandler(main_menu_handler, pattern="^staff_back_to_main$"),
             ],
             per_chat=True,
@@ -681,6 +682,7 @@ class StaffBot:
             },
             fallbacks=[
                 CommandHandler("cancel", start_handler.cancel),
+                CallbackQueryHandler(status_update_handler.show_cash_hub, pattern="^staff_cash_hub$"),
                 CallbackQueryHandler(main_menu_handler, pattern="^staff_back_to_main$"),
             ],
             per_chat=True,
@@ -707,6 +709,7 @@ class StaffBot:
             },
             fallbacks=[
                 CommandHandler("cancel", start_handler.cancel),
+                CallbackQueryHandler(status_update_handler.show_cash_hub, pattern="^staff_cash_hub$"),
                 CallbackQueryHandler(main_menu_handler, pattern="^staff_back_to_main$"),
             ],
             per_chat=True,

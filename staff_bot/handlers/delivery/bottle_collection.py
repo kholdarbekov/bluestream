@@ -81,11 +81,16 @@ class BottleCollectionHandler(BaseHandler):
         self._clear_flow(context)
 
         text = i18n.get('staff.delivery.bottle_collection_search_prompt', language)
+        cancel_keyboard = CommonKeyboards.back_button(language, "staff_cash_hub")
         if update.callback_query:
             await update.callback_query.answer()
-            await update.callback_query.edit_message_text(text, parse_mode='HTML')
+            await update.callback_query.edit_message_text(
+                text, reply_markup=cancel_keyboard, parse_mode='HTML'
+            )
         else:
-            await update.message.reply_text(text, parse_mode='HTML')
+            await update.message.reply_text(
+                text, reply_markup=cancel_keyboard, parse_mode='HTML'
+            )
         return BOTTLE_COLLECTION_SEARCH_INPUT
 
     async def receive_collection_search(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -488,28 +493,41 @@ class BottleCollectionHandler(BaseHandler):
         started_at = session.get('started_at', '')[:16].replace('T', ' ')
         ref = (session.get('session_ref') or '')[:8]
 
+        session_label = i18n.get('staff.delivery.session_ref_label', language)
+        started_label = i18n.get('staff.delivery.session_started_label', language)
+        loaded_label = i18n.get('staff.delivery.bottles_loaded_label', language)
+        delivered_label = i18n.get('staff.delivery.bottles_delivered_label', language)
+        collected_label = i18n.get('staff.delivery.bottles_collected_label', language)
+        transferred_out_label = i18n.get('staff.delivery.bottles_transferred_out_label', language)
+        transferred_in_label = i18n.get('staff.delivery.bottles_transferred_in_label', language)
+        on_truck_label = i18n.get('staff.delivery.bottles_on_truck_label', language)
+        returned_wh_label = i18n.get('staff.delivery.bottles_returned_wh_label', language)
+        discrepancy_label = i18n.get('staff.delivery.discrepancy_label', language)
+
         lines = [
-            f"\U0001f69a <b>Session #{escape_html(ref)}</b>  [{escape_html(status.upper())}]",
-            f"⏱ Started: {escape_html(started_at)}",
+            f"\U0001f69a <b>{session_label} #{escape_html(ref)}</b>  [{escape_html(status.upper())}]",
+            f"\u23f1 {started_label}: {escape_html(started_at)}",
             "",
-            f"\U0001f4e6 Loaded:               <b>{loaded}</b>",
-            f"\U0001f69a Delivered:            <b>{delivered}</b>",
-            f"\u267b\ufe0f Collected:            <b>{collected}</b>",
+            f"\U0001f4e6 {loaded_label}:               <b>{loaded}</b>",
+            f"\U0001f69a {delivered_label}:            <b>{delivered}</b>",
+            f"\u267b\ufe0f {collected_label}:            <b>{collected}</b>",
         ]
         if transferred_out or transferred_in:
             lines += [
-                f"\U0001f4e4 Transferred out:      <b>{transferred_out}</b>",
-                f"\U0001f4e5 Transferred in:       <b>{transferred_in}</b>",
+                f"\U0001f4e4 {transferred_out_label}:      <b>{transferred_out}</b>",
+                f"\U0001f4e5 {transferred_in_label}:       <b>{transferred_in}</b>",
             ]
-        lines.append(f"\u2500" * 30)
-        lines.append(f"\U0001f69a On truck now:         <b>{current}</b>")
+        lines.append("\u2500" * 30)
+        lines.append(f"\U0001f69a {on_truck_label}:         <b>{current}</b>")
         if returned is not None:
-            lines.append(f"\U0001f3e2 Returned to WH:       <b>{returned}</b>")
+            lines.append(f"\U0001f3e2 {returned_wh_label}:       <b>{returned}</b>")
         if discrepancy is not None:
             if discrepancy == 0:
-                lines.append(f"\u2705 Discrepancy:          <b>0</b>  \U0001f3af")
+                lines.append(i18n.get('staff.delivery.discrepancy_zero', language))
             else:
-                lines.append(f"\u26a0\ufe0f Discrepancy:          <b>{discrepancy}</b>")
+                lines.append(
+                    f"\u26a0\ufe0f {discrepancy_label}:          <b>{discrepancy}</b>"
+                )
         return "\n".join(lines)
 
     @staticmethod
@@ -600,11 +618,9 @@ class BottleCollectionHandler(BaseHandler):
                 raw_started = session.get('started_at')
                 started = raw_started[:16].replace('T', ' ') if raw_started else 'unknown time'
                 loaded = session.get('bottles_loaded', 0)
-                text = (
-                    f"\U0001f6ab <b>Cannot start a new load.</b>\n\n"
-                    f"You already have an active session started at <b>{escape_html(started)}</b> "
-                    f"with <b>{loaded}</b> bottles loaded.\n\n"
-                    f"Return to the warehouse and close your current session first."
+                text = i18n.get(
+                    'staff.delivery.bottle_session_already_open', language,
+                    started=escape_html(started), loaded=loaded,
                 )
                 await query.edit_message_text(
                     text,
@@ -616,7 +632,11 @@ class BottleCollectionHandler(BaseHandler):
             pass
 
         prompt = i18n.get('staff.delivery.enter_bottles_loaded_qty', language)
-        await query.edit_message_text(prompt, parse_mode='HTML')
+        await query.edit_message_text(
+            prompt,
+            reply_markup=CommonKeyboards.back_button(language, "staff_cash_hub"),
+            parse_mode='HTML',
+        )
         return BOTTLE_SESSION_LOADED_QTY_INPUT
 
     async def receive_bottles_loaded(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -646,8 +666,7 @@ class BottleCollectionHandler(BaseHandler):
                 error_code = (response.data or {}).get('error_code', '')
                 if error_code == 'BOTTLE_SESSION_ALREADY_OPEN':
                     await update.message.reply_text(
-                        "\U0001f6ab You already have an open session. "
-                        "Close it before loading new bottles.",
+                        i18n.get('staff.delivery.bottle_session_already_open_short', language),
                         reply_markup=DeliveryKeyboards.bottle_session_menu(language),
                         parse_mode='HTML',
                     )
@@ -657,11 +676,9 @@ class BottleCollectionHandler(BaseHandler):
 
             session = response.data or {}
             ref = (session.get('session_ref') or '')[:8]
-            text = (
-                f"\u2705 <b>Session opened!</b>\n\n"
-                f"\U0001f4e6 Loaded: <b>{count}</b> bottles\n"
-                f"Session ref: <code>{escape_html(ref)}</code>\n\n"
-                f"Deliver your orders and return to WH when done."
+            text = i18n.get(
+                'staff.delivery.bottle_session_opened', language,
+                count=count, ref=escape_html(ref),
             )
             await update.message.reply_text(
                 text,
@@ -699,7 +716,7 @@ class BottleCollectionHandler(BaseHandler):
                 context_text = self._format_session(response.data, language) + "\n\n"
             elif response.success and not response.data:
                 await query.edit_message_text(
-                    "ℹ️ You have no active bottle session. Nothing to close.",
+                    i18n.get('staff.delivery.no_active_bottle_session', language),
                     reply_markup=DeliveryKeyboards.bottle_session_menu(language),
                     parse_mode='HTML',
                 )
@@ -708,7 +725,11 @@ class BottleCollectionHandler(BaseHandler):
             pass
 
         prompt = i18n.get('staff.delivery.enter_bottles_returned_qty', language)
-        await query.edit_message_text(context_text + prompt, parse_mode='HTML')
+        await query.edit_message_text(
+            context_text + prompt,
+            reply_markup=CommonKeyboards.back_button(language, "staff_cash_hub"),
+            parse_mode='HTML',
+        )
         return BOTTLE_SESSION_RETURNED_QTY_INPUT
 
     async def receive_bottles_returned(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -742,15 +763,13 @@ class BottleCollectionHandler(BaseHandler):
             ref = (session.get('session_ref') or '')[:8]
 
             disc_line = (
-                f"\u2705 Discrepancy: <b>0</b>  \U0001f3af"
+                i18n.get('staff.delivery.discrepancy_zero', language)
                 if discrepancy == 0
-                else f"\u26a0\ufe0f Discrepancy: <b>{discrepancy}</b> bottles unaccounted"
+                else i18n.get('staff.delivery.discrepancy_nonzero', language, discrepancy=discrepancy)
             )
-            text = (
-                f"\u2705 <b>Session closed.</b>\n\n"
-                f"\U0001f3e2 Returned to WH: <b>{count}</b>\n"
-                f"{disc_line}\n"
-                f"Ref: <code>{escape_html(ref)}</code>"
+            text = i18n.get(
+                'staff.delivery.bottle_session_closed', language,
+                count=count, disc_line=disc_line, ref=escape_html(ref),
             )
             await update.message.reply_text(
                 text,
@@ -785,8 +804,7 @@ class BottleCollectionHandler(BaseHandler):
                 response = await client.get_current_bottle_session(token)
             if not (response.success and response.data):
                 await query.edit_message_text(
-                    "\U0001f6ab You must have an active bottle session to transfer bottles.\n"
-                    "Load bottles from the warehouse first.",
+                    i18n.get('staff.delivery.no_active_bottle_session', language),
                     reply_markup=DeliveryKeyboards.bottle_session_menu(language),
                     parse_mode='HTML',
                 )
@@ -796,7 +814,7 @@ class BottleCollectionHandler(BaseHandler):
             available = session.get('current_inventory', 0)
             if available <= 0:
                 await query.edit_message_text(
-                    "\U0001f6ab You have no bottles available to transfer.",
+                    i18n.get('staff.delivery.no_bottles_to_transfer', language),
                     reply_markup=DeliveryKeyboards.bottle_session_menu(language),
                     parse_mode='HTML',
                 )
@@ -822,15 +840,14 @@ class BottleCollectionHandler(BaseHandler):
 
         if not drivers:
             await query.edit_message_text(
-                "No other active drivers found.",
+                i18n.get('staff.delivery.no_active_drivers', language),
                 reply_markup=DeliveryKeyboards.bottle_session_menu(language),
                 parse_mode='HTML',
             )
             return ConversationHandler.END
 
         await query.edit_message_text(
-            f"Select the driver to transfer bottles to.\n"
-            f"(You have <b>{available}</b> bottles available)",
+            i18n.get('staff.delivery.select_transfer_driver', language, available=available),
             reply_markup=DeliveryKeyboards.driver_select_for_transfer(language, drivers),
             parse_mode='HTML',
         )
@@ -853,8 +870,7 @@ class BottleCollectionHandler(BaseHandler):
         context.user_data['pending_transfer_receiver_id'] = receiver_id
 
         await query.edit_message_text(
-            f"\U0001f4e6 How many bottles are you transferring?\n"
-            f"(You have <b>{available}</b> available)",
+            i18n.get('staff.delivery.enter_transfer_qty', language, available=available),
             parse_mode='HTML',
         )
         return BOTTLE_TRANSFER_QTY_INPUT
@@ -876,7 +892,7 @@ class BottleCollectionHandler(BaseHandler):
                 raise ValueError("non-positive")
             if qty > available:
                 await update.message.reply_text(
-                    f"\u26a0\ufe0f You only have {available} bottle(s) available. Enter a smaller number."
+                    i18n.get('staff.delivery.transfer_qty_exceeds_available', language, available=available)
                 )
                 return BOTTLE_TRANSFER_QTY_INPUT
         except (TypeError, ValueError):
@@ -896,10 +912,10 @@ class BottleCollectionHandler(BaseHandler):
             transfer = response.data or {}
             ref = (transfer.get('transfer_ref') or '')[:8]
             await update.message.reply_text(
-                f"\u2705 <b>Transfer initiated!</b>\n\n"
-                f"\U0001f4e6 Quantity: <b>{qty}</b> bottles\n"
-                f"The receiving driver will get a notification to confirm.\n"
-                f"Ref: <code>{escape_html(ref)}</code>",
+                i18n.get(
+                    'staff.delivery.bottle_transfer_initiated', language,
+                    qty=qty, ref=escape_html(ref),
+                ),
                 reply_markup=DeliveryKeyboards.bottle_session_menu(language),
                 parse_mode='HTML',
             )
@@ -938,13 +954,13 @@ class BottleCollectionHandler(BaseHandler):
             transfers = response.data or []
             if not transfers:
                 await query.edit_message_text(
-                    "No pending transfers waiting for your confirmation.",
+                    i18n.get('staff.delivery.no_pending_transfers', language),
                     reply_markup=CommonKeyboards.back_button(language, callback_data="staff_cash_hub"),
                     parse_mode='HTML',
                 )
                 return
 
-            lines = ["\U0001f4e5 <b>Pending Incoming Transfers:</b>\n"]
+            lines = [i18n.get('staff.delivery.pending_transfers_title', language) + "\n"]
             for t in transfers:
                 ref = (t.get('transfer_ref') or '')[:8]
                 qty = t.get('declared_quantity', 0)
@@ -977,8 +993,9 @@ class BottleCollectionHandler(BaseHandler):
             return ConversationHandler.END
 
         context.user_data['pending_confirm_transfer_id'] = transfer_id
+        language = await self._get_language(update, context)
         await query.edit_message_text(
-            "\u270f\ufe0f How many bottles did you actually receive?\nEnter the count:",
+            i18n.get('staff.delivery.enter_actual_received_qty', language),
             parse_mode='HTML',
         )
         return BOTTLE_TRANSFER_CONFIRM_QTY_INPUT
@@ -1042,11 +1059,13 @@ class BottleCollectionHandler(BaseHandler):
             if not response.success:
                 if update.callback_query:
                     await update.callback_query.edit_message_text(
-                        "Failed to confirm transfer. Please try again.",
+                        i18n.get('staff.delivery.transfer_confirm_failed', language),
                         reply_markup=DeliveryKeyboards.bottle_session_menu(language),
                     )
                 else:
-                    await update.message.reply_text("Failed to confirm transfer.")
+                    await update.message.reply_text(
+                        i18n.get('staff.delivery.transfer_confirm_failed', language)
+                    )
                 return
 
             transfer = response.data or {}
@@ -1054,15 +1073,11 @@ class BottleCollectionHandler(BaseHandler):
             declared = transfer.get('declared_quantity', 0)
 
             if status == 'confirmed':
-                text = (
-                    f"\u2705 <b>Transfer confirmed!</b>\n\n"
-                    f"\U0001f4e5 <b>{qty}</b> bottles added to your session."
-                )
+                text = i18n.get('staff.delivery.transfer_confirmed', language, qty=qty)
             else:
-                text = (
-                    f"\u26a0\ufe0f <b>Transfer dispute filed.</b>\n\n"
-                    f"Sender declared <b>{declared}</b>, you received <b>{qty}</b>.\n"
-                    f"Admin has been notified. Your session has been credited with <b>{qty}</b> pending resolution."
+                text = i18n.get(
+                    'staff.delivery.transfer_disputed', language,
+                    declared=declared, qty=qty,
                 )
 
             if update.callback_query:
@@ -1081,7 +1096,4 @@ class BottleCollectionHandler(BaseHandler):
             context.user_data.pop('pending_confirm_transfer_qty', None)
         except Exception as exc:
             logger.error("Error confirming bottle transfer: %s", exc, exc_info=True)
-            if update.callback_query:
-                await update.callback_query.edit_message_text("An error occurred. Please try again.")
-            else:
-                await update.message.reply_text("An error occurred.")
+            await self._handle_error(update, context)

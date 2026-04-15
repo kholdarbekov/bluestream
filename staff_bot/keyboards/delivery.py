@@ -16,11 +16,11 @@ class DeliveryKeyboards:
         """View/Accept buttons for an order in the pool"""
         return InlineKeyboardMarkup([[
             InlineKeyboardButton(
-                f"\U0001f440 {i18n.get('staff.delivery.view_details', language)}",
+                f"👁️ {i18n.get('staff.delivery.view_details', language)}",
                 callback_data=f"staff_view_order_{delivery_id}"
             ),
             InlineKeyboardButton(
-                f"\u2705 {i18n.get('staff.delivery.accept', language)}",
+                f"✅ {i18n.get('staff.delivery.accept', language)}",
                 callback_data=f"staff_accept_order_{delivery_id}"
             )
         ]])
@@ -31,11 +31,11 @@ class DeliveryKeyboards:
         return InlineKeyboardMarkup([
             [
                 InlineKeyboardButton(
-                    f"\u2705 {i18n.get('staff.confirm', language)}",
+                    f"✅ {i18n.get('staff.confirm', language)}",
                     callback_data=f"staff_confirm_accept_{delivery_id}"
                 ),
                 InlineKeyboardButton(
-                    f"\u274c {i18n.get('staff.cancel', language)}",
+                    f"❌ {i18n.get('staff.cancel', language)}",
                     callback_data="staff_new_orders"
                 )
             ]
@@ -51,18 +51,18 @@ class DeliveryKeyboards:
     ) -> InlineKeyboardMarkup:
         """Actions for pool order details."""
         keyboard = [[InlineKeyboardButton(
-            f"\u2705 {i18n.get('staff.delivery.accept', language)}",
+            f"✅ {i18n.get('staff.delivery.accept', language)}",
             callback_data=f"staff_accept_order_{delivery_id}"
         )]]
 
         if can_mark_preparing and order_id:
             keyboard.append([InlineKeyboardButton(
-                f"\U0001f6e0\ufe0f {i18n.get('staff.delivery.mark_preparing', language)}",
+                f"🛠️ {i18n.get('staff.delivery.mark_preparing', language)}",
                 callback_data=f"staff_mark_preparing_{order_id}"
             )])
 
         keyboard.append([InlineKeyboardButton(
-            f"\u2b05\ufe0f {i18n.get('staff.back', language)}",
+            f"⬅️ {i18n.get('staff.back', language)}",
             callback_data=back_callback
         )])
 
@@ -95,13 +95,13 @@ class DeliveryKeyboards:
 
         # Navigate button (opens Yandex Maps route)
         keyboard.append([InlineKeyboardButton(
-            f"\U0001f4cd {i18n.get('staff.delivery.navigate', language)}",
+            f"📍 {i18n.get('staff.delivery.navigate', language)}",
             callback_data=f"staff_navigate_{delivery_id}"
         )])
 
         # Back button
         keyboard.append([InlineKeyboardButton(
-            f"\u2b05\ufe0f {i18n.get('staff.back', language)}",
+            f"⬅️ {i18n.get('staff.back', language)}",
             callback_data="staff_active_deliveries"
         )])
 
@@ -118,7 +118,7 @@ class DeliveryKeyboards:
             )])
 
         keyboard.append([InlineKeyboardButton(
-            f"\u2b05\ufe0f {i18n.get('staff.back', language)}",
+            f"⬅️ {i18n.get('staff.back', language)}",
             callback_data=f"staff_view_active_{delivery_id}"
         )])
 
@@ -131,15 +131,15 @@ class DeliveryKeyboards:
         """Explicit delivery-completion cash collection options."""
         return InlineKeyboardMarkup([
             [InlineKeyboardButton(
-                f"\u2705 {i18n.get('staff.delivery.confirm_cash', language, amount=f'{amount:,.0f}')}",
+                f"✅ {i18n.get('staff.delivery.confirm_cash', language, amount=f'{amount:,.0f}')}",
                 callback_data=f"staff_cash_full_{delivery_id}"
             )],
             [InlineKeyboardButton(
-                f"\u270f\ufe0f {i18n.get('staff.delivery.edit_cash', language)}",
+                f"✏️ {i18n.get('staff.delivery.edit_cash', language)}",
                 callback_data=f"staff_cash_partial_{delivery_id}"
             )],
             [InlineKeyboardButton(
-                f"\u274c {i18n.get('staff.delivery.no_cash_collected', language)}",
+                f"❌ {i18n.get('staff.delivery.no_cash_collected', language)}",
                 callback_data=f"staff_cash_none_{delivery_id}"
             )],
         ])
@@ -154,16 +154,16 @@ class DeliveryKeyboards:
         keyboard = []
         if can_submit:
             keyboard.append([InlineKeyboardButton(
-                f"\U0001f4b5 {i18n.get('staff.delivery.submit_reconciliation', language)}",
+                f"💵 {i18n.get('staff.delivery.submit_reconciliation', language)}",
                 callback_data="staff_reconcile_submit"
             )])
         if can_handoff:
             keyboard.append([InlineKeyboardButton(
-                f"\U0001f4e6 {i18n.get('staff.delivery.checkpoint_handoff', language)}",
+                f"📦 {i18n.get('staff.delivery.checkpoint_handoff', language)}",
                 callback_data="staff_reconcile_transfer"
             )])
         keyboard.append([InlineKeyboardButton(
-            f"\u2b05\ufe0f {i18n.get('staff.back', language)}",
+            f"⬅️ {i18n.get('staff.back', language)}",
             callback_data="staff_back_to_main"
         )])
         return InlineKeyboardMarkup(keyboard)
@@ -173,7 +173,7 @@ class DeliveryKeyboards:
         """View COD debt details for a searched customer."""
         return InlineKeyboardMarkup([
             [InlineKeyboardButton(
-                f"\U0001f4dc {i18n.get('staff.delivery.view_cod_statement', language)}",
+                f"📜 {i18n.get('staff.delivery.view_cod_statement', language)}",
                 callback_data=f"staff_cod_customer_{customer_id}"
             )],
         ])
@@ -189,15 +189,15 @@ class DeliveryKeyboards:
         keyboard = []
         if can_collect:
             keyboard.append([InlineKeyboardButton(
-                f"\U0001f4b8 {i18n.get('staff.delivery.collect_full_cod', language)}",
+                f"💸 {i18n.get('staff.delivery.collect_full_cod', language)}",
                 callback_data=f"staff_cod_collect_full_{customer_id}"
             )])
             keyboard.append([InlineKeyboardButton(
-                f"\u270f\ufe0f {i18n.get('staff.delivery.collect_custom_cod', language)}",
+                f"✏️ {i18n.get('staff.delivery.collect_custom_cod', language)}",
                 callback_data=f"staff_cod_collect_custom_{customer_id}"
             )])
         keyboard.append([InlineKeyboardButton(
-            f"\u2b05\ufe0f {i18n.get('staff.back', language)}",
+            f"⬅️ {i18n.get('staff.back', language)}",
             callback_data="staff_back_to_main"
         )])
         return InlineKeyboardMarkup(keyboard)
@@ -211,15 +211,15 @@ class DeliveryKeyboards:
         """Options for bottle return during delivery completion."""
         return InlineKeyboardMarkup([
             [InlineKeyboardButton(
-                f"\u2705 {i18n.get('staff.delivery.bottles_all_returned', language, count=expected_bottles)}",
+                f"✅ {i18n.get('staff.delivery.bottles_all_returned', language, count=expected_bottles)}",
                 callback_data=f"staff_bottles_full_{delivery_id}"
             )],
             [InlineKeyboardButton(
-                f"\u270f\ufe0f {i18n.get('staff.delivery.bottles_enter_count', language)}",
+                f"✏️ {i18n.get('staff.delivery.bottles_enter_count', language)}",
                 callback_data=f"staff_bottles_custom_{delivery_id}"
             )],
             [InlineKeyboardButton(
-                f"\u274c {i18n.get('staff.delivery.bottles_none_returned', language)}",
+                f"❌ {i18n.get('staff.delivery.bottles_none_returned', language)}",
                 callback_data=f"staff_bottles_none_{delivery_id}"
             )],
         ])
@@ -229,7 +229,7 @@ class DeliveryKeyboards:
         """View bottle balance for a searched customer."""
         return InlineKeyboardMarkup([[
             InlineKeyboardButton(
-                f"\U0001f4ca {i18n.get('staff.delivery.view_bottle_balance', language)}",
+                f"📊 {i18n.get('staff.delivery.view_bottle_balance', language)}",
                 callback_data=f"staff_bottle_customer_{customer_id}"
             )
         ]])
@@ -245,11 +245,11 @@ class DeliveryKeyboards:
             title = addr.get('address_title') or addr.get('full_address', '')[:30]
             balance = addr.get('balance', 0)
             keyboard.append([InlineKeyboardButton(
-                f"\U0001f4cd {title} ({int(balance)})",
+                f"📍 {title} ({int(balance)})",
                 callback_data=f"staff_bottle_addr_{customer_id}_{addr_id}"
             )])
         keyboard.append([InlineKeyboardButton(
-            f"\u2b05\ufe0f {i18n.get('staff.back', language)}",
+            f"⬅️ {i18n.get('staff.back', language)}",
             callback_data="staff_back_to_main"
         )])
         return InlineKeyboardMarkup(keyboard)
@@ -262,15 +262,15 @@ class DeliveryKeyboards:
         keyboard = []
         if can_collect:
             keyboard.append([InlineKeyboardButton(
-                f"\U0001f4e6 {i18n.get('staff.delivery.collect_bottles', language)}",
+                f"📦 {i18n.get('staff.delivery.collect_bottles', language)}",
                 callback_data=f"staff_bottle_collect_{customer_id}_{address_id}"
             )])
         keyboard.append([InlineKeyboardButton(
-            f"\u26a0\ufe0f {i18n.get('staff.delivery.issue_bottle_fine', language)}",
+            f"⚠️ {i18n.get('staff.delivery.issue_bottle_fine', language)}",
             callback_data=f"staff_bottle_fine_{customer_id}_{address_id}"
         )])
         keyboard.append([InlineKeyboardButton(
-            f"\u2b05\ufe0f {i18n.get('staff.back', language)}",
+            f"⬅️ {i18n.get('staff.back', language)}",
             callback_data="staff_back_to_main"
         )])
         return InlineKeyboardMarkup(keyboard)
@@ -284,23 +284,23 @@ class DeliveryKeyboards:
         """Main bottle session action menu."""
         return InlineKeyboardMarkup([
             [InlineKeyboardButton(
-                "\U0001f4e6 Load bottles from WH",
+                f"📦 {i18n.get('staff.menu.log_bottles_loaded', language)}",
                 callback_data="staff_bottle_session_load"
             )],
             [InlineKeyboardButton(
-                "\U0001f3e2 Return to Warehouse",
+                f"🏢 {i18n.get('staff.menu.return_to_warehouse', language)}",
                 callback_data="staff_bottle_session_return"
             )],
             [InlineKeyboardButton(
-                "\U0001f504 Transfer bottles to driver",
+                f"🔄 {i18n.get('staff.menu.transfer_bottles_to_driver', language)}",
                 callback_data="staff_bottle_transfer_start"
             )],
             [InlineKeyboardButton(
-                "\U0001f4e5 Incoming transfers",
+                f"📥 {i18n.get('staff.menu.incoming_transfers', language)}",
                 callback_data="staff_bottle_transfers_pending"
             )],
             [InlineKeyboardButton(
-                f"\u2b05\ufe0f {i18n.get('staff.back', language)}",
+                f"⬅️ {i18n.get('staff.back', language)}",
                 callback_data="staff_cash_hub"
             )],
         ])
@@ -313,11 +313,11 @@ class DeliveryKeyboards:
             driver_id = driver.get('id') or driver.get('user_id')
             name = driver.get('name') or driver.get('full_name', 'Driver')
             keyboard.append([InlineKeyboardButton(
-                f"\U0001f464 {name}",
+                f"👤 {name}",
                 callback_data=f"staff_transfer_driver_{driver_id}"
             )])
         keyboard.append([InlineKeyboardButton(
-            f"\u2b05\ufe0f {i18n.get('staff.back', language)}",
+            f"⬅️ {i18n.get('staff.back', language)}",
             callback_data="staff_cash_hub"
         )])
         return InlineKeyboardMarkup(keyboard)
@@ -332,16 +332,16 @@ class DeliveryKeyboards:
             sender = (t.get('sender_name') or 'Driver')[:15]
             keyboard.append([
                 InlineKeyboardButton(
-                    f"\u2705 Confirm {qty} from {sender}",
+                    f"✅ Confirm {qty} from {sender}",
                     callback_data=f"staff_transfer_confirm_{transfer_id}_{qty}"
                 ),
                 InlineKeyboardButton(
-                    "\u270f\ufe0f Different count",
+                    "✏️ Different count",
                     callback_data=f"staff_transfer_custom_{transfer_id}"
                 ),
             ])
         keyboard.append([InlineKeyboardButton(
-            f"\u2b05\ufe0f {i18n.get('staff.back', language)}",
+            f"⬅️ {i18n.get('staff.back', language)}",
             callback_data="staff_cash_hub"
         )])
         return InlineKeyboardMarkup(keyboard)

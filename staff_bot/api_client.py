@@ -649,29 +649,6 @@ class StaffAPIClient:
             data=data,
         )
 
-    async def record_bottles_loaded(self, token: str, bottles_loaded: int) -> APIResponse:
-        return await self._make_request(
-            'POST',
-            '/api/v1/staff/bottles/load',
-            token=token,
-            data={'bottles_loaded': bottles_loaded},
-        )
-
-    async def record_bottles_returned_to_warehouse(self, token: str, bottles_returned: int) -> APIResponse:
-        return await self._make_request(
-            'POST',
-            '/api/v1/staff/bottles/return-to-warehouse',
-            token=token,
-            data={'bottles_returned_to_warehouse': bottles_returned},
-        )
-
-    async def get_my_bottle_accountability(self, token: str) -> APIResponse:
-        return await self._make_request(
-            'GET',
-            '/api/v1/staff/bottles/my-accountability',
-            token=token,
-        )
-
     # --- Bottle Session endpoints ---
 
     async def open_bottle_session(self, token: str, bottles_loaded: int, notes: str = None) -> APIResponse:
@@ -695,6 +672,23 @@ class StaffAPIClient:
             params={'page': page, 'per_page': per_page},
         )
 
+    # --- Co-driver session membership endpoints ---
+
+    async def get_joinable_bottle_sessions(self, token: str) -> APIResponse:
+        return await self._make_request('GET', '/api/v1/staff/bottles/sessions/joinable', token=token)
+
+    async def join_bottle_session(self, token: str, session_id: int) -> APIResponse:
+        return await self._make_request(
+            'POST', '/api/v1/staff/bottles/session/join', token=token,
+            data={'session_id': session_id},
+        )
+
+    async def leave_bottle_session(self, token: str) -> APIResponse:
+        return await self._make_request('POST', '/api/v1/staff/bottles/session/leave', token=token)
+
+    async def get_current_session_membership(self, token: str) -> APIResponse:
+        return await self._make_request('GET', '/api/v1/staff/bottles/session/membership', token=token)
+
     # --- Bottle Transfer endpoints ---
 
     async def get_pending_bottle_transfers(self, token: str) -> APIResponse:
@@ -712,6 +706,17 @@ class StaffAPIClient:
             data['notes'] = notes
         return await self._make_request(
             'POST', f'/api/v1/staff/bottles/transfers/{transfer_id}/confirm', token=token, data=data
+        )
+
+    async def get_drivers_available_to_invite(self, token: str) -> APIResponse:
+        return await self._make_request(
+            'GET', '/api/v1/staff/bottles/sessions/available-drivers', token=token
+        )
+
+    async def invite_driver_to_session(self, token: str, member_driver_id: int) -> APIResponse:
+        return await self._make_request(
+            'POST', '/api/v1/staff/bottles/session/invite', token=token,
+            data={'member_driver_id': member_driver_id},
         )
 
 

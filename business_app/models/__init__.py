@@ -9,7 +9,6 @@ from business_app.models.bottle import (  # noqa: F401
     BottleBalance,
     BottleLedger,
     BottleFine,
-    DriverBottleLoad,
     DriverBottleSession,
     DriverBottleSessionOrder,
     DriverBottleTransfer,

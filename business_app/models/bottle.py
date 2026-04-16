@@ -26,6 +26,7 @@ from business_app.utils.constants import (
     BottleLedgerEventType,
     DriverBottleSessionStatus,
     DriverBottleTransferStatus,
+    DriverSessionMembershipStatus,
 )
 
 
@@ -285,6 +286,11 @@ class DriverBottleSession(db.Model, TimestampMixin):
         back_populates="session",
         cascade="all, delete-orphan",
     )
+    memberships = relationship(
+        "DriverSessionMembership",
+        back_populates="session",
+        cascade="all, delete-orphan",
+    )
     transfers_out = relationship(
         "DriverBottleTransfer",
         foreign_keys="DriverBottleTransfer.sender_session_id",
@@ -368,6 +374,9 @@ class DriverBottleSessionOrder(db.Model, TimestampMixin):
         Integer, ForeignKey("driver_bottle_sessions.id"), nullable=False, index=True
     )
     order_id = Column(Integer, ForeignKey("orders.id"), nullable=False, index=True)
+    # The driver who actually accepted the order — may differ from session owner
+    # when co-driver (session member) accepts the order. NULL for legacy records.
+    accepted_by_driver_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
     added_at = Column(
         DateTime(timezone=True),
         nullable=False,
@@ -376,13 +385,91 @@ class DriverBottleSessionOrder(db.Model, TimestampMixin):
 
     session = relationship("DriverBottleSession", back_populates="session_orders")
     order = relationship("Order", backref="bottle_session_binding")
+    accepted_by_driver = relationship("User", foreign_keys=[accepted_by_driver_id])
 
     def to_dict(self):
         return {
             "id": self.id,
             "session_id": self.session_id,
             "order_id": self.order_id,
+            "accepted_by_driver_id": self.accepted_by_driver_id,
             "added_at": self.added_at.isoformat() if self.added_at else None,
+        }
+
+
+class DriverSessionMembership(db.Model, TimestampMixin):
+    """Co-driver membership: allows a driver to operate under another driver's open session.
+
+    Use case: two drivers share one truck. Driver A loads bottles and opens a
+    session; Driver B joins that session. While ACTIVE, Driver B's order
+    acceptances are validated against — and tallied to — Driver A's session.
+
+    Rules:
+    - A driver can only have ONE active membership at a time (partial unique index).
+    - A driver with their own OPEN session cannot join another session.
+    - When the owning session is closed, all active memberships are auto-REVOKED.
+    """
+
+    __tablename__ = "driver_session_memberships"
+    __table_args__ = (
+        Index("idx_dsm_session", "session_id"),
+        Index("idx_dsm_member_status", "member_driver_id", "status"),
+        Index("idx_dsm_owner_status", "session_owner_id", "status"),
+        # At most one ACTIVE membership per driver at any time
+        Index(
+            "uq_dsm_member_active",
+            "member_driver_id",
+            unique=True,
+            postgresql_where=sa_text("status = 'active'"),
+        ),
+    )
+
+    id = Column(Integer, primary_key=True)
+    session_id = Column(
+        Integer, ForeignKey("driver_bottle_sessions.id"), nullable=False, index=True
+    )
+    # Denormalized for fast "who owns this session" lookups without a join
+    session_owner_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    member_driver_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+
+    status = Column(
+        SqlEnum(
+            DriverSessionMembershipStatus,
+            name="driver_session_membership_status",
+            values_callable=lambda x: [e.value for e in x],
+        ),
+        nullable=False,
+        default=DriverSessionMembershipStatus.ACTIVE,
+        index=True,
+    )
+
+    joined_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+    left_at = Column(DateTime(timezone=True), nullable=True)
+    invited_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    notes = Column(Text, nullable=True)
+
+    session = relationship("DriverBottleSession", back_populates="memberships")
+    session_owner = relationship("User", foreign_keys=[session_owner_id])
+    member_driver = relationship("User", foreign_keys=[member_driver_id])
+    invited_by = relationship("User", foreign_keys=[invited_by_user_id])
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "session_id": self.session_id,
+            "session_owner_id": self.session_owner_id,
+            "member_driver_id": self.member_driver_id,
+            "status": self.status.value if hasattr(self.status, "value") else self.status,
+            "joined_at": self.joined_at.isoformat() if self.joined_at else None,
+            "left_at": self.left_at.isoformat() if self.left_at else None,
+            "invited_by_user_id": self.invited_by_user_id,
+            "notes": self.notes,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
 
 
@@ -484,64 +571,6 @@ class DriverBottleTransfer(db.Model, TimestampMixin):
             "resolved_by_user_id": self.resolved_by_user_id,
             "dispute_notes": self.dispute_notes,
             "resolution_notes": self.resolution_notes,
-            "notes": self.notes,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
-            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
-        }
-
-
-class DriverBottleLoad(db.Model, TimestampMixin):
-    """[DEPRECATED] Per-day driver bottle accountability record.
-
-    Superseded by DriverBottleSession which provides per-trip granularity and
-    enforced sequencing.  This table is kept read-only for historical reporting.
-    New code should use DriverBottleSession exclusively.
-    """
-
-    __tablename__ = "driver_bottle_loads"
-    __table_args__ = (
-        UniqueConstraint("driver_user_id", "load_date", name="uq_driver_bottle_load_date"),
-        Index("idx_driver_bottle_loads_driver_date", "driver_user_id", "load_date"),
-    )
-
-    id = Column(Integer, primary_key=True)
-    driver_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    load_date = Column(Date, nullable=False)
-    bottles_loaded = Column(Integer, nullable=False, default=0)
-    bottles_delivered = Column(Integer, nullable=False, default=0)
-    bottles_collected = Column(Integer, nullable=False, default=0)
-    bottles_returned_to_warehouse = Column(Integer, nullable=False, default=0)
-    discrepancy = Column(Integer, nullable=False, default=0)
-    reconciled = Column(Boolean, nullable=False, default=False)
-    reconciled_by = Column(Integer, ForeignKey("users.id"), nullable=True)
-    reconciled_at = Column(DateTime(timezone=True), nullable=True)
-    notes = Column(Text, nullable=True)
-
-    driver = relationship("User", foreign_keys=[driver_user_id])
-    reconciler = relationship("User", foreign_keys=[reconciled_by])
-
-    def compute_discrepancy(self):
-        """loaded - delivered + collected - returned_to_warehouse should equal 0."""
-        self.discrepancy = (
-            (self.bottles_loaded or 0)
-            - (self.bottles_delivered or 0)
-            + (self.bottles_collected or 0)
-            - (self.bottles_returned_to_warehouse or 0)
-        )
-
-    def to_dict(self):
-        return {
-            "id": self.id,
-            "driver_user_id": self.driver_user_id,
-            "load_date": self.load_date.isoformat() if self.load_date else None,
-            "bottles_loaded": self.bottles_loaded,
-            "bottles_delivered": self.bottles_delivered,
-            "bottles_collected": self.bottles_collected,
-            "bottles_returned_to_warehouse": self.bottles_returned_to_warehouse,
-            "discrepancy": self.discrepancy,
-            "reconciled": self.reconciled,
-            "reconciled_by": self.reconciled_by,
-            "reconciled_at": self.reconciled_at.isoformat() if self.reconciled_at else None,
             "notes": self.notes,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,

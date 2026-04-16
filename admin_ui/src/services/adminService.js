@@ -1088,11 +1088,6 @@ class AdminService {
     return response.data;
   }
 
-  async getDriverBottleAccountability(params = {}) {
-    const response = await api.get('/admin/bottles/driver-accountability', { params });
-    return response.data;
-  }
-
   // --- Bottle Sessions ---
 
   async getBottleSessions(params = {}) {

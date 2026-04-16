@@ -20,7 +20,6 @@ from business_app.serializers.bottle_serializers import (
     serialize_bottle_ledger_entry,
     serialize_bottle_session,
     serialize_bottle_transfer,
-    serialize_driver_bottle_load,
 )
 from business_app.services.bottle_tracking_service import BottleTrackingService
 from business_app.utils.api_responses import success_response, validation_error_response
@@ -273,33 +272,6 @@ def reconcile_bottle_balance(user_id, address_id):
 
 
 # ------------------------------------------------------------------
-# Driver Accountability (legacy — DriverBottleLoad)
-# ------------------------------------------------------------------
-
-@admin_bottles_bp.route("/bottles/driver-accountability", methods=["GET"])
-@handle_api_exception
-@jwt_required()
-@validate_admin_action(["view_orders", "manage_orders"])
-def list_driver_accountability():
-    """Get paginated legacy driver bottle accountability records (DriverBottleLoad)."""
-    service = BottleTrackingService()
-
-    start_date = request.args.get("start_date")
-    end_date = request.args.get("end_date")
-
-    result = service.get_all_driver_accountability(
-        page=request.args.get("page", 1, type=int),
-        per_page=request.args.get("per_page", 20, type=int),
-        driver_user_id=request.args.get("driver_user_id", type=int),
-        start_date=date.fromisoformat(start_date) if start_date else None,
-        end_date=date.fromisoformat(end_date) if end_date else None,
-        only_discrepancies=request.args.get("only_discrepancies", "false").lower() == "true",
-    )
-    result["items"] = [serialize_driver_bottle_load(item) for item in result["items"]]
-    return success_response(data=result)
-
-
-# ------------------------------------------------------------------
 # Driver Bottle Sessions
 # ------------------------------------------------------------------
 
@@ -344,7 +316,7 @@ def get_bottle_session(session_id):
         from business_app.utils.exceptions import NotFoundError
         raise NotFoundError("Bottle session not found")
     return success_response(data=serialize_bottle_session(
-        session, include_orders=True, include_transfers=True
+        session, include_orders=True, include_transfers=True, include_members=True
     ))
 
 

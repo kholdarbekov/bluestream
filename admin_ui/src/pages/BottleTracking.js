@@ -214,9 +214,6 @@ const BottleTracking = () => {
   const [fineStatus, setFineStatus] = useState();
   const [finePagination, setFinePagination] = useState({ page: 1, per_page: 20 });
 
-  // Driver accountability state
-  const [driverPagination, setDriverPagination] = useState({ page: 1, per_page: 20 });
-
   // Sessions state
   const [sessionPagination, setSessionPagination] = useState({ page: 1, per_page: 20 });
   const [sessionStatusFilter, setSessionStatusFilter] = useState();
@@ -299,20 +296,6 @@ const BottleTracking = () => {
     { keepPreviousData: true, enabled: activeTab === 'fines' }
   );
 
-  const driverFilters = useMemo(
-    () => ({
-      page: driverPagination.page,
-      per_page: driverPagination.per_page,
-    }),
-    [driverPagination]
-  );
-
-  const { data: driverData, isLoading: driverLoading } = useQuery(
-    ['bottle-driver-accountability', driverFilters],
-    () => adminService.getDriverBottleAccountability(driverFilters),
-    { keepPreviousData: true, enabled: activeTab === 'drivers' }
-  );
-
   const sessionFilters = useMemo(
     () => ({
       page: sessionPagination.page,
@@ -368,9 +351,6 @@ const BottleTracking = () => {
   const ledgerTotal = ledgerData?.data?.total || ledgerEntries.length;
   const fines = finesData?.data?.items || finesData?.data || [];
   const finesTotal = finesData?.data?.total || fines.length;
-  const driverLoads = driverData?.data?.items || driverData?.data || [];
-  const driverTotal = driverData?.data?.total || driverLoads.length;
-
   const sessions = sessionsData?.data?.items || sessionsData?.data || [];
   const sessionsTotal = sessionsData?.data?.total || sessions.length;
   const sessionDetail = sessionDetailData?.data || null;
@@ -383,7 +363,6 @@ const BottleTracking = () => {
     queryClient.invalidateQueries(['bottle-balances']);
     queryClient.invalidateQueries(['bottle-ledger']);
     queryClient.invalidateQueries(['bottle-fines']);
-    queryClient.invalidateQueries(['bottle-driver-accountability']);
     queryClient.invalidateQueries(['bottle-sessions']);
     queryClient.invalidateQueries(['bottle-transfers']);
   };
@@ -700,57 +679,6 @@ const BottleTracking = () => {
     },
   ];
 
-  // --- Driver accountability columns ---
-  const driverColumns = [
-    {
-      title: 'Driver',
-      key: 'driver',
-      render: (_, record) => record.driver_name || `Driver #${record.driver_user_id}`,
-    },
-    {
-      title: 'Date',
-      dataIndex: 'load_date',
-      key: 'load_date',
-      render: (val) => (val ? formatDate(val) : '—'),
-    },
-    {
-      title: 'Loaded',
-      dataIndex: 'bottles_loaded',
-      key: 'bottles_loaded',
-    },
-    {
-      title: 'Delivered',
-      dataIndex: 'bottles_delivered',
-      key: 'bottles_delivered',
-    },
-    {
-      title: 'Collected',
-      dataIndex: 'bottles_collected',
-      key: 'bottles_collected',
-    },
-    {
-      title: 'Returned to WH',
-      dataIndex: 'bottles_returned_to_warehouse',
-      key: 'bottles_returned_to_warehouse',
-    },
-    {
-      title: 'Discrepancy',
-      dataIndex: 'discrepancy',
-      key: 'discrepancy',
-      render: (val) => {
-        const num = Number(val) || 0;
-        if (num === 0) return <Text>0</Text>;
-        return <Text type="danger">{num}</Text>;
-      },
-    },
-    {
-      title: 'Reconciled',
-      dataIndex: 'reconciled',
-      key: 'reconciled',
-      render: (val) => val ? <Tag color="green">Yes</Tag> : <Tag color="orange">No</Tag>,
-    },
-  ];
-
   // --- Address ledger columns (drawer) ---
   const addressLedgerColumns = [
     {
@@ -913,26 +841,6 @@ const BottleTracking = () => {
             size="middle"
           />
         </>
-      ),
-    },
-    {
-      key: 'drivers',
-      label: 'Driver Accountability',
-      children: (
-        <Table
-          columns={driverColumns}
-          dataSource={driverLoads}
-          rowKey={(r) => r.id || `${r.driver_user_id}_${r.load_date}`}
-          loading={driverLoading}
-          pagination={{
-            current: driverPagination.page,
-            pageSize: driverPagination.per_page,
-            total: driverTotal,
-            showSizeChanger: true,
-            onChange: (page, per_page) => setDriverPagination({ page, per_page }),
-          }}
-          size="middle"
-        />
       ),
     },
     {
@@ -1227,6 +1135,34 @@ const BottleTracking = () => {
                 <Descriptions.Item label="Force Close Reason" span={2}>{sessionDetail.force_close_reason}</Descriptions.Item>
               )}
             </Descriptions>
+            {sessionDetail.members?.length > 0 && (
+              <>
+                <Text strong style={{ display: 'block', marginBottom: 8 }}>
+                  Co-Drivers ({sessionDetail.members.length})
+                </Text>
+                <Table
+                  style={{ marginBottom: 16 }}
+                  size="small"
+                  pagination={false}
+                  dataSource={sessionDetail.members}
+                  rowKey={(r) => r.membership_id || r.member_driver_id}
+                  columns={[
+                    { title: 'Driver', dataIndex: 'member_name', render: (v, r) => v || `Driver #${r.member_driver_id}` },
+                    {
+                      title: 'Status',
+                      dataIndex: 'status',
+                      render: (v) => (
+                        <Tag color={{ active: 'blue', left: 'orange', revoked: 'red' }[v] || 'default'}>
+                          {(v || '').toUpperCase()}
+                        </Tag>
+                      ),
+                    },
+                    { title: 'Joined', dataIndex: 'joined_at', render: (v) => v ? formatDateTimeShort(v) : '—' },
+                    { title: 'Left', dataIndex: 'left_at', render: (v) => v ? formatDateTimeShort(v) : '—' },
+                  ]}
+                />
+              </>
+            )}
             {sessionDetail.orders?.length > 0 && (
               <>
                 <Text strong>Bound Orders ({sessionDetail.orders.length})</Text>
@@ -1249,6 +1185,11 @@ const BottleTracking = () => {
                     },
                     { title: 'Total', dataIndex: 'total_amount', render: (v) => v != null ? formatCurrency(v) : '—' },
                     { title: 'Status', dataIndex: 'status', render: (v) => v ? <Tag>{v}</Tag> : '—' },
+                    {
+                      title: 'Accepted By',
+                      dataIndex: 'accepted_by_driver_name',
+                      render: (v, r) => v || (r.accepted_by_driver_id ? `Driver #${r.accepted_by_driver_id}` : '—'),
+                    },
                     { title: 'Added At', dataIndex: 'added_at', render: (v) => v ? formatDateTimeShort(v) : '—' },
                   ]}
                 />

@@ -582,6 +582,29 @@ class TryoutService:
             )
 
         db.session.flush()
+
+        # Tally tryout-handoff bottles against the driver's open session (if any).
+        # Mirrors the tally done for regular order deliveries so the driver's
+        # session discrepancy formula stays balanced.
+        total_bottles_handed_off = sum(
+            TryoutService._as_decimal(item.returnable_bottles_due)
+            for item in tryout.items
+            if TryoutService._as_decimal(item.returnable_bottles_due) > 0
+        )
+        if actor_user_id and total_bottles_handed_off > 0:
+            try:
+                from business_app.services.bottle_tracking_service import BottleTrackingService
+                BottleTrackingService().update_session_delivery_tally(
+                    actor_user_id,
+                    bottles_delivered=int(total_bottles_handed_off),
+                )
+            except Exception:
+                import logging
+                logging.getLogger(__name__).warning(
+                    "[BOTTLE] tryout handoff session tally failed for tryout=%s actor=%s",
+                    tryout.id, actor_user_id, exc_info=True,
+                )
+
         db.session.expire(tryout, ["bottle_ledger_entries"])
         TryoutService._ensure_pickup_task(tryout, actor_user_id, assigned_driver_user_id=task.assigned_driver_user_id)
         TryoutService._sync_tryout_status(tryout)
@@ -703,6 +726,23 @@ class TryoutService:
             "pickups": [{"product_id": int(line["product_id"]), "units": float(TryoutService._as_decimal(line["units"]))} for line in pickups],
             "notes": notes,
         }
+
+        # Tally returned tryout bottles against the driver's open session (mirrors handoff tally)
+        total_picked_up = sum(TryoutService._as_decimal(p["units"]) for p in pickups)
+        if actor_user_id and total_picked_up > 0:
+            try:
+                from business_app.services.bottle_tracking_service import BottleTrackingService
+                BottleTrackingService().update_session_delivery_tally(
+                    actor_user_id,
+                    bottles_collected=int(total_picked_up),
+                )
+            except Exception:
+                import logging
+                logging.getLogger(__name__).warning(
+                    "[BOTTLE] tryout pickup session tally failed for task=%s actor=%s",
+                    task_id, actor_user_id, exc_info=True,
+                )
+
         TryoutService._sync_tryout_status(tryout)
         db.session.commit()
         return TryoutService._load_tryout(tryout.id)

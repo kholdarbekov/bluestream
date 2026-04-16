@@ -530,34 +530,6 @@ class BottleCollectionHandler(BaseHandler):
                 )
         return "\n".join(lines)
 
-    @staticmethod
-    def _format_accountability(record: dict, language: str) -> str:
-        """Format a legacy DriverBottleLoad record as HTML summary (kept for backward compat)."""
-        load_date = record.get('load_date', '')
-        loaded = record.get('bottles_loaded', 0)
-        delivered = record.get('bottles_delivered', 0)
-        collected = record.get('bottles_collected', 0)
-        returned = record.get('bottles_returned_to_warehouse', 0)
-        discrepancy = record.get('discrepancy', 0)
-
-        lines = [
-            f"\U0001f4ca <b>Bottle Accountability</b>"
-        ]
-        if load_date:
-            lines[0] += f" ({escape_html(str(load_date))})"
-        lines += [
-            f"\U0001f4e6 Loaded:          <b>{loaded}</b>",
-            f"\U0001f69a Delivered:       <b>{delivered}</b>",
-            f"\u267b\ufe0f  Collected:       <b>{collected}</b>",
-            f"\U0001f3e2 Returned to WH:  <b>{returned}</b>",
-            "\u2500" * 28,
-        ]
-        if discrepancy == 0:
-            lines.append(f"\u2705 Discrepancy:     <b>0</b>")
-        else:
-            lines.append(f"\u26a0\ufe0f Discrepancy:     <b>{discrepancy}</b>")
-        return "\n".join(lines)
-
     @require_auth
     @require_delivery_driver
     async def show_my_accountability(self, update: Update, context: ContextTypes.DEFAULT_TYPE):

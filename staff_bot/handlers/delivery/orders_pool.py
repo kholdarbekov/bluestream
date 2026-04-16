@@ -3,7 +3,7 @@ Orders Pool Handler for Staff Bot
 Shows unassigned orders available for pickup by delivery persons.
 """
 import logging
-from telegram import Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
 from staff_bot.handlers.base import BaseHandler
@@ -288,6 +288,29 @@ class OrdersPoolHandler(BaseHandler):
                         reply_markup=CommonKeyboards.back_button(language, "staff_new_orders")
                     )
                     return
+                error_code = getattr(response, 'error_code', None)
+                if error_code == 'BOTTLE_SESSION_REQUIRED':
+                    # Driver has no bottle session — offer to start one or join a colleague's
+                    keyboard = InlineKeyboardMarkup([
+                        [InlineKeyboardButton(
+                            i18n.get('staff.bottles.start_session', language),
+                            callback_data='bottles_start_session',
+                        )],
+                        [InlineKeyboardButton(
+                            i18n.get('staff.bottles.join_session', language),
+                            callback_data='bottles_join_session',
+                        )],
+                        [InlineKeyboardButton(
+                            i18n.get('common.back', language),
+                            callback_data='staff_new_orders',
+                        )],
+                    ])
+                    await query.edit_message_text(
+                        f"\u26a0\ufe0f {i18n.get('staff.bottles.session_required_to_accept', language)}",
+                        reply_markup=keyboard,
+                        parse_mode='HTML',
+                    )
+                    return
                 # For any other failure (e.g. STAFF_DRIVER_COD_BLOCKED,
                 # STAFF_MAX_CONCURRENT_REACHED), replace the confirm screen with the
                 # resolved error message + a back button so the user can't re-click
@@ -296,7 +319,7 @@ class OrdersPoolHandler(BaseHandler):
                     language,
                     error=getattr(response, 'error', None),
                     status_code=getattr(response, 'status_code', None),
-                    error_code=getattr(response, 'error_code', None),
+                    error_code=error_code,
                 )
                 await query.edit_message_text(
                     f"\u274c {error_msg}",

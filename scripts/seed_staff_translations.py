@@ -998,6 +998,158 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "uz": "Farq",
         "ru": "Расхождение",
     },
+
+    # --- Co-driver session membership ---
+    "staff.bottles.session_required_to_accept": {
+        "en": "⚠️ A bottle session is required to accept this order.\nPlease start your own session or join a colleague's.",
+        "uz": "⚠️ Buyurtmani qabul qilish uchun shisha sessiyasi kerak.\nO'z sessiyangizni boshlang yoki hamkasbingiznikiga qo'shiling.",
+        "ru": "⚠️ Для принятия заказа требуется сессия бутылок.\nНачните свою сессию или присоединитесь к сессии коллеги.",
+    },
+    "staff.bottles.start_session": {
+        "en": "▶️ Start My Session",
+        "uz": "▶️ O'z sessiyamni boshlash",
+        "ru": "▶️ Начать свою сессию",
+    },
+    "staff.bottles.join_session": {
+        "en": "🤝 Join Colleague's Session",
+        "uz": "🤝 Hamkasb sessiyasiga qo'shilish",
+        "ru": "🤝 Присоединиться к сессии коллеги",
+    },
+    "staff.bottles.leave_session": {
+        "en": "🚪 Leave Session",
+        "uz": "🚪 Sessiyadan chiqish",
+        "ru": "🚪 Покинуть сессию",
+    },
+    "staff.bottles.no_open_sessions": {
+        "en": "ℹ️ No open sessions available to join right now.",
+        "uz": "ℹ️ Hozirda qo'shilish uchun ochiq sessiyalar yo'q.",
+        "ru": "ℹ️ Сейчас нет открытых сессий для присоединения.",
+    },
+    "staff.bottles.choose_session_to_join": {
+        "en": "Choose a session to join:",
+        "uz": "Qo'shilish uchun sessiyani tanlang:",
+        "ru": "Выберите сессию для присоединения:",
+    },
+    "staff.bottles.join_session_confirm_title": {
+        "en": "Join Session?",
+        "uz": "Sessiyaga qo'shilasizmi?",
+        "ru": "Присоединиться к сессии?",
+    },
+    "staff.bottles.session_owner": {
+        "en": "Session owner",
+        "uz": "Sessiya egasi",
+        "ru": "Владелец сессии",
+    },
+    "staff.bottles.bottles_on_truck": {
+        "en": "Bottles on truck",
+        "uz": "Mashinadagi shishalar",
+        "ru": "Бутылок в машине",
+    },
+    "staff.bottles.join_session_confirm_note": {
+        "en": "While joined, your orders will be tracked against this session's inventory.",
+        "uz": "Qo'shilgandan so'ng buyurtmalaringiz ushbu sessiya inventariga hisoblanadi.",
+        "ru": "После присоединения ваши заказы будут учитываться в рамках этой сессии.",
+    },
+    "staff.bottles.confirm_join": {
+        "en": "Confirm Join",
+        "uz": "Qo'shilishni tasdiqlash",
+        "ru": "Подтвердить присоединение",
+    },
+    "staff.bottles.joined_session": {
+        "en": "Joined {name}'s session!",
+        "uz": "{name} sessiyasiga qo'shildingiz!",
+        "ru": "Вы присоединились к сессии {name}!",
+    },
+    "staff.bottles.joined_session_info": {
+        "en": "You can now accept orders. Bottles will be deducted from the shared session.",
+        "uz": "Endi buyurtmalarni qabul qilishingiz mumkin. Shishalar umumiy sessiyadan hisoblanadi.",
+        "ru": "Теперь вы можете принимать заказы. Бутылки будут списываться из общей сессии.",
+    },
+    "staff.bottles.left_session": {
+        "en": "✅ You have left the session.",
+        "uz": "✅ Siz sessiyadan chiqdingiz.",
+        "ru": "✅ Вы покинули сессию.",
+    },
+    "staff.bottles.current_membership_title": {
+        "en": "Active Co-Driver Session",
+        "uz": "Faol hamkor sessiyasi",
+        "ru": "Активная совместная сессия",
+    },
+    "staff.bottles.current_membership": {
+        "en": "Using {name}'s session — <b>{qty}</b> bottles available",
+        "uz": "{name} sessiyasida — <b>{qty}</b> shisha mavjud",
+        "ru": "Сессия {name} — доступно <b>{qty}</b> бутылок",
+    },
+    "staff.bottles.session_closed_membership_revoked": {
+        "en": "ℹ️ The session you joined has been closed. Start or join a new session when needed.",
+        "uz": "ℹ️ Siz qo'shilgan sessiya yopildi. Kerak bo'lganda yangi sessiya boshlang yoki qo'shiling.",
+        "ru": "ℹ️ Сессия, к которой вы присоединились, закрыта. При необходимости начните или присоединитесь к новой сессии.",
+    },
+    "staff.bottles.no_active_membership": {
+        "en": "ℹ️ You are not currently joined to any colleague's session.",
+        "uz": "ℹ️ Hozirda hech qanday hamkasb sessiyasiga qo'shilmagansiz.",
+        "ru": "ℹ️ Вы сейчас не присоединены ни к чьей сессии.",
+    },
+    "staff.bottles.session_not_found": {
+        "en": "❌ Session not found. It may have been closed.",
+        "uz": "❌ Sessiya topilmadi. U yopilgan bo'lishi mumkin.",
+        "ru": "❌ Сессия не найдена. Возможно, она уже закрыта.",
+    },
+    "staff.bottles.membership_status_active": {
+        "en": "Active",
+        "uz": "Faol",
+        "ru": "Активен",
+    },
+    "staff.bottles.membership_status_left": {
+        "en": "Left",
+        "uz": "Chiqib ketdi",
+        "ru": "Покинул",
+    },
+    "staff.bottles.membership_status_revoked": {
+        "en": "Revoked",
+        "uz": "Bekor qilindi",
+        "ru": "Отозван",
+    },
+    "staff.bottles.invite_codriver": {
+        "en": "👥 Invite Co-driver",
+        "uz": "👥 Hamkorni taklif qilish",
+        "ru": "👥 Пригласить напарника",
+    },
+    "staff.bottles.no_drivers_to_invite": {
+        "en": "ℹ️ No available drivers to invite. All drivers either have their own session or are already in a session.",
+        "uz": "ℹ️ Taklif qilish uchun mavjud haydovchi yo'q. Barcha haydovchilar o'z sessiyasiga ega yoki allaqachon sessiyada.",
+        "ru": "ℹ️ Нет доступных водителей для приглашения. Все водители либо имеют собственную сессию, либо уже состоят в сессии.",
+    },
+    "staff.bottles.choose_driver_to_invite": {
+        "en": "👥 Choose a driver to invite to your session:",
+        "uz": "👥 Sessiyangizga taklif qilish uchun haydovchini tanlang:",
+        "ru": "👥 Выберите водителя для приглашения в вашу сессию:",
+    },
+    "staff.bottles.invite_codriver_confirm": {
+        "en": "Invite this driver to join your session as a co-driver?",
+        "uz": "Bu haydovchini sessiyangizga hamkor sifatida taklif qilasizmi?",
+        "ru": "Пригласить этого водителя присоединиться к вашей сессии как напарника?",
+    },
+    "staff.bottles.invite_codriver_confirm_note": {
+        "en": "ℹ️ They will be able to deliver orders and collect bottles under your session.",
+        "uz": "ℹ️ Ular sizning sessiyangiz doirasida buyurtmalarni yetkazib berish va shishalarni yig'ish imkoniyatiga ega bo'ladi.",
+        "ru": "ℹ️ Они смогут доставлять заказы и собирать бутылки в рамках вашей сессии.",
+    },
+    "staff.bottles.confirm_invite": {
+        "en": "✅ Confirm Invite",
+        "uz": "✅ Taklif qilishni tasdiqlash",
+        "ru": "✅ Подтвердить приглашение",
+    },
+    "staff.bottles.codriver_invited": {
+        "en": "✅ <b>{name}</b> has been added to your session as a co-driver.",
+        "uz": "✅ <b>{name}</b> sessiyangizga hamkor sifatida qo'shildi.",
+        "ru": "✅ <b>{name}</b> добавлен в вашу сессию как напарник.",
+    },
+    "staff.bottles.no_open_session_to_invite": {
+        "en": "❌ You must have an open session to invite a co-driver.",
+        "uz": "❌ Hamkorni taklif qilish uchun ochiq sessiyangiz bo'lishi kerak.",
+        "ru": "❌ Для приглашения напарника необходимо иметь открытую сессию.",
+    },
 }
 
 

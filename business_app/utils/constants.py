@@ -31,6 +31,7 @@ from shared.enums import (  # noqa: F401
     BottleFineStatus,
     DriverBottleSessionStatus,
     DriverBottleTransferStatus,
+    DriverSessionMembershipStatus,
 )
 
 

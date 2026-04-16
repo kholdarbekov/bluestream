@@ -67,6 +67,7 @@ from staff_bot.handlers.delivery.bottle_collection import (
     BOTTLE_TRANSFER_DRIVER_SELECT, BOTTLE_TRANSFER_QTY_INPUT,
     BOTTLE_TRANSFER_CONFIRM_QTY_INPUT,
 )
+from staff_bot.handlers.delivery.bottle_session import BottleSessionMembershipHandler
 from staff_bot.handlers.operator.create_user import CreateUserHandler
 from staff_bot.handlers.operator.create_user import ENTER_PHONE, ENTER_FIRST_NAME, ENTER_LAST_NAME
 from staff_bot.handlers.operator.create_user import SELECT_LANGUAGE as CREATE_USER_LANG
@@ -298,6 +299,7 @@ class StaffBot:
         status_update_handler = StatusUpdateHandler()
         cash_collection_handler = CashCollectionHandler()
         bottle_collection_handler = BottleCollectionHandler()
+        bottle_session_membership_handler = BottleSessionMembershipHandler()
         history_handler = HistoryHandler()
         location_handler = LocationHandler()
         tryout_handler = TryoutHandler()
@@ -671,6 +673,7 @@ class StaffBot:
             entry_points=[
                 CallbackQueryHandler(bottle_collection_handler.start_log_loaded, pattern="^staff_bottle_log_loaded$"),
                 CallbackQueryHandler(bottle_collection_handler.start_log_loaded, pattern="^staff_bottle_session_load$"),
+                CallbackQueryHandler(bottle_collection_handler.start_log_loaded, pattern="^bottles_start_session$"),
             ],
             states={
                 BOTTLES_LOADED_INPUT: [
@@ -766,6 +769,32 @@ class StaffBot:
             allow_reentry=True,
         )
         self.application.add_handler(bottle_transfer_confirm_conv)
+
+        # Co-driver session join/leave handlers
+        self.application.add_handler(
+            CallbackQueryHandler(bottle_session_membership_handler.show_joinable_sessions, pattern="^bottles_join_session$")
+        )
+        self.application.add_handler(
+            CallbackQueryHandler(bottle_session_membership_handler.confirm_join_session, pattern=r"^bottles_join_confirm_\d+$")
+        )
+        self.application.add_handler(
+            CallbackQueryHandler(bottle_session_membership_handler.execute_join_session, pattern=r"^bottles_join_execute_\d+$")
+        )
+        self.application.add_handler(
+            CallbackQueryHandler(bottle_session_membership_handler.leave_session, pattern="^bottles_leave_session$")
+        )
+        self.application.add_handler(
+            CallbackQueryHandler(bottle_session_membership_handler.show_membership_status, pattern="^bottles_membership_status$")
+        )
+        self.application.add_handler(
+            CallbackQueryHandler(bottle_session_membership_handler.show_invitable_drivers, pattern="^bottles_invite_driver$")
+        )
+        self.application.add_handler(
+            CallbackQueryHandler(bottle_session_membership_handler.confirm_invite_driver, pattern=r"^bottles_invite_confirm_\d+$")
+        )
+        self.application.add_handler(
+            CallbackQueryHandler(bottle_session_membership_handler.execute_invite_driver, pattern=r"^bottles_invite_execute_\d+$")
+        )
 
         # Keep main-menu back handler after conversations so their fallbacks can run.
         self.application.add_handler(

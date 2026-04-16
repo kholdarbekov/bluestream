@@ -13,10 +13,10 @@ from business_app.models.bottle import (
     BottleBalance,
     BottleFine,
     BottleLedger,
-    DriverBottleLoad,
     DriverBottleSession,
     DriverBottleSessionOrder,
     DriverBottleTransfer,
+    DriverSessionMembership,
 )
 from business_app.models.order import Order, OrderItem
 from business_app.models.product import Product
@@ -26,6 +26,7 @@ from business_app.utils.constants import (
     BottleLedgerEventType,
     DriverBottleSessionStatus,
     DriverBottleTransferStatus,
+    DriverSessionMembershipStatus,
 )
 from business_app.utils.exceptions import ConflictError, NotFoundError, ValidationError
 
@@ -229,7 +230,7 @@ class BottleTrackingService:
         qty = self._as_decimal(quantity)
         if qty <= 0:
             raise ValidationError("Collection quantity must be positive")
-        return self._create_ledger_entry(
+        entry = self._create_ledger_entry(
             user_id=user_id,
             address_id=address_id,
             event_type=BottleLedgerEventType.STANDALONE_COLLECTION,
@@ -238,6 +239,12 @@ class BottleTrackingService:
             notes=notes,
             metadata={"source": "standalone_collection"},
         )
+        # Tally against the driver's open session so session inventory stays accurate
+        self.update_session_delivery_tally(
+            actor_user_id,
+            bottles_collected=int(qty),
+        )
+        return entry
 
     def admin_adjust_balance(
         self,
@@ -713,102 +720,6 @@ class BottleTrackingService:
         }
 
     # ------------------------------------------------------------------
-    # Driver bottle accountability
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def get_or_create_driver_load(
-        driver_user_id: int, load_date: date = None
-    ) -> DriverBottleLoad:
-        """Get or create a driver bottle load record for the given date."""
-        load_date = load_date or date.today()
-        load = DriverBottleLoad.query.filter_by(
-            driver_user_id=driver_user_id, load_date=load_date
-        ).first()
-        if not load:
-            load = DriverBottleLoad(
-                driver_user_id=driver_user_id,
-                load_date=load_date,
-            )
-            db.session.add(load)
-            db.session.flush()
-        return load
-
-    def record_driver_bottles_loaded(
-        self, driver_user_id: int, bottles_loaded: int, load_date: date = None
-    ) -> DriverBottleLoad:
-        """Driver logs bottles loaded from warehouse."""
-        load = self.get_or_create_driver_load(driver_user_id, load_date)
-        load.bottles_loaded = bottles_loaded
-        load.compute_discrepancy()
-        db.session.flush()
-        return load
-
-    def record_driver_bottles_returned_to_warehouse(
-        self, driver_user_id: int, bottles_returned: int, load_date: date = None
-    ) -> DriverBottleLoad:
-        """Driver logs bottles returned to warehouse at end of day."""
-        load = self.get_or_create_driver_load(driver_user_id, load_date)
-        load.bottles_returned_to_warehouse = bottles_returned
-        load.compute_discrepancy()
-        db.session.flush()
-        return load
-
-    def update_driver_delivery_counts(
-        self, driver_user_id: int, bottles_delivered: int, bottles_collected: int
-    ) -> DriverBottleLoad:
-        """Update the auto-calculated delivery/collection counts for today."""
-        load = self.get_or_create_driver_load(driver_user_id)
-        load.bottles_delivered = (load.bottles_delivered or 0) + bottles_delivered
-        load.bottles_collected = (load.bottles_collected or 0) + bottles_collected
-        load.compute_discrepancy()
-        db.session.flush()
-        return load
-
-    @staticmethod
-    def get_driver_accountability(
-        driver_user_id: int, target_date: date = None
-    ) -> Optional[Dict]:
-        """Get driver's bottle accountability for a specific date."""
-        target_date = target_date or date.today()
-        load = DriverBottleLoad.query.filter_by(
-            driver_user_id=driver_user_id, load_date=target_date
-        ).first()
-        return load.to_dict() if load else None
-
-    @staticmethod
-    def get_all_driver_accountability(
-        page: int = 1,
-        per_page: int = 20,
-        driver_user_id: int = None,
-        start_date: date = None,
-        end_date: date = None,
-        only_discrepancies: bool = False,
-    ) -> Dict:
-        """Get paginated driver accountability records (legacy DriverBottleLoad)."""
-        query = DriverBottleLoad.query.options(
-            joinedload(DriverBottleLoad.driver),
-        )
-        if driver_user_id:
-            query = query.filter(DriverBottleLoad.driver_user_id == driver_user_id)
-        if start_date:
-            query = query.filter(DriverBottleLoad.load_date >= start_date)
-        if end_date:
-            query = query.filter(DriverBottleLoad.load_date <= end_date)
-        if only_discrepancies:
-            query = query.filter(DriverBottleLoad.discrepancy != 0)
-
-        query = query.order_by(DriverBottleLoad.load_date.desc())
-        total = query.count()
-        items = query.offset((page - 1) * per_page).limit(per_page).all()
-        return {
-            "items": items,
-            "total": total,
-            "page": page,
-            "per_page": per_page,
-            "pages": (total + per_page - 1) // per_page if per_page else 0,
-        }
-
     # ------------------------------------------------------------------
     # Driver bottle sessions
     # ------------------------------------------------------------------
@@ -877,6 +788,9 @@ class BottleTrackingService:
         session.compute_discrepancy()
         if notes:
             session.notes = (session.notes or "") + f"\n{notes}" if session.notes else notes
+        revoked = self.revoke_all_memberships(session.id)
+        if revoked:
+            logger.info("[BOTTLE] close_bottle_session revoked %s co-driver membership(s) for session=%s", revoked, session.id)
         db.session.flush()
         return session
 
@@ -910,6 +824,9 @@ class BottleTrackingService:
         session.closed_at = self._utc_now()
         session.closed_by_user_id = actor_user_id
         session.compute_discrepancy()
+        revoked = self.revoke_all_memberships(session.id)
+        if revoked:
+            logger.info("[BOTTLE] admin_force_close_session revoked %s co-driver membership(s) for session=%s", revoked, session.id)
         db.session.flush()
         return session
 
@@ -937,12 +854,161 @@ class BottleTrackingService:
         return session
 
     # ------------------------------------------------------------------
+    # Co-driver session membership
+    # ------------------------------------------------------------------
+
+    def get_effective_session(self, driver_user_id: int) -> Optional[DriverBottleSession]:
+        """Return the session this driver should operate under.
+
+        Priority:
+          1. Driver's own OPEN session (if they have one).
+          2. The OPEN session they have joined as a co-driver member.
+          3. None — driver has no access to any session.
+        """
+        own = self.get_open_session(driver_user_id)
+        if own:
+            return own
+        membership = self.get_active_membership(driver_user_id)
+        if membership:
+            session = DriverBottleSession.query.get(membership.session_id)
+            if session and session.status == DriverBottleSessionStatus.OPEN:
+                return session
+        return None
+
+    def get_active_membership(self, driver_user_id: int) -> Optional[DriverSessionMembership]:
+        """Return the driver's current active co-driver membership, if any."""
+        return DriverSessionMembership.query.filter_by(
+            member_driver_id=driver_user_id,
+            status=DriverSessionMembershipStatus.ACTIVE,
+        ).first()
+
+    def get_joinable_sessions(self, excluding_driver_id: int) -> List[DriverBottleSession]:
+        """Return all OPEN sessions not owned by this driver, available to join."""
+        return (
+            DriverBottleSession.query
+            .filter(
+                DriverBottleSession.status == DriverBottleSessionStatus.OPEN,
+                DriverBottleSession.driver_user_id != excluding_driver_id,
+            )
+            .order_by(DriverBottleSession.started_at.desc())
+            .all()
+        )
+
+    def join_session(
+        self,
+        member_driver_id: int,
+        session_id: int,
+        *,
+        notes: str = None,
+    ) -> DriverSessionMembership:
+        """Allow a driver to join another driver's open session as a co-driver.
+
+        Raises:
+          - ConflictError if the driver already has their own OPEN session.
+          - ConflictError if the driver is already an active member of another session.
+          - NotFoundError if the target session is not found.
+          - ValidationError if the target session is not OPEN.
+          - ValidationError if driver tries to join their own session.
+        """
+        session = DriverBottleSession.query.get(session_id)
+        if not session:
+            raise NotFoundError(
+                "Bottle session not found",
+                error_code="BOTTLE_SESSION_NOT_FOUND",
+            )
+        if session.driver_user_id == member_driver_id:
+            raise ValidationError(
+                "Cannot join your own session",
+                error_code="BOTTLE_SESSION_JOIN_OWN",
+            )
+        if session.status != DriverBottleSessionStatus.OPEN:
+            raise ValidationError(
+                "Can only join an OPEN session",
+                error_code="BOTTLE_SESSION_NOT_OPEN",
+            )
+
+        own_session = self.get_open_session(member_driver_id)
+        if own_session:
+            raise ConflictError(
+                "Close your own open session before joining another driver's session",
+                error_code="BOTTLE_SESSION_ALREADY_OPEN",
+            )
+
+        existing_membership = self.get_active_membership(member_driver_id)
+        if existing_membership:
+            raise ConflictError(
+                f"Already an active co-driver member of session {existing_membership.session_id}. "
+                "Leave that session before joining another.",
+                error_code="BOTTLE_SESSION_MEMBERSHIP_ALREADY_ACTIVE",
+            )
+
+        membership = DriverSessionMembership(
+            session_id=session_id,
+            session_owner_id=session.driver_user_id,
+            member_driver_id=member_driver_id,
+            status=DriverSessionMembershipStatus.ACTIVE,
+            notes=notes,
+        )
+        db.session.add(membership)
+        db.session.flush()
+        logger.info(
+            "[BOTTLE] join_session member=%s joined session=%s (owner=%s)",
+            member_driver_id, session_id, session.driver_user_id,
+        )
+        return membership
+
+    def leave_session(self, member_driver_id: int) -> DriverSessionMembership:
+        """Voluntarily leave the current co-driver session membership.
+
+        Raises NotFoundError if the driver has no active membership.
+        """
+        membership = self.get_active_membership(member_driver_id)
+        if not membership:
+            raise NotFoundError(
+                "No active co-driver session membership found",
+                error_code="BOTTLE_SESSION_MEMBERSHIP_NOT_FOUND",
+            )
+        membership.status = DriverSessionMembershipStatus.LEFT
+        membership.left_at = self._utc_now()
+        db.session.flush()
+        logger.info(
+            "[BOTTLE] leave_session member=%s left session=%s",
+            member_driver_id, membership.session_id,
+        )
+        return membership
+
+    def revoke_all_memberships(self, session_id: int) -> int:
+        """Revoke all active memberships for a session (called on close/force-close).
+
+        Returns the count of memberships revoked.
+        """
+        now = self._utc_now()
+        memberships = DriverSessionMembership.query.filter_by(
+            session_id=session_id,
+            status=DriverSessionMembershipStatus.ACTIVE,
+        ).all()
+        for m in memberships:
+            m.status = DriverSessionMembershipStatus.REVOKED
+            m.left_at = now
+        return len(memberships)
+
+    # ------------------------------------------------------------------
     # Order binding & capacity enforcement
     # ------------------------------------------------------------------
 
-    def bind_order_to_session(self, session_id: int, order_id: int) -> DriverBottleSessionOrder:
-        """Attach an order to a session. Idempotent — safe to call multiple times."""
-        logger.info(f"[BOTTLE] bind_order_to_session session={session_id} order={order_id}")
+    def bind_order_to_session(
+        self,
+        session_id: int,
+        order_id: int,
+        *,
+        accepted_by_driver_id: int = None,
+    ) -> DriverBottleSessionOrder:
+        """Attach an order to a session. Idempotent — safe to call multiple times.
+
+        accepted_by_driver_id: the driver who actually accepted the order.
+        May differ from the session owner when a co-driver (member) accepts.
+        """
+        logger.info(f"[BOTTLE] bind_order_to_session session={session_id} order={order_id} accepted_by={accepted_by_driver_id}")
         existing = DriverBottleSessionOrder.query.filter_by(order_id=order_id).first()
         if existing:
             if existing.session_id != session_id:
@@ -955,7 +1021,11 @@ class BottleTrackingService:
             logger.info(f"[BOTTLE] bind_order_to_session order={order_id} already bound to session={session_id} (idempotent)")
             return existing  # already bound to this session
 
-        binding = DriverBottleSessionOrder(session_id=session_id, order_id=order_id)
+        binding = DriverBottleSessionOrder(
+            session_id=session_id,
+            order_id=order_id,
+            accepted_by_driver_id=accepted_by_driver_id,
+        )
         db.session.add(binding)
         db.session.flush()
         logger.info(f"[BOTTLE] bind_order_to_session OK binding_id={binding.id}")
@@ -983,15 +1053,17 @@ class BottleTrackingService:
     ) -> Optional[DriverBottleSession]:
         """Increment session delivery/collection counters after each ledger write.
 
-        No-op if the driver has no open session (backward-compatible).
+        Uses the driver's *effective* session — their own OPEN session if they
+        have one, otherwise the session they have joined as a co-driver member.
+        No-op if the driver has no effective session (backward-compatible).
         """
         logger.info(
             "[BOTTLE] update_session_delivery_tally driver=%s delivered=%s collected=%s",
             driver_user_id, bottles_delivered, bottles_collected,
         )
-        session = self.get_open_session(driver_user_id)
+        session = self.get_effective_session(driver_user_id)
         if not session:
-            logger.info("[BOTTLE] update_session_delivery_tally driver=%s no open session, skipping", driver_user_id)
+            logger.info("[BOTTLE] update_session_delivery_tally driver=%s no effective session, skipping", driver_user_id)
             return None
         prev_delivered = session.bottles_delivered or 0
         prev_collected = session.bottles_collected_from_customers or 0
@@ -1155,7 +1227,7 @@ class BottleTrackingService:
 
     @staticmethod
     def get_session_detail(session_id: int) -> Optional[DriverBottleSession]:
-        """Fetch a session with orders and transfers pre-loaded."""
+        """Fetch a session with orders, transfers, and memberships pre-loaded."""
         return (
             DriverBottleSession.query
             .options(
@@ -1167,10 +1239,14 @@ class BottleTrackingService:
                     .joinedload(DriverBottleSessionOrder.order)
                     .joinedload(Order.order_items)
                     .joinedload(OrderItem.product),
+                joinedload(DriverBottleSession.session_orders)
+                    .joinedload(DriverBottleSessionOrder.accepted_by_driver),
                 joinedload(DriverBottleSession.transfers_out)
                     .joinedload(DriverBottleTransfer.receiver_driver),
                 joinedload(DriverBottleSession.transfers_in)
                     .joinedload(DriverBottleTransfer.sender_driver),
+                joinedload(DriverBottleSession.memberships)
+                    .joinedload(DriverSessionMembership.member_driver),
             )
             .get(session_id)
         )

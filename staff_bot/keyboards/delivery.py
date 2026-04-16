@@ -16,7 +16,7 @@ class DeliveryKeyboards:
         """View/Accept buttons for an order in the pool"""
         return InlineKeyboardMarkup([[
             InlineKeyboardButton(
-                f"👁️ {i18n.get('staff.delivery.view_details', language)}",
+                f"👀 {i18n.get('staff.delivery.view_details', language)}",
                 callback_data=f"staff_view_order_{delivery_id}"
             ),
             InlineKeyboardButton(

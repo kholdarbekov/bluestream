@@ -123,7 +123,7 @@ class TryoutKeyboards:
 
         buttons.append([
             InlineKeyboardButton(
-                f"👁️ {i18n.get('staff.tryout.view_tryout', language)}",
+                f"👀 {i18n.get('staff.tryout.view_tryout', language)}",
                 callback_data=f"staff_tryout_view_{task.get('tryout_id')}"
             )
         ])

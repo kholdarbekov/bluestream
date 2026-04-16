@@ -232,3 +232,17 @@ class DriverBottleTransferStatus(Enum):
     CONFIRMED = 'confirmed'  # Receiver accepted the declared quantity
     DISPUTED  = 'disputed'   # Receiver claims a different quantity
     RESOLVED  = 'resolved'   # Admin arbitrated the dispute
+
+
+class DriverSessionMembershipStatus(Enum):
+    """Lifecycle state for a driver joining another driver's open bottle session.
+
+    A driver who does not have their own OPEN session may join a colleague's
+    session (e.g. two drivers sharing the same truck).  While ACTIVE the
+    member driver's order acceptances are validated against and tallied to the
+    owner's session.  At most ONE active membership is allowed per driver at
+    any time (enforced via a partial unique index).
+    """
+    ACTIVE  = 'active'   # Member is currently using the owner's session
+    LEFT    = 'left'     # Member voluntarily left the session
+    REVOKED = 'revoked'  # Session was closed/force-closed; membership auto-terminated

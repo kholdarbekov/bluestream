@@ -1317,16 +1317,30 @@ class OrderService:
                         )
                         logger.info(f"[BOTTLE] order={order.id} record_bottles_returned OK", order.id)
 
-                    if updated_by:
-                        open_session = bottle_service.get_open_session(updated_by)
+                    # Use the assigned delivery driver to look up the effective session.
+                    # `updated_by` may be an admin user (e.g. admin panel force-completes a
+                    # delivery), in which case get_effective_session(updated_by) returns None
+                    # and the tally would be silently skipped.  The delivery_person_id always
+                    # points to the actual driver whose session should be credited.
+                    tally_driver_id = (
+                        order.delivery.delivery_person_id
+                        if order.delivery and order.delivery.delivery_person_id
+                        else updated_by
+                    )
+                    if tally_driver_id:
+                        effective_session = bottle_service.get_effective_session(tally_driver_id)
                         logger.info(
-                            f"[BOTTLE] order={order.id} get_open_session(driver={updated_by}) → {f'session_id={open_session.id} status={open_session.status}' if open_session else 'None'}",
+                            f"[BOTTLE] order={order.id} get_effective_session(driver={tally_driver_id}) → {f'session_id={effective_session.id} status={effective_session.status}' if effective_session else 'None'}",
                         )
-                        if open_session:
-                            bottle_service.bind_order_to_session(open_session.id, order.id)
-                            logger.info(f"[BOTTLE] order={order.id} bound to session={open_session.id}")
+                        if effective_session:
+                            bottle_service.bind_order_to_session(
+                                effective_session.id,
+                                order.id,
+                                accepted_by_driver_id=tally_driver_id,
+                            )
+                            logger.info(f"[BOTTLE] order={order.id} bound to session={effective_session.id} by driver={tally_driver_id}")
                             bottle_service.update_session_delivery_tally(
-                                updated_by,
+                                tally_driver_id,
                                 bottles_delivered=int(bottles_in_order),
                                 bottles_collected=int(bottles_returned_qty),
                             )
@@ -1335,11 +1349,10 @@ class OrderService:
                             )
                         else:
                             logger.info(
-                                f"[BOTTLE] order={order.id} no open session for driver={updated_by} — skipping tally",
-                                order.id, updated_by,
+                                f"[BOTTLE] order={order.id} no effective session for driver={tally_driver_id} — skipping tally",
                             )
                     else:
-                        logger.info(f"[BOTTLE] order={order.id} updated_by is None — skipping session tally")
+                        logger.info(f"[BOTTLE] order={order.id} no driver id available — skipping session tally")
 
             except Exception as bottle_exc:
                 logger.error(

@@ -990,6 +990,173 @@ def list_my_bottle_sessions():
     })
 
 
+# --- Co-driver session membership endpoints ---
+
+@staff_bp.route('/bottles/sessions/joinable', methods=['GET'])
+@handle_api_exception
+@jwt_required()
+@require_staff_roles('delivery_driver')
+def list_joinable_bottle_sessions():
+    """Return all open bottle sessions the calling driver can join as a co-driver."""
+    from business_app.serializers.bottle_serializers import serialize_joinable_session
+    from business_app.services.bottle_tracking_service import BottleTrackingService
+
+    current_user_id = get_jwt_identity()
+    service = BottleTrackingService()
+    sessions = service.get_joinable_sessions(excluding_driver_id=current_user_id)
+    return success_response([serialize_joinable_session(s) for s in sessions])
+
+
+@staff_bp.route('/bottles/session/join', methods=['POST'])
+@handle_api_exception
+@jwt_required()
+@require_staff_roles('delivery_driver')
+def join_bottle_session():
+    """Driver joins another driver's open session as a co-driver."""
+    from business_app import db
+    from business_app.serializers.bottle_serializers import (
+        JoinSessionRequest,
+        serialize_session_membership,
+    )
+    from business_app.services.bottle_tracking_service import BottleTrackingService
+    from pydantic import ValidationError as PydanticValidationError
+    from business_app.utils.api_responses import validation_error_response
+
+    current_user_id = get_jwt_identity()
+    data = request.get_json() or {}
+
+    try:
+        payload = JoinSessionRequest(**data)
+    except PydanticValidationError as exc:
+        return validation_error_response(exc.errors())
+
+    service = BottleTrackingService()
+    membership = service.join_session(current_user_id, payload.session_id)
+    db.session.commit()
+    return success_response(serialize_session_membership(membership), status_code=201)
+
+
+@staff_bp.route('/bottles/session/leave', methods=['POST'])
+@handle_api_exception
+@jwt_required()
+@require_staff_roles('delivery_driver')
+def leave_bottle_session():
+    """Driver leaves their current co-driver session membership."""
+    from business_app import db
+    from business_app.serializers.bottle_serializers import serialize_session_membership
+    from business_app.services.bottle_tracking_service import BottleTrackingService
+
+    current_user_id = get_jwt_identity()
+    service = BottleTrackingService()
+    membership = service.leave_session(current_user_id)
+    db.session.commit()
+    return success_response(serialize_session_membership(membership))
+
+
+@staff_bp.route('/bottles/session/membership', methods=['GET'])
+@handle_api_exception
+@jwt_required()
+@require_staff_roles('delivery_driver')
+def get_current_session_membership():
+    """Return current co-driver membership info, or 404 if not a member of any session."""
+    from business_app.serializers.bottle_serializers import serialize_membership_session_info
+    from business_app.services.bottle_tracking_service import BottleTrackingService
+    from business_app.utils.exceptions import NotFoundError
+
+    current_user_id = get_jwt_identity()
+    service = BottleTrackingService()
+    membership = service.get_active_membership(current_user_id)
+    if not membership:
+        raise NotFoundError(
+            "No active co-driver session membership",
+            error_code="BOTTLE_SESSION_MEMBERSHIP_NOT_FOUND",
+        )
+    session = service.get_open_session(membership.session_owner_id)
+    if not session:
+        raise NotFoundError(
+            "The session you joined is no longer open",
+            error_code="BOTTLE_SESSION_NOT_OPEN",
+        )
+    return success_response(serialize_membership_session_info(membership, session))
+
+
+@staff_bp.route('/bottles/session/invite', methods=['POST'])
+@handle_api_exception
+@jwt_required()
+@require_staff_roles('delivery_driver')
+def invite_driver_to_session():
+    """Session owner invites another driver to join their open session.
+
+    The owner must have an open session. The invited driver must not already
+    have their own open session or an active membership in another session.
+    """
+    from business_app import db
+    from business_app.serializers.bottle_serializers import serialize_session_membership
+    from business_app.services.bottle_tracking_service import BottleTrackingService
+    from business_app.utils.exceptions import ValidationError, ConflictError
+
+    current_user_id = get_jwt_identity()
+    data = request.get_json() or {}
+    member_driver_id = data.get('member_driver_id')
+    if not member_driver_id:
+        raise ValidationError('member_driver_id is required', error_code='INVITE_MEMBER_REQUIRED')
+
+    service = BottleTrackingService()
+    owner_session = service.get_open_session(current_user_id)
+    if not owner_session:
+        raise ConflictError(
+            'You must have an open bottle session to invite co-drivers',
+            error_code='BOTTLE_SESSION_NOT_FOUND',
+        )
+    # Reuse join_session from the member's perspective but initiated by owner
+    membership = service.join_session(int(member_driver_id), owner_session.id)
+    db.session.commit()
+    return success_response(serialize_session_membership(membership), status_code=201)
+
+
+@staff_bp.route('/bottles/sessions/available-drivers', methods=['GET'])
+@handle_api_exception
+@jwt_required()
+@require_staff_roles('delivery_driver')
+def list_drivers_available_to_invite():
+    """Return delivery drivers who can be invited to the caller's session.
+
+    A driver is eligible if they have no own open session and no active membership.
+    """
+    from business_app.models.user import User
+    from business_app.services.bottle_tracking_service import BottleTrackingService
+    from business_app.utils.exceptions import ConflictError
+
+    current_user_id = get_jwt_identity()
+    service = BottleTrackingService()
+    owner_session = service.get_open_session(current_user_id)
+    if not owner_session:
+        raise ConflictError(
+            'You must have an open bottle session to invite co-drivers',
+            error_code='BOTTLE_SESSION_NOT_FOUND',
+        )
+
+    # All delivery drivers except self
+    drivers = User.query.filter(
+        User.role == 'delivery_driver',
+        User.id != current_user_id,
+        User.is_active == True,
+    ).all()
+
+    result = []
+    for d in drivers:
+        if service.get_open_session(d.id):
+            continue  # has own session
+        if service.get_active_membership(d.id):
+            continue  # already in another session
+        result.append({
+            'user_id': d.id,
+            'name': f"{d.first_name or ''} {d.last_name or ''}".strip(),
+            'phone': d.phone,
+        })
+    return success_response(result)
+
+
 # --- Transfer endpoints ---
 
 @staff_bp.route('/bottles/transfers/pending', methods=['GET'])

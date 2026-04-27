@@ -19,8 +19,7 @@ from business_app.models.bottle import (
     DriverSessionMembership,
 )
 from business_app.models.order import Order, OrderItem
-from business_app.models.product import Product
-from business_app.models.user import User, UserAddress
+from business_app.models.user import User
 from business_app.utils.constants import (
     BottleFineStatus,
     BottleLedgerEventType,
@@ -29,6 +28,7 @@ from business_app.utils.constants import (
     DriverSessionMembershipStatus,
 )
 from business_app.utils.exceptions import ConflictError, NotFoundError, ValidationError
+from business_app.utils.transactions import transactional
 
 logger = logging.getLogger(__name__)
 
@@ -55,9 +55,7 @@ class BottleTrackingService:
     @staticmethod
     def get_or_create_balance(user_id: int, address_id: int) -> BottleBalance:
         """Get existing balance or create a new zero-balance record."""
-        balance = BottleBalance.query.filter_by(
-            user_id=user_id, address_id=address_id
-        ).first()
+        balance = BottleBalance.query.filter_by(user_id=user_id, address_id=address_id).first()
         if not balance:
             balance = BottleBalance(
                 user_id=user_id,
@@ -108,9 +106,7 @@ class BottleTrackingService:
         """Create a ledger entry and update the materialized balance."""
         # Check idempotency
         if idempotency_key:
-            existing = BottleLedger.query.filter_by(
-                idempotency_key=idempotency_key
-            ).first()
+            existing = BottleLedger.query.filter_by(idempotency_key=idempotency_key).first()
             if existing:
                 logger.info("Duplicate ledger entry skipped: %s", idempotency_key)
                 return existing
@@ -126,8 +122,11 @@ class BottleTrackingService:
         )
 
         balance_record = self._update_balance(
-            user_id, address_id, quantity,
-            is_delivery=is_delivery, is_return=is_return,
+            user_id,
+            address_id,
+            quantity,
+            is_delivery=is_delivery,
+            is_return=is_return,
         )
 
         entry = BottleLedger(
@@ -163,7 +162,11 @@ class BottleTrackingService:
         """Record bottles delivered to customer via an order (+quantity)."""
         logger.info(
             "[BOTTLE] record_bottles_delivered order=%s user=%s address=%s qty=%s actor=%s",
-            order_id, user_id, address_id, quantity, actor_user_id,
+            order_id,
+            user_id,
+            address_id,
+            quantity,
+            actor_user_id,
         )
         entry = self._create_ledger_entry(
             user_id=user_id,
@@ -177,7 +180,9 @@ class BottleTrackingService:
         )
         logger.info(
             "[BOTTLE] record_bottles_delivered OK order=%s ledger_id=%s balance_after=%s",
-            order_id, entry.id, entry.balance_after,
+            order_id,
+            entry.id,
+            entry.balance_after,
         )
         return entry
 
@@ -195,7 +200,12 @@ class BottleTrackingService:
         """Record bottles returned by customer during a delivery (-quantity)."""
         logger.info(
             "[BOTTLE] record_bottles_returned order=%s delivery=%s user=%s address=%s qty=%s actor=%s",
-            order_id, delivery_id, user_id, address_id, quantity, actor_user_id,
+            order_id,
+            delivery_id,
+            user_id,
+            address_id,
+            quantity,
+            actor_user_id,
         )
         qty = self._as_decimal(quantity)
         if qty <= 0:
@@ -214,10 +224,13 @@ class BottleTrackingService:
         )
         logger.info(
             "[BOTTLE] record_bottles_returned OK order=%s ledger_id=%s balance_after=%s",
-            order_id, entry.id, entry.balance_after,
+            order_id,
+            entry.id,
+            entry.balance_after,
         )
         return entry
 
+    @transactional
     def record_standalone_collection(
         self,
         user_id: int,
@@ -246,6 +259,7 @@ class BottleTrackingService:
         )
         return entry
 
+    @transactional
     def admin_adjust_balance(
         self,
         user_id: int,
@@ -267,6 +281,7 @@ class BottleTrackingService:
             metadata={"source": "admin_adjustment"},
         )
 
+    @transactional
     def set_initial_balance(
         self,
         user_id: int,
@@ -299,7 +314,8 @@ class BottleTrackingService:
         items = order.order_items if hasattr(order, "order_items") else []
         logger.debug(
             "[BOTTLE] calculate_bottles_for_order order=%s item_count=%s",
-            order.id, len(items),
+            order.id,
+            len(items),
         )
         for item in items:
             product = item.product
@@ -310,13 +326,18 @@ class BottleTrackingService:
                 logger.debug(
                     "[BOTTLE] order=%s item=%s product=%s tracks_bottles=True "
                     "bottles_per_unit=%s item_qty=%s line_bottles=%s",
-                    order.id, item.id, product.id,
-                    bottles_per_unit, item.quantity, line_qty,
+                    order.id,
+                    item.id,
+                    product.id,
+                    bottles_per_unit,
+                    item.quantity,
+                    line_qty,
                 )
             else:
                 logger.debug(
                     "[BOTTLE] order=%s item=%s product=%s tracks_bottles=%s — skipped",
-                    order.id, item.id,
+                    order.id,
+                    item.id,
                     product.id if product else None,
                     product.tracks_returnable_bottles if product else "no product",
                 )
@@ -327,6 +348,7 @@ class BottleTrackingService:
     # Fine management (always manual)
     # ------------------------------------------------------------------
 
+    @transactional
     def issue_fine(
         self,
         user_id: int,
@@ -380,9 +402,8 @@ class BottleTrackingService:
         db.session.flush()
         return fine
 
-    def waive_fine(
-        self, fine_id: int, actor_user_id: int, notes: str = None
-    ) -> BottleFine:
+    @transactional
+    def waive_fine(self, fine_id: int, actor_user_id: int, notes: str = None) -> BottleFine:
         """Waive an existing fine."""
         fine = BottleFine.query.get(fine_id)
         if not fine:
@@ -412,9 +433,8 @@ class BottleTrackingService:
         db.session.flush()
         return fine
 
-    def mark_fine_paid(
-        self, fine_id: int, actor_user_id: int, notes: str = None
-    ) -> BottleFine:
+    @transactional
+    def mark_fine_paid(self, fine_id: int, actor_user_id: int, notes: str = None) -> BottleFine:
         """Mark a fine as paid and reduce the customer's bottle balance by the fine quantity."""
         fine = BottleFine.query.get(fine_id)
         if not fine:
@@ -453,16 +473,13 @@ class BottleTrackingService:
     @staticmethod
     def get_balance(user_id: int, address_id: int) -> Optional[BottleBalance]:
         """Get balance for a specific user+address pair."""
-        return BottleBalance.query.filter_by(
-            user_id=user_id, address_id=address_id
-        ).first()
+        return BottleBalance.query.filter_by(user_id=user_id, address_id=address_id).first()
 
     @staticmethod
     def get_customer_balances(user_id: int) -> List[BottleBalance]:
         """Get all balances across addresses for a customer."""
         return (
-            BottleBalance.query
-            .filter_by(user_id=user_id)
+            BottleBalance.query.filter_by(user_id=user_id)
             .options(joinedload(BottleBalance.address))
             .order_by(BottleBalance.balance.desc())
             .all()
@@ -476,12 +493,14 @@ class BottleTrackingService:
             BottleFine.user_id == user_id,
             BottleFine.status.in_([BottleFineStatus.PENDING, BottleFineStatus.INVOICED]),
         ).count()
-        total_fine_amount = db.session.query(
-            func.coalesce(func.sum(BottleFine.fine_amount), 0)
-        ).filter(
-            BottleFine.user_id == user_id,
-            BottleFine.status.in_([BottleFineStatus.PENDING, BottleFineStatus.INVOICED]),
-        ).scalar()
+        total_fine_amount = (
+            db.session.query(func.coalesce(func.sum(BottleFine.fine_amount), 0))
+            .filter(
+                BottleFine.user_id == user_id,
+                BottleFine.status.in_([BottleFineStatus.PENDING, BottleFineStatus.INVOICED]),
+            )
+            .scalar()
+        )
 
         return {
             "user_id": user_id,
@@ -503,14 +522,10 @@ class BottleTrackingService:
         }
 
     @staticmethod
-    def get_address_ledger(
-        user_id: int, address_id: int, page: int = 1, per_page: int = 20
-    ) -> Dict:
+    def get_address_ledger(user_id: int, address_id: int, page: int = 1, per_page: int = 20) -> Dict:
         """Get paginated ledger for a specific user+address."""
-        query = (
-            BottleLedger.query
-            .filter_by(user_id=user_id, address_id=address_id)
-            .order_by(BottleLedger.occurred_at.desc())
+        query = BottleLedger.query.filter_by(user_id=user_id, address_id=address_id).order_by(
+            BottleLedger.occurred_at.desc()
         )
         total = query.count()
         entries = query.offset((page - 1) * per_page).limit(per_page).all()
@@ -531,12 +546,9 @@ class BottleTrackingService:
         search: str = None,
     ) -> Dict:
         """Get paginated list of all balances with optional filters."""
-        query = (
-            BottleBalance.query
-            .options(
-                joinedload(BottleBalance.user),
-                joinedload(BottleBalance.address),
-            )
+        query = BottleBalance.query.options(
+            joinedload(BottleBalance.user),
+            joinedload(BottleBalance.address),
         )
         if min_balance is not None:
             query = query.filter(BottleBalance.balance >= Decimal(str(min_balance)))
@@ -633,23 +645,23 @@ class BottleTrackingService:
     @staticmethod
     def get_dashboard_stats() -> Dict:
         """Aggregate stats for the admin bottle tracking dashboard."""
-        total_bottles_out = db.session.query(
-            func.coalesce(func.sum(BottleBalance.balance), 0)
-        ).filter(BottleBalance.balance > 0).scalar()
+        total_bottles_out = (
+            db.session.query(func.coalesce(func.sum(BottleBalance.balance), 0))
+            .filter(BottleBalance.balance > 0)
+            .scalar()
+        )
 
-        customers_with_balance = BottleBalance.query.filter(
-            BottleBalance.balance > 0
-        ).count()
+        customers_with_balance = BottleBalance.query.filter(BottleBalance.balance > 0).count()
 
         active_fines = BottleFine.query.filter(
             BottleFine.status.in_([BottleFineStatus.PENDING, BottleFineStatus.INVOICED])
         ).count()
 
-        total_fine_amount = db.session.query(
-            func.coalesce(func.sum(BottleFine.fine_amount), 0)
-        ).filter(
-            BottleFine.status.in_([BottleFineStatus.PENDING, BottleFineStatus.INVOICED])
-        ).scalar()
+        total_fine_amount = (
+            db.session.query(func.coalesce(func.sum(BottleFine.fine_amount), 0))
+            .filter(BottleFine.status.in_([BottleFineStatus.PENDING, BottleFineStatus.INVOICED]))
+            .scalar()
+        )
 
         # Top debtors
         top_debtors = (
@@ -668,12 +680,14 @@ class BottleTrackingService:
         for user_id, total_bal in top_debtors:
             user = User.query.get(user_id)
             if user:
-                top_debtor_details.append({
-                    "user_id": user_id,
-                    "name": f"{user.first_name or ''} {user.last_name or ''}".strip(),
-                    "phone": user.phone,
-                    "total_balance": float(total_bal or 0),
-                })
+                top_debtor_details.append(
+                    {
+                        "user_id": user_id,
+                        "name": f"{user.first_name or ''} {user.last_name or ''}".strip(),
+                        "phone": user.phone,
+                        "total_balance": float(total_bal or 0),
+                    }
+                )
 
         return {
             "total_bottles_out": float(total_bottles_out or 0),
@@ -687,14 +701,17 @@ class BottleTrackingService:
     # Balance reconciliation
     # ------------------------------------------------------------------
 
+    @transactional
     def reconcile_balance(self, user_id: int, address_id: int) -> Dict:
         """Recalculate balance from ledger entries and report discrepancy."""
-        ledger_sum = db.session.query(
-            func.coalesce(func.sum(BottleLedger.quantity), 0)
-        ).filter(
-            BottleLedger.user_id == user_id,
-            BottleLedger.address_id == address_id,
-        ).scalar()
+        ledger_sum = (
+            db.session.query(func.coalesce(func.sum(BottleLedger.quantity), 0))
+            .filter(
+                BottleLedger.user_id == user_id,
+                BottleLedger.address_id == address_id,
+            )
+            .scalar()
+        )
 
         balance = self.get_or_create_balance(user_id, address_id)
         current = float(balance.balance or 0)
@@ -703,9 +720,12 @@ class BottleTrackingService:
 
         if discrepancy != 0:
             logger.warning(
-                "Bottle balance discrepancy for user=%s address=%s: "
-                "current=%s expected=%s diff=%s",
-                user_id, address_id, current, expected, discrepancy,
+                "Bottle balance discrepancy for user=%s address=%s: " "current=%s expected=%s diff=%s",
+                user_id,
+                address_id,
+                current,
+                expected,
+                discrepancy,
             )
             balance.balance = Decimal(str(expected))
             db.session.flush()
@@ -724,6 +744,7 @@ class BottleTrackingService:
     # Driver bottle sessions
     # ------------------------------------------------------------------
 
+    @transactional
     def open_bottle_session(
         self,
         driver_user_id: int,
@@ -763,6 +784,7 @@ class BottleTrackingService:
         db.session.flush()
         return session
 
+    @transactional
     def close_bottle_session(
         self,
         driver_user_id: int,
@@ -790,10 +812,13 @@ class BottleTrackingService:
             session.notes = (session.notes or "") + f"\n{notes}" if session.notes else notes
         revoked = self.revoke_all_memberships(session.id)
         if revoked:
-            logger.info("[BOTTLE] close_bottle_session revoked %s co-driver membership(s) for session=%s", revoked, session.id)
+            logger.info(
+                "[BOTTLE] close_bottle_session revoked %s co-driver membership(s) for session=%s", revoked, session.id
+            )
         db.session.flush()
         return session
 
+    @transactional
     def admin_force_close_session(
         self,
         session_id: int,
@@ -811,9 +836,7 @@ class BottleTrackingService:
         if not session:
             raise NotFoundError("Bottle session not found")
         if session.status != DriverBottleSessionStatus.OPEN:
-            raise ConflictError(
-                f"Session is already {session.status.value}, cannot force close"
-            )
+            raise ConflictError(f"Session is already {session.status.value}, cannot force close")
         if not reason or not reason.strip():
             raise ValidationError("A reason is required for force-closing a session")
 
@@ -826,7 +849,11 @@ class BottleTrackingService:
         session.compute_discrepancy()
         revoked = self.revoke_all_memberships(session.id)
         if revoked:
-            logger.info("[BOTTLE] admin_force_close_session revoked %s co-driver membership(s) for session=%s", revoked, session.id)
+            logger.info(
+                "[BOTTLE] admin_force_close_session revoked %s co-driver membership(s) for session=%s",
+                revoked,
+                session.id,
+            )
         db.session.flush()
         return session
 
@@ -885,8 +912,7 @@ class BottleTrackingService:
     def get_joinable_sessions(self, excluding_driver_id: int) -> List[DriverBottleSession]:
         """Return all OPEN sessions not owned by this driver, available to join."""
         return (
-            DriverBottleSession.query
-            .filter(
+            DriverBottleSession.query.filter(
                 DriverBottleSession.status == DriverBottleSessionStatus.OPEN,
                 DriverBottleSession.driver_user_id != excluding_driver_id,
             )
@@ -894,6 +920,7 @@ class BottleTrackingService:
             .all()
         )
 
+    @transactional
     def join_session(
         self,
         member_driver_id: int,
@@ -953,10 +980,13 @@ class BottleTrackingService:
         db.session.flush()
         logger.info(
             "[BOTTLE] join_session member=%s joined session=%s (owner=%s)",
-            member_driver_id, session_id, session.driver_user_id,
+            member_driver_id,
+            session_id,
+            session.driver_user_id,
         )
         return membership
 
+    @transactional
     def leave_session(self, member_driver_id: int) -> DriverSessionMembership:
         """Voluntarily leave the current co-driver session membership.
 
@@ -973,7 +1003,8 @@ class BottleTrackingService:
         db.session.flush()
         logger.info(
             "[BOTTLE] leave_session member=%s left session=%s",
-            member_driver_id, membership.session_id,
+            member_driver_id,
+            membership.session_id,
         )
         return membership
 
@@ -992,6 +1023,42 @@ class BottleTrackingService:
             m.left_at = now
         return len(memberships)
 
+    def list_eligible_co_drivers(self, owner_driver_id: int) -> List[Dict[str, Any]]:
+        """Drivers who can be invited to ``owner_driver_id``'s open session.
+
+        Eligibility: active delivery driver, not the owner, no own open session,
+        and not currently a member of any other session. Encapsulated here so
+        the staff API stays free of direct ``User.query`` access (boundary rule
+        enforced by ``test_api_boundary_coupling_scores_do_not_regress``).
+        """
+        owner_session = self.get_open_session(owner_driver_id)
+        if not owner_session:
+            raise ConflictError(
+                "You must have an open bottle session to invite co-drivers",
+                error_code="BOTTLE_SESSION_NOT_FOUND",
+            )
+
+        drivers = User.query.filter(
+            User.role == "delivery_driver",
+            User.id != owner_driver_id,
+            User.is_active.is_(True),
+        ).all()
+
+        eligible: List[Dict[str, Any]] = []
+        for driver in drivers:
+            if self.get_open_session(driver.id):
+                continue
+            if self.get_active_membership(driver.id):
+                continue
+            eligible.append(
+                {
+                    "user_id": driver.id,
+                    "name": f"{driver.first_name or ''} {driver.last_name or ''}".strip(),
+                    "phone": driver.phone,
+                }
+            )
+        return eligible
+
     # ------------------------------------------------------------------
     # Order binding & capacity enforcement
     # ------------------------------------------------------------------
@@ -1008,17 +1075,19 @@ class BottleTrackingService:
         accepted_by_driver_id: the driver who actually accepted the order.
         May differ from the session owner when a co-driver (member) accepts.
         """
-        logger.info(f"[BOTTLE] bind_order_to_session session={session_id} order={order_id} accepted_by={accepted_by_driver_id}")
+        logger.info(
+            f"[BOTTLE] bind_order_to_session session={session_id} order={order_id} accepted_by={accepted_by_driver_id}"
+        )
         existing = DriverBottleSessionOrder.query.filter_by(order_id=order_id).first()
         if existing:
             if existing.session_id != session_id:
                 logger.warning(
-                    f"[BOTTLE] bind_order_to_session CONFLICT order={order_id} already bound to session={existing.session_id}, requested session={session_id}"
+                    f"[BOTTLE] bind_order_to_session CONFLICT order={order_id} already bound to session={existing.session_id}, requested session={session_id}"  # noqa: E501
                 )
-                raise ConflictError(
-                    f"Order {order_id} is already bound to session {existing.session_id}"
-                )
-            logger.info(f"[BOTTLE] bind_order_to_session order={order_id} already bound to session={session_id} (idempotent)")
+                raise ConflictError(f"Order {order_id} is already bound to session {existing.session_id}")
+            logger.info(
+                f"[BOTTLE] bind_order_to_session order={order_id} already bound to session={session_id} (idempotent)"
+            )
             return existing  # already bound to this session
 
         binding = DriverBottleSessionOrder(
@@ -1032,9 +1101,7 @@ class BottleTrackingService:
         return binding
 
     @staticmethod
-    def assert_delivery_within_session_capacity(
-        session: DriverBottleSession, bottles_to_deliver: int
-    ) -> None:
+    def assert_delivery_within_session_capacity(session: DriverBottleSession, bottles_to_deliver: int) -> None:
         """Raise ValidationError if the session cannot cover this delivery."""
         available = session.current_inventory
         if bottles_to_deliver > available:
@@ -1059,11 +1126,15 @@ class BottleTrackingService:
         """
         logger.info(
             "[BOTTLE] update_session_delivery_tally driver=%s delivered=%s collected=%s",
-            driver_user_id, bottles_delivered, bottles_collected,
+            driver_user_id,
+            bottles_delivered,
+            bottles_collected,
         )
         session = self.get_effective_session(driver_user_id)
         if not session:
-            logger.info("[BOTTLE] update_session_delivery_tally driver=%s no effective session, skipping", driver_user_id)
+            logger.info(
+                "[BOTTLE] update_session_delivery_tally driver=%s no effective session, skipping", driver_user_id
+            )
             return None
         prev_delivered = session.bottles_delivered or 0
         prev_collected = session.bottles_collected_from_customers or 0
@@ -1082,6 +1153,7 @@ class BottleTrackingService:
     # Driver-to-driver bottle transfers
     # ------------------------------------------------------------------
 
+    @transactional
     def initiate_bottle_transfer(
         self,
         sender_driver_id: int,
@@ -1110,9 +1182,7 @@ class BottleTrackingService:
             )
 
         # Deduct immediately (pessimistic) to prevent over-delivery
-        sender_session.bottles_transferred_out = (
-            (sender_session.bottles_transferred_out or 0) + declared_quantity
-        )
+        sender_session.bottles_transferred_out = (sender_session.bottles_transferred_out or 0) + declared_quantity
 
         transfer = DriverBottleTransfer(
             sender_session_id=sender_session.id,
@@ -1126,6 +1196,7 @@ class BottleTrackingService:
         db.session.flush()
         return transfer
 
+    @transactional
     def confirm_bottle_transfer(
         self,
         transfer_id: int,
@@ -1153,15 +1224,12 @@ class BottleTrackingService:
         receiver_session = self.get_open_session(receiver_driver_id)
         if not receiver_session:
             raise ConflictError(
-                "Receiver must have an open bottle session to accept a transfer. "
-                "Open a session first.",
+                "Receiver must have an open bottle session to accept a transfer. " "Open a session first.",
                 error_code="BOTTLE_SESSION_NOT_FOUND",
             )
 
         # Credit the receiver's session
-        receiver_session.bottles_transferred_in = (
-            (receiver_session.bottles_transferred_in or 0) + confirmed_quantity
-        )
+        receiver_session.bottles_transferred_in = (receiver_session.bottles_transferred_in or 0) + confirmed_quantity
         transfer.receiver_session_id = receiver_session.id
         transfer.confirmed_quantity = confirmed_quantity
         transfer.confirmed_at = self._utc_now()
@@ -1178,6 +1246,7 @@ class BottleTrackingService:
         db.session.flush()
         return transfer
 
+    @transactional
     def admin_resolve_transfer_dispute(
         self,
         transfer_id: int,
@@ -1203,15 +1272,15 @@ class BottleTrackingService:
         # Adjust sender session: replace declared with resolved
         delta_out = resolved_quantity - transfer.declared_quantity
         transfer.sender_session.bottles_transferred_out = (
-            (transfer.sender_session.bottles_transferred_out or 0) + delta_out
-        )
+            transfer.sender_session.bottles_transferred_out or 0
+        ) + delta_out
 
         # Adjust receiver session: replace confirmed with resolved
         if transfer.receiver_session:
             delta_in = resolved_quantity - (transfer.confirmed_quantity or 0)
             transfer.receiver_session.bottles_transferred_in = (
-                (transfer.receiver_session.bottles_transferred_in or 0) + delta_in
-            )
+                transfer.receiver_session.bottles_transferred_in or 0
+            ) + delta_in
 
         transfer.confirmed_quantity = resolved_quantity
         transfer.status = DriverBottleTransferStatus.RESOLVED
@@ -1228,28 +1297,20 @@ class BottleTrackingService:
     @staticmethod
     def get_session_detail(session_id: int) -> Optional[DriverBottleSession]:
         """Fetch a session with orders, transfers, and memberships pre-loaded."""
-        return (
-            DriverBottleSession.query
-            .options(
-                joinedload(DriverBottleSession.driver),
-                joinedload(DriverBottleSession.session_orders)
-                    .joinedload(DriverBottleSessionOrder.order)
-                    .joinedload(Order.user),
-                joinedload(DriverBottleSession.session_orders)
-                    .joinedload(DriverBottleSessionOrder.order)
-                    .joinedload(Order.order_items)
-                    .joinedload(OrderItem.product),
-                joinedload(DriverBottleSession.session_orders)
-                    .joinedload(DriverBottleSessionOrder.accepted_by_driver),
-                joinedload(DriverBottleSession.transfers_out)
-                    .joinedload(DriverBottleTransfer.receiver_driver),
-                joinedload(DriverBottleSession.transfers_in)
-                    .joinedload(DriverBottleTransfer.sender_driver),
-                joinedload(DriverBottleSession.memberships)
-                    .joinedload(DriverSessionMembership.member_driver),
-            )
-            .get(session_id)
-        )
+        return DriverBottleSession.query.options(
+            joinedload(DriverBottleSession.driver),
+            joinedload(DriverBottleSession.session_orders)
+            .joinedload(DriverBottleSessionOrder.order)
+            .joinedload(Order.user),
+            joinedload(DriverBottleSession.session_orders)
+            .joinedload(DriverBottleSessionOrder.order)
+            .joinedload(Order.order_items)
+            .joinedload(OrderItem.product),
+            joinedload(DriverBottleSession.session_orders).joinedload(DriverBottleSessionOrder.accepted_by_driver),
+            joinedload(DriverBottleSession.transfers_out).joinedload(DriverBottleTransfer.receiver_driver),
+            joinedload(DriverBottleSession.transfers_in).joinedload(DriverBottleTransfer.sender_driver),
+            joinedload(DriverBottleSession.memberships).joinedload(DriverSessionMembership.member_driver),
+        ).get(session_id)
 
     @staticmethod
     def get_driver_sessions(
@@ -1259,14 +1320,12 @@ class BottleTrackingService:
         status: str = None,
     ) -> Dict:
         """Get paginated session history for a specific driver."""
-        query = DriverBottleSession.query.filter_by(
-            driver_user_id=driver_user_id
-        ).options(joinedload(DriverBottleSession.driver))
+        query = DriverBottleSession.query.filter_by(driver_user_id=driver_user_id).options(
+            joinedload(DriverBottleSession.driver)
+        )
 
         if status:
-            query = query.filter(
-                DriverBottleSession.status == DriverBottleSessionStatus(status)
-            )
+            query = query.filter(DriverBottleSession.status == DriverBottleSessionStatus(status))
 
         query = query.order_by(DriverBottleSession.started_at.desc())
         total = query.count()
@@ -1290,29 +1349,21 @@ class BottleTrackingService:
         end_date: date = None,
     ) -> Dict:
         """Get paginated session list for admin with optional filters."""
-        query = DriverBottleSession.query.options(
-            joinedload(DriverBottleSession.driver)
-        )
+        query = DriverBottleSession.query.options(joinedload(DriverBottleSession.driver))
 
         if driver_user_id:
             query = query.filter(DriverBottleSession.driver_user_id == driver_user_id)
         if status:
-            query = query.filter(
-                DriverBottleSession.status == DriverBottleSessionStatus(status)
-            )
+            query = query.filter(DriverBottleSession.status == DriverBottleSessionStatus(status))
         if only_discrepancies:
             query = query.filter(
                 DriverBottleSession.discrepancy.isnot(None),
                 DriverBottleSession.discrepancy != 0,
             )
         if start_date:
-            query = query.filter(
-                func.date(DriverBottleSession.started_at) >= start_date
-            )
+            query = query.filter(func.date(DriverBottleSession.started_at) >= start_date)
         if end_date:
-            query = query.filter(
-                func.date(DriverBottleSession.started_at) <= end_date
-            )
+            query = query.filter(func.date(DriverBottleSession.started_at) <= end_date)
 
         query = query.order_by(DriverBottleSession.started_at.desc())
         total = query.count()
@@ -1331,8 +1382,7 @@ class BottleTrackingService:
     ) -> List[DriverBottleTransfer]:
         """Return transfers pending confirmation by this driver (as receiver)."""
         return (
-            DriverBottleTransfer.query
-            .filter_by(
+            DriverBottleTransfer.query.filter_by(
                 receiver_driver_id=driver_user_id,
                 status=DriverBottleTransferStatus.PENDING,
             )
@@ -1358,9 +1408,7 @@ class BottleTrackingService:
         )
 
         if status:
-            query = query.filter(
-                DriverBottleTransfer.status == DriverBottleTransferStatus(status)
-            )
+            query = query.filter(DriverBottleTransfer.status == DriverBottleTransferStatus(status))
         if driver_user_id:
             query = query.filter(
                 or_(

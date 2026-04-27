@@ -41,7 +41,7 @@ import {
   DownloadOutlined,
   ReloadOutlined,
 } from '@ant-design/icons';
-import { useQuery, useMutation, useQueryClient } from 'react-query';
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import adminService from '../services/adminService';
 import { useTranslation } from 'react-i18next';
 import { formatLocalDate } from '../utils/dateUtils';
@@ -91,6 +91,7 @@ const getMarkingCodeStatusColor = (status) => {
 
 const getMarkingCodeStatusLabel = (t, status) =>
   t(`ui.products.marking_code_status_${status}`, {
+    // eslint-disable-next-line security/detect-object-injection
     defaultValue: MARKING_CODE_STATUS_LABELS[status] || status,
   });
 
@@ -134,17 +135,18 @@ const Products = () => {
   const [createCodesForm] = Form.useForm();
   const [editCodeForm] = Form.useForm();
 
-  const { data: categoriesData } = useQuery(
-    'categories',
-    () => adminService.getCategories({ per_page: 100 }),
-    { staleTime: 5 * 60 * 1000 },
-  );
+  const { data: categoriesData } = useQuery({
+    queryKey: ['categories'],
+    queryFn: () => adminService.getCategories({ per_page: 100 }),
+    staleTime: 5 * 60 * 1000,
+  });
 
   const categories = categoriesData?.data?.items || [];
 
-  const { data, isLoading } = useQuery(
-    ['products', pagination, searchText, categoryFilter, statusFilter],
-    () =>
+  const { data, isLoading } = useQuery({
+    queryKey: ['products', pagination, searchText, categoryFilter, statusFilter],
+
+    queryFn: () =>
       adminService.getProducts({
         page: pagination.page,
         per_page: pagination.per_page,
@@ -152,27 +154,28 @@ const Products = () => {
         category_id: categoryFilter || undefined,
         status: statusFilter || undefined,
       }),
-    { keepPreviousData: true },
-  );
+
+    placeholderData: keepPreviousData,
+  });
 
   const {
     data: markingCodesData,
     isLoading: isMarkingCodesLoading,
     refetch: refetchMarkingCodes,
-  } = useQuery(
-    ['product-marking-codes', selectedProduct?.id, markingCodesPagination, markingCodeSearch, markingCodeStatusFilter],
-    () =>
+  } = useQuery({
+    queryKey: ['product-marking-codes', selectedProduct?.id, markingCodesPagination, markingCodeSearch, markingCodeStatusFilter],
+
+    queryFn: () =>
       adminService.listProductMarkingCodes(selectedProduct.id, {
         page: markingCodesPagination.page,
         per_page: markingCodesPagination.per_page,
         search: markingCodeSearch,
         status: markingCodeStatusFilter || undefined,
       }),
-    {
-      enabled: Boolean(selectedProduct?.id && isDetailModalVisible),
-      keepPreviousData: true,
-    },
-  );
+
+    enabled: Boolean(selectedProduct?.id && isDetailModalVisible),
+    placeholderData: keepPreviousData,
+  });
 
   const syncSelectedProduct = (product) => {
     if (!product) {
@@ -194,133 +197,159 @@ const Products = () => {
   };
 
   const invalidateProductQueries = () => {
-    queryClient.invalidateQueries('products');
+    queryClient.invalidateQueries({
+      queryKey: ['products'],
+    });
     if (selectedProduct?.id) {
-      queryClient.invalidateQueries(['product-marking-codes', selectedProduct.id]);
+      queryClient.invalidateQueries({
+        queryKey: ['product-marking-codes', selectedProduct.id],
+      });
     }
   };
 
-  const createProductMutation = useMutation((productData) => adminService.createProduct(productData), {
+  const createProductMutation = useMutation({
+    mutationFn: (productData) => adminService.createProduct(productData),
+
     onSuccess: () => {
       message.success(t('ui.products.created_success', 'Product created successfully'));
-      queryClient.invalidateQueries('products');
+      queryClient.invalidateQueries({
+        queryKey: ['products'],
+      });
       setIsCreateModalVisible(false);
       createForm.resetFields();
       setCreateFileList([]);
     },
+
     onError: (error) => {
       const errors = extractApiErrorMessages(error, t('ui.products.create_failed', 'Failed to create product'));
       message.error(errors[0]);
     },
   });
 
-  const updateProductMutation = useMutation(
-    ({ productId, productData }) => adminService.updateProduct(productId, productData),
-    {
-      onSuccess: (response) => {
-        const updatedProduct = response?.data?.product;
-        message.success(t('ui.products.updated_success', 'Product updated successfully'));
-        invalidateProductQueries();
-        if (updatedProduct) {
-          syncSelectedProduct(updatedProduct);
-        }
-        setIsEditModalVisible(false);
-        editForm.resetFields();
-        setEditFileList([]);
-      },
-      onError: (error) => {
-        const errors = extractApiErrorMessages(error, t('ui.products.update_failed', 'Failed to update product'));
-        message.error(errors[0]);
-      },
-    },
-  );
+  const updateProductMutation = useMutation({
+    mutationFn: ({ productId, productData }) => adminService.updateProduct(productId, productData),
 
-  const deleteProductMutation = useMutation((productId) => adminService.deleteProduct(productId), {
+    onSuccess: (response) => {
+      const updatedProduct = response?.data?.product;
+      message.success(t('ui.products.updated_success', 'Product updated successfully'));
+      invalidateProductQueries();
+      if (updatedProduct) {
+        syncSelectedProduct(updatedProduct);
+      }
+      setIsEditModalVisible(false);
+      editForm.resetFields();
+      setEditFileList([]);
+    },
+
+    onError: (error) => {
+      const errors = extractApiErrorMessages(error, t('ui.products.update_failed', 'Failed to update product'));
+      message.error(errors[0]);
+    },
+  });
+
+  const deleteProductMutation = useMutation({
+    mutationFn: (productId) => adminService.deleteProduct(productId),
+
     onSuccess: () => {
       message.success(t('ui.products.deleted_success', 'Product deleted successfully'));
-      queryClient.invalidateQueries('products');
+      queryClient.invalidateQueries({
+        queryKey: ['products'],
+      });
     },
+
     onError: (error) => {
       const errors = extractApiErrorMessages(error, t('ui.products.delete_failed', 'Failed to delete product'));
       message.error(errors[0]);
     },
   });
 
-  const createMarkingCodesMutation = useMutation(
-    (payload) => adminService.createProductMarkingCodes(selectedProduct.id, payload),
-    {
-      onSuccess: (response) => {
-        const createdCount = response?.data?.created || response?.data?.codes?.length || 0;
-        message.success(
-          t('ui.products.marking_codes_created', '{{count}} marking codes created', { count: createdCount }),
-        );
-        queryClient.invalidateQueries('products');
-        queryClient.invalidateQueries(['product-marking-codes', selectedProduct.id]);
-        createCodesForm.resetFields();
-        setIsCreateCodesModalVisible(false);
-      },
-      onError: (error) => {
-        const errors = extractApiErrorMessages(error, t('ui.products.marking_codes_create_failed', 'Failed to create marking codes'));
-        message.error(errors[0]);
-      },
-    },
-  );
+  const createMarkingCodesMutation = useMutation({
+    mutationFn: (payload) => adminService.createProductMarkingCodes(selectedProduct.id, payload),
 
-  const updateMarkingCodeMutation = useMutation(
-    ({ markingCodeId, payload }) => adminService.updateProductMarkingCode(selectedProduct.id, markingCodeId, payload),
-    {
-      onSuccess: () => {
-        message.success(t('ui.products.marking_code_updated', 'Marking code updated successfully'));
-        queryClient.invalidateQueries('products');
-        queryClient.invalidateQueries(['product-marking-codes', selectedProduct.id]);
-        editCodeForm.resetFields();
-        setSelectedMarkingCode(null);
-        setIsEditCodeModalVisible(false);
-      },
-      onError: (error) => {
-        const errors = extractApiErrorMessages(error, t('ui.products.marking_code_update_failed', 'Failed to update marking code'));
-        message.error(errors[0]);
-      },
+    onSuccess: (response) => {
+      const createdCount = response?.data?.created || response?.data?.codes?.length || 0;
+      message.success(
+        t('ui.products.marking_codes_created', '{{count}} marking codes created', { count: createdCount }),
+      );
+      queryClient.invalidateQueries({
+        queryKey: ['products'],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ['product-marking-codes', selectedProduct.id],
+      });
+      createCodesForm.resetFields();
+      setIsCreateCodesModalVisible(false);
     },
-  );
 
-  const importMarkingCodesMutation = useMutation(
-    (file) => adminService.importProductMarkingCodesCsv(selectedProduct.id, file),
-    {
-      onSuccess: (response) => {
-        const payload = response?.data || {};
-        message.success(
-          t('ui.products.marking_codes_imported', '{{count}} marking codes imported', {
-            count: payload.created || 0,
-          }),
-        );
-        queryClient.invalidateQueries('products');
-        queryClient.invalidateQueries(['product-marking-codes', selectedProduct.id]);
-        setCsvFileList([]);
-
-        if (payload.invalid_rows?.length) {
-          Modal.info({
-            title: t('ui.products.marking_code_import_issues', 'CSV import completed with issues'),
-            width: 720,
-            content: (
-              <div style={{ maxHeight: 320, overflow: 'auto' }}>
-                {payload.invalid_rows.map((row) => (
-                  <div key={`${row.row || 'global'}-${row.reason || 'issue'}`} style={{ marginBottom: 12 }}>
-                    <strong>{row.row ? `Row ${row.row}` : 'File issue'}:</strong> {row.reason}
-                    {row.codes?.length ? <div>{row.codes.join(', ')}</div> : null}
-                  </div>
-                ))}
-              </div>
-            ),
-          });
-        }
-      },
-      onError: (error) => {
-        const errors = extractApiErrorMessages(error, t('ui.products.marking_codes_import_failed', 'Failed to import marking codes'));
-        message.error(errors[0]);
-      },
+    onError: (error) => {
+      const errors = extractApiErrorMessages(error, t('ui.products.marking_codes_create_failed', 'Failed to create marking codes'));
+      message.error(errors[0]);
     },
-  );
+  });
+
+  const updateMarkingCodeMutation = useMutation({
+    mutationFn: ({ markingCodeId, payload }) => adminService.updateProductMarkingCode(selectedProduct.id, markingCodeId, payload),
+
+    onSuccess: () => {
+      message.success(t('ui.products.marking_code_updated', 'Marking code updated successfully'));
+      queryClient.invalidateQueries({
+        queryKey: ['products'],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ['product-marking-codes', selectedProduct.id],
+      });
+      editCodeForm.resetFields();
+      setSelectedMarkingCode(null);
+      setIsEditCodeModalVisible(false);
+    },
+
+    onError: (error) => {
+      const errors = extractApiErrorMessages(error, t('ui.products.marking_code_update_failed', 'Failed to update marking code'));
+      message.error(errors[0]);
+    },
+  });
+
+  const importMarkingCodesMutation = useMutation({
+    mutationFn: (file) => adminService.importProductMarkingCodesCsv(selectedProduct.id, file),
+
+    onSuccess: (response) => {
+      const payload = response?.data || {};
+      message.success(
+        t('ui.products.marking_codes_imported', '{{count}} marking codes imported', {
+          count: payload.created || 0,
+        }),
+      );
+      queryClient.invalidateQueries({
+        queryKey: ['products'],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ['product-marking-codes', selectedProduct.id],
+      });
+      setCsvFileList([]);
+
+      if (payload.invalid_rows?.length) {
+        Modal.info({
+          title: t('ui.products.marking_code_import_issues', 'CSV import completed with issues'),
+          width: 720,
+          content: (
+            <div style={{ maxHeight: 320, overflow: 'auto' }}>
+              {payload.invalid_rows.map((row) => (
+                <div key={`${row.row || 'global'}-${row.reason || 'issue'}`} style={{ marginBottom: 12 }}>
+                  <strong>{row.row ? `Row ${row.row}` : 'File issue'}:</strong> {row.reason}
+                  {row.codes?.length ? <div>{row.codes.join(', ')}</div> : null}
+                </div>
+              ))}
+            </div>
+          ),
+        });
+      }
+    },
+
+    onError: (error) => {
+      const errors = extractApiErrorMessages(error, t('ui.products.marking_codes_import_failed', 'Failed to import marking codes'));
+      message.error(errors[0]);
+    },
+  });
 
   const products = data?.data?.items || [];
   const totalProducts = data?.meta?.total || 0;
@@ -939,7 +968,7 @@ const Products = () => {
                   <Button
                     icon={<UploadOutlined />}
                     onClick={handleImportCsv}
-                    loading={importMarkingCodesMutation.isLoading}
+                    loading={importMarkingCodesMutation.isPending}
                   >
                     {t('ui.products.import_csv', 'Import CSV')}
                   </Button>
@@ -1338,7 +1367,7 @@ const Products = () => {
         footer={null}
         width={760}
       >
-        {buildProductForm(createForm, handleCreateSubmit, createFileList, setCreateFileList, createProductMutation.isLoading || uploadingCreate)}
+        {buildProductForm(createForm, handleCreateSubmit, createFileList, setCreateFileList, createProductMutation.isPending || uploadingCreate)}
       </Modal>
 
       <Modal
@@ -1352,7 +1381,7 @@ const Products = () => {
         footer={null}
         width={760}
       >
-        {buildProductForm(editForm, handleEditSubmit, editFileList, setEditFileList, updateProductMutation.isLoading || uploadingEdit)}
+        {buildProductForm(editForm, handleEditSubmit, editFileList, setEditFileList, updateProductMutation.isPending || uploadingEdit)}
       </Modal>
 
       <Modal
@@ -1379,7 +1408,7 @@ const Products = () => {
           <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
             <Space>
               <Button onClick={() => setIsCreateCodesModalVisible(false)}>{t('ui.common.cancel', 'Cancel')}</Button>
-              <Button type="primary" htmlType="submit" loading={createMarkingCodesMutation.isLoading}>
+              <Button type="primary" htmlType="submit" loading={createMarkingCodesMutation.isPending}>
                 {t('ui.products.create_marking_codes', 'Create Codes')}
               </Button>
             </Space>
@@ -1429,7 +1458,7 @@ const Products = () => {
           <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
             <Space>
               <Button onClick={() => setIsEditCodeModalVisible(false)}>{t('ui.common.cancel', 'Cancel')}</Button>
-              <Button type="primary" htmlType="submit" loading={updateMarkingCodeMutation.isLoading}>
+              <Button type="primary" htmlType="submit" loading={updateMarkingCodeMutation.isPending}>
                 {t('ui.common.save', 'Save')}
               </Button>
             </Space>

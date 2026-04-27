@@ -93,6 +93,8 @@ class BottleCollectionHandler(BaseHandler):
             )
         return BOTTLE_COLLECTION_SEARCH_INPUT
 
+    @require_auth
+    @require_delivery_driver
     async def receive_collection_search(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Search customers with bottle balance > 0."""
         language = await self._get_language(update, context)
@@ -246,6 +248,8 @@ class BottleCollectionHandler(BaseHandler):
             logger.error("Error starting bottle collection: %s", exc, exc_info=True)
             await self._handle_error(update, context)
 
+    @require_auth
+    @require_delivery_driver
     async def receive_collection_quantity(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Receive bottle count, ask for notes."""
         language = await self._get_language(update, context)
@@ -271,6 +275,8 @@ class BottleCollectionHandler(BaseHandler):
         )
         return BOTTLE_COLLECTION_NOTE_INPUT
 
+    @require_auth
+    @require_delivery_driver
     async def receive_collection_note(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Finalize standalone bottle collection."""
         language = await self._get_language(update, context)
@@ -356,6 +362,8 @@ class BottleCollectionHandler(BaseHandler):
             logger.error("Error starting bottle fine: %s", exc, exc_info=True)
             await self._handle_error(update, context)
 
+    @require_auth
+    @require_delivery_driver
     async def receive_fine_bottle_qty(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Receive how many bottles to fine for."""
         language = await self._get_language(update, context)
@@ -381,6 +389,8 @@ class BottleCollectionHandler(BaseHandler):
         )
         return BOTTLE_FINE_AMOUNT_INPUT
 
+    @require_auth
+    @require_delivery_driver
     async def receive_fine_amount(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Receive monetary fine amount."""
         language = await self._get_language(update, context)
@@ -406,6 +416,8 @@ class BottleCollectionHandler(BaseHandler):
         )
         return BOTTLE_FINE_NOTE_INPUT
 
+    @require_auth
+    @require_delivery_driver
     async def receive_fine_note(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Submit fine creation."""
         language = await self._get_language(update, context)
@@ -611,6 +623,8 @@ class BottleCollectionHandler(BaseHandler):
         )
         return BOTTLE_SESSION_LOADED_QTY_INPUT
 
+    @require_auth
+    @require_delivery_driver
     async def receive_bottles_loaded(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Open a new session with the entered bottle count."""
         language = await self._get_language(update, context)
@@ -704,6 +718,8 @@ class BottleCollectionHandler(BaseHandler):
         )
         return BOTTLE_SESSION_RETURNED_QTY_INPUT
 
+    @require_auth
+    @require_delivery_driver
     async def receive_bottles_returned(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Close the active session with the returned bottle count."""
         language = await self._get_language(update, context)
@@ -825,6 +841,8 @@ class BottleCollectionHandler(BaseHandler):
         )
         return BOTTLE_TRANSFER_DRIVER_SELECT
 
+    @require_auth
+    @require_delivery_driver
     async def receive_transfer_driver_select(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Store selected receiver driver and prompt for quantity."""
         query = update.callback_query
@@ -847,6 +865,8 @@ class BottleCollectionHandler(BaseHandler):
         )
         return BOTTLE_TRANSFER_QTY_INPUT
 
+    @require_auth
+    @require_delivery_driver
     async def receive_transfer_quantity(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Send transfer and notify result."""
         language = await self._get_language(update, context)
@@ -972,6 +992,8 @@ class BottleCollectionHandler(BaseHandler):
         )
         return BOTTLE_TRANSFER_CONFIRM_QTY_INPUT
 
+    @require_auth
+    @require_delivery_driver
     async def receive_transfer_confirm_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle callback when receiver taps 'Confirm N' on a transfer."""
         query = update.callback_query
@@ -993,6 +1015,8 @@ class BottleCollectionHandler(BaseHandler):
         # Direct confirm with declared qty
         await self._do_confirm_transfer(update, context, transfer_id, qty, language)
 
+    @require_auth
+    @require_delivery_driver
     async def receive_transfer_custom_confirm(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Receive a custom quantity from the receiver and confirm the transfer."""
         language = await self._get_language(update, context)

@@ -30,22 +30,17 @@ class TestHelpersCore:
         assert helpers.validate_phone_number("+998901234567") is True
         assert helpers.format_phone_number("90 123 45 67") == "+998901234567"
 
-    def test_distance_radius_fee_and_time(self, app):
+    def test_distance_radius_and_time(self, app):
+        # ARCH-003: delivery-fee calculation moved to DeliveryService.
         with app.app_context():
             app.config["DELIVERY_RADIUS_KM"] = 20
-            app.config["FREE_DELIVERY_THRESHOLD"] = 50000
-            app.config["DEFAULT_DELIVERY_FEE"] = 3000
 
             distance = helpers.calculate_distance(41.2995, 69.2401, 41.3111, 69.2797)
             within = helpers.is_within_delivery_radius(41.2995, 69.2401, 41.3111, 69.2797)
-            paid_fee = helpers.calculate_delivery_fee(distance_km=5, order_total=10000)
-            free_fee = helpers.calculate_delivery_fee(distance_km=5, order_total=90000)
             eta = helpers.estimate_delivery_time(distance_km=5, traffic_factor=1.2)
 
         assert distance > 0
         assert within is True
-        assert paid_fee == 3000 + 2500
-        assert free_fee == 0
         assert eta == int(30 + (5 * 2 * 1.2))
 
     def test_currency_text_and_slug_helpers(self):

@@ -1,7 +1,7 @@
 """Admin bulk action service."""
 
 from datetime import datetime, UTC
-from typing import Any, Dict, List
+from typing import Dict, List
 
 from flask import current_app
 
@@ -20,12 +20,12 @@ class AdminBulkActionService:
     """Service for admin bulk actions."""
 
     VALID_ACTIONS = {
-        'user': ['activate', 'deactivate', 'suspend', 'delete', 'send_email', 'assign_role'],
-        'order': ['cancel', 'confirm', 'process', 'mark_delivered'],
-        'product': ['activate', 'deactivate', 'delete', 'update_stock', 'update_price'],
-        'review': ['approve', 'reject', 'delete', 'feature'],
-        'subscription': ['pause', 'resume', 'cancel'],
-        'delivery': ['assign_driver', 'mark_in_transit', 'mark_delivered']
+        "user": ["activate", "deactivate", "suspend", "delete", "send_email", "assign_role"],
+        "order": ["cancel", "confirm", "process", "mark_delivered"],
+        "product": ["activate", "deactivate", "delete", "update_stock", "update_price"],
+        "review": ["approve", "reject", "delete", "feature"],
+        "subscription": ["pause", "resume", "cancel"],
+        "delivery": ["assign_driver", "mark_in_transit", "mark_delivered"],
     }
 
     @staticmethod
@@ -42,24 +42,24 @@ class AdminBulkActionService:
         """Dispatch and perform bulk action for target type."""
         parameters = parameters or {}
 
-        if target_type == 'user':
+        if target_type == "user":
             return AdminBulkActionService._bulk_action_users(action, target_ids, parameters, reason, admin_id)
-        if target_type == 'order':
+        if target_type == "order":
             return AdminBulkActionService._bulk_action_orders(action, target_ids, parameters, reason, admin_id)
-        if target_type == 'product':
+        if target_type == "product":
             return AdminBulkActionService._bulk_action_products(action, target_ids, parameters, reason, admin_id)
-        if target_type == 'review':
+        if target_type == "review":
             return AdminBulkActionService._bulk_action_reviews(action, target_ids, parameters, reason, admin_id)
-        if target_type == 'subscription':
+        if target_type == "subscription":
             return AdminBulkActionService._bulk_action_subscriptions(action, target_ids, parameters, reason, admin_id)
-        if target_type == 'delivery':
+        if target_type == "delivery":
             return AdminBulkActionService._bulk_action_deliveries(action, target_ids, parameters, reason, admin_id)
 
         return {
-            'success_count': 0,
-            'failed_count': len(target_ids),
-            'errors': [{'target_type': target_type, 'error': 'Invalid target type'}],
-            'total_errors': 1,
+            "success_count": 0,
+            "failed_count": len(target_ids),
+            "errors": [{"target_type": target_type, "error": "Invalid target type"}],
+            "total_errors": 1,
         }
 
     @staticmethod
@@ -73,23 +73,23 @@ class AdminBulkActionService:
                 user = User.query.get(user_id)
                 if not user:
                     failed_count += 1
-                    errors.append({'user_id': user_id, 'error': 'User not found'})
+                    errors.append({"user_id": user_id, "error": "User not found"})
                     continue
 
-                if action == 'activate':
+                if action == "activate":
                     user.status = UserStatus.ACTIVE
                     user.is_active = True
-                elif action == 'deactivate':
+                elif action == "deactivate":
                     user.status = UserStatus.INACTIVE
                     user.is_active = False
-                elif action == 'suspend':
+                elif action == "suspend":
                     user.status = UserStatus.SUSPENDED
                     user.is_active = False
-                elif action == 'delete':
+                elif action == "delete":
                     user.status = UserStatus.DELETED
                     user.is_active = False
-                elif action == 'assign_role':
-                    new_role = parameters.get('role')
+                elif action == "assign_role":
+                    new_role = parameters.get("role")
                     valid_roles = [
                         UserRole.CUSTOMER.value,
                         UserRole.ADMIN.value,
@@ -101,6 +101,7 @@ class AdminBulkActionService:
                         user.role = UserRole(new_role)
                         try:
                             from business_app.services.token_service import TokenService
+
                             token_service = TokenService()
                             token_service.revoke_user_tokens(user_id)
                             current_app.logger.info(
@@ -117,9 +118,9 @@ class AdminBulkActionService:
                             )
                     else:
                         failed_count += 1
-                        errors.append({'user_id': user_id, 'error': 'Invalid role'})
+                        errors.append({"user_id": user_id, "error": "Invalid role"})
                         continue
-                elif action == 'send_email':
+                elif action == "send_email":
                     pass
 
                 db.session.commit()
@@ -128,13 +129,14 @@ class AdminBulkActionService:
             except Exception as e:
                 db.session.rollback()
                 failed_count += 1
-                errors.append({'user_id': user_id, 'error': str(e)})
+                errors.append({"user_id": user_id, "error": str(e)})
+                current_app.logger.exception("Bulk user action '%s' failed for user_id=%s", action, user_id)
 
         return {
-            'success_count': success_count,
-            'failed_count': failed_count,
-            'errors': errors[:10],
-            'total_errors': len(errors)
+            "success_count": success_count,
+            "failed_count": failed_count,
+            "errors": errors[:10],
+            "total_errors": len(errors),
         }
 
     @staticmethod
@@ -148,12 +150,13 @@ class AdminBulkActionService:
                 order = Order.query.get(order_id)
                 if not order:
                     failed_count += 1
-                    errors.append({'order_id': order_id, 'error': 'Order not found'})
+                    errors.append({"order_id": order_id, "error": "Order not found"})
                     continue
 
-                if action == 'cancel':
+                if action == "cancel":
                     if order.status in [OrderStatus.PENDING, OrderStatus.CONFIRMED]:
                         from business_app.services.order_service import OrderService
+
                         OrderService().cancel_order(
                             order.id,
                             reason=reason,
@@ -161,33 +164,41 @@ class AdminBulkActionService:
                         )
                     else:
                         failed_count += 1
-                        errors.append({'order_id': order_id, 'error': f'Cannot cancel order with status {order.status}'})
+                        errors.append(
+                            {"order_id": order_id, "error": f"Cannot cancel order with status {order.status}"}
+                        )
                         continue
 
-                elif action == 'confirm':
+                elif action == "confirm":
                     if order.status == OrderStatus.PENDING:
                         order.status = OrderStatus.CONFIRMED
                         order.confirmed_at = datetime.now(UTC)
                     else:
                         failed_count += 1
-                        errors.append({'order_id': order_id, 'error': f'Cannot confirm order with status {order.status}'})
+                        errors.append(
+                            {"order_id": order_id, "error": f"Cannot confirm order with status {order.status}"}
+                        )
                         continue
 
-                elif action == 'process':
+                elif action == "process":
                     if order.status == OrderStatus.CONFIRMED:
                         order.status = OrderStatus.PREPARING
                     else:
                         failed_count += 1
-                        errors.append({'order_id': order_id, 'error': f'Cannot process order with status {order.status}'})
+                        errors.append(
+                            {"order_id": order_id, "error": f"Cannot process order with status {order.status}"}
+                        )
                         continue
 
-                elif action == 'mark_delivered':
+                elif action == "mark_delivered":
                     if order.status in [OrderStatus.PREPARING, OrderStatus.OUT_FOR_DELIVERY]:
                         order.status = OrderStatus.DELIVERED
                         order.delivered_at = datetime.now(UTC)
                     else:
                         failed_count += 1
-                        errors.append({'order_id': order_id, 'error': f'Cannot mark as delivered with status {order.status}'})
+                        errors.append(
+                            {"order_id": order_id, "error": f"Cannot mark as delivered with status {order.status}"}
+                        )
                         continue
 
                 db.session.commit()
@@ -196,13 +207,14 @@ class AdminBulkActionService:
             except Exception as e:
                 db.session.rollback()
                 failed_count += 1
-                errors.append({'order_id': order_id, 'error': str(e)})
+                errors.append({"order_id": order_id, "error": str(e)})
+                current_app.logger.exception("Bulk order action '%s' failed for order_id=%s", action, order_id)
 
         return {
-            'success_count': success_count,
-            'failed_count': failed_count,
-            'errors': errors[:10],
-            'total_errors': len(errors)
+            "success_count": success_count,
+            "failed_count": failed_count,
+            "errors": errors[:10],
+            "total_errors": len(errors),
         }
 
     @staticmethod
@@ -216,28 +228,28 @@ class AdminBulkActionService:
                 product = Product.query.get(product_id)
                 if not product:
                     failed_count += 1
-                    errors.append({'product_id': product_id, 'error': 'Product not found'})
+                    errors.append({"product_id": product_id, "error": "Product not found"})
                     continue
 
-                if action == 'activate':
+                if action == "activate":
                     product.is_active = True
-                elif action == 'deactivate':
+                elif action == "deactivate":
                     product.is_active = False
-                elif action == 'delete':
+                elif action == "delete":
                     product.is_active = False
                     product.deleted_at = datetime.now(UTC)
-                elif action == 'update_stock':
-                    stock_adjustment = parameters.get('stock_adjustment', 0)
-                    new_stock = parameters.get('new_stock')
+                elif action == "update_stock":
+                    stock_adjustment = parameters.get("stock_adjustment", 0)
+                    new_stock = parameters.get("new_stock")
 
                     if new_stock is not None:
                         product.stock_quantity = new_stock
                     else:
                         product.stock_quantity = (product.stock_quantity or 0) + stock_adjustment
 
-                elif action == 'update_price':
-                    new_price = parameters.get('new_price')
-                    price_adjustment = parameters.get('price_adjustment', 0)
+                elif action == "update_price":
+                    new_price = parameters.get("new_price")
+                    price_adjustment = parameters.get("price_adjustment", 0)
 
                     if new_price is not None:
                         product.price = new_price
@@ -250,13 +262,14 @@ class AdminBulkActionService:
             except Exception as e:
                 db.session.rollback()
                 failed_count += 1
-                errors.append({'product_id': product_id, 'error': str(e)})
+                errors.append({"product_id": product_id, "error": str(e)})
+                current_app.logger.exception("Bulk product action '%s' failed for product_id=%s", action, product_id)
 
         return {
-            'success_count': success_count,
-            'failed_count': failed_count,
-            'errors': errors[:10],
-            'total_errors': len(errors)
+            "success_count": success_count,
+            "failed_count": failed_count,
+            "errors": errors[:10],
+            "total_errors": len(errors),
         }
 
     @staticmethod
@@ -270,18 +283,18 @@ class AdminBulkActionService:
                 review = Review.query.get(review_id)
                 if not review:
                     failed_count += 1
-                    errors.append({'review_id': review_id, 'error': 'Review not found'})
+                    errors.append({"review_id": review_id, "error": "Review not found"})
                     continue
 
-                if action == 'approve':
+                if action == "approve":
                     review.is_approved = True
                     review.moderator_notes = reason
-                elif action == 'reject':
+                elif action == "reject":
                     review.is_approved = False
                     review.moderator_notes = reason
-                elif action == 'delete':
+                elif action == "delete":
                     db.session.delete(review)
-                elif action == 'feature':
+                elif action == "feature":
                     review.is_featured = True
                     review.is_approved = True
 
@@ -291,13 +304,14 @@ class AdminBulkActionService:
             except Exception as e:
                 db.session.rollback()
                 failed_count += 1
-                errors.append({'review_id': review_id, 'error': str(e)})
+                errors.append({"review_id": review_id, "error": str(e)})
+                current_app.logger.exception("Bulk review action '%s' failed for review_id=%s", action, review_id)
 
         return {
-            'success_count': success_count,
-            'failed_count': failed_count,
-            'errors': errors[:10],
-            'total_errors': len(errors)
+            "success_count": success_count,
+            "failed_count": failed_count,
+            "errors": errors[:10],
+            "total_errors": len(errors),
         }
 
     @staticmethod
@@ -311,30 +325,34 @@ class AdminBulkActionService:
                 subscription = Subscription.query.get(subscription_id)
                 if not subscription:
                     failed_count += 1
-                    errors.append({'subscription_id': subscription_id, 'error': 'Subscription not found'})
+                    errors.append({"subscription_id": subscription_id, "error": "Subscription not found"})
                     continue
 
-                if action == 'pause':
+                if action == "pause":
                     if subscription.status == SubscriptionStatus.ACTIVE:
                         subscription.status = SubscriptionStatus.PAUSED
                         subscription.paused_at = datetime.now(UTC)
                         subscription.pause_reason = reason
                     else:
                         failed_count += 1
-                        errors.append({'subscription_id': subscription_id, 'error': 'Can only pause active subscriptions'})
+                        errors.append(
+                            {"subscription_id": subscription_id, "error": "Can only pause active subscriptions"}
+                        )
                         continue
 
-                elif action == 'resume':
+                elif action == "resume":
                     if subscription.status == SubscriptionStatus.PAUSED:
                         subscription.status = SubscriptionStatus.ACTIVE
                         subscription.paused_at = None
                         subscription.pause_reason = None
                     else:
                         failed_count += 1
-                        errors.append({'subscription_id': subscription_id, 'error': 'Can only resume paused subscriptions'})
+                        errors.append(
+                            {"subscription_id": subscription_id, "error": "Can only resume paused subscriptions"}
+                        )
                         continue
 
-                elif action == 'cancel':
+                elif action == "cancel":
                     subscription.status = SubscriptionStatus.CANCELLED
                     subscription.end_date = datetime.now(UTC)
 
@@ -344,13 +362,16 @@ class AdminBulkActionService:
             except Exception as e:
                 db.session.rollback()
                 failed_count += 1
-                errors.append({'subscription_id': subscription_id, 'error': str(e)})
+                errors.append({"subscription_id": subscription_id, "error": str(e)})
+                current_app.logger.exception(
+                    "Bulk subscription action '%s' failed for subscription_id=%s", action, subscription_id
+                )
 
         return {
-            'success_count': success_count,
-            'failed_count': failed_count,
-            'errors': errors[:10],
-            'total_errors': len(errors)
+            "success_count": success_count,
+            "failed_count": failed_count,
+            "errors": errors[:10],
+            "total_errors": len(errors),
         }
 
     @staticmethod
@@ -364,35 +385,35 @@ class AdminBulkActionService:
                 delivery = Delivery.query.get(delivery_id)
                 if not delivery:
                     failed_count += 1
-                    errors.append({'delivery_id': delivery_id, 'error': 'Delivery not found'})
+                    errors.append({"delivery_id": delivery_id, "error": "Delivery not found"})
                     continue
 
-                if action == 'assign_driver':
-                    driver_id = parameters.get('driver_id')
+                if action == "assign_driver":
+                    driver_id = parameters.get("driver_id")
                     if not driver_id:
                         failed_count += 1
-                        errors.append({'delivery_id': delivery_id, 'error': 'driver_id required'})
+                        errors.append({"delivery_id": delivery_id, "error": "driver_id required"})
                         continue
 
                     driver = DeliveryPerson.query.get(driver_id)
                     if not driver:
                         failed_count += 1
-                        errors.append({'delivery_id': delivery_id, 'error': 'Driver not found'})
+                        errors.append({"delivery_id": delivery_id, "error": "Driver not found"})
                         continue
 
                     delivery.delivery_person_id = driver_id
                     delivery.status = DeliveryStatus.ASSIGNED
 
-                elif action == 'mark_in_transit':
+                elif action == "mark_in_transit":
                     DeliveryService().begin_delivery_in_transit(
                         delivery.id,
                         actor_user_id=admin_id,
-                        notes=reason or 'Updated via admin bulk action to in_transit',
+                        notes=reason or "Updated via admin bulk action to in_transit",
                     )
                     success_count += 1
                     continue
 
-                elif action == 'mark_delivered':
+                elif action == "mark_delivered":
                     delivery.status = DeliveryStatus.DELIVERED
                     delivery.delivered_at = datetime.now(UTC)
 
@@ -402,11 +423,12 @@ class AdminBulkActionService:
             except Exception as e:
                 db.session.rollback()
                 failed_count += 1
-                errors.append({'delivery_id': delivery_id, 'error': str(e)})
+                errors.append({"delivery_id": delivery_id, "error": str(e)})
+                current_app.logger.exception("Bulk delivery action '%s' failed for delivery_id=%s", action, delivery_id)
 
         return {
-            'success_count': success_count,
-            'failed_count': failed_count,
-            'errors': errors[:10],
-            'total_errors': len(errors)
+            "success_count": success_count,
+            "failed_count": failed_count,
+            "errors": errors[:10],
+            "total_errors": len(errors),
         }

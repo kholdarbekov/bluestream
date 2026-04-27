@@ -34,7 +34,7 @@ import {
   LockOutlined,
   UnlockOutlined
 } from '@ant-design/icons';
-import { useQuery, useMutation, useQueryClient } from 'react-query';
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import adminService from '../services/adminService';
 import staffService from '../services/staffService';
@@ -94,167 +94,178 @@ const Users = () => {
   const selectedUserTypeMeta = getUserTypeMeta(t, selectedUser?.user_type);
 
   // Fetch users
-  const { data, isLoading } = useQuery(
-    ['users', pagination, searchText, statusFilter, registrationMethodFilter],
-    () => adminService.getUsers({
+  const { data, isLoading } = useQuery({
+    queryKey: ['users', pagination, searchText, statusFilter, registrationMethodFilter],
+
+    queryFn: () => adminService.getUsers({
       page: pagination.page,
       per_page: pagination.per_page,
       search: searchText,
       status: statusFilter,
       registration_method: registrationMethodFilter
     }),
-    {
-      keepPreviousData: true
-    }
-  );
+
+    placeholderData: keepPreviousData,
+  });
 
   // Update user status mutation
-  const updateUserMutation = useMutation(
-    ({ userId, status, reason }) => adminService.updateUserStatus(userId, status, reason),
-    {
-      onSuccess: () => {
-        message.success(t('ui.users.status_updated_success'));
-        queryClient.invalidateQueries('users');
-      },
-      onError: () => {
-        message.error(t('ui.users.status_update_failed'));
-      }
-    }
-  );
+  const updateUserMutation = useMutation({
+    mutationFn: ({ userId, status, reason }) => adminService.updateUserStatus(userId, status, reason),
+
+    onSuccess: () => {
+      message.success(t('ui.users.status_updated_success'));
+      queryClient.invalidateQueries({
+        queryKey: ['users'],
+      });
+    },
+
+    onError: () => {
+      message.error(t('ui.users.status_update_failed'));
+    },
+  });
 
   // Create user mutation
-  const createUserMutation = useMutation(
-    (userData) => adminService.createUser(userData),
-    {
-      onSuccess: () => {
-        message.success(t('ui.users.user_created_success', 'User created successfully'));
-        setIsCreateModalVisible(false);
-        createForm.resetFields();
-        queryClient.invalidateQueries('users');
-      },
-      onError: (error) => {
-        const errorMessage = error.response?.data?.message || t('ui.users.user_create_failed', 'Failed to create user');
-        message.error(errorMessage);
-      }
-    }
-  );
+  const createUserMutation = useMutation({
+    mutationFn: (userData) => adminService.createUser(userData),
 
-  const editUserMutation = useMutation(
-    ({ userId, userData }) => adminService.updateUser(userId, userData),
-    {
-      onSuccess: (response) => {
-        const updatedUser = response?.data?.user || null;
-        message.success(t('ui.users.user_updated_success', 'User updated successfully'));
-        setIsCreateModalVisible(false);
-        setEditingUser(null);
-        createForm.resetFields();
-        queryClient.invalidateQueries('users');
-        if (updatedUser && selectedUser?.id === updatedUser.id) {
-          setSelectedUser(updatedUser);
-        }
-      },
-      onError: (error) => {
-        const errorMessage = error.response?.data?.message || t('ui.users.user_update_failed', 'Failed to update user');
-        message.error(errorMessage);
+    onSuccess: () => {
+      message.success(t('ui.users.user_created_success', 'User created successfully'));
+      setIsCreateModalVisible(false);
+      createForm.resetFields();
+      queryClient.invalidateQueries({
+        queryKey: ['users'],
+      });
+    },
+
+    onError: (error) => {
+      const errorMessage = error.response?.data?.message || t('ui.users.user_create_failed', 'Failed to create user');
+      message.error(errorMessage);
+    },
+  });
+
+  const editUserMutation = useMutation({
+    mutationFn: ({ userId, userData }) => adminService.updateUser(userId, userData),
+
+    onSuccess: (response) => {
+      const updatedUser = response?.data?.user || null;
+      message.success(t('ui.users.user_updated_success', 'User updated successfully'));
+      setIsCreateModalVisible(false);
+      setEditingUser(null);
+      createForm.resetFields();
+      queryClient.invalidateQueries({
+        queryKey: ['users'],
+      });
+      if (updatedUser && selectedUser?.id === updatedUser.id) {
+        setSelectedUser(updatedUser);
       }
-    }
-  );
+    },
+
+    onError: (error) => {
+      const errorMessage = error.response?.data?.message || t('ui.users.user_update_failed', 'Failed to update user');
+      message.error(errorMessage);
+    },
+  });
 
   // Create address mutation
-  const createAddressMutation = useMutation(
-    ({ userId, addressData }) => adminService.createUserAddress(userId, addressData),
-    {
-      onSuccess: () => {
-        message.success(t('ui.users.address_created', 'Address created successfully'));
-        setIsAddressModalVisible(false);
-        addressForm.resetFields();
-        if (selectedUser) {
-          fetchUserAddresses(selectedUser.id);
-        }
-      },
-      onError: (error) => {
-        const errorMessage = error.response?.data?.message || t('ui.users.address_create_failed', 'Failed to create address');
-        message.error(errorMessage);
+  const createAddressMutation = useMutation({
+    mutationFn: ({ userId, addressData }) => adminService.createUserAddress(userId, addressData),
+
+    onSuccess: () => {
+      message.success(t('ui.users.address_created', 'Address created successfully'));
+      setIsAddressModalVisible(false);
+      addressForm.resetFields();
+      if (selectedUser) {
+        // eslint-disable-next-line no-use-before-define
+        fetchUserAddresses(selectedUser.id);
       }
-    }
-  );
+    },
+
+    onError: (error) => {
+      const errorMessage = error.response?.data?.message || t('ui.users.address_create_failed', 'Failed to create address');
+      message.error(errorMessage);
+    },
+  });
 
   // Update address mutation
-  const updateAddressMutation = useMutation(
-    ({ userId, addressId, addressData }) => adminService.updateUserAddress(userId, addressId, addressData),
-    {
-      onSuccess: () => {
-        message.success(t('ui.users.address_updated', 'Address updated successfully'));
-        setIsAddressModalVisible(false);
-        setEditingAddress(null);
-        addressForm.resetFields();
-        if (selectedUser) {
-          fetchUserAddresses(selectedUser.id);
-        }
-      },
-      onError: (error) => {
-        const errorMessage = error.response?.data?.message || t('ui.users.address_update_failed', 'Failed to update address');
-        message.error(errorMessage);
+  const updateAddressMutation = useMutation({
+    mutationFn: ({ userId, addressId, addressData }) => adminService.updateUserAddress(userId, addressId, addressData),
+
+    onSuccess: () => {
+      message.success(t('ui.users.address_updated', 'Address updated successfully'));
+      setIsAddressModalVisible(false);
+      setEditingAddress(null);
+      addressForm.resetFields();
+      if (selectedUser) {
+        // eslint-disable-next-line no-use-before-define
+        fetchUserAddresses(selectedUser.id);
       }
-    }
-  );
+    },
+
+    onError: (error) => {
+      const errorMessage = error.response?.data?.message || t('ui.users.address_update_failed', 'Failed to update address');
+      message.error(errorMessage);
+    },
+  });
 
   // Delete address mutation
-  const deleteAddressMutation = useMutation(
-    ({ userId, addressId }) => adminService.deleteUserAddress(userId, addressId),
-    {
-      onSuccess: () => {
-        message.success(t('ui.users.address_deleted', 'Address deleted successfully'));
-        if (selectedUser) {
-          fetchUserAddresses(selectedUser.id);
-        }
-      },
-      onError: (error) => {
-        const errorMessage = error.response?.data?.message || t('ui.users.address_delete_failed', 'Failed to delete address');
-        message.error(errorMessage);
+  const deleteAddressMutation = useMutation({
+    mutationFn: ({ userId, addressId }) => adminService.deleteUserAddress(userId, addressId),
+
+    onSuccess: () => {
+      message.success(t('ui.users.address_deleted', 'Address deleted successfully'));
+      if (selectedUser) {
+        // eslint-disable-next-line no-use-before-define
+        fetchUserAddresses(selectedUser.id);
       }
-    }
-  );
+    },
+
+    onError: (error) => {
+      const errorMessage = error.response?.data?.message || t('ui.users.address_delete_failed', 'Failed to delete address');
+      message.error(errorMessage);
+    },
+  });
 
   // Unlock user account mutation
-  const unlockUserMutation = useMutation(
-    (userId) => adminService.unlockUserAccount(userId),
-    {
-      onSuccess: () => {
-        message.success(t('ui.users.account_unlocked', 'Account unlocked successfully'));
-        queryClient.invalidateQueries('users');
-      },
-      onError: (error) => {
-        const errorMessage = error.response?.data?.message || t('ui.users.unlock_failed', 'Failed to unlock account');
-        message.error(errorMessage);
-      }
-    }
-  );
+  const unlockUserMutation = useMutation({
+    mutationFn: (userId) => adminService.unlockUserAccount(userId),
 
-  const updateUserNotificationSettingsMutation = useMutation(
-    ({ userId, enabled, reason }) => adminService.updateUserNotificationSettings(userId, {
+    onSuccess: () => {
+      message.success(t('ui.users.account_unlocked', 'Account unlocked successfully'));
+      queryClient.invalidateQueries({
+        queryKey: ['users'],
+      });
+    },
+
+    onError: (error) => {
+      const errorMessage = error.response?.data?.message || t('ui.users.unlock_failed', 'Failed to unlock account');
+      message.error(errorMessage);
+    },
+  });
+
+  const updateUserNotificationSettingsMutation = useMutation({
+    mutationFn: ({ userId, enabled, reason }) => adminService.updateUserNotificationSettings(userId, {
       delivery_telegram_status_updates_enabled: enabled,
       reason
     }),
-    {
-      onSuccess: (response) => {
-        const settings = response?.data?.notification_settings || response?.notification_settings || null;
-        if (settings) {
-          setNotificationSettings(settings);
-        }
-        message.success(
-          response?.message || t('ui.users.notification_settings_updated', 'Notification settings updated')
-        );
-        setIsNotificationReasonModalVisible(false);
-        setPendingNotificationToggle(null);
-        setNotificationReason('');
-      },
-      onError: (error) => {
-        const errorMessage = error.response?.data?.message || t('ui.users.notification_settings_update_failed', 'Failed to update notification settings');
-        message.error(errorMessage);
+
+    onSuccess: (response) => {
+      const settings = response?.data?.notification_settings || response?.notification_settings || null;
+      if (settings) {
+        setNotificationSettings(settings);
       }
-    }
-  );
+      message.success(
+        response?.message || t('ui.users.notification_settings_updated', 'Notification settings updated')
+      );
+      setIsNotificationReasonModalVisible(false);
+      setPendingNotificationToggle(null);
+      setNotificationReason('');
+    },
+
+    onError: (error) => {
+      const errorMessage = error.response?.data?.message || t('ui.users.notification_settings_update_failed', 'Failed to update notification settings');
+      message.error(errorMessage);
+    },
+  });
 
   // Handle unlock user
   const handleUnlockUser = (userId) => {
@@ -509,6 +520,7 @@ const Users = () => {
           telegram: { icon: <MessageOutlined />, color: 'blue', label: t('ui.users.reg_method_telegram', 'Telegram') }
         };
         const method = record.registration_method || 'email';
+        // eslint-disable-next-line security/detect-object-injection
         const config = methodConfig[method] || methodConfig.email;
 
         return (
@@ -555,6 +567,7 @@ const Users = () => {
         const isLocked = record.account_locked_until && new Date(record.account_locked_until) > new Date();
         return (
           <Space direction="vertical" size={2}>
+            {/* eslint-disable-next-line security/detect-object-injection */}
             <Tag color={colors[status]} size="small">
               {t(`ui.users.status_${status}`)}
             </Tag>
@@ -604,23 +617,27 @@ const Users = () => {
               {
                 key: 'view',
                 label: t('ui.users.view_details'),
+                // eslint-disable-next-line no-use-before-define
                 onClick: () => handleViewUser(record)
               },
               {
                 key: 'edit',
                 label: t('ui.users.edit_user', 'Edit User'),
+                // eslint-disable-next-line no-use-before-define
                 onClick: () => handleEditUser(record)
               },
               {
                 key: 'activate',
                 label: t('ui.users.activate'),
                 disabled: record.status === 'active',
+                // eslint-disable-next-line no-use-before-define
                 onClick: () => handleStatusChange(record.id, 'active')
               },
               {
                 key: 'suspend',
                 label: t('ui.users.suspend'),
                 disabled: record.status === 'suspended',
+                // eslint-disable-next-line no-use-before-define
                 onClick: () => handleStatusChange(record.id, 'suspended')
               },
               {
@@ -628,6 +645,7 @@ const Users = () => {
                 label: t('ui.users.ban'),
                 danger: true,
                 disabled: record.status === 'banned',
+                // eslint-disable-next-line no-use-before-define
                 onClick: () => handleStatusChange(record.id, 'banned')
               },
               // Show unlock option if account is locked
@@ -732,7 +750,7 @@ const Users = () => {
 
     updateUserNotificationSettingsMutation.mutate({
       userId: selectedUser.id,
-      enabled: !!pendingNotificationToggle,
+      enabled: Boolean(pendingNotificationToggle),
       reason
     });
   };
@@ -1152,7 +1170,7 @@ const Users = () => {
                     <Col xs={24} sm={8} style={{ textAlign: responsive.isMobileDevice ? 'left' : 'right' }}>
                       <Switch
                         checked={notificationSettings?.delivery_telegram_status_updates_enabled ?? true}
-                        loading={updateUserNotificationSettingsMutation.isLoading}
+                        loading={updateUserNotificationSettingsMutation.isPending}
                         onChange={handleNotificationToggleRequest}
                       />
                     </Col>
@@ -1338,7 +1356,7 @@ const Users = () => {
           setNotificationReason('');
         }}
         onOk={handleNotificationSettingsUpdateConfirm}
-        confirmLoading={updateUserNotificationSettingsMutation.isLoading}
+        confirmLoading={updateUserNotificationSettingsMutation.isPending}
         okText={t('ui.common.confirm', 'Confirm')}
         cancelText={t('ui.common.cancel', 'Cancel')}
       >
@@ -1378,7 +1396,7 @@ const Users = () => {
           addressForm.resetFields();
         }}
         onOk={() => addressForm.submit()}
-        confirmLoading={createAddressMutation.isLoading || updateAddressMutation.isLoading}
+        confirmLoading={createAddressMutation.isPending || updateAddressMutation.isPending}
         okText={editingAddress ? t('ui.common.save', 'Save') : t('ui.users.add', 'Add')}
         cancelText={t('ui.common.cancel', 'Cancel')}
         width={responsive.isMobileDevice ? '95%' : 750}
@@ -1555,7 +1573,7 @@ const Users = () => {
           createForm.resetFields();
         }}
         onOk={() => createForm.submit()}
-        confirmLoading={createUserMutation.isLoading || editUserMutation.isLoading}
+        confirmLoading={createUserMutation.isPending || editUserMutation.isPending}
         okText={editingUser ? t('ui.common.save', 'Save') : t('ui.users.create', 'Create')}
         cancelText={t('ui.common.cancel', 'Cancel')}
         width={responsive.isMobileDevice ? '95%' : 500}
@@ -1691,7 +1709,7 @@ const Users = () => {
               <strong>{t('ui.users.entity_client', 'Entity client')}:</strong>{' '}
               {t(
                 'ui.users.entity_client_note',
-                'Users created with user type \"Entity\" become selectable in the Corporate Contracts screen.'
+                'Users created with user type "Entity" become selectable in the Corporate Contracts screen.'
               )}
             </div>
           )}

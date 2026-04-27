@@ -1,58 +1,69 @@
 import exportUtils from '../../utils/exportUtils';
 import adminService from '../../services/adminService';
 import { saveAs } from 'file-saver';
-import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
-// Mock dependencies
-jest.mock('../../services/adminService');
-jest.mock('file-saver');
-jest.mock('xlsx');
-jest.mock('jspdf', () => {
-  return jest.fn().mockImplementation(() => ({
-    setFontSize: jest.fn(),
-    text: jest.fn(),
-    autoTable: jest.fn(),
-    save: jest.fn()
+vi.mock('../../services/adminService');
+vi.mock('file-saver', () => ({
+  saveAs: vi.fn(),
+  default: { saveAs: vi.fn() },
+}));
+
+const mockWriteBuffer = vi.fn();
+const mockAddRows = vi.fn();
+const mockAddWorksheet = vi.fn();
+
+vi.mock('exceljs', () => {
+  const Workbook = vi.fn().mockImplementation(() => ({
+    addWorksheet: mockAddWorksheet,
+    xlsx: { writeBuffer: mockWriteBuffer },
   }));
+  return { default: { Workbook } };
 });
+
+vi.mock('jspdf', () => ({
+  default: vi.fn().mockImplementation(() => ({
+    setFontSize: vi.fn(),
+    text: vi.fn(),
+    save: vi.fn(),
+  })),
+}));
+
+vi.mock('jspdf-autotable', () => ({
+  default: vi.fn(),
+}));
 
 describe('ExportUtils', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
+    mockAddWorksheet.mockReturnValue({ columns: [], addRows: mockAddRows });
+    mockWriteBuffer.mockResolvedValue(new ArrayBuffer(8));
   });
 
   describe('exportToExcel', () => {
-    it('exports data to Excel successfully', () => {
+    it('exports data to Excel successfully', async () => {
       const mockData = [
         { id: 1, name: 'John Doe', email: 'john@example.com' },
-        { id: 2, name: 'Jane Smith', email: 'jane@example.com' }
+        { id: 2, name: 'Jane Smith', email: 'jane@example.com' },
       ];
 
-      const mockWorksheet = {};
-      const mockWorkbook = {};
-      const mockBuffer = new ArrayBuffer(8);
+      const result = await exportUtils.exportToExcel(mockData, 'test_export', 'Test Sheet');
 
-      XLSX.utils.json_to_sheet.mockReturnValue(mockWorksheet);
-      XLSX.utils.book_new.mockReturnValue(mockWorkbook);
-      XLSX.utils.book_append_sheet.mockImplementation(() => {});
-      XLSX.write.mockReturnValue(mockBuffer);
-
-      const result = exportUtils.exportToExcel(mockData, 'test_export', 'Test Sheet');
-
-      expect(XLSX.utils.json_to_sheet).toHaveBeenCalledWith(mockData);
-      expect(XLSX.utils.book_new).toHaveBeenCalled();
-      expect(XLSX.utils.book_append_sheet).toHaveBeenCalledWith(mockWorkbook, mockWorksheet, 'Test Sheet');
+      expect(ExcelJS.Workbook).toHaveBeenCalled();
+      expect(mockAddWorksheet).toHaveBeenCalledWith('Test Sheet');
+      expect(mockAddRows).toHaveBeenCalledWith(mockData);
+      expect(mockWriteBuffer).toHaveBeenCalled();
       expect(saveAs).toHaveBeenCalled();
       expect(result.success).toBe(true);
       expect(result.message).toBe('Excel file exported successfully');
     });
 
-    it('handles export errors gracefully', () => {
-      XLSX.utils.json_to_sheet.mockImplementation(() => {
-        throw new Error('Export failed');
-      });
+    it('handles export errors gracefully', async () => {
+      mockWriteBuffer.mockRejectedValueOnce(new Error('Export failed'));
 
-      const result = exportUtils.exportToExcel([], 'test_export');
+      const result = await exportUtils.exportToExcel([{ a: 1 }], 'test_export');
 
       expect(result.success).toBe(false);
       expect(result.message).toBe('Failed to export Excel file');
@@ -62,22 +73,40 @@ describe('ExportUtils', () => {
   describe('exportToCSV', () => {
     it('exports data to CSV successfully', () => {
       const mockData = [
-        { id: 1, name: 'John Doe', email: 'john@example.com' }
+        { id: 1, name: 'John Doe', email: 'john@example.com' },
       ];
-
-      const mockWorksheet = {};
-      const mockCSV = 'id,name,email\n1,John Doe,john@example.com';
-
-      XLSX.utils.json_to_sheet.mockReturnValue(mockWorksheet);
-      XLSX.utils.sheet_to_csv.mockReturnValue(mockCSV);
 
       const result = exportUtils.exportToCSV(mockData, 'test_export');
 
-      expect(XLSX.utils.json_to_sheet).toHaveBeenCalledWith(mockData);
-      expect(XLSX.utils.sheet_to_csv).toHaveBeenCalledWith(mockWorksheet);
       expect(saveAs).toHaveBeenCalled();
+      const blob = saveAs.mock.calls[0][0];
+      const filename = saveAs.mock.calls[0][1];
+      expect(filename).toBe('test_export.csv');
+      expect(blob.type).toContain('text/csv');
       expect(result.success).toBe(true);
       expect(result.message).toBe('CSV file exported successfully');
+    });
+
+    it('escapes CSV cells containing commas and quotes', () => {
+      const mockData = [
+        { name: 'Smith, Jane', quote: 'She said "hi"' },
+      ];
+
+      exportUtils.exportToCSV(mockData, 'csv_edge');
+
+      expect(saveAs).toHaveBeenCalled();
+    });
+  });
+
+  describe('exportToPDF', () => {
+    it('generates a PDF via autoTable', () => {
+      const mockData = [{ col1: 'a', col2: 'b' }];
+
+      const result = exportUtils.exportToPDF(mockData, 'test_export', 'Title');
+
+      expect(jsPDF).toHaveBeenCalled();
+      expect(autoTable).toHaveBeenCalled();
+      expect(result.success).toBe(true);
     });
   });
 
@@ -92,16 +121,15 @@ describe('ExportUtils', () => {
             role: 'customer',
             status: 'active',
             created_at: '2024-01-01T00:00:00Z',
-            last_login: '2024-01-15T10:00:00Z'
-          }
-        ]
+            last_login: '2024-01-15T10:00:00Z',
+          },
+        ],
       };
 
       adminService.getUsers.mockResolvedValue(mockUsersData);
 
-      // Mock the exportToExcel method
-      const exportToExcelSpy = jest.spyOn(exportUtils, 'exportToExcel');
-      exportToExcelSpy.mockReturnValue({ success: true, message: 'Excel file exported successfully' });
+      const exportToExcelSpy = vi.spyOn(exportUtils, 'exportToExcel');
+      exportToExcelSpy.mockResolvedValue({ success: true, message: 'Excel file exported successfully' });
 
       const result = await exportUtils.exportUsers({}, 'excel');
 
@@ -135,15 +163,15 @@ describe('ExportUtils', () => {
             status: 'delivered',
             payment_status: 'paid',
             created_at: '2024-01-01T00:00:00Z',
-            items_count: 2
-          }
-        ]
+            items_count: 2,
+          },
+        ],
       };
 
       adminService.getOrders.mockResolvedValue(mockOrdersData);
 
-      const exportToExcelSpy = jest.spyOn(exportUtils, 'exportToExcel');
-      exportToExcelSpy.mockReturnValue({ success: true, message: 'Excel file exported successfully' });
+      const exportToExcelSpy = vi.spyOn(exportUtils, 'exportToExcel');
+      exportToExcelSpy.mockResolvedValue({ success: true, message: 'Excel file exported successfully' });
 
       const result = await exportUtils.exportOrders({}, 'excel');
 
@@ -162,14 +190,14 @@ describe('ExportUtils', () => {
             customer_name: 'John Doe',
             total_amount: 99.99,
             status: 'delivered',
-            created_at: '2024-01-01T00:00:00Z'
-          }
-        ]
+            created_at: '2024-01-01T00:00:00Z',
+          },
+        ],
       };
 
       adminService.getOrders.mockResolvedValue(mockOrdersData);
 
-      const exportToPDFSpy = jest.spyOn(exportUtils, 'exportToPDF');
+      const exportToPDFSpy = vi.spyOn(exportUtils, 'exportToPDF');
       exportToPDFSpy.mockReturnValue({ success: true, message: 'PDF file exported successfully' });
 
       const result = await exportUtils.exportOrders({}, 'pdf');
@@ -194,15 +222,15 @@ describe('ExportUtils', () => {
             stock_quantity: 100,
             status: 'active',
             created_at: '2024-01-01T00:00:00Z',
-            is_featured: true
-          }
-        ]
+            is_featured: true,
+          },
+        ],
       };
 
       adminService.getProducts.mockResolvedValue(mockProductsData);
 
-      const exportToExcelSpy = jest.spyOn(exportUtils, 'exportToExcel');
-      exportToExcelSpy.mockReturnValue({ success: true, message: 'Excel file exported successfully' });
+      const exportToExcelSpy = vi.spyOn(exportUtils, 'exportToExcel');
+      exportToExcelSpy.mockResolvedValue({ success: true, message: 'Excel file exported successfully' });
 
       const result = await exportUtils.exportProducts({}, 'excel');
 
@@ -216,7 +244,7 @@ describe('ExportUtils', () => {
 
   describe('exportData', () => {
     it('calls correct export method based on type', async () => {
-      const exportUsersSpy = jest.spyOn(exportUtils, 'exportUsers');
+      const exportUsersSpy = vi.spyOn(exportUtils, 'exportUsers');
       exportUsersSpy.mockResolvedValue({ success: true, message: 'Users exported successfully' });
 
       const result = await exportUtils.exportData('users', {}, 'excel');

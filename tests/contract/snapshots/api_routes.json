@@ -1,0 +1,3454 @@
+[
+  {
+    "endpoint": "addresses.create_address",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/addresses/"
+  },
+  {
+    "endpoint": "addresses.get_user_addresses",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/addresses/"
+  },
+  {
+    "endpoint": "addresses.delete_address",
+    "methods": [
+      "DELETE"
+    ],
+    "rule": "/api/v1/addresses/<int:address_id>"
+  },
+  {
+    "endpoint": "addresses.get_address",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/addresses/<int:address_id>"
+  },
+  {
+    "endpoint": "addresses.update_address",
+    "methods": [
+      "PUT"
+    ],
+    "rule": "/api/v1/addresses/<int:address_id>"
+  },
+  {
+    "endpoint": "addresses.set_default_address",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/addresses/<int:address_id>/set-default"
+  },
+  {
+    "endpoint": "addresses.get_districts",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/addresses/districts"
+  },
+  {
+    "endpoint": "addresses.get_geo_configuration",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/addresses/geo-config"
+  },
+  {
+    "endpoint": "addresses.geocode_address",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/addresses/geocode"
+  },
+  {
+    "endpoint": "addresses.reverse_geocode",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/addresses/reverse-geocode"
+  },
+  {
+    "endpoint": "admin.get_audit_logs",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/audit-logs"
+  },
+  {
+    "endpoint": "admin.get_audit_log_detail",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/audit-logs/<int:log_id>"
+  },
+  {
+    "endpoint": "admin.get_audit_log_analytics",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/audit-logs/analytics"
+  },
+  {
+    "endpoint": "admin.export_audit_logs",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/audit-logs/export"
+  },
+  {
+    "endpoint": "admin.get_security_alerts",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/audit-logs/security-alerts"
+  },
+  {
+    "endpoint": "admin.create_backup",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/backup"
+  },
+  {
+    "endpoint": "admin.admin_create_blog_post",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/blog/posts"
+  },
+  {
+    "endpoint": "admin.get_all_blog_posts",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/blog/posts"
+  },
+  {
+    "endpoint": "admin.admin_delete_blog_post",
+    "methods": [
+      "DELETE"
+    ],
+    "rule": "/api/v1/admin/blog/posts/<int:post_id>"
+  },
+  {
+    "endpoint": "admin.admin_get_blog_post",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/blog/posts/<int:post_id>"
+  },
+  {
+    "endpoint": "admin.admin_update_blog_post",
+    "methods": [
+      "PUT"
+    ],
+    "rule": "/api/v1/admin/blog/posts/<int:post_id>"
+  },
+  {
+    "endpoint": "admin.admin_publish_blog_post",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/blog/posts/<int:post_id>/publish"
+  },
+  {
+    "endpoint": "admin.admin_unpublish_blog_post",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/blog/posts/<int:post_id>/unpublish"
+  },
+  {
+    "endpoint": "admin_bottles.create_bottle_adjustment",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/bottles/adjustment"
+  },
+  {
+    "endpoint": "admin_bottles.list_bottle_balances",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/bottles/balances"
+  },
+  {
+    "endpoint": "admin_bottles.get_customer_bottle_balances",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/bottles/balances/<int:user_id>"
+  },
+  {
+    "endpoint": "admin_bottles.bottle_dashboard",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/bottles/dashboard"
+  },
+  {
+    "endpoint": "admin_bottles.create_bottle_fine",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/bottles/fines"
+  },
+  {
+    "endpoint": "admin_bottles.list_bottle_fines",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/bottles/fines"
+  },
+  {
+    "endpoint": "admin_bottles.update_bottle_fine",
+    "methods": [
+      "PUT"
+    ],
+    "rule": "/api/v1/admin/bottles/fines/<int:fine_id>"
+  },
+  {
+    "endpoint": "admin_bottles.set_bottle_initial_balance",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/bottles/initial-balance"
+  },
+  {
+    "endpoint": "admin_bottles.list_bottle_ledger",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/bottles/ledger"
+  },
+  {
+    "endpoint": "admin_bottles.get_bottle_ledger",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/bottles/ledger/<int:user_id>/<int:address_id>"
+  },
+  {
+    "endpoint": "admin_bottles.reconcile_bottle_balance",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/bottles/reconcile/<int:user_id>/<int:address_id>"
+  },
+  {
+    "endpoint": "admin_bottles.list_bottle_sessions",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/bottles/sessions"
+  },
+  {
+    "endpoint": "admin_bottles.get_bottle_session",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/bottles/sessions/<int:session_id>"
+  },
+  {
+    "endpoint": "admin_bottles.force_close_bottle_session",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/bottles/sessions/<int:session_id>/force-close"
+  },
+  {
+    "endpoint": "admin_bottles.list_bottle_transfers",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/bottles/transfers"
+  },
+  {
+    "endpoint": "admin_bottles.resolve_bottle_transfer_dispute",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/bottles/transfers/<int:transfer_id>/resolve"
+  },
+  {
+    "endpoint": "admin.perform_bulk_action",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/bulk-actions"
+  },
+  {
+    "endpoint": "admin.create_campaign",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/campaigns"
+  },
+  {
+    "endpoint": "admin.get_promotional_campaigns",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/campaigns"
+  },
+  {
+    "endpoint": "admin.delete_campaign",
+    "methods": [
+      "DELETE"
+    ],
+    "rule": "/api/v1/admin/campaigns/<int:campaign_id>"
+  },
+  {
+    "endpoint": "admin.get_campaign_detail",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/campaigns/<int:campaign_id>"
+  },
+  {
+    "endpoint": "admin.update_campaign",
+    "methods": [
+      "PUT"
+    ],
+    "rule": "/api/v1/admin/campaigns/<int:campaign_id>"
+  },
+  {
+    "endpoint": "admin.toggle_campaign",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/campaigns/<int:campaign_id>/toggle"
+  },
+  {
+    "endpoint": "admin.get_campaign_usage",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/campaigns/<int:campaign_id>/usage"
+  },
+  {
+    "endpoint": "admin.create_category",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/categories"
+  },
+  {
+    "endpoint": "admin.get_categories",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/categories"
+  },
+  {
+    "endpoint": "admin.delete_category",
+    "methods": [
+      "DELETE"
+    ],
+    "rule": "/api/v1/admin/categories/<int:category_id>"
+  },
+  {
+    "endpoint": "admin.get_category",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/categories/<int:category_id>"
+  },
+  {
+    "endpoint": "admin.update_category",
+    "methods": [
+      "PUT"
+    ],
+    "rule": "/api/v1/admin/categories/<int:category_id>"
+  },
+  {
+    "endpoint": "admin.reorder_category",
+    "methods": [
+      "PUT"
+    ],
+    "rule": "/api/v1/admin/categories/<int:category_id>/reorder"
+  },
+  {
+    "endpoint": "admin.create_corporate_contract",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/corporate/contracts"
+  },
+  {
+    "endpoint": "admin.list_corporate_contracts",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/corporate/contracts"
+  },
+  {
+    "endpoint": "admin.get_corporate_contract",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/corporate/contracts/<int:contract_id>"
+  },
+  {
+    "endpoint": "admin.update_corporate_contract",
+    "methods": [
+      "PUT"
+    ],
+    "rule": "/api/v1/admin/corporate/contracts/<int:contract_id>"
+  },
+  {
+    "endpoint": "admin.get_corporate_contract_balance",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/corporate/contracts/<int:contract_id>/balance"
+  },
+  {
+    "endpoint": "admin.get_corporate_contract_ledger",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/corporate/contracts/<int:contract_id>/ledger"
+  },
+  {
+    "endpoint": "admin.topup_corporate_contract",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/corporate/contracts/<int:contract_id>/prepayments/topup"
+  },
+  {
+    "endpoint": "admin.upsert_corporate_contract_prices",
+    "methods": [
+      "PUT"
+    ],
+    "rule": "/api/v1/admin/corporate/contracts/<int:contract_id>/prices"
+  },
+  {
+    "endpoint": "admin.preview_corporate_contract_overlaps",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/corporate/contracts/overlap-preview"
+  },
+  {
+    "endpoint": "admin.get_admin_dashboard",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/dashboard"
+  },
+  {
+    "endpoint": "admin.get_admin_deliveries",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/deliveries"
+  },
+  {
+    "endpoint": "admin.update_admin_delivery",
+    "methods": [
+      "PUT"
+    ],
+    "rule": "/api/v1/admin/deliveries/<int:delivery_id>"
+  },
+  {
+    "endpoint": "admin.get_delivery_personnel",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/delivery-personnel"
+  },
+  {
+    "endpoint": "admin.create_delivery_route",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/delivery-routes"
+  },
+  {
+    "endpoint": "admin.get_delivery_routes",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/delivery-routes"
+  },
+  {
+    "endpoint": "admin.delete_delivery_route",
+    "methods": [
+      "DELETE"
+    ],
+    "rule": "/api/v1/admin/delivery-routes/<int:route_id>"
+  },
+  {
+    "endpoint": "admin.get_delivery_route",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/delivery-routes/<int:route_id>"
+  },
+  {
+    "endpoint": "admin.update_delivery_route",
+    "methods": [
+      "PUT"
+    ],
+    "rule": "/api/v1/admin/delivery-routes/<int:route_id>"
+  },
+  {
+    "endpoint": "admin.update_route_status",
+    "methods": [
+      "PUT"
+    ],
+    "rule": "/api/v1/admin/delivery-routes/<int:route_id>/status"
+  },
+  {
+    "endpoint": "admin.get_delivery_routes_analytics",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/delivery-routes/analytics"
+  },
+  {
+    "endpoint": "admin.create_time_slot",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/delivery/time-slots"
+  },
+  {
+    "endpoint": "admin.get_time_slots_admin",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/delivery/time-slots"
+  },
+  {
+    "endpoint": "admin.delete_time_slot",
+    "methods": [
+      "DELETE"
+    ],
+    "rule": "/api/v1/admin/delivery/time-slots/<int:slot_id>"
+  },
+  {
+    "endpoint": "admin.get_time_slot_admin",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/delivery/time-slots/<int:slot_id>"
+  },
+  {
+    "endpoint": "admin.update_time_slot",
+    "methods": [
+      "PUT"
+    ],
+    "rule": "/api/v1/admin/delivery/time-slots/<int:slot_id>"
+  },
+  {
+    "endpoint": "admin.adjust_inventory",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/inventory/<int:product_id>/adjust"
+  },
+  {
+    "endpoint": "admin.get_inventory_status",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/inventory/<int:product_id>/status"
+  },
+  {
+    "endpoint": "admin.check_inventory_availability",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/inventory/check-availability"
+  },
+  {
+    "endpoint": "admin.get_order_reservations",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/inventory/reservations/<int:order_id>"
+  },
+  {
+    "endpoint": "admin.release_order_reservations",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/inventory/reservations/<int:order_id>/release"
+  },
+  {
+    "endpoint": "admin.get_loyalty_members",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/loyalty-customers"
+  },
+  {
+    "endpoint": "admin.get_loyalty_analytics",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/loyalty/analytics"
+  },
+  {
+    "endpoint": "admin.get_loyalty_members",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/loyalty/members"
+  },
+  {
+    "endpoint": "admin.get_loyalty_member_detail",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/loyalty/members/<int:user_id>"
+  },
+  {
+    "endpoint": "admin.create_loyalty_program",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/loyalty/programs"
+  },
+  {
+    "endpoint": "admin.get_loyalty_programs",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/loyalty/programs"
+  },
+  {
+    "endpoint": "admin.delete_loyalty_program",
+    "methods": [
+      "DELETE"
+    ],
+    "rule": "/api/v1/admin/loyalty/programs/<int:program_id>"
+  },
+  {
+    "endpoint": "admin.update_loyalty_program",
+    "methods": [
+      "PUT"
+    ],
+    "rule": "/api/v1/admin/loyalty/programs/<int:program_id>"
+  },
+  {
+    "endpoint": "admin.create_loyalty_reward",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/loyalty/rewards"
+  },
+  {
+    "endpoint": "admin.get_loyalty_rewards",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/loyalty/rewards"
+  },
+  {
+    "endpoint": "admin.delete_loyalty_reward",
+    "methods": [
+      "DELETE"
+    ],
+    "rule": "/api/v1/admin/loyalty/rewards/<int:reward_id>"
+  },
+  {
+    "endpoint": "admin.get_loyalty_reward_detail",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/loyalty/rewards/<int:reward_id>"
+  },
+  {
+    "endpoint": "admin.update_loyalty_reward",
+    "methods": [
+      "PUT"
+    ],
+    "rule": "/api/v1/admin/loyalty/rewards/<int:reward_id>"
+  },
+  {
+    "endpoint": "admin.create_loyalty_tier_config",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/loyalty/tiers"
+  },
+  {
+    "endpoint": "admin.get_loyalty_tier_configs",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/loyalty/tiers"
+  },
+  {
+    "endpoint": "admin.delete_loyalty_tier_config",
+    "methods": [
+      "DELETE"
+    ],
+    "rule": "/api/v1/admin/loyalty/tiers/<int:tier_id>"
+  },
+  {
+    "endpoint": "admin.update_loyalty_tier_config",
+    "methods": [
+      "PUT"
+    ],
+    "rule": "/api/v1/admin/loyalty/tiers/<int:tier_id>"
+  },
+  {
+    "endpoint": "admin.get_notification_campaign_segments",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/notification-campaign-segments"
+  },
+  {
+    "endpoint": "admin.create_notification_campaign",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/notification-campaigns"
+  },
+  {
+    "endpoint": "admin.get_notification_campaigns",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/notification-campaigns"
+  },
+  {
+    "endpoint": "admin.delete_notification_campaign",
+    "methods": [
+      "DELETE"
+    ],
+    "rule": "/api/v1/admin/notification-campaigns/<int:campaign_id>"
+  },
+  {
+    "endpoint": "admin.get_notification_campaign_detail",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/notification-campaigns/<int:campaign_id>"
+  },
+  {
+    "endpoint": "admin.update_notification_campaign",
+    "methods": [
+      "PUT"
+    ],
+    "rule": "/api/v1/admin/notification-campaigns/<int:campaign_id>"
+  },
+  {
+    "endpoint": "admin.cancel_notification_campaign",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/notification-campaigns/<int:campaign_id>/cancel"
+  },
+  {
+    "endpoint": "admin.duplicate_notification_campaign",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/notification-campaigns/<int:campaign_id>/duplicate"
+  },
+  {
+    "endpoint": "admin.send_notification_campaign",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/notification-campaigns/<int:campaign_id>/send"
+  },
+  {
+    "endpoint": "admin.create_notification_template",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/notification-templates"
+  },
+  {
+    "endpoint": "admin.get_notification_templates",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/notification-templates"
+  },
+  {
+    "endpoint": "admin.delete_notification_template",
+    "methods": [
+      "DELETE"
+    ],
+    "rule": "/api/v1/admin/notification-templates/<int:template_id>"
+  },
+  {
+    "endpoint": "admin.get_notification_template_detail",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/notification-templates/<int:template_id>"
+  },
+  {
+    "endpoint": "admin.update_notification_template",
+    "methods": [
+      "PUT"
+    ],
+    "rule": "/api/v1/admin/notification-templates/<int:template_id>"
+  },
+  {
+    "endpoint": "admin.preview_notification_template",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/notification-templates/<int:template_id>/preview"
+  },
+  {
+    "endpoint": "admin.test_send_notification_template",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/notification-templates/<int:template_id>/test-send"
+  },
+  {
+    "endpoint": "admin.get_notification_channels",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/notification-templates/channels"
+  },
+  {
+    "endpoint": "admin.get_notification_types",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/notification-templates/types"
+  },
+  {
+    "endpoint": "admin.create_order_for_user",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/orders"
+  },
+  {
+    "endpoint": "admin.get_orders",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/orders"
+  },
+  {
+    "endpoint": "admin.get_order_details",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/orders/<int:order_id>"
+  },
+  {
+    "endpoint": "admin.update_order_status",
+    "methods": [
+      "PUT"
+    ],
+    "rule": "/api/v1/admin/orders/<int:order_id>/status"
+  },
+  {
+    "endpoint": "admin.get_payments",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/payments"
+  },
+  {
+    "endpoint": "admin.get_payment",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/payments/<int:payment_id>"
+  },
+  {
+    "endpoint": "admin.retry_payment_fiscalization",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/payments/<int:payment_id>/fiscalization/retry"
+  },
+  {
+    "endpoint": "admin.refund_payment",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/payments/<int:payment_id>/refund"
+  },
+  {
+    "endpoint": "admin.get_payment_status",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/payments/<int:payment_id>/status"
+  },
+  {
+    "endpoint": "admin.get_payment_analytics",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/payments/analytics"
+  },
+  {
+    "endpoint": "admin.get_payment_transactions",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/payments/transactions"
+  },
+  {
+    "endpoint": "admin.create_price_rule",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/price-rules"
+  },
+  {
+    "endpoint": "admin.get_price_rules",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/price-rules"
+  },
+  {
+    "endpoint": "admin.delete_price_rule",
+    "methods": [
+      "DELETE"
+    ],
+    "rule": "/api/v1/admin/price-rules/<int:rule_id>"
+  },
+  {
+    "endpoint": "admin.get_price_rule_detail",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/price-rules/<int:rule_id>"
+  },
+  {
+    "endpoint": "admin.update_price_rule",
+    "methods": [
+      "PUT"
+    ],
+    "rule": "/api/v1/admin/price-rules/<int:rule_id>"
+  },
+  {
+    "endpoint": "admin.get_price_rule_types",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/price-rules/types"
+  },
+  {
+    "endpoint": "admin.create_product",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/products"
+  },
+  {
+    "endpoint": "admin.get_products_admin",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/products"
+  },
+  {
+    "endpoint": "admin.delete_product",
+    "methods": [
+      "DELETE"
+    ],
+    "rule": "/api/v1/admin/products/<int:product_id>"
+  },
+  {
+    "endpoint": "admin.update_product",
+    "methods": [
+      "PUT"
+    ],
+    "rule": "/api/v1/admin/products/<int:product_id>"
+  },
+  {
+    "endpoint": "admin.create_product_marking_codes",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/products/<int:product_id>/marking-codes"
+  },
+  {
+    "endpoint": "admin.list_product_marking_codes",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/products/<int:product_id>/marking-codes"
+  },
+  {
+    "endpoint": "admin.update_product_marking_code",
+    "methods": [
+      "PUT"
+    ],
+    "rule": "/api/v1/admin/products/<int:product_id>/marking-codes/<int:marking_code_id>"
+  },
+  {
+    "endpoint": "admin.export_product_marking_codes",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/products/<int:product_id>/marking-codes/export"
+  },
+  {
+    "endpoint": "admin.import_product_marking_codes",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/products/<int:product_id>/marking-codes/import"
+  },
+  {
+    "endpoint": "admin.update_product_stock",
+    "methods": [
+      "PUT"
+    ],
+    "rule": "/api/v1/admin/products/<int:product_id>/stock"
+  },
+  {
+    "endpoint": "admin.generate_report",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/reports/generate"
+  },
+  {
+    "endpoint": "admin.get_reviews",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/reviews"
+  },
+  {
+    "endpoint": "admin.delete_review",
+    "methods": [
+      "DELETE"
+    ],
+    "rule": "/api/v1/admin/reviews/<int:review_id>"
+  },
+  {
+    "endpoint": "admin.get_review",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/reviews/<int:review_id>"
+  },
+  {
+    "endpoint": "admin.approve_review",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/reviews/<int:review_id>/approve"
+  },
+  {
+    "endpoint": "admin.feature_review",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/reviews/<int:review_id>/feature"
+  },
+  {
+    "endpoint": "admin.reject_review",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/reviews/<int:review_id>/reject"
+  },
+  {
+    "endpoint": "admin.get_review_analytics",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/reviews/analytics"
+  },
+  {
+    "endpoint": "admin.bulk_approve_reviews",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/reviews/bulk-approve"
+  },
+  {
+    "endpoint": "admin.send_announcement",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/send-announcement"
+  },
+  {
+    "endpoint": "admin.get_cash_reconciliation_report",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/staff/cash-reconciliation"
+  },
+  {
+    "endpoint": "admin.record_cash_collection_admin",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/staff/cash-reconciliation/collections"
+  },
+  {
+    "endpoint": "admin.get_customer_cod_statement_admin",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/staff/cash-reconciliation/customers/<int:customer_id>/statement"
+  },
+  {
+    "endpoint": "admin.get_order_payment_timeline_admin",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/staff/cash-reconciliation/orders/<int:order_id>/timeline"
+  },
+  {
+    "endpoint": "admin.get_cash_reconciliation_session",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/staff/cash-reconciliation/sessions/<int:session_id>"
+  },
+  {
+    "endpoint": "admin.resolve_cash_reconciliation_session",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/staff/cash-reconciliation/sessions/<int:session_id>/resolve"
+  },
+  {
+    "endpoint": "admin.verify_cash_reconciliation_session",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/staff/cash-reconciliation/sessions/<int:session_id>/verify"
+  },
+  {
+    "endpoint": "admin.confirm_cash_reconciliation_transfer",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/staff/cash-reconciliation/transfers/<int:transfer_id>/confirm"
+  },
+  {
+    "endpoint": "admin.search_cod_collection_users_admin",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/staff/cash-reconciliation/users/search"
+  },
+  {
+    "endpoint": "admin.list_cod_collection_users_with_open_debts_admin",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/staff/cash-reconciliation/users/with-open-cod"
+  },
+  {
+    "endpoint": "admin.create_staff_delivery_person",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/staff/delivery-persons"
+  },
+  {
+    "endpoint": "admin.get_staff_delivery_persons",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/staff/delivery-persons"
+  },
+  {
+    "endpoint": "admin.get_staff_delivery_person_details",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/staff/delivery-persons/<int:person_id>"
+  },
+  {
+    "endpoint": "admin.update_staff_delivery_person",
+    "methods": [
+      "PUT"
+    ],
+    "rule": "/api/v1/admin/staff/delivery-persons/<int:person_id>"
+  },
+  {
+    "endpoint": "admin.toggle_staff_mute_notifications",
+    "methods": [
+      "PUT"
+    ],
+    "rule": "/api/v1/admin/staff/delivery-persons/<int:person_id>/mute"
+  },
+  {
+    "endpoint": "admin.admin_assign_delivery",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/staff/delivery/assign/<int:delivery_id>"
+  },
+  {
+    "endpoint": "admin.admin_reassign_delivery",
+    "methods": [
+      "PUT"
+    ],
+    "rule": "/api/v1/admin/staff/delivery/reassign/<int:delivery_id>"
+  },
+  {
+    "endpoint": "admin.generate_staff_invite_link",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/staff/invite-link"
+  },
+  {
+    "endpoint": "admin.create_staff_operator",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/staff/operators"
+  },
+  {
+    "endpoint": "admin.get_staff_operators",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/staff/operators"
+  },
+  {
+    "endpoint": "admin.update_staff_operator",
+    "methods": [
+      "PUT"
+    ],
+    "rule": "/api/v1/admin/staff/operators/<int:user_id>"
+  },
+  {
+    "endpoint": "admin.get_admin_staff_overview",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/staff/overview"
+  },
+  {
+    "endpoint": "admin.update_staff_user_roles",
+    "methods": [
+      "PUT"
+    ],
+    "rule": "/api/v1/admin/staff/users/<int:user_id>/roles"
+  },
+  {
+    "endpoint": "admin.get_subscriptions",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/subscriptions"
+  },
+  {
+    "endpoint": "admin.get_subscription",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/subscriptions/<int:subscription_id>"
+  },
+  {
+    "endpoint": "admin.process_subscription_billing_admin",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/subscriptions/<int:subscription_id>/billing/process"
+  },
+  {
+    "endpoint": "admin.cancel_subscription_admin",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/subscriptions/<int:subscription_id>/cancel"
+  },
+  {
+    "endpoint": "admin.pause_subscription_admin",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/subscriptions/<int:subscription_id>/pause"
+  },
+  {
+    "endpoint": "admin.resume_subscription_admin",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/subscriptions/<int:subscription_id>/resume"
+  },
+  {
+    "endpoint": "admin.get_subscription_analytics",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/subscriptions/analytics"
+  },
+  {
+    "endpoint": "admin.get_system_settings",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/system-settings"
+  },
+  {
+    "endpoint": "admin.update_system_settings",
+    "methods": [
+      "PUT"
+    ],
+    "rule": "/api/v1/admin/system-settings"
+  },
+  {
+    "endpoint": "admin.get_system_settings_categories",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/system-settings/categories"
+  },
+  {
+    "endpoint": "admin.reset_system_settings",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/system-settings/reset"
+  },
+  {
+    "endpoint": "admin.create_translation",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/translations"
+  },
+  {
+    "endpoint": "admin.get_translations",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/translations"
+  },
+  {
+    "endpoint": "admin.delete_translation",
+    "methods": [
+      "DELETE"
+    ],
+    "rule": "/api/v1/admin/translations/<int:translation_id>"
+  },
+  {
+    "endpoint": "admin.get_translation_by_id",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/translations/<int:translation_id>"
+  },
+  {
+    "endpoint": "admin.update_translation",
+    "methods": [
+      "PUT"
+    ],
+    "rule": "/api/v1/admin/translations/<int:translation_id>"
+  },
+  {
+    "endpoint": "admin.get_translation_completeness",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/translations/completeness"
+  },
+  {
+    "endpoint": "admin.get_translation_completion",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/translations/completion"
+  },
+  {
+    "endpoint": "admin.get_translatable_entities",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/translations/entities"
+  },
+  {
+    "endpoint": "admin.export_translations",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/translations/export"
+  },
+  {
+    "endpoint": "admin.import_translations",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/translations/import"
+  },
+  {
+    "endpoint": "admin.get_missing_translations",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/translations/missing"
+  },
+  {
+    "endpoint": "admin.sync_entity_translations",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/translations/sync/<entity_type>"
+  },
+  {
+    "endpoint": "admin_tryouts.assign_tryout_task",
+    "methods": [
+      "PUT"
+    ],
+    "rule": "/api/v1/admin/tryout-tasks/<int:task_id>/assign"
+  },
+  {
+    "endpoint": "admin_tryouts.complete_tryout_task",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/tryout-tasks/<int:task_id>/complete"
+  },
+  {
+    "endpoint": "admin_tryouts.create_tryout",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/tryouts"
+  },
+  {
+    "endpoint": "admin_tryouts.list_tryouts",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/tryouts"
+  },
+  {
+    "endpoint": "admin_tryouts.get_tryout",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/tryouts/<int:tryout_id>"
+  },
+  {
+    "endpoint": "admin_tryouts.update_tryout",
+    "methods": [
+      "PUT"
+    ],
+    "rule": "/api/v1/admin/tryouts/<int:tryout_id>"
+  },
+  {
+    "endpoint": "admin_tryouts.adjust_tryout_bottles",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/tryouts/<int:tryout_id>/adjust-bottles"
+  },
+  {
+    "endpoint": "admin_tryouts.convert_tryout",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/tryouts/<int:tryout_id>/convert"
+  },
+  {
+    "endpoint": "admin_tryouts.create_tryout_task",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/tryouts/<int:tryout_id>/tasks"
+  },
+  {
+    "endpoint": "admin_tryouts.export_tryouts",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/tryouts/export"
+  },
+  {
+    "endpoint": "admin.upload_file",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/upload/file"
+  },
+  {
+    "endpoint": "admin.upload_image",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/upload/image"
+  },
+  {
+    "endpoint": "admin.create_user",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/users"
+  },
+  {
+    "endpoint": "admin.get_users",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/users"
+  },
+  {
+    "endpoint": "admin.get_user_details",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/users/<int:user_id>"
+  },
+  {
+    "endpoint": "admin.update_user",
+    "methods": [
+      "PUT"
+    ],
+    "rule": "/api/v1/admin/users/<int:user_id>"
+  },
+  {
+    "endpoint": "admin.create_user_address",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/users/<int:user_id>/addresses"
+  },
+  {
+    "endpoint": "admin.get_user_addresses",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/users/<int:user_id>/addresses"
+  },
+  {
+    "endpoint": "admin.delete_user_address",
+    "methods": [
+      "DELETE"
+    ],
+    "rule": "/api/v1/admin/users/<int:user_id>/addresses/<int:address_id>"
+  },
+  {
+    "endpoint": "admin.update_user_address",
+    "methods": [
+      "PUT"
+    ],
+    "rule": "/api/v1/admin/users/<int:user_id>/addresses/<int:address_id>"
+  },
+  {
+    "endpoint": "admin.get_user_notification_settings",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/users/<int:user_id>/notification-settings"
+  },
+  {
+    "endpoint": "admin.update_user_notification_settings",
+    "methods": [
+      "PUT"
+    ],
+    "rule": "/api/v1/admin/users/<int:user_id>/notification-settings"
+  },
+  {
+    "endpoint": "admin.get_user_payment_methods_admin",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/users/<int:user_id>/payment-methods"
+  },
+  {
+    "endpoint": "admin.update_user_status",
+    "methods": [
+      "PUT"
+    ],
+    "rule": "/api/v1/admin/users/<int:user_id>/status"
+  },
+  {
+    "endpoint": "admin.unlock_user_account",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/users/<int:user_id>/unlock"
+  },
+  {
+    "endpoint": "analytics.get_analytics_alerts",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/analytics/alerts"
+  },
+  {
+    "endpoint": "analytics.get_cohort_analysis",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/analytics/cohort"
+  },
+  {
+    "endpoint": "analytics.get_conversion_funnel",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/analytics/conversion-funnel"
+  },
+  {
+    "endpoint": "analytics.generate_custom_report",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/analytics/custom-report"
+  },
+  {
+    "endpoint": "analytics.get_customer_analytics",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/analytics/customers"
+  },
+  {
+    "endpoint": "analytics.get_analytics_dashboard",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/analytics/dashboard"
+  },
+  {
+    "endpoint": "analytics.get_delivery_analytics",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/analytics/delivery"
+  },
+  {
+    "endpoint": "analytics.export_analytics",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/analytics/export"
+  },
+  {
+    "endpoint": "analytics.get_geographic_analytics",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/analytics/geographic"
+  },
+  {
+    "endpoint": "analytics.get_order_analytics",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/analytics/orders"
+  },
+  {
+    "endpoint": "analytics.get_predictions",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/analytics/predictions"
+  },
+  {
+    "endpoint": "analytics.get_product_analytics",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/analytics/products"
+  },
+  {
+    "endpoint": "analytics.get_real_time_analytics",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/analytics/real-time"
+  },
+  {
+    "endpoint": "analytics.get_revenue_analytics",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/analytics/revenue"
+  },
+  {
+    "endpoint": "analytics.get_search_analytics",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/analytics/search-analytics"
+  },
+  {
+    "endpoint": "analytics.get_user_segments",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/analytics/segments"
+  },
+  {
+    "endpoint": "analytics.track_event",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/analytics/track-event"
+  },
+  {
+    "endpoint": "analytics.get_user_behavior_analytics",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/analytics/user-behavior"
+  },
+  {
+    "endpoint": "auth.add_user_address",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/auth/addresses"
+  },
+  {
+    "endpoint": "auth.get_user_addresses",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/auth/addresses"
+  },
+  {
+    "endpoint": "auth.delete_user_address",
+    "methods": [
+      "DELETE"
+    ],
+    "rule": "/api/v1/auth/addresses/<int:address_id>"
+  },
+  {
+    "endpoint": "auth.update_user_address",
+    "methods": [
+      "PATCH",
+      "PUT"
+    ],
+    "rule": "/api/v1/auth/addresses/<int:address_id>"
+  },
+  {
+    "endpoint": "auth.set_default_address",
+    "methods": [
+      "PATCH"
+    ],
+    "rule": "/api/v1/auth/addresses/<int:address_id>/set-default"
+  },
+  {
+    "endpoint": "auth.admin_create_user",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/auth/admin/create-user"
+  },
+  {
+    "endpoint": "auth.admin_get_users",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/auth/admin/users"
+  },
+  {
+    "endpoint": "auth.cancel_phone_change",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/auth/cancel-phone-change"
+  },
+  {
+    "endpoint": "auth.change_password",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/auth/change-password"
+  },
+  {
+    "endpoint": "auth.change_phone",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/auth/change-phone"
+  },
+  {
+    "endpoint": "auth.check_phone_availability",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/auth/check-phone-availability"
+  },
+  {
+    "endpoint": "auth.export_account_data",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/auth/export-data"
+  },
+  {
+    "endpoint": "auth.forgot_password",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/auth/forgot-password"
+  },
+  {
+    "endpoint": "auth.generate_telegram_auth",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/auth/generate-telegram-auth"
+  },
+  {
+    "endpoint": "auth.generate_web_auth",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/auth/generate-web-auth"
+  },
+  {
+    "endpoint": "auth.link_phone_send_otp",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/auth/link-phone-account/send-otp"
+  },
+  {
+    "endpoint": "auth.link_phone_verify",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/auth/link-phone-account/verify"
+  },
+  {
+    "endpoint": "auth.link_telegram",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/auth/link-telegram"
+  },
+  {
+    "endpoint": "auth.link_web_account",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/auth/link-web-account"
+  },
+  {
+    "endpoint": "auth.login",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/auth/login"
+  },
+  {
+    "endpoint": "auth.logout",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/auth/logout"
+  },
+  {
+    "endpoint": "auth.logout_all",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/auth/logout-all"
+  },
+  {
+    "endpoint": "auth.get_orders_summary",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/auth/orders/summary"
+  },
+  {
+    "endpoint": "auth.get_permissions",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/auth/permissions"
+  },
+  {
+    "endpoint": "auth.phone_register_init",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/auth/phone/register/init"
+  },
+  {
+    "endpoint": "auth.phone_register_verify",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/auth/phone/register/verify"
+  },
+  {
+    "endpoint": "auth.phone_resend_otp",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/auth/phone/resend-otp"
+  },
+  {
+    "endpoint": "auth.get_platform_status",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/auth/platform-status"
+  },
+  {
+    "endpoint": "auth.get_profile",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/auth/profile"
+  },
+  {
+    "endpoint": "auth.update_profile",
+    "methods": [
+      "PUT"
+    ],
+    "rule": "/api/v1/auth/profile"
+  },
+  {
+    "endpoint": "auth.refresh",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/auth/refresh"
+  },
+  {
+    "endpoint": "auth.refresh_with_cookie",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/auth/refresh-cookie"
+  },
+  {
+    "endpoint": "auth.refresh",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/auth/refresh-token"
+  },
+  {
+    "endpoint": "auth.register",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/auth/register"
+  },
+  {
+    "endpoint": "auth.resend_email_verification",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/auth/resend-email-verification"
+  },
+  {
+    "endpoint": "auth.resend_sms_verification",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/auth/resend-sms-verification"
+  },
+  {
+    "endpoint": "auth.reset_password",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/auth/reset-password"
+  },
+  {
+    "endpoint": "auth.send_otp",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/auth/send-otp"
+  },
+  {
+    "endpoint": "auth.get_user_sessions",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/auth/sessions"
+  },
+  {
+    "endpoint": "auth.revoke_session",
+    "methods": [
+      "DELETE"
+    ],
+    "rule": "/api/v1/auth/sessions/<session_id>"
+  },
+  {
+    "endpoint": "auth.logout_all",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/auth/sessions/revoke-all"
+  },
+  {
+    "endpoint": "auth.suggest_auto_link",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/auth/suggest-auto-link"
+  },
+  {
+    "endpoint": "auth.sync_platform_data",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/auth/sync-platform-data"
+  },
+  {
+    "endpoint": "auth.sync_profile",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/auth/sync-profile"
+  },
+  {
+    "endpoint": "auth.telegram_login",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/auth/telegram-login"
+  },
+  {
+    "endpoint": "auth.telegram_register",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/auth/telegram-register"
+  },
+  {
+    "endpoint": "auth.validate_token",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/auth/validate-token"
+  },
+  {
+    "endpoint": "auth.verify_email",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/auth/verify-email"
+  },
+  {
+    "endpoint": "auth.verify_phone",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/auth/verify-otp"
+  },
+  {
+    "endpoint": "auth.verify_phone",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/auth/verify-phone"
+  },
+  {
+    "endpoint": "auth.verify_telegram_auth",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/auth/verify-telegram-auth/<auth_code>"
+  },
+  {
+    "endpoint": "auth.verify_web_auth",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/auth/verify-web-auth/<auth_token>"
+  },
+  {
+    "endpoint": "blog.get_blog_posts",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/blog/posts"
+  },
+  {
+    "endpoint": "blog.get_blog_post",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/blog/posts/<slug>"
+  },
+  {
+    "endpoint": "blog.get_featured_posts",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/blog/posts/featured"
+  },
+  {
+    "endpoint": "bot.bot_health",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/bot/health"
+  },
+  {
+    "endpoint": "bot.reload_translations",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/bot/reload-translations"
+  },
+  {
+    "endpoint": "bot.get_bot_stats",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/bot/stats"
+  },
+  {
+    "endpoint": "cart.get_cart",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/cart/"
+  },
+  {
+    "endpoint": "cart.clear_cart",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/cart/clear"
+  },
+  {
+    "endpoint": "cart.get_cart_estimate",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/cart/estimate"
+  },
+  {
+    "endpoint": "cart.add_cart_item",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/cart/items"
+  },
+  {
+    "endpoint": "cart.remove_cart_item",
+    "methods": [
+      "DELETE"
+    ],
+    "rule": "/api/v1/cart/items/<int:product_id>"
+  },
+  {
+    "endpoint": "cart.update_cart_item",
+    "methods": [
+      "PUT"
+    ],
+    "rule": "/api/v1/cart/items/<int:product_id>"
+  },
+  {
+    "endpoint": "cart.sync_cart",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/cart/sync"
+  },
+  {
+    "endpoint": "cart.validate_cart",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/cart/validate"
+  },
+  {
+    "endpoint": "get_csrf_token_endpoint",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/csrf-token"
+  },
+  {
+    "endpoint": "delivery.get_live_tracking",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/delivery/<int:delivery_id>/live-tracking"
+  },
+  {
+    "endpoint": "delivery.calculate_delivery_fee",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/delivery/calculate-fee"
+  },
+  {
+    "endpoint": "delivery.mark_arrived",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/delivery/driver/arrive/<int:delivery_id>"
+  },
+  {
+    "endpoint": "delivery.get_driver_assignments",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/delivery/driver/assignments"
+  },
+  {
+    "endpoint": "delivery.complete_delivery",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/delivery/driver/complete/<int:delivery_id>"
+  },
+  {
+    "endpoint": "delivery.report_delivery_issue",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/delivery/driver/report-issue/<int:delivery_id>"
+  },
+  {
+    "endpoint": "delivery.request_route_optimization",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/delivery/driver/route-optimization"
+  },
+  {
+    "endpoint": "delivery.start_delivery",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/delivery/driver/start-delivery/<int:delivery_id>"
+  },
+  {
+    "endpoint": "delivery.update_driver_location",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/delivery/driver/update-location"
+  },
+  {
+    "endpoint": "delivery.estimate_delivery",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/delivery/estimate-delivery"
+  },
+  {
+    "endpoint": "delivery.get_my_deliveries",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/delivery/my-deliveries"
+  },
+  {
+    "endpoint": "delivery.get_time_slots",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/delivery/time-slots"
+  },
+  {
+    "endpoint": "delivery.track_delivery_public",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/delivery/track/<tracking_number>"
+  },
+  {
+    "endpoint": "delivery.upload_delivery_photo",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/delivery/upload-photo"
+  },
+  {
+    "endpoint": "delivery.get_delivery_zones",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/delivery/zones"
+  },
+  {
+    "endpoint": "loyalty.get_loyalty_account",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/loyalty/account"
+  },
+  {
+    "endpoint": "loyalty.get_loyalty_challenges",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/loyalty/challenges"
+  },
+  {
+    "endpoint": "loyalty.earn_points",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/loyalty/earn-points"
+  },
+  {
+    "endpoint": "loyalty.gift_points",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/loyalty/gift-points"
+  },
+  {
+    "endpoint": "loyalty.get_loyalty_points_history",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/loyalty/history"
+  },
+  {
+    "endpoint": "loyalty.get_loyalty_points",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/loyalty/points"
+  },
+  {
+    "endpoint": "loyalty.get_points_history",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/loyalty/points/history"
+  },
+  {
+    "endpoint": "loyalty.get_loyalty_profile",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/loyalty/profile"
+  },
+  {
+    "endpoint": "loyalty.get_loyalty_programs",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/loyalty/programs"
+  },
+  {
+    "endpoint": "loyalty.get_referral_info",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/loyalty/referral"
+  },
+  {
+    "endpoint": "loyalty.get_available_rewards",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/loyalty/rewards"
+  },
+  {
+    "endpoint": "loyalty.get_reward_details",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/loyalty/rewards/<int:reward_id>"
+  },
+  {
+    "endpoint": "loyalty.redeem_reward",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/loyalty/rewards/<int:reward_id>/redeem"
+  },
+  {
+    "endpoint": "loyalty.get_redemption_history",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/loyalty/rewards/history"
+  },
+  {
+    "endpoint": "loyalty.get_loyalty_statistics",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/loyalty/statistics"
+  },
+  {
+    "endpoint": "loyalty.get_tier_benefits",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/loyalty/tier-benefits"
+  },
+  {
+    "endpoint": "loyalty.get_membership_tiers",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/loyalty/tiers"
+  },
+  {
+    "endpoint": "notifications.get_notifications",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/notifications/"
+  },
+  {
+    "endpoint": "notifications.get_notification",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/notifications/<int:notification_id>"
+  },
+  {
+    "endpoint": "notifications.delete_notification",
+    "methods": [
+      "DELETE"
+    ],
+    "rule": "/api/v1/notifications/<int:notification_id>/delete"
+  },
+  {
+    "endpoint": "notifications.mark_notification_read",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/notifications/<int:notification_id>/mark-read"
+  },
+  {
+    "endpoint": "notifications.send_bulk_notification",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/notifications/bulk-send"
+  },
+  {
+    "endpoint": "notifications.get_notification_channels",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/notifications/channels"
+  },
+  {
+    "endpoint": "notifications.get_delivery_reports",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/notifications/delivery-reports"
+  },
+  {
+    "endpoint": "notifications.mark_all_notifications_read",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/notifications/mark-all-read"
+  },
+  {
+    "endpoint": "notifications.get_notification_preferences",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/notifications/preferences"
+  },
+  {
+    "endpoint": "notifications.update_notification_preferences",
+    "methods": [
+      "PUT"
+    ],
+    "rule": "/api/v1/notifications/preferences"
+  },
+  {
+    "endpoint": "notifications.register_push_token",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/notifications/push-token"
+  },
+  {
+    "endpoint": "notifications.unregister_push_token",
+    "methods": [
+      "DELETE"
+    ],
+    "rule": "/api/v1/notifications/push-token"
+  },
+  {
+    "endpoint": "notifications.get_notification_statistics",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/notifications/statistics"
+  },
+  {
+    "endpoint": "notifications.get_notification_templates",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/notifications/templates"
+  },
+  {
+    "endpoint": "notifications.send_test_notification",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/notifications/test"
+  },
+  {
+    "endpoint": "orders.create_order",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/orders/"
+  },
+  {
+    "endpoint": "orders.get_orders",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/orders/"
+  },
+  {
+    "endpoint": "orders.get_order",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/orders/<int:order_id>"
+  },
+  {
+    "endpoint": "orders.cancel_order",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/orders/<int:order_id>/cancel"
+  },
+  {
+    "endpoint": "orders.submit_order_feedback",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/orders/<int:order_id>/feedback"
+  },
+  {
+    "endpoint": "orders.retry_order_payment",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/orders/<int:order_id>/retry-payment"
+  },
+  {
+    "endpoint": "orders.track_order",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/orders/<int:order_id>/track"
+  },
+  {
+    "endpoint": "orders.get_my_bottle_balances",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/orders/bottles/my-balances"
+  },
+  {
+    "endpoint": "orders.get_my_bottle_ledger",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/orders/bottles/my-ledger/<int:address_id>"
+  },
+  {
+    "endpoint": "orders.bulk_order_action",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/orders/bulk-action"
+  },
+  {
+    "endpoint": "orders.estimate_cart",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/orders/cart/estimate"
+  },
+  {
+    "endpoint": "orders.get_delivery_slots",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/orders/delivery-slots"
+  },
+  {
+    "endpoint": "orders.create_emergency_order",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/orders/emergency"
+  },
+  {
+    "endpoint": "orders.export_orders",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/orders/export"
+  },
+  {
+    "endpoint": "orders.validate_promo_code",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/orders/promo-code/validate"
+  },
+  {
+    "endpoint": "orders.get_quick_reorder_suggestions",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/orders/quick-reorder"
+  },
+  {
+    "endpoint": "orders.repeat_order",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/orders/repeat/<int:order_id>"
+  },
+  {
+    "endpoint": "orders.schedule_order",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/orders/schedule"
+  },
+  {
+    "endpoint": "orders.get_order_statistics",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/orders/statistics"
+  },
+  {
+    "endpoint": "orders.get_order_statuses",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/orders/statuses"
+  },
+  {
+    "endpoint": "orders.create_subscription_order",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/orders/subscription"
+  },
+  {
+    "endpoint": "payments.get_payments",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/payments/"
+  },
+  {
+    "endpoint": "payments.cancel_payment",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/payments/<int:payment_id>/cancel"
+  },
+  {
+    "endpoint": "payments.get_payment_status",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/payments/<int:payment_id>/status"
+  },
+  {
+    "endpoint": "payments.verify_payment",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/payments/<int:payment_id>/verify"
+  },
+  {
+    "endpoint": "payments.get_saved_cards",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/payments/cards"
+  },
+  {
+    "endpoint": "payments.save_card",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/payments/cards"
+  },
+  {
+    "endpoint": "payments.delete_card",
+    "methods": [
+      "DELETE"
+    ],
+    "rule": "/api/v1/payments/cards/<int:card_id>"
+  },
+  {
+    "endpoint": "payments.create_card_token",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/payments/cards/create-token"
+  },
+  {
+    "endpoint": "payments.resend_verification_code",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/payments/cards/resend-code"
+  },
+  {
+    "endpoint": "payments.send_verification_code",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/payments/cards/send-verification"
+  },
+  {
+    "endpoint": "payments.verify_card_code",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/payments/cards/verify"
+  },
+  {
+    "endpoint": "payments.get_cod_statement",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/payments/cod/statement"
+  },
+  {
+    "endpoint": "payments.create_payment",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/payments/create"
+  },
+  {
+    "endpoint": "payments.get_exchange_rates",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/payments/exchange-rates"
+  },
+  {
+    "endpoint": "payments.get_payment_methods",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/payments/methods"
+  },
+  {
+    "endpoint": "payments.get_order_payment_timeline",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/payments/orders/<int:order_id>/timeline"
+  },
+  {
+    "endpoint": "payments.process_card_payment",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/payments/process-card-payment"
+  },
+  {
+    "endpoint": "payments.request_refund",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/payments/refund"
+  },
+  {
+    "endpoint": "payments.get_payment_statistics",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/payments/statistics"
+  },
+  {
+    "endpoint": "payments.create_subscription_payment",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/payments/subscription"
+  },
+  {
+    "endpoint": "payments.tokenize_card",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/payments/tokenize"
+  },
+  {
+    "endpoint": "payments.payment_webhook",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/payments/webhook/<provider>"
+  },
+  {
+    "endpoint": "products.get_products",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/products/"
+  },
+  {
+    "endpoint": "products.get_product",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/products/<int:product_id>"
+  },
+  {
+    "endpoint": "products.add_product_review",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/products/<int:product_id>/reviews"
+  },
+  {
+    "endpoint": "products.get_product_reviews",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/products/<int:product_id>/reviews"
+  },
+  {
+    "endpoint": "products.get_products_bulk",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/products/bulk"
+  },
+  {
+    "endpoint": "products.get_categories",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/products/categories"
+  },
+  {
+    "endpoint": "products.get_category",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/products/categories/<int:category_id>"
+  },
+  {
+    "endpoint": "products.get_featured_products",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/products/featured"
+  },
+  {
+    "endpoint": "products.get_popular_products",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/products/popular"
+  },
+  {
+    "endpoint": "products.calculate_price",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/products/price-calculator"
+  },
+  {
+    "endpoint": "products.get_search_suggestions",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/products/search-suggestions"
+  },
+  {
+    "endpoint": "session_management.trigger_cleanup",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/session/admin/cleanup"
+  },
+  {
+    "endpoint": "session_management.get_all_sessions",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/session/admin/sessions"
+  },
+  {
+    "endpoint": "session_management.get_session_stats",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/session/admin/stats"
+  },
+  {
+    "endpoint": "session_management.get_user_sessions",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/session/sessions"
+  },
+  {
+    "endpoint": "session_management.revoke_session",
+    "methods": [
+      "DELETE"
+    ],
+    "rule": "/api/v1/session/sessions/<int:session_id>"
+  },
+  {
+    "endpoint": "session_management.revoke_all_sessions",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/session/sessions/revoke-all"
+  },
+  {
+    "endpoint": "staff.staff_login",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/staff/auth/login"
+  },
+  {
+    "endpoint": "staff.staff_refresh_token",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/staff/auth/refresh"
+  },
+  {
+    "endpoint": "staff.record_bottle_collection",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/staff/bottles/collection"
+  },
+  {
+    "endpoint": "staff.get_customer_bottle_addresses",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/staff/bottles/customer/<int:user_id>/addresses"
+  },
+  {
+    "endpoint": "staff.get_customer_bottle_summary",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/staff/bottles/customer/<int:user_id>/summary"
+  },
+  {
+    "endpoint": "staff.create_bottle_fine_staff",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/staff/bottles/fine"
+  },
+  {
+    "endpoint": "staff.record_bottles_loaded",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/staff/bottles/load"
+  },
+  {
+    "endpoint": "staff.get_my_bottle_accountability",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/staff/bottles/my-accountability"
+  },
+  {
+    "endpoint": "staff.record_bottles_returned_to_warehouse",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/staff/bottles/return-to-warehouse"
+  },
+  {
+    "endpoint": "staff.close_bottle_session",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/staff/bottles/session/close"
+  },
+  {
+    "endpoint": "staff.get_current_bottle_session",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/staff/bottles/session/current"
+  },
+  {
+    "endpoint": "staff.invite_driver_to_session",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/staff/bottles/session/invite"
+  },
+  {
+    "endpoint": "staff.join_bottle_session",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/staff/bottles/session/join"
+  },
+  {
+    "endpoint": "staff.leave_bottle_session",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/staff/bottles/session/leave"
+  },
+  {
+    "endpoint": "staff.get_current_session_membership",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/staff/bottles/session/membership"
+  },
+  {
+    "endpoint": "staff.open_bottle_session",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/staff/bottles/session/open"
+  },
+  {
+    "endpoint": "staff.list_my_bottle_sessions",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/staff/bottles/sessions"
+  },
+  {
+    "endpoint": "staff.list_drivers_available_to_invite",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/staff/bottles/sessions/available-drivers"
+  },
+  {
+    "endpoint": "staff.list_joinable_bottle_sessions",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/staff/bottles/sessions/joinable"
+  },
+  {
+    "endpoint": "staff.initiate_bottle_transfer",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/staff/bottles/transfers"
+  },
+  {
+    "endpoint": "staff.confirm_bottle_transfer",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/staff/bottles/transfers/<int:transfer_id>/confirm"
+  },
+  {
+    "endpoint": "staff.get_pending_bottle_transfers",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/staff/bottles/transfers/pending"
+  },
+  {
+    "endpoint": "staff.record_cash_collection",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/staff/cash-collections"
+  },
+  {
+    "endpoint": "staff.get_staff_customer_cod_statement",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/staff/customers/<int:customer_id>/cod-statement"
+  },
+  {
+    "endpoint": "staff.search_customers_for_cod_collection",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/staff/customers/search"
+  },
+  {
+    "endpoint": "staff.update_location",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/staff/delivery/<int:delivery_id>/location"
+  },
+  {
+    "endpoint": "staff.update_delivery_status",
+    "methods": [
+      "PUT"
+    ],
+    "rule": "/api/v1/staff/delivery/<int:delivery_id>/status"
+  },
+  {
+    "endpoint": "staff.accept_order",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/staff/delivery/accept/<int:delivery_id>"
+  },
+  {
+    "endpoint": "staff.get_active_deliveries",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/staff/delivery/active"
+  },
+  {
+    "endpoint": "staff.get_delivery_history",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/staff/delivery/history"
+  },
+  {
+    "endpoint": "staff.get_order_pool",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/staff/delivery/pool"
+  },
+  {
+    "endpoint": "staff.get_delivery_stats",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/staff/delivery/stats"
+  },
+  {
+    "endpoint": "staff.create_order_for_client",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/staff/operator/orders"
+  },
+  {
+    "endpoint": "staff.get_recent_operator_orders",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/staff/operator/orders/recent"
+  },
+  {
+    "endpoint": "staff.create_client_user",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/staff/operator/users"
+  },
+  {
+    "endpoint": "staff.add_client_address",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/staff/operator/users/<int:user_id>/addresses"
+  },
+  {
+    "endpoint": "staff.get_client_addresses",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/staff/operator/users/<int:user_id>/addresses"
+  },
+  {
+    "endpoint": "staff.get_client_corporate_balance",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/staff/operator/users/<int:user_id>/corporate-balance"
+  },
+  {
+    "endpoint": "staff.get_client_payment_methods",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/staff/operator/users/<int:user_id>/payment-methods"
+  },
+  {
+    "endpoint": "staff.search_clients",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/staff/operator/users/search"
+  },
+  {
+    "endpoint": "staff.mark_order_preparing",
+    "methods": [
+      "PUT"
+    ],
+    "rule": "/api/v1/staff/orders/<int:order_id>/preparing"
+  },
+  {
+    "endpoint": "staff.get_reconciliation_session",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/staff/reconciliation/session"
+  },
+  {
+    "endpoint": "staff.submit_reconciliation_session",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/staff/reconciliation/session/submit"
+  },
+  {
+    "endpoint": "staff.create_reconciliation_transfer",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/staff/reconciliation/transfers"
+  },
+  {
+    "endpoint": "staff_tryouts.accept_tryout_task",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/staff/tryout-tasks/<int:task_id>/accept"
+  },
+  {
+    "endpoint": "staff_tryouts.complete_staff_handoff",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/staff/tryout-tasks/<int:task_id>/complete-handoff"
+  },
+  {
+    "endpoint": "staff_tryouts.record_staff_pickup",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/staff/tryout-tasks/<int:task_id>/record-pickup"
+  },
+  {
+    "endpoint": "staff_tryouts.get_active_tryout_tasks",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/staff/tryout-tasks/active"
+  },
+  {
+    "endpoint": "staff_tryouts.get_tryout_task_pool",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/staff/tryout-tasks/pool"
+  },
+  {
+    "endpoint": "staff_tryouts.create_staff_tryout",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/staff/tryouts"
+  },
+  {
+    "endpoint": "staff_tryouts.get_staff_tryout",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/staff/tryouts/<int:tryout_id>"
+  },
+  {
+    "endpoint": "staff_tryouts.get_active_tryouts",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/staff/tryouts/active"
+  },
+  {
+    "endpoint": "staff_tryouts.get_tryout_history",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/staff/tryouts/history"
+  },
+  {
+    "endpoint": "subscriptions.create_subscription",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/subscriptions/"
+  },
+  {
+    "endpoint": "subscriptions.get_subscriptions",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/subscriptions/"
+  },
+  {
+    "endpoint": "subscriptions.get_subscription",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/subscriptions/<int:subscription_id>"
+  },
+  {
+    "endpoint": "subscriptions.update_subscription",
+    "methods": [
+      "PUT"
+    ],
+    "rule": "/api/v1/subscriptions/<int:subscription_id>"
+  },
+  {
+    "endpoint": "subscriptions.get_billing_history",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/subscriptions/<int:subscription_id>/billing-history"
+  },
+  {
+    "endpoint": "subscriptions.cancel_subscription",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/subscriptions/<int:subscription_id>/cancel"
+  },
+  {
+    "endpoint": "subscriptions.change_payment_method",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/subscriptions/<int:subscription_id>/change-payment-method"
+  },
+  {
+    "endpoint": "subscriptions.add_subscription_item",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/subscriptions/<int:subscription_id>/items"
+  },
+  {
+    "endpoint": "subscriptions.get_subscription_items",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/subscriptions/<int:subscription_id>/items"
+  },
+  {
+    "endpoint": "subscriptions.remove_subscription_item",
+    "methods": [
+      "DELETE"
+    ],
+    "rule": "/api/v1/subscriptions/<int:subscription_id>/items/<int:item_id>"
+  },
+  {
+    "endpoint": "subscriptions.update_subscription_item",
+    "methods": [
+      "PUT"
+    ],
+    "rule": "/api/v1/subscriptions/<int:subscription_id>/items/<int:item_id>"
+  },
+  {
+    "endpoint": "subscriptions.get_subscription_logs",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/subscriptions/<int:subscription_id>/logs"
+  },
+  {
+    "endpoint": "subscriptions.pause_subscription",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/subscriptions/<int:subscription_id>/pause"
+  },
+  {
+    "endpoint": "subscriptions.resume_subscription",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/subscriptions/<int:subscription_id>/resume"
+  },
+  {
+    "endpoint": "subscriptions.retry_billing",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/subscriptions/<int:subscription_id>/retry-billing"
+  },
+  {
+    "endpoint": "subscriptions.skip_next_delivery",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/subscriptions/<int:subscription_id>/skip-next-delivery"
+  },
+  {
+    "endpoint": "subscriptions.preview_subscription",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/subscriptions/preview"
+  },
+  {
+    "endpoint": "subscriptions.get_subscription_statistics",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/subscriptions/statistics"
+  },
+  {
+    "endpoint": "subscriptions.get_subscription_templates",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/subscriptions/templates"
+  },
+  {
+    "endpoint": "translations.get_translations",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/translations/<language>/<namespace>"
+  },
+  {
+    "endpoint": "translations.get_namespaces",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/translations/namespaces"
+  },
+  {
+    "endpoint": "translations.reload_translations",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/translations/reload"
+  }
+]

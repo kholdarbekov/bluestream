@@ -42,7 +42,7 @@ const PieChart = ({
         }
       },
       title: {
-        display: !!title,
+        display: Boolean(title),
         text: title,
         font: {
           size: 16,

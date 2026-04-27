@@ -135,11 +135,13 @@ class TestDeliveryServiceBusinessRules:
         assert history[-1].notes == "Order cancelled by customer"
 
     def test_update_delivery_status_enqueues_notification_with_history_id(
-        self, delivery_service, order_with_address, db
+        self, delivery_service, order_with_address, sample_user, db
     ):
+        # ARCH-006: any delivery already past SCHEDULED must have a person on file.
         delivery = Delivery(
             order_id=order_with_address.id,
             status=DeliveryStatus.IN_TRANSIT,
+            delivery_person_id=sample_user.id,
             scheduled_date=datetime.now(UTC),
             scheduled_time_slot="09:00-12:00",
         )

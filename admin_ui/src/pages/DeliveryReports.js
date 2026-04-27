@@ -31,7 +31,7 @@ import {
   UserOutlined,
   WarningOutlined,
 } from '@ant-design/icons';
-import { useMutation, useQuery, useQueryClient } from 'react-query';
+import { useMutation, useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import staffService from '../services/staffService';
 
@@ -95,50 +95,53 @@ const DeliveryReports = () => {
   const isPersonalCardTransfer = collectionSource === 'personal_card_transfer';
 
   const reportQueryKey = ['deliveryReports', period, statusFilter, blockedOnly];
-  const { data, isLoading, refetch } = useQuery(
-    reportQueryKey,
-    () =>
+  const { data, isLoading, refetch } = useQuery({
+    queryKey: reportQueryKey,
+
+    queryFn: () =>
       staffService.getCashReconciliation({
         period,
         ...(statusFilter !== 'all' ? { status: statusFilter } : {}),
         ...(blockedOnly ? { blocked_only: true } : {}),
       }),
-    { keepPreviousData: true }
-  );
 
-  const sessionDetailQuery = useQuery(
-    ['deliveryReportSession', selectedSessionId],
-    () => staffService.getCashReconciliationSession(selectedSessionId),
-    { enabled: !!selectedSessionId && detailOpen }
-  );
+    placeholderData: keepPreviousData,
+  });
 
-  const customerStatementQuery = useQuery(
-    ['deliveryReportCustomerStatement', customerStatementId],
-    () => staffService.getCustomerCodStatement(customerStatementId),
-    { enabled: !!customerStatementId }
-  );
+  const sessionDetailQuery = useQuery({
+    queryKey: ['deliveryReportSession', selectedSessionId],
+    queryFn: () => staffService.getCashReconciliationSession(selectedSessionId),
+    enabled: Boolean(selectedSessionId) && detailOpen,
+  });
 
-  const orderTimelineQuery = useQuery(
-    ['deliveryReportOrderTimeline', orderTimelineId],
-    () => staffService.getOrderPaymentTimeline(orderTimelineId),
-    { enabled: !!orderTimelineId }
-  );
+  const customerStatementQuery = useQuery({
+    queryKey: ['deliveryReportCustomerStatement', customerStatementId],
+    queryFn: () => staffService.getCustomerCodStatement(customerStatementId),
+    enabled: Boolean(customerStatementId),
+  });
 
-  const driverOptionsQuery = useQuery(
-    ['deliveryReportDriversForCollections'],
-    () => staffService.getDeliveryPersons({ per_page: 100 }),
-    { enabled: recordCollectionOpen }
-  );
+  const orderTimelineQuery = useQuery({
+    queryKey: ['deliveryReportOrderTimeline', orderTimelineId],
+    queryFn: () => staffService.getOrderPaymentTimeline(orderTimelineId),
+    enabled: Boolean(orderTimelineId),
+  });
 
-  const recordCollectionStatementQuery = useQuery(
-    ['deliveryReportRecordCollectionStatement', recordCollectionCustomerId],
-    () => staffService.getCustomerCodStatement(recordCollectionCustomerId),
-    { enabled: recordCollectionOpen && !!recordCollectionCustomerId }
-  );
+  const driverOptionsQuery = useQuery({
+    queryKey: ['deliveryReportDriversForCollections'],
+    queryFn: () => staffService.getDeliveryPersons({ per_page: 100 }),
+    enabled: recordCollectionOpen,
+  });
 
-  const codDebtUsersQuery = useQuery(
-    ['deliveryReportCodDebtUsers', isPersonalCardTransfer],
-    () => (
+  const recordCollectionStatementQuery = useQuery({
+    queryKey: ['deliveryReportRecordCollectionStatement', recordCollectionCustomerId],
+    queryFn: () => staffService.getCustomerCodStatement(recordCollectionCustomerId),
+    enabled: recordCollectionOpen && Boolean(recordCollectionCustomerId),
+  });
+
+  const codDebtUsersQuery = useQuery({
+    queryKey: ['deliveryReportCodDebtUsers', isPersonalCardTransfer],
+
+    queryFn: () => (
       isPersonalCardTransfer
         ? staffService.searchCodCollectionUsers({
           q: '',
@@ -147,86 +150,91 @@ const DeliveryReports = () => {
         })
         : staffService.getCodCollectionUsersWithOpenDebts({ limit: 500 })
     ),
-    { enabled: recordCollectionOpen }
-  );
+
+    enabled: recordCollectionOpen,
+  });
 
   const refreshReportQueries = () => {
-    queryClient.invalidateQueries(reportQueryKey);
+    queryClient.invalidateQueries({
+      queryKey: reportQueryKey,
+    });
     if (selectedSessionId) {
-      queryClient.invalidateQueries(['deliveryReportSession', selectedSessionId]);
+      queryClient.invalidateQueries({
+        queryKey: ['deliveryReportSession', selectedSessionId],
+      });
     }
   };
 
-  const verifyMutation = useMutation(
-    ({ sessionId, payload }) => staffService.verifyCashReconciliationSession(sessionId, payload),
-    {
-      onSuccess: () => {
-        message.success(
-          verifyMode === 'reject'
-            ? t('staff:reconciliation_rejected', 'Reconciliation rejected and marked as mismatch')
-            : t('staff:reconciliation_verified', 'Reconciliation verified')
-        );
-        setVerifyOpen(false);
-        setVerifyMode('approve');
-        verifyForm.resetFields();
-        refreshReportQueries();
-      },
-      onError: (error) => {
-        const backendMessage = error?.response?.data?.message;
-        message.error(backendMessage || t('common:error_occurred'));
-      },
-    }
-  );
+  const verifyMutation = useMutation({
+    mutationFn: ({ sessionId, payload }) => staffService.verifyCashReconciliationSession(sessionId, payload),
 
-  const resolveMutation = useMutation(
-    ({ sessionId, payload }) => staffService.resolveCashReconciliationSession(sessionId, payload),
-    {
-      onSuccess: () => {
-        message.success(t('staff:reconciliation_resolved', 'Reconciliation resolved'));
-        setResolveOpen(false);
-        resolveForm.resetFields();
-        refreshReportQueries();
-      },
-      onError: (error) => {
-        const backendMessage = error?.response?.data?.message;
-        message.error(backendMessage || t('common:error_occurred'));
-      },
-    }
-  );
+    onSuccess: () => {
+      message.success(
+        verifyMode === 'reject'
+          ? t('staff:reconciliation_rejected', 'Reconciliation rejected and marked as mismatch')
+          : t('staff:reconciliation_verified', 'Reconciliation verified')
+      );
+      setVerifyOpen(false);
+      setVerifyMode('approve');
+      verifyForm.resetFields();
+      refreshReportQueries();
+    },
 
-  const confirmTransferMutation = useMutation(
-    ({ transferId, payload }) => staffService.confirmCashReconciliationTransfer(transferId, payload),
-    {
-      onSuccess: () => {
-        message.success(t('staff:transfer_confirmed', 'Checkpoint transfer confirmed'));
-        setTransferConfirmOpen(false);
-        setSelectedTransfer(null);
-        transferConfirmForm.resetFields();
-        refreshReportQueries();
-      },
-      onError: (error) => {
-        const backendMessage = error?.response?.data?.message;
-        message.error(backendMessage || t('common:error_occurred'));
-      },
-    }
-  );
+    onError: (error) => {
+      const backendMessage = error?.response?.data?.message;
+      message.error(backendMessage || t('common:error_occurred'));
+    },
+  });
 
-  const recordCollectionMutation = useMutation(
-    (payload) => staffService.recordCashCollection(payload),
-    {
-      onSuccess: () => {
-        message.success(t('staff:cash_collection_recorded', 'Cash collection recorded'));
-        setRecordCollectionOpen(false);
-        setRecordCollectionCustomerId(null);
-        recordCollectionForm.resetFields();
-        refreshReportQueries();
-      },
-      onError: (error) => {
-        const backendMessage = error?.response?.data?.message;
-        message.error(backendMessage || t('common:error_occurred'));
-      },
-    }
-  );
+  const resolveMutation = useMutation({
+    mutationFn: ({ sessionId, payload }) => staffService.resolveCashReconciliationSession(sessionId, payload),
+
+    onSuccess: () => {
+      message.success(t('staff:reconciliation_resolved', 'Reconciliation resolved'));
+      setResolveOpen(false);
+      resolveForm.resetFields();
+      refreshReportQueries();
+    },
+
+    onError: (error) => {
+      const backendMessage = error?.response?.data?.message;
+      message.error(backendMessage || t('common:error_occurred'));
+    },
+  });
+
+  const confirmTransferMutation = useMutation({
+    mutationFn: ({ transferId, payload }) => staffService.confirmCashReconciliationTransfer(transferId, payload),
+
+    onSuccess: () => {
+      message.success(t('staff:transfer_confirmed', 'Checkpoint transfer confirmed'));
+      setTransferConfirmOpen(false);
+      setSelectedTransfer(null);
+      transferConfirmForm.resetFields();
+      refreshReportQueries();
+    },
+
+    onError: (error) => {
+      const backendMessage = error?.response?.data?.message;
+      message.error(backendMessage || t('common:error_occurred'));
+    },
+  });
+
+  const recordCollectionMutation = useMutation({
+    mutationFn: (payload) => staffService.recordCashCollection(payload),
+
+    onSuccess: () => {
+      message.success(t('staff:cash_collection_recorded', 'Cash collection recorded'));
+      setRecordCollectionOpen(false);
+      setRecordCollectionCustomerId(null);
+      recordCollectionForm.resetFields();
+      refreshReportQueries();
+    },
+
+    onError: (error) => {
+      const backendMessage = error?.response?.data?.message;
+      message.error(backendMessage || t('common:error_occurred'));
+    },
+  });
 
   const payload = data?.data?.data || {};
   const summary = payload.summary || {};
@@ -779,7 +787,7 @@ const DeliveryReports = () => {
           setVerifyMode('approve');
         }}
         onOk={() => verifyForm.submit()}
-        confirmLoading={verifyMutation.isLoading}
+        confirmLoading={verifyMutation.isPending}
       >
         <Alert
           type={verifyMode === 'reject' ? 'warning' : 'info'}
@@ -860,7 +868,7 @@ const DeliveryReports = () => {
         open={resolveOpen}
         onCancel={() => setResolveOpen(false)}
         onOk={() => resolveForm.submit()}
-        confirmLoading={resolveMutation.isLoading}
+        confirmLoading={resolveMutation.isPending}
       >
         <Form
           form={resolveForm}
@@ -904,7 +912,7 @@ const DeliveryReports = () => {
           setSelectedTransfer(null);
         }}
         onOk={() => transferConfirmForm.submit()}
-        confirmLoading={confirmTransferMutation.isLoading}
+        confirmLoading={confirmTransferMutation.isPending}
       >
         <Form
           form={transferConfirmForm}
@@ -946,7 +954,7 @@ const DeliveryReports = () => {
 
       <Modal
         title={t('staff:customer_statement', 'Customer COD Statement')}
-        open={!!customerStatementId}
+        open={Boolean(customerStatementId)}
         onCancel={() => setCustomerStatementId(null)}
         footer={null}
         width={900}
@@ -979,7 +987,7 @@ const DeliveryReports = () => {
 
       <Modal
         title={t('staff:payment_timeline', 'Order Payment Timeline')}
-        open={!!orderTimelineId}
+        open={Boolean(orderTimelineId)}
         onCancel={() => setOrderTimelineId(null)}
         footer={null}
         width={900}
@@ -1018,7 +1026,7 @@ const DeliveryReports = () => {
           recordCollectionForm.resetFields();
         }}
         onOk={() => recordCollectionForm.submit()}
-        confirmLoading={recordCollectionMutation.isLoading}
+        confirmLoading={recordCollectionMutation.isPending}
       >
         <Form
           form={recordCollectionForm}

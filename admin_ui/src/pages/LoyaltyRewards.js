@@ -6,7 +6,6 @@ import {
   DatePicker,
   Descriptions,
   Drawer,
-  Empty,
   Form,
   Input,
   InputNumber,
@@ -30,12 +29,15 @@ import {
   PlusOutlined,
   StarOutlined
 } from '@ant-design/icons';
-import { useMutation, useQuery, useQueryClient } from 'react-query';
+import { useMutation, useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import moment from 'moment';
+import dayjs from 'dayjs';
 import adminService from '../services/adminService';
 import exportUtils from '../utils/exportUtils';
 import { formatDate, formatDateTime } from '../utils/dateUtils';
+import AsyncButton from '../components/common/AsyncButton';
+import DataView from '../components/common/DataView';
+import EmptyState from '../components/common/EmptyState';
 
 const { TextArea } = Input;
 const rewardTypeOptions = [
@@ -57,9 +59,10 @@ const LoyaltyRewards = () => {
   const [rewardModal, setRewardModal] = useState({ open: false, reward: null });
   const [rewardForm] = Form.useForm();
 
-  const rewardsQuery = useQuery(
-    ['loyalty-rewards', pagination, searchText, programId, rewardType, statusFilter],
-    () => adminService.getLoyaltyRewards({
+  const rewardsQuery = useQuery({
+    queryKey: ['loyalty-rewards', pagination, searchText, programId, rewardType, statusFilter],
+
+    queryFn: () => adminService.getLoyaltyRewards({
       page: pagination.page,
       per_page: pagination.per_page,
       search: searchText,
@@ -67,59 +70,61 @@ const LoyaltyRewards = () => {
       reward_type: rewardType,
       is_active: statusFilter,
     }),
-    { keepPreviousData: true }
-  );
 
-  const programsQuery = useQuery(
-    ['loyalty-program-options'],
-    () => adminService.getLoyaltyPrograms({ page: 1, per_page: 100 }),
-    { keepPreviousData: true }
-  );
+    placeholderData: keepPreviousData,
+  });
 
-  const rewardDetailQuery = useQuery(
-    ['loyalty-reward-detail', drawerRewardId],
-    () => adminService.getLoyaltyReward(drawerRewardId),
-    { enabled: Boolean(drawerRewardId) }
-  );
+  const programsQuery = useQuery({
+    queryKey: ['loyalty-program-options'],
+    queryFn: () => adminService.getLoyaltyPrograms({ page: 1, per_page: 100 }),
+    placeholderData: keepPreviousData,
+  });
+
+  const rewardDetailQuery = useQuery({
+    queryKey: ['loyalty-reward-detail', drawerRewardId],
+    queryFn: () => adminService.getLoyaltyReward(drawerRewardId),
+    enabled: Boolean(drawerRewardId),
+  });
 
   const invalidateRewardQueries = () => {
-    queryClient.invalidateQueries(['loyalty-rewards']);
-    queryClient.invalidateQueries(['analytics-loyalty']);
+    queryClient.invalidateQueries({
+      queryKey: ['loyalty-rewards'],
+    });
+    queryClient.invalidateQueries({
+      queryKey: ['analytics-loyalty'],
+    });
   };
 
-  const createRewardMutation = useMutation(
-    (values) => adminService.createLoyaltyReward(values),
-    {
-      onSuccess: () => {
-        message.success(t('ui.loyalty.reward_create_success', { defaultValue: 'Reward created successfully' }));
-        setRewardModal({ open: false, reward: null });
-        rewardForm.resetFields();
-        invalidateRewardQueries();
-      }
-    }
-  );
+  const createRewardMutation = useMutation({
+    mutationFn: (values) => adminService.createLoyaltyReward(values),
 
-  const updateRewardMutation = useMutation(
-    ({ rewardId, values }) => adminService.updateLoyaltyReward(rewardId, values),
-    {
-      onSuccess: () => {
-        message.success(t('ui.loyalty.reward_update_success', { defaultValue: 'Reward updated successfully' }));
-        setRewardModal({ open: false, reward: null });
-        rewardForm.resetFields();
-        invalidateRewardQueries();
-      }
-    }
-  );
+    onSuccess: () => {
+      message.success(t('ui.loyalty.reward_create_success', { defaultValue: 'Reward created successfully' }));
+      setRewardModal({ open: false, reward: null });
+      rewardForm.resetFields();
+      invalidateRewardQueries();
+    },
+  });
 
-  const deleteRewardMutation = useMutation(
-    (rewardId) => adminService.deleteLoyaltyReward(rewardId),
-    {
-      onSuccess: () => {
-        message.success(t('ui.loyalty.reward_delete_success', { defaultValue: 'Reward removed successfully' }));
-        invalidateRewardQueries();
-      }
-    }
-  );
+  const updateRewardMutation = useMutation({
+    mutationFn: ({ rewardId, values }) => adminService.updateLoyaltyReward(rewardId, values),
+
+    onSuccess: () => {
+      message.success(t('ui.loyalty.reward_update_success', { defaultValue: 'Reward updated successfully' }));
+      setRewardModal({ open: false, reward: null });
+      rewardForm.resetFields();
+      invalidateRewardQueries();
+    },
+  });
+
+  const deleteRewardMutation = useMutation({
+    mutationFn: (rewardId) => adminService.deleteLoyaltyReward(rewardId),
+
+    onSuccess: () => {
+      message.success(t('ui.loyalty.reward_delete_success', { defaultValue: 'Reward removed successfully' }));
+      invalidateRewardQueries();
+    },
+  });
 
   const rewards = rewardsQuery.data?.items || [];
   const totalRewards = rewardsQuery.data?.total || 0;
@@ -178,8 +183,8 @@ const LoyaltyRewards = () => {
               setRewardModal({ open: true, reward: record });
               rewardForm.setFieldsValue({
                 ...record,
-                valid_from: record.valid_from ? moment(record.valid_from) : null,
-                valid_until: record.valid_until ? moment(record.valid_until) : null,
+                valid_from: record.valid_from ? dayjs(record.valid_from) : null,
+                valid_until: record.valid_until ? dayjs(record.valid_until) : null,
               });
             }}
           />
@@ -328,7 +333,7 @@ const LoyaltyRewards = () => {
           dataSource={rewards}
           loading={rewardsQuery.isLoading}
           locale={{
-            emptyText: <Empty description={t('ui.loyalty.no_rewards', { defaultValue: 'No loyalty rewards found' })} />
+            emptyText: <EmptyState description={t('ui.loyalty.no_rewards', { defaultValue: 'No loyalty rewards found' })} />
           }}
           pagination={{
             current: pagination.page,
@@ -351,7 +356,13 @@ const LoyaltyRewards = () => {
         title={rewardDetailQuery.data?.name || t('ui.loyalty.reward_details', { defaultValue: 'Reward Details' })}
         onClose={() => setDrawerRewardId(null)}
       >
-        {rewardDetailQuery.data ? (
+        <DataView
+          loading={rewardDetailQuery.isLoading}
+          error={rewardDetailQuery.error}
+          isEmpty={!rewardDetailQuery.data}
+          onRetry={() => rewardDetailQuery.refetch()}
+          emptyDescription={t('ui.loyalty.no_reward_details', { defaultValue: 'No reward selected' })}
+        >
           <Descriptions bordered column={2} size="small">
             <Descriptions.Item label={t('ui.loyalty.program', { defaultValue: 'Program' })}>
               {rewardDetailQuery.data.program_name || '-'}
@@ -381,12 +392,10 @@ const LoyaltyRewards = () => {
               {rewardDetailQuery.data.description || '-'}
             </Descriptions.Item>
             <Descriptions.Item label={t('ui.loyalty.terms', { defaultValue: 'Terms' })} span={2}>
-              {rewardDetailQuery.data.terms_conditions || '-'}
+              {rewardDetailQuery.data?.terms_conditions || '-'}
             </Descriptions.Item>
           </Descriptions>
-        ) : (
-          <Empty />
-        )}
+        </DataView>
       </Drawer>
 
       <Modal
@@ -530,9 +539,9 @@ const LoyaltyRewards = () => {
               <Button onClick={() => setRewardModal({ open: false, reward: null })}>
                 {t('ui.loyalty.cancel', { defaultValue: 'Cancel' })}
               </Button>
-              <Button type="primary" htmlType="submit" loading={createRewardMutation.isLoading || updateRewardMutation.isLoading}>
+              <AsyncButton type="primary" htmlType="submit" loading={createRewardMutation.isPending || updateRewardMutation.isPending}>
                 {rewardModal.reward ? t('ui.loyalty.update', { defaultValue: 'Update' }) : t('ui.loyalty.create', { defaultValue: 'Create' })}
-              </Button>
+              </AsyncButton>
             </Space>
           </Form.Item>
         </Form>

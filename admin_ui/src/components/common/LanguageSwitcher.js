@@ -22,7 +22,7 @@ const LanguageSwitcher = ({ showSyncButton = true, size = 'middle' }) => {
   const handleLanguageChange = async (languageCode) => {
     try {
       await i18n.changeLanguage(languageCode);
-      message.success(t('ui.language') + ' changed successfully');
+      message.success(`${t('ui.language')  } changed successfully`);
     } catch (error) {
       console.error('Failed to change language:', error);
       message.error('Failed to change language');

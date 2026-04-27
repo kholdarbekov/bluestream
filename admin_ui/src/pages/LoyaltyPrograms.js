@@ -3,7 +3,6 @@ import {
   Button,
   Card,
   Col,
-  Empty,
   Form,
   Input,
   InputNumber,
@@ -28,11 +27,13 @@ import {
   StarOutlined,
   TrophyOutlined
 } from '@ant-design/icons';
-import { useMutation, useQuery, useQueryClient } from 'react-query';
+import { useMutation, useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import adminService from '../services/adminService';
 import exportUtils from '../utils/exportUtils';
 import { formatDate } from '../utils/dateUtils';
+import AsyncButton from '../components/common/AsyncButton';
+import EmptyState from '../components/common/EmptyState';
 
 const { TextArea } = Input;
 
@@ -49,16 +50,18 @@ const LoyaltyPrograms = () => {
   const [programForm] = Form.useForm();
   const [tierForm] = Form.useForm();
 
-  const programsQuery = useQuery(
-    ['loyalty-programs', pagination, searchText, statusFilter],
-    () => adminService.getLoyaltyPrograms({
+  const programsQuery = useQuery({
+    queryKey: ['loyalty-programs', pagination, searchText, statusFilter],
+
+    queryFn: () => adminService.getLoyaltyPrograms({
       page: pagination.page,
       per_page: pagination.per_page,
       search: searchText,
       status: statusFilter,
     }),
-    { keepPreviousData: true }
-  );
+
+    placeholderData: keepPreviousData,
+  });
 
   const programs = programsQuery.data?.items || [];
   const totalPrograms = programsQuery.data?.total || 0;
@@ -70,90 +73,88 @@ const LoyaltyPrograms = () => {
     }
   }, [programs, selectedProgramId]);
 
-  const tiersQuery = useQuery(
-    ['loyalty-tiers', selectedProgramId],
-    () => adminService.getLoyaltyTiers({ program_id: selectedProgramId }),
-    {
-      enabled: Boolean(selectedProgramId),
-      keepPreviousData: true,
-    }
-  );
+  const tiersQuery = useQuery({
+    queryKey: ['loyalty-tiers', selectedProgramId],
+    queryFn: () => adminService.getLoyaltyTiers({ program_id: selectedProgramId }),
+    enabled: Boolean(selectedProgramId),
+    placeholderData: keepPreviousData,
+  });
 
   const tiers = tiersQuery.data?.items || [];
 
   const invalidateLoyaltyQueries = () => {
-    queryClient.invalidateQueries(['loyalty-programs']);
-    queryClient.invalidateQueries(['loyalty-tiers']);
-    queryClient.invalidateQueries(['loyalty-program-options']);
+    queryClient.invalidateQueries({
+      queryKey: ['loyalty-programs'],
+    });
+    queryClient.invalidateQueries({
+      queryKey: ['loyalty-tiers'],
+    });
+    queryClient.invalidateQueries({
+      queryKey: ['loyalty-program-options'],
+    });
   };
 
-  const createProgramMutation = useMutation(
-    (values) => adminService.createLoyaltyProgram(values),
-    {
-      onSuccess: () => {
-        message.success(t('ui.loyalty.create_success', { defaultValue: 'Program created successfully' }));
-        setProgramModal({ open: false, program: null });
-        programForm.resetFields();
-        invalidateLoyaltyQueries();
-      }
-    }
-  );
+  const createProgramMutation = useMutation({
+    mutationFn: (values) => adminService.createLoyaltyProgram(values),
 
-  const updateProgramMutation = useMutation(
-    ({ programId, values }) => adminService.updateLoyaltyProgram(programId, values),
-    {
-      onSuccess: () => {
-        message.success(t('ui.loyalty.update_success', { defaultValue: 'Program updated successfully' }));
-        setProgramModal({ open: false, program: null });
-        programForm.resetFields();
-        invalidateLoyaltyQueries();
-      }
-    }
-  );
+    onSuccess: () => {
+      message.success(t('ui.loyalty.create_success', { defaultValue: 'Program created successfully' }));
+      setProgramModal({ open: false, program: null });
+      programForm.resetFields();
+      invalidateLoyaltyQueries();
+    },
+  });
 
-  const deleteProgramMutation = useMutation(
-    (programId) => adminService.deleteLoyaltyProgram(programId),
-    {
-      onSuccess: () => {
-        message.success(t('ui.loyalty.delete_success', { defaultValue: 'Program updated successfully' }));
-        invalidateLoyaltyQueries();
-      }
-    }
-  );
+  const updateProgramMutation = useMutation({
+    mutationFn: ({ programId, values }) => adminService.updateLoyaltyProgram(programId, values),
 
-  const createTierMutation = useMutation(
-    (values) => adminService.createLoyaltyTier(values),
-    {
-      onSuccess: () => {
-        message.success(t('ui.loyalty.tier_create_success', { defaultValue: 'Tier created successfully' }));
-        setTierModal({ open: false, tier: null });
-        tierForm.resetFields();
-        invalidateLoyaltyQueries();
-      }
-    }
-  );
+    onSuccess: () => {
+      message.success(t('ui.loyalty.update_success', { defaultValue: 'Program updated successfully' }));
+      setProgramModal({ open: false, program: null });
+      programForm.resetFields();
+      invalidateLoyaltyQueries();
+    },
+  });
 
-  const updateTierMutation = useMutation(
-    ({ tierId, values }) => adminService.updateLoyaltyTier(tierId, values),
-    {
-      onSuccess: () => {
-        message.success(t('ui.loyalty.tier_update_success', { defaultValue: 'Tier updated successfully' }));
-        setTierModal({ open: false, tier: null });
-        tierForm.resetFields();
-        invalidateLoyaltyQueries();
-      }
-    }
-  );
+  const deleteProgramMutation = useMutation({
+    mutationFn: (programId) => adminService.deleteLoyaltyProgram(programId),
 
-  const deleteTierMutation = useMutation(
-    (tierId) => adminService.deleteLoyaltyTier(tierId),
-    {
-      onSuccess: () => {
-        message.success(t('ui.loyalty.tier_delete_success', { defaultValue: 'Tier removed successfully' }));
-        invalidateLoyaltyQueries();
-      }
-    }
-  );
+    onSuccess: () => {
+      message.success(t('ui.loyalty.delete_success', { defaultValue: 'Program updated successfully' }));
+      invalidateLoyaltyQueries();
+    },
+  });
+
+  const createTierMutation = useMutation({
+    mutationFn: (values) => adminService.createLoyaltyTier(values),
+
+    onSuccess: () => {
+      message.success(t('ui.loyalty.tier_create_success', { defaultValue: 'Tier created successfully' }));
+      setTierModal({ open: false, tier: null });
+      tierForm.resetFields();
+      invalidateLoyaltyQueries();
+    },
+  });
+
+  const updateTierMutation = useMutation({
+    mutationFn: ({ tierId, values }) => adminService.updateLoyaltyTier(tierId, values),
+
+    onSuccess: () => {
+      message.success(t('ui.loyalty.tier_update_success', { defaultValue: 'Tier updated successfully' }));
+      setTierModal({ open: false, tier: null });
+      tierForm.resetFields();
+      invalidateLoyaltyQueries();
+    },
+  });
+
+  const deleteTierMutation = useMutation({
+    mutationFn: (tierId) => adminService.deleteLoyaltyTier(tierId),
+
+    onSuccess: () => {
+      message.success(t('ui.loyalty.tier_delete_success', { defaultValue: 'Tier removed successfully' }));
+      invalidateLoyaltyQueries();
+    },
+  });
 
   const handleExport = async () => {
     const result = await exportUtils.exportLoyaltyPrograms({
@@ -413,7 +414,7 @@ const LoyaltyPrograms = () => {
                     dataSource={programs}
                     loading={programsQuery.isLoading}
                     locale={{
-                      emptyText: <Empty description={t('ui.loyalty.no_programs', { defaultValue: 'No loyalty programs found' })} />
+                      emptyText: <EmptyState description={t('ui.loyalty.no_programs', { defaultValue: 'No loyalty programs found' })} />
                     }}
                     pagination={{
                       current: pagination.page,
@@ -479,7 +480,7 @@ const LoyaltyPrograms = () => {
                     dataSource={tiers}
                     loading={tiersQuery.isLoading}
                     locale={{
-                      emptyText: <Empty description={t('ui.loyalty.no_tiers', { defaultValue: 'No tiers configured' })} />
+                      emptyText: <EmptyState description={t('ui.loyalty.no_tiers', { defaultValue: 'No tiers configured' })} />
                     }}
                     pagination={false}
                   />
@@ -574,9 +575,9 @@ const LoyaltyPrograms = () => {
               <Button onClick={() => setProgramModal({ open: false, program: null })}>
                 {t('ui.loyalty.cancel', { defaultValue: 'Cancel' })}
               </Button>
-              <Button type="primary" htmlType="submit" loading={createProgramMutation.isLoading || updateProgramMutation.isLoading}>
+              <AsyncButton type="primary" htmlType="submit" loading={createProgramMutation.isPending || updateProgramMutation.isPending}>
                 {programModal.program ? t('ui.loyalty.update_program', { defaultValue: 'Update Program' }) : t('ui.loyalty.create_program', { defaultValue: 'Create Program' })}
-              </Button>
+              </AsyncButton>
             </Space>
           </Form.Item>
         </Form>
@@ -668,9 +669,9 @@ const LoyaltyPrograms = () => {
               <Button onClick={() => setTierModal({ open: false, tier: null })}>
                 {t('ui.loyalty.cancel', { defaultValue: 'Cancel' })}
               </Button>
-              <Button type="primary" htmlType="submit" loading={createTierMutation.isLoading || updateTierMutation.isLoading}>
+              <AsyncButton type="primary" htmlType="submit" loading={createTierMutation.isPending || updateTierMutation.isPending}>
                 {tierModal.tier ? t('ui.loyalty.update', { defaultValue: 'Update' }) : t('ui.loyalty.create', { defaultValue: 'Create' })}
-              </Button>
+              </AsyncButton>
             </Space>
           </Form.Item>
         </Form>

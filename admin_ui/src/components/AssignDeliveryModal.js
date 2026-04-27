@@ -4,7 +4,7 @@ import {
     message, Alert,
 } from 'antd';
 import { CarOutlined, UserOutlined } from '@ant-design/icons';
-import { useQuery, useMutation, useQueryClient } from 'react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import staffService from '../services/staffService';
 
@@ -27,37 +27,39 @@ const AssignDeliveryModal = ({ open, onCancel, deliveryId, currentPersonId, onSu
     const [selectedPersonId, setSelectedPersonId] = useState(null);
 
     // Fetch available delivery persons
-    const { data: personsData, isLoading: loadingPersons } = useQuery(
-        ['availableDeliveryPersons'],
-        () => staffService.getDeliveryPersons({ status: 'active', per_page: 100 }),
-        { enabled: open }
-    );
+    const { data: personsData, isLoading: loadingPersons } = useQuery({
+        queryKey: ['availableDeliveryPersons'],
+        queryFn: () => staffService.getDeliveryPersons({ status: 'active', per_page: 100 }),
+        enabled: open,
+    });
 
     const persons = personsData?.data?.data?.items || [];
 
-    const isReassign = !!currentPersonId;
+    const isReassign = Boolean(currentPersonId);
 
-    const assignMutation = useMutation(
-        () =>
+    const assignMutation = useMutation({
+        mutationFn: () =>
             isReassign
                 ? staffService.reassignDelivery(deliveryId, selectedPersonId)
                 : staffService.assignDelivery(deliveryId, selectedPersonId),
-        {
-            onSuccess: () => {
-                message.success(
-                    isReassign ? t('staff:delivery_reassigned') : t('staff:delivery_assigned')
-                );
-                queryClient.invalidateQueries('staffDeliveryPersons');
-                setSelectedPersonId(null);
-                onSuccess?.();
-                onCancel();
-            },
-            onError: (err) => {
-                const msg = err?.response?.data?.message || t('common:error_occurred');
-                message.error(msg);
-            },
-        }
-    );
+
+        onSuccess: () => {
+            message.success(
+                isReassign ? t('staff:delivery_reassigned') : t('staff:delivery_assigned')
+            );
+            queryClient.invalidateQueries({
+                queryKey: ['staffDeliveryPersons'],
+            });
+            setSelectedPersonId(null);
+            onSuccess?.();
+            onCancel();
+        },
+
+        onError: (err) => {
+            const msg = err?.response?.data?.message || t('common:error_occurred');
+            message.error(msg);
+        },
+    });
 
     const selectedPerson = persons.find((p) => p.user_id === selectedPersonId);
 
@@ -69,7 +71,7 @@ const AssignDeliveryModal = ({ open, onCancel, deliveryId, currentPersonId, onSu
             onOk={() => assignMutation.mutate()}
             okText={isReassign ? t('staff:reassign') : t('staff:assign')}
             cancelText={t('common:cancel')}
-            confirmLoading={assignMutation.isLoading}
+            confirmLoading={assignMutation.isPending}
             okButtonProps={{ disabled: !selectedPersonId }}
         >
             <Space direction="vertical" size="middle" style={{ width: '100%' }}>

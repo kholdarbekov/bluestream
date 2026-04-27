@@ -61,27 +61,27 @@ class ProfileHandlers(BaseHandler):
 
         age_seconds = (datetime.now(timezone.utc) - message_date.astimezone(timezone.utc)).total_seconds()
         return age_seconds < 47 * 3600
-    
+
     async def profile_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Show user profile menu"""
         try:
             user = await user_middleware(update)
             if not user:
                 return
-            
+
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
-            
+
             # Clear any pending input state
             await self.user_repo.update_user_state(user_id, {})
-            
+
             # Get user profile from API
             async with api_client as client:
                 user_token = await get_auth_token(update, context, client)
                 if not user_token:
                     await self._handle_auth_error(update, language)
                     return
-                
+
                 response = await client.get_user_profile(user_token)
                 if not response.success and response.status_code == 404:
                     # Recover from stale cached token pointing to an old/deleted user.
@@ -104,21 +104,21 @@ class ProfileHandlers(BaseHandler):
                 if not response.success:
                     await self._handle_api_error(update, response.error, language)
                     return
-                
+
                 profile = response.data['data']
-            
+
             not_set_label = i18n.get('telegram.common.not_set', language)
             full_name = (f"{profile.get('first_name', '')} {profile.get('last_name', '')}" or not_set_label).strip()
-            
+
             # Format profile information
             profile_text = f"{i18n.get('telegram.profile_title', language)}\n\n"
             profile_text += f"{i18n.get('telegram.profile_name', language)}: {full_name}\n"
             profile_text += f"{i18n.get('telegram.profile_phone', language)}: {profile.get('phone', not_set_label)}\n"
             profile_text += f"{i18n.get('telegram.profile_email', language)}: {profile.get('email', not_set_label)}\n"
             profile_text += f"{i18n.get('telegram.profile_language', language)}: {language}"
-            
+
             keyboard = ProfileKeyboards.profile_menu(language)
-            
+
             if update.callback_query:
                 await update.callback_query.edit_message_text(
                     text=profile_text,
@@ -130,7 +130,7 @@ class ProfileHandlers(BaseHandler):
                     text=profile_text,
                     reply_markup=keyboard
                 )
-            
+
             logger.info(f"Profile menu shown to user {user_id}")
 
         except Exception as e:
@@ -680,21 +680,21 @@ class ProfileHandlers(BaseHandler):
                 )
 
                 return ConversationHandler.END
-            
+
         except Exception as e:
             logger.error(f"Error starting registration: {e}")
             return ConversationHandler.END
-    
+
     async def start_registration(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Start registration process"""
         try:
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
-            
+
             # Ask for phone number
             phone_text = i18n.get('telegram.registration.enter_phone', language)
             keyboard = ProfileKeyboards.phone_request(language)
-            
+
             if update.callback_query:
                 await update.callback_query.edit_message_text(
                     text=phone_text
@@ -710,13 +710,13 @@ class ProfileHandlers(BaseHandler):
                     text=phone_text,
                     reply_markup=keyboard
                 )
-            
+
             return PHONE
-            
+
         except Exception as e:
             logger.error(f"Error starting registration: {e}")
             return ConversationHandler.END
-    
+
     async def language_selection(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle language selection during registration"""
         try:
@@ -725,12 +725,12 @@ class ProfileHandlers(BaseHandler):
             user_id = user.id
             language_code = query.data.split('_')[-1]
             logger.info(f"User {user_id} (@{user.username}) register started with language: {language_code}")
-            
+
             # Validate language code
             if language_code not in config.localization.supported_languages:
                 await query.answer(i18n.get('telegram.registration.invalid_language_selection', 'en'))
                 return SELECT_LANGUAGE  # Stay in language selection state
-            
+
             user_repo = BotUserRepository(db_manager)
 
             existing_user = await user_repo.get_user_by_telegram_id(user_id)
@@ -783,32 +783,32 @@ class ProfileHandlers(BaseHandler):
                 # Update user's preferred language
                 await self.user_repo.update_user_language(user_id, language_code)
                 await query.answer(i18n.get('telegram.registration.language_updated_toast', language_code))
-            
+
             # Proceed to phone number input
             phone_text = i18n.get('telegram.registration.enter_phone', language_code)
             keyboard = ProfileKeyboards.phone_request(language_code)
-            
+
             # Send the phone request message first
             await context.bot.send_message(
                 chat_id=update.effective_chat.id,
                 text=phone_text,
                 reply_markup=keyboard
             )
-            
+
             # Then try to delete the old language selection message
             try:
                 await query.delete_message()
             except Exception as del_error:
                 logger.warning(f"Could not delete language selection message: {del_error}")
-            
+
             return PHONE
-            
+
         except Exception as e:
             logger.error(f"Error in language selection: {e}")
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
             return ConversationHandler.END
-    
+
     async def phone_received(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle phone number from contact - checks for duplicates and offers linking"""
         try:
@@ -824,15 +824,15 @@ class ProfileHandlers(BaseHandler):
                 return PHONE
 
             phone = normalize_phone_number(contact.phone_number)
-            
+
             # Check if phone is available via API
             try:
                 async with api_client as client:
                     response = await client.check_phone_availability(user_id, phone)
-                    
+
                     # Extract nested data - API returns {'data': {...}, 'success': True}
                     response_data = response.data.get('data', {}) if response.data else {}
-                    
+
                     if response.success and response_data.get('available'):
                         # Contact sharing is trusted by Telegram, mark phone as verified
                         await self.user_repo.set_user_phone_verified(user_id, phone)
@@ -842,27 +842,27 @@ class ProfileHandlers(BaseHandler):
                             i18n.get('telegram.phone.phone_accepted', language),
                             reply_markup=ReplyKeyboardRemove()
                         )
-                        
+
                         # Registration complete
                         complete_text = i18n.get('telegram.registration_complete', language)
                         keyboard = MenuKeyboards.main_menu(language)
-                        
+
                         await update.message.reply_text(
                             text=complete_text,
                             reply_markup=keyboard
                         )
-                        
+
                         logger.info(f"Registration completed for user {user_id}")
                         return ConversationHandler.END
-                    
+
                     elif response.success and not response_data.get('available'):
                         # Phone exists - check if linking is possible
                         available = response_data.get('available', False)
                         can_link = response_data.get('can_link', False)
                         existing_user = response_data.get('existing_user_masked', {})
-                        
+
                         logger.info(f"Phone check for user {user_id}: available={available}, can_link={can_link}, existing_user={existing_user}")
-                        
+
                         if can_link:
                             # Store phone for linking
                             context.user_data['pending_link_phone'] = phone
@@ -872,7 +872,7 @@ class ProfileHandlers(BaseHandler):
                                 i18n.get('telegram.phone.phone_accepted', language),
                                 reply_markup=ReplyKeyboardRemove()
                             )
-                            
+
                             # Show linking option
                             masked_name = existing_user.get('name', '***') if existing_user else '***'
 
@@ -886,12 +886,12 @@ class ProfileHandlers(BaseHandler):
                                 [{'text': i18n.get('telegram.phone.link_yes_button', language), 'callback_data': "link_yes"}],
                                 [{'text': i18n.get('telegram.phone.link_no_button', language), 'callback_data': "link_no"}]
                             ])
-                            
+
                             await update.message.reply_text(
                                 text=link_text,
                                 reply_markup=keyboard
                             )
-                            
+
                             return LINK_ACCOUNT_CONFIRM
                         else:
                             # Cannot link - phone belongs to another telegram user
@@ -908,7 +908,7 @@ class ProfileHandlers(BaseHandler):
                             reply_markup=ProfileKeyboards.phone_request(language)
                         )
                         return PHONE
-                        
+
             except Exception as api_error:
                 logger.error(f"API error checking phone: {api_error}")
                 # Fall back to direct save (will fail if duplicate, which is caught below)
@@ -919,15 +919,15 @@ class ProfileHandlers(BaseHandler):
                     i18n.get('telegram.phone.phone_accepted', language),
                     reply_markup=ReplyKeyboardRemove()
                 )
-                
+
                 complete_text = i18n.get('telegram.registration_complete', language)
                 keyboard = MenuKeyboards.main_menu(language)
-                
+
                 await update.message.reply_text(
                     text=complete_text,
                     reply_markup=keyboard
                 )
-                
+
                 logger.info(f"Registration completed for user {user_id}")
                 return ConversationHandler.END
 
@@ -935,7 +935,7 @@ class ProfileHandlers(BaseHandler):
             logger.error(f"Error handling phone: {e}")
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
-            
+
             # Check if it's a duplicate key error
             if 'duplicate key' in str(e).lower() or 'unique constraint' in str(e).lower():
                 language = await i18n.get_user_language(update.effective_user.id)
@@ -944,9 +944,9 @@ class ProfileHandlers(BaseHandler):
                     reply_markup=ProfileKeyboards.phone_request(language)
                 )
                 return PHONE
-            
+
             return ConversationHandler.END
-    
+
     async def phone_text_received(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle phone number as text"""
         try:
@@ -966,10 +966,10 @@ class ProfileHandlers(BaseHandler):
             try:
                 async with api_client as client:
                     response = await client.check_phone_availability(user_id, phone)
-                    
+
                     # Extract nested data - API returns {'data': {...}, 'success': True}
                     response_data = response.data.get('data', {}) if response.data else {}
-                    
+
                     if response.success and response_data.get('available'):
                         # For text input, phone must be OTP-verified
                         user_token = await get_auth_token(
@@ -1021,19 +1021,19 @@ class ProfileHandlers(BaseHandler):
 
                         logger.info(f"Registration OTP sent to {phone} for user {user_id}")
                         return ConversationHandler.END
-                    
+
                     elif response.success and not response_data.get('available'):
                         # Phone exists - check if linking is possible
                         available = response_data.get('available', False)
                         can_link = response_data.get('can_link', False)
                         existing_user = response_data.get('existing_user_masked', {})
-                        
+
                         logger.info(f"Phone check for user {user_id}: available={available}, can_link={can_link}, existing_user={existing_user}")
-                        
+
                         if can_link:
                             # Store phone for linking
                             context.user_data['pending_link_phone'] = phone
-                            
+
                             # Remove the share contact keyboard first
                             await update.message.reply_text(
                                 i18n.get('telegram.phone.phone_accepted', language),
@@ -1053,12 +1053,12 @@ class ProfileHandlers(BaseHandler):
                                 [{'text': i18n.get('telegram.phone.link_yes_button', language), 'callback_data': "link_yes"}],
                                 [{'text': i18n.get('telegram.phone.link_no_button', language), 'callback_data': "link_no"}]
                             ])
-                            
+
                             await update.message.reply_text(
                                 text=link_text,
                                 reply_markup=keyboard
                             )
-                            
+
                             return LINK_ACCOUNT_CONFIRM
                         else:
                             # Cannot link - phone belongs to another telegram user
@@ -1075,7 +1075,7 @@ class ProfileHandlers(BaseHandler):
                             reply_markup=ProfileKeyboards.phone_request(language)
                         )
                         return PHONE
-                        
+
             except Exception as api_error:
                 logger.error(f"API error checking phone: {api_error}")
                 await update.message.reply_text(
@@ -1086,7 +1086,7 @@ class ProfileHandlers(BaseHandler):
 
         except Exception as e:
             logger.error(f"Error handling phone text: {e}")
-            
+
             # Check if it's a duplicate key error
             if 'duplicate key' in str(e).lower() or 'unique constraint' in str(e).lower():
                 language = await i18n.get_user_language(update.effective_user.id)
@@ -1095,30 +1095,30 @@ class ProfileHandlers(BaseHandler):
                     reply_markup=ProfileKeyboards.phone_request(language)
                 )
                 return PHONE
-            
+
             return ConversationHandler.END
-    
+
     async def link_account_confirm(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle user's choice to link or cancel account linking"""
         try:
             query = update.callback_query
             await query.answer()
-            
+
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
             callback_data = query.data
-            
+
             if callback_data == "link_yes":
                 # User wants to link - send OTP
                 phone = context.user_data.get('pending_link_phone')
-                
+
                 if not phone:
                     await query.edit_message_text(
                         i18n.get('telegram.phone.session_expired_share_again', language),
                         reply_markup=None
                     )
                     return PHONE
-                
+
                 # Rate limit OTP requests
                 if not await otp_rate_limiter.allow_otp_request(user_id):
                     await query.edit_message_text(
@@ -1131,7 +1131,7 @@ class ProfileHandlers(BaseHandler):
                 try:
                     async with api_client as client:
                         response = await client.link_phone_send_otp(user_id, phone)
-                        
+
                         if response.success:
                             phone_masked = response.data.get('phone_masked', phone)
                             await query.edit_message_text(
@@ -1162,7 +1162,7 @@ class ProfileHandlers(BaseHandler):
                                 reply_markup=ProfileKeyboards.phone_request(language)
                             )
                             return PHONE
-                            
+
                 except Exception as api_error:
                     logger.error(f"API error sending OTP: {api_error}")
                     await query.edit_message_text(
@@ -1175,59 +1175,59 @@ class ProfileHandlers(BaseHandler):
                         reply_markup=ProfileKeyboards.phone_request(language)
                     )
                     return PHONE
-                    
+
             elif callback_data == "link_no":
                 # User wants to use different phone
                 context.user_data.pop('pending_link_phone', None)
-                
+
                 await query.edit_message_text(
                     i18n.get('telegram.phone.share_different_phone_prompt', language),
                     reply_markup=None
                 )
-                
+
                 # Send keyboard for phone sharing
                 await context.bot.send_message(
                     chat_id=update.effective_chat.id,
                     text=i18n.get('telegram.phone.share_phone_using_button', language),
                     reply_markup=ProfileKeyboards.phone_request(language)
                 )
-                
+
                 return PHONE
-            
+
             return ConversationHandler.END
-            
+
         except Exception as e:
             logger.error(f"Error in link_account_confirm: {e}")
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
             return ConversationHandler.END
-    
+
     async def link_account_otp(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle OTP verification for account linking"""
         try:
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
             otp = update.message.text.strip()
-            
+
             # Validate OTP format
             if not otp.isdigit() or len(otp) != 6:
                 await update.message.reply_text(
                     i18n.get('telegram.phone.enter_valid_6_digit_code', language)
                 )
                 return LINK_ACCOUNT_OTP
-            
+
             phone = context.user_data.get('pending_link_phone')
             if not phone:
                 await update.message.reply_text(
                     i18n.get('telegram.phone.session_expired_start_again', language)
                 )
                 return ConversationHandler.END
-            
+
             # Call API to verify OTP and link accounts
             try:
                 async with api_client as client:
                     response = await client.link_phone_verify(user_id, otp)
-                    
+
                     if response.success:
                         # Account linked successfully!
                         context.user_data.pop('pending_link_phone', None)
@@ -1257,7 +1257,7 @@ class ProfileHandlers(BaseHandler):
                         return ConversationHandler.END
                     else:
                         error_msg = response.error or i18n.get('telegram.phone.invalid_verification_code_default', language)
-                        
+
                         # Check if it's an expired/invalid OTP
                         if 'expired' in error_msg.lower() or 'not found' in error_msg.lower():
                             await update.message.reply_text(
@@ -1269,20 +1269,20 @@ class ProfileHandlers(BaseHandler):
                                 i18n.get('telegram.phone.verification_failed_with_error_retry', language, error=error_msg)
                             )
                             return LINK_ACCOUNT_OTP
-                        
+
             except Exception as api_error:
                 logger.error(f"API error verifying OTP: {api_error}")
                 await update.message.reply_text(
                     i18n.get('telegram.phone.verification_failed_retry', language)
                 )
                 return LINK_ACCOUNT_OTP
-            
+
         except Exception as e:
             logger.error(f"Error in link_account_otp: {e}")
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
             return ConversationHandler.END
-    
+
     async def name_received(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle name input or OTP verification"""
         try:
@@ -1372,36 +1372,36 @@ class ProfileHandlers(BaseHandler):
         except Exception as e:
             logger.error(f"Error handling name: {e}")
             return ConversationHandler.END
-    
+
     async def continue_registration(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Continue registration after phone sharing"""
         try:
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
-            
+
             # Check if user already has full profile
             user_data = await self.user_repo.get_user_by_telegram_id(user_id)
             if user_data and user_data.get('full_name'):
                 # Already registered, show main menu
                 await self.profile_menu(update, context)
                 return
-            
+
             # Ask for name
             name_text = i18n.get('telegram.registration.enter_name', language)
             await update.message.reply_text(name_text)
-            
+
         except Exception as e:
             logger.error(f"Error continuing registration: {e}")
-    
+
     async def cancel_registration(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Cancel registration process"""
         try:
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
-            
+
             cancel_text = i18n.get('telegram.action_cancelled', language)
             keyboard = MenuKeyboards.main_menu(language)
-            
+
             await update.message.reply_text(
                 text=i18n.get('telegram.action_cancelled_short', language),
                 reply_markup=ReplyKeyboardRemove()
@@ -1410,59 +1410,59 @@ class ProfileHandlers(BaseHandler):
                 text=cancel_text,
                 reply_markup=keyboard
             )
-            
+
             return ConversationHandler.END
-            
+
         except Exception as e:
             logger.error(f"Error canceling registration: {e}")
             return ConversationHandler.END
-    
+
     async def edit_profile(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle profile editing"""
         try:
             query = update.callback_query
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
-            
+
             edit_text = i18n.get('telegram.profile.edit_prompt', language)
-            
+
             await query.edit_message_text(
                 text=edit_text,
                 reply_markup=MenuKeyboards.cancel_button(language)
             )
             await query.answer()
-            
+
             # Set user state for profile editing
             await self.user_repo.update_user_state(user_id, {'awaiting_input': 'profile_edit'})
-            
+
         except Exception as e:
             logger.error(f"Error in edit profile: {e}")
             await self._handle_error(update)
-    
+
     async def manage_addresses(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle address management"""
         try:
             query = update.callback_query
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
-            
+
             # Clear any pending input state
             await self.user_repo.update_user_state(user_id, {})
-            
+
             # Get user addresses
             async with api_client as client:
                 user_token = await get_auth_token(update, context, client)
                 if not user_token:
                     await self._handle_auth_error(update, language)
                     return
-                
+
                 response = await client.get_user_addresses(user_token)
                 if not response.success:
                     await self._handle_api_error(update, response.error, language)
                     return
-                
+
                 addresses = response.data.get('data', {}).get('addresses', [])
-            
+
             if not addresses:
                 addresses_text = i18n.get('telegram.address.no_addresses', language)
                 keyboard = ProfileKeyboards.empty_addresses(language)
@@ -1473,27 +1473,27 @@ class ProfileHandlers(BaseHandler):
                     status = "🏠" if addr.get('is_default') else "📍"
                     addresses_text += f"{status} {addr.get('title', i18n.get('telegram.address.title_fallback', language, index=i))}\n"
                     addresses_text += f"   {addr.get('full_address', i18n.get('telegram.address.no_address_placeholder', language))}\n\n"
-                
+
                 # Create proper address management keyboard
                 keyboard = ProfileKeyboards.addresses_management(addresses, language)
                 logger.info(f"Found {len(addresses)} addresses, showing management keyboard")
-            
+
             await query.edit_message_text(
                 text=addresses_text,
                 reply_markup=keyboard
             )
             await query.answer()
-            
+
         except Exception as e:
             logger.error(f"Error managing addresses: {e}")
             await self._handle_error(update)
-    
+
     async def add_address(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Start address adding process - entry point for enhanced address flow"""
         try:
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
-            
+
             # Clear any pending database state before starting address flow
             await self.user_repo.update_user_state(user_id, {})
 
@@ -1562,7 +1562,7 @@ class ProfileHandlers(BaseHandler):
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
             return ConversationHandler.END
-    
+
     async def location_received(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle location sharing for address - primary path with reverse geocoding"""
         logger.info(f"=== LOCATION_RECEIVED METHOD CALLED ===")
@@ -1628,28 +1628,28 @@ class ProfileHandlers(BaseHandler):
             import traceback
             logger.error(f"Full traceback: {traceback.format_exc()}")
             return ConversationHandler.END
-    
+
     async def address_text_received(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle address as text"""
         try:
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
             address_text = update.message.text.strip()
-            
+
             # Store address text temporarily
             context.user_data['temp_address'] = address_text
-            
+
             await update.message.reply_text(
                 i18n.get('telegram.address.title_received', language),
                 reply_markup=ReplyKeyboardRemove()
             )
-            
+
             return ADDRESS_TITLE
-            
+
         except Exception as e:
             logger.error(f"Error handling address text: {e}")
             return ConversationHandler.END
-    
+
     async def address_title_received(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle address title from text input"""
         try:
@@ -1721,7 +1721,7 @@ class ProfileHandlers(BaseHandler):
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
             return ConversationHandler.END
-    
+
     async def cancel_address(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Cancel address adding process"""
         try:
@@ -1763,13 +1763,13 @@ class ProfileHandlers(BaseHandler):
             language = await i18n.get_user_language(user_id)
 
             cancel_text = i18n.get('telegram.action_cancelled', language)
-            
+
             # First remove the reply keyboard
             await update.message.reply_text(
                 i18n.get('telegram.action_cancelled_short', language),
                 reply_markup=ReplyKeyboardRemove()
             )
-            
+
             # Then show main menu
             keyboard = MenuKeyboards.main_menu(language)
             await update.message.reply_text(
@@ -2363,7 +2363,7 @@ class ProfileHandlers(BaseHandler):
 
             # Offer location sharing or manual re-entry
             retry_text = i18n.get('telegram.address.retry_location', language)
-            
+
             keyboard = ProfileKeyboards.location_request_with_retry(language)
 
             await query.message.reply_text(
@@ -2411,7 +2411,11 @@ class ProfileHandlers(BaseHandler):
 
         callback_query = getattr(update, 'callback_query', None)
         callback_message = callback_query.message if callback_query else None
-        resume_message = update.message or callback_message
+        # When a callback drove this flow, anchor the resumed update on the
+        # callback's message (the bubble that held the inline buttons) — that
+        # is what the user actually sees and what checkout should reply to.
+        # Fall back to update.message only for non-callback (text) entry points.
+        resume_message = callback_message or update.message
 
         if resume_message is not None:
             synthetic_update = SimpleNamespace(
@@ -2499,39 +2503,39 @@ class ProfileHandlers(BaseHandler):
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
             return ConversationHandler.END
-    
+
     async def view_address(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """View specific address details"""
         try:
             query = update.callback_query
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
-            
+
             # Clear any pending input state (user may have cancelled an edit)
             await self.user_repo.update_user_state(user_id, {})
-            
+
             # Extract address ID from callback data
             address_id = query.data.split('_')[-1]
-            
+
             # Get address details from API
             async with api_client as client:
                 user_token = await get_auth_token(update, context, client)
                 if not user_token:
                     await self._handle_auth_error(update, language)
                     return
-                
+
                 response = await client.get_user_addresses(user_token)
                 if not response.success:
                     await self._handle_api_error(update, response.error, language)
                     return
-                
+
                 addresses = response.data.get('data', {}).get('addresses', [])
                 address = next((addr for addr in addresses if str(addr.get('id')) == address_id), None)
-                
+
                 if not address:
                     await query.answer(i18n.get('telegram.address.not_found', language))
                     return
-            
+
             # Format address details
             address_text = i18n.get(
                 'telegram.address.details_title',
@@ -2549,7 +2553,7 @@ class ProfileHandlers(BaseHandler):
                 address_text += i18n.get('telegram.address.details_city', language, city=address.get('city'))
             if address.get('is_default'):
                 address_text += i18n.get('telegram.address.details_default_badge', language)
-            
+
             # Create action buttons for this address
             buttons = [
                 [
@@ -2557,15 +2561,15 @@ class ProfileHandlers(BaseHandler):
                     {'text': i18n.get('telegram.address.delete', language), 'callback_data': f'delete_address_{address_id}'}
                 ]
             ]
-            
+
             if not address.get('is_default'):
                 buttons.insert(0, [{'text': i18n.get('telegram.address.set_default', language), 'callback_data': f'set_default_address_{address_id}'}])
-            
+
             buttons.append([{'text': i18n.get('telegram.back', language), 'callback_data': 'manage_addresses'}])
-            
+
             from keyboards import KeyboardBuilder
             keyboard = KeyboardBuilder.build_inline_keyboard(buttons)
-            
+
             try:
                 await query.edit_message_text(
                     text=address_text,
@@ -2578,40 +2582,40 @@ class ProfileHandlers(BaseHandler):
                     logger.info(f"Message content unchanged for address {address_id}")
                 else:
                     raise edit_error
-            
+
             await query.answer()
-            
+
         except Exception as e:
             logger.error(f"Error viewing address: {e}")
             await self._handle_error(update)
-    
+
     async def select_edit_address(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Show address selection for editing"""
         try:
             query = update.callback_query
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
-            
+
             # Get user addresses
             async with api_client as client:
                 user_token = await get_auth_token(update, context, client)
                 if not user_token:
                     await self._handle_auth_error(update, language)
                     return
-                
+
                 response = await client.get_user_addresses(user_token)
                 if not response.success:
                     await self._handle_api_error(update, response.error, language)
                     return
-                
+
                 addresses = response.data.get('data', {}).get('addresses', [])
-            
+
             if not addresses:
                 await query.answer(i18n.get('telegram.address.no_addresses_to_edit', language))
                 return
-            
+
             edit_text = i18n.get('telegram.address.select_edit_prompt', language)
-            
+
             # Create selection buttons
             buttons = []
             for addr in addresses:
@@ -2624,50 +2628,50 @@ class ProfileHandlers(BaseHandler):
                     'text': f"{status} {addr_title}",
                     'callback_data': f"edit_address_{addr['id']}"
                 }])
-            
+
             buttons.append([{'text': i18n.get('telegram.back', language), 'callback_data': 'manage_addresses'}])
-            
+
             from keyboards import KeyboardBuilder
             keyboard = KeyboardBuilder.build_inline_keyboard(buttons)
-            
+
             await query.edit_message_text(
                 text=edit_text,
                 reply_markup=keyboard,
                 parse_mode='Markdown'
             )
             await query.answer()
-            
+
         except Exception as e:
             logger.error(f"Error in select edit address: {e}")
             await self._handle_error(update)
-    
+
     async def select_delete_address(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Show address selection for deletion"""
         try:
             query = update.callback_query
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
-            
+
             # Get user addresses
             async with api_client as client:
                 user_token = await get_auth_token(update, context, client)
                 if not user_token:
                     await self._handle_auth_error(update, language)
                     return
-                
+
                 response = await client.get_user_addresses(user_token)
                 if not response.success:
                     await self._handle_api_error(update, response.error, language)
                     return
-                
+
                 addresses = response.data.get('data', {}).get('addresses', [])
-            
+
             if not addresses:
                 await query.answer(i18n.get('telegram.address.no_addresses_to_delete', language))
                 return
-            
+
             delete_text = i18n.get('telegram.address.select_delete_prompt', language)
-            
+
             # Create selection buttons
             buttons = []
             for addr in addresses:
@@ -2680,46 +2684,46 @@ class ProfileHandlers(BaseHandler):
                     'text': f"{status} {addr_title}",
                     'callback_data': f"confirm_delete_address_{addr['id']}"
                 }])
-            
+
             buttons.append([{'text': i18n.get('telegram.back', language), 'callback_data': 'manage_addresses'}])
-            
+
             from keyboards import KeyboardBuilder
             keyboard = KeyboardBuilder.build_inline_keyboard(buttons)
-            
+
             await query.edit_message_text(
                 text=delete_text,
                 reply_markup=keyboard,
                 parse_mode='Markdown'
             )
             await query.answer()
-            
+
         except Exception as e:
             logger.error(f"Error in select delete address: {e}")
             await self._handle_error(update)
-    
+
     async def set_default_address(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Set address as default"""
         try:
             query = update.callback_query
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
-            
+
             # Extract address ID from callback data
             address_id = query.data.split('_')[-1]
-            
+
             # Set address as default via API
             async with api_client as client:
                 user_token = await get_auth_token(update, context, client)
                 if not user_token:
                     await self._handle_auth_error(update, language)
                     return
-                
+
                 # Call the API to set address as default
                 response = await client.set_default_address(user_token, int(address_id))
                 if response.success:
                     await query.answer(i18n.get('telegram.address.set_default_success_toast', language))
                     logger.info(f"Address {address_id} successfully set as default")
-                    
+
                     # Refresh the address view to show updated status
                     await self.view_address(update, context)
                 else:
@@ -2727,27 +2731,27 @@ class ProfileHandlers(BaseHandler):
                         i18n.get('telegram.address.set_default_failed_toast', language, error=response.error)
                     )
                     logger.error(f"Failed to set address {address_id} as default: {response.error}")
-            
+
         except Exception as e:
             logger.error(f"Error setting default address: {e}")
             await self._handle_error(update)
-    
+
     async def edit_address_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle editing specific address"""
         try:
             query = update.callback_query
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
-            
+
             # Clear any old pending input state before showing edit menu
             await self.user_repo.update_user_state(user_id, {})
-            
+
             # Extract address ID from callback data
             address_id = query.data.split('_')[-1]
-            
+
             # Show editing options for the address
             edit_text = i18n.get('telegram.address.edit_options_text', language)
-            
+
             # Create editing options buttons
             buttons = [
                 [
@@ -2763,10 +2767,10 @@ class ProfileHandlers(BaseHandler):
                     {'text': i18n.get('telegram.back', language), 'callback_data': f'view_address_{address_id}'}
                 ]
             ]
-            
+
             from keyboards import KeyboardBuilder
             keyboard = KeyboardBuilder.build_inline_keyboard(buttons)
-            
+
             try:
                 await query.edit_message_text(
                     text=edit_text,
@@ -2776,90 +2780,90 @@ class ProfileHandlers(BaseHandler):
             except BadRequest as edit_error:
                 if "message is not modified" not in str(edit_error).lower():
                     raise edit_error
-            
+
             await query.answer()
             logger.info(f"Address editing options shown for address {address_id}")
-            
+
         except Exception as e:
             logger.error(f"Error in edit address handler: {e}")
             await self._handle_error(update)
-    
+
     async def delete_address_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle address deletion confirmation"""
         try:
             query = update.callback_query
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
-            
-            # Extract address ID from callback data  
+
+            # Extract address ID from callback data
             address_id = query.data.split('_')[-1]
-            
+
             # Get address details for confirmation
             async with api_client as client:
                 user_token = await get_auth_token(update, context, client)
                 if not user_token:
                     await self._handle_auth_error(update, language)
                     return
-                
+
                 response = await client.get_user_addresses(user_token)
                 if not response.success:
                     await self._handle_api_error(update, response.error, language)
                     return
-                
+
                 addresses = response.data.get('data', {}).get('addresses', [])
                 address = next((addr for addr in addresses if str(addr.get('id')) == address_id), None)
-                
+
                 if not address:
                     await query.answer(i18n.get('telegram.address.not_found', language))
                     return
-            
+
             # Show confirmation dialog
             confirm_text = i18n.get('telegram.address.delete_confirmation', language, title=address.get('title', 'Untitled'), address=address.get('full_address', 'N/A'))
-            
+
             buttons = [
                 [
                     {'text': i18n.get('telegram.address.delete_confirm_yes', language), 'callback_data': f'confirm_delete_address_{address_id}'},
                     {'text': i18n.get('telegram.cancel', language), 'callback_data': f'view_address_{address_id}'}
                 ]
             ]
-            
+
             from keyboards import KeyboardBuilder
             keyboard = KeyboardBuilder.build_inline_keyboard(buttons)
-            
+
             await query.edit_message_text(
                 text=confirm_text,
                 reply_markup=keyboard,
                 parse_mode='Markdown'
             )
             await query.answer()
-            
+
         except Exception as e:
             logger.error(f"Error in delete address handler: {e}")
             await self._handle_error(update)
-    
+
     async def confirm_delete_address(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Confirm and execute address deletion"""
         try:
             query = update.callback_query
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
-            
+
             # Extract address ID from callback data
             address_id = query.data.split('_')[-1]
-            
+
             # Delete address via API
             async with api_client as client:
                 user_token = await get_auth_token(update, context, client)
                 if not user_token:
                     await self._handle_auth_error(update, language)
                     return
-                
+
                 # Call the API to delete the address
                 response = await client.delete_user_address(user_token, int(address_id))
                 if response.success:
                     await query.answer(i18n.get('telegram.address.deleted_success_toast', language))
                     logger.info(f"Address {address_id} successfully deleted")
-                    
+
                     # Redirect back to address management
                     await self.manage_addresses(update, context)
                 else:
@@ -2867,14 +2871,14 @@ class ProfileHandlers(BaseHandler):
                         i18n.get('telegram.address.delete_failed_toast', language, error=response.error)
                     )
                     logger.error(f"Failed to delete address {address_id}: {response.error}")
-                    
+
                     # Show error and go back to address view
                     error_text = i18n.get('telegram.address.delete_failed_detail', language, error=response.error)
                     back_button = [[{'text': i18n.get('telegram.back', language), 'callback_data': f'view_address_{address_id}'}]]
-                    
+
                     from keyboards import KeyboardBuilder
                     keyboard = KeyboardBuilder.build_inline_keyboard(back_button)
-                    
+
                     try:
                         await query.edit_message_text(
                             text=error_text,
@@ -2884,116 +2888,116 @@ class ProfileHandlers(BaseHandler):
                     except BadRequest as edit_error:
                         if "message is not modified" not in str(edit_error).lower():
                             raise edit_error
-            
+
         except Exception as e:
             logger.error(f"Error confirming delete address: {e}")
             await self._handle_error(update)
-    
+
     async def edit_title_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle editing address title"""
         try:
             query = update.callback_query
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
-            
+
             # Extract address ID from callback data
             address_id = query.data.split('_')[-1]
-            
+
             # Store address ID for conversation
             context.user_data['edit_address_id'] = address_id
             context.user_data['edit_field'] = 'title'
-            
+
             # Get current address details
             async with api_client as client:
                 user_token = await get_auth_token(update, context, client)
                 if not user_token:
                     await self._handle_auth_error(update, language)
                     return
-                
+
                 response = await client.get_user_addresses(user_token)
                 if response.success:
                     addresses = response.data.get('data', {}).get('addresses', [])
                     address = next((addr for addr in addresses if str(addr.get('id')) == address_id), None)
-                    
+
                     if address:
                         current_title = address.get('title', i18n.get('telegram.address.untitled', language))
                         edit_text = i18n.get('telegram.address.edit_title_prompt', language, current_title=current_title)
-                        
+
                         cancel_button = [[{'text': i18n.get('telegram.cancel', language), 'callback_data': f'view_address_{address_id}'}]]
                         from keyboards import KeyboardBuilder
                         keyboard = KeyboardBuilder.build_inline_keyboard(cancel_button)
-                        
+
                         await query.edit_message_text(
                             text=edit_text,
                             reply_markup=keyboard,
                             parse_mode='Markdown'
                         )
                         await query.answer()
-                        
+
                         # Set state to wait for title input
                         await self.user_repo.update_user_state(user_id, {
                             'awaiting_input': 'edit_address_title',
                             'edit_address_id': address_id
                         })
-                        
+
                         return
-            
+
             await query.answer(i18n.get('telegram.address.not_found', language))
-            
+
         except Exception as e:
             logger.error(f"Error in edit title handler: {e}")
             await self._handle_error(update)
-    
+
     async def edit_location_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle editing address location"""
         try:
             query = update.callback_query
             language = await i18n.get_user_language(update.effective_user.id)
             address_id = query.data.split('_')[-1]
-            
+
             await query.answer(i18n.get('telegram.address.location_edit_not_supported', language))
             logger.info(f"Location edit requested for address {address_id} - redirecting to delete/add flow")
-            
+
         except Exception as e:
             logger.error(f"Error in edit location handler: {e}")
             await self._handle_error(update)
-    
+
     async def edit_details_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle editing address details"""
         try:
             query = update.callback_query
             language = await i18n.get_user_language(update.effective_user.id)
             address_id = query.data.split('_')[-1]
-            
+
             await query.answer(i18n.get('telegram.address.details_edit_coming_soon', language))
             logger.info(f"Details edit requested for address {address_id} - not yet implemented")
-            
+
         except Exception as e:
             logger.error(f"Error in edit details handler: {e}")
             await self._handle_error(update)
-    
+
     async def edit_instructions_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle editing delivery instructions"""
         try:
             query = update.callback_query
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
-            
+
             # Extract address ID from callback data
             address_id = query.data.split('_')[-1]
-            
+
             # Get current address details
             async with api_client as client:
                 user_token = await get_auth_token(update, context, client)
                 if not user_token:
                     await self._handle_auth_error(update, language)
                     return
-                
+
                 response = await client.get_user_addresses(user_token)
                 if response.success:
                     addresses = response.data.get('data', {}).get('addresses', [])
                     address = next((addr for addr in addresses if str(addr.get('id')) == address_id), None)
-                    
+
                     if address:
                         current_instructions = address.get('delivery_instructions') or i18n.get('telegram.address.none_value', language)
                         edit_text = i18n.get(
@@ -3001,91 +3005,91 @@ class ProfileHandlers(BaseHandler):
                             language,
                             current_instructions=current_instructions
                         )
-                        
+
                         cancel_button = [[{'text': i18n.get('telegram.cancel', language), 'callback_data': f'view_address_{address_id}'}]]
                         from keyboards import KeyboardBuilder
                         keyboard = KeyboardBuilder.build_inline_keyboard(cancel_button)
-                        
+
                         await query.edit_message_text(
                             text=edit_text,
                             reply_markup=keyboard,
                             parse_mode='Markdown'
                         )
                         await query.answer()
-                        
+
                         # Set state to wait for instructions input
                         await self.user_repo.update_user_state(user_id, {
                             'awaiting_input': 'edit_address_instructions',
                             'edit_address_id': address_id
                         })
-                        
+
                         return
-            
+
             await query.answer(i18n.get('telegram.address.not_found', language))
-            
+
         except Exception as e:
             logger.error(f"Error in edit instructions handler: {e}")
             await self._handle_error(update)
-    
-    async def handle_address_title_edit(self, update: Update, context: ContextTypes.DEFAULT_TYPE, 
+
+    async def handle_address_title_edit(self, update: Update, context: ContextTypes.DEFAULT_TYPE,
                                       text: str, user_state: Dict):
         """Handle address title editing input"""
         try:
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
             address_id = user_state.get('edit_address_id')
-            
+
             if not address_id:
                 await update.message.reply_text(i18n.get('telegram.address.edit_session_expired', language))
                 await self.user_repo.update_user_state(user_id, {})
                 return
-            
+
             # Validate title input
             if len(text.strip()) < 2:
                 await update.message.reply_text(i18n.get('telegram.address.title_too_short', language))
                 return
-            
+
             if len(text.strip()) > 50:
                 await update.message.reply_text(i18n.get('telegram.address.title_too_long', language))
                 return
-            
+
             # Update address via API
             async with api_client as client:
                 user_token = await get_auth_token(update, context, client)
                 if not user_token:
                     await self._handle_auth_error(update, language)
                     return
-                
+
                 # Prepare update data with just the title
                 update_data = {'title': text.strip()}
-                
+
                 response = await client.update_user_address(user_token, int(address_id), update_data)
                 if response.success:
                     success_text = i18n.get('telegram.address.title_updated_success', language, title=text.strip())
-                    
+
                     back_button = [[{'text': i18n.get('telegram.back', language), 'callback_data': f'view_address_{address_id}'}]]
                     from keyboards import KeyboardBuilder
                     keyboard = KeyboardBuilder.build_inline_keyboard(back_button)
-                    
+
                     await update.message.reply_text(
                         text=success_text,
                         reply_markup=keyboard,
                         parse_mode='Markdown'
                     )
-                    
+
                     # Clear user state
                     await self.user_repo.update_user_state(user_id, {})
                     logger.info(f"Address {address_id} title updated to: {text.strip()}")
-                    
+
                 else:
                     error_text = i18n.get('telegram.address.title_update_failed', language, error=response.error)
                     await update.message.reply_text(error_text, parse_mode='Markdown')
                     logger.error(f"Failed to update address {address_id} title: {response.error}")
-            
+
         except Exception as e:
             logger.error(f"Error handling address title edit: {e}")
             await update.message.reply_text(i18n.get('telegram.address.title_update_error', language))
-    
+
     async def handle_address_instructions_edit(self, update: Update, context: ContextTypes.DEFAULT_TYPE,
                                              text: str, user_state: Dict):
         """Handle address delivery instructions editing input"""
@@ -3093,27 +3097,27 @@ class ProfileHandlers(BaseHandler):
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
             address_id = user_state.get('edit_address_id')
-            
+
             if not address_id:
                 await update.message.reply_text(i18n.get('telegram.address.edit_session_expired', language))
                 await self.user_repo.update_user_state(user_id, {})
                 return
-            
+
             # Validate instructions input
             if len(text.strip()) > 200:
                 await update.message.reply_text(i18n.get('telegram.address.instructions_too_long', language))
                 return
-            
+
             # Update address via API
             async with api_client as client:
                 user_token = await get_auth_token(update, context, client)
                 if not user_token:
                     await self._handle_auth_error(update, language)
                     return
-                
+
                 # Prepare update data with delivery instructions
                 update_data = {'delivery_instructions': text.strip()}
-                
+
                 response = await client.update_user_address(user_token, int(address_id), update_data)
                 if response.success:
                     success_text = i18n.get('telegram.address.instructions_updated_intro', language)
@@ -3121,49 +3125,49 @@ class ProfileHandlers(BaseHandler):
                         success_text += i18n.get('telegram.address.instructions_new_value', language, value=text.strip())
                     else:
                         success_text += i18n.get('telegram.address.instructions_cleared', language)
-                    
+
                     back_button = [[{'text': i18n.get('telegram.back', language), 'callback_data': f'view_address_{address_id}'}]]
                     from keyboards import KeyboardBuilder
                     keyboard = KeyboardBuilder.build_inline_keyboard(back_button)
-                    
+
                     await update.message.reply_text(
                         text=success_text,
                         reply_markup=keyboard,
                         parse_mode='Markdown'
                     )
-                    
+
                     # Clear user state
                     await self.user_repo.update_user_state(user_id, {})
                     logger.info(f"Address {address_id} delivery instructions updated")
-                    
+
                 else:
                     error_text = i18n.get('telegram.address.instructions_update_failed', language, error=response.error)
                     await update.message.reply_text(error_text, parse_mode='Markdown')
                     logger.error(f"Failed to update address {address_id} instructions: {response.error}")
-            
+
         except Exception as e:
             logger.error(f"Error handling address instructions edit: {e}")
             await update.message.reply_text(i18n.get('telegram.address.instructions_update_error', language))
-    
+
     async def logout_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle user logout from all platforms"""
         try:
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
-            
+
             # Confirm logout action
             logout_text = i18n.get('telegram.profile.logout_confirmation_text', language)
-            
+
             buttons = [
                 [
                     {'text': i18n.get('telegram.profile.logout_yes_button', language), 'callback_data': 'confirm_logout'},
                     {'text': i18n.get('telegram.cancel', language), 'callback_data': 'profile_menu'}
                 ]
             ]
-            
+
             from keyboards import KeyboardBuilder
             keyboard = KeyboardBuilder.build_inline_keyboard(buttons)
-            
+
             if update.callback_query:
                 await update.callback_query.edit_message_text(
                     text=logout_text,
@@ -3177,20 +3181,20 @@ class ProfileHandlers(BaseHandler):
                     reply_markup=keyboard,
                     parse_mode='Markdown'
                 )
-            
+
             logger.info(f"Logout confirmation shown to user {user_id}")
-            
+
         except Exception as e:
             logger.error(f"Error in logout handler: {e}")
             await self._handle_error(update)
-    
+
     async def confirm_logout(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Confirm and execute logout"""
         try:
             query = update.callback_query
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
-            
+
             # Call logout API to invalidate tokens
             async with api_client as client:
                 user_token = await get_auth_token(update, context, client)
@@ -3202,26 +3206,26 @@ class ProfileHandlers(BaseHandler):
                     except Exception as api_error:
                         logger.warning(f"API logout failed for user {user_id}: {api_error}")
                         # Continue with local logout even if API fails
-            
+
             # Clear local bot user data
             await self.user_repo.clear_user_session(user_id)
-            
+
             # Show logout success message
             logout_success = i18n.get('telegram.profile.logout_success_text', language)
-            
+
             # Remove inline keyboard
             await query.edit_message_text(
                 text=logout_success,
                 parse_mode='Markdown'
             )
             await query.answer(i18n.get('telegram.profile.logout_success_toast', language))
-            
+
             logger.info(f"User {user_id} successfully logged out")
-            
+
         except Exception as e:
             logger.error(f"Error confirming logout: {e}")
             await self._handle_error(update)
-    
+
 
 
 # Global handler instance

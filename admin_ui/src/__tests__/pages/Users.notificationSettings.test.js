@@ -1,7 +1,7 @@
 import React from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { QueryClient, QueryClientProvider } from 'react-query';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { BrowserRouter } from 'react-router-dom';
 import { message } from 'antd';
 
@@ -9,33 +9,37 @@ import Users from '../../pages/Users';
 import adminService from '../../services/adminService';
 import staffService from '../../services/staffService';
 
-jest.mock('../../services/adminService');
-jest.mock('../../services/staffService');
+vi.mock('../../services/adminService');
+vi.mock('../../services/staffService');
 
-jest.mock('../../components/AddressMapPicker', () => () => <div data-testid="address-map-picker" />);
+vi.mock('../../components/AddressMapPicker', () => ({
+  default: () => <div data-testid="address-map-picker" />,
+}));
 
-jest.mock('../../services/api', () => ({
+vi.mock('../../services/api', () => ({
   __esModule: true,
   default: {
-    get: jest.fn(),
+    get: vi.fn(),
   },
 }));
 
-jest.mock('../../hooks/useResponsive', () => () => ({
-  isMobileDevice: false,
-  isTabletDevice: false,
-  isTouchDevice: false,
-  getFontSize: (mobile, _tablet, desktop) => desktop || mobile,
+vi.mock('../../hooks/useResponsive', () => ({
+  default: () => ({
+    isMobileDevice: false,
+    isTabletDevice: false,
+    isTouchDevice: false,
+    getFontSize: (mobile, _tablet, desktop) => desktop || mobile,
+  }),
 }));
 
-jest.mock('react-i18next', () => ({
+vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: (key, fallback) => fallback || key,
   }),
 }));
 
-jest.mock('antd', () => {
-  const actual = jest.requireActual('antd');
+vi.mock('antd', async () => {
+  const actual = await vi.importActual('antd');
   return {
     ...actual,
     Dropdown: ({ menu, children }) => (
@@ -56,13 +60,13 @@ jest.mock('antd', () => {
       </div>
     ),
     message: {
-      success: jest.fn(),
-      error: jest.fn(),
-      info: jest.fn(),
-      warning: jest.fn(),
-      loading: jest.fn(),
-      destroy: jest.fn(),
-      open: jest.fn(),
+      success: vi.fn(),
+      error: vi.fn(),
+      info: vi.fn(),
+      warning: vi.fn(),
+      loading: vi.fn(),
+      destroy: vi.fn(),
+      open: vi.fn(),
     },
   };
 });
@@ -85,7 +89,7 @@ const createWrapper = () => {
 
 describe('Users page notification settings modal flow', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
 
     adminService.getUsers.mockResolvedValue({
       data: {

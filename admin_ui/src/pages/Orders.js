@@ -36,12 +36,14 @@ import {
   LinkOutlined,
   BarcodeOutlined,
 } from '@ant-design/icons';
-import { useQuery, useMutation, useQueryClient } from 'react-query';
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { formatDate, formatDateTimeShort } from '../utils/dateUtils';
 import adminService from '../services/adminService';
 import api from '../services/api';
 import { useTranslation } from 'react-i18next';
 import { extractApiErrorMessages } from '../utils/apiError';
+import AsyncButton from '../components/common/AsyncButton';
+import EmptyState from '../components/common/EmptyState';
 
 const { Option } = Select;
 const { RangePicker } = DatePicker;
@@ -109,9 +111,10 @@ const Orders = () => {
   const watchedPaymentMethod = Form.useWatch('payment_method', createOrderForm);
   const watchedStatusValue = Form.useWatch('status', statusForm);
 
-  const { data, isLoading } = useQuery(
-    ['orders', pagination, searchText, statusFilter, dateRange],
-    () =>
+  const { data, isLoading } = useQuery({
+    queryKey: ['orders', pagination, searchText, statusFilter, dateRange],
+
+    queryFn: () =>
       adminService.getOrders({
         page: pagination.page,
         per_page: pagination.per_page,
@@ -120,54 +123,67 @@ const Orders = () => {
         start_date: dateRange?.[0]?.format('YYYY-MM-DD'),
         end_date: dateRange?.[1]?.format('YYYY-MM-DD'),
       }),
-    { keepPreviousData: true },
-  );
 
-  const { data: usersData } = useQuery(['users-for-order'], () => adminService.getUsers({ per_page: 100 }), {
+    placeholderData: keepPreviousData,
+  });
+
+  const { data: usersData } = useQuery({
+    queryKey: ['users-for-order'],
+    queryFn: () => adminService.getUsers({ per_page: 100 }),
     enabled: isCreateModalVisible,
   });
 
-  const { data: productsData } = useQuery(
-    ['products-for-order', selectedUserId],
-    () =>
+  const { data: productsData } = useQuery({
+    queryKey: ['products-for-order', selectedUserId],
+
+    queryFn: () =>
       adminService.getProducts({
         per_page: 100,
         is_active: true,
         ...(selectedUserId ? { pricing_user_id: selectedUserId } : {}),
       }),
-    { enabled: isCreateModalVisible },
-  );
 
-  const { data: statusesData } = useQuery(
-    ['order-statuses'],
-    async () => {
+    enabled: isCreateModalVisible,
+  });
+
+  const { data: statusesData } = useQuery({
+    queryKey: ['order-statuses'],
+
+    queryFn: async () => {
       const response = await api.get('/orders/statuses');
       return response.data;
     },
-    { staleTime: 1000 * 60 * 60 * 24 },
-  );
+
+    staleTime: 1000 * 60 * 60 * 24,
+  });
   const orderStatuses = statusesData?.data?.statuses || [];
 
-  const updateOrderMutation = useMutation(
-    ({ orderId, status, notes, bottles_returned }) => adminService.updateOrderStatus(orderId, status, notes, { bottles_returned }),
-    {
-      onSuccess: () => {
-        message.success(t('ui.orders.status_updated_success', 'Order status updated successfully'));
-        queryClient.invalidateQueries('orders');
-        setIsStatusModalVisible(false);
-        statusForm.resetFields();
-      },
-      onError: (error) => {
-        const errors = extractApiErrorMessages(error, t('ui.orders.status_update_failed', 'Failed to update order status'));
-        message.error(errors[0]);
-      },
-    },
-  );
+  const updateOrderMutation = useMutation({
+    mutationFn: ({ orderId, status, notes, bottles_returned }) => adminService.updateOrderStatus(orderId, status, notes, { bottles_returned }),
 
-  const createOrderMutation = useMutation((orderData) => adminService.createOrderForUser(orderData), {
+    onSuccess: () => {
+      message.success(t('ui.orders.status_updated_success', 'Order status updated successfully'));
+      queryClient.invalidateQueries({
+        queryKey: ['orders'],
+      });
+      setIsStatusModalVisible(false);
+      statusForm.resetFields();
+    },
+
+    onError: (error) => {
+      const errors = extractApiErrorMessages(error, t('ui.orders.status_update_failed', 'Failed to update order status'));
+      message.error(errors[0]);
+    },
+  });
+
+  const createOrderMutation = useMutation({
+    mutationFn: (orderData) => adminService.createOrderForUser(orderData),
+
     onSuccess: (response) => {
       message.success(t('ui.orders.order_created_success', 'Order created successfully'));
-      queryClient.invalidateQueries('orders');
+      queryClient.invalidateQueries({
+        queryKey: ['orders'],
+      });
       setIsCreateModalVisible(false);
       createOrderForm.resetFields();
       setCreateOrderErrors([]);
@@ -188,6 +204,7 @@ const Orders = () => {
         });
       }
     },
+
     onError: (error) => {
       const errorMessages = extractApiErrorMessages(
         error,
@@ -198,55 +215,59 @@ const Orders = () => {
     },
   });
 
-  const recordPersonalCardPaymentMutation = useMutation(
-    (payload) => adminService.recordStaffCashCollection(payload),
-    {
-      onSuccess: async () => {
-        message.success(t('ui.orders.personal_card_payment_recorded', 'Personal card payment recorded'));
-        queryClient.invalidateQueries('orders');
-        setIsPersonalCardModalVisible(false);
-        personalCardForm.resetFields();
+  const recordPersonalCardPaymentMutation = useMutation({
+    mutationFn: (payload) => adminService.recordStaffCashCollection(payload),
 
-        if (selectedOrder?.id) {
-          try {
-            const response = await adminService.getOrderDetails(selectedOrder.id);
-            if (response.success && response.data?.order) {
-              setSelectedOrder(response.data.order);
-            }
-          } catch (_error) {
-            // Keep the current modal state when refresh fails.
-          }
-        }
-      },
-      onError: (error) => {
-        const errorMessages = extractApiErrorMessages(
-          error,
-          t('ui.orders.personal_card_payment_failed', 'Failed to record personal card payment'),
-        );
-        message.error(errorMessages[0]);
-      },
-    },
-  );
+    onSuccess: async () => {
+      message.success(t('ui.orders.personal_card_payment_recorded', 'Personal card payment recorded'));
+      queryClient.invalidateQueries({
+        queryKey: ['orders'],
+      });
+      setIsPersonalCardModalVisible(false);
+      personalCardForm.resetFields();
 
-  const retryFiscalizationMutation = useMutation(
-    (paymentId) => adminService.retryPaymentFiscalization(paymentId),
-    {
-      onSuccess: async () => {
-        message.success(t('ui.orders.fiscalization_retry_success', 'Fiscalization retry queued successfully'));
-        queryClient.invalidateQueries('orders');
-        if (selectedOrder?.id) {
+      if (selectedOrder?.id) {
+        try {
           const response = await adminService.getOrderDetails(selectedOrder.id);
           if (response.success && response.data?.order) {
             setSelectedOrder(response.data.order);
           }
+        } catch (_error) {
+          // Keep the current modal state when refresh fails.
         }
-      },
-      onError: (error) => {
-        const errors = extractApiErrorMessages(error, t('ui.orders.fiscalization_retry_failed', 'Failed to retry fiscalization'));
-        message.error(errors[0]);
-      },
+      }
     },
-  );
+
+    onError: (error) => {
+      const errorMessages = extractApiErrorMessages(
+        error,
+        t('ui.orders.personal_card_payment_failed', 'Failed to record personal card payment'),
+      );
+      message.error(errorMessages[0]);
+    },
+  });
+
+  const retryFiscalizationMutation = useMutation({
+    mutationFn: (paymentId) => adminService.retryPaymentFiscalization(paymentId),
+
+    onSuccess: async () => {
+      message.success(t('ui.orders.fiscalization_retry_success', 'Fiscalization retry queued successfully'));
+      queryClient.invalidateQueries({
+        queryKey: ['orders'],
+      });
+      if (selectedOrder?.id) {
+        const response = await adminService.getOrderDetails(selectedOrder.id);
+        if (response.success && response.data?.order) {
+          setSelectedOrder(response.data.order);
+        }
+      }
+    },
+
+    onError: (error) => {
+      const errors = extractApiErrorMessages(error, t('ui.orders.fiscalization_retry_failed', 'Failed to retry fiscalization'));
+      message.error(errors[0]);
+    },
+  });
 
   const handleUserSelect = async (userId) => {
     setSelectedUserId(userId);
@@ -581,6 +602,9 @@ const Orders = () => {
           dataSource={orders}
           loading={isLoading}
           rowKey="id"
+          locale={{
+            emptyText: <EmptyState description={t('ui.orders.no_orders', 'No orders found')} />,
+          }}
           pagination={{
             current: pagination.page,
             pageSize: pagination.per_page,
@@ -696,14 +720,14 @@ const Orders = () => {
 
             {selectedOrder?.payment_provider && ['click', 'card'].includes(selectedOrder.payment_provider) && selectedOrder.fiscalization_status !== 'completed' && selectedOrder.fiscalization_status !== 'not_required' ? (
               <div style={{ marginTop: 16 }}>
-                <Button
+                <AsyncButton
                   icon={<ReloadOutlined />}
                   disabled={!selectedOrder.payment_id}
-                  loading={retryFiscalizationMutation.isLoading}
-                  onClick={() => retryFiscalizationMutation.mutate(selectedOrder.payment_id)}
+                  loading={retryFiscalizationMutation.isPending}
+                  onClick={() => retryFiscalizationMutation.mutateAsync(selectedOrder.payment_id)}
                 >
                   {t('ui.orders.retry_fiscalization', 'Retry Fiscalization')}
-                </Button>
+                </AsyncButton>
               </div>
             ) : null}
 
@@ -1100,9 +1124,9 @@ const Orders = () => {
           <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
             <Space>
               <Button onClick={() => setIsStatusModalVisible(false)}>{t('ui.orders.close', 'Close')}</Button>
-              <Button type="primary" htmlType="submit" loading={updateOrderMutation.isLoading}>
+              <AsyncButton type="primary" htmlType="submit" loading={updateOrderMutation.isPending}>
                 {t('ui.orders.update_status', 'Update Status')}
-              </Button>
+              </AsyncButton>
             </Space>
           </Form.Item>
         </Form>
@@ -1308,9 +1332,9 @@ const Orders = () => {
           <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
             <Space>
               <Button onClick={createOrderReset}>{t('ui.common.cancel', 'Cancel')}</Button>
-              <Button type="primary" htmlType="submit" loading={createOrderMutation.isLoading} icon={<ShoppingCartOutlined />}>
+              <AsyncButton type="primary" htmlType="submit" loading={createOrderMutation.isPending} icon={<ShoppingCartOutlined />}>
                 {t('ui.orders.create_order', 'Create Order')}
-              </Button>
+              </AsyncButton>
             </Space>
           </Form.Item>
         </Form>
@@ -1324,7 +1348,7 @@ const Orders = () => {
           personalCardForm.resetFields();
         }}
         onOk={() => personalCardForm.submit()}
-        confirmLoading={recordPersonalCardPaymentMutation.isLoading}
+        confirmLoading={recordPersonalCardPaymentMutation.isPending}
       >
         <Form
           form={personalCardForm}

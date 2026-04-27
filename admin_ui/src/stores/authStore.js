@@ -7,28 +7,27 @@ export const useAuthStore = create(
   persist(
     (set, get) => ({
       user: null,
-      token: null,
       permissions: {},
       isAuthenticated: false,
       isLoading: false,
 
-      // Initialize auth state from localStorage
+      // UI-001: JWT lives in HttpOnly cookies; this store only tracks
+      // non-sensitive UX state (user profile, permissions, auth flag).
+      // The server is the sole source of truth for auth validity.
       initialize: async () => {
         const user = authService.getCurrentUser();
-        const token = authService.getToken();
         const permissions = authService.getPermissions();
         let isAuthenticated = authService.isAuthenticated();
 
-        // Verify auth status with server if we have a token
-        if (token && user) {
+        // If we have a cached user, verify with the server. The HttpOnly
+        // cookie is sent automatically; we don't inspect it here.
+        if (user) {
           try {
             isAuthenticated = await authService.checkAuthStatus();
             if (!isAuthenticated) {
-              // Clear local storage if server says auth is invalid
               authService.clearStoredAuth();
               set({
                 user: null,
-                token: null,
                 permissions: {},
                 isAuthenticated: false
               });
@@ -43,7 +42,6 @@ export const useAuthStore = create(
 
         set({
           user,
-          token,
           permissions,
           isAuthenticated
         });
@@ -53,10 +51,9 @@ export const useAuthStore = create(
       login: async (credentials) => {
         set({ isLoading: true });
         try {
-          const { user, token, permissions } = await authService.login(credentials);
+          const { user, permissions } = await authService.login(credentials);
           set({
             user,
-            token,
             permissions,
             isAuthenticated: true,
             isLoading: false
@@ -81,7 +78,6 @@ export const useAuthStore = create(
         } finally {
           set({
             user: null,
-            token: null,
             permissions: {},
             isAuthenticated: false,
             isLoading: false
@@ -104,6 +100,7 @@ export const useAuthStore = create(
         if (typeof permission !== 'string' || permission.includes('__proto__') || permission.includes('constructor')) {
           return false;
         }
+        // eslint-disable-next-line security/detect-object-injection
         return Object.prototype.hasOwnProperty.call(permissions, permission) && permissions[permission] === true;
       },
 
@@ -118,7 +115,6 @@ export const useAuthStore = create(
         authService.clearStoredAuth();
         set({
           user: null,
-          token: null,
           permissions: {},
           isAuthenticated: false,
           isLoading: false
@@ -129,7 +125,6 @@ export const useAuthStore = create(
       name: 'admin-auth-storage',
       partialize: (state) => ({
         user: state.user,
-        token: state.token,
         permissions: state.permissions,
         isAuthenticated: state.isAuthenticated
       })

@@ -14,6 +14,7 @@ import json
 # Initialize Sentry before any other imports to capture all errors
 import sentry_sdk
 from sentry_sdk.integrations.asyncio import AsyncioIntegration
+from sentry_scrub import before_send as _sentry_before_send
 
 # Initialize Sentry if DSN is configured
 _sentry_dsn = os.environ.get('SENTRY_DSN')
@@ -21,8 +22,8 @@ if _sentry_dsn:
     sentry_sdk.init(
         dsn=_sentry_dsn,
         environment=os.environ.get('SENTRY_ENVIRONMENT', os.environ.get('FLASK_ENV', 'development')),
-        traces_sample_rate=float(os.environ.get('SENTRY_TRACES_SAMPLE_RATE', '1.0')),
-        profiles_sample_rate=float(os.environ.get('SENTRY_PROFILES_SAMPLE_RATE', '1.0')),
+        traces_sample_rate=float(os.environ.get('SENTRY_TRACES_SAMPLE_RATE', '0.05')),
+        profiles_sample_rate=float(os.environ.get('SENTRY_PROFILES_SAMPLE_RATE', '0.01')),
         send_default_pii=os.environ.get('SENTRY_SEND_DEFAULT_PII', 'false').lower() == 'true',
         debug=os.environ.get('SENTRY_DEBUG', 'false').lower() == 'true',
         integrations=[
@@ -30,6 +31,7 @@ if _sentry_dsn:
         ],
         # Set release version if available
         release=os.environ.get('APP_VERSION', 'telegram-bot@1.0.0'),
+        before_send=_sentry_before_send,
     )
 
 from telegram import Update, BotCommand, ReplyKeyboardRemove
@@ -75,13 +77,13 @@ logger = logging.getLogger('bot')
 
 class WaterBusinessBot:
     """Main bot application class"""
-    
+
     def __init__(self):
         self.application: Optional[Application] = None
         self.is_running = False
         self.user_repository = BotUserRepository(db_manager)
         self.token_manager: Optional[TokenManager] = None
-    
+
     async def initialize(self):
         """Initialize bot and all dependencies"""
         try:
@@ -96,7 +98,7 @@ class WaterBusinessBot:
 
             # Initialize API client
             # Note: api_client will be used as async context manager in handlers
-            
+
             # Initialize TokenManager for JWT token caching
             logger.info("Initializing TokenManager...")
             self.token_manager = TokenManager(config.redis.url)
@@ -104,7 +106,7 @@ class WaterBusinessBot:
                 logger.info("TokenManager connected to Redis successfully")
             else:
                 logger.warning("TokenManager running without Redis - tokens will not be cached")
-            
+
             # Build Telegram application
             logger.info("Creating Telegram Application...")
             request = ResilientHTTPXRequest(
@@ -150,7 +152,7 @@ class WaterBusinessBot:
             webhook_server.set_application(self.application)
             await webhook_server.start()
             logger.info("Webhook server started successfully")
-            
+
             # Test bot connection
             logger.info("Testing bot connection to Telegram...")
             try:
@@ -159,20 +161,20 @@ class WaterBusinessBot:
             except Exception as bot_error:
                 logger.error(f"Failed to connect to Telegram: {bot_error}")
                 raise
-            
+
             # Store token_manager in bot_data for handler access
             self.application.bot_data['token_manager'] = self.token_manager
-            
+
             # Set up handlers
             logger.info("Setting up handlers...")
             await self._setup_handlers()
             logger.info("Handlers setup completed!")
-            
+
             # Set up bot commands
             logger.info("Setting up bot commands...")
             await self._setup_bot_commands()
             logger.info("Bot commands setup completed!")
-            
+
             # Set up error handling
             self.application.add_error_handler(error_handler)
             logger.info("Error handler setup completed!")
@@ -216,37 +218,37 @@ class WaterBusinessBot:
                         f"Currency: {update.pre_checkout_query.currency}"
                     )
 
-            
+
             self.application.add_handler(TypeHandler(Update, log_all_updates), group=-10)
             logger.info("Update logging middleware installed!")
 
             logger.info("Bot initialization completed successfully")
-            
+
         except Exception as e:
             logger.error(f"Failed to initialize bot: {e}")
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
             raise
-    
+
     async def _setup_handlers(self):
         """Set up all bot handlers"""
-        
+
         # Command handlers
         # self.application.add_handler(CommandHandler("start", start_handler))
         self.application.add_handler(CommandHandler("menu", main_menu_handler))
         self.application.add_handler(CommandHandler("help", support_handlers.help_handler))
         self.application.add_handler(CommandHandler("language", language_handler.language_menu))
-        
+
         # Admin commands (restricted - access control handled in handler)
         self.application.add_handler(CommandHandler("admin", admin_handlers.admin_panel))
-        
+
         # Callback query handlers
         callback_handlers = [
             # Main menu callbacks
             CallbackQueryHandler(main_menu_handler, pattern="^back_to_main$"),
             CallbackQueryHandler(language_handler.language_menu, pattern="^menu_language$"),
             CallbackQueryHandler(language_handler.set_language, pattern="^set_language_"),
-            
+
             # Product callbacks
             CallbackQueryHandler(product_handlers.products_menu, pattern="^menu_products$"),
             CallbackQueryHandler(product_handlers.products_menu, pattern="^back_to_categories$"),
@@ -274,12 +276,12 @@ class WaterBusinessBot:
             CallbackQueryHandler(order_handlers.cancel_order, pattern="^cancel_order_\\d+"),
             # Back to delivery address selection (from payment method screen)
             CallbackQueryHandler(order_handlers.checkout_handler, pattern="^back_to_delivery$"),
-            
+
             # Confirmation callbacks
             # Order Cancellation
             CallbackQueryHandler(order_handlers.cancel_order_confirm_yes, pattern="^cancel_order_confirm_yes$"),
             CallbackQueryHandler(order_handlers.cancel_order_confirm_no, pattern="^cancel_order_confirm_no$"),
-            
+
             # Subscription callbacks
             CallbackQueryHandler(subscription_handlers.subscriptions_menu, pattern="^menu_subscriptions$"),
             CallbackQueryHandler(subscription_handlers.subscriptions_menu, pattern="^back_to_subscriptions$"),
@@ -327,7 +329,7 @@ class WaterBusinessBot:
             CallbackQueryHandler(profile_handlers.edit_location_handler, pattern="^edit_location_"),
             CallbackQueryHandler(profile_handlers.edit_details_handler, pattern="^edit_details_"),
             CallbackQueryHandler(profile_handlers.edit_instructions_handler, pattern="^edit_instructions_"),
-            
+
             # Bottle balance callback
             CallbackQueryHandler(bottle_handlers.show_bottle_balance, pattern="^my_bottles$"),
 
@@ -335,12 +337,12 @@ class WaterBusinessBot:
             CallbackQueryHandler(loyalty_handlers.loyalty_menu, pattern="^menu_loyalty$"),
             CallbackQueryHandler(loyalty_handlers.loyalty_history, pattern="^loyalty_history$"),
             CallbackQueryHandler(loyalty_handlers.redeem_reward, pattern="^redeem_"),
-            
+
             # Support callbacks
             CallbackQueryHandler(support_handlers.support_menu, pattern="^menu_support$"),
             CallbackQueryHandler(support_handlers.faq_handler, pattern="^faq$"),
             CallbackQueryHandler(support_handlers.contact_support, pattern="^contact_support$"),
-            
+
             # Admin callbacks (restricted - access control handled in handler)
             CallbackQueryHandler(admin_handlers.admin_orders, pattern="^admin_orders$"),
             CallbackQueryHandler(admin_handlers.admin_analytics, pattern="^admin_analytics$"),
@@ -362,14 +364,14 @@ class WaterBusinessBot:
                 logger.error(f"Message ID: {update.callback_query.message.message_id}")
                 logger.error(f"========================================")
                 # Don't process, just log and let other handlers handle it
-            
+
         # Add debug handler that catches all callbacks but doesn't interfere
         self.application.add_handler(CallbackQueryHandler(debug_callback_handler), group=-1)
-        
+
         # Add all callback handlers
         for handler in callback_handlers:
             self.application.add_handler(handler)
-        
+
         # Conversation handlers for complex flows
         registration_handler = ConversationHandler(
             entry_points=[
@@ -398,7 +400,7 @@ class WaterBusinessBot:
             fallbacks=[CommandHandler("cancel", profile_handlers.cancel_registration)]
         )
         self.application.add_handler(registration_handler, group=-2)
-        
+
         # Address input conversation - Enhanced flow with manual entry support
         address_handler = ConversationHandler(
             entry_points=[CallbackQueryHandler(profile_handlers.add_address, pattern="^add_new_address(_checkout)?$")],
@@ -635,18 +637,18 @@ class WaterBusinessBot:
         self.application.add_handler(
             MessageHandler(filters.TEXT & ~filters.COMMAND, self._handle_text_message)
         )
-        
+
         # Contact messages are handled by ConversationHandlers in higher priority groups
         # (registration_handler and phone_verification_handler)
-        
+
         # Location messages are handled by conversation handlers in higher priority groups
-        
+
         # Handle voice messages if enabled
         if config.features.enable_voice_messages:
             self.application.add_handler(
                 MessageHandler(filters.VOICE, self._handle_voice_message)
             )
-    
+
     async def _setup_bot_commands(self):
         """Set up bot command menu"""
         command_key_pairs = [
@@ -676,10 +678,10 @@ class WaterBusinessBot:
             ]
             await self.application.bot.set_my_commands(default_commands)
             logger.info("Bot commands set successfully")
-            
+
         except Exception as e:
             logger.error(f"Failed to set bot commands: {e}")
-    
+
     async def _handle_text_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle text messages not caught by other handlers"""
         try:
@@ -725,7 +727,7 @@ class WaterBusinessBot:
             #     # Handle general text input (could be search, commands, etc.)
             #     logger.info(f"Handling general text input from user {user_id}: {text}")
             #     await self._handle_general_input(update, context, text, language)
-                
+
         except Exception as e:
             logger.error(f"Error handling text message: {e}")
             await update.message.reply_text(i18n.get('telegram.error_occurred', language))
@@ -793,7 +795,7 @@ class WaterBusinessBot:
         input_type = user_state.get('awaiting_input')
         user_id = update.effective_user.id
         text = update.message.text.strip()
-        
+
         if input_type == 'search_products':
             # Handle product search
             await product_handlers.search_products(update, context, text)
@@ -810,13 +812,13 @@ class WaterBusinessBot:
             # Unknown state, clear it
             await self.user_repository.update_user_state(user_id, {})
             await update.message.reply_text(i18n.get('telegram.error.invalid_input', language))
-    
+
     async def _handle_general_input(self, update: Update, context: ContextTypes.DEFAULT_TYPE,
                                   text: str, language: str):
         """Handle general text input"""
         # Check for common keywords
         text_lower = text.lower()
-        
+
         if any(keyword in text_lower for keyword in ['help', 'support', 'problem', 'issue']):
             await support_handlers.support_menu(update, context)
         elif any(keyword in text_lower for keyword in ['order', 'buy', 'purchase', 'water']):
@@ -827,30 +829,30 @@ class WaterBusinessBot:
             # Default response
             logger.info(f"General text input from user {update.effective_user.id}: {text}")
             await main_menu_handler(update, context)
-    
+
     async def _handle_contact(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle contact sharing"""
         try:
             user_id = update.effective_user.id
             contact = update.message.contact
-            
+
             if contact.user_id == user_id:
                 # User shared their own contact
                 phone = contact.phone_number
                 await self.user_repository.set_user_phone(user_id, phone)
-                
+
                 language = await i18n.get_user_language(user_id)
                 await update.message.reply_text(
                     i18n.get('telegram.registration.phone_shared', language),
                     reply_markup=None
                 )
-                
+
                 # Continue with registration if needed
                 await profile_handlers.continue_registration(update, context)
-            
+
         except Exception as e:
             logger.error(f"Error handling contact: {e}")
-    
+
     async def _handle_location(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle location sharing outside of conversation"""
         try:
@@ -859,14 +861,14 @@ class WaterBusinessBot:
             location = update.message.location
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
-            
+
             logger.info(f"Location: lat={location.latitude}, lng={location.longitude}")
             logger.info(f"Context user_data: {context.user_data}")
-            
+
             # Check if user is in address adding flow
             user_state = await self.user_repository.get_user_state(user_id)
             logger.info(f"Database user state: {user_state}")
-            
+
             if user_state.get('awaiting_input') == 'address_location':
                 logger.info(f"User is in address_location flow, handling as address creation")
                 # Handle as part of address creation
@@ -875,12 +877,12 @@ class WaterBusinessBot:
                     'longitude': location.longitude
                 }
                 await self.user_repository.update_user_state(user_id, user_state)
-                
+
                 await update.message.reply_text(
                     i18n.get('telegram.bot.location.received_prompt', language),
                     reply_markup=ReplyKeyboardRemove()
                 )
-                
+
                 # Set state for address title input
                 user_state['awaiting_input'] = 'address_title'
                 await self.user_repository.update_user_state(user_id, user_state)
@@ -897,27 +899,27 @@ class WaterBusinessBot:
                     ),
                     reply_markup=MenuKeyboards.main_menu(language)
                 )
-            
+
         except Exception as e:
             logger.error(f"Error handling location: {e}")
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
-    
+
     async def _handle_voice_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle voice messages (if voice feature is enabled)"""
         try:
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
-            
+
             # For now, just acknowledge voice message
             # In the future, could integrate speech-to-text
             await update.message.reply_text(
                 i18n.get('telegram.bot.voice.not_supported', language),
             )
-            
+
         except Exception as e:
             logger.error(f"Error handling voice message: {e}")
-    
+
     def run(self):
         """Run the bot (synchronous wrapper for async run)"""
         try:
@@ -939,7 +941,7 @@ class WaterBusinessBot:
                 logger.info("========================================")
                 logger.info("Bot will start receiving updates from Telegram...")
                 self.is_running = True
-                
+
                 # Start polling with verbose logging
                 self.application.run_polling(
                     timeout=config.telegram.polling_timeout,
@@ -948,13 +950,13 @@ class WaterBusinessBot:
                     allowed_updates=None,  # Accept all update types
                     drop_pending_updates=config.telegram.drop_pending_updates
                 )
-                
+
         except Exception as e:
             logger.error(f"Error running bot: {e}")
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
             raise
-    
+
     async def async_initialize(self):
         """Async initialization wrapper"""
         try:
@@ -962,7 +964,7 @@ class WaterBusinessBot:
         except Exception as e:
             logger.error(f"Failed to initialize bot: {e}")
             raise
-    
+
     async def cleanup(self):
         """Cleanup resources"""
         try:
@@ -986,14 +988,14 @@ class WaterBusinessBot:
 
         except Exception as e:
             logger.error(f"Error during cleanup: {e}")
-    
+
     async def stop(self):
         """Stop the bot gracefully"""
         logger.info("Stopping bot...")
-        
+
         if self.application:
             await self.application.stop()
-        
+
         await self.cleanup()
 
 
@@ -1008,7 +1010,7 @@ def main():
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
         level=logging.INFO if config.telegram.webhook_url else logging.DEBUG
     )
-    
+
     # Set up signal handlers for graceful shutdown
     def signal_handler(signum, frame):
         logger.info(f"Received signal {signum}")
@@ -1018,20 +1020,20 @@ def main():
             except RuntimeError:
                 # No running event loop, just exit
                 sys.exit(0)
-    
+
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
-    
+
     try:
         # Initialize the bot first (async)
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         loop.run_until_complete(bot.async_initialize())
-        
+
         # Don't close the loop - let run_polling use it
         # Then run the bot (sync - it uses the current event loop)
         bot.run()
-        
+
     except KeyboardInterrupt:
         logger.info("Bot stopped by user")
     except Exception as e:
@@ -1046,5 +1048,5 @@ if __name__ == "__main__":
         uvloop.install()
     except ImportError:
         pass
-    
+
     main()

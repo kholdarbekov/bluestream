@@ -1,31 +1,31 @@
 import React from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { QueryClient, QueryClientProvider } from 'react-query';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 import Orders from '../../pages/Orders';
 import adminService from '../../services/adminService';
 import api from '../../services/api';
 
-jest.mock('../../services/adminService');
-jest.mock('../../services/api', () => ({
+vi.mock('../../services/adminService');
+vi.mock('../../services/api', () => ({
   __esModule: true,
   default: {
-    get: jest.fn(),
-    post: jest.fn(),
-    put: jest.fn(),
-    delete: jest.fn(),
+    get: vi.fn(),
+    post: vi.fn(),
+    put: vi.fn(),
+    delete: vi.fn(),
   },
-  getCookie: jest.fn(),
+  getCookie: vi.fn(),
 }));
-jest.mock('react-i18next', () => ({
+vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: (key, fallback) => fallback || key,
   }),
 }));
 
-jest.mock('antd', () => {
-  const actual = jest.requireActual('antd');
+vi.mock('antd', async () => {
+  const actual = await vi.importActual('antd');
   return {
     ...actual,
     Dropdown: ({ menu, children }) => (
@@ -43,7 +43,7 @@ jest.mock('antd', () => {
   };
 });
 
-jest.setTimeout(10000);
+vi.setConfig({ testTimeout: 10000 });
 
 const createWrapper = () => {
   const queryClient = new QueryClient({
@@ -61,7 +61,7 @@ const createWrapper = () => {
 
 describe('Orders personal card payment flow', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
 
     api.get.mockResolvedValue({
       data: {

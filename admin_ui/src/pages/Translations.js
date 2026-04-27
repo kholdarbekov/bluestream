@@ -35,7 +35,7 @@ import {
   DownloadOutlined,
   UploadOutlined
 } from '@ant-design/icons';
-import { useQuery, useMutation, useQueryClient } from 'react-query';
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import adminService from '../services/adminService';
 
 const { Option } = Select;
@@ -94,11 +94,11 @@ const Translations = () => {
   }, [searchText, categoryFilter, languageFilter]);
 
   // Fetch available entity types for sync and filtering
-  const { data: entitiesData } = useQuery(
-    ['translation-entities'],
-    () => adminService.getTranslatableEntities(),
-    { staleTime: 300000 }
-  );
+  const { data: entitiesData } = useQuery({
+    queryKey: ['translation-entities'],
+    queryFn: () => adminService.getTranslatableEntities(),
+    staleTime: 300000,
+  });
 
   const entityTypes = useMemo(
     () => (entitiesData?.data?.entities?.map((entity) => entity.entity_type) || []),
@@ -111,90 +111,127 @@ const Translations = () => {
   }, [entityTypes]);
 
   // Fetch translations
-  const { data: translationsData, isLoading: translationsLoading } = useQuery(
-    ['translations', searchText, categoryFilter, languageFilter, pagination.current, pagination.pageSize],
-    () => adminService.getTranslations({
+  const { data: translationsData, isLoading: translationsLoading } = useQuery({
+    queryKey: ['translations', searchText, categoryFilter, languageFilter, pagination.current, pagination.pageSize],
+
+    queryFn: () => adminService.getTranslations({
       page: pagination.current,
       per_page: pagination.pageSize,
       search: searchText || undefined,
       category: categoryFilter || undefined,
       language: languageFilter || undefined
     }),
-    { keepPreviousData: true }
-  );
+
+    placeholderData: keepPreviousData,
+  });
 
   // Fetch completion stats
-  const { data: completionData, isLoading: completionLoading } = useQuery(
-    ['translations-completion', categoryFilter],
-    () => adminService.getTranslationCompletion({ category: categoryFilter || undefined }),
-    { refetchInterval: 3600000 } // Refresh every 1 hour
-  );
+  const { data: completionData, isLoading: completionLoading } = useQuery({
+    queryKey: ['translations-completion', categoryFilter],
+    queryFn: () => adminService.getTranslationCompletion({ category: categoryFilter || undefined }),
+    refetchInterval: 3600000,
+  });
 
   // Fetch missing translations
-  const { data: missingData, isLoading: missingLoading } = useQuery(
-    ['translations-missing', categoryFilter, languageFilter, missingPagination.current, missingPagination.pageSize],
-    () => adminService.getMissingTranslations({
+  const { data: missingData, isLoading: missingLoading } = useQuery({
+    queryKey: ['translations-missing', categoryFilter, languageFilter, missingPagination.current, missingPagination.pageSize],
+
+    queryFn: () => adminService.getMissingTranslations({
       page: missingPagination.current,
       per_page: missingPagination.pageSize,
       category: categoryFilter || undefined,
       language: languageFilter || undefined
-    })
-  );
+    }),
+  });
 
   // Mutations
-  const createTranslationMutation = useMutation(adminService.createTranslation, {
+  const createTranslationMutation = useMutation({
+    mutationFn: adminService.createTranslation,
+
     onSuccess: () => {
       message.success('Translation created successfully');
       setIsCreateModalVisible(false);
       form.resetFields();
-      queryClient.invalidateQueries('translations');
-      queryClient.invalidateQueries('translations-completion');
-      queryClient.invalidateQueries('translations-missing');
+      queryClient.invalidateQueries({
+        queryKey: ['translations'],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ['translations-completion'],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ['translations-missing'],
+      });
     },
+
     onError: (error) => {
       message.error(error.message || 'Failed to create translation');
-    }
+    },
   });
 
-  const updateTranslationMutation = useMutation(adminService.updateTranslation, {
+  const updateTranslationMutation = useMutation({
+    mutationFn: adminService.updateTranslation,
+
     onSuccess: () => {
       message.success('Translation updated successfully');
       setIsEditModalVisible(false);
       form.resetFields();
-      queryClient.invalidateQueries('translations');
-      queryClient.invalidateQueries('translations-completion');
+      queryClient.invalidateQueries({
+        queryKey: ['translations'],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ['translations-completion'],
+      });
     },
+
     onError: (error) => {
       message.error(error.message || 'Failed to update translation');
-    }
+    },
   });
 
-  const deleteTranslationMutation = useMutation(adminService.deleteTranslation, {
+  const deleteTranslationMutation = useMutation({
+    mutationFn: adminService.deleteTranslation,
+
     onSuccess: () => {
       message.success('Translation deleted successfully');
-      queryClient.invalidateQueries('translations');
-      queryClient.invalidateQueries('translations-completion');
-      queryClient.invalidateQueries('translations-missing');
+      queryClient.invalidateQueries({
+        queryKey: ['translations'],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ['translations-completion'],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ['translations-missing'],
+      });
     },
+
     onError: (error) => {
       message.error(error.message || 'Failed to delete translation');
-    }
+    },
   });
 
-  const syncTranslationsMutation = useMutation(adminService.syncEntityTranslations, {
+  const syncTranslationsMutation = useMutation({
+    mutationFn: adminService.syncEntityTranslations,
+
     onSuccess: (data) => {
       message.success(data.message || 'Translations synced successfully');
       setIsSyncModalVisible(false);
       syncForm.resetFields();
-      queryClient.invalidateQueries('translations');
-      queryClient.invalidateQueries('translations-completion');
+      queryClient.invalidateQueries({
+        queryKey: ['translations'],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ['translations-completion'],
+      });
     },
+
     onError: (error) => {
       message.error(error.message || 'Failed to sync translations');
-    }
+    },
   });
 
-  const importTranslationsMutation = useMutation(adminService.importTranslations, {
+  const importTranslationsMutation = useMutation({
+    mutationFn: adminService.importTranslations,
+
     onSuccess: (data) => {
       const results = data?.data?.results;
       if (results) {
@@ -206,13 +243,20 @@ const Translations = () => {
       }
       setIsImportModalVisible(false);
       importForm.resetFields();
-      queryClient.invalidateQueries('translations');
-      queryClient.invalidateQueries('translations-completion');
-      queryClient.invalidateQueries('translations-missing');
+      queryClient.invalidateQueries({
+        queryKey: ['translations'],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ['translations-completion'],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ['translations-missing'],
+      });
     },
+
     onError: (error) => {
       message.error(error.message || 'Failed to import translations');
-    }
+    },
   });
 
   // Table columns for translations
@@ -424,7 +468,7 @@ const Translations = () => {
         language: languageFilter || undefined,
         search: searchText || undefined
       });
-      
+
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -433,7 +477,7 @@ const Translations = () => {
       a.click();
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
-      
+
       message.success('Export completed successfully');
     } catch (error) {
       message.error('Failed to export translations');
@@ -478,9 +522,9 @@ const Translations = () => {
                 suffix="%"
                 prefix={<PercentageOutlined />}
               />
-              <Progress 
-                percent={overall_stats.overall_completion_percentage} 
-                size="small" 
+              <Progress
+                percent={overall_stats.overall_completion_percentage}
+                size="small"
                 status={overall_stats.overall_completion_percentage > 80 ? 'success' : 'active'}
               />
             </Card>
@@ -531,8 +575,8 @@ const Translations = () => {
                   <Card size="small">
                     <Space direction="vertical" size={0} style={{ width: '100%' }}>
                       <Text strong>{stat.display_name || stat.category}</Text>
-                      <Progress 
-                        percent={stat.completion_percentage} 
+                      <Progress
+                        percent={stat.completion_percentage}
                         size="small"
                         format={() => `${stat.completion_percentage}%`}
                       />
@@ -576,7 +620,7 @@ const Translations = () => {
                   style={{ width: 250 }}
                   allowClear
                 />
-                
+
                 <Select
                   placeholder="Category"
                   value={categoryFilter}
@@ -618,7 +662,7 @@ const Translations = () => {
                   >
                     Add Translation
                   </Button>
-                  
+
                   <Dropdown
                     menu={{
                       items: [
@@ -799,10 +843,10 @@ const Translations = () => {
               }}>
                 Cancel
               </Button>
-              <Button 
-                type="primary" 
+              <Button
+                type="primary"
                 htmlType="submit"
-                loading={createTranslationMutation.isLoading}
+                loading={createTranslationMutation.isPending}
               >
                 Create Translation
               </Button>
@@ -864,10 +908,10 @@ const Translations = () => {
               }}>
                 Cancel
               </Button>
-              <Button 
-                type="primary" 
+              <Button
+                type="primary"
                 htmlType="submit"
-                loading={updateTranslationMutation.isLoading}
+                loading={updateTranslationMutation.isPending}
               >
                 Update Translation
               </Button>
@@ -928,11 +972,11 @@ const Translations = () => {
               }}>
                 Cancel
               </Button>
-              <Button 
-                type="primary" 
+              <Button
+                type="primary"
                 htmlType="submit"
                 disabled={entityTypes.length === 0}
-                loading={syncTranslationsMutation.isLoading}
+                loading={syncTranslationsMutation.isPending}
               >
                 Sync Translations
               </Button>
@@ -1009,10 +1053,10 @@ const Translations = () => {
               }}>
                 Cancel
               </Button>
-              <Button 
-                type="primary" 
+              <Button
+                type="primary"
                 htmlType="submit"
-                loading={importTranslationsMutation.isLoading}
+                loading={importTranslationsMutation.isPending}
               >
                 Import Translations
               </Button>

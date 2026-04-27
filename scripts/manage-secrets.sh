@@ -14,7 +14,9 @@ NC='\033[0m' # No Color
 
 # Configuration
 SECRETS_DIR="${SECRETS_DIR:-./secrets}"
+# shellcheck disable=SC2034  # exposed for callers that source this script
 COMPOSE_FILE="docker-compose.secrets.yml"
+# shellcheck disable=SC2034
 ENV_FILE=".env"
 
 # Logging function
@@ -53,7 +55,7 @@ Commands:
     backup                 Backup secrets to encrypted archive
     restore <backup_file>  Restore secrets from backup
     generate               Generate random values for all secrets
-    
+
 Options:
     -h, --help             Show this help message
     -v, --verbose          Verbose output
@@ -68,7 +70,7 @@ Examples:
 
 Required secrets:
     - postgres_password
-    - secret_key  
+    - secret_key
     - telegram_bot_token
     - staff_bot_token
 
@@ -102,10 +104,10 @@ generate_hex_secret() {
 # Create secrets directory
 init_secrets_dir() {
     log "Initializing secrets directory..."
-    
+
     mkdir -p "$SECRETS_DIR"
     chmod 700 "$SECRETS_DIR"
-    
+
     # Create .gitignore for secrets directory
     cat > "$SECRETS_DIR/.gitignore" << EOF
 # Ignore all secret files
@@ -154,7 +156,7 @@ Each file should contain only the secret value (no newlines or extra whitespace)
 
 Use the \`manage-secrets.sh\` script to manage these secrets safely.
 EOF
-    
+
     success "Secrets directory initialized at $SECRETS_DIR"
 }
 
@@ -162,30 +164,34 @@ EOF
 create_secret() {
     local secret_name="$1"
     local secret_file="$SECRETS_DIR/$secret_name"
-    
+
     if [[ -f "$secret_file" ]]; then
         error "Secret '$secret_name' already exists. Use 'update' to modify it."
         return 1
     fi
-    
+
     log "Creating secret: $secret_name"
-    
+
     # Prompt for secret value
     echo -n "Enter secret value (leave empty to generate): "
     read -r -s secret_value
     echo
-    
+
     if [[ -z "$secret_value" ]]; then
         log "Generating random secret value..."
+        # INF-007: more-specific patterns must come first. Previously the
+        # `*_key` glob caught `encryption_key` and `secret_key` before their
+        # specific branches, so encryption_key was being generated as a 32-char
+        # base64 string instead of the intended 64-char hex.
         case "$secret_name" in
-            *_password|*_token|*_key)
-                secret_value=$(generate_secret 32)
-                ;;
             encryption_key)
                 secret_value=$(generate_hex_secret 64)
                 ;;
             secret_key)
                 secret_value=$(generate_secret 64)
+                ;;
+            *_password|*_token|*_key)
+                secret_value=$(generate_secret 32)
                 ;;
             *)
                 secret_value=$(generate_secret 32)
@@ -193,11 +199,11 @@ create_secret() {
         esac
         log "Generated random value for $secret_name"
     fi
-    
+
     # Write secret to file
     echo -n "$secret_value" > "$secret_file"
     chmod 600 "$secret_file"
-    
+
     success "Created secret: $secret_name"
 }
 
@@ -205,31 +211,31 @@ create_secret() {
 update_secret() {
     local secret_name="$1"
     local secret_file="$SECRETS_DIR/$secret_name"
-    
+
     if [[ ! -f "$secret_file" ]]; then
         error "Secret '$secret_name' does not exist. Use 'create' to create it."
         return 1
     fi
-    
+
     log "Updating secret: $secret_name"
-    
+
     # Prompt for new secret value
     echo -n "Enter new secret value: "
     read -r -s secret_value
     echo
-    
+
     if [[ -z "$secret_value" ]]; then
         error "Secret value cannot be empty"
         return 1
     fi
-    
+
     # Backup old secret
     cp "$secret_file" "$secret_file.backup.$(date +%s)"
-    
+
     # Write new secret to file
     echo -n "$secret_value" > "$secret_file"
     chmod 600 "$secret_file"
-    
+
     success "Updated secret: $secret_name"
 }
 
@@ -237,36 +243,36 @@ update_secret() {
 remove_secret() {
     local secret_name="$1"
     local secret_file="$SECRETS_DIR/$secret_name"
-    
+
     if [[ ! -f "$secret_file" ]]; then
         error "Secret '$secret_name' does not exist."
         return 1
     fi
-    
+
     warn "This will permanently delete secret: $secret_name"
     echo -n "Are you sure? (y/N): "
     read -r confirmation
-    
+
     if [[ "$confirmation" != "y" && "$confirmation" != "Y" ]]; then
         log "Operation cancelled"
         return 0
     fi
-    
+
     # Secure delete
     shred -vfz -n 3 "$secret_file" 2>/dev/null || rm -f "$secret_file"
-    
+
     success "Removed secret: $secret_name"
 }
 
 # List all secrets
 list_secrets() {
     log "Listing secrets in $SECRETS_DIR:"
-    
+
     if [[ ! -d "$SECRETS_DIR" ]]; then
         warn "Secrets directory does not exist. Run 'init' first."
         return 1
     fi
-    
+
     local count=0
     for secret_file in "$SECRETS_DIR"/*; do
         if [[ -f "$secret_file" && "$(basename "$secret_file")" != "README.md" && "$(basename "$secret_file")" != ".gitignore" ]]; then
@@ -278,7 +284,7 @@ list_secrets() {
             ((count++))
         fi
     done
-    
+
     if [[ $count -eq 0 ]]; then
         warn "No secrets found"
     else
@@ -289,16 +295,16 @@ list_secrets() {
 # Validate secrets
 validate_secrets() {
     log "Validating required secrets..."
-    
+
     local required_secrets=("postgres_password" "secret_key" "telegram_bot_token" "staff_bot_token")
     local missing_secrets=()
-    
+
     for secret in "${required_secrets[@]}"; do
         if [[ ! -f "$SECRETS_DIR/$secret" ]]; then
             missing_secrets+=("$secret")
         fi
     done
-    
+
     if [[ ${#missing_secrets[@]} -eq 0 ]]; then
         success "All required secrets are present"
         return 0
@@ -311,25 +317,25 @@ validate_secrets() {
 # Deploy secrets to Docker Swarm
 deploy_secrets() {
     log "Deploying secrets to Docker Swarm..."
-    
+
     if ! docker info | grep -q "Swarm: active"; then
         error "Docker Swarm is not active. Initialize with: docker swarm init"
         return 1
     fi
-    
+
     local deployed=0
     for secret_file in "$SECRETS_DIR"/*; do
         if [[ -f "$secret_file" && "$(basename "$secret_file")" != "README.md" && "$(basename "$secret_file")" != ".gitignore" ]]; then
             local secret_name
             secret_name=$(basename "$secret_file")
             local docker_secret_name="bluestream_$secret_name"
-            
+
             # Check if secret already exists
             if docker secret inspect "$docker_secret_name" >/dev/null 2>&1; then
                 warn "Secret '$docker_secret_name' already exists in Docker Swarm"
                 continue
             fi
-            
+
             # Create secret in Docker Swarm
             if docker secret create "$docker_secret_name" "$secret_file"; then
                 success "Deployed secret: $docker_secret_name"
@@ -339,23 +345,23 @@ deploy_secrets() {
             fi
         fi
     done
-    
+
     success "Deployed $deployed secrets to Docker Swarm"
 }
 
 # Cleanup secrets from Docker Swarm
 cleanup_secrets() {
     log "Cleaning up secrets from Docker Swarm..."
-    
+
     warn "This will remove ALL Blue Stream secrets from Docker Swarm"
     echo -n "Are you sure? (y/N): "
     read -r confirmation
-    
+
     if [[ "$confirmation" != "y" && "$confirmation" != "Y" ]]; then
         log "Operation cancelled"
         return 0
     fi
-    
+
     local removed=0
     for secret in $(docker secret ls --format "{{.Name}}" | grep "^bluestream_"); do
         if docker secret rm "$secret"; then
@@ -365,18 +371,18 @@ cleanup_secrets() {
             error "Failed to remove secret: $secret"
         fi
     done
-    
+
     success "Removed $removed secrets from Docker Swarm"
 }
 
 # Generate all secrets
 generate_all_secrets() {
     log "Generating all secrets..."
-    
+
     # Required secrets
     local secrets=(
         "postgres_password"
-        "secret_key" 
+        "secret_key"
         "telegram_bot_token"
         "staff_bot_token"
         "payme_secret_key"
@@ -390,7 +396,7 @@ generate_all_secrets() {
         "encryption_key"
         "redis_password"
     )
-    
+
     local generated=0
     for secret in "${secrets[@]}"; do
         if [[ ! -f "$SECRETS_DIR/$secret" ]]; then
@@ -418,7 +424,7 @@ generate_all_secrets() {
                     secret_value=$(generate_secret 32)
                     ;;
             esac
-            
+
             echo -n "$secret_value" > "$SECRETS_DIR/$secret"
             chmod 600 "$SECRETS_DIR/$secret"
             success "Generated secret: $secret"
@@ -427,7 +433,7 @@ generate_all_secrets() {
             warn "Secret '$secret' already exists, skipping"
         fi
     done
-    
+
     success "Generated $generated new secrets"
 }
 
@@ -495,13 +501,13 @@ main() {
 check_dependencies() {
     local deps=("docker" "openssl")
     local missing=()
-    
+
     for dep in "${deps[@]}"; do
         if ! command -v "$dep" >/dev/null 2>&1; then
             missing+=("$dep")
         fi
     done
-    
+
     if [[ ${#missing[@]} -gt 0 ]]; then
         error "Missing dependencies: ${missing[*]}"
         exit 1

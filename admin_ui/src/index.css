@@ -1,4 +1,4 @@
-@import '~antd/dist/reset.css';
+@import 'antd/dist/reset.css';
 
 /* ==========================================================================
    2025 Mobile-First Responsive Admin UI Styles
@@ -371,13 +371,13 @@ code {
 }
 
 @keyframes fadeIn {
-  from { 
-    opacity: 0; 
-    transform: translateY(10px); 
+  from {
+    opacity: 0;
+    transform: translateY(10px);
   }
-  to { 
-    opacity: 1; 
-    transform: translateY(0); 
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }
 
@@ -405,34 +405,34 @@ code {
   .admin-content {
     padding: 12px;
   }
-  
+
   .mobile-header {
     padding: 12px 16px !important;
     min-height: 64px !important;
   }
-  
+
   .stat-value {
     font-size: 22px;
   }
-  
+
   .chart-container {
     padding: 12px;
   }
-  
+
   .ant-card-body {
     padding: 16px;
   }
-  
+
   .table-actions {
     gap: 12px;
   }
-  
+
   /* Better spacing for larger mobile screens */
   .ant-row {
     margin-left: -12px !important;
     margin-right: -12px !important;
   }
-  
+
   .ant-col {
     padding-left: 12px !important;
     padding-right: 12px !important;
@@ -447,40 +447,40 @@ code {
   body {
     font-size: 16px;
   }
-  
+
   .admin-content {
     padding: 20px;
   }
-  
+
   .desktop-content {
     padding: 24px !important;
   }
-  
+
   .desktop-header {
     height: 64px !important;
   }
-  
+
   .stat-value {
     font-size: 28px;
   }
-  
+
   .stat-title {
     font-size: 14px;
   }
-  
+
   .stat-trend {
     font-size: 12px;
   }
-  
+
   .chart-container {
     padding: 16px;
     margin-bottom: 16px;
   }
-  
+
   .dashboard-card {
     margin-bottom: 16px;
   }
-  
+
   /* Table Actions - Horizontal layout */
   .table-actions {
     flex-direction: row;
@@ -489,19 +489,19 @@ code {
     gap: 16px;
     margin-bottom: 16px;
   }
-  
+
   .table-actions .ant-input-search {
     width: 300px !important;
   }
-  
+
   .table-actions .ant-select {
     width: 150px !important;
   }
-  
+
   .table-actions .ant-btn {
     width: auto !important;
   }
-  
+
   /* Modal improvements for tablet */
   .ant-modal {
     margin: 24px auto;
@@ -509,35 +509,35 @@ code {
     width: auto !important;
     top: 24px !important;
   }
-  
+
   .ant-modal-body {
     padding: 24px;
     max-height: calc(100vh - 200px);
   }
-  
+
   /* Better column spacing */
   .ant-row {
     margin-left: -16px !important;
     margin-right: -16px !important;
   }
-  
+
   .ant-col {
     padding-left: 16px !important;
     padding-right: 16px !important;
   }
-  
+
   /* Pagination improvements */
   .ant-table-pagination {
     padding: 16px;
   }
-  
+
   /* Touch target improvements for tablet */
   .ant-btn,
   .ant-input,
   .ant-select-selector {
     min-height: 40px;
   }
-  
+
   .ant-btn-sm {
     min-height: 32px;
   }
@@ -551,44 +551,44 @@ code {
   .admin-content {
     padding: 20px;
   }
-  
+
   .desktop-content {
     padding: 24px !important;
   }
-  
+
   .stat-value {
     font-size: 32px;
   }
-  
+
   .chart-container {
     padding: 20px;
     margin-bottom: 20px;
   }
-  
+
   .dashboard-card {
     margin-bottom: 20px;
   }
-  
+
   .table-actions {
     gap: 20px;
   }
-  
+
   .ant-card-head {
     padding: 16px 24px;
     min-height: 56px;
   }
-  
+
   .ant-card-body {
     padding: 20px;
   }
-  
+
   /* Desktop-like interactions */
   .ant-btn,
   .ant-input,
   .ant-select-selector {
     min-height: 36px;
   }
-  
+
   .ant-pagination-item,
   .ant-pagination-prev,
   .ant-pagination-next {
@@ -606,34 +606,34 @@ code {
   .admin-content {
     padding: 24px;
   }
-  
+
   .desktop-content {
     padding: 32px !important;
   }
-  
+
   .chart-container {
     padding: 24px;
     margin-bottom: 24px;
   }
-  
+
   .dashboard-card {
     margin-bottom: 24px;
   }
-  
+
   .ant-card-body {
     padding: 24px;
   }
-  
+
   .table-actions {
     margin-bottom: 24px;
   }
-  
+
   /* Better spacing for large screens */
   .ant-row {
     margin-left: -24px !important;
     margin-right: -24px !important;
   }
-  
+
   .ant-col {
     padding-left: 24px !important;
     padding-right: 24px !important;
@@ -648,24 +648,24 @@ code {
   .admin-content {
     padding: 32px;
   }
-  
+
   .desktop-content {
     padding: 48px !important;
   }
-  
+
   .chart-container {
     padding: 32px;
   }
-  
+
   .ant-card-body {
     padding: 32px;
   }
-  
+
   /* Ultra-wide specific adjustments */
   .stat-value {
     font-size: 36px;
   }
-  
+
   .ant-card-head-title {
     font-size: 18px;
   }
@@ -685,13 +685,13 @@ code {
   .ant-pagination-next {
     min-height: 44px;
   }
-  
+
   /* Increase spacing for touch targets */
   .ant-menu-item {
     height: 48px;
     line-height: 48px;
   }
-  
+
   /* Better touch feedback */
   .ant-btn:active,
   .ant-menu-item:active,
@@ -709,11 +709,11 @@ code {
   .ant-card {
     box-shadow: 0 0.5px 1.5px rgba(0, 0, 0, 0.1);
   }
-  
+
   .admin-header {
     box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
   }
-  
+
   /* Crisp text rendering */
   body {
     -webkit-font-smoothing: antialiased;
@@ -735,16 +735,16 @@ code {
   .ant-modal-wrap {
     display: none !important;
   }
-  
+
   .admin-content {
     padding: 0;
     background: white;
   }
-  
+
   .ant-table {
     font-size: 12px;
   }
-  
+
   .ant-card {
     border: 1px solid #d9d9d9;
     box-shadow: none;
@@ -769,11 +769,11 @@ code {
   .fade-in {
     animation: none;
   }
-  
+
   .ant-spin {
     animation-duration: 0.01ms !important;
   }
-  
+
   * {
     transition-duration: 0.01ms !important;
     animation-duration: 0.01ms !important;

@@ -7,7 +7,7 @@ import {
     SearchOutlined, UserOutlined, PhoneOutlined, ReloadOutlined,
     ShoppingCartOutlined, PlusOutlined, EditOutlined, LinkOutlined, CopyOutlined,
 } from '@ant-design/icons';
-import { useQuery, useMutation, useQueryClient } from 'react-query';
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import staffService from '../services/staffService';
 
@@ -30,57 +30,63 @@ const Operators = () => {
     const [inviteModalOpen, setInviteModalOpen] = useState(false);
     const [inviteLink, setInviteLink] = useState('');
 
-    const { data, isLoading, refetch } = useQuery(
-        ['staffOperators', page, perPage, search, statusFilter],
-        () =>
+    const { data, isLoading, refetch } = useQuery({
+        queryKey: ['staffOperators', page, perPage, search, statusFilter],
+
+        queryFn: () =>
             staffService.getOperators({
                 page,
                 per_page: perPage,
                 search: search || undefined,
                 status: statusFilter,
             }),
-        { keepPreviousData: true }
-    );
 
-    const saveMutation = useMutation(
-        (payload) => {
+        placeholderData: keepPreviousData,
+    });
+
+    const saveMutation = useMutation({
+        mutationFn: (payload) => {
             if (editingOperator?.id) {
                 return staffService.updateOperator(editingOperator.id, payload);
             }
             return staffService.createOperator(payload);
         },
-        {
-            onSuccess: () => {
-                message.success(editingOperator ? t('staff:operator_updated') : t('staff:operator_created'));
-                setEditorOpen(false);
-                setEditingOperator(null);
-                form.resetFields();
-                queryClient.invalidateQueries('staffOperators');
-                queryClient.invalidateQueries('staffInviteOperators');
-            },
-            onError: (err) => {
-                const backendMessage = err?.response?.data?.message;
-                message.error(backendMessage || t('common:error_occurred'));
-            },
-        }
-    );
 
-    const inviteMutation = useMutation(
-        ({ userId }) => staffService.generateInviteLink({ user_id: userId, role: 'operator' }),
-        {
-            onSuccess: (res) => {
-                const link = res?.data?.data?.invite_link;
-                if (link) {
-                    setInviteLink(link);
-                    setInviteModalOpen(true);
-                }
-            },
-            onError: (err) => {
-                const backendMessage = err?.response?.data?.message;
-                message.error(backendMessage || t('common:error_occurred'));
-            },
-        }
-    );
+        onSuccess: () => {
+            message.success(editingOperator ? t('staff:operator_updated') : t('staff:operator_created'));
+            setEditorOpen(false);
+            setEditingOperator(null);
+            form.resetFields();
+            queryClient.invalidateQueries({
+                queryKey: ['staffOperators'],
+            });
+            queryClient.invalidateQueries({
+                queryKey: ['staffInviteOperators'],
+            });
+        },
+
+        onError: (err) => {
+            const backendMessage = err?.response?.data?.message;
+            message.error(backendMessage || t('common:error_occurred'));
+        },
+    });
+
+    const inviteMutation = useMutation({
+        mutationFn: ({ userId }) => staffService.generateInviteLink({ user_id: userId, role: 'operator' }),
+
+        onSuccess: (res) => {
+            const link = res?.data?.data?.invite_link;
+            if (link) {
+                setInviteLink(link);
+                setInviteModalOpen(true);
+            }
+        },
+
+        onError: (err) => {
+            const backendMessage = err?.response?.data?.message;
+            message.error(backendMessage || t('common:error_occurred'));
+        },
+    });
 
     const items = data?.data?.data?.items || [];
     const total = data?.data?.meta?.total || 0;
@@ -224,7 +230,7 @@ const Operators = () => {
                     <Button
                         size="small"
                         icon={<LinkOutlined />}
-                        loading={inviteMutation.isLoading}
+                        loading={inviteMutation.isPending}
                         onClick={() => handleGenerateInvite(record)}
                     >
                         {t('staff:invite')}
@@ -410,7 +416,7 @@ const Operators = () => {
                         <Button onClick={() => setEditorOpen(false)}>
                             {t('common:cancel')}
                         </Button>
-                        <Button type="primary" htmlType="submit" loading={saveMutation.isLoading}>
+                        <Button type="primary" htmlType="submit" loading={saveMutation.isPending}>
                             {t('common:save')}
                         </Button>
                     </Space>

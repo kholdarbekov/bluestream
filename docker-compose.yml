@@ -59,6 +59,61 @@ services:
         max-file: "3"
     command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
 
+  # ARCH-006 follow-up: schema bootstrap as a one-shot init container.
+  # Replaces the in-line `flask db upgrade` that previously ran inside
+  # `start-gunicorn.sh` — that path crashed on import because `flask` CLI
+  # invocations don't get the prometheus multiproc-dir setup that
+  # gunicorn.conf.py does, so migrations were silently being skipped.
+  #
+  # This service applies pending Alembic migrations and exits. Every
+  # DB-consuming service waits on `service_completed_successfully`, so they
+  # only boot against an up-to-date schema and a real migration failure now
+  # blocks rollout (instead of being swallowed by the entrypoint warning).
+  #
+  # PROMETHEUS_MULTIPROC_DIR is unset in the command (not the environment —
+  # prometheus_client checks key presence, not value) so the metrics module's
+  # import-time mmap allocation falls back to in-process MutexValue storage.
+  # No /tmp/prom-multiproc/ side-effects, no stale per-PID files left behind
+  # for gunicorn workers to inherit.
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: business_app
+    command:
+      - sh
+      - -c
+      - 'unset PROMETHEUS_MULTIPROC_DIR && exec flask db upgrade'
+    environment:
+      - TZ=${DISPLAY_TIMEZONE:-Asia/Tashkent}
+      - FLASK_APP=business_app:create_app
+      - FLASK_ENV=${FLASK_ENV:-production}
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-dummy_password}@postgres:5432/${POSTGRES_DB:-bluestream_db}
+      - REDIS_URL=redis://redis:6379/0
+      - SECRET_KEY=${SECRET_KEY}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+      - USE_SECRETS_FALLBACK=true
+    env_file:
+      - .env
+    volumes:
+      - ./business_app:/app/business_app
+      - ./shared:/app/shared
+      - ./logs:/app/logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   business_app:
     build:
       context: .
@@ -109,6 +164,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:80/health" ]
       interval: 300s
@@ -158,6 +215,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       business_app:
         condition: service_started
     healthcheck:
@@ -209,6 +268,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       business_app:
         condition: service_healthy
     healthcheck:
@@ -255,6 +316,11 @@ services:
       - TWILIO_PHONE_NUMBER=${TWILIO_PHONE_NUMBER}
       - CELERY_WORKER_CONCURRENCY=${CELERY_WORKER_CONCURRENCY:-4}
       - CELERY_WORKER_MAX_MEMORY_PER_CHILD=${CELERY_WORKER_MAX_MEMORY_PER_CHILD:-200000}
+      # INF-008: backup destinations. Override BACKUP_RCLONE_REMOTE in
+      # production env to enable offsite copies.
+      - BACKUP_LOCAL_DIR=${BACKUP_LOCAL_DIR:-/var/backups/bluestream}
+      - BACKUP_LOCAL_RETENTION_DAYS=${BACKUP_LOCAL_RETENTION_DAYS:-14}
+      - BACKUP_RCLONE_REMOTE=${BACKUP_RCLONE_REMOTE:-}
     env_file:
       - .env
     volumes:
@@ -262,12 +328,20 @@ services:
       - ./shared:/app/shared
       - uploads_data:/app/uploads
       - ./logs:/app/logs
+      # INF-008: backup output dir. Mounted as a named volume so backups
+      # survive container restarts/rebuilds. In production, replace this with
+      # a host-mount onto a separately-snapshotted disk.
+      - backup_data:/var/backups/bluestream
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
-    command: celery -A business_app.tasks.celery_app worker --loglevel=info --concurrency=${CELERY_WORKER_CONCURRENCY:-4} --max-memory-per-child=${CELERY_WORKER_MAX_MEMORY_PER_CHILD:-200000} --max-tasks-per-child=${CELERY_WORKER_MAX_TASKS_PER_CHILD:-1000}
+      migrate:
+        condition: service_completed_successfully
+    # CEL-006: `-E` enables task lifecycle events so Flower and the
+    # celery-exporter can observe started/succeeded/failed/retried transitions.
+    command: celery -A business_app.tasks.celery_app worker -E --loglevel=info --concurrency=${CELERY_WORKER_CONCURRENCY:-4} --max-memory-per-child=${CELERY_WORKER_MAX_MEMORY_PER_CHILD:-200000} --max-tasks-per-child=${CELERY_WORKER_MAX_TASKS_PER_CHILD:-1000}
     healthcheck:
       test: [ "CMD", "celery", "-A", "business_app.tasks.celery_app", "status" ]
       interval: 60s
@@ -313,6 +387,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     command: celery -A business_app.tasks.celery_app beat --loglevel=info --schedule=/app/celerybeat/celerybeat-schedule
     healthcheck:
       test: [ "CMD", "sh", "-c", "ps aux | grep 'celery.*beat' | grep -v grep || exit 1" ]
@@ -328,6 +404,90 @@ services:
         reservations:
           memory: 256M
           cpus: '0.25'
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # CEL-006: Flower dashboard for Celery (queues, workers, task history).
+  # Internal-only — no published port. Access from the host with:
+  #   docker compose exec flower wget -qO- http://localhost:5555/
+  # or temporarily expose via `docker compose port flower 5555` / a one-off
+  # `-p 127.0.0.1:5555:5555` override. FLOWER_BASIC_AUTH must be set even on
+  # the internal network — defense-in-depth in case a sibling container is
+  # ever compromised.
+  flower:
+    image: mher/flower:2.0
+    environment:
+      - TZ=${DISPLAY_TIMEZONE:-Asia/Tashkent}
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - FLOWER_BASIC_AUTH=${FLOWER_BASIC_AUTH:?FLOWER_BASIC_AUTH must be set, e.g. admin:somelongpassword}
+      - FLOWER_PERSISTENT=True
+      - FLOWER_DB=/data/flower.db
+      - FLOWER_STATE_SAVE_INTERVAL=60000
+      - FLOWER_PURGE_OFFLINE_WORKERS=3600
+    command: celery --broker=redis://redis:6379/0 flower --persistent=True --db=/data/flower.db --port=5555
+    volumes:
+      - flower_data:/data
+    depends_on:
+      redis:
+        condition: service_healthy
+      celery_worker:
+        condition: service_started
+    healthcheck:
+      test: [ "CMD-SHELL", "wget -qO- --user=$$(echo $$FLOWER_BASIC_AUTH | cut -d: -f1) --password=$$(echo $$FLOWER_BASIC_AUTH | cut -d: -f2) http://localhost:5555/healthcheck || exit 1" ]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.25'
+        reservations:
+          memory: 128M
+          cpus: '0.1'
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # CEL-006: Prometheus exporter for Celery (danihodovic/celery-exporter).
+  # Consumes the worker event stream (enabled via `-E` on celery_worker) and
+  # exposes Prometheus metrics on :9540. Scraped by Prometheus job `celery`.
+  celery_exporter:
+    image: danihodovic/celery-exporter:0.10.13
+    environment:
+      - TZ=${DISPLAY_TIMEZONE:-Asia/Tashkent}
+      - CE_BROKER_URL=redis://redis:6379/0
+      - CE_LOG_LEVEL=info
+    command:
+      - --broker-url=redis://redis:6379/0
+      - --port=9540
+    depends_on:
+      redis:
+        condition: service_healthy
+      celery_worker:
+        condition: service_started
+    healthcheck:
+      test: [ "CMD-SHELL", "wget -qO- http://localhost:9540/health || exit 1" ]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: '0.2'
+        reservations:
+          memory: 64M
+          cpus: '0.1'
     restart: unless-stopped
     logging:
       driver: "json-file"
@@ -415,8 +575,15 @@ volumes:
   postgres_data_new:
   redis_data:
   uploads_data:
+  # INF-008: backup output. In production, replace with a host-mount onto a
+  # separately-managed disk (and snapshot it independently of the main app
+  # volume). Keeping it as a named volume in dev so `docker compose down -v`
+  # doesn't drag the user-uploads volume with it.
+  backup_data:
   nginx_cache:
   celerybeat_schedule:
+  # CEL-006: persists Flower task history across container restarts.
+  flower_data:
 
 
 networks:

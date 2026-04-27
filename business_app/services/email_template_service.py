@@ -3,11 +3,12 @@ Email Template Service
 Provides file-based email template rendering with multi-language support.
 Uses Jinja2 templates stored in business_app/templates/emails/
 """
+
 import os
 import logging
 from typing import Dict, Any, Optional
 from datetime import datetime, UTC
-from flask import current_app, render_template_string
+from flask import current_app
 from jinja2 import Environment, FileSystemLoader, TemplateNotFound
 
 logger = logging.getLogger(__name__)
@@ -28,81 +29,81 @@ class EmailTemplateService:
     # Template name to notification type mapping
     # Maps notification_type values to template file names
     TEMPLATE_MAPPING = {
-        'email_verification': 'email_verification',
-        'password_reset': 'password_reset',
-        'order_confirmation': 'order_confirmation',
-        'payment_confirmation': 'payment_confirmation',
-        'loyalty_reward': 'loyalty_reward',
-        'delivery_update': 'delivery_update',
-        'subscription_created': 'subscription_created',
-        'subscription_reminder': 'subscription_reminder',
-        'subscription_renewal': 'subscription_renewal',
-        'subscription_cancelled': 'subscription_cancelled',
-        'reward_redeemed': 'reward_redeemed',
+        "email_verification": "email_verification",
+        "password_reset": "password_reset",
+        "order_confirmation": "order_confirmation",
+        "payment_confirmation": "payment_confirmation",
+        "loyalty_reward": "loyalty_reward",
+        "delivery_update": "delivery_update",
+        "subscription_created": "subscription_created",
+        "subscription_reminder": "subscription_reminder",
+        "subscription_renewal": "subscription_renewal",
+        "subscription_cancelled": "subscription_cancelled",
+        "reward_redeemed": "reward_redeemed",
     }
 
     # Email subjects by template and language
     EMAIL_SUBJECTS = {
-        'email_verification': {
-            'uz': 'Elektron pochtangizni tasdiqlang - {company_name}',
-            'en': 'Verify Your Email - {company_name}',
-            'ru': 'Подтвердите вашу почту - {company_name}',
+        "email_verification": {
+            "uz": "Elektron pochtangizni tasdiqlang - {company_name}",
+            "en": "Verify Your Email - {company_name}",
+            "ru": "Подтвердите вашу почту - {company_name}",
         },
-        'password_reset': {
-            'uz': 'Parolni tiklash - {company_name}',
-            'en': 'Reset Your Password - {company_name}',
-            'ru': 'Сброс пароля - {company_name}',
+        "password_reset": {
+            "uz": "Parolni tiklash - {company_name}",
+            "en": "Reset Your Password - {company_name}",
+            "ru": "Сброс пароля - {company_name}",
         },
-        'order_confirmation': {
-            'uz': 'Buyurtma #{order_number} tasdiqlandi - {company_name}',
-            'en': 'Order #{order_number} Confirmed - {company_name}',
-            'ru': 'Заказ #{order_number} подтвержден - {company_name}',
+        "order_confirmation": {
+            "uz": "Buyurtma #{order_number} tasdiqlandi - {company_name}",
+            "en": "Order #{order_number} Confirmed - {company_name}",
+            "ru": "Заказ #{order_number} подтвержден - {company_name}",
         },
-        'payment_confirmation': {
-            'uz': "To'lov qabul qilindi - {company_name}",
-            'en': 'Payment Confirmed - {company_name}',
-            'ru': 'Оплата подтверждена - {company_name}',
+        "payment_confirmation": {
+            "uz": "To'lov qabul qilindi - {company_name}",
+            "en": "Payment Confirmed - {company_name}",
+            "ru": "Оплата подтверждена - {company_name}",
         },
-        'loyalty_reward': {
-            'uz': 'Sodiqlik ballari qo\'shildi - {company_name}',
-            'en': 'Loyalty Points Earned - {company_name}',
-            'ru': 'Баллы лояльности начислены - {company_name}',
+        "loyalty_reward": {
+            "uz": "Sodiqlik ballari qo'shildi - {company_name}",
+            "en": "Loyalty Points Earned - {company_name}",
+            "ru": "Баллы лояльности начислены - {company_name}",
         },
-        'delivery_update': {
-            'uz': 'Yetkazib berish yangiligi - {company_name}',
-            'en': 'Delivery Update - {company_name}',
-            'ru': 'Обновление доставки - {company_name}',
+        "delivery_update": {
+            "uz": "Yetkazib berish yangiligi - {company_name}",
+            "en": "Delivery Update - {company_name}",
+            "ru": "Обновление доставки - {company_name}",
         },
-        'subscription_created': {
-            'uz': 'Obuna faollashtirildi - {company_name}',
-            'en': 'Subscription Activated - {company_name}',
-            'ru': 'Подписка активирована - {company_name}',
+        "subscription_created": {
+            "uz": "Obuna faollashtirildi - {company_name}",
+            "en": "Subscription Activated - {company_name}",
+            "ru": "Подписка активирована - {company_name}",
         },
-        'subscription_reminder': {
-            'uz': 'Obuna eslatmasi - {company_name}',
-            'en': 'Subscription Reminder - {company_name}',
-            'ru': 'Напоминание о подписке - {company_name}',
+        "subscription_reminder": {
+            "uz": "Obuna eslatmasi - {company_name}",
+            "en": "Subscription Reminder - {company_name}",
+            "ru": "Напоминание о подписке - {company_name}",
         },
-        'subscription_renewal': {
-            'uz': 'Obuna yangilandi - {company_name}',
-            'en': 'Subscription Renewed - {company_name}',
-            'ru': 'Подписка продлена - {company_name}',
+        "subscription_renewal": {
+            "uz": "Obuna yangilandi - {company_name}",
+            "en": "Subscription Renewed - {company_name}",
+            "ru": "Подписка продлена - {company_name}",
         },
-        'subscription_cancelled': {
-            'uz': 'Obuna bekor qilindi - {company_name}',
-            'en': 'Subscription Cancelled - {company_name}',
-            'ru': 'Подписка отменена - {company_name}',
+        "subscription_cancelled": {
+            "uz": "Obuna bekor qilindi - {company_name}",
+            "en": "Subscription Cancelled - {company_name}",
+            "ru": "Подписка отменена - {company_name}",
         },
-        'reward_redeemed': {
-            'uz': 'Mukofot olindi - {company_name}',
-            'en': 'Reward Redeemed - {company_name}',
-            'ru': 'Награда получена - {company_name}',
+        "reward_redeemed": {
+            "uz": "Mukofot olindi - {company_name}",
+            "en": "Reward Redeemed - {company_name}",
+            "ru": "Награда получена - {company_name}",
         },
     }
 
-    SUPPORTED_LANGUAGES = ['uz', 'en', 'ru']
-    DEFAULT_LANGUAGE = 'en'
-    FALLBACK_CHAIN = ['uz', 'en', 'ru']
+    SUPPORTED_LANGUAGES = ["uz", "en", "ru"]
+    DEFAULT_LANGUAGE = "en"
+    FALLBACK_CHAIN = ["uz", "en", "ru"]
 
     def __init__(self):
         """Initialize the email template service."""
@@ -120,7 +121,7 @@ class EmailTemplateService:
                 # Outside Flask context, use relative path
                 base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-            self._templates_dir = os.path.join(base_dir, 'templates', 'emails')
+            self._templates_dir = os.path.join(base_dir, "templates", "emails")
 
         return self._templates_dir
 
@@ -129,11 +130,10 @@ class EmailTemplateService:
         """Get or create Jinja2 environment for email templates."""
         if self._jinja_env is None:
             self._jinja_env = Environment(
-                loader=FileSystemLoader([
-                    self.templates_dir,
-                    os.path.dirname(self.templates_dir)  # For base.html access
-                ]),
-                autoescape=True
+                loader=FileSystemLoader(
+                    [self.templates_dir, os.path.dirname(self.templates_dir)]  # For base.html access
+                ),
+                autoescape=True,
             )
         return self._jinja_env
 
@@ -143,26 +143,26 @@ class EmailTemplateService:
         These are available in all email templates.
         """
         try:
-            company_name = current_app.config.get('COMPANY_NAME', 'BlueStream')
-            company_phone = current_app.config.get('COMPANY_PHONE', '')
-            company_email = current_app.config.get('COMPANY_EMAIL', '')
-            company_address = current_app.config.get('COMPANY_ADDRESS', '')
-            company_website = current_app.config.get('COMPANY_WEBSITE', '')
+            company_name = current_app.config.get("COMPANY_NAME", "BlueStream")
+            company_phone = current_app.config.get("COMPANY_PHONE", "")
+            company_email = current_app.config.get("COMPANY_EMAIL", "")
+            company_address = current_app.config.get("COMPANY_ADDRESS", "")
+            company_website = current_app.config.get("COMPANY_WEBSITE", "")
         except RuntimeError:
             # Outside Flask context
-            company_name = os.environ.get('COMPANY_NAME', 'BlueStream')
-            company_phone = os.environ.get('COMPANY_PHONE', '')
-            company_email = os.environ.get('COMPANY_EMAIL', '')
-            company_address = os.environ.get('COMPANY_ADDRESS', '')
-            company_website = os.environ.get('COMPANY_WEBSITE', '')
+            company_name = os.environ.get("COMPANY_NAME", "BlueStream")
+            company_phone = os.environ.get("COMPANY_PHONE", "")
+            company_email = os.environ.get("COMPANY_EMAIL", "")
+            company_address = os.environ.get("COMPANY_ADDRESS", "")
+            company_website = os.environ.get("COMPANY_WEBSITE", "")
 
         return {
-            'company_name': company_name,
-            'company_phone': company_phone,
-            'company_email': company_email,
-            'company_address': company_address,
-            'company_website': company_website,
-            'current_year': datetime.now(UTC).year,
+            "company_name": company_name,
+            "company_phone": company_phone,
+            "company_email": company_email,
+            "company_address": company_address,
+            "company_website": company_website,
+            "current_year": datetime.now(UTC).year,
         }
 
     def get_template_name_for_notification_type(self, notification_type: str) -> str:
@@ -177,12 +177,7 @@ class EmailTemplateService:
         """
         return self.TEMPLATE_MAPPING.get(notification_type, notification_type)
 
-    def get_subject(
-        self,
-        template_name: str,
-        language: str,
-        template_data: Dict[str, Any]
-    ) -> str:
+    def get_subject(self, template_name: str, language: str, template_data: Dict[str, Any]) -> str:
         """
         Get the email subject for a template.
 
@@ -198,7 +193,7 @@ class EmailTemplateService:
             language = self.DEFAULT_LANGUAGE
 
         subjects = self.EMAIL_SUBJECTS.get(template_name, {})
-        subject_template = subjects.get(language) or subjects.get(self.DEFAULT_LANGUAGE, '')
+        subject_template = subjects.get(language) or subjects.get(self.DEFAULT_LANGUAGE, "")
 
         # Merge with common context for company_name
         context = {**self.get_common_context(), **template_data}
@@ -209,12 +204,7 @@ class EmailTemplateService:
             logger.warning(f"Missing subject variable {e} for template {template_name}")
             return subject_template
 
-    def render_template(
-        self,
-        template_name: str,
-        language: str,
-        template_data: Dict[str, Any]
-    ) -> Optional[str]:
+    def render_template(self, template_name: str, language: str, template_data: Dict[str, Any]) -> Optional[str]:
         """
         Render an email template with the given data.
 
@@ -233,11 +223,7 @@ class EmailTemplateService:
         template_path = f"{language}/{template_name}.html"
 
         # Merge common context with template-specific data
-        context = {
-            **self.get_common_context(),
-            'language': language,
-            **template_data
-        }
+        context = {**self.get_common_context(), "language": language, **template_data}
 
         try:
             template = self.jinja_env.get_template(template_path)
@@ -253,7 +239,7 @@ class EmailTemplateService:
                 fallback_path = f"{fallback_lang}/{template_name}.html"
                 try:
                     template = self.jinja_env.get_template(fallback_path)
-                    context['language'] = fallback_lang
+                    context["language"] = fallback_lang
                     logger.info(f"Using fallback template: {fallback_path}")
                     return template.render(**context)
                 except TemplateNotFound:
@@ -261,15 +247,12 @@ class EmailTemplateService:
 
             logger.error(f"No template found for {template_name} in any language")
             return None
-        except Exception as e:
-            logger.error(f"Error rendering template {template_path}: {e}")
+        except Exception:
+            logger.exception("Error rendering template %s", template_path)
             return None
 
     def render_notification_email(
-        self,
-        notification_type: str,
-        language: str,
-        template_data: Dict[str, Any]
+        self, notification_type: str, language: str, template_data: Dict[str, Any]
     ) -> Optional[Dict[str, str]]:
         """
         Render a notification email by notification type.
@@ -290,10 +273,7 @@ class EmailTemplateService:
         if content is None:
             return None
 
-        return {
-            'subject': subject,
-            'content': content
-        }
+        return {"subject": subject, "content": content}
 
     def template_exists(self, template_name: str, language: str = None) -> bool:
         """
@@ -330,11 +310,7 @@ class EmailTemplateService:
         for lang in self.SUPPORTED_LANGUAGES:
             lang_dir = os.path.join(self.templates_dir, lang)
             if os.path.exists(lang_dir):
-                templates[lang] = [
-                    f.replace('.html', '')
-                    for f in os.listdir(lang_dir)
-                    if f.endswith('.html')
-                ]
+                templates[lang] = [f.replace(".html", "") for f in os.listdir(lang_dir) if f.endswith(".html")]
             else:
                 templates[lang] = []
 

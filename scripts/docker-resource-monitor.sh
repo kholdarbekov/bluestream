@@ -39,7 +39,7 @@ format_bytes() {
     local kb=$((bytes / 1024))
     local mb=$((kb / 1024))
     local gb=$((mb / 1024))
-    
+
     if [ $gb -gt 0 ]; then
         echo "${gb}GB"
     elif [ $mb -gt 0 ]; then
@@ -61,15 +61,15 @@ check_thresholds() {
     local container=$1
     local cpu_percent=$2
     local mem_percent=$3
-    
+
     # Remove % symbol for comparison
     cpu_percent=${cpu_percent%\%}
     mem_percent=${mem_percent%\%}
-    
+
     # Convert to integer for comparison
     cpu_percent=${cpu_percent%.*}
     mem_percent=${mem_percent%.*}
-    
+
     # CPU thresholds
     if [ "$cpu_percent" -gt 80 ]; then
         error "HIGH CPU: $container is using $cpu_percent% CPU"
@@ -77,7 +77,7 @@ check_thresholds() {
     elif [ "$cpu_percent" -gt 60 ]; then
         warn "MEDIUM CPU: $container is using $cpu_percent% CPU"
     fi
-    
+
     # Memory thresholds
     if [ "$mem_percent" -gt 85 ]; then
         error "HIGH MEMORY: $container is using $mem_percent% memory"
@@ -90,8 +90,9 @@ check_thresholds() {
 # Function to get container health status
 get_container_health() {
     local container=$1
-    local health=$(docker inspect --format='{{.State.Health.Status}}' "$container" 2>/dev/null || echo "no-healthcheck")
-    
+    local health
+    health=$(docker inspect --format='{{.State.Health.Status}}' "$container" 2>/dev/null || echo "no-healthcheck")
+
     case $health in
         "healthy")
             echo -e "${GREEN}✓${NC}"
@@ -117,7 +118,7 @@ get_docker_disk_usage() {
 show_recent_errors() {
     local container=$1
     local lines=${2:-10}
-    
+
     echo -e "\n${BLUE}Recent errors from $container:${NC}"
     docker logs --tail $lines "$container" 2>&1 | grep -i -E "(error|exception|failed|critical)" | tail -5 || echo "No recent errors found"
 }
@@ -125,40 +126,40 @@ show_recent_errors() {
 # Main monitoring function
 monitor_resources() {
     clear
-    
+
     echo "=================================================="
     echo "Docker Resource Monitor - BlueStream Platform"
     echo "Monitoring interval: ${INTERVAL}s"
     echo "Log file: $OUTPUT_FILE"
     echo "=================================================="
-    
+
     while true; do
         echo -e "\n${BLUE}=== $(date) ===${NC}"
-        
+
         # Container statistics
         echo -e "\n${GREEN}Container Resource Usage:${NC}"
         printf "%-20s %-10s %-15s %-10s %-20s %-20s %-8s\n" "CONTAINER" "CPU %" "MEMORY" "MEM %" "NET I/O" "BLOCK I/O" "HEALTH"
         printf "%-20s %-10s %-15s %-10s %-20s %-20s %-8s\n" "--------" "-----" "------" "-----" "-------" "---------" "------"
-        
+
         # Get container stats and process each line
         get_container_stats | tail -n +2 | while IFS=$'\t' read -r container cpu_percent mem_usage mem_percent net_io block_io; do
             health=$(get_container_health "$container")
             printf "%-20s %-10s %-15s %-10s %-20s %-20s %-8s\n" "$container" "$cpu_percent" "$mem_usage" "$mem_percent" "$net_io" "$block_io" "$health"
-            
+
             # Check thresholds
             check_thresholds "$container" "$cpu_percent" "$mem_percent"
         done
-        
+
         # Docker disk usage
         echo -e "\n${GREEN}Docker Disk Usage:${NC}"
         get_docker_disk_usage
-        
+
         # System resources
         echo -e "\n${GREEN}Host System Resources:${NC}"
         echo "CPU Load: $(uptime | awk -F'load average:' '{print $2}')"
         echo "Memory: $(free -h | awk 'NR==2{printf "Used: %s/%s (%.1f%%)", $3,$2,$3*100/$2}')"
         echo "Disk: $(df -h / | awk 'NR==2{printf "Used: %s/%s (%s)", $3,$2,$5}')"
-        
+
         # Check for unhealthy containers
         echo -e "\n${GREEN}Container Health Status:${NC}"
         for container in postgres redis business_app telegram_bot celery_worker celery_beat admin_ui; do
@@ -166,7 +167,7 @@ monitor_resources() {
                 health=$(get_container_health "$container")
                 status=$(docker inspect --format='{{.State.Status}}' "$container" 2>/dev/null || echo "not-found")
                 echo "  $container: $status $health"
-                
+
                 # Show errors for unhealthy containers
                 if [ "$(docker inspect --format='{{.State.Health.Status}}' "$container" 2>/dev/null)" = "unhealthy" ]; then
                     show_recent_errors "$container" 5
@@ -175,7 +176,7 @@ monitor_resources() {
                 echo "  $container: not running ✗"
             fi
         done
-        
+
         # Docker compose services status
         echo -e "\n${GREEN}Docker Compose Services:${NC}"
         if command -v docker-compose >/dev/null 2>&1; then
@@ -183,7 +184,7 @@ monitor_resources() {
         else
             echo "docker-compose not available"
         fi
-        
+
         echo -e "\n${BLUE}Waiting ${INTERVAL} seconds... (Press Ctrl+C to stop)${NC}"
         sleep $INTERVAL
         clear
@@ -193,23 +194,23 @@ monitor_resources() {
 # Function to generate resource report
 generate_report() {
     local output_file="${1:-docker-resource-report.txt}"
-    
+
     echo "Generating resource usage report..."
-    
+
     {
         echo "Docker Resource Usage Report"
         echo "Generated: $(date)"
         echo "========================================"
         echo ""
-        
+
         echo "Container Resource Usage:"
         get_container_stats
         echo ""
-        
+
         echo "Docker Disk Usage:"
         get_docker_disk_usage
         echo ""
-        
+
         echo "Container Health Status:"
         for container in postgres redis business_app telegram_bot celery_worker celery_beat admin_ui; do
             if docker ps --filter "name=$container" --format "{{.Names}}" | grep -q "$container"; then
@@ -222,39 +223,39 @@ generate_report() {
             fi
         done
         echo ""
-        
+
         echo "System Resources:"
         echo "CPU Load: $(uptime | awk -F'load average:' '{print $2}')"
         echo "Memory: $(free -h | awk 'NR==2{printf "Used: %s/%s (%.1f%%)", $3,$2,$3*100/$2}')"
         echo "Disk: $(df -h / | awk 'NR==2{printf "Used: %s/%s (%s)", $3,$2,$5}')"
         echo ""
-        
+
         if [ -f "$OUTPUT_FILE" ]; then
             echo "Recent Alerts:"
             tail -20 "$OUTPUT_FILE"
         fi
-        
+
     } > "$output_file"
-    
+
     log "Report generated: $output_file"
 }
 
 # Function to cleanup Docker resources
 cleanup_docker() {
     echo "Cleaning up Docker resources..."
-    
+
     # Remove stopped containers
     docker container prune -f
-    
+
     # Remove unused images
     docker image prune -f
-    
+
     # Remove unused volumes
     docker volume prune -f
-    
+
     # Remove unused networks
     docker network prune -f
-    
+
     # Show space freed
     echo "Docker cleanup completed!"
     get_docker_disk_usage

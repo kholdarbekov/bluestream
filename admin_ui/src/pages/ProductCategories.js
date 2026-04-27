@@ -29,7 +29,7 @@ import {
   WarningOutlined,
   SortAscendingOutlined
 } from '@ant-design/icons';
-import { useQuery, useMutation, useQueryClient } from 'react-query';
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import adminService from '../services/adminService';
 import { formatLocalDate } from '../utils/dateUtils';
 
@@ -48,66 +48,72 @@ const ProductCategories = () => {
   const queryClient = useQueryClient();
 
   // Fetch categories
-  const { data, isLoading } = useQuery(
-    ['categories', pagination, searchText],
-    () => adminService.getCategories({
+  const { data, isLoading } = useQuery({
+    queryKey: ['categories', pagination, searchText],
+
+    queryFn: () => adminService.getCategories({
       page: pagination.page,
       per_page: pagination.per_page,
       search: searchText
     }),
-    {
-      keepPreviousData: true
-    }
-  );
+
+    placeholderData: keepPreviousData,
+  });
 
   // Create category mutation
-  const createCategoryMutation = useMutation(
-    (categoryData) => adminService.createCategory(categoryData),
-    {
-      onSuccess: () => {
-        message.success('Category created successfully');
-        queryClient.invalidateQueries('categories');
-        setIsCreateModalVisible(false);
-        createForm.resetFields();
-      },
-      onError: (error) => {
-        const errorMessage = error.response?.data?.message || 'Failed to create category';
-        message.error(errorMessage);
-      }
-    }
-  );
+  const createCategoryMutation = useMutation({
+    mutationFn: (categoryData) => adminService.createCategory(categoryData),
+
+    onSuccess: () => {
+      message.success('Category created successfully');
+      queryClient.invalidateQueries({
+        queryKey: ['categories'],
+      });
+      setIsCreateModalVisible(false);
+      createForm.resetFields();
+    },
+
+    onError: (error) => {
+      const errorMessage = error.response?.data?.message || 'Failed to create category';
+      message.error(errorMessage);
+    },
+  });
 
   // Update category mutation
-  const updateCategoryMutation = useMutation(
-    ({ categoryId, categoryData }) => adminService.updateCategory(categoryId, categoryData),
-    {
-      onSuccess: () => {
-        message.success('Category updated successfully');
-        queryClient.invalidateQueries('categories');
-        setIsEditModalVisible(false);
-        editForm.resetFields();
-      },
-      onError: (error) => {
-        const errorMessage = error.response?.data?.message || 'Failed to update category';
-        message.error(errorMessage);
-      }
-    }
-  );
+  const updateCategoryMutation = useMutation({
+    mutationFn: ({ categoryId, categoryData }) => adminService.updateCategory(categoryId, categoryData),
+
+    onSuccess: () => {
+      message.success('Category updated successfully');
+      queryClient.invalidateQueries({
+        queryKey: ['categories'],
+      });
+      setIsEditModalVisible(false);
+      editForm.resetFields();
+    },
+
+    onError: (error) => {
+      const errorMessage = error.response?.data?.message || 'Failed to update category';
+      message.error(errorMessage);
+    },
+  });
 
   // Delete category mutation
-  const deleteCategoryMutation = useMutation(
-    ({ categoryId, force }) => adminService.deleteCategory(categoryId, force),
-    {
-      onSuccess: () => {
-        message.success('Category deleted successfully');
-        queryClient.invalidateQueries('categories');
-      },
-      onError: (error) => {
-        const errorMessage = error.response?.data?.message || 'Failed to delete category';
-        message.error(errorMessage);
-      }
-    }
-  );
+  const deleteCategoryMutation = useMutation({
+    mutationFn: ({ categoryId, force }) => adminService.deleteCategory(categoryId, force),
+
+    onSuccess: () => {
+      message.success('Category deleted successfully');
+      queryClient.invalidateQueries({
+        queryKey: ['categories'],
+      });
+    },
+
+    onError: (error) => {
+      const errorMessage = error.response?.data?.message || 'Failed to delete category';
+      message.error(errorMessage);
+    },
+  });
 
   const columns = [
     {
@@ -182,12 +188,14 @@ const ProductCategories = () => {
                 key: 'view',
                 label: 'View Details',
                 icon: <EyeOutlined />,
+                // eslint-disable-next-line no-use-before-define
                 onClick: () => handleViewCategory(record)
               },
               {
                 key: 'edit',
                 label: 'Edit Category',
                 icon: <EditOutlined />,
+                // eslint-disable-next-line no-use-before-define
                 onClick: () => handleEditCategory(record)
               },
               {
@@ -198,6 +206,7 @@ const ProductCategories = () => {
                 label: 'Delete Category',
                 icon: <DeleteOutlined />,
                 danger: true,
+                // eslint-disable-next-line no-use-before-define
                 onClick: () => handleDeleteCategory(record)
               }
             ]
@@ -583,7 +592,7 @@ const ProductCategories = () => {
               <Button
                 type="primary"
                 htmlType="submit"
-                loading={createCategoryMutation.isLoading}
+                loading={createCategoryMutation.isPending}
               >
                 Create Category
               </Button>
@@ -723,7 +732,7 @@ const ProductCategories = () => {
               <Button
                 type="primary"
                 htmlType="submit"
-                loading={updateCategoryMutation.isLoading}
+                loading={updateCategoryMutation.isPending}
               >
                 Update Category
               </Button>

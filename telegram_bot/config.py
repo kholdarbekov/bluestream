@@ -26,7 +26,7 @@ if use_fallback:
         if not value and required:
             raise ValueError(f"Required secret '{secret_name}' not found")
         return value
-    
+
     def get_database_url():
         """Fallback database URL builder"""
         # Check if full DATABASE_URL is provided first
@@ -40,7 +40,7 @@ if use_fallback:
         user = os.environ.get('POSTGRES_USER', 'postgres')
         password = os.environ.get('POSTGRES_PASSWORD', 'postgres')
         return f"postgresql://{user}:{password}@{host}:{port}/{database}"
-    
+
     def get_redis_url():
         """Fallback Redis URL builder"""
         # Check if full REDIS_URL is provided first
@@ -67,12 +67,17 @@ class TelegramConfig:
     webhook_listen: str = "0.0.0.0"
     webhook_ssl_cert: Optional[str] = None
     webhook_ssl_priv: Optional[str] = None
-    
+
     # Rate limiting
     rate_limit_enabled: bool = True
     rate_limit_requests: int = 30
     rate_limit_window: int = 60  # seconds
-    
+    # Behaviour when Redis is unavailable. "closed" = deny (fail closed, audit BOT-005
+    # default); "open" = allow all traffic with critical alert (preserves UX, weakens defense).
+    rate_limit_fail_mode: str = 'closed'
+    # How long to wait between Redis reconnect attempts after a failure (seconds).
+    rate_limit_redis_retry_seconds: int = 30
+
     # Support settings
     support_chat_id: Optional[int] = None
 
@@ -128,11 +133,11 @@ class BusinessAPIConfig:
     timeout: int = 30
     max_retries: int = 3
     retry_delay: float = 1.0
-    
+
     # SSL configuration
     ssl_verify: bool = True  # Enable SSL verification by default
     ssl_cert_path: Optional[str] = None  # Path to custom SSL certificate
-    
+
     # API endpoints
     auth_endpoint: str = "/api/v1/auth"
     products_endpoint: str = "/api/v1/products"
@@ -151,16 +156,16 @@ class PaymentConfig:
     payme_merchant_id: Optional[str] = None
     payme_secret_key: Optional[str] = None
     payme_test_mode: bool = True
-    
+
     # Click
     click_merchant_id: Optional[str] = None
     click_service_id: Optional[str] = None
     click_secret_key: Optional[str] = None
     click_test_mode: bool = True
-    
+
     # Supported currencies
     supported_currencies: List[str] = None
-    
+
     def __post_init__(self):
         if self.supported_currencies is None:
             self.supported_currencies = ['UZS', 'USD']
@@ -172,7 +177,7 @@ class LocalizationConfig:
     default_language: str = "en"
     supported_languages: List[str] = None
     fallback_language: str = "en"
-    
+
     def __post_init__(self):
         if self.supported_languages is None:
             self.supported_languages = ["en", "uz", "ru"]
@@ -195,26 +200,26 @@ class FeatureConfig:
     enable_guest_orders: bool = True
     enable_voice_messages: bool = True
     enable_location_sharing: bool = True
-    
+
     # Payment features
     enable_cash_on_delivery: bool = True
     enable_online_payments: bool = True
     enable_loyalty_payments: bool = True
     enable_business_accounts: bool = True
-    
+
     # Delivery features
     enable_express_delivery: bool = True
     enable_scheduled_delivery: bool = True
     enable_delivery_tracking: bool = True
     enable_live_location: bool = True
-    
+
     # Advanced features
     enable_subscriptions: bool = True
     enable_loyalty_program: bool = True
     enable_referrals: bool = True
     enable_analytics: bool = True
     enable_admin_panel: bool = True
-    
+
     # AI features
     enable_ai_recommendations: bool = True
     enable_chatbot_mode: bool = True
@@ -256,7 +261,7 @@ class SentryConfig:
 
 class BotConfig:
     """Main bot configuration"""
-    
+
     def __init__(self):
         # Load environment variables using secrets manager
         self.telegram = TelegramConfig(
@@ -283,17 +288,22 @@ class BotConfig:
             get_updates_max_retries=int(os.getenv('TELEGRAM_GET_UPDATES_MAX_RETRIES', '3')),
             get_updates_retry_backoff_seconds=float(os.getenv('TELEGRAM_GET_UPDATES_RETRY_BACKOFF_SECONDS', '0.75')),
             get_updates_retry_max_backoff_seconds=float(os.getenv('TELEGRAM_GET_UPDATES_RETRY_MAX_BACKOFF_SECONDS', '5')),
+            rate_limit_enabled=os.getenv('TELEGRAM_RATE_LIMIT_ENABLED', 'true').lower() == 'true',
+            rate_limit_requests=int(os.getenv('TELEGRAM_RATE_LIMIT_REQUESTS', '30')),
+            rate_limit_window=int(os.getenv('TELEGRAM_RATE_LIMIT_WINDOW', '60')),
+            rate_limit_fail_mode=os.getenv('TELEGRAM_RATE_LIMIT_FAIL_MODE', 'closed').lower(),
+            rate_limit_redis_retry_seconds=int(os.getenv('TELEGRAM_RATE_LIMIT_REDIS_RETRY_SECONDS', '30')),
         )
-        
+
         self.database = DatabaseConfig(
             url=get_database_url(),
             pool_size=int(os.getenv('DB_POOL_SIZE', '20')),
         )
-        
+
         self.redis = RedisConfig(
             url=get_redis_url(),
         )
-        
+
         self.business_api = BusinessAPIConfig(
             base_url=os.getenv('BUSINESS_APP_URL', 'http://business_app:80'),
             ssl_verify=os.getenv('BUSINESS_API_SSL_VERIFY', 'true').lower() == 'true',
@@ -301,7 +311,7 @@ class BotConfig:
             timeout=int(os.getenv('BUSINESS_API_TIMEOUT', '30')),
             max_retries=int(os.getenv('BUSINESS_API_MAX_RETRIES', '3')),
         )
-        
+
         self.payments = PaymentConfig(
             payme_merchant_id=os.getenv('PAYME_MERCHANT_ID'),
             payme_secret_key=get_secret('payme_secret_key', 'PAYME_SECRET_KEY', required=False),
@@ -311,17 +321,17 @@ class BotConfig:
             click_secret_key=get_secret('click_secret_key', 'CLICK_SECRET_KEY', required=False),
             click_test_mode=os.getenv('CLICK_TEST_MODE', 'true').lower() == 'true',
         )
-        
+
         self.localization = LocalizationConfig(
             default_language=os.getenv('DEFAULT_LANGUAGE', 'en'),
         )
-        
+
         self.features = FeatureConfig()
 
         self.timezone = TimezoneConfig(
             default_timezone=os.getenv('DISPLAY_TIMEZONE', DISPLAY_TIMEZONE),
         )
-        
+
         self.security = SecurityConfig(
             jwt_secret_key=os.environ.get('JWT_SECRET_KEY') or os.environ.get('SECRET_KEY'),
             webhook_secret=os.environ.get('WEBHOOK_SECRET'),
@@ -339,7 +349,7 @@ class BotConfig:
 
         # Validate required configuration
         self._validate_config()
-    
+
     def _validate_config(self):
         """Validate required configuration values"""
         required_fields = [
@@ -348,14 +358,14 @@ class BotConfig:
             (self.business_api.base_url, "BUSINESS_APP_URL"),
             (self.security.jwt_secret_key, "JWT_SECRET_KEY"),
         ]
-        
+
         missing_fields = [field_name for field_value, field_name in required_fields if not field_value]
-        
+
         if missing_fields:
             raise ValueError(f"Missing required configuration: {', '.join(missing_fields)}")
-    
+
     # Admin checks are now handled by backend API permissions
-    
+
     def get_api_url(self, endpoint: str) -> str:
         """Get full API URL for endpoint"""
         return f"{self.business_api.base_url.rstrip('/')}{endpoint}"

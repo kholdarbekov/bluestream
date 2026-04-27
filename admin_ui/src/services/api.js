@@ -3,9 +3,9 @@ import toast from 'react-hot-toast';
 import { extractApiErrorMessage } from '../utils/apiError';
 
 // Create axios instance with cookie support
-console.log('API URL:', process.env.REACT_APP_API_URL);
+console.log('API URL:', import.meta.env.VITE_API_URL);
 const api = axios.create({
-  baseURL: process.env.REACT_APP_API_URL || 'https://aqua-element.uz/api/v1',
+  baseURL: import.meta.env.VITE_API_URL || 'https://aqua-element.uz/api/v1',
   timeout: 10000,
   withCredentials: true  // Enable sending cookies with requests
 });
@@ -31,7 +31,7 @@ const getJWTCSRFToken = () => {
 const fetchCSRFToken = async () => {
   try {
     const response = await axios.get(
-      `${process.env.REACT_APP_API_URL || 'https://aqua-element.uz/api/v1'}/csrf-token`,
+      `${import.meta.env.VITE_API_URL || 'https://aqua-element.uz/api/v1'}/csrf-token`,
       { withCredentials: true }
     );
     csrfToken = response.data.csrf_token;
@@ -152,7 +152,10 @@ api.interceptors.response.use(
         }
       }
 
-      // If refresh failed, this is refresh endpoint, or already retried, logout
+      // If refresh failed, this is refresh endpoint, or already retried, logout.
+      // UI-001: `admin_token` removal kept only to flush legacy values from
+      // older builds; no new code writes it. HttpOnly cookies are cleared by
+      // the /auth/logout response or will expire naturally on the server side.
       console.log('Logging out due to expired session');
       localStorage.removeItem('admin_token');
       localStorage.removeItem('admin_user');

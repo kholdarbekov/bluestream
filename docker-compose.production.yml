@@ -80,6 +80,9 @@ services:
       - GUNICORN_WORKER_CONNECTIONS=1000
       - GUNICORN_TIMEOUT=60
       - GUNICORN_KEEPALIVE=10
+      # INF-003: prometheus_client multiprocess shared dir (must be writable by
+      # every worker; ephemeral tmpfs is ideal — counters are re-derived on boot).
+      - PROMETHEUS_MULTIPROC_DIR=/tmp/prom-multiproc
     deploy:
       resources:
         limits:
@@ -125,6 +128,7 @@ services:
       replicas: 2
     command: >
       celery -A business_app.tasks.celery_app worker
+      -E
       --loglevel=info
       --concurrency=8
       --max-memory-per-child=500000
@@ -155,13 +159,34 @@ services:
           memory: 256M
           cpus: '0.5'
 
+  # CEL-006: Flower is stateful (persists task history to flower_data volume)
+  # so pin to manager node like celery_beat. Internal-only — no published port.
+  flower:
+    deploy:
+      placement:
+        constraints:
+          - node.role == manager
+
+  # CEL-006: Stateless event consumer; can run on any node. Tightened resource
+  # ceiling — exporter footprint is small.
+  celery_exporter:
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.25'
+        reservations:
+          memory: 64M
+          cpus: '0.1'
+
   # Production monitoring services
   prometheus:
     image: prom/prometheus:latest
     ports:
       - "9090:9090"
     volumes:
-      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/alert_rules.yml:/etc/prometheus/alert_rules.yml:ro
       - prometheus_data:/prometheus
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
@@ -170,6 +195,8 @@ services:
       - '--web.console.templates=/etc/prometheus/consoles'
       - '--storage.tsdb.retention.time=200h'
       - '--web.enable-lifecycle'
+    depends_on:
+      - alertmanager
     deploy:
       resources:
         limits:
@@ -178,6 +205,32 @@ services:
         reservations:
           memory: 256M
           cpus: '0.25'
+    restart: unless-stopped
+
+  # INF-003: Alertmanager for routing Prometheus alerts to Slack.
+  # Secret material (Slack webhook URL) is loaded via Docker Compose file-mount
+  # secret at /run/secrets/slack_webhook_url — see monitoring/alertmanager.yml.
+  alertmanager:
+    image: prom/alertmanager:latest
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./monitoring/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager_data:/alertmanager
+    secrets:
+      - slack_webhook_url
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+      - '--storage.path=/alertmanager'
+      - '--cluster.listen-address='  # single-node; disable gossip to avoid warning spam
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: '0.2'
+        reservations:
+          memory: 64M
+          cpus: '0.1'
     restart: unless-stopped
 
   grafana:
@@ -222,8 +275,18 @@ services:
 
 volumes:
   prometheus_data:
+  alertmanager_data:
   grafana_data:
   loki_data:
+
+# INF-003: Alertmanager receiver credential (Slack webhook URL).
+# File-mount secret for plain Docker Compose (non-Swarm). The file must exist
+# at the path below before `docker compose up` — see README or INF-003 setup
+# notes for how to populate it. chmod 600 recommended so only the docker
+# daemon / compose user can read it.
+secrets:
+  slack_webhook_url:
+    file: ./secrets/slack_webhook_url.txt
 
 networks:
   default:

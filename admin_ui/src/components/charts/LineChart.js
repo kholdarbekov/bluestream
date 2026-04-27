@@ -55,7 +55,7 @@ const LineChart = ({
         position: 'top'
       },
       title: {
-        display: !!title,
+        display: Boolean(title),
         text: title,
         font: {
           size: 16,

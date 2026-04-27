@@ -18,7 +18,7 @@ A comprehensive React-based admin dashboard for the Blue Stream Water Business P
 ### 📊 Analytics & Business Intelligence
 - **Interactive Charts**: Line, Bar, Pie charts with Chart.js
 - **Sales Trends**: Revenue tracking and performance analysis
-- **Customer Insights**: Churn prediction and behavior analysis  
+- **Customer Insights**: Churn prediction and behavior analysis
 - **Delivery Heatmaps**: Geographic performance visualization
 - **Revenue Forecasting**: Predictive analytics for business planning
 - **Real-time Updates**: Live data refresh and notifications
@@ -51,7 +51,7 @@ A comprehensive React-based admin dashboard for the Blue Stream Water Business P
 ## Getting Started
 
 ### Prerequisites
-- Node.js 16+ 
+- Node.js 16+
 - npm or yarn
 - Blue Stream API running on localhost:5000
 
@@ -210,7 +210,28 @@ docker-compose up
 ```env
 REACT_APP_API_URL=http://localhost:5000/api
 REACT_APP_WEBSOCKET_URL=ws://localhost:5000
+REACT_APP_TINYMCE_API_KEY=<public-tinymce-key>
 ```
+
+> **Important — `REACT_APP_*` variables are PUBLIC.** Create-React-App inlines every
+> `REACT_APP_*` value into the compiled JS bundle that is shipped to browsers.
+> Anyone can read these values from DevTools. Treat them as published identifiers,
+> NOT secrets — never put a server-side API key, database credential, or OAuth
+> client secret here.
+>
+> **TinyMCE API key — required hardening:**
+>  1. Register the key to BlueStream's TinyMCE account and rotate it if the current
+>     value has ever been committed to a public location.
+>  2. In the TinyMCE dashboard, enable **domain restriction** so the key only works
+>     on our production domains (`aqua-element.uz`, `www.aqua-element.uz`,
+>     `admin.aqua-element.uz`) plus `localhost` for dev. This makes the key useless
+>     to anyone who scrapes it from our bundle.
+>  3. Monitor the TinyMCE quota dashboard; a quota spike is an early sign of abuse
+>     even with domain restriction in place.
+>
+> **Do not** add a backend-only secret (e.g., `PAYME_SECRET_KEY`, `JWT_SECRET_KEY`,
+> `SENDGRID_API_KEY`) to `admin_ui/.env` — those belong in the backend secrets
+> store (`shared/secrets_manager.py`), not the browser bundle.
 
 ## Contributing
 

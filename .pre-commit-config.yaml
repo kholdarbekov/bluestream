@@ -1,0 +1,82 @@
+# TST-007: pre-commit hooks mirror CI to fail locally before push.
+# Tool versions track requirements.txt and admin_ui/package.json so a hook pass
+# is a near-perfect proxy for the CI lint/format jobs.
+#
+# Install once per clone:
+#     pip install pre-commit && pre-commit install
+# Run manually against the whole tree:
+#     pre-commit run --all-files
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+        exclude: ^(monitoring/grafana/dashboards/|admin_ui/)
+      - id: check-added-large-files
+        args: [--maxkb=1024]
+      - id: check-merge-conflict
+      - id: check-json
+        exclude: ^admin_ui/
+      - id: detect-private-key
+
+  - repo: https://github.com/psf/black
+    rev: 25.1.0
+    hooks:
+      - id: black
+        files: ^business_app/
+        args: [--line-length=120]
+
+  - repo: https://github.com/PyCQA/flake8
+    rev: 7.3.0
+    hooks:
+      - id: flake8
+        files: ^business_app/
+        args:
+          - --max-line-length=120
+          - --extend-ignore=E203,W503
+
+  # Frontend lint runs against admin_ui via the project's own ESLint config
+  # (eslint.config.mjs, ESLint 9 flat). Hook only fires when admin_ui/ files
+  # are staged, so most backend commits skip it entirely.
+  - repo: local
+    hooks:
+      - id: admin-ui-eslint
+        name: admin_ui ESLint
+        entry: bash -c 'cd admin_ui && npx --no-install eslint $(printf "%s\n" "$@" | sed "s|^admin_ui/||") --no-warn-ignored' --
+        language: system
+        files: ^admin_ui/src/.*\.(js|jsx|mjs|cjs)$
+        pass_filenames: true
+        require_serial: false
+
+  # Full-suite test hooks (project requirement: every commit runs all tests
+  # for every service — backend + bots + Celery + admin UI).
+  #
+  # Pytest's testpaths covers tests/{unit,integration,security,performance,
+  # contract,regression,e2e,telegram_bot}; the bot + Celery + service tests
+  # all live there. Coverage gate stays in CI; --no-cov keeps the local pass
+  # focused on functional correctness.
+  #
+  # These are slow. Skip a single hook with `SKIP=backend-pytest git commit`
+  # or bypass everything with `git commit --no-verify`. Move to `pre-push`
+  # by adding `stages: [pre-push]` if commit-time latency hurts more than
+  # push-time latency on this team's workflow.
+  - repo: local
+    hooks:
+      - id: backend-pytest
+        name: Backend pytest (full suite)
+        entry: scripts/precommit-backend-tests.sh
+        language: system
+        pass_filenames: false
+        always_run: true
+        verbose: true
+
+      - id: admin-ui-vitest
+        name: Admin UI Vitest (full suite)
+        entry: bash -c 'cd admin_ui && npm test --silent'
+        language: system
+        pass_filenames: false
+        always_run: true
+        verbose: true

@@ -1,5 +1,5 @@
 import React, { useEffect, useCallback, useRef } from 'react';
-import { useQueryClient } from 'react-query';
+import { useQueryClient } from '@tanstack/react-query';
 import { message } from 'antd';
 
 // WebSocket connection manager
@@ -143,6 +143,7 @@ export const useRealTimeUpdates = (options = {}) => {
         break;
 
       case 'message':
+        // eslint-disable-next-line no-use-before-define
         handleRealTimeUpdate(data);
         if (onUpdate) onUpdate(data);
         break;
@@ -157,55 +158,85 @@ export const useRealTimeUpdates = (options = {}) => {
 
     switch (type) {
       case 'order_status_updated':
-        queryClient.invalidateQueries(['orders']);
-        queryClient.invalidateQueries(['dashboard']);
+        queryClient.invalidateQueries({
+          queryKey: ['orders'],
+        });
+        queryClient.invalidateQueries({
+          queryKey: ['dashboard'],
+        });
         message.info(`Order ${payload.order_number} status updated to ${payload.status}`);
         break;
 
       case 'new_order_created':
-        queryClient.invalidateQueries(['orders']);
-        queryClient.invalidateQueries(['dashboard']);
+        queryClient.invalidateQueries({
+          queryKey: ['orders'],
+        });
+        queryClient.invalidateQueries({
+          queryKey: ['dashboard'],
+        });
         message.success(`New order ${payload.order_number} received`);
         break;
 
       case 'delivery_status_updated':
-        queryClient.invalidateQueries(['deliveries']);
-        queryClient.invalidateQueries(['dashboard']);
+        queryClient.invalidateQueries({
+          queryKey: ['deliveries'],
+        });
+        queryClient.invalidateQueries({
+          queryKey: ['dashboard'],
+        });
         if (payload.status === 'delivered') {
           message.success(`Delivery ${payload.delivery_id} completed`);
         }
         break;
 
       case 'product_stock_low':
-        queryClient.invalidateQueries(['products']);
+        queryClient.invalidateQueries({
+          queryKey: ['products'],
+        });
         message.warning(`Low stock alert: ${payload.product_name} (${payload.stock_quantity} remaining)`);
         break;
 
       case 'product_out_of_stock':
-        queryClient.invalidateQueries(['products']);
+        queryClient.invalidateQueries({
+          queryKey: ['products'],
+        });
         message.error(`Out of stock: ${payload.product_name}`);
         break;
 
       case 'user_registered':
-        queryClient.invalidateQueries(['users']);
-        queryClient.invalidateQueries(['dashboard']);
+        queryClient.invalidateQueries({
+          queryKey: ['users'],
+        });
+        queryClient.invalidateQueries({
+          queryKey: ['dashboard'],
+        });
         break;
 
       case 'loyalty_points_updated':
-        queryClient.invalidateQueries(['loyalty-members']);
-        queryClient.invalidateQueries(['analytics-loyalty']);
+        queryClient.invalidateQueries({
+          queryKey: ['loyalty-members'],
+        });
+        queryClient.invalidateQueries({
+          queryKey: ['analytics-loyalty'],
+        });
         if (payload.points_added > 0) {
           message.info(`${payload.customer_name} earned ${payload.points_added} points`);
         }
         break;
 
       case 'notification_sent':
-        queryClient.invalidateQueries(['notification-campaigns']);
+        queryClient.invalidateQueries({
+          queryKey: ['notification-campaigns'],
+        });
         break;
 
       case 'dashboard_metrics_updated':
-        queryClient.invalidateQueries(['dashboard']);
-        queryClient.invalidateQueries(['analytics']);
+        queryClient.invalidateQueries({
+          queryKey: ['dashboard'],
+        });
+        queryClient.invalidateQueries({
+          queryKey: ['analytics'],
+        });
         break;
 
       case 'system_alert':
@@ -221,7 +252,9 @@ export const useRealTimeUpdates = (options = {}) => {
       default:
         // Invalidate specific queries if provided
         queries.forEach(queryKey => {
-          queryClient.invalidateQueries(queryKey);
+          queryClient.invalidateQueries({
+            queryKey,
+          });
         });
         break;
     }
@@ -296,7 +329,9 @@ export const usePollingUpdates = (options = {}) => {
 
     intervalRef.current = setInterval(() => {
       queries.forEach(queryKey => {
-        queryClient.invalidateQueries(queryKey);
+        queryClient.invalidateQueries({
+          queryKey,
+        });
       });
 
       if (onUpdate) {

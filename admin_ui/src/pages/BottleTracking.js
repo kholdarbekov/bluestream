@@ -30,7 +30,7 @@ import {
   SyncOutlined,
   WarningOutlined,
 } from '@ant-design/icons';
-import { useMutation, useQuery, useQueryClient } from 'react-query';
+import { useMutation, useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 
 import adminService from '../services/adminService';
 import { formatDate, formatDateTimeShort } from '../utils/dateUtils';
@@ -129,23 +129,24 @@ const CustomerAddressFields = ({ form, userFieldName = 'user_id', addressFieldNa
 
   const selectedUserId = Form.useWatch(userFieldName, form);
 
-  const { data: usersData, isFetching: usersFetching } = useQuery(
-    ['bottle-customer-search', searchTerm],
-    () => adminService.getUsers({ search: searchTerm, per_page: 20 }),
-    { enabled: searchTerm.length >= 2, keepPreviousData: true }
-  );
+  const { data: usersData, isFetching: usersFetching } = useQuery({
+    queryKey: ['bottle-customer-search', searchTerm],
+    queryFn: () => adminService.getUsers({ search: searchTerm, per_page: 20 }),
+    enabled: searchTerm.length >= 2,
+    placeholderData: keepPreviousData,
+  });
 
-  const { data: selectedUserData } = useQuery(
-    ['bottle-customer-details', selectedUserId],
-    () => adminService.getUserDetails(selectedUserId),
-    { enabled: Boolean(selectedUserId) }
-  );
+  const { data: selectedUserData } = useQuery({
+    queryKey: ['bottle-customer-details', selectedUserId],
+    queryFn: () => adminService.getUserDetails(selectedUserId),
+    enabled: Boolean(selectedUserId),
+  });
 
-  const { data: addressesData, isFetching: addressesFetching } = useQuery(
-    ['bottle-customer-addresses', selectedUserId],
-    () => adminService.getUserAddresses(selectedUserId),
-    { enabled: Boolean(selectedUserId) }
-  );
+  const { data: addressesData, isFetching: addressesFetching } = useQuery({
+    queryKey: ['bottle-customer-addresses', selectedUserId],
+    queryFn: () => adminService.getUserAddresses(selectedUserId),
+    enabled: Boolean(selectedUserId),
+  });
 
   const users = usersData?.data?.users || usersData?.data?.items || usersData?.data || [];
   const selectedUser = selectedUserData?.data?.user || selectedUserData?.data || null;
@@ -244,11 +245,11 @@ const BottleTracking = () => {
   const [fineForm] = Form.useForm();
 
   // --- Queries ---
-  const { data: dashboardData, isLoading: dashboardLoading } = useQuery(
-    ['bottle-dashboard'],
-    () => adminService.getBottleDashboard(),
-    { staleTime: 30_000 }
-  );
+  const { data: dashboardData, isLoading: dashboardLoading } = useQuery({
+    queryKey: ['bottle-dashboard'],
+    queryFn: () => adminService.getBottleDashboard(),
+    staleTime: 30_000,
+  });
 
   const balanceFilters = useMemo(
     () => ({
@@ -260,11 +261,11 @@ const BottleTracking = () => {
     [balancePagination, balanceSearch, balanceMinBalance]
   );
 
-  const { data: balancesData, isLoading: balancesLoading } = useQuery(
-    ['bottle-balances', balanceFilters],
-    () => adminService.getBottleBalances(balanceFilters),
-    { keepPreviousData: true }
-  );
+  const { data: balancesData, isLoading: balancesLoading } = useQuery({
+    queryKey: ['bottle-balances', balanceFilters],
+    queryFn: () => adminService.getBottleBalances(balanceFilters),
+    placeholderData: keepPreviousData,
+  });
 
   const ledgerFilters = useMemo(
     () => ({
@@ -275,11 +276,12 @@ const BottleTracking = () => {
     [ledgerPagination, ledgerEventType]
   );
 
-  const { data: ledgerData, isLoading: ledgerLoading } = useQuery(
-    ['bottle-ledger', ledgerFilters],
-    () => adminService.getBottleLedger(ledgerFilters),
-    { keepPreviousData: true, enabled: activeTab === 'ledger' }
-  );
+  const { data: ledgerData, isLoading: ledgerLoading } = useQuery({
+    queryKey: ['bottle-ledger', ledgerFilters],
+    queryFn: () => adminService.getBottleLedger(ledgerFilters),
+    placeholderData: keepPreviousData,
+    enabled: activeTab === 'ledger',
+  });
 
   const fineFilters = useMemo(
     () => ({
@@ -290,11 +292,12 @@ const BottleTracking = () => {
     [finePagination, fineStatus]
   );
 
-  const { data: finesData, isLoading: finesLoading } = useQuery(
-    ['bottle-fines', fineFilters],
-    () => adminService.getBottleFines(fineFilters),
-    { keepPreviousData: true, enabled: activeTab === 'fines' }
-  );
+  const { data: finesData, isLoading: finesLoading } = useQuery({
+    queryKey: ['bottle-fines', fineFilters],
+    queryFn: () => adminService.getBottleFines(fineFilters),
+    placeholderData: keepPreviousData,
+    enabled: activeTab === 'fines',
+  });
 
   const sessionFilters = useMemo(
     () => ({
@@ -306,17 +309,18 @@ const BottleTracking = () => {
     [sessionPagination, sessionStatusFilter, sessionOnlyDiscrepancies]
   );
 
-  const { data: sessionsData, isLoading: sessionsLoading } = useQuery(
-    ['bottle-sessions', sessionFilters],
-    () => adminService.getBottleSessions(sessionFilters),
-    { keepPreviousData: true, enabled: activeTab === 'sessions' }
-  );
+  const { data: sessionsData, isLoading: sessionsLoading } = useQuery({
+    queryKey: ['bottle-sessions', sessionFilters],
+    queryFn: () => adminService.getBottleSessions(sessionFilters),
+    placeholderData: keepPreviousData,
+    enabled: activeTab === 'sessions',
+  });
 
-  const { data: sessionDetailData, isLoading: sessionDetailLoading } = useQuery(
-    ['bottle-session-detail', sessionDetailTarget],
-    () => adminService.getBottleSession(sessionDetailTarget),
-    { enabled: Boolean(sessionDetailTarget) }
-  );
+  const { data: sessionDetailData, isLoading: sessionDetailLoading } = useQuery({
+    queryKey: ['bottle-session-detail', sessionDetailTarget],
+    queryFn: () => adminService.getBottleSession(sessionDetailTarget),
+    enabled: Boolean(sessionDetailTarget),
+  });
 
   const transferFilters = useMemo(
     () => ({
@@ -327,22 +331,25 @@ const BottleTracking = () => {
     [transferPagination, transferStatusFilter]
   );
 
-  const { data: transfersData, isLoading: transfersLoading } = useQuery(
-    ['bottle-transfers', transferFilters],
-    () => adminService.getBottleTransfers(transferFilters),
-    { keepPreviousData: true, enabled: activeTab === 'transfers' }
-  );
+  const { data: transfersData, isLoading: transfersLoading } = useQuery({
+    queryKey: ['bottle-transfers', transferFilters],
+    queryFn: () => adminService.getBottleTransfers(transferFilters),
+    placeholderData: keepPreviousData,
+    enabled: activeTab === 'transfers',
+  });
 
   // Ledger drawer query
-  const { data: addressLedgerData, isLoading: addressLedgerLoading } = useQuery(
-    ['bottle-address-ledger', ledgerDrawerTarget?.user_id, ledgerDrawerTarget?.address_id],
-    () => adminService.getBottleLedgerForAddress(
+  const { data: addressLedgerData, isLoading: addressLedgerLoading } = useQuery({
+    queryKey: ['bottle-address-ledger', ledgerDrawerTarget?.user_id, ledgerDrawerTarget?.address_id],
+
+    queryFn: () => adminService.getBottleLedgerForAddress(
       ledgerDrawerTarget.user_id,
       ledgerDrawerTarget.address_id,
       { per_page: 50 }
     ),
-    { enabled: Boolean(ledgerDrawerTarget) }
-  );
+
+    enabled: Boolean(ledgerDrawerTarget),
+  });
 
   const dashboard = dashboardData?.data || {};
   const balances = balancesData?.data?.items || balancesData?.data || [];
@@ -359,109 +366,127 @@ const BottleTracking = () => {
   const transfersTotal = transfersData?.data?.total || transfers.length;
 
   const refreshAll = () => {
-    queryClient.invalidateQueries(['bottle-dashboard']);
-    queryClient.invalidateQueries(['bottle-balances']);
-    queryClient.invalidateQueries(['bottle-ledger']);
-    queryClient.invalidateQueries(['bottle-fines']);
-    queryClient.invalidateQueries(['bottle-sessions']);
-    queryClient.invalidateQueries(['bottle-transfers']);
+    queryClient.invalidateQueries({
+      queryKey: ['bottle-dashboard'],
+    });
+    queryClient.invalidateQueries({
+      queryKey: ['bottle-balances'],
+    });
+    queryClient.invalidateQueries({
+      queryKey: ['bottle-ledger'],
+    });
+    queryClient.invalidateQueries({
+      queryKey: ['bottle-fines'],
+    });
+    queryClient.invalidateQueries({
+      queryKey: ['bottle-sessions'],
+    });
+    queryClient.invalidateQueries({
+      queryKey: ['bottle-transfers'],
+    });
   };
 
   // --- Mutations ---
-  const adjustmentMutation = useMutation(
-    (data) => adminService.createBottleAdjustment(data),
-    {
-      onSuccess: () => {
-        message.success('Balance adjusted');
-        setAdjustmentOpen(false);
-        adjustmentForm.resetFields();
-        refreshAll();
-      },
-      onError: (err) => message.error(err?.response?.data?.error || 'Failed to adjust balance'),
-    }
-  );
+  const adjustmentMutation = useMutation({
+    mutationFn: (data) => adminService.createBottleAdjustment(data),
 
-  const initialBalanceMutation = useMutation(
-    (data) => adminService.setBottleInitialBalance(data),
-    {
-      onSuccess: () => {
-        message.success('Initial balance set');
-        setInitialBalanceOpen(false);
-        initialBalanceForm.resetFields();
-        refreshAll();
-      },
-      onError: (err) => message.error(err?.response?.data?.error || 'Failed to set initial balance'),
-    }
-  );
+    onSuccess: () => {
+      message.success('Balance adjusted');
+      setAdjustmentOpen(false);
+      adjustmentForm.resetFields();
+      refreshAll();
+    },
 
-  const fineCreateMutation = useMutation(
-    (data) => adminService.createBottleFine(data),
-    {
-      onSuccess: () => {
-        message.success('Fine created');
-        setFineCreateOpen(false);
-        fineForm.resetFields();
-        refreshAll();
-      },
-      onError: (err) => message.error(err?.response?.data?.error || 'Failed to create fine'),
-    }
-  );
+    onError: (err) => message.error(err?.response?.data?.error || 'Failed to adjust balance'),
+  });
 
-  const fineUpdateMutation = useMutation(
-    ({ fineId, data }) => adminService.updateBottleFine(fineId, data),
-    {
-      onSuccess: () => {
-        message.success('Fine updated');
-        refreshAll();
-      },
-      onError: (err) => message.error(err?.response?.data?.error || 'Failed to update fine'),
-    }
-  );
+  const initialBalanceMutation = useMutation({
+    mutationFn: (data) => adminService.setBottleInitialBalance(data),
 
-  const reconcileMutation = useMutation(
-    ({ userId, addressId }) => adminService.reconcileBottleBalance(userId, addressId),
-    {
-      onSuccess: (res) => {
-        const diff = res?.data?.difference;
-        if (diff && diff !== 0) {
-          message.warning(`Reconciled — balance corrected by ${diff}`);
-        } else {
-          message.success('Balance is consistent');
-        }
-        refreshAll();
-      },
-      onError: (err) => message.error(err?.response?.data?.error || 'Reconciliation failed'),
-    }
-  );
+    onSuccess: () => {
+      message.success('Initial balance set');
+      setInitialBalanceOpen(false);
+      initialBalanceForm.resetFields();
+      refreshAll();
+    },
 
-  const forceCloseMutation = useMutation(
-    ({ sessionId, data }) => adminService.forceCloseBottleSession(sessionId, data),
-    {
-      onSuccess: () => {
-        message.success('Session force-closed');
-        setForceCloseOpen(false);
-        setForceCloseTarget(null);
-        forceCloseForm.resetFields();
-        queryClient.invalidateQueries(['bottle-sessions']);
-      },
-      onError: (err) => message.error(err?.response?.data?.error || 'Failed to force-close session'),
-    }
-  );
+    onError: (err) => message.error(err?.response?.data?.error || 'Failed to set initial balance'),
+  });
 
-  const resolveTransferMutation = useMutation(
-    ({ transferId, data }) => adminService.resolveBottleTransferDispute(transferId, data),
-    {
-      onSuccess: () => {
-        message.success('Transfer dispute resolved');
-        setResolveOpen(false);
-        setResolveTarget(null);
-        resolveForm.resetFields();
-        queryClient.invalidateQueries(['bottle-transfers']);
-        queryClient.invalidateQueries(['bottle-sessions']);
-      },
-      onError: (err) => message.error(err?.response?.data?.error || 'Failed to resolve dispute'),
-    }
-  );
+  const fineCreateMutation = useMutation({
+    mutationFn: (data) => adminService.createBottleFine(data),
+
+    onSuccess: () => {
+      message.success('Fine created');
+      setFineCreateOpen(false);
+      fineForm.resetFields();
+      refreshAll();
+    },
+
+    onError: (err) => message.error(err?.response?.data?.error || 'Failed to create fine'),
+  });
+
+  const fineUpdateMutation = useMutation({
+    mutationFn: ({ fineId, data }) => adminService.updateBottleFine(fineId, data),
+
+    onSuccess: () => {
+      message.success('Fine updated');
+      refreshAll();
+    },
+
+    onError: (err) => message.error(err?.response?.data?.error || 'Failed to update fine'),
+  });
+
+  const reconcileMutation = useMutation({
+    mutationFn: ({ userId, addressId }) => adminService.reconcileBottleBalance(userId, addressId),
+
+    onSuccess: (res) => {
+      const diff = res?.data?.difference;
+      if (diff && diff !== 0) {
+        message.warning(`Reconciled — balance corrected by ${diff}`);
+      } else {
+        message.success('Balance is consistent');
+      }
+      refreshAll();
+    },
+
+    onError: (err) => message.error(err?.response?.data?.error || 'Reconciliation failed'),
+  });
+
+  const forceCloseMutation = useMutation({
+    mutationFn: ({ sessionId, data }) => adminService.forceCloseBottleSession(sessionId, data),
+
+    onSuccess: () => {
+      message.success('Session force-closed');
+      setForceCloseOpen(false);
+      setForceCloseTarget(null);
+      forceCloseForm.resetFields();
+      queryClient.invalidateQueries({
+        queryKey: ['bottle-sessions'],
+      });
+    },
+
+    onError: (err) => message.error(err?.response?.data?.error || 'Failed to force-close session'),
+  });
+
+  const resolveTransferMutation = useMutation({
+    mutationFn: ({ transferId, data }) => adminService.resolveBottleTransferDispute(transferId, data),
+
+    onSuccess: () => {
+      message.success('Transfer dispute resolved');
+      setResolveOpen(false);
+      setResolveTarget(null);
+      resolveForm.resetFields();
+      queryClient.invalidateQueries({
+        queryKey: ['bottle-transfers'],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ['bottle-sessions'],
+      });
+    },
+
+    onError: (err) => message.error(err?.response?.data?.error || 'Failed to resolve dispute'),
+  });
 
   // --- Balance columns ---
   const balanceColumns = [
@@ -537,7 +562,7 @@ const BottleTracking = () => {
           <Button
             size="small"
             icon={<SyncOutlined />}
-            loading={reconcileMutation.isLoading}
+            loading={reconcileMutation.isPending}
             onClick={() => reconcileMutation.mutate({ userId: record.user_id, addressId: record.address_id })}
           >
             Reconcile
@@ -571,7 +596,9 @@ const BottleTracking = () => {
       dataIndex: 'event_type',
       key: 'event_type',
       render: (val) => (
+        // eslint-disable-next-line security/detect-object-injection
         <Tag color={EVENT_TYPE_COLORS[val] || 'default'}>
+          {/* eslint-disable-next-line security/detect-object-injection */}
           {EVENT_TYPE_LABELS[val] || val}
         </Tag>
       ),
@@ -628,6 +655,7 @@ const BottleTracking = () => {
       dataIndex: 'status',
       key: 'status',
       render: (val) => (
+        // eslint-disable-next-line security/detect-object-injection
         <Tag color={FINE_STATUS_COLORS[val] || 'default'}>
           {(val || '').toUpperCase()}
         </Tag>
@@ -661,7 +689,7 @@ const BottleTracking = () => {
               size="small"
               type="primary"
               onClick={() => fineUpdateMutation.mutate({ fineId: record.id, data: { action: 'mark_paid' } })}
-              loading={fineUpdateMutation.isLoading}
+              loading={fineUpdateMutation.isPending}
             >
               Mark Paid
             </Button>
@@ -669,7 +697,7 @@ const BottleTracking = () => {
               size="small"
               danger
               onClick={() => fineUpdateMutation.mutate({ fineId: record.id, data: { action: 'waive', notes: 'Waived by admin' } })}
-              loading={fineUpdateMutation.isLoading}
+              loading={fineUpdateMutation.isPending}
             >
               Waive
             </Button>
@@ -692,7 +720,9 @@ const BottleTracking = () => {
       dataIndex: 'event_type',
       key: 'event_type',
       render: (val) => (
+        // eslint-disable-next-line security/detect-object-injection
         <Tag color={EVENT_TYPE_COLORS[val] || 'default'}>
+          {/* eslint-disable-next-line security/detect-object-injection */}
           {EVENT_TYPE_LABELS[val] || val}
         </Tag>
       ),
@@ -891,6 +921,7 @@ const BottleTracking = () => {
                 title: 'Status', dataIndex: 'status', key: 'status',
                 render: (v) => {
                   const colors = { open: 'blue', closed: 'green', force_closed: 'red', cancelled: 'default' };
+                  // eslint-disable-next-line security/detect-object-injection
                   return <Tag color={colors[v] || 'default'}>{(v || '').toUpperCase()}</Tag>;
                 },
               },
@@ -957,6 +988,7 @@ const BottleTracking = () => {
                 title: 'Status', dataIndex: 'status', key: 'status',
                 render: (v) => {
                   const colors = { pending: 'blue', confirmed: 'green', disputed: 'red', resolved: 'default' };
+                  // eslint-disable-next-line security/detect-object-injection
                   return <Tag color={colors[v] || 'default'}>{(v || '').toUpperCase()}</Tag>;
                 },
               },
@@ -1009,7 +1041,7 @@ const BottleTracking = () => {
         open={adjustmentOpen}
         onCancel={() => { setAdjustmentOpen(false); adjustmentForm.resetFields(); }}
         onOk={() => adjustmentForm.submit()}
-        confirmLoading={adjustmentMutation.isLoading}
+        confirmLoading={adjustmentMutation.isPending}
       >
         <Form
           form={adjustmentForm}
@@ -1036,7 +1068,7 @@ const BottleTracking = () => {
         open={initialBalanceOpen}
         onCancel={() => { setInitialBalanceOpen(false); initialBalanceForm.resetFields(); }}
         onOk={() => initialBalanceForm.submit()}
-        confirmLoading={initialBalanceMutation.isLoading}
+        confirmLoading={initialBalanceMutation.isPending}
       >
         <Form
           form={initialBalanceForm}
@@ -1059,7 +1091,7 @@ const BottleTracking = () => {
         open={fineCreateOpen}
         onCancel={() => { setFineCreateOpen(false); fineForm.resetFields(); }}
         onOk={() => fineForm.submit()}
-        confirmLoading={fineCreateMutation.isLoading}
+        confirmLoading={fineCreateMutation.isPending}
       >
         <Form
           form={fineForm}
@@ -1152,6 +1184,7 @@ const BottleTracking = () => {
                       title: 'Status',
                       dataIndex: 'status',
                       render: (v) => (
+                        // eslint-disable-next-line security/detect-object-injection
                         <Tag color={{ active: 'blue', left: 'orange', revoked: 'red' }[v] || 'default'}>
                           {(v || '').toUpperCase()}
                         </Tag>
@@ -1205,7 +1238,7 @@ const BottleTracking = () => {
         open={forceCloseOpen}
         onCancel={() => { setForceCloseOpen(false); setForceCloseTarget(null); forceCloseForm.resetFields(); }}
         onOk={() => forceCloseForm.submit()}
-        confirmLoading={forceCloseMutation.isLoading}
+        confirmLoading={forceCloseMutation.isPending}
         okButtonProps={{ danger: true }}
         okText="Force Close"
       >
@@ -1233,7 +1266,7 @@ const BottleTracking = () => {
         open={resolveOpen}
         onCancel={() => { setResolveOpen(false); setResolveTarget(null); resolveForm.resetFields(); }}
         onOk={() => resolveForm.submit()}
-        confirmLoading={resolveTransferMutation.isLoading}
+        confirmLoading={resolveTransferMutation.isPending}
         okText="Resolve"
       >
         {resolveTarget && (

@@ -23,15 +23,34 @@ query_range:
         enabled: true
         max_size_mb: 100
 
+# Schema v13 + tsdb index are required by Loki 3.x for Structured Metadata
+# and native OTLP ingestion. Fresh deploy so no legacy `from:` entry needed —
+# if you ever migrate an existing boltdb-shipper store, keep the old entry
+# and add a new one with a future `from:` date instead of editing in-place.
 schema_config:
   configs:
-    - from: 2020-10-24
-      store: boltdb-shipper
+    - from: 2024-01-01
+      store: tsdb
       object_store: filesystem
-      schema: v11
+      schema: v13
       index:
         prefix: index_
         period: 24h
+
+# tsdb-shipper index locations (sibling to the filesystem chunk store above).
+storage_config:
+  tsdb_shipper:
+    active_index_directory: /loki/tsdb-index
+    cache_location: /loki/tsdb-cache
+
+# Retain 30 days of logs — adjust to your retention policy.
+limits_config:
+  retention_period: 720h
+  allow_structured_metadata: true
+
+compactor:
+  working_directory: /loki/compactor
+  delete_request_store: filesystem
 
 ruler:
   alertmanager_url: http://localhost:9093

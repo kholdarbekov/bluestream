@@ -5,6 +5,7 @@ from decimal import Decimal
 import pytest
 
 from business_app.models.user import UserAddress
+from business_app.services.bottle_tracking_service import BottleTrackingService
 from business_app.services.tryout_service import TryoutService
 
 
@@ -159,6 +160,59 @@ def test_convert_tryout_links_existing_user_and_copies_geolocated_address(
     assert len(addresses) == 1
     assert float(addresses[0].latitude) == pytest.approx(41.311081)
     assert float(addresses[0].longitude) == pytest.approx(69.240562)
+
+
+@pytest.mark.unit
+def test_tryout_handoff_updates_driver_session_tally(db, sample_product, admin_user, delivery_driver):
+    """Completing a tryout handoff increments the driver's session bottles_delivered."""
+    sample_product.is_tryout_eligible = True
+    sample_product.tracks_returnable_bottles = True
+    sample_product.returnable_bottles_per_unit = Decimal("1.00")
+    sample_product.stock_quantity = 10
+    db.session.commit()
+
+    bottle_svc = BottleTrackingService()
+    session = bottle_svc.open_bottle_session(
+        delivery_driver.id, bottles_loaded=10, actor_user_id=admin_user.id
+    )
+    db.session.commit()
+
+    # Create tryout without immediate handoff so we can complete it as the driver
+    tryout = TryoutService.create_tryout(
+        _build_payload(sample_product.id, quantity=3, complete_handoff=False),
+        admin_user.id,
+        source="admin",
+    )
+    handoff_task = next(t for t in tryout.tasks if t.task_type.value == "handoff")
+    TryoutService.complete_handoff_task(handoff_task.id, actor_user_id=delivery_driver.id)
+
+    db.session.refresh(session)
+    assert session.bottles_delivered == 3
+
+
+@pytest.mark.unit
+def test_tryout_handoff_no_session_does_not_raise(db, sample_product, admin_user, delivery_driver):
+    """Completing a tryout handoff when driver has no open session is a silent no-op."""
+    sample_product.is_tryout_eligible = True
+    sample_product.tracks_returnable_bottles = True
+    sample_product.returnable_bottles_per_unit = Decimal("1.00")
+    sample_product.stock_quantity = 10
+    db.session.commit()
+
+    # No session opened for this driver — tally should be skipped without error
+    tryout = TryoutService.create_tryout(
+        _build_payload(sample_product.id, quantity=2, complete_handoff=False),
+        admin_user.id,
+        source="admin",
+    )
+    handoff_task = next(t for t in tryout.tasks if t.task_type.value == "handoff")
+    TryoutService.complete_handoff_task(handoff_task.id, actor_user_id=delivery_driver.id)
+
+    # Outstanding bottles should still be recorded correctly
+    outstanding = TryoutService.get_outstanding_bottles_by_product(
+        TryoutService._load_tryout(tryout.id)
+    )
+    assert float(outstanding[sample_product.id]) == 2.0
 
 
 @pytest.mark.unit

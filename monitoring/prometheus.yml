@@ -2,9 +2,9 @@ global:
   scrape_interval: 15s
   evaluation_interval: 15s
 
+# Load alert/recording rules once and evaluate them per global evaluation_interval.
 rule_files:
-  # - "first_rules.yml"
-  # - "second_rules.yml"
+  - "alert_rules.yml"
 
 scrape_configs:
   # The job name is added as a label `job=<job_name>` to any timeseries scraped from this config.
@@ -28,9 +28,11 @@ scrape_configs:
       - targets: ['redis:6379']
     scrape_interval: 30s
 
+  # CEL-006: scrape danihodovic/celery-exporter on :9540. Replaces the legacy
+  # celery_worker:5555 target (Flower's UI port — never exported metrics).
   - job_name: 'celery'
     static_configs:
-      - targets: ['celery_worker:5555']
+      - targets: ['celery_exporter:9540']
     scrape_interval: 30s
 
   # Docker metrics
@@ -39,12 +41,13 @@ scrape_configs:
       - targets: ['host.docker.internal:9323']
     scrape_interval: 30s
 
+  - job_name: 'alertmanager'
+    static_configs:
+      - targets: ['alertmanager:9093']
+    scrape_interval: 30s
+
 alerting:
   alertmanagers:
     - static_configs:
         - targets:
-          # - alertmanager:9093
-
-# Load rules once and periodically evaluate them according to the global 'evaluation_interval'.
-rule_files:
-  - "alert_rules.yml"
+            - 'alertmanager:9093'

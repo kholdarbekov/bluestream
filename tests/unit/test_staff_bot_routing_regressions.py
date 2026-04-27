@@ -78,7 +78,11 @@ def test_staff_create_order_conversation_wiring_present():
 
 
 def test_staff_cod_callback_and_reconciliation_wiring_present():
-    """Ensure COD completion and reconciliation callbacks stay registered."""
+    """Ensure COD completion and reconciliation callbacks stay registered.
+
+    Reconciliation and COD collection are reached from the Cash hub sub-menu,
+    so the hub callback wiring must also be present.
+    """
     text = BOT_FILE.read_text(encoding="utf-8")
     required_fragments = [
         'CallbackQueryHandler(status_update_handler.confirm_full_cash_collection, pattern=r"^staff_cash_full_\\d+$")',
@@ -91,8 +95,8 @@ def test_staff_cod_callback_and_reconciliation_wiring_present():
         'CallbackQueryHandler(cash_collection_handler.show_customer_statement, pattern=r"^staff_cod_customer_\\d+$")',
         'CallbackQueryHandler(cash_collection_handler.start_full_collection, pattern=r"^staff_cod_collect_full_\\d+$")',
         'CallbackQueryHandler(cash_collection_handler.start_custom_collection, pattern=r"^staff_cod_collect_custom_\\d+$")',
-        "i18n.get('staff.menu.cash_reconciliation', language): 'staff_reconcile_session'",
-        "i18n.get('staff.menu.collect_cod_debt', language): 'staff_cod_collect_menu'",
+        'CallbackQueryHandler(status_update_handler.show_cash_hub, pattern="^staff_cash_hub$")',
+        "i18n.get('staff.menu.cash', language): 'staff_cash_hub'",
         "if cod_collection_flow:",
         "await cash_collection_handler.receive_collection_amount(update, context)",
         "await cash_collection_handler.receive_collection_note(update, context)",
@@ -117,10 +121,14 @@ def test_staff_operator_text_entry_patterns_present():
 
 
 def test_staff_tryout_conversation_and_callbacks_present():
-    """Ensure try-out create/task callbacks and conversation entry wiring are registered."""
+    """Ensure try-out create/task callbacks and conversation entry wiring are registered.
+
+    Try-out create / tasks / active are reached via the Try-outs hub sub-menu, so the
+    hub callback wiring must also be present.
+    """
     text = BOT_FILE.read_text(encoding="utf-8")
     required_fragments = [
-        "create_tryout_text_pattern = self._menu_text_pattern('staff.menu.create_tryout_now')",
+        'CallbackQueryHandler(tryout_handler.show_hub, pattern="^staff_tryouts_hub$")',
         'CallbackQueryHandler(tryout_handler.start_create_tryout, pattern="^staff_tryout_create$")',
         'CallbackQueryHandler(tryout_handler.show_create_products, pattern="^staff_tryout_select_products$")',
         'CallbackQueryHandler(tryout_handler.select_create_product, pattern=r"^staff_tryout_product_\\d+$")',

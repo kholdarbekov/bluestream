@@ -8,7 +8,7 @@ import {
     SearchOutlined, UserOutlined, CarOutlined, PhoneOutlined,
     BellOutlined, EnvironmentOutlined, ReloadOutlined, PlusOutlined, EditOutlined, LinkOutlined, CopyOutlined,
 } from '@ant-design/icons';
-import { useQuery, useMutation, useQueryClient } from 'react-query';
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import staffService from '../services/staffService';
 import DeliveryMap from '../components/DeliveryMap';
@@ -39,9 +39,10 @@ const DeliveryPersons = () => {
     const [inviteModalOpen, setInviteModalOpen] = useState(false);
     const [inviteLink, setInviteLink] = useState('');
 
-    const { data, isLoading, refetch } = useQuery(
-        ['staffDeliveryPersons', page, perPage, search, statusFilter, availableFilter],
-        () =>
+    const { data, isLoading, refetch } = useQuery({
+        queryKey: ['staffDeliveryPersons', page, perPage, search, statusFilter, availableFilter],
+
+        queryFn: () =>
             staffService.getDeliveryPersons({
                 page,
                 per_page: perPage,
@@ -49,68 +50,73 @@ const DeliveryPersons = () => {
                 status: statusFilter,
                 available: availableFilter,
             }),
-        { keepPreviousData: true }
-    );
 
-    const { data: detailData, isLoading: detailLoading } = useQuery(
-        ['staffDeliveryPerson', selectedPerson?.id],
-        () => staffService.getDeliveryPerson(selectedPerson.id),
-        { enabled: !!selectedPerson?.id }
-    );
+        placeholderData: keepPreviousData,
+    });
 
-    const muteMutation = useMutation(
-        ({ id, muted }) => staffService.muteNotifications(id, muted),
-        {
-            onSuccess: () => {
-                message.success(t('staff:notifications_updated'));
-                queryClient.invalidateQueries('staffDeliveryPersons');
-            },
-            onError: () => message.error(t('common:error_occurred')),
-        }
-    );
+    const { data: detailData, isLoading: detailLoading } = useQuery({
+        queryKey: ['staffDeliveryPerson', selectedPerson?.id],
+        queryFn: () => staffService.getDeliveryPerson(selectedPerson.id),
+        enabled: Boolean(selectedPerson?.id),
+    });
 
-    const saveMutation = useMutation(
-        (payload) => {
+    const muteMutation = useMutation({
+        mutationFn: ({ id, muted }) => staffService.muteNotifications(id, muted),
+
+        onSuccess: () => {
+            message.success(t('staff:notifications_updated'));
+            queryClient.invalidateQueries({
+                queryKey: ['staffDeliveryPersons'],
+            });
+        },
+
+        onError: () => message.error(t('common:error_occurred')),
+    });
+
+    const saveMutation = useMutation({
+        mutationFn: (payload) => {
             if (editingPerson?.id) {
                 return staffService.updateDeliveryPerson(editingPerson.id, payload);
             }
             return staffService.createDeliveryPerson(payload);
         },
-        {
-            onSuccess: () => {
-                message.success(
-                    editingPerson
-                        ? t('staff:delivery_person_updated')
-                        : t('staff:delivery_person_created')
-                );
-                setEditorOpen(false);
-                setEditingPerson(null);
-                form.resetFields();
-                queryClient.invalidateQueries('staffDeliveryPersons');
-            },
-            onError: (err) => {
-                const backendMessage = err?.response?.data?.message;
-                message.error(backendMessage || t('common:error_occurred'));
-            },
-        }
-    );
 
-    const inviteMutation = useMutation(
-        ({ userId }) => staffService.generateInviteLink({ user_id: userId, role: 'delivery_driver' }),
-        {
-            onSuccess: (res) => {
-                const link = res?.data?.data?.invite_link;
-                if (link) {
-                    setInviteLink(link);
-                    setInviteModalOpen(true);
-                }
-            },
-            onError: (err) => {
-                const backendMessage = err?.response?.data?.message;
-                message.error(backendMessage || t('common:error_occurred'));
-            },
-        }
-    );
+        onSuccess: () => {
+            message.success(
+                editingPerson
+                    ? t('staff:delivery_person_updated')
+                    : t('staff:delivery_person_created')
+            );
+            setEditorOpen(false);
+            setEditingPerson(null);
+            form.resetFields();
+            queryClient.invalidateQueries({
+                queryKey: ['staffDeliveryPersons'],
+            });
+        },
+
+        onError: (err) => {
+            const backendMessage = err?.response?.data?.message;
+            message.error(backendMessage || t('common:error_occurred'));
+        },
+    });
+
+    const inviteMutation = useMutation({
+        mutationFn: ({ userId }) => staffService.generateInviteLink({ user_id: userId, role: 'delivery_driver' }),
+
+        onSuccess: (res) => {
+            const link = res?.data?.data?.invite_link;
+            if (link) {
+                setInviteLink(link);
+                setInviteModalOpen(true);
+            }
+        },
+
+        onError: (err) => {
+            const backendMessage = err?.response?.data?.message;
+            message.error(backendMessage || t('common:error_occurred'));
+        },
+    });
 
     const items = data?.data?.data?.items || [];
     const total = data?.data?.meta?.total || 0;
@@ -140,8 +146,8 @@ const DeliveryPersons = () => {
             max_concurrent_deliveries: record.max_concurrent_deliveries || 3,
             working_hours_start: record.working_hours_start || '09:00',
             working_hours_end: record.working_hours_end || '18:00',
-            is_active: !!record.is_active,
-            is_available: !!record.is_available,
+            is_active: Boolean(record.is_active),
+            is_available: Boolean(record.is_available),
         });
         setEditorOpen(true);
     };
@@ -257,7 +263,7 @@ const DeliveryPersons = () => {
                         }
                         checkedChildren={<BellOutlined />}
                         unCheckedChildren={<BellOutlined />}
-                        loading={muteMutation.isLoading}
+                        loading={muteMutation.isPending}
                     />
                 </Tooltip>
             ),
@@ -282,7 +288,7 @@ const DeliveryPersons = () => {
                     <Button
                         size="small"
                         icon={<LinkOutlined />}
-                        loading={inviteMutation.isLoading}
+                        loading={inviteMutation.isPending}
                         onClick={() => handleGenerateInvite(record)}
                     >
                         {t('staff:invite')}
@@ -569,7 +575,7 @@ const DeliveryPersons = () => {
                         <Button onClick={() => setEditorOpen(false)}>
                             {t('common:cancel')}
                         </Button>
-                        <Button type="primary" htmlType="submit" loading={saveMutation.isLoading}>
+                        <Button type="primary" htmlType="submit" loading={saveMutation.isPending}>
                             {t('common:save')}
                         </Button>
                     </Space>

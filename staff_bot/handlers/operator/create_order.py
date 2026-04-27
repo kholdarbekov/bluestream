@@ -97,6 +97,8 @@ class CreateOrderHandler(BaseHandler):
             await self._handle_error(update, context)
             return ConversationHandler.END
 
+    @require_auth
+    @require_operator
     async def receive_client_search(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Search for client by phone/name"""
         language = await self._get_language(update, context)
@@ -148,6 +150,8 @@ class CreateOrderHandler(BaseHandler):
             await self._handle_error(update, context)
             return ConversationHandler.END
 
+    @require_auth
+    @require_operator
     async def select_address(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle address selection"""
         query = update.callback_query
@@ -197,6 +201,8 @@ class CreateOrderHandler(BaseHandler):
             await self._handle_error(update, context)
             return ConversationHandler.END
 
+    @require_auth
+    @require_operator
     async def select_product(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle product selection - show quantity picker"""
         query = update.callback_query
@@ -230,6 +236,8 @@ class CreateOrderHandler(BaseHandler):
             await self._handle_error(update, context)
             return ConversationHandler.END
 
+    @require_auth
+    @require_operator
     async def select_quantity(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle quantity selection - add to cart"""
         query = update.callback_query
@@ -272,6 +280,8 @@ class CreateOrderHandler(BaseHandler):
             await self._handle_error(update, context)
             return ConversationHandler.END
 
+    @require_auth
+    @require_operator
     async def products_done(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Done selecting products - move to payment selection"""
         query = update.callback_query
@@ -328,6 +338,8 @@ class CreateOrderHandler(BaseHandler):
         await query.edit_message_text(text, reply_markup=keyboard, parse_mode='HTML')
         return SELECT_PAYMENT
 
+    @require_auth
+    @require_operator
     async def select_payment(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle payment method selection"""
         query = update.callback_query
@@ -367,6 +379,8 @@ class CreateOrderHandler(BaseHandler):
             logger.error(f"Error selecting payment: {e}", exc_info=True)
             await self._handle_error(update, context)
 
+    @require_auth
+    @require_operator
     async def receive_notes(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Receive delivery notes"""
         language = await self._get_language(update, context)
@@ -376,6 +390,8 @@ class CreateOrderHandler(BaseHandler):
         await self._show_order_summary(update, context, language)
         return CONFIRM_ORDER
 
+    @require_auth
+    @require_operator
     async def skip_notes(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Skip delivery notes"""
         query = update.callback_query
@@ -416,6 +432,8 @@ class CreateOrderHandler(BaseHandler):
                 text, reply_markup=keyboard, parse_mode='HTML'
             )
 
+    @require_auth
+    @require_operator
     async def confirm_order(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Confirm and create the order"""
         query = update.callback_query
@@ -494,6 +512,8 @@ class CreateOrderHandler(BaseHandler):
 
         return '\n'.join(lines)
 
+    @require_auth
+    @require_operator
     async def cancel(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Cancel order creation"""
         context.user_data.pop('new_order', None)

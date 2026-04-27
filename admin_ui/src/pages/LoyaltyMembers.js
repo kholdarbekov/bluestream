@@ -5,7 +5,6 @@ import {
   Col,
   Descriptions,
   Drawer,
-  Empty,
   Input,
   List,
   Row,
@@ -25,11 +24,13 @@ import {
   TrophyOutlined,
   UserOutlined
 } from '@ant-design/icons';
-import { useQuery } from 'react-query';
+import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import adminService from '../services/adminService';
 import exportUtils from '../utils/exportUtils';
 import { formatDate, formatDateTime } from '../utils/dateUtils';
+import DataView from '../components/common/DataView';
+import EmptyState from '../components/common/EmptyState';
 
 const { Text } = Typography;
 
@@ -40,28 +41,30 @@ const LoyaltyMembers = () => {
   const [pagination, setPagination] = useState({ page: 1, per_page: 20 });
   const [selectedMemberId, setSelectedMemberId] = useState(null);
 
-  const membersQuery = useQuery(
-    ['loyalty-members', pagination, searchText, programId],
-    () => adminService.getLoyaltyMembers({
+  const membersQuery = useQuery({
+    queryKey: ['loyalty-members', pagination, searchText, programId],
+
+    queryFn: () => adminService.getLoyaltyMembers({
       page: pagination.page,
       per_page: pagination.per_page,
       search: searchText,
       program_id: programId,
     }),
-    { keepPreviousData: true }
-  );
 
-  const programsQuery = useQuery(
-    ['loyalty-program-options'],
-    () => adminService.getLoyaltyPrograms({ page: 1, per_page: 100 }),
-    { keepPreviousData: true }
-  );
+    placeholderData: keepPreviousData,
+  });
 
-  const memberDetailQuery = useQuery(
-    ['loyalty-member-detail', selectedMemberId],
-    () => adminService.getLoyaltyMember(selectedMemberId),
-    { enabled: Boolean(selectedMemberId) }
-  );
+  const programsQuery = useQuery({
+    queryKey: ['loyalty-program-options'],
+    queryFn: () => adminService.getLoyaltyPrograms({ page: 1, per_page: 100 }),
+    placeholderData: keepPreviousData,
+  });
+
+  const memberDetailQuery = useQuery({
+    queryKey: ['loyalty-member-detail', selectedMemberId],
+    queryFn: () => adminService.getLoyaltyMember(selectedMemberId),
+    enabled: Boolean(selectedMemberId),
+  });
 
   const summary = membersQuery.data?.summary || {};
   const members = membersQuery.data?.items || [];
@@ -214,7 +217,7 @@ const LoyaltyMembers = () => {
           loading={membersQuery.isLoading}
           locale={{
             emptyText: (
-              <Empty description={t('ui.loyalty.no_members', { defaultValue: 'No loyalty members found' })} />
+              <EmptyState description={t('ui.loyalty.no_members', { defaultValue: 'No loyalty members found' })} />
             )
           }}
           pagination={{
@@ -238,7 +241,13 @@ const LoyaltyMembers = () => {
         title={memberDetailQuery.data?.member?.customer_name || t('ui.loyalty.member_details', { defaultValue: 'Member Details' })}
         onClose={() => setSelectedMemberId(null)}
       >
-        {memberDetailQuery.isLoading ? null : memberDetailQuery.data?.member ? (
+        <DataView
+          loading={memberDetailQuery.isLoading}
+          error={memberDetailQuery.error}
+          isEmpty={!memberDetailQuery.data?.member}
+          onRetry={() => memberDetailQuery.refetch()}
+          emptyDescription={t('ui.loyalty.member_not_found', { defaultValue: 'Member not found' })}
+        >
           <Space direction="vertical" size={24} style={{ width: '100%' }}>
             <Descriptions bordered size="small" column={2}>
               <Descriptions.Item label={t('ui.loyalty.program', { defaultValue: 'Program' })}>
@@ -305,9 +314,7 @@ const LoyaltyMembers = () => {
               />
             </Card>
           </Space>
-        ) : (
-          <Empty description={t('ui.loyalty.member_not_found', { defaultValue: 'Member not found' })} />
-        )}
+        </DataView>
       </Drawer>
     </div>
   );

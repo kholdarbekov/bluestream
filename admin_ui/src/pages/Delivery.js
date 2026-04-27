@@ -36,7 +36,7 @@ import {
   ExportOutlined,
   CalendarOutlined
 } from '@ant-design/icons';
-import { useQuery, useMutation, useQueryClient } from 'react-query';
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { formatDate, formatDateTimeShort } from '../utils/dateUtils';
 import adminService from '../services/adminService';
@@ -89,9 +89,10 @@ const Delivery = () => {
   };
 
   // Fetch deliveries
-  const { data, isLoading } = useQuery(
-    ['deliveries', pagination, searchText, statusFilter, dateRange],
-    () => adminService.getDeliveries({
+  const { data, isLoading } = useQuery({
+    queryKey: ['deliveries', pagination, searchText, statusFilter, dateRange],
+
+    queryFn: () => adminService.getDeliveries({
       page: pagination.page,
       per_page: pagination.per_page,
       search: searchText || undefined,
@@ -99,26 +100,27 @@ const Delivery = () => {
       start_date: dateRange?.[0]?.format('YYYY-MM-DD'),
       end_date: dateRange?.[1]?.format('YYYY-MM-DD')
     }),
-    {
-      keepPreviousData: true
-    }
-  );
+
+    placeholderData: keepPreviousData,
+  });
 
   // Update delivery mutation
-  const updateDeliveryMutation = useMutation(
-    ({ deliveryId, data }) => adminService.updateDelivery(deliveryId, data),
-    {
-      onSuccess: (response) => {
-        message.success(response?.message || t('ui.delivery.updated_success'));
-        queryClient.invalidateQueries(['deliveries']);
-        setIsUpdateModalVisible(false);
-        form.resetFields();
-      },
-      onError: (error) => {
-        message.error(error?.response?.data?.message || t('ui.delivery.update_failed'));
-      }
-    }
-  );
+  const updateDeliveryMutation = useMutation({
+    mutationFn: ({ deliveryId, data }) => adminService.updateDelivery(deliveryId, data),
+
+    onSuccess: (response) => {
+      message.success(response?.message || t('ui.delivery.updated_success'));
+      queryClient.invalidateQueries({
+        queryKey: ['deliveries'],
+      });
+      setIsUpdateModalVisible(false);
+      form.resetFields();
+    },
+
+    onError: (error) => {
+      message.error(error?.response?.data?.message || t('ui.delivery.update_failed'));
+    },
+  });
 
   const deliveryStatusColors = {
     scheduled: 'gold',
@@ -211,6 +213,7 @@ const Delivery = () => {
       key: 'status',
       width: 120,
       render: (status) => (
+        // eslint-disable-next-line security/detect-object-injection
         <Tag color={deliveryStatusColors[status] || 'default'} icon={getStatusIcon(status)}>
           {t(`ui.delivery.status_${status}`, status)}
         </Tag>
@@ -247,18 +250,21 @@ const Delivery = () => {
                 key: 'track',
                 label: t('ui.delivery.track_delivery'),
                 icon: <EnvironmentOutlined />,
+                // eslint-disable-next-line no-use-before-define
                 onClick: () => handleTrackDelivery(record)
               },
               {
                 key: 'details',
                 label: t('ui.delivery.view_details'),
                 icon: <EyeOutlined />,
+                // eslint-disable-next-line no-use-before-define
                 onClick: () => handleViewDelivery(record)
               },
               {
                 key: 'update',
                 label: t('ui.delivery.update_status'),
                 icon: <EditOutlined />,
+                // eslint-disable-next-line no-use-before-define
                 onClick: () => handleUpdateDelivery(record)
               },
               {
@@ -267,6 +273,7 @@ const Delivery = () => {
                   ? t('ui.delivery.reassign_driver', 'Reassign driver')
                   : t('ui.delivery.assign_driver'),
                 icon: <UserOutlined />,
+                // eslint-disable-next-line no-use-before-define
                 onClick: () => handleAssignDelivery(record)
               }
             ]
@@ -340,6 +347,7 @@ const Delivery = () => {
   };
 
   const handleExportReport = () => {
+    // eslint-disable-next-line no-use-before-define
     if (!deliveries.length) {
       message.info(t('ui.delivery.no_data_to_export', 'No deliveries to export'));
       return;
@@ -359,6 +367,7 @@ const Delivery = () => {
         'address',
         'total_amount'
       ],
+      // eslint-disable-next-line no-use-before-define
       ...deliveries.map((delivery) => ([
         delivery.delivery_id,
         delivery.tracking_number || '',
@@ -505,6 +514,7 @@ const Delivery = () => {
   };
 
   const getUpdateStatusOptions = (currentStatus) => {
+    // eslint-disable-next-line security/detect-object-injection
     const allowedValues = statusTransitions[currentStatus] || [currentStatus];
     return statusOptions.filter((option) => allowedValues.includes(option.value));
   };
@@ -555,7 +565,6 @@ const Delivery = () => {
           </Card>
         </Col>
       </Row>
-
       <Card>
         {/* Filter Controls */}
         <div className="table-actions">
@@ -619,7 +628,6 @@ const Delivery = () => {
           scroll={{ x: 1200 }}
         />
       </Card>
-
       {/* Delivery Details Modal */}
       <Modal
         title={`${t('ui.delivery.delivery_details')} - ${selectedDelivery?.delivery_id}`}
@@ -732,7 +740,6 @@ const Delivery = () => {
           </div>
         )}
       </Modal>
-
       {/* Tracking Modal */}
       <Modal
         title={`${t('ui.delivery.track_delivery_title')} - ${selectedDelivery?.delivery_id}`}
@@ -801,7 +808,6 @@ const Delivery = () => {
           </div>
         )}
       </Modal>
-
       {/* Update Status Modal */}
       <Modal
         title={`${t('ui.delivery.update_delivery')} - ${selectedDelivery?.delivery_id}`}
@@ -862,7 +868,7 @@ const Delivery = () => {
               <Button
                 type="primary"
                 htmlType="submit"
-                loading={updateDeliveryMutation.isLoading}
+                loading={updateDeliveryMutation.isPending}
               >
                 {t('ui.delivery.update_delivery_button')}
               </Button>
@@ -870,14 +876,15 @@ const Delivery = () => {
           </Form.Item>
         </Form>
       </Modal>
-
       <AssignDeliveryModal
-        open={!!assignmentTarget}
+        open={Boolean(assignmentTarget)}
         onCancel={() => setAssignmentTarget(null)}
         deliveryId={assignmentTarget?.id}
         currentPersonId={assignmentTarget?.driver_id || null}
         onSuccess={() => {
-          queryClient.invalidateQueries(['deliveries']);
+          queryClient.invalidateQueries({
+            queryKey: ['deliveries'],
+          });
         }}
       />
     </div>

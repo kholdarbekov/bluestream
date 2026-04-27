@@ -555,6 +555,7 @@ def test_send_telegram_notification_uses_bundled_fallback_template_when_db_missi
     service.telegram_bot_token = 'test-token'
 
     fake_response = Mock()
+    fake_response.status_code = 200
     fake_response.raise_for_status.return_value = None
     fake_response.json.return_value = {'ok': True, 'result': {'message_id': 777}}
 
@@ -605,6 +606,7 @@ Phone: {driver_phone}
     )
 
     fake_response = Mock()
+    fake_response.status_code = 200
     fake_response.raise_for_status.return_value = None
     fake_response.json.return_value = {'ok': True, 'result': {'message_id': 778}}
 
@@ -698,6 +700,7 @@ def test_send_telegram_notification_allows_in_transit_delivery_status(app, db, s
     service.telegram_bot_token = 'test-token'
 
     fake_response = Mock()
+    fake_response.status_code = 200
     fake_response.raise_for_status.return_value = None
     fake_response.json.return_value = {'ok': True, 'result': {'message_id': 779}}
 
@@ -729,6 +732,7 @@ def test_send_staff_telegram_message_uses_staff_bot_token(app, db, sample_user):
     service.staff_telegram_bot_token = 'staff-token'
 
     fake_response = Mock()
+    fake_response.status_code = 200
     fake_response.raise_for_status.return_value = None
     fake_response.json.return_value = {'ok': True, 'result': {'message_id': 790}}
 
@@ -813,6 +817,7 @@ Thank you for your purchase!''' if field == 'content' else None,
     )
 
     fake_response = Mock()
+    fake_response.status_code = 200
     fake_response.raise_for_status.return_value = None
     fake_response.json.return_value = {'ok': True, 'result': {'message_id': 780}}
 

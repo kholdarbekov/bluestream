@@ -28,13 +28,14 @@ import {
   SwapOutlined,
   UserAddOutlined,
 } from '@ant-design/icons';
-import { useMutation, useQuery, useQueryClient } from 'react-query';
+import { useMutation, useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import dayjs from 'dayjs';
 
 import adminService from '../services/adminService';
 import AddressMapPicker from '../components/AddressMapPicker';
 import tryoutService from '../services/tryoutService';
 import { formatDate, formatDateTimeShort } from '../utils/dateUtils';
+import AsyncButton from '../components/common/AsyncButton';
 
 const { RangePicker } = DatePicker;
 const { Text } = Typography;
@@ -176,23 +177,23 @@ const Tryouts = () => {
     [pagination, search, status, outcome, pickupState, driverId, dateRange, dueDateRange]
   );
 
-  const { data, isLoading } = useQuery(
-    ['tryouts', filters],
-    () => tryoutService.getTryouts(filters),
-    { keepPreviousData: true }
-  );
+  const { data, isLoading } = useQuery({
+    queryKey: ['tryouts', filters],
+    queryFn: () => tryoutService.getTryouts(filters),
+    placeholderData: keepPreviousData,
+  });
 
-  const { data: productsData } = useQuery(
-    ['tryout-products'],
-    () => adminService.getProducts({ per_page: 200, status: 'active' }),
-    { staleTime: 60_000 }
-  );
+  const { data: productsData } = useQuery({
+    queryKey: ['tryout-products'],
+    queryFn: () => adminService.getProducts({ per_page: 200, status: 'active' }),
+    staleTime: 60_000,
+  });
 
-  const { data: driversData } = useQuery(
-    ['tryout-drivers'],
-    () => adminService.getDeliveryPersonnel({ per_page: 100 }),
-    { staleTime: 60_000 }
-  );
+  const { data: driversData } = useQuery({
+    queryKey: ['tryout-drivers'],
+    queryFn: () => adminService.getDeliveryPersonnel({ per_page: 100 }),
+    staleTime: 60_000,
+  });
 
   const products = (productsData?.data?.items || []).filter((product) => product.is_tryout_eligible !== false);
   const drivers = driversData?.data?.items || [];
@@ -200,7 +201,9 @@ const Tryouts = () => {
   const summary = data?.summary || {};
 
   const refreshTryouts = () => {
-    queryClient.invalidateQueries(['tryouts']);
+    queryClient.invalidateQueries({
+      queryKey: ['tryouts'],
+    });
   };
 
   const closeTryoutModal = () => {
@@ -219,7 +222,9 @@ const Tryouts = () => {
     tryoutForm.setFieldsValue(TRYOUT_FORM_INITIAL_VALUES);
   };
 
-  const createMutation = useMutation((payload) => tryoutService.createTryout(payload), {
+  const createMutation = useMutation({
+    mutationFn: (payload) => tryoutService.createTryout(payload),
+
     onSuccess: () => {
       message.success('Try-out created');
       closeTryoutModal();
@@ -227,19 +232,20 @@ const Tryouts = () => {
     },
   });
 
-  const assignMutation = useMutation(
-    ({ taskId, assignedDriverUserId }) => tryoutService.assignTask(taskId, assignedDriverUserId),
-    {
-      onSuccess: () => {
-        message.success('Task assigned');
-        setAssignOpen(false);
-        assignForm.resetFields();
-        refreshTryouts();
-      },
-    }
-  );
+  const assignMutation = useMutation({
+    mutationFn: ({ taskId, assignedDriverUserId }) => tryoutService.assignTask(taskId, assignedDriverUserId),
 
-  const convertMutation = useMutation((tryoutId) => tryoutService.convertTryout(tryoutId), {
+    onSuccess: () => {
+      message.success('Task assigned');
+      setAssignOpen(false);
+      assignForm.resetFields();
+      refreshTryouts();
+    },
+  });
+
+  const convertMutation = useMutation({
+    mutationFn: (tryoutId) => tryoutService.convertTryout(tryoutId),
+
     onSuccess: ({ tryout: updatedTryout, conversion }) => {
       const action = conversion?.action;
       const user = conversion?.user;
@@ -259,32 +265,30 @@ const Tryouts = () => {
     },
   });
 
-  const adjustMutation = useMutation(
-    ({ tryoutId, payload }) => tryoutService.adjustBottles(tryoutId, payload),
-    {
-      onSuccess: () => {
-        message.success('Bottle adjustment saved');
-        setAdjustOpen(false);
-        adjustForm.resetFields();
-        refreshTryouts();
-        if (adjustTarget?.id) {
-          tryoutService.getTryout(adjustTarget.id).then(setSelectedTryout);
-        }
-      },
-    }
-  );
+  const adjustMutation = useMutation({
+    mutationFn: ({ tryoutId, payload }) => tryoutService.adjustBottles(tryoutId, payload),
 
-  const updateMutation = useMutation(
-    ({ tryoutId, payload }) => tryoutService.updateTryout(tryoutId, payload),
-    {
-      onSuccess: (updatedTryout) => {
-        message.success('Try-out updated');
-        closeTryoutModal();
-        setSelectedTryout(updatedTryout);
-        refreshTryouts();
-      },
-    }
-  );
+    onSuccess: () => {
+      message.success('Bottle adjustment saved');
+      setAdjustOpen(false);
+      adjustForm.resetFields();
+      refreshTryouts();
+      if (adjustTarget?.id) {
+        tryoutService.getTryout(adjustTarget.id).then(setSelectedTryout);
+      }
+    },
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: ({ tryoutId, payload }) => tryoutService.updateTryout(tryoutId, payload),
+
+    onSuccess: (updatedTryout) => {
+      message.success('Try-out updated');
+      closeTryoutModal();
+      setSelectedTryout(updatedTryout);
+      refreshTryouts();
+    },
+  });
 
   const openDetails = async (record) => {
     const tryout = await tryoutService.getTryout(record.id);
@@ -380,12 +384,14 @@ const Tryouts = () => {
       title: 'Status',
       dataIndex: 'status',
       key: 'status',
+      // eslint-disable-next-line security/detect-object-injection
       render: (value) => <Tag color={STATUS_COLORS[value] || 'default'}>{value}</Tag>,
     },
     {
       title: 'Outcome',
       dataIndex: 'outcome',
       key: 'outcome',
+      // eslint-disable-next-line security/detect-object-injection
       render: (value) => <Tag color={OUTCOME_COLORS[value] || 'default'}>{value}</Tag>,
     },
     {
@@ -398,6 +404,7 @@ const Tryouts = () => {
       title: 'Pickup State',
       dataIndex: 'pickup_state',
       key: 'pickup_state',
+      // eslint-disable-next-line security/detect-object-injection
       render: (value) => <Tag color={PICKUP_STATE_COLORS[value] || 'default'}>{value}</Tag>,
     },
     {
@@ -424,13 +431,13 @@ const Tryouts = () => {
           <Button onClick={() => openEdit(record)}>
             Edit
           </Button>
-          <Button
+          <AsyncButton
             icon={<UserAddOutlined />}
             disabled={record.outcome === 'converted'}
-            onClick={() => convertMutation.mutate(record.id)}
+            onClick={() => convertMutation.mutateAsync(record.id)}
           >
             Convert
-          </Button>
+          </AsyncButton>
         </Space>
       ),
     },
@@ -553,13 +560,13 @@ const Tryouts = () => {
             }}>
               Adjust Bottles
             </Button>
-            <Button
+            <AsyncButton
               type="primary"
               disabled={selectedTryout?.outcome === 'converted'}
-              onClick={() => convertMutation.mutate(selectedTryout?.id)}
+              onClick={() => convertMutation.mutateAsync(selectedTryout?.id)}
             >
               Convert
-            </Button>
+            </AsyncButton>
           </Space>
         )}
       >
@@ -736,7 +743,7 @@ const Tryouts = () => {
                   </Row>
                 ))}
                 <Button disabled={Boolean(tryoutFormTarget?.handoff_completed_at)} onClick={() => add({ quantity: 1 })}>Add Product</Button>
-                {Boolean(tryoutFormTarget?.handoff_completed_at) ? (
+                {tryoutFormTarget?.handoff_completed_at ? (
                   <div style={{ marginTop: 8 }}>
                     <Text type="secondary">Products cannot be edited after handoff completion.</Text>
                   </div>
@@ -765,7 +772,7 @@ const Tryouts = () => {
           <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
             <Space>
               <Button onClick={closeTryoutModal}>Cancel</Button>
-              <Button type="primary" htmlType="submit" loading={createMutation.isLoading || updateMutation.isLoading}>
+              <Button type="primary" htmlType="submit" loading={createMutation.isPending || updateMutation.isPending}>
                 {isEditingTryout ? 'Save' : 'Create'}
               </Button>
             </Space>
@@ -799,7 +806,7 @@ const Tryouts = () => {
           <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
             <Space>
               <Button onClick={() => setAssignOpen(false)}>Cancel</Button>
-              <Button type="primary" htmlType="submit" loading={assignMutation.isLoading}>Assign</Button>
+              <Button type="primary" htmlType="submit" loading={assignMutation.isPending}>Assign</Button>
             </Space>
           </Form.Item>
         </Form>
@@ -835,7 +842,7 @@ const Tryouts = () => {
           <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
             <Space>
               <Button onClick={() => setAdjustOpen(false)}>Cancel</Button>
-              <Button type="primary" htmlType="submit" loading={adjustMutation.isLoading}>Save</Button>
+              <Button type="primary" htmlType="submit" loading={adjustMutation.isPending}>Save</Button>
             </Space>
           </Form.Item>
         </Form>

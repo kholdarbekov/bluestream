@@ -63,6 +63,8 @@ class TryoutHandler(BaseHandler):
             await update.message.reply_text(prompt)
         return ENTER_TRYOUT_PHONE
 
+    @require_auth
+    @require_delivery_driver
     async def receive_create_phone(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         language = await self._get_language(update, context)
         valid, result = validate_phone((update.message.text or '').strip())
@@ -74,6 +76,8 @@ class TryoutHandler(BaseHandler):
         await update.message.reply_text(i18n.get('staff.tryout.enter_name', language))
         return ENTER_TRYOUT_NAME
 
+    @require_auth
+    @require_delivery_driver
     async def receive_create_name(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         language = await self._get_language(update, context)
         name = (update.message.text or '').strip()
@@ -92,6 +96,8 @@ class TryoutHandler(BaseHandler):
         )
         return ENTER_TRYOUT_ADDRESS
 
+    @require_auth
+    @require_delivery_driver
     async def receive_create_address(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         language = await self._get_language(update, context)
         address = (update.message.text or '').strip()
@@ -109,6 +115,8 @@ class TryoutHandler(BaseHandler):
         await self._show_product_selection(update, context, use_message=True)
         return ConversationHandler.END
 
+    @require_auth
+    @require_delivery_driver
     async def receive_create_location(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         language = await self._get_language(update, context)
         token = await self._get_auth_token(update, context)
@@ -461,6 +469,8 @@ class TryoutHandler(BaseHandler):
         )
         return ConversationHandler.END
 
+    @require_auth
+    @require_delivery_driver
     async def cancel_create_tryout(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.pop('new_tryout', None)
         context.user_data.pop('new_tryout_products', None)

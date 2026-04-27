@@ -22,9 +22,12 @@ import {
   DeleteOutlined,
   ClockCircleOutlined
 } from '@ant-design/icons';
-import { useQuery, useMutation, useQueryClient } from 'react-query';
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import adminService from '../services/adminService';
-import moment from 'moment';
+import dayjs from 'dayjs';
+import customParseFormat from 'dayjs/plugin/customParseFormat';
+
+dayjs.extend(customParseFormat);
 
 const { Option } = Select;
 
@@ -49,66 +52,72 @@ const TimeSlots = () => {
   ];
 
   // Fetch time slots
-  const { data, isLoading } = useQuery(
-    ['timeSlots', pagination],
-    () => adminService.getTimeSlots({
+  const { data, isLoading } = useQuery({
+    queryKey: ['timeSlots', pagination],
+
+    queryFn: () => adminService.getTimeSlots({
       page: pagination.page,
       per_page: pagination.per_page
     }),
-    {
-      keepPreviousData: true
-    }
-  );
+
+    placeholderData: keepPreviousData,
+  });
 
   const timeSlots = data?.data?.items || [];
   const total = data?.data?.total || 0;
 
   // Create mutation
-  const createMutation = useMutation(
-    (slotData) => adminService.createTimeSlot(slotData),
-    {
-      onSuccess: () => {
-        message.success('Time slot created successfully');
-        setIsCreateModalVisible(false);
-        createForm.resetFields();
-        queryClient.invalidateQueries('timeSlots');
-      },
-      onError: (error) => {
-        message.error(error.response?.data?.message || 'Failed to create time slot');
-      }
-    }
-  );
+  const createMutation = useMutation({
+    mutationFn: (slotData) => adminService.createTimeSlot(slotData),
+
+    onSuccess: () => {
+      message.success('Time slot created successfully');
+      setIsCreateModalVisible(false);
+      createForm.resetFields();
+      queryClient.invalidateQueries({
+        queryKey: ['timeSlots'],
+      });
+    },
+
+    onError: (error) => {
+      message.error(error.response?.data?.message || 'Failed to create time slot');
+    },
+  });
 
   // Update mutation
-  const updateMutation = useMutation(
-    ({ id, data }) => adminService.updateTimeSlot(id, data),
-    {
-      onSuccess: () => {
-        message.success('Time slot updated successfully');
-        setIsEditModalVisible(false);
-        setSelectedSlot(null);
-        editForm.resetFields();
-        queryClient.invalidateQueries('timeSlots');
-      },
-      onError: (error) => {
-        message.error(error.response?.data?.message || 'Failed to update time slot');
-      }
-    }
-  );
+  const updateMutation = useMutation({
+    mutationFn: ({ id, data }) => adminService.updateTimeSlot(id, data),
+
+    onSuccess: () => {
+      message.success('Time slot updated successfully');
+      setIsEditModalVisible(false);
+      setSelectedSlot(null);
+      editForm.resetFields();
+      queryClient.invalidateQueries({
+        queryKey: ['timeSlots'],
+      });
+    },
+
+    onError: (error) => {
+      message.error(error.response?.data?.message || 'Failed to update time slot');
+    },
+  });
 
   // Delete mutation
-  const deleteMutation = useMutation(
-    (slotId) => adminService.deleteTimeSlot(slotId),
-    {
-      onSuccess: () => {
-        message.success('Time slot deleted successfully');
-        queryClient.invalidateQueries('timeSlots');
-      },
-      onError: (error) => {
-        message.error(error.response?.data?.message || 'Failed to delete time slot');
-      }
-    }
-  );
+  const deleteMutation = useMutation({
+    mutationFn: (slotId) => adminService.deleteTimeSlot(slotId),
+
+    onSuccess: () => {
+      message.success('Time slot deleted successfully');
+      queryClient.invalidateQueries({
+        queryKey: ['timeSlots'],
+      });
+    },
+
+    onError: (error) => {
+      message.error(error.response?.data?.message || 'Failed to delete time slot');
+    },
+  });
 
   const handleCreate = () => {
     setIsCreateModalVisible(true);
@@ -118,8 +127,8 @@ const TimeSlots = () => {
     setSelectedSlot(slot);
     editForm.setFieldsValue({
       name: slot.name,
-      start_time: moment(slot.start_time, 'HH:mm'),
-      end_time: moment(slot.end_time, 'HH:mm'),
+      start_time: dayjs(slot.start_time, 'HH:mm'),
+      end_time: dayjs(slot.end_time, 'HH:mm'),
       max_orders: slot.max_orders,
       delivery_fee: slot.delivery_fee,
       is_premium: slot.is_premium,
@@ -235,6 +244,7 @@ const TimeSlots = () => {
           <Space size={4} wrap>
             {days.map(day => (
               <Tag key={day} size="small">
+                {/* eslint-disable-next-line security/detect-object-injection */}
                 {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][day]}
               </Tag>
             ))}
@@ -311,7 +321,7 @@ const TimeSlots = () => {
           pagination={{
             current: pagination.page,
             pageSize: pagination.per_page,
-            total: total,
+            total,
             onChange: (page, pageSize) => {
               setPagination({ page, per_page: pageSize });
             },
@@ -331,7 +341,7 @@ const TimeSlots = () => {
           setIsCreateModalVisible(false);
           createForm.resetFields();
         }}
-        confirmLoading={createMutation.isLoading}
+        confirmLoading={createMutation.isPending}
         width={600}
       >
         <Form
@@ -429,7 +439,7 @@ const TimeSlots = () => {
           setSelectedSlot(null);
           editForm.resetFields();
         }}
-        confirmLoading={updateMutation.isLoading}
+        confirmLoading={updateMutation.isPending}
         width={600}
       >
         <Form

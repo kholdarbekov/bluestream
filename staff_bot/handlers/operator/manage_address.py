@@ -119,6 +119,8 @@ class ManageAddressHandler(BaseHandler):
             logger.error(f"Error starting add address: {e}", exc_info=True)
             await self._handle_error(update, context)
 
+    @require_auth
+    @require_operator
     async def receive_label(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Receive address label (Home, Office, etc.)"""
         language = await self._get_language(update, context)
@@ -139,6 +141,8 @@ class ManageAddressHandler(BaseHandler):
         )
         return ENTER_ADDRESS
 
+    @require_auth
+    @require_operator
     async def receive_address(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Receive full address text"""
         language = await self._get_language(update, context)
@@ -159,6 +163,8 @@ class ManageAddressHandler(BaseHandler):
         )
         return ENTER_DISTRICT
 
+    @require_auth
+    @require_operator
     async def receive_district(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Receive district"""
         language = await self._get_language(update, context)
@@ -175,6 +181,8 @@ class ManageAddressHandler(BaseHandler):
         )
         return ENTER_NOTES
 
+    @require_auth
+    @require_operator
     async def receive_address_notes(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Receive delivery notes for address"""
         language = await self._get_language(update, context)
@@ -207,6 +215,8 @@ class ManageAddressHandler(BaseHandler):
         await update.message.reply_text(text, reply_markup=keyboard, parse_mode='HTML')
         return CONFIRM_ADDRESS
 
+    @require_auth
+    @require_operator
     async def confirm_address(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Confirm and save the address"""
         query = update.callback_query
@@ -268,6 +278,8 @@ class ManageAddressHandler(BaseHandler):
         context.user_data.pop('adding_address_for', None)
         return ConversationHandler.END
 
+    @require_auth
+    @require_operator
     async def cancel(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Cancel address creation"""
         context.user_data.pop('new_address', None)

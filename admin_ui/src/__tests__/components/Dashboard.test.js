@@ -1,15 +1,15 @@
 import React from 'react';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { QueryClient, QueryClientProvider } from 'react-query';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { BrowserRouter } from 'react-router-dom';
 
 import Dashboard from '../../pages/Dashboard';
 import adminService from '../../services/adminService';
 
-jest.mock('../../services/adminService');
+vi.mock('../../services/adminService');
 
-jest.mock('react-i18next', () => ({
+vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: (key) => {
       const translations = {
@@ -45,20 +45,23 @@ jest.mock('react-i18next', () => ({
         'ui.dashboard.week': 'Week',
         'ui.dashboard.units_sold': 'Units Sold',
       };
+      // eslint-disable-next-line security/detect-object-injection
       return translations[key] || key;
     },
   }),
 }));
 
-jest.mock('../../hooks/useResponsive', () => () => ({
-  isMobileDevice: false,
-  isTabletDevice: false,
-  isTouchDevice: false,
-  getFontSize: (mobile, _tablet, desktop) => desktop || mobile,
+vi.mock('../../hooks/useResponsive', () => ({
+  default: () => ({
+    isMobileDevice: false,
+    isTabletDevice: false,
+    isTouchDevice: false,
+    getFontSize: (mobile, _tablet, desktop) => desktop || mobile,
+  }),
 }));
 
-jest.mock('../../components/charts/StatCard', () => {
-  return function MockStatCard({ title, value, trendValue, prefix, loading }) {
+vi.mock('../../components/charts/StatCard', () => ({
+  default: function MockStatCard({ title, value, trendValue, prefix, loading }) {
     return (
       <div data-testid="stat-card">
         <div>{title}</div>
@@ -67,26 +70,26 @@ jest.mock('../../components/charts/StatCard', () => {
         <div>{loading ? 'loading' : 'loaded'}</div>
       </div>
     );
-  };
-});
+  },
+}));
 
-jest.mock('../../components/charts/LineChart', () => {
-  return function MockLineChart() {
+vi.mock('../../components/charts/LineChart', () => ({
+  default: function MockLineChart() {
     return <div data-testid="line-chart">Line Chart</div>;
-  };
-});
+  },
+}));
 
-jest.mock('../../components/charts/BarChart', () => {
-  return function MockBarChart() {
+vi.mock('../../components/charts/BarChart', () => ({
+  default: function MockBarChart() {
     return <div data-testid="bar-chart">Bar Chart</div>;
-  };
-});
+  },
+}));
 
-jest.mock('../../components/charts/PieChart', () => {
-  return function MockPieChart() {
+vi.mock('../../components/charts/PieChart', () => ({
+  default: function MockPieChart() {
     return <div data-testid="pie-chart">Pie Chart</div>;
-  };
-});
+  },
+}));
 
 const mockDashboardResponse = {
   dashboard: {
@@ -119,7 +122,7 @@ const createWrapper = () => {
     defaultOptions: {
       queries: {
         retry: false,
-        cacheTime: 0,
+        gcTime: 0,
       },
     },
   });
@@ -139,7 +142,7 @@ describe('Dashboard Component', () => {
   });
 
   afterEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   it('renders the dashboard header immediately', () => {

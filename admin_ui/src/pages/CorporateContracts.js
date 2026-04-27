@@ -26,7 +26,7 @@ import {
   PlusOutlined,
   ReloadOutlined
 } from '@ant-design/icons';
-import { useMutation, useQuery, useQueryClient } from 'react-query';
+import { useMutation, useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 
 import adminService from '../services/adminService';
@@ -85,44 +85,46 @@ const CorporateContracts = () => {
   const [topupForm] = Form.useForm();
   const [pricesForm] = Form.useForm();
 
-  const contractsQuery = useQuery(
-    ['corporate-contracts', pagination],
-    () => adminService.getCorporateContracts({
+  const contractsQuery = useQuery({
+    queryKey: ['corporate-contracts', pagination],
+
+    queryFn: () => adminService.getCorporateContracts({
       page: pagination.page,
       per_page: pagination.per_page
     }),
-    { keepPreviousData: true }
-  );
 
-  const usersQuery = useQuery(
-    ['corporate-contract-users'],
-    () => adminService.getUsers({ per_page: 200 }),
-    { enabled: isContractModalOpen }
-  );
+    placeholderData: keepPreviousData,
+  });
 
-  const productsQuery = useQuery(
-    ['corporate-contract-products'],
-    () => adminService.getProducts({ per_page: 200, is_active: true }),
-    { enabled: isPricesDrawerOpen }
-  );
+  const usersQuery = useQuery({
+    queryKey: ['corporate-contract-users'],
+    queryFn: () => adminService.getUsers({ per_page: 200 }),
+    enabled: isContractModalOpen,
+  });
 
-  const contractDetailQuery = useQuery(
-    ['corporate-contract-detail', selectedContractId],
-    () => adminService.getCorporateContract(selectedContractId),
-    { enabled: Boolean(selectedContractId) }
-  );
+  const productsQuery = useQuery({
+    queryKey: ['corporate-contract-products'],
+    queryFn: () => adminService.getProducts({ per_page: 200, is_active: true }),
+    enabled: isPricesDrawerOpen,
+  });
 
-const contractBalanceQuery = useQuery(
-    ['corporate-contract-balance', selectedContractId],
-    () => adminService.getCorporateContractBalance(selectedContractId),
-    { enabled: Boolean(selectedContractId) }
-  );
+  const contractDetailQuery = useQuery({
+    queryKey: ['corporate-contract-detail', selectedContractId],
+    queryFn: () => adminService.getCorporateContract(selectedContractId),
+    enabled: Boolean(selectedContractId),
+  });
 
-  const contractLedgerQuery = useQuery(
-    ['corporate-contract-ledger', selectedContractId],
-    () => adminService.getCorporateContractLedger(selectedContractId, { per_page: 50 }),
-    { enabled: Boolean(selectedContractId) }
-  );
+const contractBalanceQuery = useQuery({
+  queryKey: ['corporate-contract-balance', selectedContractId],
+  queryFn: () => adminService.getCorporateContractBalance(selectedContractId),
+  enabled: Boolean(selectedContractId),
+});
+
+  const contractLedgerQuery = useQuery({
+    queryKey: ['corporate-contract-ledger', selectedContractId],
+    queryFn: () => adminService.getCorporateContractLedger(selectedContractId, { per_page: 50 }),
+    enabled: Boolean(selectedContractId),
+  });
 
   const contracts = contractsQuery.data?.data?.items || [];
   const selectedContract = contractDetailQuery.data?.data?.contract || null;
@@ -162,101 +164,109 @@ const contractBalanceQuery = useQuery(
   }, [contracts, selectedContractId]);
 
   const invalidateCorporateQueries = () => {
-    queryClient.invalidateQueries('corporate-contracts');
-    queryClient.invalidateQueries('corporate-contract-detail');
-    queryClient.invalidateQueries('corporate-contract-balance');
-    queryClient.invalidateQueries('corporate-contract-ledger');
+    queryClient.invalidateQueries({
+      queryKey: ['corporate-contracts'],
+    });
+    queryClient.invalidateQueries({
+      queryKey: ['corporate-contract-detail'],
+    });
+    queryClient.invalidateQueries({
+      queryKey: ['corporate-contract-balance'],
+    });
+    queryClient.invalidateQueries({
+      queryKey: ['corporate-contract-ledger'],
+    });
   };
 
-  const createContractMutation = useMutation(
-    (payload) => adminService.createCorporateContract(payload),
-    {
-      onSuccess: (response) => {
-        const createdContract = response?.data?.contract;
-        message.success(t('ui.corporate.contract_created', 'Corporate contract created'));
-        setIsContractModalOpen(false);
-        contractForm.resetFields();
-        invalidateCorporateQueries();
-        if (createdContract?.id) {
-          setSelectedContractId(createdContract.id);
-        }
-      },
-      onError: (error) => {
-        message.error(error.response?.data?.message || t('ui.corporate.contract_create_failed', 'Failed to create contract'));
-      }
-    }
-  );
+  const createContractMutation = useMutation({
+    mutationFn: (payload) => adminService.createCorporateContract(payload),
 
-  const updateContractMutation = useMutation(
-    ({ contractId, payload }) => adminService.updateCorporateContract(contractId, payload),
-    {
-      onSuccess: () => {
-        message.success(t('ui.corporate.contract_updated', 'Corporate contract updated'));
-        setIsContractModalOpen(false);
-        setEditingContract(null);
-        contractForm.resetFields();
-        invalidateCorporateQueries();
-      },
-      onError: (error) => {
-        message.error(error.response?.data?.message || t('ui.corporate.contract_update_failed', 'Failed to update contract'));
+    onSuccess: (response) => {
+      const createdContract = response?.data?.contract;
+      message.success(t('ui.corporate.contract_created', 'Corporate contract created'));
+      setIsContractModalOpen(false);
+      contractForm.resetFields();
+      invalidateCorporateQueries();
+      if (createdContract?.id) {
+        setSelectedContractId(createdContract.id);
       }
-    }
-  );
+    },
 
-  const updatePricesMutation = useMutation(
-    ({ contractId, prices }) => adminService.updateCorporateContractPrices(contractId, prices),
-    {
-      onSuccess: () => {
-        message.success(t('ui.corporate.prices_updated', 'Contract prices updated'));
-        setIsPricesDrawerOpen(false);
-        invalidateCorporateQueries();
-      },
-      onError: (error) => {
-        message.error(error.response?.data?.message || t('ui.corporate.prices_update_failed', 'Failed to update prices'));
-      }
-    }
-  );
+    onError: (error) => {
+      message.error(error.response?.data?.message || t('ui.corporate.contract_create_failed', 'Failed to create contract'));
+    },
+  });
 
-  const topupMutation = useMutation(
-    ({ contractId, payload }) => adminService.topupCorporateContract(contractId, payload),
-    {
-      onSuccess: () => {
-        message.success(t('ui.corporate.topup_success', 'Prepayment topup applied'));
-        setIsTopupModalOpen(false);
-        topupForm.resetFields();
-        invalidateCorporateQueries();
-      },
-      onError: (error) => {
-        message.error(error.response?.data?.message || t('ui.corporate.topup_failed', 'Failed to apply topup'));
-      }
-    }
-  );
+  const updateContractMutation = useMutation({
+    mutationFn: ({ contractId, payload }) => adminService.updateCorporateContract(contractId, payload),
 
-  const previewContractOverlapMutation = useMutation(
-    (payload) => adminService.previewCorporateContractOverlaps(payload),
-    {
-      onSuccess: (response) => {
-        setContractOverlapPreview(response?.data?.preview || null);
-      },
-      onError: (error) => {
-        setContractOverlapPreview(null);
-        message.error(error.response?.data?.message || t('ui.corporate.overlap_preview_failed', 'Failed to preview overlaps'));
-      }
-    }
-  );
+    onSuccess: () => {
+      message.success(t('ui.corporate.contract_updated', 'Corporate contract updated'));
+      setIsContractModalOpen(false);
+      setEditingContract(null);
+      contractForm.resetFields();
+      invalidateCorporateQueries();
+    },
 
-  const previewPricesOverlapMutation = useMutation(
-    (payload) => adminService.previewCorporateContractOverlaps(payload),
-    {
-      onSuccess: (response) => {
-        setPricesOverlapPreview(response?.data?.preview || null);
-      },
-      onError: (error) => {
-        setPricesOverlapPreview(null);
-        message.error(error.response?.data?.message || t('ui.corporate.overlap_preview_failed', 'Failed to preview overlaps'));
-      }
-    }
-  );
+    onError: (error) => {
+      message.error(error.response?.data?.message || t('ui.corporate.contract_update_failed', 'Failed to update contract'));
+    },
+  });
+
+  const updatePricesMutation = useMutation({
+    mutationFn: ({ contractId, prices }) => adminService.updateCorporateContractPrices(contractId, prices),
+
+    onSuccess: () => {
+      message.success(t('ui.corporate.prices_updated', 'Contract prices updated'));
+      setIsPricesDrawerOpen(false);
+      invalidateCorporateQueries();
+    },
+
+    onError: (error) => {
+      message.error(error.response?.data?.message || t('ui.corporate.prices_update_failed', 'Failed to update prices'));
+    },
+  });
+
+  const topupMutation = useMutation({
+    mutationFn: ({ contractId, payload }) => adminService.topupCorporateContract(contractId, payload),
+
+    onSuccess: () => {
+      message.success(t('ui.corporate.topup_success', 'Prepayment topup applied'));
+      setIsTopupModalOpen(false);
+      topupForm.resetFields();
+      invalidateCorporateQueries();
+    },
+
+    onError: (error) => {
+      message.error(error.response?.data?.message || t('ui.corporate.topup_failed', 'Failed to apply topup'));
+    },
+  });
+
+  const previewContractOverlapMutation = useMutation({
+    mutationFn: (payload) => adminService.previewCorporateContractOverlaps(payload),
+
+    onSuccess: (response) => {
+      setContractOverlapPreview(response?.data?.preview || null);
+    },
+
+    onError: (error) => {
+      setContractOverlapPreview(null);
+      message.error(error.response?.data?.message || t('ui.corporate.overlap_preview_failed', 'Failed to preview overlaps'));
+    },
+  });
+
+  const previewPricesOverlapMutation = useMutation({
+    mutationFn: (payload) => adminService.previewCorporateContractOverlaps(payload),
+
+    onSuccess: (response) => {
+      setPricesOverlapPreview(response?.data?.preview || null);
+    },
+
+    onError: (error) => {
+      setPricesOverlapPreview(null);
+      message.error(error.response?.data?.message || t('ui.corporate.overlap_preview_failed', 'Failed to preview overlaps'));
+    },
+  });
 
   const handleOpenCreateModal = () => {
     setEditingContract(null);
@@ -475,6 +485,7 @@ const contractBalanceQuery = useQuery(
       dataIndex: 'status',
       key: 'status',
       render: (status) => (
+        // eslint-disable-next-line security/detect-object-injection
         <Tag color={statusColors[status] || 'default'}>
           {status}
         </Tag>
@@ -875,7 +886,7 @@ const contractBalanceQuery = useQuery(
           contractForm.resetFields();
         }}
         onOk={() => contractForm.submit()}
-        confirmLoading={createContractMutation.isLoading || updateContractMutation.isLoading}
+        confirmLoading={createContractMutation.isPending || updateContractMutation.isPending}
         width={760}
       >
         <Form form={contractForm} layout="vertical" onFinish={handleContractSubmit}>
@@ -998,7 +1009,7 @@ const contractBalanceQuery = useQuery(
           </Form.Item>
 
           <div style={{ marginBottom: 16 }}>
-            <Button onClick={handlePreviewContractOverlap} loading={previewContractOverlapMutation.isLoading}>
+            <Button onClick={handlePreviewContractOverlap} loading={previewContractOverlapMutation.isPending}>
               {t('ui.corporate.preview_overlaps', 'Preview Overlaps')}
             </Button>
           </div>
@@ -1015,7 +1026,7 @@ const contractBalanceQuery = useQuery(
           topupForm.resetFields();
         }}
         onOk={() => topupForm.submit()}
-        confirmLoading={topupMutation.isLoading}
+        confirmLoading={topupMutation.isPending}
         >
         <Form
           form={topupForm}
@@ -1066,13 +1077,13 @@ const contractBalanceQuery = useQuery(
         width={720}
         extra={(
           <Space>
-            <Button onClick={handlePreviewPricesOverlap} loading={previewPricesOverlapMutation.isLoading}>
+            <Button onClick={handlePreviewPricesOverlap} loading={previewPricesOverlapMutation.isPending}>
               {t('ui.corporate.preview_overlaps', 'Preview Overlaps')}
             </Button>
             <Button
               type="primary"
               onClick={() => pricesForm.submit()}
-              loading={updatePricesMutation.isLoading}
+              loading={updatePricesMutation.isPending}
             >
               {t('ui.common.save', 'Save')}
             </Button>

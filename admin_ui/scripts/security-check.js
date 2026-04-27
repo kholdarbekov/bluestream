@@ -37,29 +37,29 @@ function log(message, color = 'reset') {
 
 function runSecurityCheck() {
   log('🔒 Running ESLint Security Check...', 'blue');
-  
+
   try {
     // Run ESLint with JSON output for parsing
     const command = 'npx eslint src --ext .js,.jsx --format json';
-    const result = execSync(command, { 
-      encoding: 'utf-8', 
+    const result = execSync(command, {
+      encoding: 'utf-8',
       cwd: path.dirname(__dirname),
       stdio: 'pipe'
     });
-    
+
     const lintResults = JSON.parse(result);
     let criticalIssues = 0;
     let warningIssues = 0;
     let securityIssues = 0;
-    
+
     // Analyze results
     lintResults.forEach(file => {
       file.messages.forEach(message => {
         const ruleId = message.ruleId;
-        
+
         if (message.severity === 2) { // Error
           criticalIssues++;
-          
+
           // Check if it's a critical security rule
           if (CRITICAL_SECURITY_RULES.includes(ruleId) || ruleId?.startsWith('security/')) {
             securityIssues++;
@@ -70,7 +70,7 @@ function runSecurityCheck() {
           }
         } else if (message.severity === 1) { // Warning
           warningIssues++;
-          
+
           if (ruleId?.startsWith('security/')) {
             log(`⚠️  SECURITY WARNING in ${file.filePath}:${message.line}`, 'yellow');
             log(`   Rule: ${ruleId}`, 'yellow');
@@ -80,39 +80,39 @@ function runSecurityCheck() {
         }
       });
     });
-    
+
     // Summary
     log('📊 Security Check Summary:', 'bold');
     log(`   Critical Issues: ${criticalIssues}`, criticalIssues > 0 ? 'red' : 'green');
     log(`   Security Issues: ${securityIssues}`, securityIssues > 0 ? 'red' : 'green');
     log(`   Warnings: ${warningIssues}`, warningIssues > 0 ? 'yellow' : 'green');
-    
+
     // Exit with error if critical security issues found
     if (securityIssues > 0) {
       log('🚨 CRITICAL SECURITY ISSUES DETECTED!', 'red');
       log('Please fix security issues before proceeding.', 'red');
       process.exit(1);
     }
-    
+
     if (criticalIssues > 0) {
       log('⚠️  Critical linting issues found. Please review.', 'yellow');
       log('Consider running: npm run lint:fix', 'blue');
       process.exit(1);
     }
-    
+
     log('✅ Security check passed!', 'green');
-    
+
   } catch (error) {
     if (error.status === 1) {
       // ESLint found issues, handle the output
       try {
         const lintResults = JSON.parse(error.stdout);
         log('🔍 Processing ESLint results...', 'blue');
-        
+
         let securityIssues = 0;
         lintResults.forEach(file => {
           file.messages.forEach(message => {
-            if (message.ruleId?.startsWith('security/') || 
+            if (message.ruleId?.startsWith('security/') ||
                 CRITICAL_SECURITY_RULES.includes(message.ruleId)) {
               securityIssues++;
               const severity = message.severity === 2 ? 'ERROR' : 'WARNING';
@@ -123,12 +123,12 @@ function runSecurityCheck() {
             }
           });
         });
-        
+
         if (securityIssues > 0) {
           log(`🚨 Found ${securityIssues} security issues!`, 'red');
           process.exit(1);
         }
-        
+
       } catch (parseError) {
         log('❌ Failed to parse ESLint output', 'red');
         console.error(error.stdout);
@@ -144,7 +144,7 @@ function runSecurityCheck() {
 
 function main() {
   const args = process.argv.slice(2);
-  
+
   if (args.includes('--help') || args.includes('-h')) {
     log('🔒 ESLint Security Checker', 'bold');
     log('');
@@ -160,7 +160,7 @@ function main() {
     log('  1 - Security issues found');
     return;
   }
-  
+
   if (args.includes('--rules')) {
     log('🔒 Critical Security Rules:', 'bold');
     CRITICAL_SECURITY_RULES.forEach(rule => {
@@ -168,13 +168,13 @@ function main() {
     });
     return;
   }
-  
+
   if (args.includes('--fix')) {
     log('🔧 Running ESLint with auto-fix...', 'blue');
     try {
-      execSync('npm run lint:fix', { 
-        stdio: 'inherit', 
-        cwd: path.dirname(__dirname) 
+      execSync('npm run lint:fix', {
+        stdio: 'inherit',
+        cwd: path.dirname(__dirname)
       });
       log('✅ Auto-fix completed!', 'green');
     } catch (error) {
@@ -182,7 +182,7 @@ function main() {
       process.exit(1);
     }
   }
-  
+
   runSecurityCheck();
 }
 

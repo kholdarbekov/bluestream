@@ -71,12 +71,93 @@ groups:
           summary: "High disk usage"
           description: "Disk usage is above 85%"
 
-      # Celery queue backup
+      # CEL-006: Celery queue backup. Metric supplied by danihodovic/celery-exporter.
       - alert: CeleryQueueBackup
         expr: celery_queue_length > 1000
         for: 10m
         labels:
           severity: warning
+          area: celery
         annotations:
-          summary: "Celery queue backup"
-          description: "Celery queue has more than 1000 pending tasks"
+          summary: "Celery queue backup ({{ $labels.queue_name }})"
+          description: "Queue {{ $labels.queue_name }} has more than 1000 pending tasks for 10m. Check worker capacity, broker connectivity, or a stuck task slot."
+
+      # CEL-006: Failed-task ratio over 10m. Catches deploy-time bugs and
+      # downstream outages (e.g., payment gateway / Telegram API failures).
+      - alert: CeleryTaskFailureRateHigh
+        expr: |
+          (
+            sum(rate(celery_task_failed_total[10m]))
+            /
+            clamp_min(sum(rate(celery_task_sent_total[10m])), 1)
+          ) > 0.05
+        for: 10m
+        labels:
+          severity: warning
+          area: celery
+        annotations:
+          summary: "Celery task failure rate > 5%"
+          description: "More than 5% of Celery tasks are failing over a 10m window. Check worker logs and recent deploys."
+
+      # CEL-006: Tasks running longer than 30 minutes. p95 runtime threshold;
+      # most BlueStream tasks complete in seconds — anything sustained at 30m+
+      # is likely a hung worker, deadlocked DB call, or runaway loop.
+      - alert: CeleryTaskStuck
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le, name) (rate(celery_task_runtime_seconds_bucket[15m]))
+          ) > 1800
+        for: 5m
+        labels:
+          severity: warning
+          area: celery
+        annotations:
+          summary: "Celery task {{ $labels.name }} stuck (p95 runtime > 30m)"
+          description: "Task {{ $labels.name }} p95 runtime exceeded 30 minutes over a 15m window. Inspect worker for hung threads / blocking I/O."
+
+      # INF-003: business-critical alerts from the 2026-04 audit
+      # Payment webhook failures: gateway callbacks dropping indicates lost revenue.
+      - alert: PaymentWebhookFailureSpike
+        expr: rate(payment_webhook_failures_total[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: critical
+          area: payments
+        annotations:
+          summary: "Payment webhook failure spike"
+          description: "More than 10% of payment webhooks are failing over a 5m window — check gateway connectivity, signature verification, and idempotency cache."
+
+      # DB pool saturation: app will start queuing/timing out requests.
+      - alert: DBPoolSaturated
+        expr: (pg_pool_in_use / pg_pool_size) > 0.9
+        for: 5m
+        labels:
+          severity: critical
+          area: backend
+        annotations:
+          summary: "Postgres connection pool saturated"
+          description: "Pool utilisation > 90% for 5m — investigate long-running queries or raise pool size."
+
+      # Stale PENDING payments: webhooks may have failed to land; orders frozen.
+      # Pairs with PAY-007 (reconciliation beat) once implemented.
+      - alert: StalePaymentsPending
+        expr: payments_pending_age_seconds{quantile="0.95"} > 900
+        for: 15m
+        labels:
+          severity: warning
+          area: payments
+        annotations:
+          summary: "Stale PENDING payments"
+          description: "p95 PENDING payment age > 15 minutes — check gateway status and reconcile."
+
+      # Webhook idempotency hit rate too high = replay flood or misconfigured gateway.
+      - alert: WebhookDuplicateFlood
+        expr: rate(payment_webhook_duplicates_total[5m]) > rate(payment_webhook_total[5m]) * 0.5
+        for: 10m
+        labels:
+          severity: warning
+          area: payments
+        annotations:
+          summary: "Unusually high webhook duplicate rate"
+          description: "More than half of incoming webhooks hit the idempotency guard — check for replay or gateway retry storm."

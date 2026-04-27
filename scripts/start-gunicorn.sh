@@ -30,13 +30,10 @@ echo "Config: gunicorn.conf.py (with post_fork DB connection disposal)"
 # Create logs directory if it doesn't exist
 mkdir -p /app/logs
 
-# Apply DB migrations
-echo "***** Applying database migrations *****"
-if flask db upgrade; then
-    echo "Database migrations applied successfully"
-else
-    echo "Warning: Database migrations failed (this may be okay if no migrations pending)"
-fi
+# Schema migrations now run in the dedicated `migrate` compose service. This
+# entrypoint is reached only after `migrate` has exited successfully, so the
+# schema is guaranteed up-to-date by the time gunicorn boots. See the comment
+# block on the `migrate:` service in docker-compose.yml for the why.
 
 # Run gunicorn with Python config file
 # The config file handles --preload safely by disposing DB connections after fork

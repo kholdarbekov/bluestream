@@ -6,17 +6,14 @@ from flask import Blueprint, request
 from flask_jwt_extended import get_jwt_identity, jwt_required
 from pydantic import ValidationError as PydanticValidationError
 
-from business_app import db
 from business_app.serializers.bottle_serializers import (
     AdminForceCloseSessionRequest,
     AdminResolveTransferRequest,
     BottleAdjustmentRequest,
-    BottleCollectionRequest,
     BottleFineCreateRequest,
     BottleFineUpdateRequest,
     BottleInitialBalanceRequest,
     serialize_bottle_balance_list,
-    serialize_bottle_fine,
     serialize_bottle_ledger_entry,
     serialize_bottle_session,
     serialize_bottle_transfer,
@@ -41,6 +38,7 @@ def _validated_payload(schema_cls):
 # Dashboard
 # ------------------------------------------------------------------
 
+
 @admin_bottles_bp.route("/bottles/dashboard", methods=["GET"])
 @handle_api_exception
 @jwt_required()
@@ -56,6 +54,7 @@ def bottle_dashboard():
 # Balances
 # ------------------------------------------------------------------
 
+
 @admin_bottles_bp.route("/bottles/balances", methods=["GET"])
 @handle_api_exception
 @jwt_required()
@@ -70,13 +69,15 @@ def list_bottle_balances():
         user_id=request.args.get("user_id", type=int),
         search=request.args.get("search"),
     )
-    return success_response(data={
-        "items": serialize_bottle_balance_list(result["items"], include_user=True),
-        "total": result["total"],
-        "page": result["page"],
-        "per_page": result["per_page"],
-        "pages": result["pages"],
-    })
+    return success_response(
+        data={
+            "items": serialize_bottle_balance_list(result["items"], include_user=True),
+            "total": result["total"],
+            "page": result["page"],
+            "per_page": result["per_page"],
+            "pages": result["pages"],
+        }
+    )
 
 
 @admin_bottles_bp.route("/bottles/balances/<int:user_id>", methods=["GET"])
@@ -93,6 +94,7 @@ def get_customer_bottle_balances(user_id):
 # ------------------------------------------------------------------
 # Ledger
 # ------------------------------------------------------------------
+
 
 @admin_bottles_bp.route("/bottles/ledger", methods=["GET"])
 @handle_api_exception
@@ -132,6 +134,7 @@ def get_bottle_ledger(user_id, address_id):
 # Adjustments & Initial Balance
 # ------------------------------------------------------------------
 
+
 @admin_bottles_bp.route("/bottles/adjustment", methods=["POST"])
 @handle_api_exception
 @jwt_required()
@@ -151,7 +154,6 @@ def create_bottle_adjustment():
         actor_user_id=current_user_id,
         notes=data["notes"],
     )
-    db.session.commit()
     return success_response(data=entry.to_dict(), message="Balance adjusted successfully")
 
 
@@ -174,13 +176,13 @@ def set_bottle_initial_balance():
         actor_user_id=current_user_id,
         notes=data.get("notes"),
     )
-    db.session.commit()
     return success_response(data=entry.to_dict(), message="Initial balance set successfully")
 
 
 # ------------------------------------------------------------------
 # Fines
 # ------------------------------------------------------------------
+
 
 @admin_bottles_bp.route("/bottles/fines", methods=["GET"])
 @handle_api_exception
@@ -215,9 +217,7 @@ def create_bottle_fine():
     if not bottle_balance_id:
         address_id = data.get("address_id")
         if not address_id:
-            return validation_error_response(
-                "Either bottle_balance_id or address_id is required"
-            )
+            return validation_error_response("Either bottle_balance_id or address_id is required")
         balance = service.get_balance(data["user_id"], address_id)
         bottle_balance_id = balance.id
 
@@ -229,7 +229,6 @@ def create_bottle_fine():
         actor_user_id=current_user_id,
         notes=data.get("notes"),
     )
-    db.session.commit()
     return success_response(data=fine.to_dict(), message="Fine issued successfully")
 
 
@@ -251,13 +250,13 @@ def update_bottle_fine(fine_id):
     else:
         fine = service.mark_fine_paid(fine_id, current_user_id, notes=data.get("notes"))
 
-    db.session.commit()
     return success_response(data=fine.to_dict(), message="Fine updated successfully")
 
 
 # ------------------------------------------------------------------
 # Reconciliation
 # ------------------------------------------------------------------
+
 
 @admin_bottles_bp.route("/bottles/reconcile/<int:user_id>/<int:address_id>", methods=["POST"])
 @handle_api_exception
@@ -267,13 +266,13 @@ def reconcile_bottle_balance(user_id, address_id):
     """Recalculate a balance from ledger entries and fix discrepancy."""
     service = BottleTrackingService()
     result = service.reconcile_balance(user_id, address_id)
-    db.session.commit()
     return success_response(data=result)
 
 
 # ------------------------------------------------------------------
 # Driver Bottle Sessions
 # ------------------------------------------------------------------
+
 
 @admin_bottles_bp.route("/bottles/sessions", methods=["GET"])
 @handle_api_exception
@@ -295,13 +294,15 @@ def list_bottle_sessions():
         start_date=date.fromisoformat(start_date) if start_date else None,
         end_date=date.fromisoformat(end_date) if end_date else None,
     )
-    return success_response(data={
-        "items": [serialize_bottle_session(s) for s in result["items"]],
-        "total": result["total"],
-        "page": result["page"],
-        "per_page": result["per_page"],
-        "pages": result["pages"],
-    })
+    return success_response(
+        data={
+            "items": [serialize_bottle_session(s) for s in result["items"]],
+            "total": result["total"],
+            "page": result["page"],
+            "per_page": result["per_page"],
+            "pages": result["pages"],
+        }
+    )
 
 
 @admin_bottles_bp.route("/bottles/sessions/<int:session_id>", methods=["GET"])
@@ -314,10 +315,11 @@ def get_bottle_session(session_id):
     session = service.get_session_detail(session_id)
     if not session:
         from business_app.utils.exceptions import NotFoundError
+
         raise NotFoundError("Bottle session not found")
-    return success_response(data=serialize_bottle_session(
-        session, include_orders=True, include_transfers=True, include_members=True
-    ))
+    return success_response(
+        data=serialize_bottle_session(session, include_orders=True, include_transfers=True, include_members=True)
+    )
 
 
 @admin_bottles_bp.route("/bottles/sessions/<int:session_id>/force-close", methods=["POST"])
@@ -338,7 +340,6 @@ def force_close_bottle_session(session_id):
         bottles_returned_to_warehouse=data.get("bottles_returned_to_warehouse", 0),
         reason=data["reason"],
     )
-    db.session.commit()
     return success_response(
         data=serialize_bottle_session(session),
         message="Session force-closed successfully",
@@ -348,6 +349,7 @@ def force_close_bottle_session(session_id):
 # ------------------------------------------------------------------
 # Driver Bottle Transfers
 # ------------------------------------------------------------------
+
 
 @admin_bottles_bp.route("/bottles/transfers", methods=["GET"])
 @handle_api_exception
@@ -383,7 +385,6 @@ def resolve_bottle_transfer_dispute(transfer_id):
         resolved_quantity=data["resolved_quantity"],
         resolution_notes=data["resolution_notes"],
     )
-    db.session.commit()
     return success_response(
         data=serialize_bottle_transfer(transfer),
         message="Transfer dispute resolved successfully",

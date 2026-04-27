@@ -2,15 +2,17 @@
 Bot Webhook Helper
 Utilities for triggering bot webhooks (translation reload, etc.)
 """
+
 import logging
 import hmac
 import hashlib
 import asyncio
+import uuid
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any
 
 import aiohttp
-from flask import current_app
+from flask import current_app, g
 
 logger = logging.getLogger(__name__)
 
@@ -26,46 +28,56 @@ def _get_webhook_signature(body: bytes, secret: str) -> str:
     Returns:
         HMAC-SHA256 signature hex string
     """
-    return hmac.new(
-        secret.encode('utf-8'),
-        body,
-        hashlib.sha256
-    ).hexdigest()
+    return hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
 
 
-async def _trigger_bot_webhook_async(endpoint: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+async def _trigger_bot_webhook_async(
+    endpoint: str,
+    payload: Dict[str, Any],
+    *,
+    request_id: Optional[str] = None,
+) -> Dict[str, Any]:
     """
     Async helper to trigger bot webhook
 
     Args:
         endpoint: Webhook endpoint path (e.g., '/internal/reload-translations')
         payload: JSON payload to send
+        request_id: stable id for the bot to dedup retries against (BOT-008).
+            Defaults to current Flask request id if available, else a new UUID.
 
     Returns:
         Response data dictionary
     """
     try:
         # Get configuration
-        bot_webhook_url = current_app.config.get('BOT_WEBHOOK_URL')
-        webhook_secret = current_app.config.get('BOT_WEBHOOK_SECRET')
+        bot_webhook_url = current_app.config.get("BOT_WEBHOOK_URL")
+        webhook_secret = current_app.config.get("BOT_WEBHOOK_SECRET")
 
         if not bot_webhook_url:
             logger.warning("BOT_WEBHOOK_URL not configured, skipping bot webhook")
-            return {'success': False, 'message': 'Bot webhook URL not configured'}
+            return {"success": False, "message": "Bot webhook URL not configured"}
 
         if not webhook_secret:
             logger.warning("BOT_WEBHOOK_SECRET not configured, skipping bot webhook")
-            return {'success': False, 'message': 'Bot webhook secret not configured'}
+            return {"success": False, "message": "Bot webhook secret not configured"}
 
         # Prepare request
         import json
-        body = json.dumps(payload).encode('utf-8')
+
+        body = json.dumps(payload).encode("utf-8")
         signature = _get_webhook_signature(body, webhook_secret)
 
         url = f"{bot_webhook_url.rstrip('/')}{endpoint}"
+        # BOT-008: stable X-Request-ID lets the bot dedup backend retries.
+        # Reuse the per-request id from `g.request_id` (set by setup_request_handlers
+        # in business_app/__init__.py) so logs trace cleanly across services.
+        if request_id is None:
+            request_id = getattr(g, "request_id", None) or str(uuid.uuid4())[:8]
         headers = {
-            'Content-Type': 'application/json',
-            'X-Bot-Webhook-Signature': signature
+            "Content-Type": "application/json",
+            "X-Bot-Webhook-Signature": signature,
+            "X-Request-ID": request_id,
         }
 
         # Send request with timeout
@@ -80,27 +92,35 @@ async def _trigger_bot_webhook_async(endpoint: str, payload: Dict[str, Any]) -> 
                 else:
                     logger.error(f"Bot webhook failed with status {response.status}: {response_data}")
                     return {
-                        'success': False,
-                        'message': f'Bot webhook failed: {response_data.get("message", "Unknown error")}',
-                        'status_code': response.status
+                        "success": False,
+                        "message": f'Bot webhook failed: {response_data.get("message", "Unknown error")}',
+                        "status_code": response.status,
                     }
 
     except asyncio.TimeoutError:
         logger.error(f"Bot webhook timeout: {endpoint}")
-        return {'success': False, 'message': 'Bot webhook timeout'}
+        return {"success": False, "message": "Bot webhook timeout"}
 
     except Exception as e:
         logger.error(f"Error triggering bot webhook: {e}", exc_info=True)
-        return {'success': False, 'message': f'Bot webhook error: {str(e)}'}
+        return {"success": False, "message": f"Bot webhook error: {str(e)}"}
 
 
-def trigger_bot_webhook(endpoint: str, payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+def trigger_bot_webhook(
+    endpoint: str,
+    payload: Optional[Dict[str, Any]] = None,
+    *,
+    request_id: Optional[str] = None,
+) -> Dict[str, Any]:
     """
     Trigger a bot webhook endpoint (sync wrapper for async function)
 
     Args:
         endpoint: Webhook endpoint path (e.g., '/internal/reload-translations')
         payload: JSON payload to send (default: empty dict)
+        request_id: BOT-008 dedup id. Pass an explicit id when calling from a
+            Celery task that retries a logical operation — same id across
+            retries collapses to one bot notification.
 
     Returns:
         Response data dictionary
@@ -114,20 +134,30 @@ def trigger_bot_webhook(endpoint: str, payload: Optional[Dict[str, Any]] = None)
         payload = {}
 
     # Add timestamp if not present
-    if 'timestamp' not in payload:
-        payload['timestamp'] = datetime.now(timezone.utc).isoformat()
+    if "timestamp" not in payload:
+        payload["timestamp"] = datetime.now(timezone.utc).isoformat()
+
+    # Capture g.request_id BEFORE crossing into the new event loop — Flask's
+    # request context isn't available inside the asyncio.run_until_complete
+    # call below.
+    if request_id is None:
+        try:
+            request_id = getattr(g, "request_id", None)
+        except RuntimeError:
+            # No Flask request context (e.g., called from Celery worker)
+            request_id = None
 
     try:
         # Run async function in event loop
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        result = loop.run_until_complete(_trigger_bot_webhook_async(endpoint, payload))
+        result = loop.run_until_complete(_trigger_bot_webhook_async(endpoint, payload, request_id=request_id))
         loop.close()
         return result
 
     except Exception as e:
         logger.error(f"Error in trigger_bot_webhook: {e}", exc_info=True)
-        return {'success': False, 'message': f'Failed to trigger bot webhook: {str(e)}'}
+        return {"success": False, "message": f"Failed to trigger bot webhook: {str(e)}"}
 
 
 def trigger_translation_reload() -> Dict[str, Any]:
@@ -143,10 +173,9 @@ def trigger_translation_reload() -> Dict[str, Any]:
             print("Bot translations reloaded")
     """
     logger.info("Triggering bot translation reload")
-    return trigger_bot_webhook('/internal/reload-translations', {
-        'action': 'reload_translations',
-        'source': 'admin_api'
-    })
+    return trigger_bot_webhook(
+        "/internal/reload-translations", {"action": "reload_translations", "source": "admin_api"}
+    )
 
 
 def trigger_bot_health_check() -> Dict[str, Any]:
@@ -157,4 +186,4 @@ def trigger_bot_health_check() -> Dict[str, Any]:
         Response data dictionary with bot health information
     """
     logger.info("Checking bot health")
-    return trigger_bot_webhook('/health', {})
+    return trigger_bot_webhook("/health", {})

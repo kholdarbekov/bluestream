@@ -7,8 +7,8 @@ import {
   TruckOutlined,
   ReloadOutlined
 } from '@ant-design/icons';
-import { useQuery } from 'react-query';
-import moment from 'moment';
+import { useQuery } from '@tanstack/react-query';
+import dayjs from 'dayjs';
 import StatCard from '../components/charts/StatCard';
 import LineChart from '../components/charts/LineChart';
 import BarChart from '../components/charts/BarChart';
@@ -25,24 +25,24 @@ const Dashboard = () => {
   // Load dashboard namespace for ui.dashboard.* keys
   const { t } = useTranslation('dashboard');
   const [dateRange, setDateRange] = useState([
-    moment().subtract(30, 'days'),
-    moment()
+    dayjs().subtract(30, 'day'),
+    dayjs()
   ]);
   const [refreshInterval, setRefreshInterval] = useState(30000); // 30 seconds
   const responsive = useResponsive();
 
   // Fetch dashboard data
-  const { data: dashboardData, isLoading, refetch } = useQuery(
-    ['dashboard', dateRange],
-    () => adminService.getDashboardData({
+  const { data: dashboardData, isLoading, refetch } = useQuery({
+    queryKey: ['dashboard', dateRange],
+
+    queryFn: () => adminService.getDashboardData({
       start_date: dateRange[0].format('YYYY-MM-DD'),
       end_date: dateRange[1].format('YYYY-MM-DD')
     }),
-    {
-      refetchInterval: refreshInterval,
-      refetchIntervalInBackground: true
-    }
-  );
+
+    refetchInterval: refreshInterval,
+    refetchIntervalInBackground: true,
+  });
 
   // Sample data for charts (replace with real API data)
   const revenueData = {
@@ -119,10 +119,10 @@ const Dashboard = () => {
   return (
     <div>
       {/* Header Controls - Universal Responsive Layout */}
-      <Row 
-        justify="space-between" 
-        align="middle" 
-        style={{ marginBottom: 24 }} 
+      <Row
+        justify="space-between"
+        align="middle"
+        style={{ marginBottom: 24 }}
         gutter={[16, 16]}
       >
         {/* Title Section */}
@@ -137,13 +137,13 @@ const Dashboard = () => {
             {t('ui.dashboard.title')}
           </Title>
         </Col>
-        
+
         {/* Controls Section */}
         <Col xs={24} sm={24} md={16} lg={18}>
-          <Space 
-            wrap 
-            size="middle" 
-            style={{ 
+          <Space
+            wrap
+            size="middle"
+            style={{
               width: '100%',
               justifyContent: responsive.isMobileDevice ? 'center' : 'flex-end'
             }}
@@ -152,7 +152,7 @@ const Dashboard = () => {
               value={dateRange}
               onChange={handleDateRangeChange}
               format="YYYY-MM-DD"
-              style={{ 
+              style={{
                 minWidth: responsive.isMobileDevice ? '200px' : '220px',
                 minHeight: responsive.isTouchDevice ? '40px' : '32px'
               }}
@@ -186,13 +186,13 @@ const Dashboard = () => {
       </Row>
 
       {/* Key Metrics - Responsive Grid */}
-      <Row 
+      <Row
         gutter={[
-          responsive.isMobileDevice ? 8 : 16, 
+          responsive.isMobileDevice ? 8 : 16,
           responsive.isMobileDevice ? 8 : 16
-        ]} 
-        style={{ 
-          marginBottom: responsive.isMobileDevice ? 16 : 24 
+        ]}
+        style={{
+          marginBottom: responsive.isMobileDevice ? 16 : 24
         }}
       >
         <Col xs={24} sm={12} lg={6}>
@@ -244,7 +244,7 @@ const Dashboard = () => {
 
       {/* Charts Section - Responsive Layout */}
       <Row gutter={[
-        responsive.isMobileDevice ? 8 : 16, 
+        responsive.isMobileDevice ? 8 : 16,
         responsive.isMobileDevice ? 8 : 16
       ]}>
         {/* Revenue Trend */}
@@ -327,13 +327,13 @@ const Dashboard = () => {
       </Row>
 
       {/* Quick Stats - Responsive Three Column Layout */}
-      <Row 
+      <Row
         gutter={[
-          responsive.isMobileDevice ? 8 : 16, 
+          responsive.isMobileDevice ? 8 : 16,
           responsive.isMobileDevice ? 8 : 16
-        ]} 
-        style={{ 
-          marginTop: responsive.isMobileDevice ? 16 : 24 
+        ]}
+        style={{
+          marginTop: responsive.isMobileDevice ? 16 : 24
         }}
       >
         <Col xs={24} sm={12} md={8}>

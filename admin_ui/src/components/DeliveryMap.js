@@ -3,7 +3,7 @@ import {
     MapContainer, TileLayer, Marker, Popup, useMap,
 } from 'react-leaflet';
 import { Card, Tag, Space, Typography, Empty } from 'antd';
-import { useQuery } from 'react-query';
+import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -44,11 +44,11 @@ const DeliveryMap = ({ height = 500, style = {} }) => {
     const { t } = useTranslation(['staff']);
 
     // Fetch delivery persons with location data, auto-refresh every 30s
-    const { data, isLoading } = useQuery(
-        ['deliveryPersonsMap'],
-        () => staffService.getDeliveryPersons({ status: 'active', per_page: 100 }),
-        { refetchInterval: 30000 }
-    );
+    const { data, isLoading } = useQuery({
+        queryKey: ['deliveryPersonsMap'],
+        queryFn: () => staffService.getDeliveryPersons({ status: 'active', per_page: 100 }),
+        refetchInterval: 30000,
+    });
 
     const persons = data?.data?.data?.items || [];
 

@@ -5,64 +5,54 @@
  * the configured display timezone offset before formatting so the
  * admin UI shows the correct local time regardless of the browser's timezone.
  *
- * The offset is set via REACT_APP_TIMEZONE_OFFSET env var (from .env).
+ * The offset is set via VITE_TIMEZONE_OFFSET env var (from .env).
  */
-import moment from 'moment';
+import dayjs from 'dayjs';
+import utc from 'dayjs/plugin/utc';
+import customParseFormat from 'dayjs/plugin/customParseFormat';
 
-const TIMEZONE_OFFSET = process.env.REACT_APP_TIMEZONE_OFFSET || '+05:00';
+dayjs.extend(utc);
+dayjs.extend(customParseFormat);
 
-/**
- * Convert a date value to a moment in the Tashkent timezone.
- */
-export const toTashkent = (date) => moment(date).utcOffset(TIMEZONE_OFFSET);
+const TIMEZONE_OFFSET = import.meta.env.VITE_TIMEZONE_OFFSET || '+05:00';
 
-/**
- * Format a date for display (date only).
- * Default format: "MMM DD, YYYY"
- */
+// Parse "+05:00" / "-03:30" into total minutes.
+const parseOffsetMinutes = (offset) => {
+  const match = /^([+-])(\d{2}):(\d{2})$/.exec(offset);
+  if (!match) return 0;
+  const sign = match[1] === '-' ? -1 : 1;
+  return sign * (parseInt(match[2], 10) * 60 + parseInt(match[3], 10));
+};
+
+const OFFSET_MINUTES = parseOffsetMinutes(TIMEZONE_OFFSET);
+
+export const toTashkent = (date) => dayjs(date).utcOffset(OFFSET_MINUTES);
+
 export const formatDate = (date, format = 'MMM DD, YYYY') => {
   if (!date) return '-';
   return toTashkent(date).format(format);
 };
 
-/**
- * Format a date-time for display.
- * Default format: "MMM DD, YYYY HH:mm"
- */
 export const formatDateTime = (date, format = 'MMM DD, YYYY HH:mm') => {
   if (!date) return '-';
   return toTashkent(date).format(format);
 };
 
-/**
- * Format a date as a short ISO-style string (YYYY-MM-DD HH:mm).
- */
 export const formatDateTimeShort = (date) => {
   if (!date) return '-';
   return toTashkent(date).format('YYYY-MM-DD HH:mm');
 };
 
-/**
- * Format a date as a locale-style date string (DD/MM/YYYY).
- * Replacement for new Date(date).toLocaleDateString().
- */
 export const formatLocalDate = (date) => {
   if (!date) return '-';
   return toTashkent(date).format('DD/MM/YYYY');
 };
 
-/**
- * Format a date as a locale-style date+time string (DD/MM/YYYY, HH:mm).
- * Replacement for new Date(date).toLocaleString().
- */
 export const formatLocaleDateTime = (date) => {
   if (!date) return '-';
   return toTashkent(date).format('DD/MM/YYYY, HH:mm');
 };
 
-/**
- * Get the current time in Tashkent as a formatted string.
- */
 export const nowTashkent = (format = 'DD/MM/YYYY, HH:mm') => {
-  return moment().utcOffset(TIMEZONE_OFFSET).format(format);
+  return dayjs().utcOffset(OFFSET_MINUTES).format(format);
 };

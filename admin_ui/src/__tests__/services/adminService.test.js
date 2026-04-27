@@ -2,20 +2,20 @@ import adminService from '../../services/adminService';
 import api from '../../services/api';
 
 // Mock the API
-jest.mock('../../services/api', () => ({
+vi.mock('../../services/api', () => ({
   __esModule: true,
   default: {
-    get: jest.fn(),
-    post: jest.fn(),
-    put: jest.fn(),
-    delete: jest.fn()
+    get: vi.fn(),
+    post: vi.fn(),
+    put: vi.fn(),
+    delete: vi.fn()
   },
-  getCookie: jest.fn()
+  getCookie: vi.fn()
 }));
 
 describe('AdminService', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   describe('getDashboardData', () => {

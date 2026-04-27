@@ -2,13 +2,12 @@
 Business App Package
 Water delivery business management system
 """
+
 import os
-import logging
-from logging.handlers import RotatingFileHandler
 from datetime import datetime, UTC
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from sqlalchemy import text
-from flask import Flask, jsonify, render_template, request, g, session, redirect
+from flask import Flask, jsonify, request, g, session, redirect
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
 from flask_jwt_extended import JWTManager, verify_jwt_in_request, get_jwt_identity
@@ -21,11 +20,14 @@ import redis
 from flasgger import Swagger
 import click
 from business_app.config import get_config
-from business_app.utils.exceptions import ValidationError, NotFoundError, UnauthorizedError
-from business_app.utils.helpers import set_language
 from business_app.utils.template_helpers import register_multilingual_filters, register_multilingual_globals
 
-# Initialize extensions
+# ARCH-013: A SQLAlchemy MetaData naming convention lives in
+# ``business_app/utils/db_naming.py`` (`NAMING_CONVENTION`). It is intentionally
+# NOT installed here — see that module's docstring for the prod-DB rename
+# blocker. Until that lands, going forward every new migration must pass an
+# explicit ``name=`` to ``ForeignKeyConstraint`` / ``op.create_foreign_key`` /
+# ``UniqueConstraint`` etc. so ``downgrade()`` can issue ``DROP CONSTRAINT``.
 db = SQLAlchemy()
 migrate = Migrate()
 jwt = JWTManager()
@@ -33,13 +35,14 @@ cors = CORS()
 limiter = Limiter(key_func=get_remote_address)
 cache = Cache()
 mail = Mail()
-redis_client = redis.from_url(os.environ.get('REDIS_URL', 'redis://redis:6379/0'))
+redis_client = redis.from_url(os.environ.get("REDIS_URL", "redis://redis:6379/0"))
 
 
 def setup_logging(app):
     """Configure application logging with enhanced structured logging"""
     # Use the new enhanced logging system
     from business_app.utils.logging_config import setup_enhanced_logging
+
     setup_enhanced_logging(app)
 
 
@@ -66,81 +69,85 @@ def register_blueprints(app: Flask):
     from business_app.api.admin_bottles import admin_bottles_bp
     from business_app.api.staff_tryouts import staff_tryouts_bp
     from business_app.frontend import frontend_bp
-    
+
     # API blueprints
-    api_prefix = app.config['API_PREFIX']
-    app.register_blueprint(auth_bp, url_prefix=f'{api_prefix}/auth')
-    app.register_blueprint(products_bp, url_prefix=f'{api_prefix}/products')
-    app.register_blueprint(orders_bp, url_prefix=f'{api_prefix}/orders')
-    app.register_blueprint(cart_bp, url_prefix=f'{api_prefix}/cart')
-    app.register_blueprint(payments_bp, url_prefix=f'{api_prefix}/payments')
-    app.register_blueprint(delivery_bp, url_prefix=f'{api_prefix}/delivery')
-    app.register_blueprint(subscriptions_bp, url_prefix=f'{api_prefix}/subscriptions')
-    app.register_blueprint(loyalty_bp, url_prefix=f'{api_prefix}/loyalty')
-    app.register_blueprint(notifications_bp, url_prefix=f'{api_prefix}/notifications')
-    app.register_blueprint(analytics_bp, url_prefix=f'{api_prefix}/analytics')
-    app.register_blueprint(admin_bp, url_prefix=f'{api_prefix}/admin')
-    app.register_blueprint(session_management_bp, url_prefix=f'{api_prefix}/session')
-    app.register_blueprint(blog_bp, url_prefix=f'{api_prefix}/blog')
-    app.register_blueprint(addresses_bp, url_prefix=f'{api_prefix}/addresses')
-    app.register_blueprint(bot_bp, url_prefix=f'{api_prefix}/bot')
-    app.register_blueprint(translations_bp, url_prefix=f'{api_prefix}/translations')
-    app.register_blueprint(staff_bp, url_prefix=f'{api_prefix}/staff')
-    app.register_blueprint(admin_tryouts_bp, url_prefix=f'{api_prefix}/admin')
-    app.register_blueprint(admin_bottles_bp, url_prefix=f'{api_prefix}/admin')
-    app.register_blueprint(staff_tryouts_bp, url_prefix=f'{api_prefix}/staff')
+    api_prefix = app.config["API_PREFIX"]
+    app.register_blueprint(auth_bp, url_prefix=f"{api_prefix}/auth")
+    app.register_blueprint(products_bp, url_prefix=f"{api_prefix}/products")
+    app.register_blueprint(orders_bp, url_prefix=f"{api_prefix}/orders")
+    app.register_blueprint(cart_bp, url_prefix=f"{api_prefix}/cart")
+    app.register_blueprint(payments_bp, url_prefix=f"{api_prefix}/payments")
+    app.register_blueprint(delivery_bp, url_prefix=f"{api_prefix}/delivery")
+    app.register_blueprint(subscriptions_bp, url_prefix=f"{api_prefix}/subscriptions")
+    app.register_blueprint(loyalty_bp, url_prefix=f"{api_prefix}/loyalty")
+    app.register_blueprint(notifications_bp, url_prefix=f"{api_prefix}/notifications")
+    app.register_blueprint(analytics_bp, url_prefix=f"{api_prefix}/analytics")
+    app.register_blueprint(admin_bp, url_prefix=f"{api_prefix}/admin")
+    app.register_blueprint(session_management_bp, url_prefix=f"{api_prefix}/session")
+    app.register_blueprint(blog_bp, url_prefix=f"{api_prefix}/blog")
+    app.register_blueprint(addresses_bp, url_prefix=f"{api_prefix}/addresses")
+    app.register_blueprint(bot_bp, url_prefix=f"{api_prefix}/bot")
+    app.register_blueprint(translations_bp, url_prefix=f"{api_prefix}/translations")
+    app.register_blueprint(staff_bp, url_prefix=f"{api_prefix}/staff")
+    app.register_blueprint(admin_tryouts_bp, url_prefix=f"{api_prefix}/admin")
+    app.register_blueprint(admin_bottles_bp, url_prefix=f"{api_prefix}/admin")
+    app.register_blueprint(staff_tryouts_bp, url_prefix=f"{api_prefix}/staff")
     app.register_blueprint(frontend_bp)
-    
 
 
 def register_error_handlers(app):
     """Register application error handlers"""
     # Import and register the new standardized error handlers
     from business_app.utils.error_handlers import register_error_handlers as register_new_handlers
+
     register_new_handlers(app)
 
 
 def register_cli_commands(app):
     """Register CLI commands"""
-    
+
     # Register timezone management commands
     from business_app.cli.timezone_commands import register_timezone_commands
+
     register_timezone_commands(app)
-    
+
     @app.cli.command()
     def init_db():
         """Initialize the database"""
         from flask_migrate import upgrade
+
         upgrade()
-        click.echo('Database initialized.')
-    
+        click.echo("Database initialized.")
+
     @app.cli.command()
     def seed_data():
         """Seed initial data"""
         from scripts.seed_data import seed_all_data
+
         seed_all_data()
-        click.echo('Database seeded.')
-    
+        click.echo("Database seeded.")
+
     @app.cli.command()
     def create_admin():
         """Create admin user"""
         from business_app.services.auth_service import AuthService
-        
-        phone = click.prompt('Admin phone')
-        email = click.prompt('Admin email')
-        password = click.prompt('Admin password', hide_input=True)
-        
+
+        phone = click.prompt("Admin phone")
+        email = click.prompt("Admin email")
+        password = click.prompt("Admin password", hide_input=True)
+
         admin_user = AuthService.create_admin_user(phone, email, password)
-        click.echo(f'Admin user created: {admin_user.email}')
-    
+        click.echo(f"Admin user created: {admin_user.email}")
+
     # Initialize configuration CLI commands
     from business_app.cli import init_app as init_cli
+
     init_cli(app)
 
 
 def setup_request_handlers(app):
     """Setup request context handlers"""
-    
+
     @app.before_request
     def before_request():
         """Execute before each request - Check URL params, session, and user preferences
@@ -154,50 +161,52 @@ def setup_request_handlers(app):
         """
         # Set request start time for performance monitoring
         g.start_time = datetime.now(UTC)
-        
+
         # Use incoming X-Request-ID for distributed tracing, or generate one
         import uuid
-        g.request_id = request.headers.get('X-Request-ID') or str(uuid.uuid4())[:8]
+
+        g.request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())[:8]
 
         # Skip logging for healthcheck endpoints and static assets
-        is_healthcheck = request.path in ['/health', '/healthz', '/api/health']
-        is_static = request.path.startswith('/static/')
-        should_log = not is_healthcheck and not is_static
+        is_healthcheck = request.path in ["/health", "/healthz", "/api/health"]
+        is_static = request.path.startswith("/static/")
+        not is_healthcheck and not is_static
 
         lang = None
         lang_source = None  # Track where the language came from
 
         # DEBUG: Log all available language sources
-        url_lang = request.args.get('lang', None)
-        session_lang = session.get('language')
-        browser_lang = request.headers.get('Accept-Language', '')[:10] if request.headers.get('Accept-Language') else None
+        url_lang = request.args.get("lang", None)
+        session_lang = session.get("language")
 
         # Keep default language URLs clean: /path (not /path?lang=<default>).
         # This reduces duplicate URL variants for crawlers and canonical signals.
-        default_language = app.config.get('DEFAULT_LANGUAGE', 'uz')
+        default_language = app.config.get("DEFAULT_LANGUAGE", "uz")
         if (
-            request.method in ('GET', 'HEAD')
+            request.method in ("GET", "HEAD")
             and request.endpoint
-            and request.endpoint.startswith('frontend.')
+            and request.endpoint.startswith("frontend.")
             and url_lang == default_language
         ):
             parsed_url = urlsplit(request.url)
             filtered_query = [
                 (key, value)
                 for key, value in parse_qsl(parsed_url.query, keep_blank_values=True)
-                if not (key == 'lang' and value == default_language)
+                if not (key == "lang" and value == default_language)
             ]
-            cleaned_url = urlunsplit((
-                parsed_url.scheme,
-                parsed_url.netloc,
-                parsed_url.path,
-                urlencode(filtered_query, doseq=True),
-                parsed_url.fragment,
-            ))
+            cleaned_url = urlunsplit(
+                (
+                    parsed_url.scheme,
+                    parsed_url.netloc,
+                    parsed_url.path,
+                    urlencode(filtered_query, doseq=True),
+                    parsed_url.fragment,
+                )
+            )
             return redirect(cleaned_url, code=301)
 
         # 1. Check URL parameter first (highest priority)
-        if url_lang and url_lang in app.config['LANGUAGES']:
+        if url_lang and url_lang in app.config["LANGUAGES"]:
             lang = url_lang
             lang_source = "URL parameter"
 
@@ -205,7 +214,7 @@ def setup_request_handlers(app):
         # This ensures explicit user language changes via UI take immediate effect
         if not lang:
 
-            if session_lang and session_lang in app.config['LANGUAGES']:
+            if session_lang and session_lang in app.config["LANGUAGES"]:
                 lang = session_lang
                 lang_source = "Session"
 
@@ -217,56 +226,58 @@ def setup_request_handlers(app):
                 current_user_id = get_jwt_identity()
                 if current_user_id:
                     from business_app.models.user import User
+
                     user = User.query.get(current_user_id)
                     if user:
-                        if user.preferred_language and user.preferred_language in app.config['LANGUAGES']:
+                        if user.preferred_language and user.preferred_language in app.config["LANGUAGES"]:
                             lang = user.preferred_language
                             lang_source = "User DB preference"
-            except Exception as e:
+            except Exception:
                 pass  # Continue with other methods
-
 
         # 4. Fall back to browser Accept-Language header
         if not lang:
-            full_browser_lang = request.headers.get('Accept-Language', '')
-            if full_browser_lang and full_browser_lang[:2] in app.config['LANGUAGES']:
+            full_browser_lang = request.headers.get("Accept-Language", "")
+            if full_browser_lang and full_browser_lang[:2] in app.config["LANGUAGES"]:
                 lang = full_browser_lang[:2]
                 lang_source = "Accept-Language header"
 
         # 5. Use default language if nothing else worked
-        if not lang or lang not in app.config['LANGUAGES']:
-            lang = app.config['DEFAULT_LANGUAGE']
+        if not lang or lang not in app.config["LANGUAGES"]:
+            lang = app.config["DEFAULT_LANGUAGE"]
             lang_source = "Default"
 
         # Keep non-default language URLs explicit to avoid cookie-only language variants.
         # Use temporary redirects because this is session/user-preference dependent.
         frontend_lang_redirect_exclusions = {
-            'frontend.set_language_route',
-            'frontend.sitemap_index',
-            'frontend.sitemap_static',
-            'frontend.sitemap_products',
-            'frontend.sitemap_blog',
-            'frontend.google_products_feed',
+            "frontend.set_language_route",
+            "frontend.sitemap_index",
+            "frontend.sitemap_static",
+            "frontend.sitemap_products",
+            "frontend.sitemap_blog",
+            "frontend.google_products_feed",
         }
         if (
-            request.method in ('GET', 'HEAD')
+            request.method in ("GET", "HEAD")
             and request.endpoint
-            and request.endpoint.startswith('frontend.')
+            and request.endpoint.startswith("frontend.")
             and request.endpoint not in frontend_lang_redirect_exclusions
             and not url_lang
             and lang != default_language
-            and lang_source in {'Session', 'User DB preference', 'Accept-Language header'}
+            and lang_source in {"Session", "User DB preference", "Accept-Language header"}
         ):
             parsed_url = urlsplit(request.url)
             existing_query = parse_qsl(parsed_url.query, keep_blank_values=True)
-            localized_query = existing_query + [('lang', lang)]
-            localized_url = urlunsplit((
-                parsed_url.scheme,
-                parsed_url.netloc,
-                parsed_url.path,
-                urlencode(localized_query, doseq=True),
-                parsed_url.fragment,
-            ))
+            localized_query = existing_query + [("lang", lang)]
+            localized_url = urlunsplit(
+                (
+                    parsed_url.scheme,
+                    parsed_url.netloc,
+                    parsed_url.path,
+                    urlencode(localized_query, doseq=True),
+                    parsed_url.fragment,
+                )
+            )
             return redirect(localized_url, code=302)
 
         # Set the language in request context
@@ -275,48 +286,46 @@ def setup_request_handlers(app):
 
         # Persist resolved language for frontend requests so reloads remain stable
         # even when JWT/session source availability changes between requests.
-        endpoint = request.endpoint or ''
-        if endpoint.startswith('frontend.'):
-            if session.get('language') != lang:
-                session['language'] = lang
+        endpoint = request.endpoint or ""
+        if endpoint.startswith("frontend."):
+            if session.get("language") != lang:
+                session["language"] = lang
                 session.permanent = True
                 session.modified = True
-    
+
     @app.after_request
     def after_request(response):
         """Execute after each request"""
         # Note: Security headers are now handled by SecurityHeadersMiddleware
-        
+
         # Echo request ID for distributed tracing
-        if hasattr(g, 'request_id'):
-            response.headers['X-Request-ID'] = g.request_id
+        if hasattr(g, "request_id"):
+            response.headers["X-Request-ID"] = g.request_id
 
         # Optional diagnostics for production language behavior.
-        if app.config.get('LANGUAGE_DEBUG_HEADERS', False):
-            response.headers['X-App-Language'] = getattr(g, 'language', '')
-            response.headers['X-App-Language-Source'] = getattr(g, 'language_source', '')
+        if app.config.get("LANGUAGE_DEBUG_HEADERS", False):
+            response.headers["X-App-Language"] = getattr(g, "language", "")
+            response.headers["X-App-Language-Source"] = getattr(g, "language_source", "")
 
         # Add performance monitoring
-        if hasattr(g, 'start_time'):
+        if hasattr(g, "start_time"):
             duration = (datetime.now(UTC) - g.start_time).total_seconds() * 1000
-            response.headers['X-Response-Time'] = f'{duration:.2f}ms'
-        
+            response.headers["X-Response-Time"] = f"{duration:.2f}ms"
+
         # Add Cache-Control headers for dynamic content
         # This prevents browsers from caching the page when language changes
-        if 'Cache-Control' not in response.headers:
-            response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
-            response.headers['Pragma'] = 'no-cache'
-            response.headers['Expires'] = '0'
-        
+        if "Cache-Control" not in response.headers:
+            response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+            response.headers["Pragma"] = "no-cache"
+            response.headers["Expires"] = "0"
+
         # Ensure Vary includes all language-affecting request headers.
         # This prevents proxy/CDN cache cross-talk between languages.
-        vary_value = response.headers.get('Vary', '')
-        vary_parts = {
-            part.strip() for part in vary_value.split(',') if part.strip()
-        }
-        vary_parts.update({'Cookie', 'Accept-Language'})
-        response.headers['Vary'] = ', '.join(sorted(vary_parts))
-        
+        vary_value = response.headers.get("Vary", "")
+        vary_parts = {part.strip() for part in vary_value.split(",") if part.strip()}
+        vary_parts.update({"Cookie", "Accept-Language"})
+        response.headers["Vary"] = ", ".join(sorted(vary_parts))
+
         # ===================================================================
         # JWT Implicit Token Refresh (Flask-JWT-Extended recommended approach)
         # https://flask-jwt-extended.readthedocs.io/en/stable/refreshing_tokens.html
@@ -326,27 +335,26 @@ def setup_request_handlers(app):
         try:
             from flask_jwt_extended import get_jwt, get_jwt_identity, create_access_token, set_access_cookies
             from datetime import timedelta, timezone
-            
+
             exp_timestamp = get_jwt()["exp"]
             now = datetime.now(timezone.utc)
             target_timestamp = datetime.timestamp(now + timedelta(minutes=30))
-            
+
             if target_timestamp > exp_timestamp:
                 # Token is within 30 minutes of expiring - refresh it
                 # IMPORTANT: Preserve original claims (especially 'role') when refreshing
                 # Otherwise admin users lose their role and get 403 Forbidden errors
                 jwt_data = get_jwt()
                 additional_claims = {
-                    key: jwt_data[key] 
-                    for key in ['user_id', 'email', 'role', 'status', 'verified', 'platform', 'session_id']
+                    key: jwt_data[key]
+                    for key in ["user_id", "email", "role", "status", "verified", "platform", "session_id"]
                     if key in jwt_data
                 }
-                access_token = create_access_token(
-                    identity=get_jwt_identity(),
-                    additional_claims=additional_claims
-                )
+                access_token = create_access_token(identity=get_jwt_identity(), additional_claims=additional_claims)
                 set_access_cookies(response, access_token)
-                app.logger.info(f"JWT auto-refreshed for user {get_jwt_identity()} with role={additional_claims.get('role')}")
+                app.logger.info(
+                    f"JWT auto-refreshed for user {get_jwt_identity()} with role={additional_claims.get('role')}"
+                )
         except (RuntimeError, KeyError):
             # No valid JWT in request (anonymous user, API call, etc.)
             # Just return the original response
@@ -354,9 +362,9 @@ def setup_request_handlers(app):
         except Exception as e:
             # Log unexpected errors but don't break the response
             app.logger.warning(f"JWT auto-refresh error: {e}")
-            
+
         return response
-    
+
     @app.teardown_appcontext
     def close_db(error):
         """Close database connections safely"""
@@ -372,7 +380,7 @@ def setup_request_handlers(app):
 
 def setup_jwt_handlers(app):
     """Setup JWT-related handlers"""
-    
+
     @jwt.user_identity_loader
     def user_identity_lookup(identity):
         """
@@ -381,44 +389,35 @@ def setup_jwt_handlers(app):
         if identity is None:
             raise ValueError("JWT identity cannot be None")
         return str(identity)
-    
+
     @jwt.expired_token_loader
     def expired_token_callback(jwt_header, jwt_payload):
         app.logger.warning(f'JWT Expired Token: user_id={jwt_payload.get("user_id")}, exp={jwt_payload.get("exp")}')
-        return jsonify({
-            'error': 'Token Expired',
-            'message': 'The token has expired.'
-        }), 401
-    
+        return jsonify({"error": "Token Expired", "message": "The token has expired."}), 401
+
     @jwt.invalid_token_loader
     def invalid_token_callback(error):
-        app.logger.error(f'JWT Invalid Token Error: {error}')
-        app.logger.error(f'Error type: {type(error)}')
-        return jsonify({
-            'error': 'Invalid Token',
-            'message': 'The token is invalid.'
-        }), 401
-    
+        app.logger.error(f"JWT Invalid Token Error: {error}")
+        app.logger.error(f"Error type: {type(error)}")
+        return jsonify({"error": "Invalid Token", "message": "The token is invalid."}), 401
+
     @jwt.unauthorized_loader
     def missing_token_callback(error):
         # Enhanced logging to debug CSRF issues
         from flask import request
-        app.logger.error(f'JWT Missing Token Error: {error}')
-        app.logger.error(f'Request cookies: {list(request.cookies.keys())}')
-        app.logger.error(f'Request headers: Authorization={request.headers.get("Authorization")}, X-CSRF-TOKEN={request.headers.get("X-CSRF-TOKEN")}')
+
+        app.logger.error(f"JWT Missing Token Error: {error}")
+        app.logger.error(f"Request cookies: {list(request.cookies.keys())}")
+        app.logger.error(
+            f'Request headers: Authorization={request.headers.get("Authorization")}, X-CSRF-TOKEN={request.headers.get("X-CSRF-TOKEN")}'  # noqa: E501
+        )
         app.logger.error(f'CSRF token cookie: {request.cookies.get("csrf_access_token")}')
-        return jsonify({
-            'error': 'Authorization Required',
-            'message': 'Request does not contain an access token.'
-        }), 401
-    
+        return jsonify({"error": "Authorization Required", "message": "Request does not contain an access token."}), 401
+
     @jwt.revoked_token_loader
     def revoked_token_callback(jwt_header, jwt_payload):
-        app.logger.error(f'JWT Revoked Token: header={jwt_header}, payload={jwt_payload}')
-        return jsonify({
-            'error': 'Token Revoked',
-            'message': 'The token has been revoked.'
-        }), 401
+        app.logger.error(f"JWT Revoked Token: header={jwt_header}, payload={jwt_payload}")
+        return jsonify({"error": "Token Revoked", "message": "The token has been revoked."}), 401
 
     @jwt.token_in_blocklist_loader
     def check_if_token_revoked(jwt_header, jwt_payload):
@@ -433,23 +432,24 @@ def setup_jwt_handlers(app):
         Returns:
             True if token is blacklisted, False otherwise
         """
-        jti = jwt_payload['jti']
+        jti = jwt_payload["jti"]
 
         try:
             # Import TokenService to check blacklist
             from business_app.services.token_service import TokenService
+
             token_service = TokenService()
 
             # Check if token is blacklisted
             is_blacklisted = token_service.is_token_blacklisted(jti)
 
             if is_blacklisted:
-                app.logger.info(f'Blocked blacklisted token with JTI: {jti}')
+                app.logger.info(f"Blocked blacklisted token with JTI: {jti}")
 
             return is_blacklisted
 
         except Exception as e:
-            app.logger.error(f'Error checking token blacklist for JTI {jti}: {e}')
+            app.logger.error(f"Error checking token blacklist for JTI {jti}: {e}")
             # Fail open to prevent authentication disruption
             # In production, you might want to fail closed (return True)
             return False
@@ -465,7 +465,7 @@ def create_app(config_class=None):
     def _apply_config_from_instance(config_instance):
         """Copy readable non-callable attributes from config instance."""
         for attr in dir(config_instance):
-            if attr.startswith('_'):
+            if attr.startswith("_"):
                 continue
             try:
                 value = getattr(config_instance, attr)
@@ -487,158 +487,172 @@ def create_app(config_class=None):
         else:
             # Handle dictionary-style config (for backward compatibility)
             app.config.update(config_class)
-            config_class = type('Config', (), config_class)
+            config_class = type("Config", (), config_class)
     else:
         config_class = baseline_config_class
-    
+
     # Initialize configuration with app-specific setup
-    if hasattr(config_class, 'init_app'):
+    if hasattr(config_class, "init_app"):
         config_class.init_app(app)
     else:
         # Legacy validation for backward compatibility
         if not app.testing:
-            if hasattr(config_class, 'validate_secret_key'):
+            if hasattr(config_class, "validate_secret_key"):
                 config_class.validate_secret_key()
-            if hasattr(config_class, 'validate_debug_mode'):
+            if hasattr(config_class, "validate_debug_mode"):
                 config_class.validate_debug_mode()
-            if hasattr(config_class, 'validate_production_settings'):
+            if hasattr(config_class, "validate_production_settings"):
                 config_class.validate_production_settings()
-    
+
     # Additional environment validation on startup
     if not app.testing:
         from business_app.utils.env_validator import validate_environment_startup
+
         validation_passed = validate_environment_startup(app)
-        
+
         # In production, fail hard if validation doesn't pass
-        if not validation_passed and os.environ.get('FLASK_ENV') == 'production':
+        if not validation_passed and os.environ.get("FLASK_ENV") == "production":
             raise RuntimeError("Environment validation failed in production")
-    
+
     # Jinja2 template behavior controls.
     # Important: Jinja cache is compiled-template cache, not rendered HTML cache.
-    force_auto_reload = bool(app.config.get('JINJA_FORCE_AUTO_RELOAD', False))
-    disable_jinja_cache = bool(app.config.get('JINJA_DISABLE_CACHE', False))
+    force_auto_reload = bool(app.config.get("JINJA_FORCE_AUTO_RELOAD", False))
+    disable_jinja_cache = bool(app.config.get("JINJA_DISABLE_CACHE", False))
 
-    app.config['TEMPLATES_AUTO_RELOAD'] = bool(app.debug or force_auto_reload)
-    app.jinja_env.auto_reload = app.config['TEMPLATES_AUTO_RELOAD']
+    app.config["TEMPLATES_AUTO_RELOAD"] = bool(app.debug or force_auto_reload)
+    app.jinja_env.auto_reload = app.config["TEMPLATES_AUTO_RELOAD"]
 
     if app.debug or disable_jinja_cache:
         app.jinja_env.cache = None
         app.jinja_env.cache_size = 0
-        if hasattr(app.jinja_loader, '_mapping'):
+        if hasattr(app.jinja_loader, "_mapping"):
             app.jinja_loader._mapping = {}
-    
+
     # Initialize extensions with app
     db.init_app(app)
-    migrate.init_app(app, db, directory='business_app/migrations')
+    migrate.init_app(app, db, directory="business_app/migrations")
     jwt.init_app(app)
-    cors.init_app(
-        app, 
-        origins=app.config['CORS_ORIGINS'],
-        supports_credentials=True
-    )
+    cors.init_app(app, origins=app.config["CORS_ORIGINS"], supports_credentials=True)
     limiter.init_app(app)
     cache.init_app(app)
     mail.init_app(app)
 
     # Initialize enhanced Swagger documentation
     from business_app.utils.swagger_config import get_swagger_template, get_swagger_config
-    
+
     swagger_config = get_swagger_config()
     swagger_template = get_swagger_template()
-    
+
     # Override config route if specified
-    if 'API_DOCS_URL' in app.config:
-        swagger_config['specs_route'] = app.config['API_DOCS_URL']
-    
+    if "API_DOCS_URL" in app.config:
+        swagger_config["specs_route"] = app.config["API_DOCS_URL"]
+
     Swagger(app, config=swagger_config, template=swagger_template)
 
     # Setup logging
     setup_logging(app)
-    
+
     # Setup monitoring
     from business_app.utils.monitoring import setup_monitoring
+
     setup_monitoring(app)
-    
+
+    # Setup Prometheus metrics (INF-003). Registers /metrics in Prometheus
+    # text-format; replaces the legacy JSON /metrics route defined by
+    # setup_monitoring above. prometheus-flask-exporter wins on route collision
+    # because it's registered after.
+    from business_app.utils.prometheus_metrics import setup_prometheus_metrics, ensure_multiproc_dir
+
+    ensure_multiproc_dir(app)
+    setup_prometheus_metrics(app)
+
     # Setup security headers
     from business_app.utils.security_headers import setup_security_headers, setup_csp_reporting
+
     setup_security_headers(app)
     setup_csp_reporting(app)
-    
+
     # Setup CSRF protection
     from business_app.utils.csrf_protection import setup_csrf_protection
+
     setup_csrf_protection(app)
-    
+
     # Setup password security
     from business_app.utils.password_security import setup_password_security
+
     setup_password_security(app)
-    
+
     # Setup timezone handling
     from business_app.middleware.timezone_middleware import TimezoneMiddleware
     from business_app.utils.timezone_utils import setup_timezone_filters
-    timezone_middleware = TimezoneMiddleware(app)
+
+    TimezoneMiddleware(app)
     setup_timezone_filters(app)
-    
+
     # Register blueprints
     register_blueprints(app)
-    
+
     # Register multilingual template helpers
     register_multilingual_filters(app)
     register_multilingual_globals(app)
-    
+
     # Register error handlers
     register_error_handlers(app)
-    
+
     # Register CLI commands
     register_cli_commands(app)
-    
+
     # Request handlers
     setup_request_handlers(app)
-    
+
     # JWT handlers
     setup_jwt_handlers(app)
-    
+
     # Initialize service factory
     from business_app.utils.service_factory import init_service_factory
+
     init_service_factory(app)
-    
+
+    # ARCH-001: enforce SoftDeleteMixin via a global query filter so any model
+    # adopting the mixin automatically excludes deleted_at IS NOT NULL rows.
+    from business_app.utils.soft_delete import install_soft_delete_filter
+
+    install_soft_delete_filter()
+
     # Register health check endpoint (exempt from rate limiting)
-    @app.route('/health')
+    @app.route("/health")
     @limiter.exempt
     def health_check():
         """Health check endpoint - exempt from rate limiting for monitoring systems"""
         try:
             # Check database connection
-            db.session.execute(text('SELECT 1'))
+            db.session.execute(text("SELECT 1"))
 
             # Check Redis connection
             redis_client.ping()
 
-            return jsonify({
-                'status': 'healthy',
-                'timestamp': datetime.now(UTC).isoformat(),
-                'version': '1.0.0',
-                'services': {
-                    'database': 'ok',
-                    'redis': 'ok'
+            return jsonify(
+                {
+                    "status": "healthy",
+                    "timestamp": datetime.now(UTC).isoformat(),
+                    "version": "1.0.0",
+                    "services": {"database": "ok", "redis": "ok"},
                 }
-            })
+            )
         except Exception as e:
-            app.logger.error(f'Health check failed: {e}')
-            return jsonify({
-                'status': 'unhealthy',
-                'timestamp': datetime.now(UTC).isoformat(),
-                'error': str(e)
-            }), 503
+            app.logger.error(f"Health check failed: {e}")
+            return jsonify({"status": "unhealthy", "timestamp": datetime.now(UTC).isoformat(), "error": str(e)}), 503
 
     # Serve uploaded files (high rate limit for images/static files)
-    @app.route('/uploads/<path:filename>')
-    @limiter.limit('5000/hour', key_func=lambda: request.remote_addr)
+    @app.route("/uploads/<path:filename>")
+    @limiter.limit("5000/hour", key_func=lambda: request.remote_addr)
     def uploaded_file(filename):
         """Serve uploaded files from the uploads directory"""
         from flask import send_from_directory
         import os
+
         # Use the same upload path as FileStorageService
-        upload_folder = app.config.get('UPLOAD_FOLDER', 'uploads/')
+        upload_folder = app.config.get("UPLOAD_FOLDER", "uploads/")
         if os.path.isabs(upload_folder):
             uploads_dir = os.path.abspath(upload_folder)
         else:
@@ -653,11 +667,10 @@ def create_app(config_class=None):
 
             # Warm landing page translations (highest traffic, rarely changes)
             # These are cached for 3 days, significantly reducing DB load
-            result = translation_service.warm_cache_for_category('landing')
-            if result.get('success'):
+            result = translation_service.warm_cache_for_category("landing")
+            if result.get("success"):
                 app.logger.info(
-                    f"Landing cache warmed: {result.get('count')} translations "
-                    f"(TTL: {result.get('ttl_seconds')}s)"
+                    f"Landing cache warmed: {result.get('count')} translations " f"(TTL: {result.get('ttl_seconds')}s)"
                 )
             else:
                 app.logger.warning(f"Landing cache warming failed: {result.get('reason')}")

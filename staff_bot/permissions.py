@@ -1,6 +1,25 @@
 """
 Role-based permission checks for the Staff Bot.
 Decorator-based system to restrict handler access by staff role.
+
+SEC-002 convention (audit-required):
+  Every async handler in ``staff_bot/handlers/`` MUST carry one of:
+    @require_auth                    — base auth check (token still valid)
+    @require_delivery_driver         — driver-only flows
+    @require_operator                — operator-only flows
+    @require_any_staff_role          — any staff role (default fallback)
+    @require_role('role1', 'role2')  — explicit multi-role allowlist
+
+  This is enforced by `tests/unit/test_staff_handler_guards.py` — adding an
+  unguarded handler will fail CI. The only exceptions are entry-point
+  handlers that legitimately run pre-auth (e.g. /start showing the language
+  picker before login); those go in the test's ``ALLOWLIST`` with a
+  justifying comment.
+
+  Why this matters: a user whose staff role is revoked mid-conversation
+  still has stale ``staff_roles`` in ``context.user_data`` until the next
+  login. Decorating every handler ensures the role is re-verified at every
+  callback / message step, not just at conversation entry.
 """
 import logging
 from functools import wraps

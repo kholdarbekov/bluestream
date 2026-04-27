@@ -36,7 +36,7 @@ import {
   ExportOutlined,
   UploadOutlined
 } from '@ant-design/icons';
-import { useQuery, useMutation, useQueryClient } from 'react-query';
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { Editor } from '@tinymce/tinymce-react';
 import adminService from '../services/adminService';
@@ -46,8 +46,8 @@ const { Option } = Select;
 const { TextArea } = Input;
 const { TabPane } = Tabs;
 
-// TinyMCE API Key from environment variable
-const TINYMCE_API_KEY = process.env.REACT_APP_TINYMCE_API_KEY || 'no-api-key';
+// TinyMCE API Key from environment variable (Vite: import.meta.env.VITE_*)
+const TINYMCE_API_KEY = import.meta.env.VITE_TINYMCE_API_KEY || 'no-api-key';
 
 const Blog = () => {
   // Load blog namespace for ui.blog.* keys
@@ -77,94 +77,104 @@ const Blog = () => {
   ];
 
   // Fetch blog posts
-  const { data, isLoading } = useQuery(
-    ['blog-posts', pagination, searchText, categoryFilter, statusFilter],
-    () => adminService.getBlogPosts({
+  const { data, isLoading } = useQuery({
+    queryKey: ['blog-posts', pagination, searchText, categoryFilter, statusFilter],
+
+    queryFn: () => adminService.getBlogPosts({
       page: pagination.page,
       per_page: pagination.per_page,
       search: searchText,
       category: categoryFilter,
       status: statusFilter
     }),
-    {
-      keepPreviousData: true
-    }
-  );
+
+    placeholderData: keepPreviousData,
+  });
 
   // Create post mutation
-  const createPostMutation = useMutation(
-    (postData) => adminService.createBlogPost(postData),
-    {
-      onSuccess: () => {
-        message.success(t('ui.blog.created_success'));
-        queryClient.invalidateQueries('blog-posts');
-        setIsCreateModalVisible(false);
-        createForm.resetFields();
-        setFeaturedImageUrl('');
-      },
-      onError: (error) => {
-        message.error(error.response?.data?.error || t('ui.blog.create_failed'));
-      }
-    }
-  );
+  const createPostMutation = useMutation({
+    mutationFn: (postData) => adminService.createBlogPost(postData),
+
+    onSuccess: () => {
+      message.success(t('ui.blog.created_success'));
+      queryClient.invalidateQueries({
+        queryKey: ['blog-posts'],
+      });
+      setIsCreateModalVisible(false);
+      createForm.resetFields();
+      setFeaturedImageUrl('');
+    },
+
+    onError: (error) => {
+      message.error(error.response?.data?.error || t('ui.blog.create_failed'));
+    },
+  });
 
   // Update post mutation
-  const updatePostMutation = useMutation(
-    ({ id, data }) => adminService.updateBlogPost(id, data),
-    {
-      onSuccess: () => {
-        message.success(t('ui.blog.updated_success'));
-        queryClient.invalidateQueries('blog-posts');
-        setIsEditModalVisible(false);
-        editForm.resetFields();
-      },
-      onError: (error) => {
-        message.error(error.response?.data?.error || t('ui.blog.update_failed'));
-      }
-    }
-  );
+  const updatePostMutation = useMutation({
+    mutationFn: ({ id, data }) => adminService.updateBlogPost(id, data),
+
+    onSuccess: () => {
+      message.success(t('ui.blog.updated_success'));
+      queryClient.invalidateQueries({
+        queryKey: ['blog-posts'],
+      });
+      setIsEditModalVisible(false);
+      editForm.resetFields();
+    },
+
+    onError: (error) => {
+      message.error(error.response?.data?.error || t('ui.blog.update_failed'));
+    },
+  });
 
   // Delete post mutation
-  const deletePostMutation = useMutation(
-    (id) => adminService.deleteBlogPost(id),
-    {
-      onSuccess: () => {
-        message.success(t('ui.blog.deleted_success'));
-        queryClient.invalidateQueries('blog-posts');
-      },
-      onError: (error) => {
-        message.error(error.response?.data?.error || t('ui.blog.delete_failed'));
-      }
-    }
-  );
+  const deletePostMutation = useMutation({
+    mutationFn: (id) => adminService.deleteBlogPost(id),
+
+    onSuccess: () => {
+      message.success(t('ui.blog.deleted_success'));
+      queryClient.invalidateQueries({
+        queryKey: ['blog-posts'],
+      });
+    },
+
+    onError: (error) => {
+      message.error(error.response?.data?.error || t('ui.blog.delete_failed'));
+    },
+  });
 
   // Publish post mutation
-  const publishPostMutation = useMutation(
-    (id) => adminService.publishBlogPost(id),
-    {
-      onSuccess: () => {
-        message.success(t('ui.blog.published_success'));
-        queryClient.invalidateQueries('blog-posts');
-      },
-      onError: (error) => {
-        message.error(error.response?.data?.error || t('ui.blog.publish_failed'));
-      }
-    }
-  );
+  const publishPostMutation = useMutation({
+    mutationFn: (id) => adminService.publishBlogPost(id),
+
+    onSuccess: () => {
+      message.success(t('ui.blog.published_success'));
+      queryClient.invalidateQueries({
+        queryKey: ['blog-posts'],
+      });
+    },
+
+    onError: (error) => {
+      message.error(error.response?.data?.error || t('ui.blog.publish_failed'));
+    },
+  });
 
   // Unpublish post mutation
-  const unpublishPostMutation = useMutation(
-    (id) => adminService.unpublishBlogPost(id),
-    {
-      onSuccess: () => {
-        message.success(t('ui.blog.unpublished_success'));
-        queryClient.invalidateQueries('blog-posts');
-      },
-      onError: (error) => {
-        message.error(error.response?.data?.error || t('ui.blog.unpublish_failed'));
-      }
-    }
-  );
+  const unpublishPostMutation = useMutation({
+    mutationFn: (id) => adminService.unpublishBlogPost(id),
+
+    onSuccess: () => {
+      message.success(t('ui.blog.unpublished_success'));
+      queryClient.invalidateQueries({
+        queryKey: ['blog-posts'],
+      });
+    },
+
+    onError: (error) => {
+      message.error(error.response?.data?.error || t('ui.blog.unpublish_failed'));
+    },
+  });
 
   // Generate slug from title
   const generateSlug = (title) => {
@@ -299,6 +309,7 @@ const Blog = () => {
           draft: { color: 'default', icon: <ClockCircleOutlined />, text: t('ui.blog.status_draft') },
           archived: { color: 'warning', icon: <InboxOutlined />, text: t('ui.blog.status_archived') }
         };
+        // eslint-disable-next-line security/detect-object-injection
         const c = config[status] || config.draft;
         return (
           <Tag color={c.color} icon={c.icon}>
@@ -408,7 +419,7 @@ const Blog = () => {
         // Return the URL from server
         return response.data.url;
       } catch (error) {
-        throw new Error('Image upload failed: ' + (error.response?.data?.error || error.message));
+        throw new Error(`Image upload failed: ${  error.response?.data?.error || error.message}`);
       }
     },
     automatic_uploads: true,
@@ -648,7 +659,7 @@ const Blog = () => {
                   form.setFieldsValue({ featured_image_url: imageUrl });
                 } catch (error) {
                   message.error({
-                    content: t('ui.blog.form_upload_failed') + ': ' + (error.response?.data||error.message),
+                    content: `${t('ui.blog.form_upload_failed')  }: ${  error.response?.data||error.message}`,
                     key: 'upload'
                   });
                 }
@@ -813,7 +824,7 @@ const Blog = () => {
           <Button
             key="submit"
             type="primary"
-            loading={createPostMutation.isLoading}
+            loading={createPostMutation.isPending}
             onClick={() => createForm.submit()}
           >
             {t('ui.blog.create')}
@@ -845,7 +856,7 @@ const Blog = () => {
           <Button
             key="submit"
             type="primary"
-            loading={updatePostMutation.isLoading}
+            loading={updatePostMutation.isPending}
             onClick={() => editForm.submit()}
           >
             {t('ui.blog.update')}

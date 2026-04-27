@@ -11,8 +11,10 @@ class AuthService {
       };
 
       const response = await api.post('/auth/login', loginData);
-      console.log(response.data.data)
-      const { user, tokens, permissions } = response.data.data;
+      // UI-001: the `tokens` field is ignored on the admin UI — the server already
+      // placed them in HttpOnly cookies. We intentionally do NOT destructure or
+      // store the raw tokens here so XSS cannot exfiltrate them from JS scope.
+      const { user, permissions } = response.data.data;
 
       // Check if user has admin/manager role (no registration allowed, only predefined admin users)
       const allowedRoles = ['admin', 'manager'];
@@ -25,15 +27,15 @@ class AuthService {
         throw new Error('Access denied. Admin panel access not permitted.');
       }
 
-      // Store user info and permissions (non-sensitive data)
-      // Note: Tokens are now stored in httpOnly cookies by the server
+      // Store only non-sensitive profile data for UX (name, role display, perms).
+      // JWTs live exclusively in HttpOnly cookies managed by the server.
       localStorage.setItem('admin_user', JSON.stringify(user));
       localStorage.setItem('admin_permissions', JSON.stringify(permissions));
 
       // Fetch CSRF token for subsequent requests
       await fetchCSRFToken();
 
-      return { user, tokens, permissions }; // Include tokens in return if needed
+      return { user, permissions };
     } catch (error) {
       // Clear any stored auth data on failed login
       this.clearStoredAuth();
@@ -68,12 +70,6 @@ class AuthService {
     return user ? JSON.parse(user) : null;
   }
 
-  getToken() {
-    // Tokens are now stored in httpOnly cookies
-    // This method is kept for backward compatibility but returns null
-    return null;
-  }
-
   getPermissions() {
     const permissions = localStorage.getItem('admin_permissions');
     return permissions ? JSON.parse(permissions) : {};
@@ -81,23 +77,24 @@ class AuthService {
 
   hasPermission(permission) {
     const permissions = this.getPermissions();
+    // eslint-disable-next-line security/detect-object-injection
     return permissions[permission] === true;
   }
 
   isAuthenticated() {
     const user = this.getCurrentUser();
     const permissions = this.getPermissions();
-    
+
     // With httpOnly cookies, we rely on user data and permissions in localStorage
     // The actual token validation happens on the server side
-    return !!(
-      user && 
+    return Boolean(user &&
       ['admin', 'manager'].includes(user.role) &&
-      permissions.can_view_admin_panel
-    );
+      permissions.can_view_admin_panel);
   }
 
   clearStoredAuth() {
+    // UI-001: `admin_token` is no longer written, but we still remove it to
+    // flush any value persisted by older builds during the rollout window.
     localStorage.removeItem('admin_token');
     localStorage.removeItem('admin_user');
     localStorage.removeItem('admin_permissions');

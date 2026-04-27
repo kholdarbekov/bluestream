@@ -10,6 +10,9 @@ import redis.asyncio as redis
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any
 
+from shared.redis_failure import report_redis_failure
+from shared.redis_keyspace import RedisKeyspace
+
 logger = logging.getLogger(__name__)
 
 
@@ -65,7 +68,7 @@ class TokenManager:
 
     def _get_cache_key(self, telegram_id: int) -> str:
         """Generate Redis key for staff user's tokens."""
-        return f"staff_bot:tokens:{telegram_id}"
+        return RedisKeyspace.staff_bot_token_cache(telegram_id)
 
     def _decode_jwt_expiry(self, token: str) -> Optional[int]:
         """Extract expiration timestamp from JWT without full validation."""
@@ -94,7 +97,8 @@ class TokenManager:
                 return None
             return json.loads(data)
         except Exception as e:
-            logger.warning(f"Error retrieving cached tokens: {e}")
+            # RED-005: TIER_CACHE — returning None forces re-auth against backend.
+            report_redis_failure("staff_bot.token_manager.get_cached_tokens", str(e), tier="cache")
             return None
 
     async def store_tokens(
@@ -123,7 +127,8 @@ class TokenManager:
             logger.info(f"Cached tokens for staff user {telegram_id}")
             return True
         except Exception as e:
-            logger.warning(f"Failed to cache tokens: {e}")
+            # RED-005: TIER_CACHE — caller has in-memory tokens, just loses cache reuse.
+            report_redis_failure("staff_bot.token_manager.store_tokens", str(e), tier="cache")
             return False
 
     async def invalidate_tokens(self, telegram_id: int) -> bool:
@@ -136,7 +141,9 @@ class TokenManager:
             logger.info(f"Invalidated cached tokens for staff user {telegram_id}")
             return True
         except Exception as e:
-            logger.warning(f"Failed to invalidate tokens: {e}")
+            # RED-005: TIER_RELIABILITY — failure to invalidate a revoked token
+            # keeps it usable until natural TTL expiry. Alert ops.
+            report_redis_failure("staff_bot.token_manager.invalidate_tokens", str(e), tier="reliability")
             return False
 
     def is_access_token_valid(self, tokens: Dict[str, Any]) -> bool:
@@ -170,11 +177,15 @@ class TokenManager:
             return tokens['access_token']
 
         if self.is_refresh_token_valid(tokens):
-            lock_key = f"staff_bot:refresh_lock:{telegram_id}"
+            lock_key = RedisKeyspace.staff_bot_refresh_lock(telegram_id)
             try:
                 lock_acquired = await self.redis.set(lock_key, "1", nx=True, ex=10)
             except Exception as e:
-                logger.warning(f"Refresh lock acquisition failed for staff user {telegram_id}: {e}")
+                # RED-005: TIER_RELIABILITY — without the lock, concurrent handlers
+                # may double-refresh. Caller continues (graceful degradation).
+                report_redis_failure(
+                    "staff_bot.token_manager.get_valid_token.lock", str(e), tier="reliability"
+                )
                 # Continue without lock as a last resort.
                 lock_acquired = True
 

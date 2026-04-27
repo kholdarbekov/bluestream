@@ -18,6 +18,7 @@ def payment_service(app, mock_redis):
     with app.app_context():
         service = PaymentService()
         service.redis_client = mock_redis
+        service._webhook_signature_verifier._redis = mock_redis
         return service
 
 
@@ -329,17 +330,18 @@ class TestWebhookSignatures:
             content_type = 'application/x-www-form-urlencoded'
             remote_addr = '10.10.10.10'
             form = payload
+            headers = {}
 
             @staticmethod
             def get_json():
                 return None
 
-        assert payment_service._validate_click_webhook_signature(DummyRequest()) is True
+        assert payment_service.validate_webhook_signature('click', DummyRequest()) is True
 
         class UnauthorizedDummyRequest(DummyRequest):
             remote_addr = '10.10.10.11'
 
-        assert payment_service._validate_click_webhook_signature(UnauthorizedDummyRequest()) is False
+        assert payment_service.validate_webhook_signature('click', UnauthorizedDummyRequest()) is False
 
     def test_validate_webhook_signature_unknown_provider(self, payment_service):
         class DummyRequest:

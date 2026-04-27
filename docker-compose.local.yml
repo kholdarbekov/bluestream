@@ -1,0 +1,31 @@
+# Local-testing override for docker-compose.production.yml.
+#
+# Purpose: let a developer run the production-style stack (Prometheus,
+# Alertmanager, Grafana, Loki plus app services) on a plain Docker Compose
+# host WITHOUT Docker Swarm. docker-compose.production.yml declares an
+# `overlay` network which only Swarm can create — this file overrides that
+# back to the default `bridge` driver.
+#
+# Use with BOTH files:
+#   docker compose -f docker-compose.yml \
+#                  -f docker-compose.production.yml \
+#                  -f docker-compose.local.yml \
+#                  up -d prometheus alertmanager
+#
+# For real production Swarm deployments, skip this file — keep the overlay
+# network from production.yml for cross-host service discovery.
+
+networks:
+  default:
+    driver: bridge
+    # `attachable: true` from production.yml is ignored on bridge driver.
+
+services:
+  # Redis: production.yml sets `--requirepass ${REDIS_PASSWORD}` which breaks
+  # locally when REDIS_PASSWORD is empty (Redis 8 absorbs the next auto-loaded
+  # module directive as the password value and errors out). Override with the
+  # no-auth variant from base docker-compose.yml. If you want auth locally,
+  # set REDIS_PASSWORD in .env AND add the password to REDIS_URL on every
+  # service that connects (app, celery, bot) — not worth it for local.
+  redis:
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru

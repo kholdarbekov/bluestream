@@ -8,6 +8,7 @@ from telegram.ext import ContextTypes
 from staff_bot.handlers.base import BaseHandler
 from staff_bot.i18n import i18n
 from staff_bot.keyboards.menu import MenuKeyboards
+from staff_bot.permissions import require_any_staff_role, require_auth
 
 logger = logging.getLogger(__name__)
 
@@ -15,6 +16,8 @@ logger = logging.getLogger(__name__)
 class LanguageHandler(BaseHandler):
     """Handles language selection for staff bot"""
 
+    @require_auth
+    @require_any_staff_role
     async def language_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Show language selection menu"""
         language = await self._get_language(update, context)
@@ -50,6 +53,8 @@ class LanguageHandler(BaseHandler):
                 text, reply_markup=InlineKeyboardMarkup(keyboard)
             )
 
+    @require_auth
+    @require_any_staff_role
     async def set_language(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Set user's preferred language"""
         query = update.callback_query

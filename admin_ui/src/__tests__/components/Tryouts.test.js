@@ -1,6 +1,6 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
-import { QueryClient, QueryClientProvider } from 'react-query';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 
 import Tryouts from '../../pages/Tryouts';
@@ -9,27 +9,29 @@ import tryoutService from '../../services/tryoutService';
 
 const { act } = React;
 
-jest.mock('../../components/AddressMapPicker', () => () => <div data-testid="address-map-picker">Map</div>);
+vi.mock('../../components/AddressMapPicker', () => ({
+  default: () => <div data-testid="address-map-picker">Map</div>,
+}));
 
-jest.mock('../../services/adminService', () => ({
+vi.mock('../../services/adminService', () => ({
   __esModule: true,
   default: {
-    getProducts: jest.fn(),
-    getDeliveryPersonnel: jest.fn(),
+    getProducts: vi.fn(),
+    getDeliveryPersonnel: vi.fn(),
   },
 }));
 
-jest.mock('../../services/tryoutService', () => ({
+vi.mock('../../services/tryoutService', () => ({
   __esModule: true,
   default: {
-    getTryouts: jest.fn(),
-    getTryout: jest.fn(),
-    createTryout: jest.fn(),
-    assignTask: jest.fn(),
-    convertTryout: jest.fn(),
-    adjustBottles: jest.fn(),
-    updateTryout: jest.fn(),
-    exportTryouts: jest.fn(),
+    getTryouts: vi.fn(),
+    getTryout: vi.fn(),
+    createTryout: vi.fn(),
+    assignTask: vi.fn(),
+    convertTryout: vi.fn(),
+    adjustBottles: vi.fn(),
+    updateTryout: vi.fn(),
+    exportTryouts: vi.fn(),
   },
 }));
 
@@ -117,6 +119,17 @@ const detailResponse = {
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
+const waitForText = async (text, { timeout = 2000 } = {}) => {
+  const start = Date.now();
+  while (Date.now() - start < timeout) {
+    if (document.body.textContent.includes(text)) return true;
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+  }
+  return false;
+};
+
 const createWrapper = (children) => {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -144,15 +157,15 @@ beforeAll(() => {
   global.IS_REACT_ACT_ENVIRONMENT = true;
   Object.defineProperty(window, 'matchMedia', {
     writable: true,
-    value: jest.fn().mockImplementation((query) => ({
+    value: vi.fn().mockImplementation((query) => ({
       matches: false,
       media: query,
       onchange: null,
-      addListener: jest.fn(),
-      removeListener: jest.fn(),
-      addEventListener: jest.fn(),
-      removeEventListener: jest.fn(),
-      dispatchEvent: jest.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
     })),
   });
 });
@@ -162,7 +175,7 @@ describe('Tryouts Page', () => {
   let root;
 
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -207,11 +220,14 @@ describe('Tryouts Page', () => {
       root.render(createWrapper(<Tryouts />));
       await flush();
       await flush();
+      await flush();
+      await flush();
     });
   };
 
   it('renders the KPI cards and try-out row', async () => {
     await renderPage();
+    await waitForText('TRY_000001_26');
 
     expect(document.body.textContent).toContain('Try-outs');
     expect(document.body.textContent).toContain('Free product handoffs and returnable bottle recovery');
@@ -225,6 +241,7 @@ describe('Tryouts Page', () => {
 
   it('opens the detail drawer for a try-out', async () => {
     await renderPage();
+    await waitForText('TRY_000001_26');
 
     const viewButton = findButtonByText('View');
     expect(viewButton).toBeTruthy();
@@ -260,6 +277,7 @@ describe('Tryouts Page', () => {
 
   it('opens the shared edit modal with phone and product fields', async () => {
     await renderPage();
+    await waitForText('TRY_000001_26');
 
     const editButton = findButtonByText('Edit');
     expect(editButton).toBeTruthy();

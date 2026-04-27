@@ -4,6 +4,7 @@ Receives webhooks from backend for cache invalidation and other operations
 """
 import hmac
 import hashlib
+import ipaddress
 import logging
 import os
 from datetime import datetime, timezone
@@ -12,8 +13,85 @@ from aiohttp import web
 from config import config
 from database import db_manager
 from i18n import i18n
+from shared.redis_failure import report_redis_failure
+from shared.redis_keyspace import RedisKeyspace
 
 logger = logging.getLogger(__name__)
+
+
+# BOT-007: IP allow-list for /internal/* webhook endpoints.
+# Default allows only RFC 1918 private ranges (Docker internal networks) + loopback.
+# Override with WEBHOOK_ALLOWED_NETWORKS env var (comma-separated CIDRs) to lock
+# down to a specific subnet, e.g. the Docker compose network's assigned range.
+_DEFAULT_ALLOWED_NETWORKS = "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8,::1/128"
+
+
+def _parse_allowed_networks() -> list:
+    """Parse WEBHOOK_ALLOWED_NETWORKS env var into a list of ip_network objects.
+
+    Invalid CIDRs are logged and skipped rather than failing the server — we'd
+    rather serve a narrower allow-list than refuse to start.
+    """
+    raw = os.environ.get("WEBHOOK_ALLOWED_NETWORKS", _DEFAULT_ALLOWED_NETWORKS)
+    networks = []
+    for cidr in (c.strip() for c in raw.split(",") if c.strip()):
+        try:
+            networks.append(ipaddress.ip_network(cidr, strict=False))
+        except ValueError as exc:
+            logger.error("WEBHOOK_ALLOWED_NETWORKS: skipping invalid CIDR %r: %s", cidr, exc)
+    if not networks:
+        logger.error(
+            "WEBHOOK_ALLOWED_NETWORKS resolved to an empty list — "
+            "all /internal/* requests will be rejected. Fix the env var."
+        )
+    return networks
+
+
+_ALLOWED_NETWORKS = _parse_allowed_networks()
+
+
+def _request_client_ip(request) -> str:
+    """Return the peer IP for allow-list evaluation.
+
+    For the internal bot webhook server there's no reverse proxy in front of
+    us (backend talks to us directly on the Docker network), so `request.remote`
+    is the authoritative source. Explicitly ignoring `X-Forwarded-For` here is
+    intentional — trusting it would let a compromised backend spoof its IP.
+    """
+    return request.remote or ""
+
+
+def _is_allowed_ip(client_ip: str) -> bool:
+    """True if client_ip falls inside any configured allow-list network."""
+    if not client_ip or not _ALLOWED_NETWORKS:
+        return False
+    try:
+        addr = ipaddress.ip_address(client_ip)
+    except ValueError:
+        return False
+    return any(addr in net for net in _ALLOWED_NETWORKS)
+
+
+@web.middleware
+async def ip_allowlist_middleware(request, handler):
+    """Reject /internal/* requests from IPs outside the allow-list.
+
+    Signature verification still runs inside each handler — this is a
+    defense-in-depth layer: if the webhook secret ever leaks, attackers
+    still need to come from inside the Docker network.
+    """
+    if request.path.startswith("/internal/"):
+        client_ip = _request_client_ip(request)
+        if not _is_allowed_ip(client_ip):
+            logger.warning(
+                "Rejected /internal request from disallowed IP %s (path=%s)",
+                client_ip or "<unknown>",
+                request.path,
+            )
+            return web.json_response(
+                {"success": False, "message": "Forbidden"}, status=403
+            )
+    return await handler(request)
 
 
 async def verify_webhook_signature(request):
@@ -205,17 +283,74 @@ class WebhookServer:
         self.runner = None
         self.site = None
         self.bot_app = None
-        # Deduplication: track recently processed order_ids with timestamps
+        # BOT-008: dedup is now Redis-backed (see _is_duplicate_webhook). The
+        # in-memory dict + 5-min TTL was insufficient — backend retries past
+        # 5 min re-sent notifications, and multi-replica deployments had no
+        # cross-replica visibility. Kept these attrs only as a last-resort
+        # in-memory fallback when Redis is unreachable; per RED-005 a Sentry
+        # alert fires on Redis failure so the degradation is observable.
         self._processed_orders: dict = {}
-        self._dedup_ttl = 300  # 5 minutes
+        self._dedup_ttl_seconds = 24 * 60 * 60  # 24h Redis TTL
 
     def set_application(self, application):
         """Set Telegram Application instance"""
         self.bot_app = application
 
+    async def _is_duplicate_webhook(self, endpoint: str, request_id: str) -> bool:
+        """BOT-008: Redis-backed webhook dedup.
+
+        Uses ``SET NX EX`` to claim the request_id atomically. Returns True if
+        the key already existed (duplicate), False if we just claimed it.
+        TTL = 24h matches the upper bound on backend retry storms (PAY-002).
+
+        Falls back to the in-memory ``_processed_orders`` dict only when Redis
+        is unreachable. The fallback is single-replica only — multi-replica
+        deploys MUST have Redis up. RED-005's ``report_redis_failure`` makes
+        the degradation observable in Sentry.
+        """
+        if not request_id:
+            # No stable id to dedup on — let it through and rely on downstream
+            # idempotency (e.g. payment-message Redis lookup overwrites cleanly).
+            return False
+
+        # Redis path
+        try:
+            from token_manager import token_manager
+            if token_manager and token_manager.redis:
+                key = RedisKeyspace.bot_webhook_dedup(endpoint, request_id)
+                # SET NX returns True if key was set (we claimed it), None if it existed.
+                claimed = await token_manager.redis.set(
+                    key, "1", nx=True, ex=self._dedup_ttl_seconds
+                )
+                return not claimed
+        except Exception as exc:
+            report_redis_failure(
+                "webhook_server.dedup_check", str(exc), tier="reliability"
+            )
+            # Fall through to in-memory fallback below
+
+        # In-memory fallback (single-replica only, narrower TTL to match the
+        # in-memory bound). Periodically prune so the dict doesn't grow forever.
+        now = datetime.now(timezone.utc)
+        fallback_ttl = 300  # 5 min — old behaviour, only as a degraded fallback
+        self._processed_orders = {
+            k: v for k, v in self._processed_orders.items()
+            if (now - v).total_seconds() < fallback_ttl
+        }
+        composite = f"{endpoint}:{request_id}"
+        if composite in self._processed_orders:
+            return True
+        self._processed_orders[composite] = now
+        return False
+
     async def setup(self):
         """Setup webhook server routes"""
-        self.app = web.Application(client_max_size=1024 * 1024)  # 1MB payload limit
+        # BOT-007: ip_allowlist_middleware gates /internal/* on source IP.
+        # /health stays open so Docker healthchecks don't need to spoof IPs.
+        self.app = web.Application(
+            client_max_size=1024 * 1024,  # 1MB payload limit
+            middlewares=[ip_allowlist_middleware],
+        )
 
         # Add routes
         self.app.router.add_post('/internal/reload-translations', reload_translations_handler)
@@ -224,11 +359,15 @@ class WebhookServer:
         self.app.router.add_get('/health', health_handler)
 
         logger.info(f"Webhook server configured on {self.host}:{self.port}")
+        logger.info(
+            "IP allow-list active: %s",
+            ", ".join(str(n) for n in _ALLOWED_NETWORKS) or "(empty — all requests blocked)",
+        )
 
     async def payment_success_handler(self, request):
         """
         Handle payment success webhook from backend
-        
+
         POST /internal/payment-success
         {
             "user_id": 12345,
@@ -245,7 +384,7 @@ class WebhookServer:
                     'success': False,
                     'message': 'Invalid signature'
                 }, status=401)
-                
+
             if not self.bot_app:
                 logger.error("Bot application not initialized in webhook server")
                 return web.json_response({
@@ -261,7 +400,7 @@ class WebhookServer:
                     'success': False,
                     'message': 'Invalid JSON'
                 }, status=400)
-                
+
             user_id = data.get('user_id')
             telegram_id = data.get('telegram_id')
             order_id = data.get('order_id')
@@ -274,71 +413,99 @@ class WebhookServer:
                     'success': False,
                     'message': 'Missing required fields: user_id, order_id'
                 }, status=400)
-            
+
             if not telegram_id:
                 logger.warning(f"Skipping notification for user {user_id}: No telegram_id provided")
                 return web.json_response({
                     'success': True,
                     'message': 'Skipped: No telegram_id'
                 })
-                
-            # Deduplication: prevent duplicate notifications for the same order
-            now = datetime.now(timezone.utc)
-            # Clean stale entries
-            self._processed_orders = {
-                k: v for k, v in self._processed_orders.items()
-                if (now - v).total_seconds() < self._dedup_ttl
-            }
-            if order_id in self._processed_orders:
-                logger.info(f"Duplicate payment webhook for order {order_id}, skipping")
+
+            # BOT-008: dedup on caller-supplied X-Request-ID when present, fall
+            # back to order_id so the existing payload still gets dedup coverage
+            # while backends roll out the header. The request_id path keys on
+            # the actual webhook attempt, so a backend that retries the same
+            # request_id N times only fires one notification — even if a second
+            # genuine notification for the same order arrives later (e.g.
+            # refund-then-success), it gets through under a different request_id.
+            request_id = request.headers.get('X-Request-ID') or f"order:{order_id}"
+            if await self._is_duplicate_webhook('payment-success', request_id):
+                logger.info(
+                    "Duplicate payment webhook (endpoint=payment-success request_id=%s order=%s), skipping",
+                    request_id, order_id,
+                )
                 return web.json_response({
                     'success': True,
                     'message': 'Already processed (deduplicated)'
                 })
-            self._processed_orders[order_id] = now
 
             logger.info(f"Sending payment success notification to telegram_id {telegram_id} (user {user_id}) for order {order_number}")
 
             # Get user language
             language = await i18n.get_user_language(telegram_id)
-            
+
             # Construct message with localized formatting
             message_text = i18n.get(
-                'telegram.payment.success_message', 
-                language, 
+                'telegram.payment.success_message',
+                language,
                 order_number=order_number or str(order_id),
                 amount=f"{amount:,.0f}",
                 currency=currency
             )
 
-            # Try to edit the existing payment message, fall back to sending new
+            # Try to edit the existing payment message, fall back to sending new.
+            # RED-005: the Redis lookup is TIER_CACHE (speedup only — fresh
+            # message is sent either way), but the Telegram edit is a business
+            # operation. Separate them so Redis failures become observable
+            # without masking Telegram-API edge cases (stale message id, etc).
+            import redis as redis_lib  # sync module, for exception types
             message_edited = False
-            try:
-                from token_manager import token_manager
-                if token_manager and token_manager.redis:
-                    redis_key = f"bot:payment_msg:{order_id}"
+            stored_message_id = None
+
+            from token_manager import token_manager
+            if token_manager and token_manager.redis:
+                redis_key = RedisKeyspace.bot_payment_message(order_id)
+                try:
                     stored_message_id = await token_manager.redis.get(redis_key)
-                    if stored_message_id:
-                        from keyboards import PaymentKeyboards
-                        keyboard = PaymentKeyboards.payment_success(order_id, language)
-                        await self.bot_app.bot.edit_message_text(
-                            chat_id=telegram_id,
-                            message_id=int(stored_message_id),
-                            text=message_text,
-                            reply_markup=keyboard
-                        )
-                        message_edited = True
+                except redis_lib.RedisError as redis_err:
+                    report_redis_failure(
+                        "webhook_server.payment_message_lookup", str(redis_err), tier="cache"
+                    )
+                    stored_message_id = None
+
+            if stored_message_id:
+                try:
+                    from keyboards import PaymentKeyboards
+                    keyboard = PaymentKeyboards.payment_success(order_id, language)
+                    await self.bot_app.bot.edit_message_text(
+                        chat_id=telegram_id,
+                        message_id=int(stored_message_id),
+                        text=message_text,
+                        reply_markup=keyboard,
+                    )
+                    message_edited = True
+                    logger.info(f"Edited payment message {stored_message_id} for order {order_id}")
+                    # Best-effort cleanup; a delete failure here just leaves a
+                    # stale key that will expire naturally.
+                    try:
                         await token_manager.redis.delete(redis_key)
-                        logger.info(f"Edited payment message {stored_message_id} for order {order_id}")
-            except Exception as edit_err:
-                logger.warning(f"Failed to edit payment message, falling back to send_message: {edit_err}")
+                    except redis_lib.RedisError as del_err:
+                        report_redis_failure(
+                            "webhook_server.payment_message_cleanup",
+                            str(del_err),
+                            tier="cache",
+                        )
+                except Exception as edit_err:
+                    logger.warning(
+                        f"Failed to edit payment message, falling back to send_message: {edit_err}"
+                    )
 
             if not message_edited:
                 await self.bot_app.bot.send_message(
                     chat_id=telegram_id,
                     text=message_text
                 )
-            
+
             return web.json_response({
                 'success': True,
                 'message': 'Notification sent'

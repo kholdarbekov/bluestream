@@ -8,6 +8,7 @@ instance/
 .pytest_cache/
 .coverage
 htmlcov/
+coverage/
 
 dist/
 build/
@@ -34,3 +35,6 @@ admin_credentials.txt
 telegram_bot/.env
 logs/
 uploads/
+docs/audit/
+docs/operations/
+backups/

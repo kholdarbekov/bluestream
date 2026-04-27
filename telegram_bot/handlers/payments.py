@@ -14,6 +14,7 @@ from api_client import api_client
 from utils import get_auth_token, format_price
 from keyboards import PaymentKeyboards
 from handlers.base import BaseHandler
+from shared.redis_keyspace import RedisKeyspace
 
 logger = logging.getLogger('handlers.payments')
 
@@ -38,30 +39,30 @@ class PaymentHandlers(BaseHandler):
     ) -> bool:
         """
         Send external payment link to user via Redirect Method.
-        
+
         Differs from native invoice: sends a message with an inline button
         that redirects to the configured PSP checkout page.
         """
         try:
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
-            
+
             # Extract order details
             order_id = order_data.get('id')
             order_number = order_data.get('order_number', str(order_id))
             total_amount = order_data.get('total_amount', 0)
-            
+
             # 1. Authenticate with Backend
             async with api_client as client:
                 token = await get_auth_token(update, context, client)
                 if not token:
                     logger.error("Failed to get auth token for payment-link generation")
                     await self._send_error_message(
-                        update, context, 
+                        update, context,
                         i18n.get('telegram.auth.login_required', language)
                     )
                     return False
-                    
+
                 # 2. Request Payment Link
                 # We use the generic 'POST /payments/create' endpoint via api_client
                 # Use dynamic bot username
@@ -74,15 +75,15 @@ class PaymentHandlers(BaseHandler):
                     'payment_method': payment_method,
                     'return_url': return_url
                 })
-                
+
                 if not result.success:
                     logger.error(f"Failed to create {payment_method} link: {result.error}")
                     await self._send_error_message(
-                        update, context, 
+                        update, context,
                         i18n.get('telegram.payment.create_link_failed_with_error', language, error=result.error)
                     )
                     return False
-                
+
                 # Let's inspect result structure safely
                 response_body = result.data or {}
                 if 'data' in response_body:
@@ -91,13 +92,13 @@ class PaymentHandlers(BaseHandler):
                     response_data = response_body
 
                 payment_link_data = response_data.get('payment_link', {})
-                # It accepts dict (from payment_service) or string? 
+                # It accepts dict (from payment_service) or string?
                 # payment_service returns dict.
                 if isinstance(payment_link_data, dict):
                     payment_url = payment_link_data.get('payment_url')
                 else:
                     payment_url = str(payment_link_data)
-                
+
                 if not payment_url:
                      logger.error(f"No payment_url in response: {result.data}")
                      await self._send_error_message(
@@ -106,7 +107,7 @@ class PaymentHandlers(BaseHandler):
                          i18n.get('telegram.payment.invalid_link_received', language)
                      )
                      return False
-                     
+
             # 3. Send Message with Button
             msg_text = i18n.get(
                 'telegram.payment.pay_message',
@@ -144,19 +145,19 @@ class PaymentHandlers(BaseHandler):
                 try:
                     from token_manager import token_manager
                     if token_manager and token_manager.redis:
-                        redis_key = f"bot:payment_msg:{order_id}"
+                        redis_key = RedisKeyspace.bot_payment_message(order_id)
                         await token_manager.redis.setex(redis_key, 3600, str(message_id))
                 except Exception as redis_err:
                     logger.warning(f"Failed to store payment message_id in Redis: {redis_err}")
-            
+
             logger.info(f"{payment_method} link sent for order {order_id}")
             return True
-            
+
         except Exception as e:
             logger.error(f"Error sending payment link: {e}", exc_info=True)
             language = await i18n.get_user_language(update.effective_user.id)
             await self._send_error_message(
-                update, context, 
+                update, context,
                 i18n.get('telegram.payment.failed_message', language)
             )
             return False

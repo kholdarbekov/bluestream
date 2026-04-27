@@ -30,9 +30,9 @@ import {
   GiftOutlined,
   StarOutlined
 } from '@ant-design/icons';
-import { useQuery } from 'react-query';
+import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import moment from 'moment';
+import dayjs from 'dayjs';
 import { formatDate } from '../utils/dateUtils';
 import LineChart from '../components/charts/LineChart';
 import BarChart from '../components/charts/BarChart';
@@ -44,20 +44,20 @@ const { Option } = Select;
 const { RangePicker } = DatePicker;
 
 const getTimeframeDateRange = (timeframe) => {
-  const end = moment();
-  const start = moment();
+  const end = dayjs();
+  const start = dayjs();
 
   if (timeframe === '7d') {
-    return [start.subtract(7, 'days'), end];
+    return [start.subtract(7, 'day'), end];
   }
   if (timeframe === '90d') {
-    return [start.subtract(90, 'days'), end];
+    return [start.subtract(90, 'day'), end];
   }
   if (timeframe === '1y') {
     return [start.subtract(1, 'year'), end];
   }
 
-  return [start.subtract(30, 'days'), end];
+  return [start.subtract(30, 'day'), end];
 };
 
 const buildExportRows = (activeTab, overviewData, salesTrends, churnData, deliveryHeatmap, revenueForecast, loyaltyAnalytics) => {
@@ -141,61 +141,51 @@ const Analytics = () => {
     end_date: endDate
   };
 
-  const { data: analyticsData = {}, isLoading } = useQuery(
-    ['analytics', timeframe, startDate, endDate],
-    () => adminService.getAnalytics(analyticsParams),
-    {
-      keepPreviousData: true
-    }
-  );
+  const { data: analyticsData = {}, isLoading } = useQuery({
+    queryKey: ['analytics', timeframe, startDate, endDate],
+    queryFn: () => adminService.getAnalytics(analyticsParams),
+    placeholderData: keepPreviousData,
+  });
 
-  const { data: salesTrends } = useQuery(
-    ['sales-trends', timeframe, startDate, endDate],
-    () => adminService.getSalesTrends(analyticsParams),
-    {
-      keepPreviousData: true,
-      enabled: activeTab === 'sales'
-    }
-  );
+  const { data: salesTrends } = useQuery({
+    queryKey: ['sales-trends', timeframe, startDate, endDate],
+    queryFn: () => adminService.getSalesTrends(analyticsParams),
+    placeholderData: keepPreviousData,
+    enabled: activeTab === 'sales',
+  });
 
-  const { data: churnData } = useQuery(
-    ['customer-churn', timeframe, startDate, endDate],
-    () => adminService.getChurnPrediction(analyticsParams),
-    {
-      keepPreviousData: true,
-      enabled: activeTab === 'churn'
-    }
-  );
+  const { data: churnData } = useQuery({
+    queryKey: ['customer-churn', timeframe, startDate, endDate],
+    queryFn: () => adminService.getChurnPrediction(analyticsParams),
+    placeholderData: keepPreviousData,
+    enabled: activeTab === 'churn',
+  });
 
-  const { data: deliveryHeatmap } = useQuery(
-    ['delivery-heatmap', timeframe, startDate, endDate],
-    () => adminService.getDeliveryHeatmap(analyticsParams),
-    {
-      keepPreviousData: true,
-      enabled: activeTab === 'delivery'
-    }
-  );
+  const { data: deliveryHeatmap } = useQuery({
+    queryKey: ['delivery-heatmap', timeframe, startDate, endDate],
+    queryFn: () => adminService.getDeliveryHeatmap(analyticsParams),
+    placeholderData: keepPreviousData,
+    enabled: activeTab === 'delivery',
+  });
 
-  const { data: revenueForecast } = useQuery(
-    ['revenue-forecast', timeframe, startDate, endDate],
-    () => adminService.getRevenueForecast(analyticsParams),
-    {
-      keepPreviousData: true,
-      enabled: activeTab === 'forecast'
-    }
-  );
+  const { data: revenueForecast } = useQuery({
+    queryKey: ['revenue-forecast', timeframe, startDate, endDate],
+    queryFn: () => adminService.getRevenueForecast(analyticsParams),
+    placeholderData: keepPreviousData,
+    enabled: activeTab === 'forecast',
+  });
 
-  const { data: loyaltyAnalytics } = useQuery(
-    ['analytics-loyalty', startDate, endDate],
-    () => adminService.getLoyaltyAnalytics({
+  const { data: loyaltyAnalytics } = useQuery({
+    queryKey: ['analytics-loyalty', startDate, endDate],
+
+    queryFn: () => adminService.getLoyaltyAnalytics({
       start_date: startDate,
       end_date: endDate,
     }),
-    {
-      keepPreviousData: true,
-      enabled: activeTab === 'loyalty'
-    }
-  );
+
+    placeholderData: keepPreviousData,
+    enabled: activeTab === 'loyalty',
+  });
 
   const overviewTrendChartData = {
     labels: analyticsData.revenue_trend?.map((item) => item.label) || [],
@@ -332,7 +322,7 @@ const Analytics = () => {
 
     const exportResult = exportUtils.exportToExcel(
       rows,
-      `analytics_${activeTab}_${endDate || moment().format('YYYY-MM-DD')}`,
+      `analytics_${activeTab}_${endDate || dayjs().format('YYYY-MM-DD')}`,
       'Analytics'
     );
 

@@ -47,8 +47,8 @@ import {
   SendOutlined,
   StopOutlined
 } from '@ant-design/icons';
-import { useMutation, useQuery, useQueryClient } from 'react-query';
-import moment from 'moment';
+import { useMutation, useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
+import dayjs from 'dayjs';
 import { formatDate, formatDateTime } from '../utils/dateUtils';
 import adminService from '../services/adminService';
 import exportUtils from '../utils/exportUtils';
@@ -125,6 +125,7 @@ const normalizeTemplatePayload = (values) => ({
 const renderChannelTag = (channel, channels) => {
   const channelMeta = channels.find((item) => item.value === channel);
   return (
+    // eslint-disable-next-line security/detect-object-injection
     <Tag color={channel === 'push' ? 'default' : 'blue'} icon={CHANNEL_ICONS[channel]}>
       {(channelMeta?.label || channel || '').toUpperCase()}
     </Tag>
@@ -194,68 +195,68 @@ const Notifications = () => {
     is_active: templateFilters.is_active
   }), [templateFilters, templatePagination]);
 
-  const { data: campaignCollection, isLoading: campaignsLoading } = useQuery(
-    ['notification-campaigns', campaignQueryParams],
-    () => adminService.getNotificationCampaigns(campaignQueryParams),
-    { keepPreviousData: true }
-  );
+  const { data: campaignCollection, isLoading: campaignsLoading } = useQuery({
+    queryKey: ['notification-campaigns', campaignQueryParams],
+    queryFn: () => adminService.getNotificationCampaigns(campaignQueryParams),
+    placeholderData: keepPreviousData,
+  });
 
-  const { data: templateCollection, isLoading: templatesLoading } = useQuery(
-    ['notification-templates', templateQueryParams],
-    () => adminService.getNotificationTemplates(templateQueryParams),
-    { keepPreviousData: true, enabled: activeTab === 'templates' || templateDrawerOpen || templateModalOpen || campaignModalOpen }
-  );
+  const { data: templateCollection, isLoading: templatesLoading } = useQuery({
+    queryKey: ['notification-templates', templateQueryParams],
+    queryFn: () => adminService.getNotificationTemplates(templateQueryParams),
+    placeholderData: keepPreviousData,
+    enabled: activeTab === 'templates' || templateDrawerOpen || templateModalOpen || campaignModalOpen,
+  });
 
-  const { data: selectedCampaign, isFetching: campaignDetailLoading } = useQuery(
-    ['notification-campaign-detail', selectedCampaignId],
-    () => adminService.getNotificationCampaign(selectedCampaignId),
-    { enabled: Boolean(selectedCampaignId) }
-  );
+  const { data: selectedCampaign, isFetching: campaignDetailLoading } = useQuery({
+    queryKey: ['notification-campaign-detail', selectedCampaignId],
+    queryFn: () => adminService.getNotificationCampaign(selectedCampaignId),
+    enabled: Boolean(selectedCampaignId),
+  });
 
-  const { data: selectedTemplate, isFetching: templateDetailLoading } = useQuery(
-    ['notification-template-detail', selectedTemplateId],
-    () => adminService.getNotificationTemplate(selectedTemplateId),
-    { enabled: Boolean(selectedTemplateId) }
-  );
+  const { data: selectedTemplate, isFetching: templateDetailLoading } = useQuery({
+    queryKey: ['notification-template-detail', selectedTemplateId],
+    queryFn: () => adminService.getNotificationTemplate(selectedTemplateId),
+    enabled: Boolean(selectedTemplateId),
+  });
 
-  const { data: notificationTypes = [] } = useQuery(
-    ['notification-template-types'],
-    () => adminService.getNotificationTemplateTypes()
-  );
+  const { data: notificationTypes = [] } = useQuery({
+    queryKey: ['notification-template-types'],
+    queryFn: () => adminService.getNotificationTemplateTypes(),
+  });
 
-  const { data: channelOptions = [] } = useQuery(
-    ['notification-template-channels'],
-    () => adminService.getNotificationTemplateChannels()
-  );
+  const { data: channelOptions = [] } = useQuery({
+    queryKey: ['notification-template-channels'],
+    queryFn: () => adminService.getNotificationTemplateChannels(),
+  });
 
-  const { data: segmentOptions = [] } = useQuery(
-    ['notification-campaign-segments'],
-    () => adminService.getNotificationCampaignSegments()
-  );
+  const { data: segmentOptions = [] } = useQuery({
+    queryKey: ['notification-campaign-segments'],
+    queryFn: () => adminService.getNotificationCampaignSegments(),
+  });
 
-  const templatePreviewMutation = useMutation(
-    ({ templateId, payload }) => adminService.previewNotificationTemplate(templateId, payload),
-    {
-      onError: (error) => {
-        message.error(error?.response?.data?.message || 'Failed to render template preview');
-      }
-    }
-  );
+  const templatePreviewMutation = useMutation({
+    mutationFn: ({ templateId, payload }) => adminService.previewNotificationTemplate(templateId, payload),
 
-  const templateTestSendMutation = useMutation(
-    ({ templateId, payload }) => adminService.testSendNotificationTemplate(templateId, payload),
-    {
-      onSuccess: () => {
-        message.success('Template test notification sent');
-      },
-      onError: (error) => {
-        message.error(error?.response?.data?.message || 'Failed to send test notification');
-      }
-    }
-  );
+    onError: (error) => {
+      message.error(error?.response?.data?.message || 'Failed to render template preview');
+    },
+  });
 
-  const campaignSaveMutation = useMutation(
-    async ({ values, mode }) => {
+  const templateTestSendMutation = useMutation({
+    mutationFn: ({ templateId, payload }) => adminService.testSendNotificationTemplate(templateId, payload),
+
+    onSuccess: () => {
+      message.success('Template test notification sent');
+    },
+
+    onError: (error) => {
+      message.error(error?.response?.data?.message || 'Failed to send test notification');
+    },
+  });
+
+  const campaignSaveMutation = useMutation({
+    mutationFn: async ({ values, mode }) => {
       const payload = normalizeCampaignPayload(values);
       let campaign;
 
@@ -277,111 +278,131 @@ const Notifications = () => {
 
       return campaign;
     },
-    {
-      onSuccess: (_, variables) => {
-        message.success(
-          variables.mode === 'draft'
-            ? 'Campaign saved'
-            : variables.mode === 'send_now'
-              ? 'Campaign sent'
-              : 'Campaign scheduled'
-        );
-        queryClient.invalidateQueries('notification-campaigns');
-        if (selectedCampaignId) {
-          queryClient.invalidateQueries(['notification-campaign-detail', selectedCampaignId]);
-        }
-        setCampaignModalOpen(false);
-        setEditingCampaignId(null);
-        campaignForm.resetFields();
-      },
-      onError: (error) => {
-        message.error(error?.response?.data?.message || error?.message || 'Failed to save campaign');
-      }
-    }
-  );
 
-  const campaignDeleteMutation = useMutation(
-    (campaignId) => adminService.deleteNotificationCampaign(campaignId),
-    {
-      onSuccess: () => {
-        message.success('Campaign deleted');
-        queryClient.invalidateQueries('notification-campaigns');
-        setCampaignDrawerOpen(false);
-        setSelectedCampaignId(null);
-      },
-      onError: (error) => {
-        message.error(error?.response?.data?.message || 'Failed to delete campaign');
+    onSuccess: (_, variables) => {
+      message.success(
+        variables.mode === 'draft'
+          ? 'Campaign saved'
+          : variables.mode === 'send_now'
+            ? 'Campaign sent'
+            : 'Campaign scheduled'
+      );
+      queryClient.invalidateQueries({
+        queryKey: ['notification-campaigns'],
+      });
+      if (selectedCampaignId) {
+        queryClient.invalidateQueries({
+          queryKey: ['notification-campaign-detail', selectedCampaignId],
+        });
       }
-    }
-  );
+      setCampaignModalOpen(false);
+      setEditingCampaignId(null);
+      campaignForm.resetFields();
+    },
 
-  const campaignDuplicateMutation = useMutation(
-    (campaignId) => adminService.duplicateNotificationCampaign(campaignId),
-    {
-      onSuccess: () => {
-        message.success('Campaign duplicated');
-        queryClient.invalidateQueries('notification-campaigns');
-      },
-      onError: (error) => {
-        message.error(error?.response?.data?.message || 'Failed to duplicate campaign');
-      }
-    }
-  );
+    onError: (error) => {
+      message.error(error?.response?.data?.message || error?.message || 'Failed to save campaign');
+    },
+  });
 
-  const campaignCancelMutation = useMutation(
-    (campaignId) => adminService.cancelNotificationCampaign(campaignId),
-    {
-      onSuccess: (_, campaignId) => {
-        message.success('Campaign cancelled');
-        queryClient.invalidateQueries('notification-campaigns');
-        queryClient.invalidateQueries(['notification-campaign-detail', campaignId]);
-      },
-      onError: (error) => {
-        message.error(error?.response?.data?.message || 'Failed to cancel campaign');
-      }
-    }
-  );
+  const campaignDeleteMutation = useMutation({
+    mutationFn: (campaignId) => adminService.deleteNotificationCampaign(campaignId),
 
-  const templateSaveMutation = useMutation(
-    async (values) => {
+    onSuccess: () => {
+      message.success('Campaign deleted');
+      queryClient.invalidateQueries({
+        queryKey: ['notification-campaigns'],
+      });
+      setCampaignDrawerOpen(false);
+      setSelectedCampaignId(null);
+    },
+
+    onError: (error) => {
+      message.error(error?.response?.data?.message || 'Failed to delete campaign');
+    },
+  });
+
+  const campaignDuplicateMutation = useMutation({
+    mutationFn: (campaignId) => adminService.duplicateNotificationCampaign(campaignId),
+
+    onSuccess: () => {
+      message.success('Campaign duplicated');
+      queryClient.invalidateQueries({
+        queryKey: ['notification-campaigns'],
+      });
+    },
+
+    onError: (error) => {
+      message.error(error?.response?.data?.message || 'Failed to duplicate campaign');
+    },
+  });
+
+  const campaignCancelMutation = useMutation({
+    mutationFn: (campaignId) => adminService.cancelNotificationCampaign(campaignId),
+
+    onSuccess: (_, campaignId) => {
+      message.success('Campaign cancelled');
+      queryClient.invalidateQueries({
+        queryKey: ['notification-campaigns'],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ['notification-campaign-detail', campaignId],
+      });
+    },
+
+    onError: (error) => {
+      message.error(error?.response?.data?.message || 'Failed to cancel campaign');
+    },
+  });
+
+  const templateSaveMutation = useMutation({
+    mutationFn: async (values) => {
       const payload = normalizeTemplatePayload(values);
       if (editingTemplateId) {
         return adminService.updateNotificationTemplate(editingTemplateId, payload);
       }
       return adminService.createNotificationTemplate(payload);
     },
-    {
-      onSuccess: () => {
-        message.success(editingTemplateId ? 'Template updated' : 'Template created');
-        queryClient.invalidateQueries('notification-templates');
-        if (selectedTemplateId) {
-          queryClient.invalidateQueries(['notification-template-detail', selectedTemplateId]);
-        }
-        setTemplateModalOpen(false);
-        setEditingTemplateId(null);
-        templateForm.resetFields();
-      },
-      onError: (error) => {
-        message.error(error?.response?.data?.message || 'Failed to save template');
-      }
-    }
-  );
 
-  const templateToggleMutation = useMutation(
-    ({ templateId, isActive }) => adminService.updateNotificationTemplate(templateId, { is_active: isActive }),
-    {
-      onSuccess: () => {
-        message.success('Template status updated');
-        queryClient.invalidateQueries('notification-templates');
-        if (selectedTemplateId) {
-          queryClient.invalidateQueries(['notification-template-detail', selectedTemplateId]);
-        }
-      },
-      onError: (error) => {
-        message.error(error?.response?.data?.message || 'Failed to update template status');
+    onSuccess: () => {
+      message.success(editingTemplateId ? 'Template updated' : 'Template created');
+      queryClient.invalidateQueries({
+        queryKey: ['notification-templates'],
+      });
+      if (selectedTemplateId) {
+        queryClient.invalidateQueries({
+          queryKey: ['notification-template-detail', selectedTemplateId],
+        });
       }
-    }
-  );
+      setTemplateModalOpen(false);
+      setEditingTemplateId(null);
+      templateForm.resetFields();
+    },
+
+    onError: (error) => {
+      message.error(error?.response?.data?.message || 'Failed to save template');
+    },
+  });
+
+  const templateToggleMutation = useMutation({
+    mutationFn: ({ templateId, isActive }) => adminService.updateNotificationTemplate(templateId, { is_active: isActive }),
+
+    onSuccess: () => {
+      message.success('Template status updated');
+      queryClient.invalidateQueries({
+        queryKey: ['notification-templates'],
+      });
+      if (selectedTemplateId) {
+        queryClient.invalidateQueries({
+          queryKey: ['notification-template-detail', selectedTemplateId],
+        });
+      }
+    },
+
+    onError: (error) => {
+      message.error(error?.response?.data?.message || 'Failed to update template status');
+    },
+  });
 
   const runTemplatePreview = async (templateId) => {
     try {
@@ -453,7 +474,7 @@ const Notifications = () => {
       target_segment_id: detail.target_segment_id || undefined,
       specific_user_ids: (detail.specific_user_ids || []).map(String),
       priority: detail.priority || 'normal',
-      scheduled_at: detail.scheduled_at ? moment(detail.scheduled_at) : null
+      scheduled_at: detail.scheduled_at ? dayjs(detail.scheduled_at) : null
     });
     openCampaignModal('edit');
   };
@@ -576,6 +597,7 @@ const Notifications = () => {
       title: 'Status',
       dataIndex: 'status',
       key: 'status',
+      // eslint-disable-next-line security/detect-object-injection
       render: (status) => <Tag color={CAMPAIGN_STATUS_COLORS[status]}>{status?.toUpperCase()}</Tag>
     },
     {
@@ -927,7 +949,6 @@ const Notifications = () => {
           }
         ]}
       />
-
       <Modal
         title={campaignModalMode === 'edit' ? 'Edit Campaign' : 'Create Campaign'}
         open={campaignModalOpen}
@@ -1080,7 +1101,7 @@ const Notifications = () => {
               <Button onClick={() => setCampaignModalOpen(false)}>Close</Button>
               <Button
                 icon={<SaveOutlined />}
-                loading={campaignSaveMutation.isLoading && campaignSubmitMode === 'draft'}
+                loading={campaignSaveMutation.isPending && campaignSubmitMode === 'draft'}
                 onClick={() => {
                   setCampaignSubmitMode('draft');
                   campaignForm.submit();
@@ -1090,7 +1111,7 @@ const Notifications = () => {
               </Button>
               <Button
                 icon={<SendOutlined />}
-                loading={campaignSaveMutation.isLoading && campaignSubmitMode === 'send_now'}
+                loading={campaignSaveMutation.isPending && campaignSubmitMode === 'send_now'}
                 onClick={() => {
                   setCampaignSubmitMode('send_now');
                   campaignForm.submit();
@@ -1101,7 +1122,7 @@ const Notifications = () => {
               <Button
                 type="primary"
                 icon={<ClockCircleOutlined />}
-                loading={campaignSaveMutation.isLoading && campaignSubmitMode === 'schedule'}
+                loading={campaignSaveMutation.isPending && campaignSubmitMode === 'schedule'}
                 onClick={() => {
                   setCampaignSubmitMode('schedule');
                   campaignForm.submit();
@@ -1113,7 +1134,6 @@ const Notifications = () => {
           </Form.Item>
         </Form>
       </Modal>
-
       <Modal
         title={templateModalMode === 'edit' ? 'Edit Template' : 'Create Template'}
         open={templateModalOpen}
@@ -1175,14 +1195,13 @@ const Notifications = () => {
           <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
             <Space>
               <Button onClick={() => setTemplateModalOpen(false)}>Close</Button>
-              <Button type="primary" loading={templateSaveMutation.isLoading} htmlType="submit">
+              <Button type="primary" loading={templateSaveMutation.isPending} htmlType="submit">
                 {templateModalMode === 'edit' ? 'Update Template' : 'Create Template'}
               </Button>
             </Space>
           </Form.Item>
         </Form>
       </Modal>
-
       <Drawer
         title={selectedCampaign?.name || 'Campaign Details'}
         width={760}
@@ -1211,8 +1230,12 @@ const Notifications = () => {
                 disabled={!['draft'].includes(selectedCampaign.status)}
                 onClick={() => adminService.sendNotificationCampaign(selectedCampaign.id, { send_now: true }).then(() => {
                   message.success('Campaign queued');
-                  queryClient.invalidateQueries('notification-campaigns');
-                  queryClient.invalidateQueries(['notification-campaign-detail', selectedCampaign.id]);
+                  queryClient.invalidateQueries({
+                    queryKey: ['notification-campaigns'],
+                  });
+                  queryClient.invalidateQueries({
+                    queryKey: ['notification-campaign-detail', selectedCampaign.id],
+                  });
                 }).catch((error) => {
                   message.error(error?.response?.data?.message || 'Failed to queue campaign');
                 })}
@@ -1318,7 +1341,6 @@ const Notifications = () => {
           <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="Select a campaign" />
         )}
       </Drawer>
-
       <Drawer
         title={selectedTemplate?.name || 'Template Details'}
         width={760}
@@ -1346,7 +1368,7 @@ const Notifications = () => {
               </Button>
               <Button
                 icon={<ExperimentOutlined />}
-                loading={templateTestSendMutation.isLoading}
+                loading={templateTestSendMutation.isPending}
                 onClick={() => {
                   try {
                     templateTestSendMutation.mutate({
@@ -1396,7 +1418,7 @@ const Notifications = () => {
                 <Button
                   size="small"
                   icon={<EyeOutlined />}
-                  loading={templatePreviewMutation.isLoading}
+                  loading={templatePreviewMutation.isPending}
                   onClick={() => {
                     try {
                       runTemplatePreview(selectedTemplate.id);

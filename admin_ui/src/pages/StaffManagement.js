@@ -7,7 +7,7 @@ import {
     TeamOutlined, UserOutlined, CarOutlined, LinkOutlined,
     DollarOutlined, CopyOutlined,
 } from '@ant-design/icons';
-import { useQuery, useMutation, useQueryClient } from 'react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import staffService from '../services/staffService';
@@ -30,60 +30,66 @@ const StaffManagement = () => {
     const [roleDrafts, setRoleDrafts] = useState({});
 
     // Queries
-    const { data: overviewData, isLoading: overviewLoading } = useQuery(
-        'staffOverview',
-        () => staffService.getStaffOverview()
-    );
+    const { data: overviewData, isLoading: overviewLoading } = useQuery({
+        queryKey: ['staffOverview'],
+        queryFn: () => staffService.getStaffOverview(),
+    });
 
-    const { data: cashData, isLoading: cashLoading, refetch: refetchCash } = useQuery(
-        ['cashReconciliation', cashPeriod],
-        () => staffService.getCashReconciliation({ period: cashPeriod }),
-        { enabled: activeTab === 'cash' }
-    );
+    const { data: cashData, isLoading: cashLoading, refetch: refetchCash } = useQuery({
+        queryKey: ['cashReconciliation', cashPeriod],
+        queryFn: () => staffService.getCashReconciliation({ period: cashPeriod }),
+        enabled: activeTab === 'cash',
+    });
 
-    const { data: deliveryPersonsData } = useQuery(
-        'staffInviteDeliveryPersons',
-        () => staffService.getDeliveryPersons({ page: 1, per_page: 200 })
-    );
+    const { data: deliveryPersonsData } = useQuery({
+        queryKey: ['staffInviteDeliveryPersons'],
+        queryFn: () => staffService.getDeliveryPersons({ page: 1, per_page: 200 }),
+    });
 
-    const { data: operatorsData } = useQuery(
-        'staffInviteOperators',
-        () => staffService.getOperators({ page: 1, per_page: 200 })
-    );
+    const { data: operatorsData } = useQuery({
+        queryKey: ['staffInviteOperators'],
+        queryFn: () => staffService.getOperators({ page: 1, per_page: 200 }),
+    });
 
     // Mutations
-    const inviteMutation = useMutation(
-        (payload) => staffService.generateInviteLink(payload),
-        {
-            onSuccess: (res) => {
-                const link = res?.data?.data?.invite_link;
-                if (link) {
-                    setInviteLink(link);
-                    setInviteModalOpen(true);
-                }
-            },
-            onError: (err) => {
-                const backendMessage = err?.response?.data?.message;
-                message.error(backendMessage || t('common:error_occurred'));
-            },
-        }
-    );
+    const inviteMutation = useMutation({
+        mutationFn: (payload) => staffService.generateInviteLink(payload),
 
-    const updateRolesMutation = useMutation(
-        ({ userId, roles }) => staffService.updateStaffRoles(userId, roles),
-        {
-            onSuccess: () => {
-                message.success(t('staff:roles_updated'));
-                queryClient.invalidateQueries('staffInviteDeliveryPersons');
-                queryClient.invalidateQueries('staffInviteOperators');
-                queryClient.invalidateQueries('staffOverview');
-            },
-            onError: (err) => {
-                const backendMessage = err?.response?.data?.message;
-                message.error(backendMessage || t('common:error_occurred'));
-            },
-        }
-    );
+        onSuccess: (res) => {
+            const link = res?.data?.data?.invite_link;
+            if (link) {
+                setInviteLink(link);
+                setInviteModalOpen(true);
+            }
+        },
+
+        onError: (err) => {
+            const backendMessage = err?.response?.data?.message;
+            message.error(backendMessage || t('common:error_occurred'));
+        },
+    });
+
+    const updateRolesMutation = useMutation({
+        mutationFn: ({ userId, roles }) => staffService.updateStaffRoles(userId, roles),
+
+        onSuccess: () => {
+            message.success(t('staff:roles_updated'));
+            queryClient.invalidateQueries({
+                queryKey: ['staffInviteDeliveryPersons'],
+            });
+            queryClient.invalidateQueries({
+                queryKey: ['staffInviteOperators'],
+            });
+            queryClient.invalidateQueries({
+                queryKey: ['staffOverview'],
+            });
+        },
+
+        onError: (err) => {
+            const backendMessage = err?.response?.data?.message;
+            message.error(backendMessage || t('common:error_occurred'));
+        },
+    });
 
     const overview = overviewData?.data?.data?.overview || {};
     const cashReport = cashData?.data?.data?.report || [];
@@ -299,7 +305,7 @@ const StaffManagement = () => {
                 <Button
                     type="primary"
                     onClick={() => saveRoles(row)}
-                    loading={updateRolesMutation.isLoading && updateRolesMutation.variables?.userId === row.user_id}
+                    loading={updateRolesMutation.isPending && updateRolesMutation.variables?.userId === row.user_id}
                 >
                     {t('common:save')}
                 </Button>
@@ -346,7 +352,7 @@ const StaffManagement = () => {
                                 }
                                 inviteMutation.mutate({ user_id: inviteUserId, role: inviteRole });
                             }}
-                            loading={inviteMutation.isLoading}
+                            loading={inviteMutation.isPending}
                             disabled={!inviteUserId}
                         >
                             {t('staff:generate_invite')}

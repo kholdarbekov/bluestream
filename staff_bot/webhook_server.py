@@ -14,6 +14,8 @@ import redis.asyncio as redis
 from staff_bot.config import config
 from staff_bot.database import db_manager
 from staff_bot.i18n import i18n
+from shared.redis_failure import report_redis_failure
+from shared.redis_keyspace import RedisKeyspace
 
 logger = logging.getLogger(__name__)
 
@@ -167,7 +169,12 @@ class StaffWebhookServer:
         except Exception as e:
             self._redis_connected = False
             self._redis = None
-            logger.warning(f"Webhook server Redis unavailable, fallback to in-memory dedup: {e}")
+            # RED-005: TIER_RELIABILITY — cross-replica dedup requires Redis.
+            # In-memory fallback only works for single-replica deployments, so
+            # ops must know the moment this degrades.
+            report_redis_failure(
+                "staff_bot.webhook_server.init_redis", str(e), tier="reliability"
+            )
 
     def _deduplicate(self, event_key: str) -> bool:
         """Return True if this event was already processed recently."""
@@ -187,7 +194,7 @@ class StaffWebhookServer:
         Uses Redis when event_id is provided; otherwise falls back to in-memory dedup.
         """
         if event_id and self._redis_connected and self._redis:
-            key = f"staff_bot:webhook_events:{event_id}"
+            key = RedisKeyspace.staff_bot_webhook_event(event_id)
             try:
                 created = await self._redis.set(
                     key,
@@ -197,7 +204,12 @@ class StaffWebhookServer:
                 )
                 return not bool(created)
             except Exception as e:
-                logger.warning(f"Redis dedup check failed, fallback to in-memory: {e}")
+                # RED-005: TIER_RELIABILITY — in-memory fallback loses dedup
+                # across replicas. Alert so ops treats a sustained failure as
+                # a priority fix, not a silent degradation.
+                report_redis_failure(
+                    "staff_bot.webhook_server.is_duplicate_event", str(e), tier="reliability"
+                )
 
         return self._deduplicate(fallback_key)
 

@@ -24,35 +24,35 @@ export const BREAKPOINTS = {
 export const useResponsive = () => {
   // Mobile-first queries
   const isMobile = useMediaQuery({ maxWidth: BREAKPOINTS.mobile - 1 });
-  const isMobileLarge = useMediaQuery({ 
+  const isMobileLarge = useMediaQuery({
     minWidth: BREAKPOINTS.mobile,
-    maxWidth: BREAKPOINTS.mobileLarge - 1 
+    maxWidth: BREAKPOINTS.mobileLarge - 1
   });
-  const isTablet = useMediaQuery({ 
+  const isTablet = useMediaQuery({
     minWidth: BREAKPOINTS.mobileLarge,
-    maxWidth: BREAKPOINTS.tablet - 1 
+    maxWidth: BREAKPOINTS.tablet - 1
   });
-  const isTabletLandscape = useMediaQuery({ 
+  const isTabletLandscape = useMediaQuery({
     minWidth: BREAKPOINTS.tablet,
-    maxWidth: BREAKPOINTS.tabletLandscape - 1 
+    maxWidth: BREAKPOINTS.tabletLandscape - 1
   });
-  const isDesktop = useMediaQuery({ 
+  const isDesktop = useMediaQuery({
     minWidth: BREAKPOINTS.tabletLandscape,
-    maxWidth: BREAKPOINTS.desktop - 1 
+    maxWidth: BREAKPOINTS.desktop - 1
   });
   const isDesktopLarge = useMediaQuery({ minWidth: BREAKPOINTS.desktop });
 
   // Grouped device queries for easier use
   const isMobileDevice = useMediaQuery({ maxWidth: BREAKPOINTS.mobileLarge - 1 });
-  const isTabletDevice = useMediaQuery({ 
+  const isTabletDevice = useMediaQuery({
     minWidth: BREAKPOINTS.mobileLarge,
-    maxWidth: BREAKPOINTS.tabletLandscape - 1 
+    maxWidth: BREAKPOINTS.tabletLandscape - 1
   });
   const isDesktopDevice = useMediaQuery({ minWidth: BREAKPOINTS.tabletLandscape });
 
   // Touch device detection
   const isTouchDevice = useMediaQuery({ query: '(hover: none) and (pointer: coarse)' });
-  
+
   // Orientation detection
   const isLandscape = useMediaQuery({ orientation: 'landscape' });
   const isPortrait = useMediaQuery({ orientation: 'portrait' });
@@ -127,10 +127,10 @@ export const useResponsive = () => {
     getContainerPadding,
     getFontSize,
     getAntBreakpoint,
-    
+
     // Current breakpoint info
     currentBreakpoint: getAntBreakpoint(),
-    
+
     // Breakpoint constants
     breakpoints: BREAKPOINTS
   };

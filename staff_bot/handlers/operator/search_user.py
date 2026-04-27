@@ -40,6 +40,8 @@ class SearchUserHandler(BaseHandler):
 
         return SEARCH_INPUT
 
+    @require_auth
+    @require_operator
     async def receive_search_query(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Receive search query and show results"""
         language = await self._get_language(update, context)
@@ -113,6 +115,8 @@ class SearchUserHandler(BaseHandler):
             await self._handle_error(update, context)
             return ConversationHandler.END
 
+    @require_auth
+    @require_operator
     async def cancel(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Cancel search"""
         language = await self._get_language(update, context)

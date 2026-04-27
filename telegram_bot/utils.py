@@ -20,6 +20,7 @@ from telegram.error import TelegramError, NetworkError, TimedOut
 from database import db_manager, BotUserRepository
 from i18n import i18n
 from config import config
+from shared.redis_keyspace import RedisKeyspace
 
 logger = logging.getLogger('utils')
 
@@ -83,65 +84,95 @@ def _should_log_network_warning() -> bool:
 class RateLimiter:
     """Redis-backed sliding window rate limiter for bot requests.
 
-    Falls back to in-memory counters when Redis is unavailable.
+    Fails closed when Redis is unavailable (audit BOT-005 default) so multi-replica
+    deployments do not silently degrade into `N_replicas × configured_limit`. Ops can
+    set ``TELEGRAM_RATE_LIMIT_FAIL_MODE=open`` to preserve availability at the cost
+    of defense — every denial in that mode emits a critical Sentry alert.
     """
 
-    CLEANUP_INTERVAL = 300  # Run cleanup every 5 minutes
+    _FAIL_ALERT_COOLDOWN_SECONDS = 300  # throttle repeated Sentry alerts
 
     def __init__(self):
         self.max_requests = config.telegram.rate_limit_requests
         self.window_seconds = config.telegram.rate_limit_window
+        self._fail_mode = (config.telegram.rate_limit_fail_mode or 'closed').lower()
+        self._retry_seconds = max(5, int(config.telegram.rate_limit_redis_retry_seconds or 30))
         self._redis: Optional[aioredis.Redis] = None
         self._redis_available = False
-        # In-memory fallback
-        self._local_requests: Dict[int, list] = {}
-        self._last_cleanup = datetime.now(timezone.utc)
+        self._last_connect_attempt: Optional[datetime] = None
+        self._last_fail_alert_at: Optional[datetime] = None
 
     async def _ensure_redis(self) -> bool:
-        """Lazily connect to Redis on first use."""
+        """Connect to Redis, retrying periodically on failure."""
         if self._redis_available:
             return True
-        if self._redis is not None:
-            return False  # already tried and failed
+
+        now = datetime.now(timezone.utc)
+        if (
+            self._last_connect_attempt is not None
+            and (now - self._last_connect_attempt).total_seconds() < self._retry_seconds
+        ):
+            return False  # recent failure — back off
+        self._last_connect_attempt = now
+
         try:
-            self._redis = aioredis.from_url(
-                config.redis.url, encoding='utf-8', decode_responses=True
-            )
+            if self._redis is None:
+                self._redis = aioredis.from_url(
+                    config.redis.url, encoding='utf-8', decode_responses=True
+                )
             await self._redis.ping()
             self._redis_available = True
             logger.info("RateLimiter connected to Redis")
             return True
         except Exception as e:
-            logger.warning(f"RateLimiter Redis unavailable, using in-memory fallback: {e}")
             self._redis_available = False
+            logger.error("RateLimiter Redis unavailable: %s", e)
             return False
 
-    def _periodic_cleanup(self):
-        """Remove stale entries from in-memory fallback."""
+    def _report_redis_failure(self, reason: str) -> None:
+        """Send a throttled Sentry alert when Redis fails (fail-closed or -open)."""
         now = datetime.now(timezone.utc)
-        if now - self._last_cleanup < timedelta(seconds=self.CLEANUP_INTERVAL):
+        if (
+            self._last_fail_alert_at is not None
+            and (now - self._last_fail_alert_at).total_seconds() < self._FAIL_ALERT_COOLDOWN_SECONDS
+        ):
             return
-        self._last_cleanup = now
-        cutoff = now - timedelta(seconds=self.window_seconds)
-        stale_keys = [
-            uid for uid, times in self._local_requests.items()
-            if not times or times[-1] < cutoff
-        ]
-        for uid in stale_keys:
-            del self._local_requests[uid]
+        self._last_fail_alert_at = now
+        logger.critical("RateLimiter Redis unavailable, fail_mode=%s: %s", self._fail_mode, reason)
+        try:
+            with sentry_sdk.push_scope() as scope:
+                scope.set_tag('component', 'bot_rate_limiter')
+                scope.set_tag('fail_mode', self._fail_mode)
+                scope.set_level('error')
+                sentry_sdk.capture_message(
+                    f"Bot rate limiter Redis unavailable (fail_mode={self._fail_mode}): {reason}"
+                )
+        except Exception:
+            pass
 
     async def allow_request(self, user_id: int) -> bool:
-        """Check if user is within rate limits (Redis or in-memory)."""
+        """Return True if the user is within rate limits.
+
+        Falls closed (returns False) when Redis is unavailable unless
+        ``TELEGRAM_RATE_LIMIT_FAIL_MODE=open`` is set.
+        """
         if not config.telegram.rate_limit_enabled:
             return True
 
         if await self._ensure_redis():
-            return await self._allow_request_redis(user_id)
-        return self._allow_request_local(user_id)
+            try:
+                return await self._allow_request_redis(user_id)
+            except Exception as e:
+                self._redis_available = False
+                self._report_redis_failure(f"pipeline error: {e}")
+                return self._fail_mode == 'open'
+
+        self._report_redis_failure("connection unavailable")
+        return self._fail_mode == 'open'
 
     async def _allow_request_redis(self, user_id: int) -> bool:
         """Sliding window counter via Redis sorted set."""
-        key = f"rate:bot:{user_id}"
+        key = RedisKeyspace.bot_rate_limit(user_id)
         now = datetime.now(timezone.utc).timestamp()
         window_start = now - self.window_seconds
 
@@ -154,25 +185,6 @@ class RateLimiter:
 
         current_count = results[1]  # zcard result
         return current_count < self.max_requests
-
-    def _allow_request_local(self, user_id: int) -> bool:
-        """In-memory fallback."""
-        now = datetime.now(timezone.utc)
-        self._periodic_cleanup()
-
-        if user_id in self._local_requests:
-            self._local_requests[user_id] = [
-                t for t in self._local_requests[user_id]
-                if now - t < timedelta(seconds=self.window_seconds)
-            ]
-        else:
-            self._local_requests[user_id] = []
-
-        if len(self._local_requests[user_id]) >= self.max_requests:
-            return False
-
-        self._local_requests[user_id].append(now)
-        return True
 
 
 class UserCache:
@@ -229,42 +241,83 @@ class UserCache:
 class OTPRateLimiter:
     """Redis-backed rate limiter for OTP requests (stricter limits).
 
-    Falls back to in-memory when Redis is unavailable.
+    Fails closed when Redis is unavailable — OTP is a brute-force target, so an
+    in-memory fallback across replicas would silently multiply the effective limit.
+    Shares the fail_mode and retry cadence with ``RateLimiter`` (see BOT-005).
     """
 
     MAX_OTP_REQUESTS = 3
     OTP_WINDOW_SECONDS = 300  # 5 minutes
+    _FAIL_ALERT_COOLDOWN_SECONDS = 300
 
     def __init__(self):
         self._redis: Optional[aioredis.Redis] = None
         self._redis_available = False
-        # In-memory fallback
-        self._local_requests: Dict[int, list] = {}
+        self._fail_mode = (config.telegram.rate_limit_fail_mode or 'closed').lower()
+        self._retry_seconds = max(5, int(config.telegram.rate_limit_redis_retry_seconds or 30))
+        self._last_connect_attempt: Optional[datetime] = None
+        self._last_fail_alert_at: Optional[datetime] = None
 
     async def _ensure_redis(self) -> bool:
         if self._redis_available:
             return True
-        if self._redis is not None:
+
+        now = datetime.now(timezone.utc)
+        if (
+            self._last_connect_attempt is not None
+            and (now - self._last_connect_attempt).total_seconds() < self._retry_seconds
+        ):
             return False
+        self._last_connect_attempt = now
+
         try:
-            self._redis = aioredis.from_url(
-                config.redis.url, encoding='utf-8', decode_responses=True
-            )
+            if self._redis is None:
+                self._redis = aioredis.from_url(
+                    config.redis.url, encoding='utf-8', decode_responses=True
+                )
             await self._redis.ping()
             self._redis_available = True
             return True
-        except Exception:
+        except Exception as e:
             self._redis_available = False
+            logger.error("OTPRateLimiter Redis unavailable: %s", e)
             return False
 
+    def _report_redis_failure(self, reason: str) -> None:
+        now = datetime.now(timezone.utc)
+        if (
+            self._last_fail_alert_at is not None
+            and (now - self._last_fail_alert_at).total_seconds() < self._FAIL_ALERT_COOLDOWN_SECONDS
+        ):
+            return
+        self._last_fail_alert_at = now
+        logger.critical("OTPRateLimiter Redis unavailable, fail_mode=%s: %s", self._fail_mode, reason)
+        try:
+            with sentry_sdk.push_scope() as scope:
+                scope.set_tag('component', 'bot_otp_rate_limiter')
+                scope.set_tag('fail_mode', self._fail_mode)
+                scope.set_level('error')
+                sentry_sdk.capture_message(
+                    f"Bot OTP rate limiter Redis unavailable (fail_mode={self._fail_mode}): {reason}"
+                )
+        except Exception:
+            pass
+
     async def allow_otp_request(self, user_id: int) -> bool:
-        """Check if user is within OTP rate limits (Redis or in-memory)."""
+        """Return True if the user is within OTP rate limits."""
         if await self._ensure_redis():
-            return await self._allow_redis(user_id)
-        return self._allow_local(user_id)
+            try:
+                return await self._allow_redis(user_id)
+            except Exception as e:
+                self._redis_available = False
+                self._report_redis_failure(f"pipeline error: {e}")
+                return self._fail_mode == 'open'
+
+        self._report_redis_failure("connection unavailable")
+        return self._fail_mode == 'open'
 
     async def _allow_redis(self, user_id: int) -> bool:
-        key = f"rate:otp:{user_id}"
+        key = RedisKeyspace.bot_otp_rate_limit(user_id)
         now = datetime.now(timezone.utc).timestamp()
         window_start = now - self.OTP_WINDOW_SECONDS
 
@@ -277,22 +330,6 @@ class OTPRateLimiter:
 
         current_count = results[1]
         return current_count < self.MAX_OTP_REQUESTS
-
-    def _allow_local(self, user_id: int) -> bool:
-        now = datetime.now(timezone.utc)
-        if user_id in self._local_requests:
-            self._local_requests[user_id] = [
-                t for t in self._local_requests[user_id]
-                if now - t < timedelta(seconds=self.OTP_WINDOW_SECONDS)
-            ]
-        else:
-            self._local_requests[user_id] = []
-
-        if len(self._local_requests[user_id]) >= self.MAX_OTP_REQUESTS:
-            return False
-
-        self._local_requests[user_id].append(now)
-        return True
 
 
 # Global instances
@@ -309,14 +346,14 @@ async def authenticate_telegram_user(
 ) -> Optional[str]:
     """
     Authenticate telegram user with business API and return token.
-    
+
     Uses TokenManager for caching to avoid repeated auth calls.
-    
+
     Args:
         update: Telegram Update object
         api_client_instance: Business API client
         token_manager: Optional TokenManager for token caching
-        
+
     Returns:
         Access token string or None if authentication failed
     """
@@ -324,9 +361,9 @@ async def authenticate_telegram_user(
         if not update.effective_user:
             logger.error("No effective_user found in update")
             return None
-        
+
         user_id = update.effective_user.id
-        
+
         # Force refresh can be used in sensitive flows (e.g. registration/linking)
         # to avoid reusing stale cached tokens.
         if token_manager and force_refresh:
@@ -338,35 +375,35 @@ async def authenticate_telegram_user(
             if cached_token:
                 logger.debug(f"Using cached token for user {user_id}")
                 return cached_token
-        
+
         logger.info(f"Authenticating user {user_id} with backend API")
-        
+
         # Prepare user data from Telegram
         user_data = {
             'username': update.effective_user.username,
             'first_name': update.effective_user.first_name,
             'last_name': update.effective_user.last_name
         }
-        
+
         # Authenticate with business API
         auth_result = await api_client_instance.authenticate_user(user_id, user_data)
-        
+
         if auth_result:
             # auth_result is now a dict with access_token, refresh_token, expires_in
             access_token = auth_result.get('access_token')
             refresh_token = auth_result.get('refresh_token')
             expires_in = auth_result.get('expires_in', 3600)
-            
+
             if access_token:
                 # Cache tokens for future requests
                 if token_manager and refresh_token:
                     await token_manager.store_tokens(
                         user_id, access_token, refresh_token, expires_in
                     )
-                
+
                 logger.info(f"Authentication successful for user {user_id}")
                 return access_token
-        
+
         # Auth failed — invalidate any stale cached tokens so next attempt
         # triggers a fresh authentication instead of reusing bad tokens
         if token_manager:
@@ -389,16 +426,16 @@ async def get_auth_token(
 ) -> Optional[str]:
     """
     Get authentication token with TokenManager integration.
-    
+
     This is a convenience wrapper around authenticate_telegram_user that
     automatically retrieves the TokenManager from context.bot_data.
-    
+
     Args:
         update: Telegram Update object
         context: Telegram context with bot_data containing token_manager
         api_client_instance: Business API client
         force_refresh: Skip cached JWT and force backend re-authentication
-        
+
     Returns:
         Access token string or None if authentication failed
     """
@@ -416,24 +453,24 @@ async def user_middleware(update: Update) -> Optional[Dict[str, Any]]:
     try:
         if not update.effective_user:
             return None
-        
+
         user_id = update.effective_user.id
-        
+
         # Check cache first
         cached_user = user_cache.get(user_id)
         if cached_user:
             return cached_user
-        
+
         # Get user from database
         user_repo = BotUserRepository(db_manager)
         user_data = await user_repo.get_user_by_telegram_id(user_id)
-        
+
         if not user_data:
             # User doesn't exist, redirect to start
             language = update.effective_user.language_code or 'en'
             welcome_msg = i18n.get('telegram.registration_welcome', language)
             start_prompt = i18n.get('telegram.registration.start_command_prompt', language)
-            
+
             try:
                 if update.callback_query:
                     await update.callback_query.edit_message_text(
@@ -446,14 +483,14 @@ async def user_middleware(update: Update) -> Optional[Dict[str, Any]]:
                     )
             except Exception as e:
                 logger.error(f"Error sending registration message: {e}")
-            
+
             return None
-        
+
         # Cache user data
         user_cache.set(user_id, user_data)
-        
+
         return user_data
-        
+
     except Exception as e:
         logger.error(f"Error in user middleware: {e}")
         return None
@@ -587,8 +624,8 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
         logger.error(f"Failed to log error analytics: {analytics_error}")
 
 
-async def log_bot_analytics(user_id: int, command: str, action: str, 
-                           data: Dict = None, success: bool = True, 
+async def log_bot_analytics(user_id: int, command: str, action: str,
+                           data: Dict = None, success: bool = True,
                            error_message: str = None):
     """Log bot analytics to database"""
     try:
@@ -596,7 +633,7 @@ async def log_bot_analytics(user_id: int, command: str, action: str,
         INSERT INTO bot_analytics (telegram_id, command, action, data, success, error_message)
         VALUES ($1, $2, $3, $4, $5, $6)
         """
-        
+
         await db_manager.execute(
             query,
             user_id,
@@ -705,7 +742,7 @@ async def is_business_hours() -> bool:
 
 class MessageBuilder:
     """Helper class for building formatted messages"""
-    
+
     @staticmethod
     def build_order_summary(order: Dict[str, Any], language: str = 'en') -> str:
         """Build order summary message"""
@@ -714,14 +751,14 @@ class MessageBuilder:
             f"📅 Date: {order.get('created_at', 'N/A')[:10]}",
             f"💰 {i18n.get('telegram.order.total', language, format_price(order.get('total_amount', 0)))}"
         ]
-        
+
         if order.get('status'):
             from shared.constants import ORDER_STATUS_ICONS, DEFAULT_STATUS_ICON
             icon = ORDER_STATUS_ICONS.get(order['status'], DEFAULT_STATUS_ICON)
             lines.append(f"📊 Status: {icon} {order['status'].replace('_', ' ').title()}")
-        
+
         return '\n'.join(lines)
-    
+
     @staticmethod
     def build_product_summary(product: Dict[str, Any], language: str = 'en') -> str:
         """Build product summary message"""
@@ -729,13 +766,13 @@ class MessageBuilder:
             f"🏷️ {product.get('name', 'Unknown Product')}",
             f"💰 {format_price(product['pricing'].get('base_price', 0))} UZS"
         ]
-        
+
         if product['specifications'].get('volume'):
             lines.append(f"📦 {product['specifications']['volume']}{product['specifications'].get('volume_unit', '')}")
-        
+
         if product['inventory'].get('stock_quantity') is not None:
             stock = product['inventory']['stock_quantity']
             status = "✅ In Stock" if stock > 0 else "❌ Out of Stock"
             lines.append(f"📊 {status}")
-        
+
         return '\n'.join(lines)

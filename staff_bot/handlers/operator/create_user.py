@@ -44,6 +44,8 @@ class CreateUserHandler(BaseHandler):
 
         return ENTER_PHONE
 
+    @require_auth
+    @require_operator
     async def receive_phone(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Receive and validate phone number"""
         language = await self._get_language(update, context)
@@ -97,6 +99,8 @@ class CreateUserHandler(BaseHandler):
         )
         return ENTER_FIRST_NAME
 
+    @require_auth
+    @require_operator
     async def receive_first_name(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Receive first name"""
         language = await self._get_language(update, context)
@@ -118,6 +122,8 @@ class CreateUserHandler(BaseHandler):
         )
         return ENTER_LAST_NAME
 
+    @require_auth
+    @require_operator
     async def receive_last_name(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Receive last name (or skip)"""
         language = await self._get_language(update, context)
@@ -151,6 +157,8 @@ class CreateUserHandler(BaseHandler):
         )
         return SELECT_LANGUAGE
 
+    @require_auth
+    @require_operator
     async def select_client_language(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle client language selection"""
         query = update.callback_query
@@ -183,6 +191,8 @@ class CreateUserHandler(BaseHandler):
         await query.edit_message_text(text, reply_markup=keyboard, parse_mode='HTML')
         return CONFIRM_CREATE
 
+    @require_auth
+    @require_operator
     async def confirm_create(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Confirm and create the client user"""
         query = update.callback_query
@@ -236,6 +246,8 @@ class CreateUserHandler(BaseHandler):
         context.user_data.pop('new_client', None)
         return ConversationHandler.END
 
+    @require_auth
+    @require_operator
     async def cancel(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Cancel user creation"""
         context.user_data.pop('new_client', None)

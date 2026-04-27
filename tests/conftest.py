@@ -33,10 +33,36 @@ from business_app.utils.constants import UserRole, UserType, OrderStatus, Paymen
 from business_app.utils.password_security import hash_password
 
 
+def _per_worker_redis_url(base_url: str) -> str:
+    """Allocate a unique Redis DB per pytest-xdist worker (TST-006).
+
+    With ``-n auto``, multiple workers run in parallel against the same Redis
+    instance. The autouse ``reset_redis_state`` fixture calls ``flushdb()``,
+    which would wipe other workers' setup state if every worker shared one DB.
+    Map ``gwN`` to ``DB (15 - N)`` so workers stay isolated within Redis's
+    default 16-DB range. Falls back to ``base_url`` for the master process or
+    unrecognised worker names.
+    """
+    worker = os.environ.get('PYTEST_XDIST_WORKER', 'master')
+    if not worker.startswith('gw'):
+        return base_url
+    try:
+        worker_num = int(worker[2:])
+    except ValueError:
+        return base_url
+    db_index = max(0, 15 - worker_num)
+    scheme_split = base_url.split('://', 1)
+    if len(scheme_split) != 2:
+        return base_url
+    scheme, rest = scheme_split
+    host_part = rest.rsplit('/', 1)[0] if '/' in rest else rest
+    return f"{scheme}://{host_part}/{db_index}"
+
+
 @pytest.fixture(scope='session')
 def app():
     """Create Flask app for testing"""
-    # Set test configuration
+    base_redis_url = os.environ.get('REDIS_URL', 'redis://redis:6379/15')
     test_config = {
         'TESTING': True,
         'WTF_CSRF_ENABLED': False,
@@ -44,12 +70,12 @@ def app():
         'SQLALCHEMY_DATABASE_URI': 'sqlite:///:memory:',
         'SQLALCHEMY_TRACK_MODIFICATIONS': False,
         'JWT_SECRET_KEY': 'test-jwt-secret',
-        'REDIS_URL': 'redis://redis:6379/15',  # Test database (docker service)
+        'REDIS_URL': _per_worker_redis_url(base_redis_url),
         'CELERY_ALWAYS_EAGER': True,  # Run tasks synchronously in tests
     }
-    
+
     app = create_app(test_config)
-    
+
     with app.app_context():
         yield app
 
@@ -70,7 +96,7 @@ def runner(app):
 def db(app):
     """Create database tables for each test"""
     from business_app import db as _db
-    
+
     with app.app_context():
         _db.create_all()
         yield _db
@@ -78,17 +104,70 @@ def db(app):
         _db.drop_all()
 
 
+class _QueryCounter:
+    """Context manager returned by the `count_queries` fixture.
+
+    Usage:
+        def test_admin_orders_no_n_plus_one(client, count_queries, ...):
+            with count_queries() as counter:
+                client.get('/api/admin/orders?page=1&per_page=50')
+            assert counter.count <= 15  # N+1 guard (ARCH-009)
+    """
+
+    def __init__(self):
+        self.count = 0
+        self.statements: list = []
+        self._engine = None
+        self._listener = None
+
+    def _on_execute(self, conn, cursor, statement, parameters, context, executemany):
+        self.count += 1
+        self.statements.append(statement)
+
+    def __enter__(self):
+        from sqlalchemy import event
+        from business_app import db as _db
+
+        self._engine = _db.engine
+        self._listener = self._on_execute
+        event.listen(self._engine, 'before_cursor_execute', self._listener)
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        from sqlalchemy import event
+
+        if self._engine is not None and self._listener is not None:
+            event.remove(self._engine, 'before_cursor_execute', self._listener)
+        return False
+
+
+@pytest.fixture
+def count_queries():
+    """Factory that yields a SQL query counter (ARCH-009 N+1 regression guard)."""
+    return _QueryCounter
+
+
 @pytest.fixture(autouse=True)
 def reset_redis_state(app):
-    """Keep Redis-backed counters/sessions isolated between tests."""
+    """Keep Redis-backed counters/sessions isolated between tests.
+
+    TST-005: flush is the **pre-test invariant** — every test starts against
+    an empty DB regardless of what the previous test left behind. The
+    post-yield flush is belt-and-suspenders for the next test if this one
+    crashed mid-fixture. Ordering must not matter.
+    """
     redis_url = app.config.get('REDIS_URL')
-    try:
-        redis_client = redis.from_url(redis_url)
-        redis_client.flushdb()
-    except Exception:
-        # Tests should continue even if Redis is unavailable.
-        pass
+
+    def _safe_flush():
+        try:
+            redis.from_url(redis_url).flushdb()
+        except Exception:
+            # Tests should continue even if Redis is unavailable.
+            pass
+
+    _safe_flush()
     yield
+    _safe_flush()
 
 
 @pytest.fixture(autouse=True)
@@ -155,6 +234,7 @@ def mock_redis():
     mock.expire.return_value = True
     mock.delete.return_value = 1
     mock.ttl.return_value = 300
+    mock.exists.return_value = 0
     return mock
 
 
@@ -487,12 +567,12 @@ def db_transaction(db):
     """Provide database transaction that can be rolled back"""
     connection = db.engine.connect()
     transaction = connection.begin()
-    
+
     # Configure session to use this connection
     db.session.configure(bind=connection)
-    
+
     yield db
-    
+
     # Rollback transaction
     transaction.rollback()
     connection.close()

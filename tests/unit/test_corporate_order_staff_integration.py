@@ -102,9 +102,13 @@ def test_order_service_create_order_supports_business_account_and_reserve(
     assert order.order_items[0].contract_id == 91
     assert order.order_items[0].contract_product_price_id == 901
     reserve_for_order.assert_called_once_with(order.id)
+    # ARCH-008: order_service.create_order now wraps the multi-step flow in
+    # `atomic_transaction()`; inner payment initialization passes
+    # `commit=False` so the outer block stays in charge of the commit.
     initialize_payment.assert_called_once_with(
         order.id,
         metadata={'consume_marking_codes': False},
+        commit=False,
     )
 
 
@@ -117,6 +121,21 @@ def test_staff_service_create_phone_order_supports_business_account_and_reserve(
     sample_user.user_type = "entity"
     operator = _create_operator_user()
     db.session.add(operator)
+    # ARCH-006: phone orders auto-CONFIRM and a CONFIRMED order requires a
+    # delivery_address_id (enforced by `assert_order_address_for_status`).
+    # Provide a real address — the corporate-pricing assertions don't care
+    # which address is used, but the state machine does.
+    address = UserAddress(
+        user_id=sample_user.id,
+        title='Corporate Office',
+        full_address='Corporate Street 1',
+        street_address='Corporate Street 1',
+        city='Tashkent',
+        latitude=41.31,
+        longitude=69.28,
+        is_default=True,
+    )
+    db.session.add(address)
     db.session.commit()
 
     with patch(
@@ -143,7 +162,7 @@ def test_staff_service_create_phone_order_supports_business_account_and_reserve(
                 'items': [{'product_id': sample_product.id, 'quantity': 2}],
                 'payment_method': 'business_account',
                 'delivery_notes': 'Corporate delivery',
-                'delivery_address_id': None,
+                'delivery_address_id': address.id,
             },
         )
 

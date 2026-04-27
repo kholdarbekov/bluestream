@@ -8,13 +8,15 @@ from telegram.ext import ContextTypes
 from staff_bot.handlers.base import BaseHandler
 from staff_bot.i18n import i18n
 from staff_bot.keyboards.menu import MenuKeyboards
-from staff_bot.permissions import is_delivery_driver, is_operator
+from staff_bot.permissions import is_delivery_driver, is_operator, require_any_staff_role, require_auth
 
 logger = logging.getLogger(__name__)
 
 _handler = BaseHandler()
 
 
+@require_auth
+@require_any_staff_role
 async def main_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show the main menu based on user's staff roles"""
     if not context.user_data.get('authenticated'):
@@ -48,6 +50,8 @@ async def main_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 
+@require_auth
+@require_any_staff_role
 async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """/menu command handler"""
     await main_menu_handler(update, context)

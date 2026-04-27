@@ -66,6 +66,8 @@ class CashCollectionHandler(BaseHandler):
             await update.message.reply_text(text, parse_mode='HTML')
         return COLLECTION_SEARCH_INPUT
 
+    @require_auth
+    @require_delivery_driver
     async def receive_collection_search(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Search customers with open COD debt for standalone collection."""
         language = await self._get_language(update, context)
@@ -222,6 +224,8 @@ class CashCollectionHandler(BaseHandler):
         )
         return COLLECTION_AMOUNT_INPUT
 
+    @require_auth
+    @require_delivery_driver
     async def receive_collection_amount(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Receive custom amount for standalone collection."""
         language = await self._get_language(update, context)
@@ -274,6 +278,8 @@ class CashCollectionHandler(BaseHandler):
         )
         return COLLECTION_NOTE_INPUT
 
+    @require_auth
+    @require_delivery_driver
     async def receive_collection_note(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Finalize standalone COD collection after receiving notes."""
         language = await self._get_language(update, context)

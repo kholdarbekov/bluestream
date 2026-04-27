@@ -1,24 +1,39 @@
-import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
 import jsPDF from 'jspdf';
-import 'jspdf-autotable';
+import autoTable from 'jspdf-autotable';
 import adminService from '../services/adminService';
 import { formatLocalDate, formatLocaleDateTime, nowTashkent } from './dateUtils';
 
+const EXCEL_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+
+const escapeCsvCell = (value) => {
+  if (value === null || value === undefined) return '';
+  const str = String(value);
+  if (/[",\n\r]/.test(str)) {
+    return `"${str.replace(/"/g, '""')}"`;
+  }
+  return str;
+};
+
 class ExportUtils {
-  // Export data to Excel
-  exportToExcel(data, filename, sheetName = 'Data') {
+  async exportToExcel(data, filename, sheetName = 'Data') {
     try {
-      const worksheet = XLSX.utils.json_to_sheet(data);
-      const workbook = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(workbook, worksheet, sheetName);
+      const workbook = new ExcelJS.Workbook();
+      const worksheet = workbook.addWorksheet(sheetName);
 
-      // Auto-size columns
-      const cols = Object.keys(data[0] || {}).map(() => ({ wch: 15 }));
-      worksheet['!cols'] = cols;
+      const headers = Object.keys(data[0] || {});
+      if (headers.length > 0) {
+        worksheet.columns = headers.map((header) => ({
+          header,
+          key: header,
+          width: 15,
+        }));
+        worksheet.addRows(data);
+      }
 
-      const excelBuffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
-      const blob = new Blob([excelBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], { type: EXCEL_MIME });
       saveAs(blob, `${filename}.xlsx`);
 
       return { success: true, message: 'Excel file exported successfully' };
@@ -28,11 +43,16 @@ class ExportUtils {
     }
   }
 
-  // Export data to CSV
   exportToCSV(data, filename) {
     try {
-      const worksheet = XLSX.utils.json_to_sheet(data);
-      const csvOutput = XLSX.utils.sheet_to_csv(worksheet);
+      const headers = Object.keys(data[0] || {});
+      const headerRow = headers.map(escapeCsvCell).join(',');
+      const dataRows = data.map((row) =>
+        // eslint-disable-next-line security/detect-object-injection
+        headers.map((h) => escapeCsvCell(row[h])).join(',')
+      );
+      const csvOutput = [headerRow, ...dataRows].join('\n');
+
       const blob = new Blob([csvOutput], { type: 'text/csv;charset=utf-8;' });
       saveAs(blob, `${filename}.csv`);
 
@@ -43,44 +63,40 @@ class ExportUtils {
     }
   }
 
-  // Export data to PDF
   exportToPDF(data, filename, title = 'Data Report', columns = null) {
     try {
       const doc = new jsPDF();
 
-      // Add title
       doc.setFontSize(18);
       doc.text(title, 14, 20);
 
-      // Add date
       doc.setFontSize(10);
       doc.text(`Generated on: ${nowTashkent()}`, 14, 30);
 
-      // Prepare table data
       const tableColumns = columns || Object.keys(data[0] || {});
-      const tableRows = data.map(row =>
-        tableColumns.map(col => row[col] || '')
+      const tableRows = data.map((row) =>
+        // eslint-disable-next-line security/detect-object-injection
+        tableColumns.map((col) => row[col] ?? '')
       );
 
-      // Add table
-      doc.autoTable({
+      autoTable(doc, {
         head: [tableColumns],
         body: tableRows,
         startY: 40,
         theme: 'grid',
         styles: {
           fontSize: 8,
-          cellPadding: 3
+          cellPadding: 3,
         },
         headStyles: {
           fillColor: [24, 144, 255],
           textColor: [255, 255, 255],
           fontSize: 9,
-          fontStyle: 'bold'
+          fontStyle: 'bold',
         },
         alternateRowStyles: {
-          fillColor: [245, 245, 245]
-        }
+          fillColor: [245, 245, 245],
+        },
       });
 
       doc.save(`${filename}.pdf`);
@@ -92,13 +108,10 @@ class ExportUtils {
     }
   }
 
-  // Export analytics report
   async exportAnalyticsReport(type, filters = {}, format = 'excel') {
     try {
       const response = await adminService.exportReportExcel('analytics', filters);
-      const blob = new Blob([response], {
-        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-      });
+      const blob = new Blob([response], { type: EXCEL_MIME });
       saveAs(blob, `analytics_report_${new Date().toISOString().split('T')[0]}.xlsx`);
 
       return { success: true, message: 'Analytics report exported successfully' };
@@ -108,19 +121,15 @@ class ExportUtils {
     }
   }
 
-  // Export users data
   async exportUsers(filters = {}, format = 'excel') {
     try {
       const filename = `users_export_${new Date().toISOString().split('T')[0]}`;
 
       if (format === 'api') {
         const response = await adminService.exportData('users', filters);
-        const blob = new Blob([response], {
-          type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-        });
+        const blob = new Blob([response], { type: EXCEL_MIME });
         saveAs(blob, `${filename}.xlsx`);
       } else {
-        // Fallback: fetch data and export locally
         const userData = await adminService.getUsers({ ...filters, per_page: 10000 });
         const exportData = (userData.data?.items || []).map(user => ({
           'ID': user.id,
@@ -142,7 +151,6 @@ class ExportUtils {
     }
   }
 
-  // Export orders data
   async exportOrders(filters = {}, format = 'excel') {
     try {
       const filename = `orders_export_${new Date().toISOString().split('T')[0]}`;
@@ -173,7 +181,6 @@ class ExportUtils {
     }
   }
 
-  // Export products data
   async exportProducts(filters = {}, format = 'excel') {
     try {
       const filename = `products_export_${new Date().toISOString().split('T')[0]}`;
@@ -204,7 +211,6 @@ class ExportUtils {
     }
   }
 
-  // Export deliveries data
   async exportDeliveries(filters = {}, format = 'excel') {
     try {
       const filename = `deliveries_export_${new Date().toISOString().split('T')[0]}`;
@@ -236,7 +242,6 @@ class ExportUtils {
     }
   }
 
-  // Export loyalty programs data
   async exportLoyaltyPrograms(filters = {}, format = 'excel') {
     try {
       const filename = `loyalty_programs_export_${new Date().toISOString().split('T')[0]}`;
@@ -313,7 +318,6 @@ class ExportUtils {
     }
   }
 
-  // Export notification campaigns data
   async exportNotificationCampaigns(filters = {}, format = 'excel') {
     try {
       const filename = `notification_campaigns_export_${new Date().toISOString().split('T')[0]}`;
@@ -337,7 +341,6 @@ class ExportUtils {
     }
   }
 
-  // Generic export handler
   async exportData(type, filters = {}, format = 'excel') {
     const exportMethods = {
       users: this.exportUsers,
@@ -350,6 +353,7 @@ class ExportUtils {
       'notification-campaigns': this.exportNotificationCampaigns
     };
 
+    // eslint-disable-next-line security/detect-object-injection
     const exportMethod = exportMethods[type];
     if (!exportMethod) {
       return { success: false, message: 'Export type not supported' };

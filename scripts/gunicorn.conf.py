@@ -5,6 +5,17 @@ This configuration handles the --preload flag safely by disposing
 database connections after fork to prevent connection sharing issues.
 """
 import os
+import shutil
+
+
+# INF-003: prometheus_client multiprocess mode.
+# Must be set before any worker imports business_app (which imports the metrics
+# module). The directory is wiped on master boot so stale per-PID files from a
+# previous container life don't linger after PID recycling.
+_PROMETHEUS_DIR = os.environ.setdefault("PROMETHEUS_MULTIPROC_DIR", "/tmp/prom-multiproc")
+if os.path.isdir(_PROMETHEUS_DIR):
+    shutil.rmtree(_PROMETHEUS_DIR, ignore_errors=True)
+os.makedirs(_PROMETHEUS_DIR, exist_ok=True)
 
 # Server socket
 bind = "0.0.0.0:80"
@@ -74,3 +85,12 @@ def post_worker_init(worker):
 def worker_exit(server, worker):
     """Called just after a worker has been exited."""
     server.log.info(f"Worker {worker.pid} exiting")
+
+    # INF-003: prometheus_client multiproc mode requires us to clean up the
+    # dying worker's per-PID files so /metrics scrapes don't include its
+    # counters indefinitely. See prometheus_client.multiprocess.mark_process_dead.
+    try:
+        from prometheus_client import multiprocess
+        multiprocess.mark_process_dead(worker.pid)
+    except Exception as exc:
+        server.log.warning(f"Worker {worker.pid}: mark_process_dead failed: {exc}")

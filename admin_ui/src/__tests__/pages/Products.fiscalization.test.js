@@ -1,13 +1,13 @@
 import React from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { QueryClient, QueryClientProvider } from 'react-query';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 import Products from '../../pages/Products';
 import adminService from '../../services/adminService';
 
-jest.mock('../../services/adminService');
-jest.mock('react-i18next', () => ({
+vi.mock('../../services/adminService');
+vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: (key, fallbackOrOptions, maybeOptions) => {
       const fallback =
@@ -27,8 +27,8 @@ jest.mock('react-i18next', () => ({
   }),
 }));
 
-jest.mock('antd', () => {
-  const actual = jest.requireActual('antd');
+vi.mock('antd', async () => {
+  const actual = await vi.importActual('antd');
   return {
     ...actual,
     Dropdown: ({ menu, children }) => (
@@ -60,7 +60,7 @@ const createWrapper = () => {
 
 describe('Products fiscal workflow', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
 
     adminService.getCategories.mockResolvedValue({
       data: {

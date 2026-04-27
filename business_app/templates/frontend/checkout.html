@@ -667,7 +667,7 @@
                                     {% if addresses %}
                                         {% for address in addresses %}
                                         <div class="address-card {% if loop.first %}selected{% endif %}"
-                                             onclick="selectAddress({{ address.id }})"
+                                             data-action="select-address" data-address-id="{{ address.id }}"
                                              data-address-id="{{ address.id }}">
                                             <input type="radio"
                                                    name="delivery_address"
@@ -689,7 +689,7 @@
                                     {% endif %}
 
                                     <!-- Add New Address -->
-                                    <div class="address-card add-address-card" onclick="showAddAddressModal()">
+                                    <div class="address-card add-address-card" data-action="show-add-address">
                                         <i class="far fa-plus-circle"></i>
                                         <div>{{ 'Add New Address'|t }}</div>
                                     </div>
@@ -709,8 +709,7 @@
                                         <input type="date"
                                                id="delivery-date"
                                                name="delivery_date"
-                                               min="{{ today }}"
-                                               onchange="loadTimeSlots()">
+                                               min="{{ today }}">
                                     </div>
 
                                     <div>
@@ -733,13 +732,13 @@
                                 </h4>
 
                                 <div class="payment-methods">
-                                    <div class="payment-method selected" onclick="selectPaymentMethod('cash')" data-method="cash">
+                                    <div class="payment-method selected" data-action="select-payment-method" data-method="cash">
                                         <i class="far fa-money-bill-wave"></i>
                                         <div class="payment-method-name">{{ 'Cash on Delivery'|t }}</div>
                                         <div class="payment-method-desc">{{ 'Pay when you receive'|t }}</div>
                                     </div>
 
-                                    <div class="payment-method" onclick="selectPaymentMethod('click')" data-method="click">
+                                    <div class="payment-method" data-action="select-payment-method" data-method="click">
                                         <i class="far fa-credit-card"></i>
                                         <div class="payment-method-name">{{ 'Card'|t }}</div>
                                         <div class="payment-method-desc">{{ 'Pay online via Click'|t }}</div>
@@ -749,20 +748,18 @@
                                 <!-- Legacy card form kept hidden for fallback compatibility. -->
                                 <div id="card-input-container" style="display: none; margin-top: 25px; padding: 20px; background: #f9f9f9; border-radius: 8px;">
                                     <h5 style="margin-bottom: 15px; font-weight: 600;">{{ 'Online Card Payment'|t }}</h5>
-                                    
+
                                     <div class="form-group" style="margin-bottom: 15px;">
                                         <label style="display: block; margin-bottom: 5px;">{{ 'Card Number'|t }}</label>
                                         <input type="text" id="card-number" placeholder="8600 0000 0000 0000" maxlength="19"
-                                               style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;"
-                                               oninput="formatCardNumber(this)">
+                                               style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
                                     </div>
-                                    
+
                                     <div class="row" style="display: flex; gap: 15px;">
                                         <div class="form-group" style="flex: 1;">
                                             <label style="display: block; margin-bottom: 5px;">{{ 'Expiry Date'|t }}</label>
                                             <input type="text" id="card-expiry" placeholder="MM/YY" maxlength="5"
-                                                   style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;"
-                                                   oninput="formatCardExpiry(this)">
+                                                   style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
                                         </div>
                                         <div class="form-group" style="flex: 1;">
                                             <label style="display: block; margin-bottom: 5px;">{{ 'Cardholder Name'|t }}</label>
@@ -846,7 +843,7 @@
                                 <a href="{{ url_for('frontend.cart') }}" class="theme-btn btn-two">
                                     <i class="far fa-arrow-left"></i> {{ 'Back to Cart'|t }}
                                 </a>
-                                <button onclick="placeOrder()" class="theme-btn btn-one" id="place-order-btn">
+                                <button data-action="place-order" class="theme-btn btn-one" id="place-order-btn">
                                     {{ 'Place Order'|t }}
                                     <i class="far fa-arrow-right"></i>
                                 </button>
@@ -863,12 +860,12 @@
             <div class="modal-content" style="max-width: 600px; width: 90%; max-height: 90vh; overflow-y: auto;">
                 <div class="modal-header" style="display: flex; justify-content: space-between; align-items: center; padding: 20px; border-bottom: 2px solid #f0f0f0;">
                     <h3 id="modal-title" style="margin: 0;">{{ 'Add New Address'|t }}</h3>
-                    <button onclick="closeAddressModal()" style="background: none; border: none; font-size: 24px; cursor: pointer; color: #666;">
+                    <button data-action="close-address-modal" style="background: none; border: none; font-size: 24px; cursor: pointer; color: #666;">
                         <i class="far fa-times"></i>
                     </button>
                 </div>
                 <div class="modal-body" style="padding: 30px;">
-                    <form id="address-form" onsubmit="saveAddress(event)">
+                    <form id="address-form">
                         <div class="form-group" style="margin-bottom: 20px;">
                             <label style="display: block; margin-bottom: 8px; font-weight: 600;">{{ 'Label'|t }} ({{ 'Optional'|t }})</label>
                             <input type="text" id="address-label" placeholder="{{ 'e.g., Home, Office'|t }}"
@@ -929,7 +926,7 @@
                         </div>
 
                         <div style="display: flex; gap: 15px;">
-                            <button type="button" onclick="closeAddressModal()" class="theme-btn btn-three" style="flex: 1;">
+                            <button type="button" data-action="close-address-modal" class="theme-btn btn-three" style="flex: 1;">
                                 {{ 'Cancel'|t }}
                             </button>
                             <button type="submit" class="theme-btn btn-one" style="flex: 1;">
@@ -946,7 +943,7 @@
             <div class="modal-content verification-modal-content">
                 <div class="modal-header">
                     <h3 style="margin: 0;">{{ 'Card Verification'|t }}</h3>
-                    <button onclick="cancelVerification()" class="modal-close-btn">
+                    <button data-action="cancel-verification" class="modal-close-btn">
                         <i class="far fa-times"></i>
                     </button>
                 </div>
@@ -974,7 +971,6 @@
                                maxlength="8"
                                placeholder="000000"
                                class="verification-code-input"
-                               oninput="onVerificationCodeInput(this)"
                                autocomplete="one-time-code">
                     </div>
 
@@ -995,7 +991,7 @@
                     <!-- Resend Button -->
                     <div id="resend-container" style="margin-bottom: 20px;">
                         <button id="resend-btn"
-                                onclick="resendVerificationCode()"
+                                data-action="resend-verification"
                                 disabled
                                 class="resend-code-btn">
                             {{ 'Resend code'|t }}
@@ -1004,10 +1000,10 @@
 
                     <!-- Action Buttons -->
                     <div style="display: flex; gap: 15px; justify-content: center;">
-                        <button onclick="cancelVerification()" class="theme-btn btn-three" style="min-width: 120px;">
+                        <button data-action="cancel-verification" class="theme-btn btn-three" style="min-width: 120px;">
                             {{ 'Cancel'|t }}
                         </button>
-                        <button id="verify-btn" onclick="submitVerificationCode()" class="theme-btn btn-one" style="min-width: 120px;">
+                        <button id="verify-btn" data-action="submit-verification" class="theme-btn btn-one" style="min-width: 120px;">
                             {{ 'Verify'|t }}
                         </button>
                     </div>
@@ -1035,883 +1031,51 @@
 {% endblock %}
 
 {% block extra_js %}
-<script>
-// Checkout state
-let cartItems = [];
-let selectedAddress = null;
-let selectedTimeSlot = null;
-let selectedPaymentMethod = 'cash';
-let deliveryDate = null;
-let currentOrderId = null;
-let currentCardToken = null;
-
-// Verification State for Payme SMS flow
-let verificationState = {
-    token: null,
-    maskedPhone: null,
-    waitSeconds: 60,
-    attemptsRemaining: 3,
-    timerInterval: null,
-    cardMetadata: null
-};
-
-// Initialize checkout
-document.addEventListener('DOMContentLoaded', async function() {
-    // Check if user is authenticated - redirect guests to login
-    if (!CURRENT_USER) {
-        window.location.href = '{{ url_for("frontend.login") }}?next={{ url_for("frontend.checkout") }}';
-        return;
-    }
-
-    // Wait for global sync to finish so we don't checkout with stale data
-    if (window.cartSyncPromise) {
-        await window.cartSyncPromise;
-    }
-
-    // Set minimum date to today
-    const today = new Date().toISOString().split('T')[0];
-    document.getElementById('delivery-date').min = today;
-
-    // Set default date to tomorrow
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    document.getElementById('delivery-date').value = tomorrow.toISOString().split('T')[0];
-
-    // Load cart items (this will set window.currentSubtotal)
-    await loadCartSummary();
-
-    // Load initial time slots
-    loadTimeSlots();
-
-    // Pre-select first address if available and calculate delivery fee
-    const firstAddress = document.querySelector('.address-card[data-address-id]');
-    if (firstAddress) {
-        selectedAddress = parseInt(firstAddress.dataset.addressId);
-        // Calculate delivery fee for the pre-selected address
-        await calculateDeliveryFee(selectedAddress);
-    }
-});
-
-// Clear cart after successful order (both localStorage and database)
-async function clearCartAfterOrder() {
-    // Clear localStorage
-    localStorage.removeItem('cart');
-    
-    // Clear database cart - handled by backend now
-    // try {
-    //     await apiRequest('/cart/clear', { method: 'POST' });
-    // } catch (error) {
-    //     console.error('Error clearing database cart:', error);
-    //     // Continue anyway - order was successful
-    // }
-    
-    // Update cart count in header
-    const cartCountElements = document.querySelectorAll('.cart-count, .cart-badge');
-    cartCountElements.forEach(el => {
-        el.textContent = '0';
-        el.style.display = 'none';
-    });
-}
-
-// Load cart summary
-async function loadCartSummary() {
-    cartItems = JSON.parse(localStorage.getItem('cart') || '[]');
-
-    if (cartItems.length === 0) {
-        window.location.href = '{{ url_for("frontend.cart") }}';
-        return;
-    }
-
-    try {
-        // Fetch product details
-        const response = await apiRequest('/products/bulk', {
-            method: 'POST',
-            body: JSON.stringify({
-                product_ids: cartItems.map(item => item.product_id),
-                language: '{{ current_language }}'
-            })
-        });
-
-        if (response.ok) {
-            const data = await response.json();
-            if (data.success && data.data.products) {
-                renderOrderSummary(data.data.products);
-            }
-        }
-    } catch (error) {
-        console.error('Error loading cart summary:', error);
-    }
-}
-
-// Render order summary
-function renderOrderSummary(products) {
-    const container = document.getElementById('summary-items');
-    let html = '';
-    let subtotal = 0;
-
-    cartItems.forEach(cartItem => {
-        const product = products.find(p => p.id === cartItem.product_id);
-        if (!product) return;
-
-        // Get price from pricing object (returned by serialize_product)
-        const pricing = product.pricing || {};
-        const price = parseFloat(pricing.current_price || pricing.base_price || product.base_price || 0);
-        const itemTotal = price * cartItem.quantity;
-        subtotal += itemTotal;
-
-        // Get product image from media.images array or fallback
-        const productImages = (product.media && product.media.images) || product.images || [];
-        const productImage = productImages.length > 0 ? productImages[0] : '{{ url_for("static", filename="images/resource/shop/shop-1.jpg") }}';
-
-        html += `
-            <div class="summary-item">
-                <img src="${productImage}"
-                     alt="${product.name}"
-                     class="summary-item-image">
-                <div class="summary-item-details">
-                    <div class="summary-item-name">${product.name}</div>
-                    <div class="summary-item-qty">{{ 'Qty'|t }}: ${cartItem.quantity}</div>
-                </div>
-                <div class="summary-item-price">${formatPrice(itemTotal)}</div>
-            </div>
-        `;
-    });
-
-    container.innerHTML = html;
-
-    // Store subtotal for delivery fee calculation
-    window.currentSubtotal = subtotal;
-
-    // Update totals - delivery fee will be calculated when address is selected
-    updateSummaryTotals(subtotal, null);
-}
-
-// Minimum order amount (in UZS)
-const MIN_ORDER_AMOUNT = {{ config.get('MIN_ORDER_AMOUNT', 20000) }};
-
-// Update summary totals
-// deliveryFee: number (fee amount) or null (not yet calculated)
-function updateSummaryTotals(subtotal, deliveryFee) {
-    document.getElementById('summary-subtotal').textContent = formatPrice(subtotal);
-
-    if (deliveryFee === null) {
-        // Delivery fee not yet calculated - show message to select address
-        document.getElementById('summary-delivery').textContent = '{{ "Select address"|t }}';
-        document.getElementById('summary-delivery').style.color = '#999';
-        document.getElementById('summary-total').textContent = formatPrice(subtotal);
-    } else if (deliveryFee === 0) {
-        document.getElementById('summary-delivery').textContent = '{{ "Free"|t }}';
-        document.getElementById('summary-delivery').style.color = '#28a745';
-        document.getElementById('summary-total').textContent = formatPrice(subtotal);
-    } else {
-        document.getElementById('summary-delivery').textContent = formatPrice(deliveryFee);
-        document.getElementById('summary-delivery').style.color = '';
-        document.getElementById('summary-total').textContent = formatPrice(subtotal + deliveryFee);
-    }
-
-    // Store current delivery fee for order placement
-    window.currentDeliveryFee = deliveryFee;
-    
-    // Update minimum order warning
-    const warningEl = document.getElementById('min-order-warning');
-    const titleEl = document.getElementById('min-order-title');
-    const textEl = document.getElementById('min-order-text');
-    const placeOrderBtn = document.getElementById('place-order-btn');
-    
-    if (subtotal < MIN_ORDER_AMOUNT) {
-        const remaining = MIN_ORDER_AMOUNT - subtotal;
-        
-        warningEl.style.display = 'flex';
-        titleEl.textContent = '{{ "Minimum order amount not met"|t }}';
-        textEl.textContent = '{{ "Add"|t }} ' + formatPrice(remaining) + ' {{ "more to place order"|t }}. {{ "Minimum order amount"|t }}: ' + formatPrice(MIN_ORDER_AMOUNT);
-        
-        // Disable place order button
-        placeOrderBtn.disabled = true;
-        placeOrderBtn.style.opacity = '0.6';
-        placeOrderBtn.style.cursor = 'not-allowed';
-        placeOrderBtn.title = '{{ "Minimum order amount is"|t }} ' + formatPrice(MIN_ORDER_AMOUNT);
-    } else {
-        // Hide warning and enable button
-        warningEl.style.display = 'none';
-        placeOrderBtn.disabled = false;
-        placeOrderBtn.style.opacity = '';
-        placeOrderBtn.style.cursor = '';
-        placeOrderBtn.title = '';
-    }
-}
-
-// Select address
-async function selectAddress(addressId) {
-    // Remove selected class from all
-    document.querySelectorAll('.address-card').forEach(card => {
-        card.classList.remove('selected');
-    });
-
-    // Add selected class to clicked
-    const selectedCard = document.querySelector(`.address-card[data-address-id="${addressId}"]`);
-    if (selectedCard) {
-        selectedCard.classList.add('selected');
-        selectedCard.querySelector('input[type="radio"]').checked = true;
-        selectedAddress = addressId;
-
-        // Fetch delivery fee from backend for this address
-        await calculateDeliveryFee(addressId);
-    }
-}
-
-// Calculate delivery fee from backend
-async function calculateDeliveryFee(addressId) {
-    if (!addressId || window.currentSubtotal === undefined) {
-        return;
-    }
-
-    // Show loading state for delivery fee
-    document.getElementById('summary-delivery').textContent = '{{ "Calculating..."|t }}';
-    document.getElementById('summary-delivery').style.color = '#999';
-
-    try {
-        const response = await apiRequest('/delivery/calculate-fee', {
-            method: 'POST',
-            body: JSON.stringify({
-                address_id: addressId,
-                order_total: window.currentSubtotal
-            })
-        });
-
-        if (response.ok) {
-            const data = await response.json();
-            if (data.success) {
-                const deliveryFee = data.data.delivery_fee || 0;
-                updateSummaryTotals(window.currentSubtotal, deliveryFee);
-            } else {
-                // If API returns error, show that delivery fee couldn't be calculated
-                updateSummaryTotals(window.currentSubtotal, null);
-                console.error('Delivery fee calculation failed:', data.message);
-            }
-        } else {
-            updateSummaryTotals(window.currentSubtotal, null);
-            console.error('Delivery fee API request failed');
-        }
-    } catch (error) {
-        console.error('Error calculating delivery fee:', error);
-        updateSummaryTotals(window.currentSubtotal, null);
-    }
-}
-
-// Load time slots
-async function loadTimeSlots() {
-    deliveryDate = document.getElementById('delivery-date').value;
-
-    if (!deliveryDate) {
-        return;
-    }
-
-    const container = document.getElementById('time-slots-container');
-    container.innerHTML = '<div style="grid-column: 1 / -1; text-align: center; padding: 20px;"><div class="loading-spinner" style="width: 30px; height: 30px;"></div></div>';
-
-    try {
-        const response = await apiRequest(`/delivery/time-slots?date=${deliveryDate}`, {
-            method: 'GET'
-        });
-
-        if (response.ok) {
-            const data = await response.json();
-            renderTimeSlots(data.data?.time_slots || []);
-        } else {
-            // Show default time slots if API fails
-            renderDefaultTimeSlots();
-        }
-    } catch (error) {
-        console.error('Error loading time slots:', error);
-        renderDefaultTimeSlots();
-    }
-}
-
-// Render time slots
-function renderTimeSlots(slots) {
-    const container = document.getElementById('time-slots-container');
-
-    if (slots.length === 0) {
-        renderDefaultTimeSlots();
-        return;
-    }
-
-    let html = '';
-    slots.forEach((slot, index) => {
-        const isAvailable = slot.available !== false;
-        html += `
-            <div class="time-slot ${!isAvailable ? 'unavailable' : ''} ${index === 0 ? 'selected' : ''}"
-                 onclick="${isAvailable ? `selectTimeSlot(${slot.id}, '${slot.start_time}', '${slot.end_time}')` : ''}"
-                 data-slot-id="${slot.id}">
-                <div class="time-slot-time">${slot.start_time} - ${slot.end_time}</div>
-                <div class="time-slot-info">${isAvailable ? '{{ "Available"|t }}' : '{{ "Full"|t }}'}</div>
-            </div>
-        `;
-    });
-
-    container.innerHTML = html;
-
-    // Auto-select first available slot
-    if (slots.length > 0 && slots[0].available !== false) {
-        selectedTimeSlot = slots[0].id;
-    }
-}
-
-// Render default time slots (fallback)
-function renderDefaultTimeSlots() {
-    const defaultSlots = [
-        { time: '09:00 - 12:00', label: '{{ "Morning"|t }}' },
-        { time: '12:00 - 15:00', label: '{{ "Afternoon"|t }}' },
-        { time: '15:00 - 18:00', label: '{{ "Evening"|t }}' },
-        { time: '18:00 - 21:00', label: '{{ "Night"|t }}' }
-    ];
-
-    const container = document.getElementById('time-slots-container');
-    let html = '';
-
-    defaultSlots.forEach((slot, index) => {
-        html += `
-            <div class="time-slot ${index === 0 ? 'selected' : ''}"
-                 onclick="selectTimeSlotManual('${slot.time}')"
-                 data-slot-time="${slot.time}">
-                <div class="time-slot-time">${slot.time}</div>
-                <div class="time-slot-info">${slot.label}</div>
-            </div>
-        `;
-    });
-
-    container.innerHTML = html;
-    selectedTimeSlot = defaultSlots[0].time;
-}
-
-// Select time slot
-function selectTimeSlot(slotId, startTime, endTime) {
-    document.querySelectorAll('.time-slot').forEach(slot => {
-        slot.classList.remove('selected');
-    });
-
-    event.target.closest('.time-slot').classList.add('selected');
-    selectedTimeSlot = slotId;
-}
-
-// Select time slot manually (fallback)
-function selectTimeSlotManual(time) {
-    document.querySelectorAll('.time-slot').forEach(slot => {
-        slot.classList.remove('selected');
-    });
-
-    event.target.closest('.time-slot').classList.add('selected');
-    selectedTimeSlot = time;
-}
-
-// Select payment method
-function selectPaymentMethod(method) {
-    document.querySelectorAll('.payment-method').forEach(pm => {
-        pm.classList.remove('selected');
-    });
-
-    event.target.closest('.payment-method').classList.add('selected');
-    selectedPaymentMethod = method;
-    document.getElementById('selected-payment-method').value = method;
-
-    // Web checkout routes card payments through Click redirect.
-    const cardContainer = document.getElementById('card-input-container');
-    cardContainer.style.display = 'none';
-}
-
-// Format Card Number
-function formatCardNumber(input) {
-    let value = input.value.replace(/\D/g, '');
-    let formattedValue = '';
-    for (let i = 0; i < value.length; i++) {
-        if (i > 0 && i % 4 === 0) {
-            formattedValue += ' ';
-        }
-        formattedValue += value[i];
-    }
-    input.value = formattedValue;
-}
-
-// Format Expiry
-function formatCardExpiry(input) {
-    let value = input.value.replace(/\D/g, '');
-    if (value.length >= 2) {
-        value = value.substring(0, 2) + '/' + value.substring(2, 4);
-    }
-    input.value = value;
-}
-
-// Show add address modal (placeholder)
-function showAddAddressModal() {
-    showNotification('{{ "Address management feature coming soon! For now, please add addresses through your account settings."|t }}', 'info');
-}
-
-// ==========================================
-// PAYME VERIFICATION FLOW FUNCTIONS
-// ==========================================
-
-// Show verification modal
-function showVerificationModal(data) {
-    verificationState.token = data.token;
-    verificationState.maskedPhone = data.masked_phone;
-    verificationState.waitSeconds = data.wait_seconds || 60;
-    verificationState.attemptsRemaining = 3;
-    verificationState.cardMetadata = {
-        masked_number: data.masked_number,
-        expire: data.expire,
-        cardholder_name: document.getElementById('card-holder').value,
-        recurrent: data.recurrent || false
-    };
-
-    // Update UI
-    document.getElementById('verification-phone').textContent = data.masked_phone;
-    document.getElementById('verification-code').value = '';
-    document.getElementById('verification-error').style.display = 'none';
-    document.getElementById('attempts-remaining').style.display = 'none';
-
-    // Start countdown
-    startVerificationCountdown(verificationState.waitSeconds);
-
-    // Show modal
-    document.getElementById('verification-modal').style.display = 'flex';
-    document.getElementById('verification-code').focus();
-}
-
-// Start countdown timer
-function startVerificationCountdown(seconds) {
-    let remaining = seconds;
-    const countdownEl = document.getElementById('countdown');
-    const resendBtn = document.getElementById('resend-btn');
-    const timerEl = document.getElementById('verification-timer');
-
-    // Clear existing timer
-    if (verificationState.timerInterval) {
-        clearInterval(verificationState.timerInterval);
-    }
-
-    // Disable resend initially
-    resendBtn.disabled = true;
-
-    // Reset timer display
-    timerEl.innerHTML = "{{ 'Code expires in'|t }} <span id='countdown'>" + remaining + "</span>s";
-
-    verificationState.timerInterval = setInterval(() => {
-        remaining--;
-        document.getElementById('countdown').textContent = remaining;
-
-        if (remaining <= 0) {
-            clearInterval(verificationState.timerInterval);
-            document.getElementById('countdown').textContent = '0';
-            resendBtn.disabled = false;
-            timerEl.innerHTML = "{{ 'Code expired.'|t }} <a href='#' onclick='resendVerificationCode(); return false;' class='timer-expired-link'>{{ 'Request new code'|t }}</a>";
-        }
-    }, 1000);
-}
-
-// Handle code input
-function onVerificationCodeInput(input) {
-    // Only allow alphanumeric
-    input.value = input.value.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
-
-    // Auto-submit if 6 digits entered
-    if (input.value.length >= 6) {
-        submitVerificationCode();
-    }
-}
-
-// Resend verification code
-async function resendVerificationCode() {
-    const resendBtn = document.getElementById('resend-btn');
-    resendBtn.disabled = true;
-    resendBtn.textContent = "{{ 'Sending...'|t }}";
-
-    try {
-        const response = await apiRequest('/payments/cards/resend-code', {
-            method: 'POST',
-            body: JSON.stringify({ token: verificationState.token })
-        });
-
-        const data = await response.json();
-
-        if (data.success) {
-            verificationState.waitSeconds = data.data.wait_seconds || 60;
-            verificationState.attemptsRemaining = 3; // Reset attempts
-
-            // Restart countdown
-            startVerificationCountdown(verificationState.waitSeconds);
-
-            document.getElementById('verification-error').style.display = 'none';
-            document.getElementById('attempts-remaining').style.display = 'none';
-            showNotification("{{ 'New code sent'|t }}", 'success');
-        } else {
-            showVerificationError(data.message || "{{ 'Failed to resend code'|t }}");
-        }
-    } catch (error) {
-        showVerificationError("{{ 'Failed to resend code'|t }}");
-    } finally {
-        resendBtn.textContent = "{{ 'Resend code'|t }}";
-    }
-}
-
-// Submit verification code
-async function submitVerificationCode() {
-    const code = document.getElementById('verification-code').value.trim();
-
-    if (!code || code.length < 4) {
-        showVerificationError("{{ 'Please enter the verification code'|t }}");
-        return;
-    }
-
-    const verifyBtn = document.getElementById('verify-btn');
-    verifyBtn.disabled = true;
-    verifyBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> {{ "Verifying..."|t }}';
-
-    try {
-        const response = await apiRequest('/payments/cards/verify', {
-            method: 'POST',
-            body: JSON.stringify({
-                token: verificationState.token,
-                code: code
-            })
-        });
-
-        const data = await response.json();
-
-        if (data.success && data.data.verified) {
-            // Verification successful - proceed with payment
-            closeVerificationModal();
-            await processPaymentWithVerifiedCard();
-        } else {
-            // Verification failed
-            verificationState.attemptsRemaining = data.data?.attempts_remaining ?? (verificationState.attemptsRemaining - 1);
-
-            if (verificationState.attemptsRemaining <= 0 || data.data?.request_new_code) {
-                showVerificationError("{{ 'Too many failed attempts. Please request a new code.'|t }}");
-                document.getElementById('resend-btn').disabled = false;
-            } else {
-                showVerificationError(data.message || "{{ 'Invalid verification code'|t }}");
-                document.getElementById('attempts-remaining').style.display = 'block';
-                document.getElementById('attempts-count').textContent = verificationState.attemptsRemaining;
-            }
-
-            // Clear input for retry
-            document.getElementById('verification-code').value = '';
-            document.getElementById('verification-code').focus();
-        }
-    } catch (error) {
-        showVerificationError("{{ 'Verification failed. Please try again.'|t }}");
-    } finally {
-        verifyBtn.disabled = false;
-        verifyBtn.innerHTML = "{{ 'Verify'|t }}";
-    }
-}
-
-// Show verification error
-function showVerificationError(message) {
-    const errorEl = document.getElementById('verification-error');
-    errorEl.textContent = message;
-    errorEl.style.display = 'block';
-}
-
-// Close verification modal
-function closeVerificationModal() {
-    document.getElementById('verification-modal').style.display = 'none';
-    if (verificationState.timerInterval) {
-        clearInterval(verificationState.timerInterval);
-    }
-}
-
-// Cancel verification
-function cancelVerification() {
-    closeVerificationModal();
-    document.getElementById('loading-overlay').style.display = 'none';
-    document.getElementById('place-order-btn').disabled = false;
-}
-
-// Process payment with verified card
-async function processPaymentWithVerifiedCard() {
-    // Show payment processing modal
-    document.getElementById('payment-processing-modal').style.display = 'flex';
-
-    try {
-        const response = await apiRequest('/payments/process-card-payment', {
-            method: 'POST',
-            body: JSON.stringify({
-                order_id: currentOrderId,
-                token: verificationState.token,
-                save_card: true,
-                card_metadata: verificationState.cardMetadata
-            })
-        });
-
-        const data = await response.json();
-
-        if (data.success) {
-            // Clear cart (localStorage + database)
-            await clearCartAfterOrder();
-
-            // Redirect to success page
-            window.location.href = data.data.redirect_url || `/my-orders?order_id=${data.data.order_id}&payment=success`;
-        } else {
-            throw new Error(data.message || 'Payment failed');
-        }
-    } catch (error) {
-        document.getElementById('payment-processing-modal').style.display = 'none';
-        showNotification(error.message || "{{ 'Payment failed. Please try again.'|t }}", 'error');
-        document.getElementById('place-order-btn').disabled = false;
-    }
-}
-
-// ==========================================
-// MAIN PLACE ORDER FUNCTIONS
-// ==========================================
-
-// Place order - main entry point
-async function placeOrder() {
-    // Validation
-    if (!selectedAddress) {
-        showNotification("{{ 'Please select a delivery address'|t }}", 'warning');
-        return;
-    }
-
-    if (!deliveryDate) {
-        showNotification("{{ 'Please select a delivery date'|t }}", 'warning');
-        return;
-    }
-
-    if (!selectedTimeSlot) {
-        showNotification("{{ 'Please select a delivery time'|t }}", 'warning');
-        return;
-    }
-
-    const agreedToTerms = document.getElementById('agree-terms').checked;
-    if (!agreedToTerms) {
-        showNotification("{{ 'Please agree to the terms and conditions'|t }}", 'warning');
-        return;
-    }
-
-    // Route based on payment method
-    if (selectedPaymentMethod === 'click') {
-        await placeOrderWithClick();
-    } else {
-        // Cash on delivery
-        await placeOrderWithCash();
-    }
-}
-
-// Payme payment flow with verification
-async function placeOrderWithPayme() {
-    // Get card details
-    const cardNum = document.getElementById('card-number').value.replace(/\s/g, '');
-    const cardExp = document.getElementById('card-expiry').value;
-    const cardName = document.getElementById('card-holder').value;
-
-    // Validate
-    if (!cardNum || cardNum.length < 16) {
-        showNotification("{{ 'Invalid card number'|t }}", 'warning');
-        return;
-    }
-    if (!cardExp || cardExp.length < 5) {
-        showNotification("{{ 'Invalid expiry date'|t }}", 'warning');
-        return;
-    }
-    if (!cardName) {
-        showNotification("{{ 'Cardholder name required'|t }}", 'warning');
-        return;
-    }
-
-    // Show loading
-    document.getElementById('loading-overlay').style.display = 'flex';
-    document.getElementById('place-order-btn').disabled = true;
-
-    try {
-        // Convert expiry from MM/YY to MMYY
-        const expiry = cardExp.replace('/', '');
-
-        // Step 1: Create card token (no SMS sent yet)
-        const tokenResponse = await apiRequest('/payments/cards/create-token', {
-            method: 'POST',
-            body: JSON.stringify({
-                card_number: cardNum,
-                expiry: expiry,
-                cardholder_name: cardName,
-                save: false
-            })
-        });
-
-        const tokenData = await tokenResponse.json();
-
-        if (!tokenData.success) {
-            throw new Error(tokenData.message || 'Card tokenization failed');
-        }
-
-        // Store token for later use
-        currentCardToken = tokenData.data.token;
-
-        // Step 2: Create order and payment record
-        await createOrderForPayme();
-
-        // Step 3: Send verification SMS (after order is created)
-        if (tokenData.data.needs_verification) {
-            const verifyResponse = await apiRequest('/payments/cards/send-verification', {
-                method: 'POST',
-                body: JSON.stringify({
-                    token: currentCardToken,
-                    order_id: currentOrderId
-                })
-            });
-
-            const verifyData = await verifyResponse.json();
-
-            if (!verifyData.success) {
-                throw new Error(verifyData.message || 'Failed to send verification code');
-            }
-
-            // Update token data with verification info
-            tokenData.data.masked_phone = verifyData.data.masked_phone;
-            tokenData.data.wait_seconds = verifyData.data.wait_seconds;
-            tokenData.data.verification_sent = verifyData.data.sent;
-        }
-
-        // Hide loading
-        document.getElementById('loading-overlay').style.display = 'none';
-
-        // Step 4: Show verification modal
-        showVerificationModal(tokenData.data);
-    } catch (error) {
-        document.getElementById('loading-overlay').style.display = 'none';
-        document.getElementById('place-order-btn').disabled = false;
-        showNotification(error.message || "{{ 'Failed to process card'|t }}", 'error');
-    }
-}
-
-// Create order for Payme (before verification)
-async function createOrderForPayme() {
-    try {
-        const orderData = {
-            items: cartItems,
-            delivery_address_id: selectedAddress,
-            delivery_date: deliveryDate,
-            delivery_time_slot: selectedTimeSlot,
-            payment_method: 'payme',
-            delivery_notes: document.getElementById('order-notes').value || null,
-            source: 'web'
-        };
-
-        const orderResponse = await apiRequest('/orders/', {
-            method: 'POST',
-            body: JSON.stringify(orderData)
-        });
-
-        const orderResult = await orderResponse.json();
-
-        if (!orderResult.success) {
-            throw new Error(orderResult.message || 'Order creation failed');
-        }
-
-        currentOrderId = orderResult.data.order.id;
-    } catch (error) {
-        throw new Error(error.message || 'Order creation failed');
-    }
-}
-
-// Create order and then process payment (for already verified cards)
-async function createOrderAndPay() {
-    document.getElementById('loading-overlay').style.display = 'flex';
-
-    try {
-        // Create order first
-        await createOrderForPayme();
-
-        document.getElementById('loading-overlay').style.display = 'none';
-
-        // Now process payment
-        await processPaymentWithVerifiedCard();
-
-    } catch (error) {
-        document.getElementById('loading-overlay').style.display = 'none';
-        document.getElementById('place-order-btn').disabled = false;
-        showNotification(error.message || "{{ 'Failed to create order'|t }}", 'error');
-    }
-}
-
-// Cash on delivery flow
-async function placeOrderWithCash() {
-    document.getElementById('loading-overlay').style.display = 'flex';
-    document.getElementById('place-order-btn').disabled = true;
-
-    try {
-        const orderData = {
-            items: cartItems,
-            delivery_address_id: selectedAddress,
-            delivery_date: deliveryDate,
-            delivery_time_slot: selectedTimeSlot,
-            payment_method: 'cash',
-            delivery_notes: document.getElementById('order-notes').value || null,
-            source: 'web'
-        };
-
-        const response = await apiRequest('/orders/', {
-            method: 'POST',
-            body: JSON.stringify(orderData)
-        });
-
-        const data = await response.json();
-
-        if (data.success) {
-            // Clear cart (localStorage + database)
-            await clearCartAfterOrder();
-            window.location.href = `/order-confirmation?order_id=${data.data.order.id}`;
-        } else {
-            throw new Error(data.message || 'Order creation failed');
-        }
-    } catch (error) {
-        showNotification(error.message || "{{ 'Failed to place order'|t }}", 'error');
-        document.getElementById('loading-overlay').style.display = 'none';
-        document.getElementById('place-order-btn').disabled = false;
-    }
-}
-
-// Click payment flow (redirect)
-async function placeOrderWithClick() {
-    document.getElementById('loading-overlay').style.display = 'flex';
-    document.getElementById('place-order-btn').disabled = true;
-
-    try {
-        const orderData = {
-            items: cartItems,
-            delivery_address_id: selectedAddress,
-            delivery_date: deliveryDate,
-            delivery_time_slot: selectedTimeSlot,
-            payment_method: 'click',
-            delivery_notes: document.getElementById('order-notes').value || null,
-            source: 'web'
-        };
-
-        const response = await apiRequest('/orders/', {
-            method: 'POST',
-            body: JSON.stringify(orderData)
-        });
-
-        const data = await response.json();
-
-        if (data.success && data.data.payment_url) {
-            // Clear cart (localStorage + database)
-            await clearCartAfterOrder();
-            window.location.href = data.data.payment_url;
-        } else {
-            throw new Error(data.message || 'Order creation failed');
-        }
-    } catch (error) {
-        showNotification(error.message || "{{ 'Failed to place order'|t }}", 'error');
-        document.getElementById('loading-overlay').style.display = 'none';
-        document.getElementById('place-order-btn').disabled = false;
-    }
-}
-
-// Format price
-function formatPrice(amount) {
-    return new Intl.NumberFormat('uz-UZ').format(Math.round(amount)) + ' UZS';
-}
-</script>
+{% from "frontend/macros/page_data.html" import render_page_data %}
+{{ render_page_data({
+    'login_url': url_for('frontend.login'),
+    'checkout_url': url_for('frontend.checkout'),
+    'cart_url': url_for('frontend.cart'),
+    'default_image': url_for('static', filename='images/resource/shop/shop-1.jpg'),
+    'current_language': current_language,
+    'min_order_amount': config.get('MIN_ORDER_AMOUNT', 20000),
+    'i18n': {
+        'qty': 'Qty' | t,
+        'select_address': 'Select address' | t,
+        'free': 'Free' | t,
+        'min_not_met': 'Minimum order amount not met' | t,
+        'add': 'Add' | t,
+        'more_to_place': 'more to place order' | t,
+        'min_order_amount': 'Minimum order amount' | t,
+        'min_warning': 'Minimum order amount is' | t,
+        'calculating': 'Calculating...' | t,
+        'available': 'Available' | t,
+        'full': 'Full' | t,
+        'morning': 'Morning' | t,
+        'afternoon': 'Afternoon' | t,
+        'evening': 'Evening' | t,
+        'night': 'Night' | t,
+        'address_coming_soon': 'Address management feature coming soon! For now, please add addresses through your account settings.' | t,
+        'code_expires_in': 'Code expires in' | t,
+        'code_expired': 'Code expired.' | t,
+        'request_new_code': 'Request new code' | t,
+        'sending': 'Sending...' | t,
+        'new_code_sent': 'New code sent' | t,
+        'resend_failed': 'Failed to resend code' | t,
+        'resend_code': 'Resend code' | t,
+        'enter_code': 'Please enter the verification code' | t,
+        'verifying': 'Verifying...' | t,
+        'verify': 'Verify' | t,
+        'too_many_attempts': 'Too many failed attempts. Please request a new code.' | t,
+        'invalid_code': 'Invalid verification code' | t,
+        'verify_failed': 'Verification failed. Please try again.' | t,
+        'payment_failed': 'Payment failed. Please try again.' | t,
+        'select_delivery_address': 'Please select a delivery address' | t,
+        'select_delivery_date': 'Please select a delivery date' | t,
+        'select_delivery_time': 'Please select a delivery time' | t,
+        'agree_terms': 'Please agree to the terms and conditions' | t,
+        'place_order_failed': 'Failed to place order' | t,
+    },
+}) }}
+<script src="{{ url_for('static', filename='js/pages/checkout.js') }}"></script>
 {% endblock %}

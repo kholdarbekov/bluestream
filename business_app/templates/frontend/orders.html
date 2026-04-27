@@ -328,22 +328,22 @@
     .order-card .row {
         flex-direction: column;
     }
-    
+
     .order-item img {
         width: 50px;
         height: 50px;
     }
-    
+
     .tracking-steps {
         flex-direction: column;
         align-items: flex-start;
     }
-    
+
     .tracking-step {
         flex-direction: row;
         margin-bottom: 15px;
     }
-    
+
     .tracking-step::after {
         display: none;
     }
@@ -399,7 +399,7 @@
                 <div class="col-md-2">
                     <div class="form-group">
                         <label>&nbsp;</label>
-                        <button type="button" class="btn btn-outline-primary btn-block" onclick="applyFilters()">
+                        <button type="button" class="btn btn-outline-primary btn-block" data-action="apply-filters">
                             <i class="far fa-search"></i> {{ 'Filter'|t }}
                         </button>
                     </div>
@@ -440,446 +440,47 @@
 {% endblock %}
 
 {% block cabinet_extra_js %}
-<script>
-
-document.addEventListener('DOMContentLoaded', function() {
-    loadOrders();
-});
-
-let currentPage = 1;
-let currentFilters = {};
-
-async function loadOrders(page = 1) {
-    const loadingElement = document.getElementById('loadingOrders');
-    const ordersListElement = document.getElementById('ordersList');
-    const emptyStateElement = document.getElementById('emptyState');
-    
-    loadingElement.style.display = 'block';
-    emptyStateElement.style.display = 'none';
-    
-    try {
-        const queryParams = new URLSearchParams({
-            page: page,
-            per_page: 10,
-            ...currentFilters
-        });
-        
-        const response = await apiRequest(`/orders?${queryParams}`);
-        const result = await response.json();
-        
-        if (response.ok && result.success) {
-            displayOrders(result.data.orders);
-            updatePagination(result.data.pagination);
-            
-            if (result.data.orders.length === 0) {
-                emptyStateElement.style.display = 'block';
-            }
-        } else {
-            showNotification(result.message || '{{ "Failed to load orders"|t }}', 'error');
-            emptyStateElement.style.display = 'block';
-        }
-    } catch (error) {
-        console.error('Failed to load orders:', error);
-        showNotification('{{ "Failed to load orders. Please try again."|t }}', 'error');
-        emptyStateElement.style.display = 'block';
-    } finally {
-        loadingElement.style.display = 'none';
-    }
-}
-
-function displayOrders(orders) {
-    const ordersListElement = document.getElementById('ordersList');
-    
-    if (orders.length === 0) {
-        ordersListElement.innerHTML = '';
-        return;
-    }
-    
-    const ordersHtml = orders.map(order => `
-        <div class="order-card" onclick="showOrderDetail(${order.id})">
-            <div class="order-header">
-                <div class="row align-items-center">
-                    <div class="col-md-3">
-                        <strong>{{ 'Order'|t }} #${order.order_number}</strong>
-                    </div>
-                    <div class="col-md-3">
-                        <small class="text-muted"><i class="far fa-calendar-alt mr-1"></i>{{ 'Order Date'|t }}: ${formatDate(order.created_at)}</small>
-                    </div>
-                    <div class="col-md-3">
-                        <span class="order-status status-${order.status}">${capitalizeFirst(order.status)}</span>
-                    </div>
-                    <div class="col-md-3 text-right">
-                        <strong>${formatAmount(order.total_amount)}</strong>
-                    </div>
-                </div>
-            </div>
-            <div class="order-body">
-                <div class="row">
-                    <div class="col-md-8">
-                        ${(order.order_items || []).slice(0, 2).map(item => `
-                            <div class="order-item">
-                                <img src="${item.product_image_url || '/static/images/products/default.jpg'}" alt="${item.product_name}">
-                                <div class="item-details">
-                                    <div class="item-name">${item.product_name}</div>
-                                    <div class="item-specs">{{ 'Quantity'|t }}: ${item.quantity}</div>
-                                </div>
-                                <div class="item-price">${formatAmount(item.unit_price)}</div>
-                            </div>
-                        `).join('')}
-                        ${(order.order_items || []).length > 2 ? `<div class="text-muted mt-2"><small>{{ 'and'|t }} ${order.order_items.length - 2} {{ 'more items'|t }}</small></div>` : ''}
-                    </div>
-                    <div class="col-md-4">
-                        <div class="delivery-info">
-                            <h6>{{ 'Delivery Address'|t }}</h6>
-                            <p class="text-muted mb-1">${order.delivery_address?.street || ''}</p>
-                            <p class="text-muted">${order.delivery_address?.city || ''}</p>
-                            ${order.estimated_delivery ? `<small class="text-primary">{{ 'Est. delivery'|t }}: ${formatDate(order.estimated_delivery)}</small>` : ''}
-                        </div>
-                    </div>
-                </div>
-            </div>
-            <div class="order-footer">
-                <div class="row align-items-center">
-                    <div class="col-md-6">
-                        ${order.tracking_number ? `<small class="text-muted">{{ 'Tracking'|t }}: ${order.tracking_number}</small>` : ''}
-                    </div>
-                    <div class="col-md-6 text-right">
-                        <button class="btn btn-sm btn-outline-primary" onclick="event.stopPropagation(); showOrderDetail(${order.id})">
-                            {{ 'View Details'|t }}
-                        </button>
-                        ${order.status === 'delivered' ? `
-                            <button class="btn btn-sm btn-primary ml-2" onclick="event.stopPropagation(); reorderItems(${order.id})">
-                                {{ 'Reorder'|t }}
-                            </button>
-                        ` : ''}
-                        ${['pending', 'confirmed'].includes(order.status) ? `
-                            <button class="btn btn-sm btn-outline-danger ml-2" onclick="event.stopPropagation(); cancelOrder(${order.id})">
-                                {{ 'Cancel'|t }}
-                            </button>
-                        ` : ''}
-                    </div>
-                </div>
-            </div>
-        </div>
-    `).join('');
-    
-    ordersListElement.innerHTML = ordersHtml;
-}
-
-function applyFilters() {
-    currentFilters = {
-        status: document.getElementById('statusFilter').value,
-        days: document.getElementById('dateFilter').value,
-        search: document.getElementById('searchOrder').value
-    };
-    
-    // Remove empty filters
-    Object.keys(currentFilters).forEach(key => {
-        if (!currentFilters[key]) {
-            delete currentFilters[key];
-        }
-    });
-    
-    currentPage = 1;
-    loadOrders(currentPage);
-}
-
-async function showOrderDetail(orderId) {
-    try {
-        const response = await apiRequest(`/orders/${orderId}`);
-        const result = await response.json();
-
-        if (response.ok && result.success) {
-            const order = result.data.order;
-            displayOrderDetail(order);
-            $('#orderDetailModal').modal('show');
-        } else {
-            showNotification(result.message || '{{ "Failed to load order details"|t }}', 'error');
-        }
-    } catch (error) {
-        console.error('Failed to load order detail:', error);
-        showNotification('{{ "Failed to load order details"|t }}', 'error');
-    }
-}
-
-function displayOrderDetail(order) {
-    const modalContent = document.getElementById('orderDetailContent');
-    const reorderBtn = document.getElementById('reorderBtn');
-    const cancelBtn = document.getElementById('cancelOrderBtn');
-    
-    // Show/hide action buttons based on order status
-    reorderBtn.style.display = order.status === 'delivered' ? 'inline-block' : 'none';
-    cancelBtn.style.display = ['pending', 'confirmed'].includes(order.status) ? 'inline-block' : 'none';
-    
-    reorderBtn.onclick = () => reorderItems(order.id);
-    cancelBtn.onclick = () => cancelOrder(order.id);
-    
-    modalContent.innerHTML = `
-        <div class="order-detail-content">
-            <!-- Order Header -->
-            <div class="row mb-4 align-items-center">
-                <div class="col-md-8">
-                    <h4 class="mb-2">{{ 'Order'|t }} #${order.order_number}</h4>
-                    <p class="text-muted mb-0"><i class="far fa-calendar-alt mr-1"></i>{{ 'Placed on'|t }} ${formatDate(order.created_at)}</p>
-                </div>
-                <div class="col-md-4 text-right">
-                    <span class="order-status status-large status-${order.status}">${capitalizeFirst(order.status)}</span>
-                </div>
-            </div>
-            
-            <!-- Order Items -->
-            <div class="order-items-section mb-4">
-                <h5 class="mb-3"><i class="far fa-box mr-2"></i>{{ 'Order Items'|t }}</h5>
-                <div class="card">
-                    <div class="card-body">
-                        <div class="modal-order-items">
-                            ${(order.order_items || []).map(item => `
-                                <div class="modal-order-item">
-                                    <img class="item-image" src="${item.product_image_url || '/static/images/products/default.jpg'}" alt="${item.product_name}">
-                                    <div class="item-info">
-                                        <div class="item-name">${item.product_name}</div>
-                                        <div class="item-sku">{{ 'SKU'|t }}: ${item.product_sku || 'N/A'}</div>
-                                    </div>
-                                    <div class="item-qty">
-                                        <span class="qty-label">{{ 'Quantity'|t }}</span>
-                                        <span class="qty-value">${item.quantity}</span>
-                                    </div>
-                                    <div class="item-total">
-                                        <span class="total-label">{{ 'Price'|t }}</span>
-                                        <span class="total-value">${formatAmount(item.total_price || item.unit_price * item.quantity)}</span>
-                                    </div>
-                                </div>
-                            `).join('')}
-                        </div>
-                    </div>
-                </div>
-            </div>
-            
-            <!-- Order Summary -->
-            <div class="row mb-4 align-items-start">
-                <div class="col-md-6">
-                    <h5 class="mb-3"><i class="far fa-map-marker-alt mr-2"></i>{{ 'Delivery Address'|t }}</h5>
-                    <div class="card h-100">
-                        <div class="card-body">
-                            ${order.delivery_address ? `
-                                <div class="address-card-content">
-                                    ${order.delivery_address.title ? `<div class="address-label"><i class="far fa-tag"></i>${order.delivery_address.title}</div>` : ''}
-                                    <div class="address-text">
-                                        <div class="address-line">${order.delivery_address.street_address || order.delivery_address.full_address || ''}</div>
-                                        ${order.delivery_address.district ? `<div class="address-line">${order.delivery_address.district}</div>` : ''}
-                                    </div>
-                                    ${order.delivery_address.delivery_instructions || order.delivery_address.delivery_notes ? `<div class="text-muted mb-2" style="font-size: 13px;"><i class="far fa-sticky-note mr-1"></i>${order.delivery_address.delivery_instructions || order.delivery_address.delivery_notes}</div>` : ''}
-                                    ${(order.delivery_address.latitude && order.delivery_address.longitude) ? `<div id="orderDeliveryMap"></div>` : ''}
-                                </div>
-                            ` : `
-                                <div class="address-card-content">
-                                    <p class="no-address">{{ 'No delivery address provided'|t }}</p>
-                                </div>
-                            `}
-                        </div>
-                    </div>
-                </div>
-                <div class="col-md-6">
-                    <h5 class="mb-3"><i class="far fa-receipt mr-2"></i>{{ 'Order Summary'|t }}</h5>
-                    <div class="card h-100">
-                        <div class="card-body">
-                            <div class="d-flex justify-content-between mb-2">
-                                <span>{{ 'Subtotal'|t }}</span>
-                                <span class="font-weight-medium">${formatAmount(order.subtotal || order.total_amount)}</span>
-                            </div>
-                            <div class="d-flex justify-content-between mb-2">
-                                <span>{{ 'Delivery Fee'|t }}</span>
-                                <span class="font-weight-medium">${formatAmount(order.delivery_fee || 0)}</span>
-                            </div>
-                            <div class="d-flex justify-content-between mb-2">
-                                <span>{{ 'Tax'|t }}</span>
-                                <span class="font-weight-medium">${formatAmount(order.tax_amount || 0)}</span>
-                            </div>
-                            <hr>
-                            <div class="d-flex justify-content-between h5 mb-0">
-                                <span class="font-weight-bold">{{ 'Total'|t }}</span>
-                                <span class="font-weight-bold text-primary">${formatAmount(order.total_amount)}</span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            
-            <!-- Tracking Information -->
-            ${order.tracking_number ? `
-                <div class="tracking-section mb-4">
-                    <h5>{{ 'Order Tracking'|t }}</h5>
-                    <div class="tracking-info">
-                        <div class="d-flex justify-content-between align-items-center mb-3">
-                            <span><strong>{{ 'Tracking Number'|t }}:</strong> ${order.tracking_number}</span>
-                            <button class="btn btn-sm btn-outline-primary" onclick="trackOrder('${order.tracking_number}')">
-                                <i class="far fa-external-link"></i> {{ 'Track Package'|t }}
-                            </button>
-                        </div>
-                        <div class="tracking-steps">
-                            <div class="tracking-step ${order.status_timeline?.confirmed ? 'completed' : ''}">
-                                <div class="step-icon"><i class="far fa-check"></i></div>
-                                <div class="step-title">{{ 'Confirmed'|t }}</div>
-                                <div class="step-time">${order.status_timeline?.confirmed || ''}</div>
-                            </div>
-                            <div class="tracking-step ${order.status_timeline?.processing ? 'completed' : order.status === 'processing' ? 'active' : ''}">
-                                <div class="step-icon"><i class="far fa-cog"></i></div>
-                                <div class="step-title">{{ 'Processing'|t }}</div>
-                                <div class="step-time">${order.status_timeline?.processing || ''}</div>
-                            </div>
-                            <div class="tracking-step ${order.status_timeline?.shipped ? 'completed' : order.status === 'shipped' ? 'active' : ''}">
-                                <div class="step-icon"><i class="far fa-truck"></i></div>
-                                <div class="step-title">{{ 'Shipped'|t }}</div>
-                                <div class="step-time">${order.status_timeline?.shipped || ''}</div>
-                            </div>
-                            <div class="tracking-step ${order.status_timeline?.delivered ? 'completed' : order.status === 'delivered' ? 'active' : ''}">
-                                <div class="step-icon"><i class="far fa-home"></i></div>
-                                <div class="step-title">{{ 'Delivered'|t }}</div>
-                                <div class="step-time">${order.status_timeline?.delivered || ''}</div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            ` : ''}
-        </div>
-    `;
-    
-    // Initialize map if coordinates are available
-    if (order.delivery_address && order.delivery_address.latitude && order.delivery_address.longitude) {
-        setTimeout(() => {
-            initOrderDeliveryMap(
-                order.delivery_address.latitude,
-                order.delivery_address.longitude,
-                order.delivery_address.title || order.delivery_address.label || order.delivery_address.street_address || '{{ "Delivery Location"|t }}'
-            );
-        }, 300);
-    }
-}
-
-function updatePagination(pagination) {
-    const paginationSection = document.getElementById('paginationSection');
-    const paginationElement = document.getElementById('ordersPagination');
-    
-    if (pagination.total_pages <= 1) {
-        paginationSection.style.display = 'none';
-        return;
-    }
-    
-    paginationSection.style.display = 'block';
-    
-    let paginationHtml = '';
-    
-    // Previous button
-    if (pagination.current_page > 1) {
-        paginationHtml += `<li class="page-item"><a class="page-link" href="#" onclick="loadOrders(${pagination.current_page - 1})">&laquo;</a></li>`;
-    }
-    
-    // Page numbers
-    for (let i = 1; i <= pagination.total_pages; i++) {
-        if (i === pagination.current_page) {
-            paginationHtml += `<li class="page-item active"><span class="page-link">${i}</span></li>`;
-        } else {
-            paginationHtml += `<li class="page-item"><a class="page-link" href="#" onclick="loadOrders(${i})">${i}</a></li>`;
-        }
-    }
-    
-    // Next button
-    if (pagination.current_page < pagination.total_pages) {
-        paginationHtml += `<li class="page-item"><a class="page-link" href="#" onclick="loadOrders(${pagination.current_page + 1})">&raquo;</a></li>`;
-    }
-    
-    paginationElement.innerHTML = paginationHtml;
-    currentPage = pagination.current_page;
-}
-
-async function reorderItems(orderId) {
-    try {
-        const response = await apiRequest(`/orders/${orderId}/reorder`, {
-            method: 'POST'
-        });
-        
-        const result = await response.json();
-        
-        if (response.ok && result.success) {
-            showNotification('{{ "Items added to cart successfully!"|t }}', 'success');
-            updateCartCount(); // Update cart counter
-            $('#orderDetailModal').modal('hide');
-        } else {
-            showNotification(result.message || '{{ "Failed to reorder items"|t }}', 'error');
-        }
-    } catch (error) {
-        console.error('Failed to reorder items:', error);
-        showNotification('{{ "Failed to reorder items"|t }}', 'error');
-    }
-}
-
-async function cancelOrder(orderId) {
-    if (!confirm('{{ "Are you sure you want to cancel this order?"|t }}')) {
-        return;
-    }
-    
-    try {
-        const response = await apiRequest(`/orders/${orderId}/cancel`, {
-            method: 'POST'
-        });
-        
-        const result = await response.json();
-        
-        if (response.ok && result.success) {
-            showNotification('{{ "Order cancelled successfully"|t }}', 'success');
-            $('#orderDetailModal').modal('hide');
-            loadOrders(currentPage); // Refresh orders list
-        } else {
-            showNotification(result.message || '{{ "Failed to cancel order"|t }}', 'error');
-        }
-    } catch (error) {
-        console.error('Failed to cancel order:', error);
-        showNotification('{{ "Failed to cancel order"|t }}', 'error');
-    }
-}
-
-function trackOrder(trackingNumber) {
-    // Open tracking in new tab (this would be the carrier's tracking URL)
-    window.open(`https://tracking.carrier.com/track?number=${trackingNumber}`, '_blank');
-}
-
-function formatDate(dateString) {
-    const date = new Date(dateString);
-    return date.toLocaleDateString('en-US', {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric'
-    });
-}
-
-function formatAmount(amount) {
-    // Format amount for Uzbekistan: no decimals, space-separated thousands
-    const intAmount = Math.floor(parseFloat(amount) || 0);
-    const formatted = intAmount.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
-    return `${formatted} UZS`;
-}
-
-function capitalizeFirst(str) {
-    if (!str) return '';
-    return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
-}
-
-// Filter event listeners
-document.getElementById('statusFilter').addEventListener('change', applyFilters);
-document.getElementById('dateFilter').addEventListener('change', applyFilters);
-document.getElementById('searchOrder').addEventListener('input', debounce(applyFilters, 500));
-
-// Debounce function for search
-function debounce(func, wait) {
-    let timeout;
-    return function executedFunction(...args) {
-        const later = () => {
-            clearTimeout(timeout);
-            func(...args);
-        };
-        clearTimeout(timeout);
-        timeout = setTimeout(later, wait);
-    };
-}
-</script>
+{% from "frontend/macros/page_data.html" import render_page_data %}
+{{ render_page_data({
+    'i18n': {
+        'quantity': 'Quantity' | t,
+        'and': 'and' | t,
+        'more_items': 'more items' | t,
+        'est_delivery': 'Est. delivery' | t,
+        'tracking': 'Tracking' | t,
+        'reorder': 'Reorder' | t,
+        'cancel': 'Cancel' | t,
+        'order': 'Order' | t,
+        'order_date': 'Order Date' | t,
+        'delivery_address': 'Delivery Address' | t,
+        'view_details': 'View Details' | t,
+        'load_failed': 'Failed to load orders' | t,
+        'load_failed_retry': 'Failed to load orders. Please try again.' | t,
+        'details_failed': 'Failed to load order details' | t,
+        'no_address': 'No delivery address provided' | t,
+        'sku': 'SKU' | t,
+        'price': 'Price' | t,
+        'placed_on': 'Placed on' | t,
+        'order_items': 'Order Items' | t,
+        'order_summary': 'Order Summary' | t,
+        'subtotal': 'Subtotal' | t,
+        'delivery_fee': 'Delivery Fee' | t,
+        'tax': 'Tax' | t,
+        'total': 'Total' | t,
+        'order_tracking': 'Order Tracking' | t,
+        'tracking_number': 'Tracking Number' | t,
+        'track_package': 'Track Package' | t,
+        'confirmed': 'Confirmed' | t,
+        'processing': 'Processing' | t,
+        'shipped': 'Shipped' | t,
+        'delivered': 'Delivered' | t,
+        'delivery_location': 'Delivery Location' | t,
+        'reorder_success': 'Items added to cart successfully!' | t,
+        'reorder_failed': 'Failed to reorder items' | t,
+        'cancel_confirm': 'Are you sure you want to cancel this order?' | t,
+        'cancel_success': 'Order cancelled successfully' | t,
+        'cancel_failed': 'Failed to cancel order' | t,
+    },
+}) }}
+<script src="{{ url_for('static', filename='js/pages/orders.js') }}"></script>
 {% endblock %}

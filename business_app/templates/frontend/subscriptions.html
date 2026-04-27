@@ -1280,126 +1280,14 @@
 {% endblock %}
 
 {% block extra_js %}
-<script>
-document.addEventListener('DOMContentLoaded', function() {
-    // Subscription builder functionality
-    const frequencyOptions = document.querySelectorAll('.frequency-option');
-    const previewFrequency = document.getElementById('preview-frequency');
-    const previewSavings = document.getElementById('preview-savings');
-
-    let selectedFrequency = null;
-
-    // Frequency selection handler
-    frequencyOptions.forEach(option => {
-        option.addEventListener('click', function() {
-            // Remove selected class from all options
-            frequencyOptions.forEach(opt => opt.classList.remove('selected'));
-
-            // Add selected class to clicked option
-            this.classList.add('selected');
-
-            // Get selected frequency
-            selectedFrequency = this.dataset.frequency;
-
-            // Update preview
-            updatePreview();
-        });
-    });
-
-    function updatePreview() {
-        if (!selectedFrequency) return;
-
-        // Update frequency display
-        const frequencyLabels = {
-            'daily': '{{ 'Daily'|t }}',
-            'weekly': '{{ 'Weekly'|t }}',
-            'biweekly': '{{ 'Bi-weekly'|t }}',
-            'monthly': '{{ 'Monthly'|t }}'
-        };
-
-        previewFrequency.textContent = frequencyLabels[selectedFrequency];
-
-        // Calculate discount based on frequency
-        const discounts = {
-            'daily': 5,
-            'weekly': 10,
-            'biweekly': 15,
-            'monthly': 20
-        };
-
-        const discount = discounts[selectedFrequency] || 0;
-        previewSavings.textContent = `${discount}%`;
-    }
-
-    // Smooth scrolling for anchor links
-    document.querySelectorAll('a[href^="#"]').forEach(anchor => {
-        anchor.addEventListener('click', function (e) {
-            e.preventDefault();
-            const href = this.getAttribute('href');
-            if (href === '#') return;
-
-            const target = document.querySelector(href);
-            if (target) {
-                target.scrollIntoView({
-                    behavior: 'smooth',
-                    block: 'start'
-                });
-            }
-        });
-    });
-
-    // Accordion functionality - Fixed
-    const accordionButtons = document.querySelectorAll('.faq-section .acc-btn');
-
-    accordionButtons.forEach(btn => {
-        btn.addEventListener('click', function(e) {
-            e.preventDefault();
-
-            const accordionBlock = this.closest('.accordion.block');
-            const content = accordionBlock.querySelector('.acc-content');
-            const isActive = this.classList.contains('active');
-
-            // Close all accordion blocks first
-            document.querySelectorAll('.faq-section .accordion.block').forEach(block => {
-                const blockBtn = block.querySelector('.acc-btn');
-                const blockContent = block.querySelector('.acc-content');
-
-                block.classList.remove('active-block');
-                blockBtn.classList.remove('active');
-                blockContent.classList.remove('current');
-            });
-
-            // If the clicked item wasn't active, open it
-            if (!isActive) {
-                accordionBlock.classList.add('active-block');
-                this.classList.add('active');
-                content.classList.add('current');
-            }
-        });
-    });
-
-    // Animation on scroll
-    const observerOptions = {
-        threshold: 0.1,
-        rootMargin: '0px 0px -100px 0px'
-    };
-
-    const observer = new IntersectionObserver(function(entries) {
-        entries.forEach(entry => {
-            if (entry.isIntersecting) {
-                entry.target.style.opacity = '1';
-                entry.target.style.transform = 'translateY(0)';
-            }
-        });
-    }, observerOptions);
-
-    // Observe elements for animation
-    document.querySelectorAll('.step-item, .feature-card, .use-case-card').forEach(el => {
-        el.style.opacity = '0';
-        el.style.transform = 'translateY(30px)';
-        el.style.transition = 'opacity 0.6s ease, transform 0.6s ease';
-        observer.observe(el);
-    });
-});
-</script>
+{% from "frontend/macros/page_data.html" import render_page_data %}
+{{ render_page_data({
+    'frequency_labels': {
+        'daily': 'Daily' | t,
+        'weekly': 'Weekly' | t,
+        'biweekly': 'Bi-weekly' | t,
+        'monthly': 'Monthly' | t,
+    },
+}) }}
+<script src="{{ url_for('static', filename='js/pages/subscriptions.js') }}"></script>
 {% endblock %}

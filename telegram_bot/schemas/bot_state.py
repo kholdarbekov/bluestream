@@ -14,13 +14,13 @@ from datetime import datetime
 class BotState(BaseModel):
     """
     Schema for validating bot conversation state.
-    
+
     The bot stores temporary conversation context in users.bot_state as JSON.
     This schema defines the valid structure and provides type safety.
-    
+
     States are typically cleared after handler completion, cancel, or error.
     """
-    
+
     # Input awaiting type - determines which handler processes user input
     awaiting_input: Optional[Literal[
         'profile_edit',           # Editing user profile
@@ -31,10 +31,10 @@ class BotState(BaseModel):
         'search_products',        # Product search query
         'support_message',        # Support message content
     ]] = None
-    
+
     # Address-related state
     address_id: Optional[int] = Field(None, description="ID of address being edited")
-    
+
     class Config:
         extra = 'allow'  # Allow additional fields for forward compatibility
 
@@ -42,19 +42,19 @@ class BotState(BaseModel):
 def validate_bot_state(state_dict: dict) -> Optional[BotState]:
     """
     Validate a bot state dictionary against the schema.
-    
+
     Returns validated BotState or None if validation fails (with graceful fallback).
     Invalid states are logged but not rejected to prevent user disruption.
-    
+
     Args:
         state_dict: Dictionary loaded from JSON bot_state
-        
+
     Returns:
         BotState if valid, None if invalid/empty
     """
     if not state_dict:
         return None
-    
+
     try:
         return BotState(**state_dict)
     except Exception as e:

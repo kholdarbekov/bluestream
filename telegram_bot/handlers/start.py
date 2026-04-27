@@ -17,18 +17,18 @@ logger = logging.getLogger('handlers')
 async def handle_auth_linking(update: Update, auth_code: str) -> bool:
     """
     Handle authentication linking for web-to-telegram flow
-    
+
     Args:
         update: Telegram update object
         auth_code: Authentication code from web app
-        
+
     Returns:
         True if linking was successful, False otherwise
     """
     try:
         user = update.effective_user
         user_id = user.id
-        
+
         # Prepare data for verification API call
         auth_data = {
             'telegram_id': str(user_id),
@@ -36,15 +36,15 @@ async def handle_auth_linking(update: Update, auth_code: str) -> bool:
             'first_name': user.first_name,
             'last_name': user.last_name
         }
-        
+
         # Call the verification endpoint
         async with api_client as client:
             response = await client._make_request(
-                'POST', 
+                'POST',
                 f'/api/v1/auth/verify-telegram-auth/{auth_code}',
                 data=auth_data
             )
-            
+
             if response.success:
                 # Get user's language
                 language = await i18n.get_user_language(user_id)
@@ -59,7 +59,7 @@ async def handle_auth_linking(update: Update, auth_code: str) -> bool:
                     i18n.get('telegram.main_menu_prompt', language),
                     reply_markup=MenuKeyboards.main_menu(language)
                 )
-                
+
                 logger.info(f"Successfully linked Telegram user {user_id} to web account")
                 return True
             else:
@@ -81,10 +81,10 @@ async def handle_auth_linking(update: Update, auth_code: str) -> bool:
                         i18n.get('telegram.auth.linking_failed', language),
                         parse_mode='Markdown'
                     )
-                
+
                 logger.warning(f"Failed to link Telegram user {user_id}: {error_message}")
                 return False
-                
+
     except Exception as e:
         logger.error(f"Error in auth linking for user {user_id}: {e}")
         language = await i18n.get_user_language(user_id)
@@ -102,27 +102,27 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user = update.effective_user
         user_id = user.id
         logger.info(f"User {user_id} (@{user.username}) called /start, context.args: {context.args}")
-        
+
         # Check if this is an authentication linking request
         if context.args and len(context.args) > 0:
             arg = context.args[0]
             if arg.startswith('auth_'):
                 auth_code = arg[5:]  # Remove 'auth_' prefix
                 logger.info(f"Processing authentication code: {auth_code}")
-                
+
                 # Handle authentication linking
                 success = await handle_auth_linking(update, auth_code)
                 if success:
                     return
                 # If linking failed, continue with normal start flow
-        
+
         # Initialize user repository
         user_repo = BotUserRepository(db_manager)
-        
+
         # Check if user already exists
         existing_user = await user_repo.get_user_by_telegram_id(user_id)
         logger.info(f"existing_user {existing_user} for user_id {user_id}")
-        
+
         if not existing_user:
             # Register user through business API (unified user creation)
             try:
@@ -143,7 +143,7 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             i18n.get('telegram.auth.registration_failed', language_code)
                         )
                         return
-                
+
                 is_new_user = True
             except Exception as e:
                 logger.error(f"Exception during telegram user registration: {e}")
@@ -154,7 +154,7 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
         else:
             is_new_user = False
-        
+
         # Get user's language preference
         language = await i18n.get_user_language(user_id)
         logger.info(f"language {language} for user_id {user_id}")
@@ -178,7 +178,7 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         # Log user interaction
         logger.info(f"User {user_id} started bot (new_user: {is_new_user})")
-        
+
     except Exception as e:
         logger.error(f"Error in start handler: {e}")
         try:

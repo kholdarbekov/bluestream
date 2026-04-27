@@ -1,0 +1,9 @@
+{#
+  Renders a page_data dict as a JSON data-island.
+  Read by static/js/pages/_page-data.js via window.getPageData().
+  Data islands (type="application/json") are NOT governed by CSP script-src
+  per CSP Level 3, so this keeps server -> JS data transfer strict-CSP-safe.
+#}
+{% macro render_page_data(data, element_id='page-data') -%}
+<script type="application/json" id="{{ element_id }}">{{ data | tojson }}</script>
+{%- endmacro %}

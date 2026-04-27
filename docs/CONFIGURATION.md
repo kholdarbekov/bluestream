@@ -7,7 +7,7 @@ This document explains how to manage environment configurations for the BlueStre
 The application supports multiple environments with separate configuration files:
 
 - **Development**: Local development with debug features
-- **Staging**: Pre-production testing environment  
+- **Staging**: Pre-production testing environment
 - **Production**: Live production environment
 - **Testing**: Automated testing environment
 
@@ -16,7 +16,7 @@ The application supports multiple environments with separate configuration files
 Each environment has its own configuration file:
 
 - `.env.development` - Development environment
-- `.env.staging` - Staging environment  
+- `.env.staging` - Staging environment
 - `.env.production` - Production environment
 - `.env.testing` - Testing environment
 
@@ -215,7 +215,7 @@ docker run -e FLASK_ENV=production your-app
 
 The application checks these variables in order:
 1. `FLASK_ENV`
-2. `APP_ENV` 
+2. `APP_ENV`
 3. `ENVIRONMENT`
 
 Falls back to `development` if none are set.

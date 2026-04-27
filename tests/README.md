@@ -23,7 +23,7 @@ python run_tests.py
 # Unit tests only
 python run_tests.py --suite unit
 
-# Security tests only  
+# Security tests only
 python run_tests.py --suite security
 
 # Performance tests only
@@ -78,7 +78,7 @@ tests/
 Tests are organized using pytest markers:
 
 - `@pytest.mark.unit` - Unit tests
-- `@pytest.mark.integration` - Integration tests  
+- `@pytest.mark.integration` - Integration tests
 - `@pytest.mark.security` - Security tests
 - `@pytest.mark.performance` - Performance tests
 - `@pytest.mark.critical` - Critical business logic tests
@@ -146,7 +146,7 @@ def test_order_creation(client, db, sample_user, sample_product):
         'items': [{'product_id': sample_product.id, 'quantity': 2}],
         'delivery_address': {'address_line1': '123 Test St'}
     }
-    
+
     response = client.post('/api/v1/orders', json=order_data)
     assert response.status_code == 201
 ```
@@ -154,7 +154,7 @@ def test_order_creation(client, db, sample_user, sample_product):
 ## Coverage Requirements
 
 - **Unit Tests**: 85% minimum coverage
-- **Integration Tests**: 75% minimum coverage  
+- **Integration Tests**: 75% minimum coverage
 - **Security Tests**: 90% minimum coverage
 - **Overall**: 80% minimum coverage
 
@@ -203,7 +203,7 @@ def test_api_load(performance_client):
         concurrent_users=50,
         requests_per_user=10
     )
-    
+
     assert metrics.get_statistics()['error_rate'] < 5
 ```
 
@@ -215,7 +215,7 @@ The project includes a comprehensive GitHub Actions workflow (`.github/workflows
 
 1. **Code Quality**: Linting, formatting, type checking
 2. **Unit Tests**: Fast feedback with high coverage
-3. **Integration Tests**: API and service integration  
+3. **Integration Tests**: API and service integration
 4. **Security Tests**: Vulnerability scanning
 5. **Performance Tests**: Load and stress testing
 6. **Build Tests**: Docker and deployment validation
@@ -280,30 +280,30 @@ pytest tests/unit/test_auth_service.py::TestUserAuthentication::test_login -vvs
 @pytest.mark.auth
 class TestUserAuthentication:
     """Test user authentication functionality"""
-    
+
     def test_valid_login_returns_success(self, auth_service, sample_user):
         """Test that valid credentials return successful authentication"""
         # Arrange
         email = sample_user.email
         password = 'valid_password'
-        
+
         # Act
         result = auth_service.authenticate_user(email, password)
-        
+
         # Assert
         assert result['success'] is True
         assert result['user_id'] == sample_user.id
         assert 'access_token' in result
-    
+
     def test_invalid_credentials_return_error(self, auth_service):
         """Test that invalid credentials return appropriate error"""
         # Arrange
         email = 'invalid@example.com'
         password = 'wrong_password'
-        
+
         # Act
         result = auth_service.authenticate_user(email, password)
-        
+
         # Assert
         assert result['success'] is False
         assert 'error' in result

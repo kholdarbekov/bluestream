@@ -39,7 +39,7 @@ def generate_secure_password(length: int = 16) -> str:
     """Generate a secure random password"""
     alphabet = string.ascii_letters + string.digits + "!@#$%^&*"
     password = ''.join(secrets.choice(alphabet) for _ in range(length))
-    
+
     # Ensure password has at least one of each character type
     if not any(c.islower() for c in password):
         password = password[:-1] + secrets.choice(string.ascii_lowercase)
@@ -49,21 +49,21 @@ def generate_secure_password(length: int = 16) -> str:
         password = password[:-1] + secrets.choice(string.digits)
     if not any(c in "!@#$%^&*" for c in password):
         password = password[:-1] + secrets.choice("!@#$%^&*")
-    
+
     return password
 
 
 def create_admin_users(app: Flask):
     """Create initial admin users"""
-    
+
     with app.app_context():
         auth_service = AuthService()
-        
+
         # Generate secure passwords for admin users
         admin_password = generate_secure_password()
         manager_password = generate_secure_password()
         operator_password = generate_secure_password()
-        
+
         # Admin users to create
         admin_users = [
             {
@@ -74,7 +74,7 @@ def create_admin_users(app: Flask):
                 'role': UserRole.ADMIN.value
             },
             {
-                'email': 'manager@bluestream.com', 
+                'email': 'manager@bluestream.com',
                 'password': manager_password,
                 'first_name': 'General',
                 'last_name': 'Manager',
@@ -84,13 +84,13 @@ def create_admin_users(app: Flask):
                 'email': 'operator@bluestream.com',
                 'password': operator_password,
                 'first_name': 'System',
-                'last_name': 'Operator', 
+                'last_name': 'Operator',
                 'role': UserRole.OPERATOR.value
             }
         ]
-        
+
         created_users = []
-        
+
         for user_data in admin_users:
             try:
                 if user_data['role'] == UserRole.ADMIN.value:
@@ -114,10 +114,10 @@ def create_admin_users(app: Flask):
                         email_verified=True,
                         is_verified=True
                     )
-                
+
                 created_users.append(user)
                 logger.info(f"✓ Created {user_data['role']} user: {user.email}")
-                
+
             except ConflictError as e:
                 logger.warning(f"⚠ User {user_data['email']} already exists: {e}")
                 continue
@@ -127,12 +127,12 @@ def create_admin_users(app: Flask):
             except Exception as e:
                 logger.error(f"✗ Failed to create {user_data['email']}: {e}")
                 continue
-        
+
         logger.info(f"\n{'='*50}")
         logger.info(f"Admin User Seeding Complete!")
         logger.info(f"Created {len(created_users)} new admin users")
         logger.info(f"{'='*50}")
-        
+
         if created_users:
             logger.info("\nLogin Credentials:")
             logger.info("-" * 30)
@@ -142,13 +142,13 @@ def create_admin_users(app: Flask):
                     logger.info(f"Password: {user_data['password']}")
                     logger.info(f"Role: {user_data['role']}")
                     logger.info("-" * 30)
-            
+
             logger.info("\n⚠ IMPORTANT SECURITY NOTES:")
             logger.info("1. Change these default passwords immediately after first login")
             logger.info("2. Use strong, unique passwords for production")
             logger.info("3. Enable two-factor authentication if available")
             logger.info("4. Remove this script from production servers")
-        
+
         # Write credentials to secure file for admin reference
         credentials_file = project_root / 'admin_credentials.txt'
         with open(credentials_file, 'w', encoding='utf-8') as f:
@@ -165,41 +165,41 @@ def create_admin_users(app: Flask):
             f.write("2. Use strong, unique passwords for production\n")
             f.write("3. Enable two-factor authentication if available\n")
             f.write("4. DELETE THIS FILE after recording credentials\n")
-        
+
         # Set secure file permissions (readable only by owner)
         import stat
         credentials_file.chmod(stat.S_IRUSR | stat.S_IWUSR)
-        
+
         logger.info(f"\n🔐 Admin credentials saved to: {credentials_file}")
         logger.info("⚠️  DELETE this file after recording credentials securely!")
-        
+
         return created_users, admin_password
 
 
 def verify_admin_access(app: Flask, admin_password: str):
     """Verify that admin users can access admin endpoints"""
-    
+
     with app.app_context():
         auth_service = AuthService()
-        
+
         # Test admin login
         try:
             admin_user, tokens = auth_service.login_user(
                 'admin@bluestream.com',
                 admin_password
             )
-            
+
             # Check permissions
             permissions = auth_service.get_user_permissions(admin_user.id)
-            
+
             logger.info(f"\n✓ Admin user verification successful")
             logger.info(f"User ID: {admin_user.id}")
             logger.info(f"Role: {admin_user.role}")
             logger.info(f"Admin Panel Access: {permissions.get('can_view_admin_panel', False)}")
             logger.info(f"User Management: {permissions.get('can_manage_users', False)}")
-            
+
             return True
-            
+
         except Exception as e:
             logger.error(f"✗ Admin verification failed: {e}")
             return False
@@ -207,24 +207,24 @@ def verify_admin_access(app: Flask, admin_password: str):
 
 def main():
     """Main function"""
-    
+
     logger.info("Starting Blue Stream Admin User Seeding...")
     logger.info("=" * 50)
-    
+
     try:
         # Create Flask app
         app = create_app()
-        
+
         # Create admin users
         created_users, admin_password = create_admin_users(app)
-        
+
         # Verify admin access (only if users were created)
         if created_users:
             logger.info("\nVerifying admin access...")
             verify_admin_access(app, admin_password)
-        
+
         logger.info("\n🎉 Admin seeding completed successfully!")
-        
+
     except Exception as e:
         logger.error(f"❌ Admin seeding failed: {e}")
         sys.exit(1)

@@ -42,16 +42,16 @@ from business_app.utils.exceptions import ValidationError, NotFoundError
 @handle_api_exception
 def get_resource(resource_id):
     """Get a specific resource"""
-    
+
     if resource_id <= 0:
         raise ValidationError("Resource ID must be positive")
-    
+
     resource = Resource.query.get(resource_id)
     if not resource:
-        raise NotFoundError("Resource not found", 
-                          resource_type="Resource", 
+        raise NotFoundError("Resource not found",
+                          resource_type="Resource",
                           resource_id=str(resource_id))
-    
+
     return create_success_response(
         data=resource.to_dict(),
         message="Resource retrieved successfully"
@@ -67,16 +67,16 @@ def get_resource(resource_id):
 def create_resource():
     """Create a new resource"""
     data = request.get_json()
-    
+
     # Validation
     if not data.get('name'):
         raise ValidationError("Name is required")
-    
+
     # Create resource (database exceptions handled automatically)
     resource = Resource(name=data['name'])
     db.session.add(resource)
     db.session.commit()
-    
+
     return create_success_response(
         data=resource.to_dict(),
         message="Resource created successfully",
@@ -93,10 +93,10 @@ def create_resource():
 def send_notification():
     """Send notification via external service"""
     data = request.get_json()
-    
+
     # External service call (exceptions handled automatically)
     result = sms_service.send_message(data['phone'], data['message'])
-    
+
     return create_success_response(
         data={'message_id': result.id},
         message="Notification sent successfully"
@@ -109,23 +109,23 @@ def send_notification():
 
 ```python
 # Validation errors (400)
-raise ValidationError("Invalid input data", 
+raise ValidationError("Invalid input data",
                      validation_errors=['Email format invalid'])
 
 # Resource not found (404)
-raise NotFoundError("User not found", 
-                   resource_type="User", 
+raise NotFoundError("User not found",
+                   resource_type="User",
                    resource_id="123")
 
 # Authentication required (401)
 raise UnauthorizedError("Authentication required")
 
 # Access forbidden (403)
-raise ForbiddenError("Admin access required", 
+raise ForbiddenError("Admin access required",
                     required_permission="admin")
 
 # Resource conflict (409)
-raise ConflictError("Email already exists", 
+raise ConflictError("Email already exists",
                    conflict_type="unique_constraint")
 ```
 
@@ -133,21 +133,21 @@ raise ConflictError("Email already exists",
 
 ```python
 # Payment processing (402)
-raise PaymentError("Payment declined", 
+raise PaymentError("Payment declined",
                   payment_gateway="stripe",
                   gateway_error_code="card_declined")
 
 # Delivery operations (422)
-raise DeliveryError("Delivery address unreachable", 
+raise DeliveryError("Delivery address unreachable",
                    delivery_stage="route_planning")
 
 # External service failures (503)
-raise ExternalServiceError("SMS service unavailable", 
+raise ExternalServiceError("SMS service unavailable",
                           service_name="twilio")
 
 # Rate limiting (429)
-raise RateLimitError("Rate limit exceeded", 
-                    retry_after=60, 
+raise RateLimitError("Rate limit exceeded",
+                    retry_after=60,
                     limit=100)
 ```
 
@@ -194,11 +194,11 @@ raise RateLimitError("Rate limit exceeded",
 ```python
 # Add to API file imports
 from business_app.utils.error_handlers import (
-    handle_api_exception, create_success_response, 
+    handle_api_exception, create_success_response,
     handle_database_exceptions, handle_external_service_exceptions
 )
 from business_app.utils.exceptions import (
-    ValidationError, NotFoundError, UnauthorizedError, 
+    ValidationError, NotFoundError, UnauthorizedError,
     ForbiddenError, ConflictError, PaymentError, DeliveryError
 )
 ```
@@ -337,13 +337,13 @@ response['request_id'] = g.trace_id
 def test_validation_error():
     with pytest.raises(ValidationError) as exc_info:
         endpoint_function(invalid_data)
-    
+
     assert "Invalid input" in str(exc_info.value)
     assert exc_info.value.details['field'] == 'email'
 
 def test_error_response_format():
     response = client.post('/api/resource', json={})
-    
+
     assert response.status_code == 400
     data = response.get_json()
     assert data['error'] == 'VALIDATION_ERROR'
@@ -357,12 +357,12 @@ def test_error_response_format():
 def test_end_to_end_error_handling():
     # Test that errors are properly handled and logged
     response = client.post('/api/resource', json={'invalid': 'data'})
-    
+
     # Check response format
     assert response.status_code == 400
     data = response.get_json()
     assert data['error'] == 'VALIDATION_ERROR'
-    
+
     # Check that error was logged (verify with log capture)
     assert 'ValidationError' in captured_logs
 ```

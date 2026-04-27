@@ -161,11 +161,11 @@
                 </div>
                 <div class="col-md-4 text-right">
                     {% if user.phone_verified_at %}
-                    <button class="btn btn-outline-primary" onclick="setup2FA()">
+                    <button class="btn btn-outline-primary" data-action="setup-2fa">
                         <i class="far fa-mobile"></i> {{ 'Enable 2FA'|t }}
                     </button>
                     {% else %}
-                    <button class="btn btn-outline-warning" onclick="verifyPhoneFirst()">
+                    <button class="btn btn-outline-warning" data-action="verify-phone-first">
                         <i class="far fa-exclamation-triangle"></i> {{ 'Verify Phone First'|t }}
                     </button>
                     {% endif %}
@@ -264,148 +264,25 @@
 {% endblock %}
 
 {% block cabinet_extra_js %}
-<script>
-// Change Password Form
-document.getElementById('changePasswordForm').addEventListener('submit', async function(e) {
-    e.preventDefault();
-    
-    const formData = new FormData(this);
-    const currentPassword = formData.get('current_password');
-    const newPassword = formData.get('new_password');
-    const confirmPassword = formData.get('confirm_password');
-    
-    // Validate passwords match
-    if (newPassword !== confirmPassword) {
-        showNotification('{{ "New passwords do not match"|t }}', 'error');
-        return;
-    }
-    
-    // Validate password strength
-    const strength = checkPasswordStrength(newPassword);
-    if (strength < 2) {
-        showNotification('{{ "Password is too weak. Please choose a stronger password."|t }}', 'error');
-        return;
-    }
-    
-    try {
-        const response = await apiRequest('/auth/change-password', {
-            method: 'POST',
-            body: JSON.stringify({
-                current_password: currentPassword,
-                new_password: newPassword
-            })
-        });
-        
-        const result = await response.json();
-        
-        if (response.ok) {
-            showNotification('{{ "Password changed successfully!"|t }}', 'success');
-            this.reset();
-            document.getElementById('strengthFill').style.width = '0%';
-            document.getElementById('strengthText').textContent = '{{ "Password strength"|t }}';
-        } else {
-            showNotification(result.message || '{{ "Failed to change password"|t }}', 'error');
-        }
-    } catch (error) {
-        showNotification('{{ "Network error. Please try again."|t }}', 'error');
-    }
-});
-
-// Security Settings Form
-document.getElementById('securitySettingsForm').addEventListener('submit', async function(e) {
-    e.preventDefault();
-    showNotification('{{ "Security settings saved successfully!"|t }}', 'success');
-});
-
-// Password strength checker
-document.querySelector('input[name="new_password"]').addEventListener('input', function() {
-    const password = this.value;
-    const strength = checkPasswordStrength(password);
-    updatePasswordStrengthUI(strength);
-});
-
-function checkPasswordStrength(password) {
-    let strength = 0;
-    if (password.length >= 8) strength++;
-    if (/[a-z]/.test(password)) strength++;
-    if (/[A-Z]/.test(password)) strength++;
-    if (/[0-9]/.test(password)) strength++;
-    if (/[^a-zA-Z0-9]/.test(password)) strength++;
-    
-    return strength;
-}
-
-function updatePasswordStrengthUI(strength) {
-    const strengthFill = document.getElementById('strengthFill');
-    const strengthText = document.getElementById('strengthText');
-    
-    // Remove all classes
-    strengthFill.className = 'strength-fill';
-    
-    switch (strength) {
-        case 0:
-        case 1:
-            strengthFill.classList.add('weak');
-            strengthFill.style.width = '20%';
-            strengthText.textContent = '{{ "Weak"|t }}';
-            break;
-        case 2:
-            strengthFill.classList.add('fair');
-            strengthFill.style.width = '40%';
-            strengthText.textContent = '{{ "Fair"|t }}';
-            break;
-        case 3:
-            strengthFill.classList.add('good');
-            strengthFill.style.width = '60%';
-            strengthText.textContent = '{{ "Good"|t }}';
-            break;
-        case 4:
-            strengthFill.classList.add('good');
-            strengthFill.style.width = '80%';
-            strengthText.textContent = '{{ "Strong"|t }}';
-            break;
-        case 5:
-            strengthFill.classList.add('strong');
-            strengthFill.style.width = '100%';
-            strengthText.textContent = '{{ "Very Strong"|t }}';
-            break;
-    }
-}
-
-// Show/hide passwords toggle
-document.getElementById('show_passwords').addEventListener('change', function() {
-    const passwordFields = document.querySelectorAll('input[type="password"]');
-    const type = this.checked ? 'text' : 'password';
-    
-    passwordFields.forEach(field => {
-        field.type = type;
-    });
-});
-
-// Real-time password confirmation validation
-document.querySelector('input[name="confirm_password"]').addEventListener('input', function() {
-    const password = document.querySelector('input[name="new_password"]').value;
-    const confirmPassword = this.value;
-    
-    if (confirmPassword && password !== confirmPassword) {
-        this.setCustomValidity('{{ "Passwords do not match"|t }}');
-        this.style.borderColor = '#dc3545';
-    } else {
-        this.setCustomValidity('');
-        this.style.borderColor = '';
-    }
-});
-
-// Setup 2FA
-function setup2FA() {
-    showNotification('{{ "Two-factor authentication setup coming soon!"|t }}', 'info');
-}
-
-// Verify phone first
-function verifyPhoneFirst() {
-    if (confirm('{{ "You need to verify your phone number before enabling 2FA. Go to phone verification?"|t }}')) {
-        window.location.href = '{{ url_for("frontend.verify_phone") }}';
-    }
-}
-</script>
+{% from "frontend/macros/page_data.html" import render_page_data %}
+{{ render_page_data({
+    'verify_phone_url': url_for('frontend.verify_phone'),
+    'i18n': {
+        'mismatch': 'New passwords do not match' | t,
+        'too_weak': 'Password is too weak. Please choose a stronger password.' | t,
+        'changed_success': 'Password changed successfully!' | t,
+        'change_failed': 'Failed to change password' | t,
+        'network_error': 'Network error. Please try again.' | t,
+        'strength_label': 'Password strength' | t,
+        'settings_saved': 'Security settings saved successfully!' | t,
+        'weak': 'Weak' | t,
+        'fair': 'Fair' | t,
+        'good': 'Good' | t,
+        'strong': 'Strong' | t,
+        'very_strong': 'Very Strong' | t,
+        'twofa_coming_soon': 'Two-factor authentication setup coming soon!' | t,
+        'verify_phone_confirm': 'You need to verify your phone number before enabling 2FA. Go to phone verification?' | t,
+    },
+}) }}
+<script src="{{ url_for('static', filename='js/pages/account-security.js') }}"></script>
 {% endblock %}

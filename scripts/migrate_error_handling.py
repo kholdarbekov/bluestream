@@ -16,30 +16,30 @@ def analyze_current_error_patterns(file_path):
     """Analyze current error handling patterns in a file"""
     with open(file_path, 'r') as f:
         content = f.read()
-    
+
     patterns = {
         'raw_try_except': len(re.findall(r'try:\s*\n.*?except\s+Exception', content, re.DOTALL)),
         'manual_jsonify_errors': len(re.findall(r'return\s+jsonify\(\s*\{[^}]*[\'"]error[\'"]', content)),
         'handle_exceptions_decorator': len(re.findall(r'@handle_exceptions', content)),
         'raw_status_codes': len(re.findall(r'return.*?,\s*[45]\d\d', content)),
     }
-    
+
     return patterns
 
 def suggest_refactoring(file_path):
     """Suggest refactoring for a specific file"""
     with open(file_path, 'r') as f:
         content = f.read()
-    
+
     suggestions = []
-    
+
     # Find functions with raw try-except blocks
     raw_exceptions = re.finditer(
         r'def\s+(\w+)\([^)]*\):[^}]*?try:\s*\n(.*?)except\s+Exception\s+as\s+\w+:(.*?)return\s+jsonify\([^}]*\{[^}]*[\'"]error[\'"]',
-        content, 
+        content,
         re.DOTALL
     )
-    
+
     for match in raw_exceptions:
         func_name = match.group(1)
         suggestions.append({
@@ -48,13 +48,13 @@ def suggest_refactoring(file_path):
             'recommendation': 'Use @handle_api_exception decorator and raise specific exceptions',
             'line_start': content[:match.start()].count('\n') + 1
         })
-    
+
     # Find manual error responses
     manual_errors = re.finditer(
         r'return\s+jsonify\(\s*\{[^}]*[\'"]error[\'"]:\s*[\'"]([^"\']+)[\'"]',
         content
     )
-    
+
     for match in manual_errors:
         error_msg = match.group(1)
         suggestions.append({
@@ -63,50 +63,50 @@ def suggest_refactoring(file_path):
             'recommendation': 'Raise appropriate exception instead of manual error response',
             'line_start': content[:match.start()].count('\n') + 1
         })
-    
+
     return suggestions
 
 def generate_migration_recommendations():
     """Generate comprehensive migration recommendations"""
     api_files = find_api_files()
-    
+
     print("BlueStream API Error Handling Migration Analysis")
     print("=" * 60)
-    
+
     total_issues = 0
     files_analyzed = 0
-    
+
     for file_path in api_files:
         if file_path.name == "__init__.py":
             continue
-            
+
         files_analyzed += 1
         patterns = analyze_current_error_patterns(file_path)
         suggestions = suggest_refactoring(file_path)
-        
+
         file_issues = sum(patterns.values())
         total_issues += file_issues
-        
+
         if file_issues > 0:
             print(f"\n📁 {file_path.name}")
             print(f"   Raw try-except blocks: {patterns['raw_try_except']}")
             print(f"   Manual error responses: {patterns['manual_jsonify_errors']}")
             print(f"   Using handle_exceptions: {patterns['handle_exceptions_decorator']}")
             print(f"   Raw status codes: {patterns['raw_status_codes']}")
-            
+
             if suggestions:
                 print(f"   Specific recommendations:")
                 for suggestion in suggestions[:3]:  # Show first 3 suggestions
                     print(f"     • Line {suggestion.get('line_start', '?')}: {suggestion['recommendation']}")
-                
+
                 if len(suggestions) > 3:
                     print(f"     • ... and {len(suggestions) - 3} more issues")
-    
+
     print(f"\n📊 Summary")
     print(f"   Files analyzed: {files_analyzed}")
     print(f"   Total issues found: {total_issues}")
     print(f"   Estimated effort: {estimate_migration_effort(total_issues)}")
-    
+
     print(f"\n🔧 Migration Steps")
     print_migration_steps()
 
@@ -159,7 +159,7 @@ def print_migration_steps():
         "   @handle_database_exceptions  # For DB operations",
         "   @handle_external_service_exceptions('payment_gateway')  # For external calls",
     ]
-    
+
     for step in steps:
         print(f"   {step}")
 
@@ -167,7 +167,7 @@ def create_example_migration():
     """Create an example of before/after migration"""
     print(f"\n📝 Example Migration")
     print("=" * 40)
-    
+
     before = '''
 # BEFORE - Inconsistent error handling
 @auth_bp.route('/login', methods=['POST'])
@@ -178,7 +178,7 @@ def login():
         user = auth_service.authenticate_user(data['email'], data['password'])
         if not user:
             return jsonify({'error': 'Invalid credentials'}), 401
-        
+
         token = create_access_token(identity=user.id)
         return jsonify({
             'success': True,
@@ -189,7 +189,7 @@ def login():
         current_app.logger.error(f"Login error: {e}")
         return jsonify({'error': 'Login failed'}), 500
 '''
-    
+
     after = '''
 # AFTER - Standardized error handling
 @auth_bp.route('/login', methods=['POST'])
@@ -198,10 +198,10 @@ def login():
 def login():
     data = request.get_json()
     user = auth_service.authenticate_user(data['email'], data['password'])
-    
+
     if not user:
         raise UnauthorizedError('Invalid credentials', details={'field': 'email_password'})
-    
+
     token = create_access_token(identity=user.id)
     return create_success_response(
         data={
@@ -211,7 +211,7 @@ def login():
         message='Login successful'
     )
 '''
-    
+
     print("BEFORE:")
     print(before)
     print("AFTER:")
@@ -222,18 +222,18 @@ def check_specific_file(file_path):
     if not os.path.exists(file_path):
         print(f"❌ File not found: {file_path}")
         return
-    
+
     print(f"🔍 Detailed analysis of {os.path.basename(file_path)}")
     print("=" * 50)
-    
+
     patterns = analyze_current_error_patterns(file_path)
     suggestions = suggest_refactoring(file_path)
-    
+
     print(f"Current error handling patterns:")
     for pattern, count in patterns.items():
         if count > 0:
             print(f"  • {pattern.replace('_', ' ').title()}: {count}")
-    
+
     if suggestions:
         print(f"\nSpecific recommendations:")
         for i, suggestion in enumerate(suggestions, 1):
@@ -242,7 +242,7 @@ def check_specific_file(file_path):
             print(f"   Recommendation: {suggestion['recommendation']}")
             if 'error_message' in suggestion:
                 print(f"   Current error: '{suggestion['error_message']}'")
-    
+
     print(f"\n💡 Quick fixes for this file:")
     print(f"   1. Add @handle_api_exception decorator to all endpoint functions")
     print(f"   2. Replace {patterns['manual_jsonify_errors']} manual error responses with exception raises")
@@ -250,7 +250,7 @@ def check_specific_file(file_path):
 
 if __name__ == "__main__":
     import sys
-    
+
     if len(sys.argv) > 1:
         # Analyze specific file
         file_path = sys.argv[1]
@@ -259,7 +259,7 @@ if __name__ == "__main__":
         # Generate full migration report
         generate_migration_recommendations()
         create_example_migration()
-        
+
         print(f"\n🎯 Next Steps:")
         print(f"   1. Run this script on specific files: python migrate_error_handling.py <file_path>")
         print(f"   2. Start migration with the files that have the most issues")

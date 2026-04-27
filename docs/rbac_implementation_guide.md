@@ -87,14 +87,14 @@ ROLE_PERMISSIONS = {
         Permission.VIEW_ORDERS,  # Own orders only
         Permission.CANCEL_ORDERS,  # Own orders only
     },
-    
+
     UserRole.DELIVERY_DRIVER: {
         Permission.VIEW_PRODUCTS,
         Permission.VIEW_DELIVERIES,
         Permission.UPDATE_DELIVERY_STATUS,
         Permission.VIEW_ORDERS,  # Assigned orders only
     },
-    
+
     UserRole.OPERATOR: {
         Permission.VIEW_USERS,
         Permission.VIEW_ORDERS,
@@ -109,11 +109,11 @@ ROLE_PERMISSIONS = {
         Permission.VIEW_PAYMENTS,
         Permission.MANAGE_NOTIFICATIONS,
     },
-    
+
     UserRole.MANAGER: {
         # ... (extensive permissions)
     },
-    
+
     UserRole.ADMIN: set(Permission),  # All permissions
 }
 ```
@@ -394,7 +394,7 @@ def test_user_management_access():
         token = create_jwt_token(user_with_permission)
         response = client.get('/api/users', headers={'Authorization': f'Bearer {token}'})
         assert response.status_code == 200
-    
+
     # Test with user lacking permission
     with app.test_client() as client:
         token = create_jwt_token(user_without_permission)
@@ -408,7 +408,7 @@ def test_role_permission_consistency():
     """Test that roles have expected permissions."""
     admin_permissions = rbac.get_user_permissions(UserRole.ADMIN)
     assert Permission.DELETE_USERS in admin_permissions
-    
+
     customer_permissions = rbac.get_user_permissions(UserRole.CUSTOMER)
     assert Permission.DELETE_USERS not in customer_permissions
 ```

@@ -34,7 +34,7 @@
                         <h2>{{ 'Create Account'|t }}</h2>
                         <p>{{ 'Join us today and enjoy premium water delivery services'|t }}</p>
                     </div>
-                    
+
                     <!-- Step 1: Register Form -->
                     <form id="registerForm" class="auth-form">
                         <!-- Name Row -->
@@ -77,7 +77,7 @@
                                 <div class="input-wrapper">
                                     <input type="password" name="password" id="password" class="form-control" placeholder="{{ 'Password'|t }}" required>
                                     <i class="fas fa-lock input-icon"></i>
-                                    <button type="button" class="password-toggle" onclick="togglePassword('password', this)" tabindex="-1">
+                                    <button type="button" class="password-toggle" data-target="password" tabindex="-1">
                                         <i class="fas fa-eye"></i>
                                     </button>
                                 </div>
@@ -92,7 +92,7 @@
                                 <div class="input-wrapper">
                                     <input type="password" name="confirm_password" id="confirm_password" class="form-control" placeholder="{{ 'Confirm Password'|t }}" required>
                                     <i class="fas fa-lock input-icon"></i>
-                                    <button type="button" class="password-toggle" onclick="togglePassword('confirm_password', this)" tabindex="-1">
+                                    <button type="button" class="password-toggle" data-target="confirm_password" tabindex="-1">
                                         <i class="fas fa-eye"></i>
                                     </button>
                                 </div>
@@ -173,7 +173,7 @@
                             <!-- Timer and Resend -->
                             <div class="otp-timer-section">
                                 <p id="otpTimerText">{{ 'Code expires in'|t }} <span id="otpTimer">3:00</span></p>
-                                <button type="button" id="resendOtpBtn" class="btn-link" style="display: none;" onclick="resendOtp()">
+                                <button type="button" id="resendOtpBtn" class="btn-link" style="display: none;">
                                     {{ 'Resend Code'|t }}
                                 </button>
                             </div>
@@ -186,12 +186,12 @@
 
                         <!-- Back Button -->
                         <div class="otp-back">
-                            <button type="button" class="btn-link" onclick="goBackToForm()">
+                            <button type="button" id="goBackToFormBtn" class="btn-link">
                                 <i class="fas fa-arrow-left"></i> {{ 'Change phone number'|t }}
                             </button>
                         </div>
                     </div>
-                    
+
                     <!-- Footer -->
                     <div class="auth-footer">
                         <p>{{ 'Already have an account?'|t }} <a href="{{ url_for('frontend.login') }}{% if request.args.get('next') %}?next={{ request.args.get('next') | urlencode }}{% endif %}">{{ 'Login Here'|t }}</a></p>
@@ -203,493 +203,45 @@
 {% endblock %}
 
 {% block extra_js %}
-<script>
-// Registration state
-let registrationData = {};
-let otpTimerInterval = null;
-let otpExpiresAt = null;
-let resendAvailableAt = null;
-
-// Toggle Password Visibility
-function togglePassword(inputId, button) {
-    const input = document.getElementById(inputId);
-    const icon = button.querySelector('i');
-
-    if (input.type === 'password') {
-        input.type = 'text';
-        icon.classList.remove('fa-eye');
-        icon.classList.add('fa-eye-slash');
-    } else {
-        input.type = 'password';
-        icon.classList.remove('fa-eye-slash');
-        icon.classList.add('fa-eye');
-    }
-}
-
-// Show/hide telegram linking info
-document.getElementById('link_telegram').addEventListener('change', function() {
-    const telegramInfo = document.getElementById('telegram_linking_info');
-    telegramInfo.style.display = this.checked ? 'block' : 'none';
-});
-
-// Password strength indicator
-document.querySelector('input[name="password"]').addEventListener('input', function() {
-    const password = this.value;
-    const strengthContainer = document.getElementById('passwordStrength');
-    const strengthFill = document.getElementById('strengthFill');
-    const strengthText = document.getElementById('strengthText');
-
-    if (password.length === 0) {
-        strengthContainer.style.display = 'none';
-        return;
-    }
-
-    strengthContainer.style.display = 'block';
-    const strength = checkPasswordStrength(password);
-
-    strengthFill.className = 'strength-fill';
-    if (strength <= 1) {
-        strengthFill.classList.add('weak');
-        strengthText.textContent = '{{ "Weak password"|t }}';
-    } else if (strength === 2) {
-        strengthFill.classList.add('fair');
-        strengthText.textContent = '{{ "Fair password"|t }}';
-    } else if (strength === 3) {
-        strengthFill.classList.add('good');
-        strengthText.textContent = '{{ "Good password"|t }}';
-    } else {
-        strengthFill.classList.add('strong');
-        strengthText.textContent = '{{ "Strong password"|t }}';
-    }
-});
-
-function checkPasswordStrength(password) {
-    let strength = 0;
-    if (password.length >= 8) strength++;
-    if (/[a-z]/.test(password)) strength++;
-    if (/[A-Z]/.test(password)) strength++;
-    if (/[0-9]/.test(password)) strength++;
-    if (/[^a-zA-Z0-9]/.test(password)) strength++;
-    return strength;
-}
-
-// Phone number validation and normalization for Uzbekistan
-function normalizeUzbekistanPhone(phone) {
-    if (!phone) return null;
-
-    // Remove all non-digit characters
-    let digits = phone.replace(/\D/g, '');
-
-    // Handle different formats
-    if (digits.length === 12 && digits.startsWith('998')) {
-        return '+' + digits;
-    } else if (digits.length === 9 && /^[3579]/.test(digits)) {
-        return '+998' + digits;
-    } else if (digits.length === 11 && digits.startsWith('8998')) {
-        return '+998' + digits.substring(1);
-    }
-
-    return null; // Invalid format
-}
-
-function isValidUzbekistanPhone(phone) {
-    const normalized = normalizeUzbekistanPhone(phone);
-    if (!normalized) return false;
-
-    // Check format: +998 XX XXX XX XX
-    if (!/^\+998[0-9]{9}$/.test(normalized)) return false;
-
-    // Check valid operator prefixes
-    const prefix = normalized.substring(4, 6);
-    const validPrefixes = ['90', '91', '93', '94', '95', '97', '98', '99', '33', '50', '55', '77', '88'];
-    return validPrefixes.includes(prefix);
-}
-
-// Main registration form submission
-document.getElementById('registerForm').addEventListener('submit', async function(e) {
-    e.preventDefault();
-
-    const submitBtn = this.querySelector('.btn-auth');
-    const formData = new FormData(this);
-
-    // Get phone and email values
-    const phone = formData.get('phone')?.trim() || '';
-    const email = formData.get('email')?.trim() || '';
-
-    // At least one of phone or email is required
-    if (!phone && !email) {
-        showNotification('{{ "Please provide either a phone number or email address"|t }}', 'error');
-        return;
-    }
-
-    // Validate phone format if provided
-    if (phone && !isValidUzbekistanPhone(phone)) {
-        showNotification('{{ "Please enter a valid Uzbekistan phone number (+998 XX XXX XX XX)"|t }}', 'error');
-        return;
-    }
-
-    // Validate email format if provided
-    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-        showNotification('{{ "Please enter a valid email address"|t }}', 'error');
-        return;
-    }
-
-    // Validate password confirmation
-    if (formData.get('password') !== formData.get('confirm_password')) {
-        showNotification('{{ "Passwords do not match"|t }}', 'error');
-        return;
-    }
-
-    submitBtn.classList.add('loading');
-
-    // Store registration data for later use
-    registrationData = {
-        first_name: formData.get('first_name'),
-        last_name: formData.get('last_name') || '',
-        password: formData.get('password'),
-        referral_code: formData.get('referral_code') || null,
-        newsletter_subscription: formData.get('newsletter') === 'on',
-        link_telegram: formData.get('link_telegram') === 'on'
-    };
-
-    // Include email if provided
-    if (email) {
-        registrationData.email = email;
-    }
-
-    // FLOW DECISION: Phone provided = OTP flow, Email only = direct registration
-    if (phone) {
-        // Phone provided - use OTP verification flow
-        registrationData.phone = normalizeUzbekistanPhone(phone);
-        await initiatePhoneRegistration(submitBtn);
-    } else {
-        // Email only - use direct registration
-        await registerWithEmailOnly(submitBtn);
-    }
-});
-
-// Initiate phone registration (Step 1: Send OTP)
-async function initiatePhoneRegistration(submitBtn) {
-    try {
-        const response = await apiRequest('/auth/phone/register/init', {
-            method: 'POST',
-            body: JSON.stringify({
-                phone: registrationData.phone,
-                preferred_language: '{{ g.locale or "uz" }}'
-            })
-        });
-
-        const result = await response.json();
-
-        if (response.ok) {
-            // Show OTP verification section
-            document.getElementById('registerForm').style.display = 'none';
-            document.getElementById('otpVerificationSection').style.display = 'block';
-            document.getElementById('maskedPhone').textContent = result.data.phone_masked || registrationData.phone;
-
-            // Start OTP timer
-            startOtpTimer(result.data.expires_in || 180, result.data.resend_available_in || 60);
-
-            // Focus first OTP input
-            document.querySelector('.otp-digit[data-index="0"]').focus();
-
-            showNotification('{{ "Verification code sent to your phone"|t }}', 'success');
-        } else {
-            showNotification(result.message || '{{ "Failed to send verification code"|t }}', 'error');
-        }
-    } catch (error) {
-        showNotification('{{ "Network error. Please try again."|t }}', 'error');
-    } finally {
-        submitBtn.classList.remove('loading');
-    }
-}
-
-// Register with email only (no phone OTP)
-async function registerWithEmailOnly(submitBtn) {
-    try {
-        const response = await apiRequest('/auth/register', {
-            method: 'POST',
-            body: JSON.stringify(registrationData)
-        });
-
-        const result = await response.json();
-
-        if (response.ok) {
-            let message = '{{ "Account created successfully! Please check your email to verify your account."|t }}';
-
-            if (registrationData.link_telegram) {
-                const linkingCode = generateLinkingCode();
-                localStorage.setItem('telegram_linking_code', linkingCode);
-                localStorage.setItem('user_id_for_linking', result.data.user.id);
-                message += '\n\n{{ "Telegram Linking Code"|t }}: ' + linkingCode;
-                showTelegramLinkingCode(linkingCode, result.data.user.id);
-            }
-
-            showNotification(message, 'success');
-
-            // Redirect to email verification page
-            setTimeout(() => {
-                const telegramParam = registrationData.link_telegram ? '?telegram_link=1' : '';
-                window.location.href = '{{ url_for("frontend.verify_email") }}' + telegramParam;
-            }, registrationData.link_telegram ? 5000 : 2000);
-        } else {
-            showNotification(result.message || '{{ "Registration failed"|t }}', 'error');
-        }
-    } catch (error) {
-        showNotification('{{ "Network error. Please try again."|t }}', 'error');
-    } finally {
-        submitBtn.classList.remove('loading');
-    }
-}
-
-// OTP Input handling
-document.querySelectorAll('.otp-digit').forEach((input, index, inputs) => {
-    input.addEventListener('input', function(e) {
-        // Only allow digits
-        this.value = this.value.replace(/[^0-9]/g, '');
-
-        if (this.value && index < inputs.length - 1) {
-            inputs[index + 1].focus();
-        }
-
-        // Update hidden OTP code field
-        updateOtpCode();
-    });
-
-    input.addEventListener('keydown', function(e) {
-        if (e.key === 'Backspace' && !this.value && index > 0) {
-            inputs[index - 1].focus();
-        }
-    });
-
-    input.addEventListener('paste', function(e) {
-        e.preventDefault();
-        const pastedData = e.clipboardData.getData('text').replace(/[^0-9]/g, '').slice(0, 6);
-        pastedData.split('').forEach((char, i) => {
-            if (inputs[i]) {
-                inputs[i].value = char;
-            }
-        });
-        updateOtpCode();
-        if (pastedData.length === 6) {
-            inputs[5].focus();
-        }
-    });
-});
-
-function updateOtpCode() {
-    const digits = Array.from(document.querySelectorAll('.otp-digit')).map(input => input.value).join('');
-    document.getElementById('otpCode').value = digits;
-}
-
-// OTP Form submission (Step 2: Verify and create account)
-document.getElementById('otpForm').addEventListener('submit', async function(e) {
-    e.preventDefault();
-
-    const otpCode = document.getElementById('otpCode').value;
-    if (otpCode.length !== 6) {
-        showNotification('{{ "Please enter the complete 6-digit code"|t }}', 'error');
-        return;
-    }
-
-    const submitBtn = document.getElementById('verifyOtpBtn');
-    submitBtn.classList.add('loading');
-
-    try {
-        const response = await apiRequest('/auth/phone/register/verify', {
-            method: 'POST',
-            body: JSON.stringify({
-                phone: registrationData.phone,
-                otp_code: otpCode,
-                first_name: registrationData.first_name,
-                last_name: registrationData.last_name,
-                password: registrationData.password,
-                referral_code: registrationData.referral_code
-            })
-        });
-
-        const result = await response.json();
-
-        if (response.ok) {
-            // Stop timer
-            if (otpTimerInterval) clearInterval(otpTimerInterval);
-
-            let message = '{{ "Account created and phone verified successfully!"|t }}';
-
-            if (registrationData.link_telegram) {
-                const linkingCode = generateLinkingCode();
-                localStorage.setItem('telegram_linking_code', linkingCode);
-                localStorage.setItem('user_id_for_linking', result.data.user.id);
-                message += '\n\n{{ "Telegram Linking Code"|t }}: ' + linkingCode;
-                showTelegramLinkingCode(linkingCode, result.data.user.id);
-            }
-
-            showNotification(message, 'success');
-
-            // Redirect to login page (account is verified)
-            setTimeout(() => {
-                window.location.href = '{{ url_for("frontend.login") }}';
-            }, registrationData.link_telegram ? 5000 : 2000);
-        } else {
-            showNotification(result.message || '{{ "Verification failed"|t }}', 'error');
-        }
-    } catch (error) {
-        showNotification('{{ "Network error. Please try again."|t }}', 'error');
-    } finally {
-        submitBtn.classList.remove('loading');
-    }
-});
-
-// OTP Timer
-function startOtpTimer(expiresIn, resendAvailableIn) {
-    otpExpiresAt = Date.now() + (expiresIn * 1000);
-    resendAvailableAt = Date.now() + (resendAvailableIn * 1000);
-
-    const timerEl = document.getElementById('otpTimer');
-    const timerTextEl = document.getElementById('otpTimerText');
-    const resendBtn = document.getElementById('resendOtpBtn');
-
-    resendBtn.style.display = 'none';
-    timerTextEl.style.display = 'block';
-
-    if (otpTimerInterval) clearInterval(otpTimerInterval);
-
-    otpTimerInterval = setInterval(() => {
-        const now = Date.now();
-        const remainingExpiry = Math.max(0, Math.floor((otpExpiresAt - now) / 1000));
-        const remainingResend = Math.max(0, Math.floor((resendAvailableAt - now) / 1000));
-
-        // Update timer display
-        const minutes = Math.floor(remainingExpiry / 60);
-        const seconds = remainingExpiry % 60;
-        timerEl.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
-
-        // Show resend button when available
-        if (remainingResend === 0 && resendBtn.style.display === 'none') {
-            resendBtn.style.display = 'inline-block';
-        }
-
-        // Stop timer when expired
-        if (remainingExpiry === 0) {
-            clearInterval(otpTimerInterval);
-            timerTextEl.innerHTML = '{{ "Code expired"|t }}';
-            resendBtn.style.display = 'inline-block';
-        }
-    }, 1000);
-}
-
-// Resend OTP
-async function resendOtp() {
-    const resendBtn = document.getElementById('resendOtpBtn');
-    resendBtn.disabled = true;
-    resendBtn.textContent = '{{ "Sending..."|t }}';
-
-    try {
-        const response = await apiRequest('/auth/phone/resend-otp', {
-            method: 'POST',
-            body: JSON.stringify({
-                phone: registrationData.phone
-            })
-        });
-
-        const result = await response.json();
-
-        if (response.ok) {
-            showNotification('{{ "New verification code sent"|t }}', 'success');
-            startOtpTimer(result.data.expires_in || 180, result.data.resend_available_in || 60);
-
-            // Clear OTP inputs
-            document.querySelectorAll('.otp-digit').forEach(input => input.value = '');
-            document.getElementById('otpCode').value = '';
-            document.querySelector('.otp-digit[data-index="0"]').focus();
-        } else {
-            showNotification(result.message || '{{ "Failed to resend code"|t }}', 'error');
-        }
-    } catch (error) {
-        showNotification('{{ "Network error. Please try again."|t }}', 'error');
-    } finally {
-        resendBtn.disabled = false;
-        resendBtn.textContent = '{{ "Resend Code"|t }}';
-    }
-}
-
-// Go back to registration form
-function goBackToForm() {
-    if (otpTimerInterval) clearInterval(otpTimerInterval);
-    document.getElementById('otpVerificationSection').style.display = 'none';
-    document.getElementById('registerForm').style.display = 'block';
-
-    // Clear OTP inputs
-    document.querySelectorAll('.otp-digit').forEach(input => input.value = '');
-    document.getElementById('otpCode').value = '';
-}
-
-function generateLinkingCode() {
-    // Generate a 8-character alphanumeric code
-    return Math.random().toString(36).substring(2, 10).toUpperCase();
-}
-
-function showTelegramLinkingCode(code, userId) {
-    // Create a modal-like overlay for the linking code
-    const overlay = document.createElement('div');
-    overlay.style.cssText = `
-        position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-        background: rgba(0,0,0,0.7); z-index: 9999; display: flex;
-        align-items: center; justify-content: center;
-    `;
-    
-    const modal = document.createElement('div');
-    modal.style.cssText = `
-        background: white; padding: 40px; border-radius: 20px;
-        max-width: 500px; text-align: center; position: relative;
-        box-shadow: 0 24px 48px rgba(0, 0, 0, 0.2);
-    `;
-    
-    modal.innerHTML = `
-        <div style="width: 60px; height: 60px; background: linear-gradient(135deg, #0088cc, #00d1f9); 
-                    border-radius: 16px; display: flex; align-items: center; justify-content: center; 
-                    margin: 0 auto 24px; box-shadow: 0 8px 24px rgba(0, 136, 204, 0.3);">
-            <i class="fab fa-telegram-plane" style="font-size: 28px; color: white;"></i>
-        </div>
-        <h3 style="color: #061a3a; font-size: 24px; font-weight: 700; margin-bottom: 16px;">
-            {{ 'Telegram Account Linking'|t }}
-        </h3>
-        <p style="color: #6b7280; margin-bottom: 24px;">{{ 'Your account has been created successfully!'|t }}</p>
-        <div style="background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%); padding: 24px; border-radius: 16px; margin-bottom: 24px;">
-            <p style="font-size: 14px; color: #64748b; margin-bottom: 8px;"><strong>{{ 'Linking Code'|t }}:</strong></p>
-            <div style="font-size: 32px; font-weight: 700; color: #002c8f; letter-spacing: 4px; margin: 12px 0; font-family: monospace;">
-                ${code}
-            </div>
-            <button onclick="copyToClipboard('${code}')" style="padding: 10px 24px; background: linear-gradient(135deg, #00d1f9, #002c8f); 
-                    color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 14px;
-                    transition: all 0.3s ease;">
-                <i class="fas fa-copy" style="margin-right: 8px;"></i>{{ 'Copy Code'|t }}
-            </button>
-        </div>
-        <div style="text-align: left; font-size: 14px; line-height: 1.8; color: #4b5563; padding: 0 12px;">
-            <p style="font-weight: 600; color: #061a3a; margin-bottom: 12px;">{{ 'To link your Telegram account'|t }}:</p>
-            <ol style="margin: 0; padding-left: 20px;">
-                <li>{{ 'Open Telegram and find our bot'|t }}: <a href="https://t.me/bluestream_bot" target="_blank" style="color: #0088cc; font-weight: 600;">@bluestream_bot</a></li>
-                <li>{{ 'Send the command'|t }}: <code style="background: #f3f4f6; padding: 2px 8px; border-radius: 4px; font-size: 13px;">/link ${code}</code></li>
-                <li>{{ 'Follow the bot instructions'|t }}</li>
-            </ol>
-        </div>
-        <button onclick="this.parentElement.parentElement.remove()" 
-                style="margin-top: 28px; padding: 14px 32px; background: linear-gradient(135deg, #10b981, #059669); 
-                       color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: 700; font-size: 15px;
-                       box-shadow: 0 4px 16px rgba(16, 185, 129, 0.3); transition: all 0.3s ease;">
-            {{ 'Continue'|t }}
-        </button>
-    `;
-    
-    overlay.appendChild(modal);
-    document.body.appendChild(overlay);
-}
-
-function copyToClipboard(text) {
-    navigator.clipboard.writeText(text).then(() => {
-        showNotification('{{ "Code copied to clipboard"|t }}', 'success');
-    });
-}
-</script>
+{% from "frontend/macros/page_data.html" import render_page_data %}
+{{ render_page_data({
+    'locale': g.locale or 'uz',
+    'verify_email_url': url_for('frontend.verify_email'),
+    'login_url': url_for('frontend.login'),
+    'i18n': {
+        'need_phone_or_email': 'Please provide either a phone number or email address' | t,
+        'invalid_uz_phone': 'Please enter a valid Uzbekistan phone number (+998 XX XXX XX XX)' | t,
+        'invalid_email': 'Please enter a valid email address' | t,
+        'passwords_mismatch': 'Passwords do not match' | t,
+        'code_sent': 'Verification code sent to your phone' | t,
+        'send_failed': 'Failed to send verification code' | t,
+        'network_error': 'Network error. Please try again.' | t,
+        'account_created_email': 'Account created successfully! Please check your email to verify your account.' | t,
+        'telegram_linking_code': 'Telegram Linking Code' | t,
+        'registration_failed': 'Registration failed' | t,
+        'account_created_verified': 'Account created and phone verified successfully!' | t,
+        'verification_failed': 'Verification failed' | t,
+        'incomplete_otp': 'Please enter the complete 6-digit code' | t,
+        'code_expired': 'Code expired' | t,
+        'sending': 'Sending...' | t,
+        'new_code_sent': 'New verification code sent' | t,
+        'resend_failed': 'Failed to resend code' | t,
+        'resend_code': 'Resend Code' | t,
+        'weak_password': 'Weak password' | t,
+        'fair_password': 'Fair password' | t,
+        'good_password': 'Good password' | t,
+        'strong_password': 'Strong password' | t,
+        'code_copied': 'Code copied to clipboard' | t,
+        'telegram_linking_title': 'Telegram Account Linking' | t,
+        'account_created_success': 'Your account has been created successfully!' | t,
+        'linking_code_label': 'Linking Code' | t,
+        'copy_code': 'Copy Code' | t,
+        'to_link_telegram': 'To link your Telegram account' | t,
+        'open_telegram_bot': 'Open Telegram and find our bot' | t,
+        'send_command': 'Send the command' | t,
+        'follow_bot_instructions': 'Follow the bot instructions' | t,
+        'continue_btn': 'Continue' | t,
+    },
+}) }}
+<script src="{{ url_for('static', filename='js/pages/register.js') }}"></script>
 {% endblock %}

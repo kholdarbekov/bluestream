@@ -506,7 +506,7 @@
                     <!-- Action Buttons -->
                     <div class="action-buttons">
                         {% if order.status.value in ['pending', 'confirmed'] and order.can_be_cancelled() %}
-                        <button onclick="cancelOrder()" class="theme-btn btn-three">
+                        <button data-action="cancel-order" class="theme-btn btn-three">
                             <i class="far fa-times"></i> {{ 'Cancel Order'|t }}
                         </button>
                         {% endif %}
@@ -522,89 +522,26 @@
 {% endblock %}
 
 {% block extra_js %}
-<script>
-// Initialize map if coordinates available
-{% if delivery and delivery.delivery_latitude and delivery.delivery_longitude and map_provider == 'google' and maps_api_key %}
-let map;
-let deliveryMarker;
-
-function initMap() {
-    const deliveryLocation = {
-        lat: {{ delivery.delivery_latitude }},
-        lng: {{ delivery.delivery_longitude }}
-    };
-
-    map = new google.maps.Map(document.getElementById('tracking-map'), {
-        zoom: 15,
-        center: deliveryLocation,
-        mapTypeControl: true,
-        streetViewControl: false,
-        fullscreenControl: true
-    });
-
-    deliveryMarker = new google.maps.Marker({
-        position: deliveryLocation,
-        map: map,
-        title: '{{ "Delivery Location"|t }}',
-        icon: {
-            url: 'https://maps.google.com/mapfiles/ms/icons/red-dot.png'
-        }
-    });
-
-    // Add info window
-    const infoWindow = new google.maps.InfoWindow({
-        content: `
-            <div style="padding: 10px;">
-                <h4 style="margin: 0 0 5px 0;">{{ "Delivery Location"|t }}</h4>
-                <p style="margin: 0; color: #666;">{{ delivery.delivery_address_line1 }}</p>
-            </div>
-        `
-    });
-
-    deliveryMarker.addListener('click', () => {
-        infoWindow.open(map, deliveryMarker);
-    });
-}
-
-document.addEventListener('DOMContentLoaded', initMap);
-{% endif %}
-
-// Auto-refresh page for active orders
-{% if order.status.value in ['pending', 'confirmed', 'preparing', 'out_for_delivery'] %}
-let refreshInterval = setInterval(function() {
-    location.reload();
-}, 30000); // Refresh every 30 seconds
-{% endif %}
-
-// Cancel order function
-function cancelOrder() {
-    if (!confirm('{{ "Are you sure you want to cancel this order?"|t }}')) {
-        return;
-    }
-
-    const reason = prompt('{{ "Please provide a reason for cancellation (optional)"|t }}');
-
-    fetch('/api/v1/orders/{{ order.id }}/cancel', {
-        method: 'POST',
-        headers: {
-            'Authorization': 'Bearer ' + localStorage.getItem('access_token'),
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ reason: reason || 'Customer request' })
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            showNotification('{{ "Order cancelled successfully"|t }}', 'success');
-            setTimeout(() => location.reload(), 1500);
-        } else {
-            showNotification(data.message || '{{ "Failed to cancel order"|t }}', 'error');
-        }
-    })
-    .catch(error => {
-        console.error('Error cancelling order:', error);
-        showNotification('{{ "An error occurred. Please try again."|t }}', 'error');
-    });
-}
-</script>
+{% from "frontend/macros/page_data.html" import render_page_data %}
+{% set map_enabled = (delivery and delivery.delivery_latitude and delivery.delivery_longitude and map_provider == 'google' and maps_api_key) %}
+{% set auto_refresh = order.status.value in ['pending', 'confirmed', 'preparing', 'out_for_delivery'] %}
+{{ render_page_data({
+    'map': {
+        'enabled': true if map_enabled else false,
+        'lat': delivery.delivery_latitude if map_enabled else none,
+        'lng': delivery.delivery_longitude if map_enabled else none,
+        'address': delivery.delivery_address_line1 if map_enabled else '',
+    },
+    'auto_refresh': true if auto_refresh else false,
+    'order_id': order.id,
+    'i18n': {
+        'delivery_location': 'Delivery Location' | t,
+        'confirm_cancel': 'Are you sure you want to cancel this order?' | t,
+        'prompt_reason': 'Please provide a reason for cancellation (optional)' | t,
+        'cancel_success': 'Order cancelled successfully' | t,
+        'cancel_failed': 'Failed to cancel order' | t,
+        'error': 'An error occurred. Please try again.' | t,
+    },
+}) }}
+<script src="{{ url_for('static', filename='js/pages/order-tracking.js') }}"></script>
 {% endblock %}

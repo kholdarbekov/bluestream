@@ -34,7 +34,7 @@
                         <h2>{{ 'Welcome Back'|t }}</h2>
                         <p>{{ 'Please login to your account to continue'|t }}</p>
                     </div>
-                    
+
                     <!-- Login Form -->
                     <form id="loginForm" class="auth-form">
                         <!-- Email/Phone Input -->
@@ -44,18 +44,18 @@
                                 <i class="fas fa-envelope input-icon"></i>
                             </div>
                         </div>
-                        
+
                         <!-- Password Input -->
                         <div class="form-group">
                             <div class="input-wrapper">
                                 <input type="password" name="password" id="password" class="form-control" placeholder="{{ 'Password'|t }}" required>
                                 <i class="fas fa-lock input-icon"></i>
-                                <button type="button" class="password-toggle" onclick="togglePassword('password', this)" tabindex="-1">
+                                <button type="button" class="password-toggle" data-target="password" tabindex="-1">
                                     <i class="fas fa-eye"></i>
                                 </button>
                             </div>
                         </div>
-                        
+
                         <!-- Remember Me & Forgot Password -->
                         <div class="form-options">
                             <label class="auth-checkbox">
@@ -64,13 +64,13 @@
                             </label>
                             <a href="{{ url_for('frontend.forgot_password') }}" class="forgot-link">{{ 'Forgot Password?'|t }}</a>
                         </div>
-                        
+
                         <!-- Submit Button -->
                         <div class="form-group">
                             <button type="submit" class="btn-auth">{{ 'landing.nav.login'|t }}</button>
                         </div>
                     </form>
-                    
+
                     <!-- Footer -->
                     <div class="auth-footer">
                         <p>{{ "Don't have an account?"|t }} <a href="{{ url_for('frontend.register') }}{% if request.args.get('next') %}?next={{ request.args.get('next') | urlencode }}{% endif %}">{{ 'Register Here'|t }}</a></p>
@@ -82,119 +82,14 @@
 {% endblock %}
 
 {% block extra_js %}
-<script>
-// Toggle Password Visibility
-function togglePassword(inputId, button) {
-    const input = document.getElementById(inputId);
-    const icon = button.querySelector('i');
-    
-    if (input.type === 'password') {
-        input.type = 'text';
-        icon.classList.remove('fa-eye');
-        icon.classList.add('fa-eye-slash');
-    } else {
-        input.type = 'password';
-        icon.classList.remove('fa-eye-slash');
-        icon.classList.add('fa-eye');
-    }
-}
-
-document.getElementById('loginForm').addEventListener('submit', async function(e) {
-    e.preventDefault();
-    
-    const submitBtn = this.querySelector('.btn-auth');
-    submitBtn.classList.add('loading');
-
-    const formData = new FormData(this);
-    const data = {
-        identifier: formData.get('identifier'),
-        password: formData.get('password'),
-        remember_me: formData.get('remember_me') === 'on'
-    };
-
-    try {
-        const response = await apiRequest('/auth/login', {
-            method: 'POST',
-            body: JSON.stringify(data)
-        });
-
-        const result = await response.json();
-
-        if (response.ok) {
-            setAuthToken(result.access_token);
-            
-            // Sync anonymous cart items to account
-            // Note: Using direct fetch instead of apiRequest to avoid 401 redirect handler
-            // which could interfere with our proper next URL redirect below
-            const localCart = JSON.parse(localStorage.getItem('cart') || '[]');
-            if (localCart.length > 0) {
-                try {
-                    const csrfToken = getCookie('csrf_access_token');
-                    const syncResponse = await fetch(API_BASE_URL + '/cart/sync', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'X-Platform': 'web',
-                            ...(csrfToken ? {'X-CSRF-TOKEN': csrfToken} : {})
-                        },
-                        credentials: 'include',
-                        body: JSON.stringify({ cart_items: localCart })
-                    });
-                    
-                    if (syncResponse.ok) {
-                        const syncData = await syncResponse.json();
-                        if (syncData.success && syncData.data.cart) {
-                            // Update local storage with merged cart from server
-                            localStorage.setItem('cart', JSON.stringify(syncData.data.cart.cart_items || []));
-                        }
-                    }
-                } catch (error) {
-                    console.error('Cart sync failed:', error);
-                    // Continue anyway - don't block login
-                }
-            }
-            // Note: If no local cart exists, the database cart will be synced by
-            // base.html's syncCartFromDatabase() when user lands on the next page
-
-            showNotification('{{ "Login successful!"|t }}', 'success');
-
-            // Check for redirect URL in query parameters
-            const urlParams = new URLSearchParams(window.location.search);
-            const nextUrl = urlParams.get('next');
-
-            if (nextUrl && isValidRedirectUrl(nextUrl)) {
-                window.location.href = nextUrl;
-            } else {
-                window.location.href = '{{ url_for("frontend.my_account") }}';
-            }
-        } else {
-            submitBtn.classList.remove('loading');
-            showNotification(result.message || '{{ "Login failed"|t }}', 'error');
-        }
-    } catch (error) {
-        submitBtn.classList.remove('loading');
-        showNotification('{{ "Network error. Please try again."|t }}', 'error');
-    }
-});
-
-// Validate redirect URL to prevent open redirect vulnerabilities
-function isValidRedirectUrl(url) {
-    // Only allow relative URLs (starting with /) to prevent open redirect attacks
-    if (!url || typeof url !== 'string') {
-        return false;
-    }
-
-    // Must start with / but not // (to prevent protocol-relative URLs)
-    if (!url.startsWith('/') || url.startsWith('//')) {
-        return false;
-    }
-
-    // Don't allow URLs with protocol schemes
-    if (url.includes('://')) {
-        return false;
-    }
-
-    return true;
-}
-</script>
+{% from "frontend/macros/page_data.html" import render_page_data %}
+{{ render_page_data({
+    'my_account_url': url_for('frontend.my_account'),
+    'i18n': {
+        'login_success': 'Login successful!' | t,
+        'login_failed': 'Login failed' | t,
+        'network_error': 'Network error. Please try again.' | t,
+    },
+}) }}
+<script src="{{ url_for('static', filename='js/pages/login.js') }}"></script>
 {% endblock %}

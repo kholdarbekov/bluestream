@@ -1,11 +1,11 @@
 
 
 .rtl {
-  direction: rtl; 
+  direction: rtl;
 }
 
 .ltr {
-  direction: ltr; 
+  direction: ltr;
 }
 
 .rtl .pull-left{
@@ -38,7 +38,7 @@
   margin-left: 0px;
 }
 
-.rtl .main-menu .navigation > li > ul > li > a, 
+.rtl .main-menu .navigation > li > ul > li > a,
 .rtl .main-menu .navigation > li > .megamenu li > a{
   text-align: right;
 }

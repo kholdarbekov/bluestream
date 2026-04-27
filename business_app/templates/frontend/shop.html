@@ -274,7 +274,7 @@
                                 </div>
                                 <div class="right-column">
                                     <div class="short-box">
-                                        <select class="selectmenu" onchange="sortProducts(this.value)">
+                                        <select class="selectmenu" data-action="sort-products">
                                             <option value="newest">{{ 'landing.shop.sort_latest'|t }}</option>
                                             <option value="price_low">{{ 'landing.shop.sort_price_low'|t }}</option>
                                             <option value="price_high">{{ 'landing.shop.sort_price_high'|t }}</option>
@@ -323,7 +323,7 @@
                                                     <p>{{ description[:80] }}{% if description|length > 80 %}...{% endif %}</p>
                                                 {% endif %}
                                                 <div class="btn-box">
-                                                    <button onclick="addToCart({{ product.id }})" class="theme-btn btn-two">
+                                                    <button data-action="add-to-cart" data-product-id="{{ product.id }}" class="theme-btn btn-two">
                                                         <i class="far fa-shopping-cart"></i> {{ 'landing.button.add_to_cart'|t }}
                                                     </button>
                                                 </div>
@@ -341,7 +341,7 @@
                                     {% if products.has_prev %}
                                     <li><a href="{{ url_for('frontend.shop', page=products.prev_num, category=current_category, search=search_query) }}"><i class="far fa-angle-left"></i></a></li>
                                     {% endif %}
-                                    
+
                                     {% for page_num in products.iter_pages() %}
                                         {% if page_num %}
                                             {% if page_num != products.page %}
@@ -353,7 +353,7 @@
                                         <li><span>...</span></li>
                                         {% endif %}
                                     {% endfor %}
-                                    
+
                                     {% if products.has_next %}
                                     <li><a href="{{ url_for('frontend.shop', page=products.next_num, category=current_category, search=search_query) }}"><i class="far fa-angle-right"></i></a></li>
                                     {% endif %}
@@ -398,152 +398,10 @@
 {% endblock %}
 
 {% block extra_js %}
-<script>
-// Price range slider with input sync
-$(function() {
-    const minPrice = 0;
-    const maxPrice = 10000000; // 10 million UZS
-
-    // Format number with thousand separators
-    function formatNumber(num) {
-        return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ");
-    }
-
-    // Remove formatting to get raw number
-    function parseFormattedNumber(str) {
-        if (!str) return 0;
-        return parseInt(str.toString().replace(/\s/g, '')) || 0;
-    }
-
-    // Wait for theme's script.js to initialize, then override
-    setTimeout(function() {
-        if ($('.price-range-slider').length) {
-            $('.price-range-slider').slider('destroy');
-            $('.price-range-slider').slider({
-                range: true,
-                min: minPrice,
-                max: maxPrice,
-                values: [minPrice, maxPrice],
-                slide: function(event, ui) {
-                    // Update input fields when slider moves with formatted numbers
-                    $('#price-min').val(formatNumber(ui.values[0]));
-                    $('#price-max').val(formatNumber(ui.values[1]));
-                },
-                change: function(event, ui) {
-                    // Also update on programmatic changes
-                    $('#price-min').val(formatNumber(ui.values[0]));
-                    $('#price-max').val(formatNumber(ui.values[1]));
-                }
-            });
-
-            // Initialize input fields with slider values
-            $('#price-min').val(formatNumber($('.price-range-slider').slider("values", 0)));
-            $('#price-max').val(formatNumber($('.price-range-slider').slider("values", 1)));
-        }
-    }, 100);
-
-    // Update slider when min input changes
-    $('#price-min').on('input', function() {
-        let minVal = parseFormattedNumber($(this).val());
-        let maxVal = parseFormattedNumber($('#price-max').val());
-
-        // Ensure min doesn't exceed max
-        if (minVal > maxVal) {
-            minVal = maxVal;
-        }
-
-        // Ensure within bounds
-        if (minVal < minPrice) minVal = minPrice;
-        if (minVal > maxPrice) minVal = maxPrice;
-
-        // Update slider
-        $('.price-range-slider').slider('values', [minVal, maxVal]);
-    });
-
-    // Update slider when max input changes
-    $('#price-max').on('input', function() {
-        let minVal = parseFormattedNumber($('#price-min').val());
-        let maxVal = parseFormattedNumber($(this).val());
-
-        // Ensure max doesn't go below min
-        if (maxVal < minVal) {
-            maxVal = minVal;
-        }
-
-        // Ensure within bounds
-        if (maxVal < minPrice) maxVal = minPrice;
-        if (maxVal > maxPrice) maxVal = maxPrice;
-
-        // Update slider
-        $('.price-range-slider').slider('values', [minVal, maxVal]);
-    });
-
-    // Format numbers with thousand separators on blur
-    $('.price-input').on('blur', function() {
-        let val = parseFormattedNumber($(this).val());
-        if (val >= 0) {
-            $(this).val(formatNumber(val));
-        } else {
-            $(this).val('0');
-        }
-    });
-
-    // Format as user types (with debounce effect)
-    let formatTimeout;
-    $('.price-input').on('input', function() {
-        // Clear previous timeout
-        clearTimeout(formatTimeout);
-
-        // Get cursor position
-        let input = this;
-        let cursorPos = input.selectionStart;
-        let oldLength = input.value.length;
-
-        // Remove all non-digits
-        let cleanValue = input.value.replace(/\D/g, '');
-
-        // Parse and format
-        if (cleanValue) {
-            let numValue = parseInt(cleanValue);
-            if (!isNaN(numValue) && numValue <= maxPrice) {
-                let formatted = formatNumber(numValue);
-                input.value = formatted;
-
-                // Adjust cursor position after formatting
-                let newLength = formatted.length;
-                let diff = newLength - oldLength;
-                input.setSelectionRange(cursorPos + diff, cursorPos + diff);
-            }
-        }
-    });
-
-    // Allow only numbers and spaces during keypress
-    $('.price-input').on('keypress', function(e) {
-        const char = String.fromCharCode(e.which);
-        if (!/[\d]/.test(char) && e.which !== 8 && e.which !== 0) {
-            e.preventDefault();
-        }
-    });
-});
-
-// Sort products
-function sortProducts(sortBy) {
-    const url = new URL(window.location.href);
-    url.searchParams.set('sort', sortBy);
-    url.searchParams.set('page', '1');
-    window.location.href = url.toString();
-}
-
-// Initialize select menu styling - wait for theme's initialization, then refresh
-$(document).ready(function() {
-    // Wait a bit for theme's script.js to initialize nice-select
-    setTimeout(function() {
-        // Destroy and reinitialize to ensure proper rendering
-        if ($('.selectmenu').length) {
-            $('.selectmenu').niceSelect('destroy');
-            $('.selectmenu').niceSelect();
-        }
-    }, 150);
-});
-</script>
+{% from "frontend/macros/page_data.html" import render_page_data %}
+{{ render_page_data({
+    'min_price': 0,
+    'max_price': 10000000,
+}) }}
+<script src="{{ url_for('static', filename='js/pages/shop.js') }}"></script>
 {% endblock %}

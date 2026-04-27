@@ -77,7 +77,7 @@ class APIResponse:
 
 class BusinessAPIClient:
     """Client for business application API"""
-    
+
     def __init__(self):
         self.base_url = config.business_api.base_url
         self.timeout = config.business_api.timeout
@@ -85,18 +85,18 @@ class BusinessAPIClient:
         self.retry_delay = config.business_api.retry_delay
         self._client = None
         self._circuit_breaker = CircuitBreaker(failure_threshold=5, recovery_timeout=30.0)
-    
+
     async def __aenter__(self):
         """Async context manager entry"""
         # SSL verification configuration
         ssl_verify = config.business_api.ssl_verify
         ssl_cert_path = config.business_api.ssl_cert_path
-        
+
         # Log SSL configuration for debugging
         logger.info(f"SSL verification: {'enabled' if ssl_verify else 'disabled'}")
         if ssl_cert_path:
             logger.info(f"Custom SSL certificate path: {ssl_cert_path}")
-        
+
         # Configure SSL verification with enhanced security
         if ssl_verify:
             if ssl_cert_path:
@@ -104,7 +104,7 @@ class BusinessAPIClient:
                 if not os.path.exists(ssl_cert_path):
                     logger.error(f"SSL certificate file not found: {ssl_cert_path}")
                     raise FileNotFoundError(f"SSL certificate file not found: {ssl_cert_path}")
-                
+
                 # Use custom certificate if provided
                 verify_config = ssl_cert_path
                 logger.info(f"Using custom SSL certificate: {ssl_cert_path}")
@@ -120,14 +120,14 @@ class BusinessAPIClient:
                 "only be used in development environments with self-signed certificates. " +
                 "Enable SSL verification in production by setting BUSINESS_API_SSL_VERIFY=true"
             )
-            
+
             # Additional warning for production-like URLs
             if any(domain in self.base_url.lower() for domain in ['https://', '.com', '.org', '.net']):
                 logger.error(
                     "🚨 SECURITY ALERT: SSL verification is disabled for a production-like URL. " +
                     "This creates a serious man-in-the-middle attack vulnerability!"
                 )
-        
+
         # Create HTTP client with enhanced security configuration
         try:
             self._client = httpx.AsyncClient(
@@ -147,16 +147,16 @@ class BusinessAPIClient:
                     keepalive_expiry=30.0
                 )
             )
-            
+
             # Test SSL connection if verification is enabled
             if ssl_verify and self.base_url.startswith('https://'):
                 await self._test_ssl_connection()
-                
+
         except Exception as e:
             logger.error(f"Failed to initialize HTTP client with SSL configuration: {e}")
             raise
         return self
-    
+
     async def _test_ssl_connection(self):
         """
         Test SSL connection to verify certificate validity
@@ -181,16 +181,16 @@ class BusinessAPIClient:
         except Exception as e:
             logger.warning(f"SSL connection test failed with unexpected error: {e}")
             # Don't raise for other errors during testing
-    
+
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """Async context manager exit"""
         if self._client:
             await self._client.aclose()
-    
+
     def _get_url(self, endpoint: str) -> str:
         """Build full URL for endpoint"""
         return f"{self.base_url.rstrip('/')}{endpoint}"
-    
+
     async def _make_request(self, method: str, endpoint: str,
                           headers: Optional[Dict] = None,
                           data: Optional[Dict] = None,
@@ -209,7 +209,7 @@ class BusinessAPIClient:
             )
 
         url = self._get_url(endpoint)
-        
+
         logger.debug(f"HTTP {method.upper()} {url}")
 
         # Set up headers
@@ -229,7 +229,7 @@ class BusinessAPIClient:
             logger.debug(f"Request data: {data}")
         if params:
             logger.debug(f"Request params: {params}")
-        
+
         for attempt in range(self.max_retries + 1):
             try:
                 logger.debug(f"HTTP request attempt {attempt + 1}/{self.max_retries + 1}")
@@ -239,7 +239,7 @@ class BusinessAPIClient:
                     # Keep bot requests stateless and prevent any cookie-based auth bleed.
                     'cookies': {}
                 }
-                
+
                 if method.upper() == 'GET':
                     response = await self._client.get(url, **request_kwargs)
                 elif method.upper() == 'POST':
@@ -252,7 +252,7 @@ class BusinessAPIClient:
                     response = await self._client.delete(url, **request_kwargs)
                 else:
                     raise ValueError(f"Unsupported HTTP method: {method}")
-                
+
                 logger.info(f"HTTP {method.upper()} {endpoint} -> {response.status_code}")
                 logger.debug(f"Response headers: {dict(response.headers)}")
 
@@ -298,7 +298,7 @@ class BusinessAPIClient:
                         error=error_msg,
                         status_code=response.status_code
                     )
-                    
+
             except httpx.ConnectError as e:
                 error_str = str(e).lower()
                 # Check if this is an SSL-related error
@@ -331,7 +331,7 @@ class BusinessAPIClient:
                             success=False,
                             error=f"Connection failed after {self.max_retries} retries: {str(e)}"
                         )
-            
+
             except httpx.TimeoutException as e:
                 logger.error(f"Request timeout (attempt {attempt + 1}): {e}")
                 if attempt < self.max_retries:
@@ -363,17 +363,17 @@ class BusinessAPIClient:
                         success=False,
                         error=str(e)
                     )
-    
+
     # Authentication methods
     async def authenticate_user(self, telegram_id: int, user_data: dict = None) -> Optional[str]:
         """Get JWT token for telegram user with enhanced audit logging"""
         try:
             logger.info(f"=== API CLIENT AUTH DEBUG START for user {telegram_id} ===")
-            
+
             # Prepare authentication data
             auth_data = {'telegram_id': telegram_id}
             logger.info(f"Base auth_data: {auth_data}")
-            
+
             # Add user information if provided
             if user_data:
                 if 'username' in user_data:
@@ -385,14 +385,14 @@ class BusinessAPIClient:
                 logger.info(f"Final auth_data with user info: {auth_data}")
             else:
                 logger.warning("No user_data provided to authenticate_user")
-            
+
             logger.info("Making POST request to /api/v1/auth/telegram-login")
             response = await self._make_request(
                 'POST',
                 '/api/v1/auth/telegram-login',
                 data=auth_data
             )
-            
+
             logger.debug(f"Auth response - Success: {response.success}, Status: {response.status_code}")
             if response.success:
                 # The response has nested data structure: response.data['data']['access_token']
@@ -422,7 +422,7 @@ class BusinessAPIClient:
                 logger.error(f"Failed to authenticate telegram user {telegram_id}")
                 logger.error(f"Error: {response.error}")
                 logger.error(f"Status code: {response.status_code}")
-                
+
                 # Log authentication failure to audit system
                 await self._log_authentication_failure(
                     telegram_id=str(telegram_id),
@@ -432,12 +432,12 @@ class BusinessAPIClient:
 
                 )
                 return None
-                
+
         except Exception as e:
             logger.error(f"Authentication error for user {telegram_id}: {e}")
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
-            
+
             # Log authentication failure to audit system
             await self._log_authentication_failure(
                 telegram_id=str(telegram_id),
@@ -447,14 +447,14 @@ class BusinessAPIClient:
             return None
         finally:
             logger.info(f"=== API CLIENT AUTH DEBUG END for user {telegram_id} ===")
-    
+
     async def refresh_token(self, refresh_token: str) -> Optional[Dict[str, Any]]:
         """
         Refresh access token using refresh token.
-        
+
         Args:
             refresh_token: Valid refresh token
-            
+
         Returns:
             Dict with new access_token and expires_in, or None if failed
         """
@@ -465,7 +465,7 @@ class BusinessAPIClient:
                 '/api/v1/auth/refresh',
                 data={'refresh_token': refresh_token}
             )
-            
+
             if response.success:
                 data = response.data.get('data', {})
                 token = data.get('access_token')
@@ -475,15 +475,15 @@ class BusinessAPIClient:
                         'access_token': token,
                         'expires_in': data.get('expires_in', 3600)
                     }
-            
+
             logger.warning(f"Token refresh failed: {response.error}")
             return None
-            
+
         except Exception as e:
             logger.error(f"Token refresh error: {e}")
             return None
-    
-    async def _log_authentication_failure(self, telegram_id: str, failure_reason: str, 
+
+    async def _log_authentication_failure(self, telegram_id: str, failure_reason: str,
                                         error_message: str = None, status_code: int = None,
                                         response_data: dict = None):
         """Log authentication failure to database audit system"""
@@ -492,33 +492,33 @@ class BusinessAPIClient:
             if not db_manager.is_connected:
                 logger.warning("Database not connected, skipping audit log")
                 return
-            
+
             # Prepare additional data
             additional_data = {
                 'timestamp': datetime.now(timezone.utc).isoformat(),
                 'api_client': 'telegram_bot',
                 'auth_method': 'telegram_login'
             }
-            
+
             if error_message:
                 additional_data['error_message'] = error_message
             if status_code:
                 additional_data['status_code'] = status_code
             if response_data:
                 additional_data['response_data'] = response_data
-            
+
             # Determine if this is suspicious
             is_suspicious = False
             if failure_reason in ['system_exception', 'api_error_500', 'missing_access_token']:
                 is_suspicious = True
             elif status_code and status_code >= 500:
                 is_suspicious = True
-            
+
             # Log to audit system using SQL function
             query = """
             SELECT log_failed_authentication(
                 NULL,  -- attempted_email
-                NULL,  -- attempted_phone  
+                NULL,  -- attempted_phone
                 $1,    -- attempted_telegram_id
                 NULL,  -- ip_address (not available in bot context)
                 $2,    -- user_agent
@@ -526,7 +526,7 @@ class BusinessAPIClient:
                 $4     -- is_suspicious
             )
             """
-            
+
             await db_manager.execute(
                 query,
                 telegram_id,
@@ -534,13 +534,13 @@ class BusinessAPIClient:
                 failure_reason,
                 is_suspicious
             )
-            
+
             logger.info(f"Authentication failure logged to audit system for telegram_id: {telegram_id}")
-            
+
         except Exception as audit_error:
             logger.error(f"Failed to log authentication failure to audit system: {audit_error}")
             # Don't raise - audit logging should not break the main flow
-    
+
     async def register_telegram_user(self, telegram_id: int, user_data: Dict) -> APIResponse:
         """Register new telegram user"""
         data = {
@@ -548,7 +548,7 @@ class BusinessAPIClient:
             **user_data
         }
         return await self._make_request('POST', '/api/v1/auth/telegram-register', data=data)
-    
+
     # Product methods
     async def get_products(self, user_token: str, category: Optional[str] = None,
                           search: Optional[str] = None, page: int = 1,
@@ -564,120 +564,120 @@ class BusinessAPIClient:
         return await self._make_request('GET', '/api/v1/products',
                                        user_token=user_token, params=params,
                                        language=language)
-    
+
     async def get_product(self, user_token: str, product_id: int, language: Optional[str] = None) -> APIResponse:
         """Get single product details"""
-        return await self._make_request('GET', f'/api/v1/products/{product_id}', 
+        return await self._make_request('GET', f'/api/v1/products/{product_id}',
                                        user_token=user_token,
                                        language=language)
-    
+
     async def get_product_categories(self, user_token: str, language: Optional[str] = None) -> APIResponse:
         """Get product categories"""
-        return await self._make_request('GET', '/api/v1/products/categories', 
+        return await self._make_request('GET', '/api/v1/products/categories',
                                        user_token=user_token,
                                        language=language)
 
     async def get_category(self, user_token: str, category_id: int, language: Optional[str] = None) -> APIResponse:
         """Get specific category details"""
-        return await self._make_request('GET', f'/api/v1/products/categories/{category_id}', 
+        return await self._make_request('GET', f'/api/v1/products/categories/{category_id}',
                                        user_token=user_token,
                                        language=language)
-    
+
     # Cart methods
     async def get_cart(self, user_token: str) -> APIResponse:
         """Get user's cart"""
-        return await self._make_request('GET', '/api/v1/cart', 
+        return await self._make_request('GET', '/api/v1/cart',
                                        user_token=user_token)
-    
+
     async def add_to_cart(self, user_token: str, product_id: int, quantity: int) -> APIResponse:
         """Add item to cart"""
         data = {
             'product_id': product_id,
             'quantity': quantity
         }
-        return await self._make_request('POST', '/api/v1/cart/items', 
+        return await self._make_request('POST', '/api/v1/cart/items',
                                        user_token=user_token, data=data)
-    
+
     async def update_cart_item(self, user_token: str, product_id: int, quantity: int) -> APIResponse:
         """Update cart item quantity"""
         data = {
             'quantity': quantity
         }
-        return await self._make_request('PUT', f'/api/v1/cart/items/{product_id}', 
+        return await self._make_request('PUT', f'/api/v1/cart/items/{product_id}',
                                        user_token=user_token, data=data)
     async def remove_cart_item(self, user_token: str, product_id: int) -> APIResponse:
         """Remove item from cart"""
-        return await self._make_request('DELETE', f'/api/v1/cart/items/{product_id}', 
+        return await self._make_request('DELETE', f'/api/v1/cart/items/{product_id}',
                                        user_token=user_token)
-    
+
     async def clear_cart(self, user_token: str) -> APIResponse:
         """Clear user's cart"""
-        return await self._make_request('POST', '/api/v1/cart/clear', 
+        return await self._make_request('POST', '/api/v1/cart/clear',
                                        user_token=user_token)
-    
+
     # Order methods
     async def create_order(self, user_token: str, order_data: Dict) -> APIResponse:
         """Create new order"""
-        return await self._make_request('POST', '/api/v1/orders', 
+        return await self._make_request('POST', '/api/v1/orders',
                                        user_token=user_token, data=order_data)
-    
+
     async def get_user_orders(self, user_token: str, status: Optional[str] = None) -> APIResponse:
         """Get user's orders"""
         params = {}
         if status:
             params['status'] = status
-            
-        return await self._make_request('GET', '/api/v1/orders/', 
+
+        return await self._make_request('GET', '/api/v1/orders/',
                                        user_token=user_token, params=params)
-    
+
     async def get_order(self, user_token: str, order_id: int) -> APIResponse:
         """Get specific order details"""
-        return await self._make_request('GET', f'/api/v1/orders/{order_id}', 
+        return await self._make_request('GET', f'/api/v1/orders/{order_id}',
                                        user_token=user_token)
-    
+
     async def cancel_order(self, user_token: str, order_id: int) -> APIResponse:
         """Cancel order"""
-        return await self._make_request('POST', f'/api/v1/orders/{order_id}/cancel', 
+        return await self._make_request('POST', f'/api/v1/orders/{order_id}/cancel',
                                        user_token=user_token)
-    
+
     async def track_order(self, user_token: str, order_id: int) -> APIResponse:
         """Get order tracking information with status timeline"""
-        return await self._make_request('GET', f'/api/v1/orders/{order_id}/track', 
+        return await self._make_request('GET', f'/api/v1/orders/{order_id}/track',
                                        user_token=user_token)
-    
+
     # Payment methods
     async def get_payment_methods(self, user_token: str) -> APIResponse:
         """Get user's payment methods"""
-        return await self._make_request('GET', '/api/v1/payments/methods', 
+        return await self._make_request('GET', '/api/v1/payments/methods',
                                        user_token=user_token)
-    
+
     async def create_payment(self, user_token: str, payment_data: Dict) -> APIResponse:
         """Create payment for order"""
-        return await self._make_request('POST', '/api/v1/payments/create', 
+        return await self._make_request('POST', '/api/v1/payments/create',
                                        user_token=user_token, data=payment_data)
-    
+
     async def get_payment_status(self, user_token: str, payment_id: str) -> APIResponse:
         """Get payment status"""
-        return await self._make_request('GET', f'/api/v1/payments/{payment_id}', 
+        return await self._make_request('GET', f'/api/v1/payments/{payment_id}',
                                        user_token=user_token)
-    
+
     # Delivery methods
     async def get_delivery_slots(self, user_token: str, address_id: int) -> APIResponse:
         """Get available delivery time slots"""
-        return await self._make_request('GET', f'/api/v1/delivery/slots/{address_id}', 
+        return await self._make_request('GET', f'/api/v1/delivery/slots/{address_id}',
                                        user_token=user_token)
-    
+
     async def track_delivery(self, user_token: str, order_id: int) -> APIResponse:
         """Track order delivery"""
-        return await self._make_request('GET', f'/api/v1/delivery/track/{order_id}', 
+        return await self._make_request('GET', f'/api/v1/delivery/track/{order_id}',
                                        user_token=user_token)
-    
+
     # User profile methods
     async def get_user_profile(self, user_token: str) -> APIResponse:
         """Get user profile"""
-        return await self._make_request('GET', '/api/v1/auth/profile', 
+        return await self._make_request('GET', '/api/v1/auth/profile',
                                        user_token=user_token)
-    
+
     async def update_user_profile(self, user_token: str, profile_data: Dict) -> APIResponse:
         """Update user profile"""
         return await self._make_request('PUT', '/api/v1/auth/profile',
@@ -712,24 +712,24 @@ class BusinessAPIClient:
 
     async def get_user_addresses(self, user_token: str) -> APIResponse:
         """Get user addresses"""
-        return await self._make_request('GET', '/api/v1/auth/addresses', 
+        return await self._make_request('GET', '/api/v1/auth/addresses',
                                        user_token=user_token)
-    
+
     async def add_user_address(self, user_token: str, address_data: Dict) -> APIResponse:
         """Add new address"""
-        return await self._make_request('POST', '/api/v1/auth/addresses', 
+        return await self._make_request('POST', '/api/v1/auth/addresses',
                                        user_token=user_token, data=address_data)
-    
+
     async def update_user_address(self, user_token: str, address_id: int, address_data: Dict) -> APIResponse:
         """Update existing address"""
         return await self._make_request('PUT', f'/api/v1/auth/addresses/{address_id}',
                                        user_token=user_token, data=address_data)
-    
+
     async def delete_user_address(self, user_token: str, address_id: int) -> APIResponse:
         """Delete address"""
         return await self._make_request('DELETE', f'/api/v1/auth/addresses/{address_id}',
                                        user_token=user_token)
-    
+
     async def set_default_address(self, user_token: str, address_id: int) -> APIResponse:
         """Set address as default"""
         return await self._make_request('PATCH', f'/api/v1/auth/addresses/{address_id}/set-default',
@@ -787,25 +787,25 @@ class BusinessAPIClient:
     # Subscription methods
     async def get_user_subscriptions(self, user_token: str) -> APIResponse:
         """Get user subscriptions"""
-        return await self._make_request('GET', '/api/v1/subscriptions', 
+        return await self._make_request('GET', '/api/v1/subscriptions',
                                        user_token=user_token)
-    
+
     async def create_subscription(self, user_token: str, subscription_data: Dict) -> APIResponse:
         """Create new subscription"""
-        return await self._make_request('POST', '/api/v1/subscriptions', 
+        return await self._make_request('POST', '/api/v1/subscriptions',
                                        user_token=user_token, data=subscription_data)
-    
-    async def update_subscription(self, user_token: str, subscription_id: int, 
+
+    async def update_subscription(self, user_token: str, subscription_id: int,
                                 update_data: Dict) -> APIResponse:
         """Update subscription"""
-        return await self._make_request('PUT', f'/api/v1/subscriptions/{subscription_id}', 
+        return await self._make_request('PUT', f'/api/v1/subscriptions/{subscription_id}',
                                        user_token=user_token, data=update_data)
-    
+
     async def pause_subscription(self, user_token: str, subscription_id: int) -> APIResponse:
         """Pause subscription"""
-        return await self._make_request('POST', f'/api/v1/subscriptions/{subscription_id}/pause', 
+        return await self._make_request('POST', f'/api/v1/subscriptions/{subscription_id}/pause',
                                        user_token=user_token)
-    
+
     async def resume_subscription(self, user_token: str, subscription_id: int) -> APIResponse:
         """Resume subscription"""
         return await self._make_request('POST', f'/api/v1/subscriptions/{subscription_id}/resume',
@@ -890,66 +890,66 @@ class BusinessAPIClient:
     # Loyalty methods
     async def get_loyalty_points(self, user_token: str) -> APIResponse:
         """Get user's loyalty points balance"""
-        return await self._make_request('GET', '/api/v1/loyalty/points', 
+        return await self._make_request('GET', '/api/v1/loyalty/points',
                                        user_token=user_token)
-    
+
     async def get_loyalty_history(self, user_token: str) -> APIResponse:
         """Get loyalty points history"""
-        return await self._make_request('GET', '/api/v1/loyalty/history', 
+        return await self._make_request('GET', '/api/v1/loyalty/history',
                                        user_token=user_token)
-    
+
     async def get_loyalty_rewards(self, user_token: str) -> APIResponse:
         """Get available loyalty rewards"""
-        return await self._make_request('GET', '/api/v1/loyalty/rewards', 
+        return await self._make_request('GET', '/api/v1/loyalty/rewards',
                                        user_token=user_token)
-    
+
     async def redeem_reward(self, user_token: str, reward_id: int) -> APIResponse:
         """Redeem loyalty reward"""
-        return await self._make_request('POST', f'/api/v1/loyalty/rewards/{reward_id}/redeem', 
+        return await self._make_request('POST', f'/api/v1/loyalty/rewards/{reward_id}/redeem',
                                        user_token=user_token)
-    
+
     # Analytics methods (admin only)
     async def get_analytics_overview(self, user_token: str) -> APIResponse:
         """Get analytics overview (admin)"""
-        return await self._make_request('GET', '/api/v1/analytics/overview', 
+        return await self._make_request('GET', '/api/v1/analytics/overview',
                                        user_token=user_token)
-    
+
     async def get_order_analytics(self, user_token: str, period: str = 'week') -> APIResponse:
         """Get order analytics (admin)"""
-        return await self._make_request('GET', f'/api/v1/analytics/orders?period={period}', 
+        return await self._make_request('GET', f'/api/v1/analytics/orders?period={period}',
                                        user_token=user_token)
-    
+
     # Authentication methods
     async def logout_current_session(self, user_token: str) -> APIResponse:
         """Logout from current session"""
-        return await self._make_request('POST', '/api/v1/auth/logout', 
+        return await self._make_request('POST', '/api/v1/auth/logout',
                                        user_token=user_token)
-    
+
     async def logout_all_sessions(self, user_token: str) -> APIResponse:
         """Logout from all sessions"""
-        return await self._make_request('POST', '/api/v1/auth/logout-all', 
+        return await self._make_request('POST', '/api/v1/auth/logout-all',
                                        user_token=user_token)
-    
+
     async def get_user_sessions(self, user_token: str) -> APIResponse:
         """Get all user sessions"""
-        return await self._make_request('GET', '/api/v1/auth/sessions', 
+        return await self._make_request('GET', '/api/v1/auth/sessions',
                                        user_token=user_token)
-    
+
     async def revoke_session(self, user_token: str, session_id: str) -> APIResponse:
         """Revoke a specific session"""
         return await self._make_request('DELETE', f'/api/v1/auth/sessions/{session_id}',
                                        user_token=user_token)
 
     # ==================== Account Linking ====================
-    
+
     async def check_phone_availability(self, telegram_id: int, phone: str) -> APIResponse:
         """
         Check if a phone number is available for registration or needs linking.
-        
+
         Args:
             telegram_id: Telegram user ID
             phone: Phone number to check
-            
+
         Returns:
             APIResponse with available, can_link, and existing_user_masked
         """
@@ -958,15 +958,15 @@ class BusinessAPIClient:
             '/api/v1/auth/check-phone-availability',
             data={'telegram_id': telegram_id, 'phone': phone}
         )
-    
+
     async def link_phone_send_otp(self, telegram_id: int, phone: str) -> APIResponse:
         """
         Send OTP to phone for account linking.
-        
+
         Args:
             telegram_id: Telegram user ID
             phone: Phone number to send OTP to
-            
+
         Returns:
             APIResponse with phone_masked on success
         """
@@ -975,15 +975,15 @@ class BusinessAPIClient:
             '/api/v1/auth/link-phone-account/send-otp',
             data={'telegram_id': telegram_id, 'phone': phone}
         )
-    
+
     async def link_phone_verify(self, telegram_id: int, otp: str) -> APIResponse:
         """
         Verify OTP and link accounts.
-        
+
         Args:
             telegram_id: Telegram user ID
             otp: 6-digit OTP code
-            
+
         Returns:
             APIResponse with user data and tokens on success
         """

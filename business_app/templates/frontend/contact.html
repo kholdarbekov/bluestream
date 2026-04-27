@@ -350,34 +350,13 @@
 {% endblock %}
 
 {% block extra_js %}
-<script>
-document.getElementById('contactForm').addEventListener('submit', async function(e) {
-    e.preventDefault();
-    
-    const formData = new FormData(this);
-    const data = {
-        name: formData.get('name'),
-        email: formData.get('email'),
-        phone: formData.get('phone'),
-        subject: formData.get('subject'),
-        message: formData.get('message')
-    };
-    
-    try {
-        const response = await apiRequest('/contact', {
-            method: 'POST',
-            body: JSON.stringify(data)
-        });
-        
-        if (response.ok) {
-            showNotification('{{ "landing.contact.success_message"|t }}', 'success');
-            this.reset();
-        } else {
-            showNotification('{{ "landing.contact.error_message"|t }}', 'error');
-        }
-    } catch (error) {
-        showNotification('{{ "landing.contact.network_error"|t }}', 'error');
-    }
-});
-</script>
+{% from "frontend/macros/page_data.html" import render_page_data %}
+{{ render_page_data({
+    'i18n': {
+        'success': 'landing.contact.success_message' | t,
+        'error': 'landing.contact.error_message' | t,
+        'network_error': 'landing.contact.network_error' | t,
+    },
+}) }}
+<script src="{{ url_for('static', filename='js/pages/contact.js') }}"></script>
 {% endblock %}

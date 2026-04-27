@@ -167,26 +167,26 @@
 }
 
 /* Tier-specific styling */
-.tier-card.bronze { 
-    border-left-color: #cd7f32; 
+.tier-card.bronze {
+    border-left-color: #cd7f32;
 }
 .tier-card.bronze::before { background: #cd7f32; }
 .tier-card.bronze .tier-header i { color: #cd7f32; }
 
-.tier-card.silver { 
-    border-left-color: #a0a0a0; 
+.tier-card.silver {
+    border-left-color: #a0a0a0;
 }
 .tier-card.silver::before { background: #a0a0a0; }
 .tier-card.silver .tier-header i { color: #a0a0a0; }
 
-.tier-card.gold { 
-    border-left-color: #ffd700; 
+.tier-card.gold {
+    border-left-color: #ffd700;
 }
 .tier-card.gold::before { background: #ffd700; }
 .tier-card.gold .tier-header i { color: #ffd700; }
 
-.tier-card.platinum { 
-    border-left-color: #7c3aed; 
+.tier-card.platinum {
+    border-left-color: #7c3aed;
 }
 .tier-card.platinum::before { background: #7c3aed; }
 .tier-card.platinum .tier-header i { color: #7c3aed; }
@@ -299,14 +299,14 @@
     flex-shrink: 0;
 }
 
-.points-icon.earned { 
-    background: linear-gradient(135deg, #52c41a 0%, #389e0d 100%); 
+.points-icon.earned {
+    background: linear-gradient(135deg, #52c41a 0%, #389e0d 100%);
 }
-.points-icon.redeemed { 
-    background: linear-gradient(135deg, #1890ff 0%, #0050b3 100%); 
+.points-icon.redeemed {
+    background: linear-gradient(135deg, #1890ff 0%, #0050b3 100%);
 }
-.points-icon.expired { 
-    background: linear-gradient(135deg, #ff4d4f 0%, #cf1322 100%); 
+.points-icon.expired {
+    background: linear-gradient(135deg, #ff4d4f 0%, #cf1322 100%);
 }
 .points-icon.bonus {
     background: linear-gradient(135deg, #722ed1 0%, #531dab 100%);
@@ -725,24 +725,24 @@
         margin: 0 -0.5rem;
         scroll-snap-type: x mandatory;
     }
-    
+
     .membership-tiers .col-md-3 {
         flex: 0 0 280px;
         max-width: 280px;
         scroll-snap-align: start;
         padding: 0 0.5rem;
     }
-    
+
     /* Hide scrollbar but keep functionality */
     .membership-tiers .row::-webkit-scrollbar {
         height: 6px;
     }
-    
+
     .membership-tiers .row::-webkit-scrollbar-track {
         background: #f0f0f0;
         border-radius: 10px;
     }
-    
+
     .membership-tiers .row::-webkit-scrollbar-thumb {
         background: #1890ff;
         border-radius: 10px;
@@ -753,28 +753,28 @@
     .loyalty-overview .col-md-4 {
         margin-bottom: 1rem;
     }
-    
+
     .loyalty-card .card-body {
         padding: 1.5rem 1rem;
     }
-    
+
     .loyalty-card h3 {
         font-size: 2rem;
     }
-    
+
     .rewards-grid {
         grid-template-columns: 1fr;
     }
-    
+
     .earn-method {
         flex-direction: column;
         text-align: center;
     }
-    
+
     .earn-icon {
         margin: 0 auto 1rem;
     }
-    
+
     .earn-details h6 {
         flex-direction: column;
         gap: 0.5rem;
@@ -806,7 +806,7 @@
                 </div>
             </div>
         </div>
-        
+
         <!-- Tier Status -->
         <div class="col-md-4">
             <div class="card loyalty-card">
@@ -829,7 +829,7 @@
                 </div>
             </div>
         </div>
-        
+
         <!-- Streak Widget -->
         <div class="col-md-4">
             <div class="card loyalty-card">
@@ -839,14 +839,14 @@
                     </div>
                     <h3 class="text-primary" id="currentStreak">0</h3>
                     <p class="text-muted">{{ 'Month Streak'|t }}</p>
-                    
+
                     <!-- Streak Progress Bar -->
                     <div class="mt-2 mb-2">
                         <div class="progress" style="height: 6px;">
                             <div class="progress-bar bg-danger" role="progressbar" style="width: 0%" id="streakProgress"></div>
                         </div>
                     </div>
-                    
+
                     <small class="text-danger font-weight-bold" id="streakNextText">{{ 'Order more to keep streak!'|t }}</small>
                     <div class="mt-3">
                          <span class="badge badge-light border">{{ 'Bonus: 3 Orders/Month'|t }}</span>
@@ -881,7 +881,7 @@
         <div class="card-header d-flex justify-content-between align-items-center">
             <h5><i class="far fa-history"></i> {{ 'Points History'|t }}</h5>
             <div class="filter-options">
-                <select class="form-control form-control-sm" id="historyFilter" onchange="loadPointsHistory()">
+                <select class="form-control form-control-sm" id="historyFilter">
                     <option value="">{{ 'All Activity'|t }}</option>
                     <option value="earned">{{ 'Points Earned'|t }}</option>
                     <option value="redeemed">{{ 'Points Redeemed'|t }}</option>
@@ -983,7 +983,7 @@
                 </div>
             </div>
             <div class="text-center mt-4">
-                <button class="btn btn-primary" onclick="generateReferralCode()">
+                <button class="btn btn-primary" data-action="generate-referral">
                     <i class="far fa-share"></i> {{ 'Get My Referral Code'|t }}
                 </button>
             </div>
@@ -1028,10 +1028,10 @@
                     <p class="text-muted">{{ 'Share this code with friends'|t }}</p>
                 </div>
                 <div class="referral-actions mt-4">
-                    <button class="btn btn-outline-primary" onclick="copyReferralCode()">
+                    <button class="btn btn-outline-primary" data-action="copy-referral">
                         <i class="far fa-copy"></i> {{ 'Copy Code'|t }}
                     </button>
-                    <button class="btn btn-outline-success ml-2" onclick="shareReferralCode()">
+                    <button class="btn btn-outline-success ml-2" data-action="share-referral">
                         <i class="far fa-share"></i> {{ 'Share'|t }}
                     </button>
                 </div>
@@ -1061,472 +1061,46 @@
 {% endblock %}
 
 {% block cabinet_extra_js %}
-<script>
-document.addEventListener('DOMContentLoaded', async function() {
-    // Load membership tiers (can run in parallel)
-    loadMembershipTiers();
-    // Load loyalty data FIRST so currentPoints is set before rewards check it
-    await loadLoyaltyData();
-    // Now load rewards (they check currentPoints to determine can_redeem)
-    loadAvailableRewards();
-    // Points history can load in parallel
-    loadPointsHistory();
-});
-
-let currentUserReferralCode = '';
-let currentUserTier = 'Bronze';
-
-async function loadMembershipTiers() {
-    const container = document.getElementById('membershipTiersContainer');
-    
-    try {
-        const response = await apiRequest('/loyalty/tiers');
-        const result = await response.json();
-        
-        if (response.ok && result.success) {
-            renderMembershipTiers(result.data.tiers);
-        } else {
-            container.innerHTML = '<div class="col-12 text-center py-4"><p class="text-muted">{{ "Failed to load membership tiers"|t }}</p></div>';
-        }
-    } catch (error) {
-        console.error('Failed to load membership tiers:', error);
-        container.innerHTML = '<div class="col-12 text-center py-4"><p class="text-muted">{{ "Failed to load membership tiers"|t }}</p></div>';
-    }
-}
-
-function renderMembershipTiers(tiers) {
-    const container = document.getElementById('membershipTiersContainer');
-    
-    if (!tiers || tiers.length === 0) {
-        container.innerHTML = '<div class="col-12 text-center py-4"><p class="text-muted">{{ "No membership tiers available"|t }}</p></div>';
-        return;
-    }
-    
-    const tiersHtml = tiers.map(tier => {
-        const tierClass = tier.name.toLowerCase();
-        const icon = tier.icon || 'fa-medal';
-        const color = tier.color || '#CD7F32';  // Use color from API
-        const isCurrentTier = tier.name === currentUserTier;
-        
-        // Build benefits list
-        const benefitsHtml = (tier.benefits || []).map(benefit => `<li>${benefit}</li>`).join('');
-        
-        // Show multiplier if >= 1
-        const multiplierBadge = tier.points_multiplier >= 1 
-            ? `<span class="badge" style="background: ${color}; color: white;">${tier.points_multiplier}x {{ 'AquaCoins'|t }}</span>` 
-            : '';
-        
-        return `
-            <div class="col-md-3">
-                <div class="tier-card ${tierClass} ${isCurrentTier ? 'current-tier' : ''}" 
-                     style="border-left-color: ${color};">
-                    <div class="tier-header">
-                        <i class="far ${icon}" style="color: ${color};"></i>
-                        <h6>${tier.name}</h6>
-                        <p>${tier.points_range} {{ 'AquaCoins'|t }}</p>
-                        ${multiplierBadge}
-                    </div>
-                    <div class="tier-benefits">
-                        <ul>
-                            ${benefitsHtml}
-                        </ul>
-                    </div>
-                    ${tier.discount_percentage > 0 ? `
-                        <div class="tier-discount" style="color: ${color};">
-                            <i class="far fa-tag"></i> ${tier.discount_percentage}% {{ 'discount'|t }}
-                        </div>
-                    ` : ''}
-                </div>
-            </div>
-        `;
-    }).join('');
-    
-    container.innerHTML = tiersHtml;
-}
-
-async function loadLoyaltyData() {
-    try {
-        const response = await apiRequest('/loyalty/account');
-        const result = await response.json();
-        
-        if (response.ok && result.success) {
-            const loyalty = result.data;
-            updateLoyaltyOverview(loyalty);
-        } else {
-            console.error('Failed to load loyalty data:', result.message);
-            updateLoyaltyOverview({
-                current_balance: 0,
-                current_tier: 'Bronze',
-                points_this_month: 0,
-                tier_progress: { current: 0, next_tier_points: 1000 },
-                available_rewards_count: 0
-            });
-        }
-    } catch (error) {
-        console.error('Failed to load loyalty data:', error);
-    }
-}
-
-function updateLoyaltyOverview(loyalty) {
-    // Update global currentUserTier for tier card highlighting
-    currentUserTier = loyalty.current_tier || 'Bronze';
-    
-    // AquaCoins & Tier Basic Info
-    document.getElementById('currentPoints').textContent = loyalty.current_balance || 0;
-    document.getElementById('pointsThisMonth').textContent = `+${loyalty.points_this_month || 0} {{ 'this month'|t }}`;
-    document.getElementById('currentTier').textContent = currentUserTier;
-    
-    // Streak Widget
-    if (loyalty.streak) {
-        document.getElementById('currentStreak').textContent = loyalty.streak.current_streak || 0;
-        // Logic for "N orders left" - we need to know how many orders. Assuming 'orders_this_month' is passed.
-        // Target is 3 orders per month for streak bonus (as per service logic)
-        const ordersThisMonth = loyalty.streak.orders_this_month || 0;
-        const targetOrders = 3;
-        const ordersNeeded = Math.max(0, targetOrders - ordersThisMonth);
-        const progressPercent = Math.min((ordersThisMonth / targetOrders) * 100, 100);
-        
-        // Update Progress Bar
-        const progressBar = document.getElementById('streakProgress');
-        if (progressBar) {
-            progressBar.style.width = `${progressPercent}%`;
-            progressBar.setAttribute('aria-valuenow', progressPercent);
-        }
-        
-        if (ordersNeeded > 0) {
-             document.getElementById('streakNextText').textContent = `${ordersNeeded} {{ 'more orders for bonus'|t }}`;
-             document.getElementById('streakNextText').className = 'text-warning font-weight-bold';
-        } else {
-             document.getElementById('streakNextText').textContent = `{{ 'Monthly Goal Achieved!'|t }}`;
-             document.getElementById('streakNextText').className = 'text-success font-weight-bold';
-        }
-    }
-
-    // Tier Guarantee & Requalification
-    if (loyalty.tier_valid_until) {
-        // Format date
-        const date = new Date(loyalty.tier_valid_until);
-        const dateStr = date.toLocaleDateString();
-        document.getElementById('tierGuaranteeText').textContent = `{{ 'Guaranteed until'|t }} ${dateStr}`;
-    } else {
-        document.getElementById('tierGuaranteeText').textContent = '';
-    }
-
-    if (loyalty.requalification) {
-        const needed = loyalty.requalification.points_needed_to_keep || 0;
-        if (needed > 0) {
-             document.getElementById('tierRequalificationText').textContent = `{{ 'Earn'|t }} ${needed} {{ 'more coins to keep status'|t }}`;
-        } else {
-             document.getElementById('tierRequalificationText').textContent = `{{ 'Status Secured'|t }}`;
-             document.getElementById('tierRequalificationText').className = 'text-success mt-1';
-        }
-    }
-
-    // Progress Bar
-    if (loyalty.tier_progress) {
-        const progressPercent = (loyalty.tier_progress.current / loyalty.tier_progress.next_tier_points) * 100;
-        document.getElementById('tierProgress').style.width = `${Math.min(progressPercent, 100)}%`;
-        document.getElementById('tierProgressText').textContent = `${loyalty.tier_progress.points_needed || loyalty.tier_progress.next_tier_points} {{ 'AquaCoins to next tier'|t }}`;
-    }
-    
-    // Highlight current tier card
-    const currentTier = (loyalty.current_tier || 'Bronze').toLowerCase();
-    document.querySelectorAll('.tier-card').forEach(card => {
-        card.classList.remove('current-tier');
-        if (card.classList.contains(currentTier)) {
-            card.classList.add('current-tier');
-        }
-    });
-}
-
-async function loadPointsHistory() {
-    const filter = document.getElementById('historyFilter')?.value || '';
-    const historyList = document.getElementById('pointsHistoryList');
-    
-    try {
-        const response = await apiRequest(`/loyalty/history${filter ? `?type=${filter}` : ''}`);
-        const result = await response.json();
-        
-        if (response.ok && result.success) {
-            displayPointsHistory(result.data.items);
-        } else {
-            historyList.innerHTML = '<div class="text-center py-4"><p class="text-muted">{{ "No points history found"|t }}</p></div>';
-        }
-    } catch (error) {
-        console.error('Failed to load points history:', error);
-        historyList.innerHTML = '<div class="text-center py-4"><p class="text-muted">{{ "Failed to load points history"|t }}</p></div>';
-    }
-}
-
-function displayPointsHistory(transactions) {
-    const historyList = document.getElementById('pointsHistoryList');
-    
-    if (!transactions || transactions.length === 0) {
-        historyList.innerHTML = '<div class="text-center py-4"><p class="text-muted">{{ "No points history found"|t }}</p></div>';
-        return;
-    }
-    
-    const historyHtml = transactions.map(transaction => `
-        <div class="points-history-item">
-            <div class="points-icon ${transaction.transaction_type || 'earned'}">
-                <i class="far fa-${getTransactionIcon(transaction.transaction_type)}"></i>
-            </div>
-            <div class="points-details">
-                <h6>${transaction.description}</h6>
-                <small class="text-muted">${formatDate(transaction.created_at)}</small>
-                ${transaction.order_number ? `<br><small class="text-primary">{{ 'Order'|t }} #${transaction.order_number}</small>` : ''}
-            </div>
-            <div class="points-amount ${transaction.points > 0 ? 'positive' : 'negative'}">
-                ${transaction.points > 0 ? '+' : ''}${transaction.points} {{ 'AquaCoins'|t }}
-            </div>
-        </div>
-    `).join('');
-    
-    historyList.innerHTML = historyHtml;
-}
-
-function getTransactionIcon(type) {
-    switch (type) {
-        case 'earned': return 'plus';
-        case 'bonus': return 'gift';
-        case 'redeemed': return 'minus';
-        case 'expired': return 'clock';
-        default: return 'circle';
-    }
-}
-
-async function loadAvailableRewards() {
-    const rewardsGrid = document.getElementById('rewardsGrid');
-    
-    try {
-        const response = await apiRequest('/loyalty/rewards');
-        const result = await response.json();
-        
-        if (response.ok && result.success) {
-            displayRewards(result.data.rewards);
-        } else {
-            rewardsGrid.innerHTML = '<div class="text-center py-4"><p class="text-muted">{{ "No rewards available"|t }}</p></div>';
-        }
-    } catch (error) {
-        console.error('Failed to load rewards:', error);
-        rewardsGrid.innerHTML = '<div class="text-center py-4"><p class="text-muted">{{ "Failed to load rewards"|t }}</p></div>';
-    }
-}
-
-function displayRewards(rewards) {
-    const rewardsGrid = document.getElementById('rewardsGrid');
-    
-    if (!rewards || rewards.length === 0) {
-        rewardsGrid.innerHTML = '<div class="text-center py-4"><p class="text-muted">{{ "No rewards available"|t }}</p></div>';
-        return;
-    }
-    
-    const currentPoints = parseInt(document.getElementById('currentPoints').textContent) || 0;
-    
-    const rewardsHtml = rewards.map(reward => {
-        const pointsCost = reward.points_cost || reward.points_required || 0;
-        const canRedeem = currentPoints >= pointsCost;
-        const rewardType = reward.reward_type || 'discount';
-        const isSystemReward = reward.is_system_reward || false;
-        const typeLabel = {
-            'discount': '{{ "Discount"|t }}',
-            'free_delivery': '{{ "Free Delivery"|t }}',
-            'free_product': '{{ "Free Product"|t }}',
-            'gift_card': '{{ "Gift Card"|t }}'
-        }[rewardType] || rewardType;
-        
-        // System rewards (like Free Delivery) are displayed differently
-        if (isSystemReward) {
-            return `
-                <div class="reward-card system-reward">
-                    <span class="reward-type-badge ${rewardType}">${typeLabel}</span>
-                    <span class="system-reward-badge">
-                        <i class="fas fa-check-circle"></i>
-                        {{ "Auto-Applied"|t }}
-                    </span>
-                    <div class="reward-image" style="${reward.image_url ? '' : 'display: flex; align-items: center; justify-content: center;'}">
-                        ${reward.image_url ? 
-                            `<img src="${reward.image_url}" alt="${reward.name}" style="width:100%; height:100%; object-fit:cover;" onerror="this.style.display='none'">` : 
-                            `<i class="fas fa-truck" style="font-size: 3rem; color: #52c41a;"></i>`
-                        }
-                    </div>
-                    <div class="reward-content">
-                        <h5>${reward.name}</h5>
-                        <p>${reward.description || ''}</p>
-                        <div class="system-reward-info">
-                            <i class="fas fa-magic"></i>
-                            <span>{{ "Applied automatically to every order"|t }}</span>
-                        </div>
-                        <div class="reward-points-cost" style="border-top: none; padding-top: 0.75rem;">
-                            <span class="points-badge" style="background: linear-gradient(135deg, #52c41a 0%, #389e0d 100%);">
-                                <i class="far fa-star"></i>
-                                ${pointsCost.toLocaleString()} {{ 'AquaCoins'|t }}
-                            </span>
-                        </div>
-                    </div>
-                </div>
-            `;
-        }
-        
-        // Regular rewards with redeem button
-        return `
-            <div class="reward-card">
-                <span class="reward-type-badge ${rewardType}">${typeLabel}</span>
-                <div class="reward-image" style="${reward.image_url ? '' : 'display: flex; align-items: center; justify-content: center;'}">
-                    ${reward.image_url ? 
-                        `<img src="${reward.image_url}" alt="${reward.name}" style="width:100%; height:100%; object-fit:cover;" onerror="this.style.display='none'">` : 
-                        `<i class="far fa-gift" style="font-size: 3rem; color: #1890ff;"></i>`
-                    }
-                </div>
-                <div class="reward-content">
-                    <h5>${reward.name}</h5>
-                    <p>${reward.description || ''}</p>
-                    <div class="reward-points-cost">
-                        <span class="points-badge">
-                            <i class="far fa-star"></i>
-                            ${pointsCost.toLocaleString()} {{ 'AquaCoins'|t }}
-                        </span>
-                        <button class="btn redeem-btn ${canRedeem ? 'can-redeem' : 'cannot-redeem'}" 
-                                onclick="redeemReward(${reward.id})" 
-                                ${!canRedeem ? 'disabled' : ''}>
-                            ${canRedeem ? '{{ "Redeem"|t }}' : '{{ "Need more points"|t }}'}
-                        </button>
-                    </div>
-                </div>
-            </div>
-        `;
-    }).join('');
-    
-    rewardsGrid.innerHTML = rewardsHtml;
-}
-
-async function redeemReward(rewardId) {
-    try {
-        const response = await apiRequest(`/loyalty/rewards/${rewardId}`);
-        const result = await response.json();
-        
-        if (response.ok && result.success) {
-            const reward = result.data;
-            showRewardModal(reward);
-        } else {
-            showNotification(result.message || '{{ "Failed to load reward details"|t }}', 'error');
-        }
-    } catch (error) {
-        console.error('Failed to load reward details:', error);
-        showNotification('{{ "Failed to load reward details"|t }}', 'error');
-    }
-}
-
-function showRewardModal(reward) {
-    const modalContent = document.getElementById('rewardModalContent');
-    const redeemBtn = document.getElementById('redeemRewardBtn');
-    
-    modalContent.innerHTML = `
-        <div class="reward-details">
-            <div class="row">
-                <div class="col-md-4">
-                    <img src="${reward.image_url || '/static/images/rewards/default.jpg'}" alt="${reward.name}" class="img-fluid rounded">
-                </div>
-                <div class="col-md-8">
-                    <h4>${reward.name}</h4>
-                    <p class="text-muted">${reward.description}</p>
-                    <div class="reward-info">
-                        <div class="info-item">
-                            <strong>{{ 'Points Required'|t }}:</strong> ${reward.points_required} {{ 'AquaCoins'|t }}
-                        </div>
-                        <div class="info-item">
-                            <strong>{{ 'Your Points'|t }}:</strong> ${document.getElementById('currentPoints').textContent} {{ 'AquaCoins'|t }}
-                        </div>
-                        ${reward.expiry_date ? `<div class="info-item"><strong>{{ 'Expires'|t }}:</strong> ${formatDate(reward.expiry_date)}</div>` : ''}
-                        ${reward.terms_conditions ? `<div class="info-item mt-3"><small class="text-muted">${reward.terms_conditions}</small></div>` : ''}
-                    </div>
-                </div>
-            </div>
-        </div>
-    `;
-    
-    redeemBtn.onclick = () => confirmRedeemReward(reward.id);
-    $('#rewardModal').modal('show');
-}
-
-async function confirmRedeemReward(rewardId) {
-    try {
-        const response = await apiRequest(`/loyalty/rewards/${rewardId}/redeem`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({})
-        });
-        
-        const result = await response.json();
-        
-        if (response.ok && result.success) {
-            showNotification('{{ "Reward redeemed successfully!"|t }}', 'success');
-            $('#rewardModal').modal('hide');
-            loadLoyaltyData();
-            loadPointsHistory();
-            loadAvailableRewards();
-        } else {
-            showNotification(result.message || '{{ "Failed to redeem reward"|t }}', 'error');
-        }
-    } catch (error) {
-        console.error('Failed to redeem reward:', error);
-        showNotification('{{ "Failed to redeem reward"|t }}', 'error');
-    }
-}
-
-async function generateReferralCode() {
-    try {
-        const response = await apiRequest('/loyalty/referral');
-        const result = await response.json();
-        
-        if (response.ok && result.success) {
-            currentUserReferralCode = result.data.referral_code;
-            document.getElementById('referralCodeText').textContent = result.data.referral_code;
-            document.getElementById('referralCount').textContent = result.data.statistics?.total_referrals || 0;
-            document.getElementById('referralPoints').textContent = result.data.statistics?.total_points_earned || 0;
-            $('#referralModal').modal('show');
-        } else {
-            showNotification(result.message || '{{ "Failed to generate referral code"|t }}', 'error');
-        }
-    } catch (error) {
-        console.error('Failed to generate referral code:', error);
-        showNotification('{{ "Failed to generate referral code"|t }}', 'error');
-    }
-}
-
-function copyReferralCode() {
-    navigator.clipboard.writeText(currentUserReferralCode).then(() => {
-        showNotification('{{ "Referral code copied to clipboard!"|t }}', 'success');
-    }).catch(() => {
-        showNotification('{{ "Failed to copy referral code"|t }}', 'error');
-    });
-}
-
-function shareReferralCode() {
-    if (navigator.share) {
-        navigator.share({
-            title: '{{ "Join Aqua Element Water Delivery"|t }}',
-            text: `{{ "Use my referral code"|t }}: ${currentUserReferralCode}`,
-            url: `${window.location.origin}?ref=${currentUserReferralCode}`
-        });
-    } else {
-        copyReferralCode();
-    }
-}
-
-function showRewards() {
-    document.querySelector('.available-rewards').scrollIntoView({ behavior: 'smooth' });
-}
-
-function formatDate(dateString) {
-    const date = new Date(dateString);
-    return date.toLocaleDateString('en-US', {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric'
-    });
-}
-</script>
+{% from "frontend/macros/page_data.html" import render_page_data %}
+{{ render_page_data({
+    'i18n': {
+        'aquacoins': 'AquaCoins' | t,
+        'discount': 'discount' | t,
+        'tiers_failed': 'Failed to load membership tiers' | t,
+        'no_tiers': 'No membership tiers available' | t,
+        'this_month': 'this month' | t,
+        'more_orders_for_bonus': 'more orders for bonus' | t,
+        'monthly_goal_achieved': 'Monthly Goal Achieved!' | t,
+        'guaranteed_until': 'Guaranteed until' | t,
+        'earn': 'Earn' | t,
+        'more_coins_to_keep': 'more coins to keep status' | t,
+        'status_secured': 'Status Secured' | t,
+        'coins_to_next_tier': 'AquaCoins to next tier' | t,
+        'order': 'Order' | t,
+        'no_history': 'No points history found' | t,
+        'history_failed': 'Failed to load points history' | t,
+        'no_rewards': 'No rewards available' | t,
+        'rewards_failed': 'Failed to load rewards' | t,
+        'type_discount': 'Discount' | t,
+        'type_free_delivery': 'Free Delivery' | t,
+        'type_free_product': 'Free Product' | t,
+        'type_gift_card': 'Gift Card' | t,
+        'auto_applied': 'Auto-Applied' | t,
+        'applied_auto_order': 'Applied automatically to every order' | t,
+        'redeem': 'Redeem' | t,
+        'need_more': 'Need more points' | t,
+        'redeem_success': 'Reward redeemed successfully!' | t,
+        'redeem_failed': 'Failed to redeem reward' | t,
+        'details_failed': 'Failed to load reward details' | t,
+        'expires': 'Expires' | t,
+        'points_required': 'Points Required' | t,
+        'your_points': 'Your Points' | t,
+        'referral_failed': 'Failed to generate referral code' | t,
+        'referral_copied': 'Referral code copied to clipboard!' | t,
+        'referral_copy_failed': 'Failed to copy referral code' | t,
+        'share_title': 'Join Aqua Element Water Delivery' | t,
+        'share_text_prefix': 'Use my referral code' | t,
+    },
+}) }}
+<script src="{{ url_for('static', filename='js/pages/loyalty.js') }}"></script>
 {% endblock %}

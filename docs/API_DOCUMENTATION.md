@@ -27,7 +27,7 @@ Authorization: Bearer <your_jwt_token>
 ### Obtaining Tokens
 
 1. **Registration**: `POST /auth/register` - Returns access and refresh tokens
-2. **Login**: `POST /auth/login` - Returns access and refresh tokens  
+2. **Login**: `POST /auth/login` - Returns access and refresh tokens
 3. **Refresh**: `POST /auth/refresh` - Returns new access token
 
 ### Token Lifecycle
@@ -275,7 +275,7 @@ Get detailed information about a specific product.
 #### POST /orders
 Create a new order.
 
-**Authentication:** Required  
+**Authentication:** Required
 **Request:**
 ```json
 {
@@ -325,7 +325,7 @@ Create a new order.
 #### GET /orders
 Get user's orders with pagination and filtering.
 
-**Authentication:** Required  
+**Authentication:** Required
 **Query Parameters:**
 - `page` (int): Page number
 - `per_page` (int): Items per page
@@ -336,12 +336,12 @@ Get user's orders with pagination and filtering.
 #### GET /orders/{id}
 Get detailed information about a specific order.
 
-**Authentication:** Required  
+**Authentication:** Required
 
 #### POST /orders/{id}/cancel
 Cancel an order.
 
-**Authentication:** Required  
+**Authentication:** Required
 **Request:**
 ```json
 {
@@ -355,7 +355,7 @@ Cancel an order.
 #### POST /orders/{order_id}/payment
 Process payment for an order.
 
-**Authentication:** Required  
+**Authentication:** Required
 **Request:**
 ```json
 {
@@ -373,22 +373,22 @@ Process payment for an order.
 #### GET /users/profile
 Get current user's profile information.
 
-**Authentication:** Required  
+**Authentication:** Required
 
 #### PUT /users/profile
 Update user profile information.
 
-**Authentication:** Required  
+**Authentication:** Required
 
 #### GET /users/addresses
 Get user's saved addresses.
 
-**Authentication:** Required  
+**Authentication:** Required
 
 #### POST /users/addresses
 Add a new address for the user.
 
-**Authentication:** Required  
+**Authentication:** Required
 
 ## Data Models
 

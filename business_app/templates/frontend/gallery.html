@@ -58,7 +58,7 @@
                         </div>
                     </div>
                 </div>
-                
+
                 <!-- Delivery Service -->
                 <div class="col-lg-4 col-md-6 col-sm-12 masonry-item small-column all delivery">
                     <div class="gallery-block-one">
@@ -74,7 +74,7 @@
                         </div>
                     </div>
                 </div>
-                
+
                 <!-- Water Bottles Products -->
                 <div class="col-lg-4 col-md-6 col-sm-12 masonry-item small-column all products">
                     <div class="gallery-block-one">
@@ -90,7 +90,7 @@
                         </div>
                     </div>
                 </div>
-                
+
                 <!-- Water Treatment Facility -->
                 <div class="col-lg-4 col-md-6 col-sm-12 masonry-item small-column all facilities water_quality">
                     <div class="gallery-block-one">
@@ -106,7 +106,7 @@
                         </div>
                     </div>
                 </div>
-                
+
                 <!-- Water Cooler Installation -->
                 <div class="col-lg-4 col-md-6 col-sm-12 masonry-item small-column all products facilities">
                     <div class="gallery-block-one">
@@ -122,7 +122,7 @@
                         </div>
                     </div>
                 </div>
-                
+
                 <!-- Customer Service -->
                 <div class="col-lg-4 col-md-6 col-sm-12 masonry-item small-column all delivery">
                     <div class="gallery-block-one">
@@ -138,7 +138,7 @@
                         </div>
                     </div>
                 </div>
-                
+
                 <!-- Laboratory Testing -->
                 <div class="col-lg-8 col-md-12 col-sm-12 masonry-item large-column all water_quality facilities">
                     <div class="gallery-block-one">
@@ -154,7 +154,7 @@
                         </div>
                     </div>
                 </div>
-                
+
                 <!-- Warehouse Operations -->
                 <div class="col-lg-4 col-md-6 col-sm-12 masonry-item small-column all facilities products">
                     <div class="gallery-block-one">
@@ -170,7 +170,7 @@
                         </div>
                     </div>
                 </div>
-                
+
                 <!-- Team Photo -->
                 <div class="col-lg-4 col-md-6 col-sm-12 masonry-item small-column all">
                     <div class="gallery-block-one">
@@ -186,7 +186,7 @@
                         </div>
                     </div>
                 </div>
-                
+
                 <!-- Office Interior -->
                 <div class="col-lg-4 col-md-6 col-sm-12 masonry-item small-column all facilities">
                     <div class="gallery-block-one">
@@ -202,7 +202,7 @@
                         </div>
                     </div>
                 </div>
-                
+
                 <!-- Product Range -->
                 <div class="col-lg-4 col-md-6 col-sm-12 masonry-item small-column all products">
                     <div class="gallery-block-one">
@@ -218,7 +218,7 @@
                         </div>
                     </div>
                 </div>
-                
+
             </div>
         </div>
     </div>
@@ -228,11 +228,5 @@
 
 {% block extra_js %}
 <script src="{{ url_for('static', filename='js/isotope.js') }}"></script>
-<script>
-// Initialize masonry after isotope is loaded
-// The enableMasonry function is defined in script.js
-if (typeof enableMasonry === 'function') {
-    enableMasonry();
-}
-</script>
+<script src="{{ url_for('static', filename='js/pages/gallery.js') }}"></script>
 {% endblock %}

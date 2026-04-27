@@ -58,7 +58,7 @@
                                     <a href="{{ url_for('frontend.shop') }}" class="theme-btn banner-btn">{{ 'landing.hero.button_discover'|t }}</a>
                                 </div>
                             </div>
-                        </div> 
+                        </div>
                     </div>
                 </div>
                 <div class="slide-item">
@@ -219,7 +219,7 @@
                                     <h6>{{ product.current_price|format_price }}</h6>
                                     <p>{{ product.short_description[:60] if product.short_description }}{% if product.short_description and product.short_description|length > 60 %}...{% endif %}</p>
                                     <div class="btn-box">
-                                        <button onclick="addToCart({{ product.id }})" class="theme-btn btn-two">{{ 'landing.button.add_to_cart'|t }}</button>
+                                        <button data-action="add-to-cart-shop" data-product-id="{{ product.id }}" class="theme-btn btn-two">{{ 'landing.button.add_to_cart'|t }}</button>
                                     </div>
                                 </div>
                             </div>

@@ -165,7 +165,7 @@
             </div>
 
             <div class="action-buttons">
-                <button onclick="checkPaymentStatus()" class="theme-btn btn-one">
+                <button data-action="check-payment-status" class="theme-btn btn-one">
                     <i class="far fa-sync"></i> {{ 'Check Status'|t }}
                 </button>
                 <a href="{{ url_for('frontend.my_orders') }}" class="theme-btn btn-three">
@@ -178,57 +178,14 @@
 {% endblock %}
 
 {% block extra_js %}
-<script>
-let checkAttempts = 0;
-const maxAttempts = 20; // Check for 20 times (about 2 minutes with 6 second intervals)
-
-// Auto-refresh to check payment status
-function checkPaymentStatus() {
-    fetch('/api/v1/payments/{{ payment.id }}/status', {
-        headers: {
-            'Authorization': 'Bearer ' + localStorage.getItem('access_token')
-        }
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success && data.data.payment) {
-            const payment = data.data.payment;
-            const paymentStatus = payment.status || payment.payment_status;
-
-            // Check if payment is completed
-            if (paymentStatus === 'completed' || paymentStatus === 'paid') {
-                // Redirect to order confirmation
-                window.location.href = `/order-confirmation?order_id={{ order.id }}`;
-            } else if (paymentStatus === 'failed' || paymentStatus === 'cancelled') {
-                // Payment failed
-                showNotification('{{ "Payment failed. Please try again."|t }}', 'error');
-                setTimeout(() => {
-                    window.location.href = `/payment/cancel?order_id={{ order.id }}`;
-                }, 2000);
-            } else {
-                // Still pending, continue checking
-                checkAttempts++;
-                if (checkAttempts < maxAttempts) {
-                    setTimeout(checkPaymentStatus, 6000); // Check again in 6 seconds
-                } else {
-                    // Max attempts reached
-                    showNotification('{{ "Payment verification is taking longer than expected. Please check your order status."|t }}', 'warning');
-                }
-            }
-        }
-    })
-    .catch(error => {
-        console.error('Error checking payment status:', error);
-        checkAttempts++;
-        if (checkAttempts < maxAttempts) {
-            setTimeout(checkPaymentStatus, 6000);
-        }
-    });
-}
-
-// Start checking payment status on page load
-document.addEventListener('DOMContentLoaded', function() {
-    setTimeout(checkPaymentStatus, 3000); // First check after 3 seconds
-});
-</script>
+{% from "frontend/macros/page_data.html" import render_page_data %}
+{{ render_page_data({
+    'payment_id': payment.id,
+    'order_id': order.id,
+    'i18n': {
+        'failed': 'Payment failed. Please try again.' | t,
+        'timeout': 'Payment verification is taking longer than expected. Please check your order status.' | t,
+    },
+}) }}
+<script src="{{ url_for('static', filename='js/pages/payment-pending.js') }}"></script>
 {% endblock %}

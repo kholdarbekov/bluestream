@@ -43,7 +43,7 @@ class KeyboardBuilder:
                              row_width: int = 2) -> InlineKeyboardMarkup:
         """Build inline keyboard from button definitions"""
         keyboard = []
-        
+
         for row in buttons:
             keyboard_row = []
             for button in row:
@@ -57,22 +57,22 @@ class KeyboardBuilder:
                     )
                 )
             keyboard.append(keyboard_row)
-        
+
         return InlineKeyboardMarkup(keyboard)
-    
+
     @staticmethod
-    def build_reply_keyboard(buttons: List[List[str]], 
+    def build_reply_keyboard(buttons: List[List[str]],
                            one_time: bool = False,
                            resize: bool = True) -> ReplyKeyboardMarkup:
         """Build reply keyboard from button texts"""
         keyboard = []
-        
+
         for row in buttons:
             keyboard_row = []
             for button in row:
                 keyboard_row.append(KeyboardButton(text=button['text']))
             keyboard.append(keyboard_row)
-        
+
         return ReplyKeyboardMarkup(
             keyboard,
             one_time_keyboard=one_time,
@@ -82,7 +82,7 @@ class KeyboardBuilder:
 
 class MenuKeyboards:
     """Main menu keyboards"""
-    
+
     @staticmethod
     def main_menu(language: str = 'en') -> InlineKeyboardMarkup:
         """Main menu keyboard"""
@@ -108,9 +108,9 @@ class MenuKeyboards:
                 {'text': i18n.get('telegram.menu.language', language), 'callback_data': 'menu_language'}
             ]
         ]
-        
+
         return KeyboardBuilder.build_inline_keyboard(buttons)
-    
+
     @staticmethod
     def back_button(language: str = 'en') -> InlineKeyboardMarkup:
         """Simple back button"""
@@ -118,7 +118,7 @@ class MenuKeyboards:
             [{'text': i18n.get('telegram.back', language), 'callback_data': 'back_to_main'}]
         ]
         return KeyboardBuilder.build_inline_keyboard(buttons)
-    
+
     @staticmethod
     def cancel_button(language: str = 'en') -> InlineKeyboardMarkup:
         """Simple cancel button"""
@@ -126,7 +126,7 @@ class MenuKeyboards:
             [{'text': i18n.get('telegram.cancel', language), 'callback_data': 'cancel_action'}]
         ]
         return KeyboardBuilder.build_inline_keyboard(buttons)
-    
+
     @staticmethod
     def yes_no_buttons(language: str = 'en', yes_callback: str = 'confirm_yes', no_callback: str = 'confirm_no') -> InlineKeyboardMarkup:
         """Yes/No confirmation buttons"""
@@ -145,7 +145,7 @@ class LanguageKeyboards:
     def select_language() -> InlineKeyboardMarkup:
         """Language selection keyboard on start"""
         buttons = []
-        
+
         for lang_code in config.localization.supported_languages:
             flag = i18n.get_language_flag(lang_code)
             name = i18n.get_language_name(lang_code, lang_code)
@@ -153,9 +153,9 @@ class LanguageKeyboards:
                 'text': f"{flag} {name}",
                 'callback_data': f'set_language_{lang_code}'
             }])
-        
+
         return KeyboardBuilder.build_inline_keyboard(buttons)
-    
+
     @staticmethod
     def language_selection(current_language: str = 'en') -> InlineKeyboardMarkup:
         """Language selection keyboard with enhanced visual layout"""
@@ -198,12 +198,12 @@ class LanguageKeyboards:
 
 class ProductKeyboards:
     """Product-related keyboards"""
-    
+
     @staticmethod
     def product_categories(categories: List[Dict], language: str = 'en') -> InlineKeyboardMarkup:
         """Product categories keyboard"""
         buttons = []
-        
+
         # Add category buttons in pairs
         for i in range(0, len(categories), 2):
             row = []
@@ -211,29 +211,29 @@ class ProductKeyboards:
                 'text': categories[i]['name'],
                 'callback_data': f"category_{categories[i]['id']}"
             })
-            
+
             if i + 1 < len(categories):
                 row.append({
                     'text': categories[i + 1]['name'],
                     'callback_data': f"category_{categories[i + 1]['id']}"
                 })
-            
+
             buttons.append(row)
-        
+
         # Add back button
         buttons.append([{
             'text': i18n.get('telegram.back', language),
             'callback_data': 'back_to_main'
         }])
-        
+
         return KeyboardBuilder.build_inline_keyboard(buttons)
-    
+
     @staticmethod
-    def product_list(products: List[Dict], page: int = 1, 
+    def product_list(products: List[Dict], page: int = 1,
                     total_pages: int = 1, language: str = 'en') -> InlineKeyboardMarkup:
         """Product list keyboard with pagination"""
         buttons = []
-        
+
         # Add product buttons
         for product in products:
             price = get_product_display_price(product)
@@ -241,7 +241,7 @@ class ProductKeyboards:
                 'text': f"{product['name']} - {price} UZS",
                 'callback_data': f"product_{product['id']}"
             }])
-        
+
         # Add pagination if needed
         if total_pages > 1:
             nav_row = []
@@ -255,24 +255,24 @@ class ProductKeyboards:
                     'text': i18n.get('telegram.pagination.next', language),
                     'callback_data': f'page_{page + 1}'
                 })
-            
+
             if nav_row:
                 buttons.append(nav_row)
-        
+
         # Add back button
         buttons.append([{
             'text': i18n.get('telegram.back', language),
             'callback_data': 'back_to_categories'
         }])
-        
+
         return KeyboardBuilder.build_inline_keyboard(buttons)
-    
+
     @staticmethod
     def product_details(product_id: int, category_id: Optional[int] = None, language: str = 'en') -> InlineKeyboardMarkup:
         """Product details keyboard"""
         # Determine back button action
         back_callback = f'category_{category_id}' if category_id else 'menu_products'
-        
+
         buttons = [
             [{'text': i18n.get('telegram.product.add_to_cart', language), 'callback_data': f'add_to_cart_{product_id}'}],
             [{'text': i18n.get('telegram.back', language), 'callback_data': back_callback}]
@@ -306,9 +306,9 @@ class ProductKeyboards:
         }])
 
         return KeyboardBuilder.build_inline_keyboard(buttons)
-    
+
     @staticmethod
-    def quantity_selector(product_id: int, current_quantity: int = 1, 
+    def quantity_selector(product_id: int, current_quantity: int = 1,
                          language: str = 'en') -> InlineKeyboardMarkup:
         """Quantity selection keyboard"""
         buttons = [
@@ -320,17 +320,17 @@ class ProductKeyboards:
             [{'text': i18n.get('telegram.cart.checkout', language), 'callback_data': f'checkout'}],
             [{'text': i18n.get('telegram.back', language), 'callback_data': f'back_to_product_{product_id}'}]
         ]
-        
+
         return KeyboardBuilder.build_inline_keyboard(buttons)
 
 
 class OrderKeyboards:
     """Order-related keyboards"""
-    
+
     @staticmethod
     def cart_actions(language: str = 'en', cart_is_empty: bool = True, meets_minimum: bool = True) -> InlineKeyboardMarkup:
         """Shopping cart action buttons
-        
+
         Args:
             language: Language code
             cart_is_empty: Whether cart has no items
@@ -363,32 +363,32 @@ class OrderKeyboards:
                     ],
                     [{'text': i18n.get('telegram.back', language), 'callback_data': 'back_to_main'}]
                 ]
-        
+
         return KeyboardBuilder.build_inline_keyboard(buttons)
-    
+
     @staticmethod
     def delivery_addresses(addresses: List[Dict], language: str = 'en') -> InlineKeyboardMarkup:
         """Delivery address selection"""
         buttons = []
-        
+
         for address in addresses:
             buttons.append([{
                 'text': f"📍 {address['title']} - {address['full_address'][:30]}...",
                 'callback_data': f"address_{address['id']}"
             }])
-        
+
         buttons.extend([
             [{'text': i18n.get('telegram.address.add_new', language), 'callback_data': 'add_new_address_checkout'}],
             [{'text': i18n.get('telegram.back', language), 'callback_data': 'back_to_cart'}]
         ])
-        
+
         return KeyboardBuilder.build_inline_keyboard(buttons)
-    
+
     @staticmethod
     def payment_methods(methods: List[Dict], language: str = 'en') -> InlineKeyboardMarkup:
         """Payment method selection"""
         buttons = []
-        
+
         # Payment method icons
         icons = {
             'cash': '💵',
@@ -398,40 +398,40 @@ class OrderKeyboards:
             'loyalty_points': '🏆',
             'business_account': '🏢'
         }
-        
+
         for method in methods:
             icon = icons.get(method['type'], '💳')
             buttons.append([{
                 'text': f"{icon} {method['name']}",
                 'callback_data': f"payment_{method['type']}"
             }])
-        
+
         buttons.append([{
             'text': i18n.get('telegram.back', language),
             'callback_data': 'back_to_delivery'
         }])
-        
+
         return KeyboardBuilder.build_inline_keyboard(buttons)
-    
+
     @staticmethod
     def delivery_time_slots(slots: List[Dict], language: str = 'en') -> InlineKeyboardMarkup:
         """Delivery time slot selection"""
         buttons = []
-        
+
         for slot in slots:
             if slot['available']:
                 buttons.append([{
                     'text': f"🕐 {slot['start_time']} - {slot['end_time']}",
                     'callback_data': f"timeslot_{slot['id']}"
                 }])
-        
+
         buttons.append([{
             'text': i18n.get('telegram.back', language),
             'callback_data': 'back_to_address'
         }])
-        
+
         return KeyboardBuilder.build_inline_keyboard(buttons)
-    
+
     @staticmethod
     def order_confirmation(language: str = 'en') -> InlineKeyboardMarkup:
         """Order confirmation buttons"""
@@ -442,23 +442,23 @@ class OrderKeyboards:
             ],
             [{'text': i18n.get('telegram.order.edit', language), 'callback_data': 'edit_order'}]
         ]
-        
+
         return KeyboardBuilder.build_inline_keyboard(buttons)
-    
+
     @staticmethod
     def order_list(orders: List[Dict], language: str = 'en') -> InlineKeyboardMarkup:
         """Order list keyboard"""
         buttons = []
-        
+
         for order in orders:
             icon = ORDER_STATUS_ICONS.get(order['status'], DEFAULT_STATUS_ICON)
             date = order['created_at'][:10] if 'created_at' in order else ''
-            
+
             buttons.append([{
                 'text': f"{icon} Order #{order['order_number']} - {date}",
                 'callback_data': f"order_{order['id']}"
             }])
-        
+
         buttons.append([{
             'text': i18n.get('telegram.back', language),
             'callback_data': 'back_to_main'
@@ -470,14 +470,14 @@ class OrderKeyboards:
     def order_details(order_id: int, order_status: str, language: str = 'en') -> InlineKeyboardMarkup:
         """Order details action buttons"""
         buttons = []
-        
+
         # Add track button for active orders
         if order_status in ['confirmed', 'preparing', 'out_for_delivery']:
             buttons.append([{
                 'text': i18n.get('telegram.order.track', language),
                 'callback_data': f'track_order_{order_id}'
             }])
-        
+
         # Add pay and cancel buttons for pending orders
         if order_status == 'pending':
             buttons.append([{
@@ -488,19 +488,19 @@ class OrderKeyboards:
                 'text': i18n.get('telegram.payment.cancel_order', language),
                 'callback_data': f'cancel_order_{order_id}'
             }])
-        
+
         # Add reorder button for delivered orders
         if order_status == 'delivered':
             buttons.append([{
                 'text': i18n.get('telegram.order.reorder', language),
                 'callback_data': f'reorder_{order_id}'
             }])
-        
+
         buttons.append([{
             'text': i18n.get('telegram.back', language),
             'callback_data': 'back_to_orders'
         }])
-        
+
         return KeyboardBuilder.build_inline_keyboard(buttons)
 
     @staticmethod
@@ -516,7 +516,7 @@ class OrderKeyboards:
                 'callback_data': 'menu_orders'
             }]
         ]
-        
+
         return KeyboardBuilder.build_inline_keyboard(buttons)
 
     @staticmethod
@@ -534,7 +534,7 @@ class OrderKeyboards:
 
 class SubscriptionKeyboards:
     """Subscription-related keyboards"""
-    
+
     @staticmethod
     def subscription_frequency(language: str = 'en') -> InlineKeyboardMarkup:
         """Subscription frequency selection"""
@@ -549,21 +549,21 @@ class SubscriptionKeyboards:
             ],
             [{'text': i18n.get('telegram.back', language), 'callback_data': 'back_to_subscriptions'}]
         ]
-        
+
         return KeyboardBuilder.build_inline_keyboard(buttons)
-    
+
     @staticmethod
     def subscription_list(subscriptions: List[Dict], language: str = 'en') -> InlineKeyboardMarkup:
         """Subscription list keyboard"""
         buttons = []
-        
+
         for sub in subscriptions:
             icon = SUBSCRIPTION_STATUS_ICONS.get(sub['status'], DEFAULT_STATUS_ICON)
             buttons.append([{
                 'text': f"{icon} {sub['name']} - {sub['delivery_frequency']}",
                 'callback_data': f"subscription_{sub['id']}"
             }])
-        
+
         buttons.extend([
             [{'text': i18n.get('telegram.subscription.create', language), 'callback_data': 'create_subscription'}],
             [{'text': i18n.get('telegram.subscription.statistics', language), 'callback_data': 'subscription_statistics'}],
@@ -571,7 +571,7 @@ class SubscriptionKeyboards:
         ])
 
         return KeyboardBuilder.build_inline_keyboard(buttons)
-    
+
     @staticmethod
     def subscription_actions(subscription_id: int, status: str, language: str = 'en') -> InlineKeyboardMarkup:
         """Subscription action buttons"""
@@ -681,7 +681,7 @@ class SubscriptionKeyboards:
 
 class ProfileKeyboards:
     """User profile keyboards"""
-    
+
     @staticmethod
     def profile_menu(language: str = 'en', phone_verified: bool = False) -> InlineKeyboardMarkup:
         """Profile menu keyboard"""
@@ -704,7 +704,7 @@ class ProfileKeyboards:
         ]
 
         return KeyboardBuilder.build_inline_keyboard(buttons)
-    
+
     @staticmethod
     def phone_request(language: str = 'en') -> ReplyKeyboardMarkup:
         """Phone number request keyboard"""
@@ -712,7 +712,7 @@ class ProfileKeyboards:
             text=i18n.get('telegram.profile.share_phone', language),
             request_contact=True
         )
-        
+
         return ReplyKeyboardMarkup(
             [[button]],
             one_time_keyboard=True,
@@ -743,7 +743,7 @@ class ProfileKeyboards:
         ]
 
         return KeyboardBuilder.build_inline_keyboard(buttons)
-    
+
     @staticmethod
     def location_request(language: str = 'en') -> ReplyKeyboardMarkup:
         """Location request keyboard"""
@@ -751,18 +751,18 @@ class ProfileKeyboards:
             text=i18n.get('telegram.address.share_location_button', language),
             request_location=True
         )
-        
+
         return ReplyKeyboardMarkup(
             [[button]],
             one_time_keyboard=True,
             resize_keyboard=True
         )
-    
+
     @staticmethod
     def addresses_management(addresses: List[Dict], language: str = 'en') -> InlineKeyboardMarkup:
         """Address management keyboard with existing addresses"""
         buttons = []
-        
+
         # Add individual address buttons
         for address in addresses[:MAX_DISPLAYED_ADDRESSES]:
             status = "🏠" if address.get('is_default') else "📍"
@@ -771,7 +771,7 @@ class ProfileKeyboards:
                 'text': f"{status} {title}",
                 'callback_data': f"view_address_{address['id']}"
             }])
-        
+
         # Add management action buttons
         buttons.extend([
             [{'text': i18n.get('telegram.address.add_new', language), 'callback_data': 'add_new_address'}],
@@ -781,9 +781,9 @@ class ProfileKeyboards:
             ],
             [{'text': i18n.get('telegram.back', language), 'callback_data': 'menu_profile'}]
         ])
-        
+
         return KeyboardBuilder.build_inline_keyboard(buttons)
-    
+
     @staticmethod
     def empty_addresses(language: str = 'en') -> InlineKeyboardMarkup:
         """Keyboard for when user has no addresses"""
@@ -889,7 +889,7 @@ class ProfileKeyboards:
     @staticmethod
     def geocode_confirmation(language: str = 'en', show_edit: bool = True) -> InlineKeyboardMarkup:
         """Confirmation keyboard after geocoding
-        
+
         Args:
             language: Language code
             show_edit: If True, show Edit Details button (for existing addresses)
@@ -903,14 +903,14 @@ class ProfileKeyboards:
                  'callback_data': 'retry_geocode'}
             ]
         ]
-        
+
         if show_edit:
             buttons.append([{'text': i18n.get('telegram.address.edit_details', language),
                             'callback_data': 'edit_address_details'}])
-        
+
         buttons.append([{'text': i18n.get('telegram.cancel', language),
                         'callback_data': 'cancel_address_creation'}])
-        
+
         return KeyboardBuilder.build_inline_keyboard(buttons)
 
     @staticmethod

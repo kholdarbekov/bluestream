@@ -232,11 +232,11 @@
     .settings-section .card-body {
         padding: 20px;
     }
-    
+
     .settings-section .form-group {
         margin-bottom: 20px;
     }
-    
+
     .status-item {
         padding: 12px;
     }
@@ -312,7 +312,7 @@
                                     <i class="far fa-check-circle"></i> {{ 'Verified'|t }}
                                 </span>
                                 {% else %}
-                                <button type="button" class="btn btn-outline-warning btn-sm" onclick="resendEmailVerification()">
+                                <button type="button" class="btn btn-outline-warning btn-sm" data-action="resend-email-verification">
                                     <i class="far fa-envelope"></i> {{ 'Verify'|t }}
                                 </button>
                                 {% endif %}
@@ -330,7 +330,7 @@
                                     <i class="far fa-check-circle"></i> {{ 'Verified'|t }}
                                 </span>
                                 {% else %}
-                                <button type="button" class="btn btn-outline-warning btn-sm" onclick="verifyPhone()">
+                                <button type="button" class="btn btn-outline-warning btn-sm" data-action="verify-phone">
                                     <i class="far fa-mobile"></i> {{ 'Verify'|t }}
                                 </button>
                                 {% endif %}
@@ -430,120 +430,21 @@
 {% endblock %}
 
 {% block cabinet_extra_js %}
-<script>
-// Personal Information Form
-document.getElementById('personalInfoForm').addEventListener('submit', async function(e) {
-    e.preventDefault();
-    
-    const formData = new FormData(this);
-    const data = {
-        first_name: formData.get('first_name'),
-        last_name: formData.get('last_name'),
-        date_of_birth: formData.get('date_of_birth') || null,
-        gender: formData.get('gender') || null,
-        preferred_language: formData.get('preferred_language')
-    };
-    
-    try {
-        const response = await apiRequest('/auth/profile', {
-            method: 'PUT',
-            body: JSON.stringify(data)
-        });
-        
-        const result = await response.json();
-        
-        if (response.ok) {
-            showNotification('{{ "Personal information updated successfully!"|t }}', 'success');
-        } else {
-            showNotification(result.message || '{{ "Failed to update personal information"|t }}', 'error');
-        }
-    } catch (error) {
-        showNotification('{{ "Network error. Please try again."|t }}', 'error');
-    }
-});
-
-// Contact Information Form
-document.getElementById('contactInfoForm').addEventListener('submit', async function(e) {
-    e.preventDefault();
-    
-    const formData = new FormData(this);
-    const data = {
-        phone: formData.get('phone')
-    };
-    
-    try {
-        const response = await apiRequest('/auth/profile', {
-            method: 'PUT',
-            body: JSON.stringify(data)
-        });
-        
-        const result = await response.json();
-        
-        if (response.ok) {
-            showNotification('{{ "Contact information updated successfully!"|t }}', 'success');
-            
-            // If phone number was changed, prompt for verification
-            if (data.phone && data.phone !== '{{ user.phone or "" }}') {
-                setTimeout(() => {
-                    if (confirm('{{ "Would you like to verify your new phone number now?"|t }}')) {
-                        verifyPhone();
-                    }
-                }, 2000);
-            }
-        } else {
-            showNotification(result.message || '{{ "Failed to update contact information"|t }}', 'error');
-        }
-    } catch (error) {
-        showNotification('{{ "Network error. Please try again."|t }}', 'error');
-    }
-});
-
-// Preferences Form
-document.getElementById('preferencesForm').addEventListener('submit', async function(e) {
-    e.preventDefault();
-    
-    showNotification('{{ "Preferences saved successfully!"|t }}', 'success');
-});
-
-// Resend Email Verification
-async function resendEmailVerification() {
-    try {
-        const response = await apiRequest('/auth/resend-email-verification', {
-            method: 'POST'
-        });
-        
-        const result = await response.json();
-        
-        if (response.ok) {
-            showNotification('{{ "Verification email sent! Please check your inbox."|t }}', 'success');
-        } else {
-            showNotification(result.message || '{{ "Failed to send verification email"|t }}', 'error');
-        }
-    } catch (error) {
-        showNotification('{{ "Network error. Please try again."|t }}', 'error');
-    }
-}
-
-// Verify Phone Number
-function verifyPhone() {
-    window.location.href = '{{ url_for("frontend.verify_phone") }}';
-}
-
-// Auto-format phone number
-document.querySelector('input[name="phone"]').addEventListener('input', function() {
-    let value = this.value.replace(/\D/g, '');
-    
-    if (value.length > 0 && !value.startsWith('998')) {
-        if (value.startsWith('0')) {
-            value = '998' + value.substring(1);
-        } else {
-            value = '998' + value;
-        }
-    }
-    
-    if (value.length > 0) {
-        this.value = '+' + value;
-    }
-});
-</script>
+{% from "frontend/macros/page_data.html" import render_page_data %}
+{{ render_page_data({
+    'verify_phone_url': url_for('frontend.verify_phone'),
+    'current_phone': user.phone or '',
+    'i18n': {
+        'personal_updated': 'Personal information updated successfully!' | t,
+        'personal_failed': 'Failed to update personal information' | t,
+        'contact_updated': 'Contact information updated successfully!' | t,
+        'contact_failed': 'Failed to update contact information' | t,
+        'verify_new_phone': 'Would you like to verify your new phone number now?' | t,
+        'preferences_saved': 'Preferences saved successfully!' | t,
+        'verification_sent': 'Verification email sent! Please check your inbox.' | t,
+        'verification_failed': 'Failed to send verification email' | t,
+        'network_error': 'Network error. Please try again.' | t,
+    },
+}) }}
+<script src="{{ url_for('static', filename='js/pages/profile-settings.js') }}"></script>
 {% endblock %}

@@ -185,7 +185,7 @@
                             {% if product.images|length > 1 %}
                             <div class="thumb-gallery">
                                 {% for image in product.images[:4] %}
-                                <div class="thumb-item {% if loop.first %}active{% endif %}" onclick="changeImage('{{ image }}', this)">
+                                <div class="thumb-item {% if loop.first %}active{% endif %}" data-action="change-image" data-image="{{ image }}">
                                     <img src="{{ image }}" alt="{{ product.name }}" loading="lazy" decoding="async">
                                 </div>
                                 {% endfor %}
@@ -312,17 +312,17 @@
                             <div class="quantity-selector">
                                 <label>{{ 'Soni'|t }}</label>
                                 <div class="qty-buttons">
-                                    <button type="button" class="qty-minus" onclick="changeQty(-1)">-</button>
+                                    <button type="button" class="qty-minus" data-action="change-qty" data-delta="-1">-</button>
                                     <input type="text" id="qtyInput" value="1" readonly>
-                                    <button type="button" class="qty-plus" onclick="changeQty(1)">+</button>
+                                    <button type="button" class="qty-plus" data-action="change-qty" data-delta="1">+</button>
                                 </div>
                             </div>
-                            <button class="add-to-cart-btn theme-btn btn-one" onclick="addToCart({{ product.id }}, qty)" {% if product.stock_quantity <= 0 %}disabled{% endif %}>
+                            <button class="add-to-cart-btn theme-btn btn-one" data-action="add-to-cart-qty" data-product-id="{{ product.id }}" {% if product.stock_quantity <= 0 %}disabled{% endif %}>
                                 <i class="far fa-shopping-cart"></i>
                                 {{ 'landing.button.add_to_cart'|t }}
                             </button>
-                            
-                            <button class="wishlist-btn" onclick="addToWishlist({{ product.id }})" title="{{ 'Add to Wishlist'|t }}">
+
+                            <button class="wishlist-btn" data-action="add-to-wishlist" data-product-id="{{ product.id }}" title="{{ 'Add to Wishlist'|t }}">
                                 <i class="far fa-heart"></i>
                             </button>
                         </div>
@@ -450,7 +450,7 @@
                                         {% endif %}
                                     </div>
                                     <div class="btn-box">
-                                        <button onclick="addToCart({{ rel_product.id }})" class="theme-btn btn-two">
+                                        <button data-action="add-to-cart" data-product-id="{{ rel_product.id }}" class="theme-btn btn-two">
                                             <i class="far fa-shopping-cart"></i> {{ 'landing.button.add_to_cart'|t }}
                                         </button>
                                     </div>
@@ -468,26 +468,10 @@
 {% endblock %}
 
 {% block extra_js %}
-<script>
-let qty = 1;
-const maxQty = {{ product.stock_quantity or 999 }};
-
-function changeQty(delta) {
-    const newQty = qty + delta;
-    if (newQty >= 1 && newQty <= maxQty) {
-        qty = newQty;
-        document.getElementById('qtyInput').value = qty;
-    }
-}
-
-function changeImage(src, element) {
-    document.getElementById('mainProductImage').src = src;
-    document.querySelectorAll('.thumb-item').forEach(el => el.classList.remove('active'));
-    element.classList.add('active');
-}
-
-function addToWishlist(id) {
-    showNotification('{{ "Added to wishlist!"|t }}', 'success');
-}
-</script>
+{% from "frontend/macros/page_data.html" import render_page_data %}
+{{ render_page_data({
+    'max_qty': product.stock_quantity or 999,
+    'i18n': {'added_to_wishlist': 'Added to wishlist!' | t},
+}) }}
+<script src="{{ url_for('static', filename='js/pages/product-detail.js') }}"></script>
 {% endblock %}

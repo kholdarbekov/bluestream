@@ -88,12 +88,12 @@
     .subscription-overview .col-md-4 {
         margin-bottom: 20px;
     }
-    
+
     .delivery-details {
         flex-direction: column;
         align-items: flex-start;
     }
-    
+
     .delivery-details .btn {
         margin-top: 10px;
         width: 100%;
@@ -272,520 +272,63 @@
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-dismiss="modal">{{ 'Cancel'|t }}</button>
-                <button type="button" class="btn btn-primary" onclick="confirmModifySubscription()">{{ 'Update Subscription'|t }}</button>
+                <button type="button" class="btn btn-primary" id="confirmModifyBtn">{{ 'Update Subscription'|t }}</button>
             </div>
         </div>
     </div>
 </div>
 {% endblock %}
 
+
 {% block cabinet_extra_js %}
-<script>
-document.addEventListener('DOMContentLoaded', function() {
-    loadSubscriptionOverview();
-    loadActiveSubscriptions();
-    loadUpcomingDeliveries();
-    loadInactiveSubscriptions();
-});
-
-let currentSubscription = null;
-
-async function loadSubscriptionOverview() {
-    try {
-        const response = await apiRequest('/subscriptions?status=active');
-        const result = await response.json();
-
-        if (response.ok && result.success) {
-            const subscriptions = result.data.items || result.data.subscriptions || [];
-            const activeCount = subscriptions.length;
-
-            const now = new Date();
-            const currentMonth = now.getMonth();
-            const currentYear = now.getFullYear();
-
-            const deliveriesThisMonth = subscriptions.filter(sub => {
-                if (!sub.next_delivery_date) return false;
-                const deliveryDate = new Date(sub.next_delivery_date);
-                return deliveryDate.getMonth() === currentMonth && deliveryDate.getFullYear() === currentYear;
-            }).length;
-
-            const monthlySavings = 0;
-
-            document.getElementById('activeSubscriptionsCount').textContent = activeCount;
-            document.getElementById('nextDeliveryCount').textContent = deliveriesThisMonth;
-            document.getElementById('monthlySavings').textContent = formatPrice(monthlySavings);
-        }
-    } catch (error) {
-        console.error('Failed to load subscription overview:', error);
-        document.getElementById('activeSubscriptionsCount').textContent = '0';
-        document.getElementById('nextDeliveryCount').textContent = '0';
-        document.getElementById('monthlySavings').textContent = '0 UZS';
-    }
-}
-
-async function loadActiveSubscriptions() {
-    const subscriptionsList = document.getElementById('activeSubscriptionsList');
-    
-    try {
-        const response = await apiRequest('/subscriptions?status=active');
-        const result = await response.json();
-        
-        if (response.ok && result.success) {
-            const subscriptions = result.data.items || result.data.subscriptions || [];
-            if (subscriptions.length === 0) {
-                subscriptionsList.innerHTML = `
-                    <div class="text-center py-4">
-                        <i class="far fa-sync-alt fa-3x text-muted mb-3"></i>
-                        <h5>{{ 'No Active Subscriptions'|t }}</h5>
-                        <p class="text-muted">{{ 'You dont have any active subscriptions'|t }}</p>
-                        <a href="{{ url_for('frontend.subscriptions') }}" class="btn btn-primary">
-                            <i class="far fa-plus"></i> {{ 'Browse Plans'|t }}
-                        </a>
-                    </div>
-                `;
-            } else {
-                displaySubscriptions(subscriptions, subscriptionsList);
-            }
-        } else {
-            subscriptionsList.innerHTML = '<div class="text-center py-4"><p class="text-muted">{{ "Failed to load subscriptions"|t }}</p></div>';
-        }
-    } catch (error) {
-        console.error('Failed to load active subscriptions:', error);
-        subscriptionsList.innerHTML = '<div class="text-center py-4"><p class="text-muted">{{ "Failed to load subscriptions"|t }}</p></div>';
-    }
-}
-
-async function loadUpcomingDeliveries() {
-    const deliveriesList = document.getElementById('upcomingDeliveriesList');
-    
-    try {
-        const response = await apiRequest('/subscriptions/upcoming-deliveries');
-        const result = await response.json();
-        
-        if (response.ok && result.success) {
-            if (result.data.deliveries.length === 0) {
-                deliveriesList.innerHTML = '<div class="text-center py-4"><p class="text-muted">{{ "No upcoming deliveries"|t }}</p></div>';
-            } else {
-                displayDeliveries(result.data.deliveries, deliveriesList);
-            }
-        } else {
-            deliveriesList.innerHTML = '<div class="text-center py-4"><p class="text-muted">{{ "Failed to load deliveries"|t }}</p></div>';
-        }
-    } catch (error) {
-        console.error('Failed to load upcoming deliveries:', error);
-        deliveriesList.innerHTML = '<div class="text-center py-4"><p class="text-muted">{{ "Failed to load deliveries"|t }}</p></div>';
-    }
-}
-
-async function loadInactiveSubscriptions() {
-    const inactiveList = document.getElementById('inactiveSubscriptionsList');
-    
-    try {
-        const response = await apiRequest('/subscriptions?status=inactive');
-        const result = await response.json();
-        
-        if (response.ok && result.success) {
-            const subscriptions = result.data.items || result.data.subscriptions || [];
-            if (subscriptions.length === 0) {
-                inactiveList.innerHTML = '<div class="text-center py-4"><p class="text-muted">{{ "No paused or cancelled subscriptions"|t }}</p></div>';
-            } else {
-                displaySubscriptions(subscriptions, inactiveList);
-            }
-        } else {
-            inactiveList.innerHTML = '<div class="text-center py-4"><p class="text-muted">{{ "Failed to load inactive subscriptions"|t }}</p></div>';
-        }
-    } catch (error) {
-        console.error('Failed to load inactive subscriptions:', error);
-        inactiveList.innerHTML = '<div class="text-center py-4"><p class="text-muted">{{ "Failed to load inactive subscriptions"|t }}</p></div>';
-    }
-}
-
-async function displaySubscriptions(subscriptions, container) {
-    const subscriptionsHtml = await Promise.all(subscriptions.map(async subscription => {
-        let productsDisplay = '';
-        if (subscription.subscription_items && subscription.subscription_items.length > 0) {
-            productsDisplay = subscription.subscription_items.map(item =>
-                `<li>${item.quantity}x ${item.product_name || 'Product'} (${formatPrice(item.unit_price)} each)</li>`
-            ).join('');
-        } else {
-            try {
-                const response = await apiRequest(`/subscriptions/${subscription.id}`);
-                const result = await response.json();
-                if (response.ok && result.success && result.data.subscription_items) {
-                    productsDisplay = result.data.subscription_items.map(item =>
-                        `<li>${item.quantity}x ${item.product_name || 'Product'} (${formatPrice(item.unit_price)} each)</li>`
-                    ).join('');
-                } else {
-                    productsDisplay = '<li class="text-muted">{{ "No products"|t }}</li>';
-                }
-            } catch (error) {
-                productsDisplay = '<li class="text-muted">{{ "Failed to load products"|t }}</li>';
-            }
-        }
-
-        return `
-        <div class="subscription-card" onclick="manageSubscription(${subscription.id})">
-            <div class="subscription-header">
-                <div class="row align-items-center">
-                    <div class="col-md-6">
-                        <h5 class="mb-1">${subscription.name || 'Subscription'}</h5>
-                        <p class="text-muted mb-0">${subscription.description || ''}</p>
-                    </div>
-                    <div class="col-md-3">
-                        <span class="subscription-status status-${subscription.status}">${subscription.status.toUpperCase()}</span>
-                    </div>
-                    <div class="col-md-3 text-right">
-                        <h5 class="mb-0">${formatPrice(subscription.billing_amount)}</h5>
-                        <small class="text-muted">/${subscription.delivery_frequency}</small>
-                    </div>
-                </div>
-            </div>
-            <div class="subscription-body">
-                <div class="row">
-                    <div class="col-md-8">
-                        <div class="mb-3">
-                            <small class="text-muted">{{ 'Products'|t }}:</small>
-                            <ul class="mb-0 mt-1" style="padding-left: 20px; list-style: none;">
-                                ${productsDisplay}
-                            </ul>
-                        </div>
-                        <div class="subscription-details">
-                            <div class="row">
-                                <div class="col-6">
-                                    <small class="text-muted">{{ 'Next delivery'|t }}</small>
-                                    <div><strong>${subscription.next_delivery_date ? formatDate(subscription.next_delivery_date) : 'N/A'}</strong></div>
-                                </div>
-                                <div class="col-6">
-                                    <small class="text-muted">{{ 'Next billing'|t }}</small>
-                                    <div><strong>${subscription.next_billing_date ? formatDate(subscription.next_billing_date) : 'N/A'}</strong></div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="col-md-4">
-                        <div class="subscription-meta">
-                            <div class="mb-2">
-                                <small class="text-muted">{{ 'Started'|t }}</small>
-                                <div><strong>${formatDate(subscription.created_at)}</strong></div>
-                            </div>
-                            <div class="mb-2">
-                                <small class="text-muted">{{ 'Payment Method'|t }}</small>
-                                <div><strong>${subscription.payment_method.toUpperCase()}</strong></div>
-                            </div>
-                            ${subscription.auto_renew ? '<div><span class="badge badge-success">{{ "Auto-renew"|t }}</span></div>' : ''}
-                        </div>
-                    </div>
-                </div>
-            </div>
-            <div class="subscription-footer">
-                <div class="d-flex justify-content-between align-items-center">
-                    <div>
-                        <small class="text-muted">{{ 'Subscription'|t }} #${subscription.id}</small>
-                    </div>
-                    <div>
-                        <button class="btn btn-sm btn-outline-primary" onclick="event.stopPropagation(); manageSubscription(${subscription.id})">
-                            {{ 'Manage'|t }}
-                        </button>
-                        ${subscription.status === 'active' ? `
-                            <button class="btn btn-sm btn-outline-warning ml-2" onclick="event.stopPropagation(); pauseSubscription(${subscription.id})">
-                                {{ 'Pause'|t }}
-                            </button>
-                        ` : subscription.status === 'paused' ? `
-                            <button class="btn btn-sm btn-outline-success ml-2" onclick="event.stopPropagation(); resumeSubscription(${subscription.id})">
-                                {{ 'Resume'|t }}
-                            </button>
-                        ` : ''}
-                    </div>
-                </div>
-            </div>
-        </div>
-        `;
-    }));
-
-    container.innerHTML = subscriptionsHtml.join('');
-}
-
-function displayDeliveries(deliveries, container) {
-    const deliveriesHtml = deliveries.map(delivery => `
-        <div class="delivery-item ${delivery.is_urgent ? 'urgent' : 'upcoming'}">
-            <div class="delivery-details">
-                <div>
-                    <div class="delivery-date">${formatDate(delivery.scheduled_date)}</div>
-                    <small class="text-muted">${delivery.subscription.plan.name} - ${delivery.quantity} bottles</small><br>
-                    <small class="text-muted">${delivery.delivery_address.street}, ${delivery.delivery_address.city}</small>
-                </div>
-                <div>
-                    <span class="delivery-status badge badge-${delivery.is_urgent ? 'danger' : 'primary'}">${delivery.is_urgent ? '{{ "Urgent"|t }}' : '{{ "Scheduled"|t }}'}</span>
-                    <br>
-                    <button class="btn btn-sm btn-outline-primary mt-2" onclick="rescheduleDelivery(${delivery.id})">
-                        {{ 'Reschedule'|t }}
-                    </button>
-                </div>
-            </div>
-        </div>
-    `).join('');
-    
-    container.innerHTML = deliveriesHtml;
-}
-
-async function manageSubscription(subscriptionId) {
-    try {
-        const response = await apiRequest(`/subscriptions/${subscriptionId}`);
-        const result = await response.json();
-
-        if (response.ok && result.success) {
-            currentSubscription = result.data.subscription;
-            showSubscriptionModal(result.data);
-        } else {
-            showNotification(result.message || '{{ "Failed to load subscription details"|t }}', 'error');
-        }
-    } catch (error) {
-        console.error('Failed to load subscription details:', error);
-        showNotification('{{ "Failed to load subscription details"|t }}', 'error');
-    }
-}
-
-function showSubscriptionModal(data) {
-    const subscription = data.subscription;
-    const billingInfo = data.billing_info || {};
-    const recentOrders = data.recent_orders || [];
-
-    const modalContent = document.getElementById('subscriptionModalContent');
-    const pauseBtn = document.getElementById('pauseSubscriptionBtn');
-    const resumeBtn = document.getElementById('resumeSubscriptionBtn');
-    const modifyBtn = document.getElementById('modifySubscriptionBtn');
-    const cancelBtn = document.getElementById('cancelSubscriptionBtn');
-
-    pauseBtn.style.display = subscription.status === 'active' ? 'inline-block' : 'none';
-    resumeBtn.style.display = subscription.status === 'paused' ? 'inline-block' : 'none';
-    modifyBtn.style.display = ['active', 'paused'].includes(subscription.status) ? 'inline-block' : 'none';
-    cancelBtn.style.display = ['active', 'paused'].includes(subscription.status) ? 'inline-block' : 'none';
-
-    pauseBtn.onclick = () => pauseSubscription(subscription.id);
-    resumeBtn.onclick = () => resumeSubscription(subscription.id);
-    modifyBtn.onclick = () => showModifyModal(subscription);
-    cancelBtn.onclick = () => cancelSubscription(subscription.id);
-
-    let productsHtml = '';
-    if (subscription.subscription_items && subscription.subscription_items.length > 0) {
-        productsHtml = subscription.subscription_items.map(item =>
-            `<li>${item.quantity}x ${item.product_name || 'Product'} - ${formatPrice(item.unit_price)} each</li>`
-        ).join('');
-    } else {
-        productsHtml = '<li class="text-muted">{{ "No products"|t }}</li>';
-    }
-
-    modalContent.innerHTML = `
-        <div class="subscription-details">
-            <div class="row mb-4">
-                <div class="col-md-6">
-                    <h4>${subscription.name || 'Subscription'}</h4>
-                    <p class="text-muted">${subscription.description || ''}</p>
-                    <div class="subscription-meta">
-                        <div class="meta-item">
-                            <strong>{{ 'Status'|t }}:</strong>
-                            <span class="subscription-status status-${subscription.status}">${subscription.status.toUpperCase()}</span>
-                        </div>
-                        <div class="meta-item">
-                            <strong>{{ 'Subscription ID'|t }}:</strong> #${subscription.id}
-                        </div>
-                        <div class="meta-item">
-                            <strong>{{ 'Started'|t }}:</strong> ${formatDate(subscription.created_at)}
-                        </div>
-                    </div>
-                </div>
-                <div class="col-md-6">
-                    <div class="subscription-pricing">
-                        <h3>${formatPrice(subscription.billing_amount)}<small>/${subscription.delivery_frequency}</small></h3>
-                        <div class="pricing-details">
-                            <div><strong>{{ 'Products'|t }}:</strong></div>
-                            <ul style="padding-left: 20px; margin-top: 5px;">${productsHtml}</ul>
-                            <div>{{ 'Delivery frequency'|t }}: <strong>${subscription.delivery_frequency}</strong></div>
-                            <div>{{ 'Next billing'|t }}: <strong>${subscription.next_billing_date ? formatDate(subscription.next_billing_date) : 'N/A'}</strong></div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <div class="delivery-info mb-4">
-                <h5>{{ 'Delivery Information'|t }}</h5>
-                <div class="row">
-                    <div class="col-md-6">
-                        <div class="info-group">
-                            <strong>{{ 'Next Delivery'|t }}:</strong>
-                            <div>${subscription.next_delivery_date ? formatDate(subscription.next_delivery_date) : 'N/A'}</div>
-                        </div>
-                        <div class="info-group">
-                            <strong>{{ 'Time Slot'|t }}:</strong>
-                            <div>${subscription.delivery_time_slot || 'N/A'}</div>
-                        </div>
-                        <div class="info-group">
-                            <strong>{{ 'Payment Method'|t }}:</strong>
-                            <div>${subscription.payment_method ? subscription.payment_method.toUpperCase() : 'N/A'}</div>
-                        </div>
-                    </div>
-                    <div class="col-md-6">
-                        <div class="info-group">
-                            <strong>{{ 'Recent Orders'|t }}:</strong>
-                            ${recentOrders.length > 0 ? `
-                                <ul style="padding-left: 20px;">
-                                    ${recentOrders.slice(0, 5).map(order => `
-                                        <li>${order.order_number} - ${order.status.toUpperCase()} - ${formatPrice(order.total_amount)}</li>
-                                    `).join('')}
-                                </ul>
-                            ` : '<div class="text-muted">{{ "No orders yet"|t }}</div>'}
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    `;
-    
-    $('#subscriptionModal').modal('show');
-}
-
-function showModifyModal(subscription) {
-    document.getElementById('subscriptionIdToModify').value = subscription.id;
-    
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    document.getElementById('effectiveDate').min = tomorrow.toISOString().split('T')[0];
-    document.getElementById('effectiveDate').value = tomorrow.toISOString().split('T')[0];
-    
-    $('#subscriptionModal').modal('hide');
-    $('#modifyModal').modal('show');
-}
-
-async function confirmModifySubscription() {
-    const subscriptionId = document.getElementById('subscriptionIdToModify').value;
-    const formData = {
-        plan: document.getElementById('newPlan').value,
-        quantity: parseInt(document.getElementById('newQuantity').value),
-        frequency: document.getElementById('newFrequency').value,
-        effective_date: document.getElementById('effectiveDate').value
-    };
-    
-    try {
-        const response = await apiRequest(`/subscriptions/${subscriptionId}/modify`, {
-            method: 'PUT',
-            body: JSON.stringify(formData)
-        });
-        
-        const result = await response.json();
-        
-        if (response.ok && result.success) {
-            showNotification('{{ "Subscription updated successfully!"|t }}', 'success');
-            $('#modifyModal').modal('hide');
-            loadActiveSubscriptions();
-            loadSubscriptionOverview();
-        } else {
-            showNotification(result.message || '{{ "Failed to update subscription"|t }}', 'error');
-        }
-    } catch (error) {
-        console.error('Failed to modify subscription:', error);
-        showNotification('{{ "Failed to update subscription"|t }}', 'error');
-    }
-}
-
-async function pauseSubscription(subscriptionId) {
-    if (!confirm('{{ "Are you sure you want to pause this subscription?"|t }}')) {
-        return;
-    }
-    
-    try {
-        const response = await apiRequest(`/subscriptions/${subscriptionId}/pause`, {
-            method: 'POST'
-        });
-        
-        const result = await response.json();
-        
-        if (response.ok && result.success) {
-            showNotification('{{ "Subscription paused successfully"|t }}', 'success');
-            $('#subscriptionModal').modal('hide');
-            loadActiveSubscriptions();
-            loadInactiveSubscriptions();
-            loadSubscriptionOverview();
-        } else {
-            showNotification(result.message || '{{ "Failed to pause subscription"|t }}', 'error');
-        }
-    } catch (error) {
-        console.error('Failed to pause subscription:', error);
-        showNotification('{{ "Failed to pause subscription"|t }}', 'error');
-    }
-}
-
-async function resumeSubscription(subscriptionId) {
-    try {
-        const response = await apiRequest(`/subscriptions/${subscriptionId}/resume`, {
-            method: 'POST'
-        });
-        
-        const result = await response.json();
-        
-        if (response.ok && result.success) {
-            showNotification('{{ "Subscription resumed successfully"|t }}', 'success');
-            $('#subscriptionModal').modal('hide');
-            loadActiveSubscriptions();
-            loadInactiveSubscriptions();
-            loadSubscriptionOverview();
-        } else {
-            showNotification(result.message || '{{ "Failed to resume subscription"|t }}', 'error');
-        }
-    } catch (error) {
-        console.error('Failed to resume subscription:', error);
-        showNotification('{{ "Failed to resume subscription"|t }}', 'error');
-    }
-}
-
-async function cancelSubscription(subscriptionId) {
-    if (!confirm('{{ "Are you sure you want to cancel this subscription? This action cannot be undone."|t }}')) {
-        return;
-    }
-    
-    const reason = prompt('{{ "Please provide a reason for cancellation (optional)"|t }}:');
-    
-    try {
-        const response = await apiRequest(`/subscriptions/${subscriptionId}/cancel`, {
-            method: 'POST',
-            body: JSON.stringify({ reason: reason || 'User requested cancellation' })
-        });
-        
-        const result = await response.json();
-        
-        if (response.ok && result.success) {
-            showNotification('{{ "Subscription cancelled successfully"|t }}', 'success');
-            $('#subscriptionModal').modal('hide');
-            loadActiveSubscriptions();
-            loadInactiveSubscriptions();
-            loadSubscriptionOverview();
-        } else {
-            showNotification(result.message || '{{ "Failed to cancel subscription"|t }}', 'error');
-        }
-    } catch (error) {
-        console.error('Failed to cancel subscription:', error);
-        showNotification('{{ "Failed to cancel subscription"|t }}', 'error');
-    }
-}
-
-function rescheduleDelivery(deliveryId) {
-    showNotification('{{ "Delivery rescheduling feature coming soon!"|t }}', 'info');
-}
-
-function formatPrice(amount) {
-    const numAmount = parseFloat(amount) || 0;
-    return new Intl.NumberFormat('en-US', {
-        minimumFractionDigits: 0,
-        maximumFractionDigits: 0
-    }).format(numAmount) + ' UZS';
-}
-
-function formatDate(dateString) {
-    const date = new Date(dateString);
-    return date.toLocaleDateString('en-US', {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric'
-    });
-}
-</script>
+{% from "frontend/macros/page_data.html" import render_page_data %}
+{{ render_page_data({
+    'subscriptions_url': url_for('frontend.subscriptions'),
+    'i18n': {
+        'no_products': 'No products' | t,
+        'products_failed': 'Failed to load products' | t,
+        'products': 'Products' | t,
+        'next_delivery': 'Next delivery' | t,
+        'next_billing': 'Next billing' | t,
+        'started': 'Started' | t,
+        'payment_method': 'Payment Method' | t,
+        'auto_renew': 'Auto-renew' | t,
+        'subscription': 'Subscription' | t,
+        'manage': 'Manage' | t,
+        'pause': 'Pause' | t,
+        'resume': 'Resume' | t,
+        'urgent': 'Urgent' | t,
+        'scheduled': 'Scheduled' | t,
+        'reschedule': 'Reschedule' | t,
+        'no_active': 'No Active Subscriptions' | t,
+        'no_active_hint': 'You dont have any active subscriptions' | t,
+        'browse_plans': 'Browse Plans' | t,
+        'load_failed': 'Failed to load subscriptions' | t,
+        'no_upcoming': 'No upcoming deliveries' | t,
+        'load_deliveries_failed': 'Failed to load deliveries' | t,
+        'no_inactive': 'No paused or cancelled subscriptions' | t,
+        'load_inactive_failed': 'Failed to load inactive subscriptions' | t,
+        'details_failed': 'Failed to load subscription details' | t,
+        'status': 'Status' | t,
+        'subscription_id': 'Subscription ID' | t,
+        'delivery_frequency': 'Delivery frequency' | t,
+        'delivery_information': 'Delivery Information' | t,
+        'time_slot': 'Time Slot' | t,
+        'recent_orders': 'Recent Orders' | t,
+        'no_orders': 'No orders yet' | t,
+        'update_success': 'Subscription updated successfully!' | t,
+        'update_failed': 'Failed to update subscription' | t,
+        'pause_confirm': 'Are you sure you want to pause this subscription?' | t,
+        'pause_success': 'Subscription paused successfully' | t,
+        'pause_failed': 'Failed to pause subscription' | t,
+        'resume_success': 'Subscription resumed successfully' | t,
+        'resume_failed': 'Failed to resume subscription' | t,
+        'cancel_confirm': 'Are you sure you want to cancel this subscription? This action cannot be undone.' | t,
+        'cancel_reason_prompt': 'Please provide a reason for cancellation (optional)' | t,
+        'cancel_success': 'Subscription cancelled successfully' | t,
+        'cancel_failed': 'Failed to cancel subscription' | t,
+        'reschedule_coming_soon': 'Delivery rescheduling feature coming soon!' | t,
+    },
+}) }}
+<script src="{{ url_for('static', filename='js/pages/my-subscriptions.js') }}"></script>
 {% endblock %}

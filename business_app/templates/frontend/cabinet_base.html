@@ -1,8 +1,8 @@
 {% extends "frontend/base.html" %}
 
-{# 
+{#
   Cabinet Base Template
-  
+
   This template provides consistent layout for all user account/cabinet pages.
   Child templates should:
   1. Set {% set active_menu = 'dashboard'|'profile'|'orders'|'addresses'|'subscriptions'|'loyalty'|'security' %}
@@ -47,7 +47,7 @@
                             <p class="text-muted">{{ user.email }}</p>
                         </div>
                     </div>
-                    
+
                     <div class="account-menu">
                         <ul class="list-unstyled">
                             <li{% if active_menu == 'dashboard' %} class="active"{% endif %}>
@@ -86,7 +86,7 @@
                                 </a>
                             </li>
                             <li>
-                                <a href="#" onclick="logout()">
+                                <a href="#" data-action="logout">
                                     <i class="far fa-sign-out-alt"></i> {{ 'landing.nav.logout'|t }}
                                 </a>
                             </li>
@@ -94,7 +94,7 @@
                     </div>
                 </div>
             </div>
-            
+
             <!-- Cabinet Content -->
             <div class="col-lg-9 col-md-8 col-sm-12">
                 <div class="cabinet-content account-content">
@@ -273,7 +273,7 @@
     .cabinet-section .account-sidebar {
         padding: 20px;
     }
-    
+
     .cabinet-section .account-menu ul li a {
         padding: 12px 15px;
         font-size: 13px;
@@ -284,63 +284,11 @@
 {% endblock %}
 
 {% block extra_js %}
-<script>
-/**
- * Cabinet Token Refresh Handler
- * 
- * Official Flask-JWT-Extended approach for handling expired tokens:
- * https://flask-jwt-extended.readthedocs.io/en/stable/refreshing_tokens.html
- * 
- * "Make an API request... if the result is an error saying your token is expired,
- * use the refresh token to generate a new access token and redo the request"
- * 
- * For page loads (not AJAX), we detect if the page rendered an error JSON and
- * attempt to refresh the token and reload.
- */
-(function() {
-    // Check if page content is a JSON error response
-    // This happens when cabinet page loads with expired token
-    try {
-        const body = document.body;
-        const text = body ? body.textContent.trim() : '';
-        
-        // Check if page shows token expired JSON error
-        if (text.startsWith('{') && text.includes('"error"') && text.includes('Token Expired')) {
-            console.log('[JWT] Token expired on page load, attempting refresh...');
-            
-            // Attempt silent token refresh using the refresh token cookie
-            fetch('{{ url_for("auth.refresh_with_cookie") }}', {
-                method: 'POST',
-                credentials: 'include',  // Send cookies
-                headers: {
-                    'Content-Type': 'application/json'
-                }
-            })
-            .then(response => {
-                if (response.ok) {
-                    console.log('[JWT] Token refreshed successfully, reloading page...');
-                    // Reload page - now with fresh access token
-                    window.location.reload();
-                } else {
-                    console.warn('[JWT] Token refresh failed, redirecting to login...');
-                    // Refresh failed (refresh token also expired), redirect to login
-                    window.location.href = '{{ url_for("frontend.login") }}?next=' + encodeURIComponent(window.location.pathname);
-                }
-            })
-            .catch(error => {
-                console.error('[JWT] Token refresh error:', error);
-                // Network error, redirect to login
-                window.location.href = '{{ url_for("frontend.login") }}?next=' + encodeURIComponent(window.location.pathname);
-            });
-            
-            // Prevent any other page scripts from running
-            return;
-        }
-    } catch (e) {
-        // Page content is not JSON, this is a normal page load
-        console.log('[JWT] Normal page load');
-    }
-})();
-</script>
+{% from "frontend/macros/page_data.html" import render_page_data %}
+{{ render_page_data({
+    'refresh_url': url_for('auth.refresh_with_cookie'),
+    'login_url': url_for('frontend.login'),
+}, element_id='cabinet-base-data') }}
+<script src="{{ url_for('static', filename='js/pages/cabinet-base.js') }}"></script>
 {% block cabinet_extra_js %}{% endblock %}
 {% endblock %}

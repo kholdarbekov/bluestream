@@ -17,7 +17,7 @@ from business_app.models.translation import Translation
 def seed_essential_translations():
     """Seed essential translations for the multilingual system"""
     print("Seeding essential translations...")
-    
+
     # Essential translations
     ESSENTIAL_TRANSLATIONS = {
         "Home": {"en": "Home", "uz": "Bosh sahifa", "ru": "Главная"},
@@ -1138,7 +1138,7 @@ def seed_essential_translations():
 
 
 
-        
+
         "Email Verification": {
             "en": "Email Verification",
             "ru": "Подтверждение электронной почты",
@@ -3406,7 +3406,7 @@ def seed_essential_translations():
         },
 
 
-    
+
         "Successful login from web browser": {
             "en": "Successful login from web browser",
             "ru": "Успешный вход через веб-браузер",
@@ -4095,15 +4095,15 @@ def seed_essential_translations():
         }
     }
 
-    
+
     added_count = 0
     updated_count = 0
-    
+
     for key, languages in ESSENTIAL_TRANSLATIONS.items():
         for lang, value in languages.items():
             try:
                 existing = Translation.query.filter_by(key=key, language=lang).first()
-                
+
                 if existing:
                     if existing.value != value:
                         existing.value = value
@@ -4123,10 +4123,10 @@ def seed_essential_translations():
                     db.session.add(new_trans)
                     added_count += 1
                     print(f"  Added: {key} [{lang}]")
-                    
+
             except Exception as e:
                 print(f"  Error with {key}[{lang}]: {e}")
-    
+
 
     for key, languages in TEMPLATE_TRANSLATIONS.items():
         if key in ESSENTIAL_TRANSLATIONS:
@@ -4134,7 +4134,7 @@ def seed_essential_translations():
         for lang, value in languages.items():
             try:
                 existing = Translation.query.filter_by(key=key, language=lang).first()
-                
+
                 if existing:
                     if existing.value != value:
                         existing.value = value
@@ -4154,10 +4154,10 @@ def seed_essential_translations():
                     db.session.add(new_trans)
                     added_count += 1
                     print(f"  Added: {key} [{lang}]")
-                    
+
             except Exception as e:
                 print(f"  Error with {key}[{lang}]: {e}")
-    
+
     print(f"Translation seeding complete: {added_count} added, {updated_count} updated")
     return added_count + updated_count > 0
 
@@ -4165,18 +4165,18 @@ def seed_essential_translations():
 def verify_seeded_data():
     """Verify that seeded data was created correctly"""
     print("\\nVerifying seeded data...")
-    
+
     total_translations = Translation.query.count()
     print(f"Total translations: {total_translations}")
-    
+
     for language in ['en', 'uz', 'ru']:
         count = Translation.query.filter_by(language=language, is_active=True).count()
         print(f"  {language}: {count} translations")
-    
+
     # Test critical translations
     critical_tests = ['Home', 'Shop', 'Login', 'My Account']
     print("\\nTesting critical translations:")
-    
+
     all_good = True
     for key in critical_tests:
         print(f"  {key}:")
@@ -4187,7 +4187,7 @@ def verify_seeded_data():
             else:
                 print(f"    {lang}: MISSING")
                 all_good = False
-    
+
     return all_good
 
 
@@ -4197,24 +4197,24 @@ def main():
     print("========================")
     print(f"Timestamp: {datetime.now(UTC).isoformat()}")
     print()
-    
+
     app = create_app()
-    
+
     with app.app_context():
         try:
             # Seed translations
             translations_changed = seed_essential_translations()
-            
+
             # Commit changes
             if translations_changed:
                 db.session.commit()
                 print("All changes committed to database")
             else:
                 print("No changes needed - data already up to date")
-            
+
             # Verify
             verification_passed = verify_seeded_data()
-            
+
             print("\\n========================")
             if verification_passed:
                 print("DATABASE SEEDING COMPLETED SUCCESSFULLY!")
@@ -4225,7 +4225,7 @@ def main():
             else:
                 print("SEEDING COMPLETED WITH WARNINGS")
                 print("Some translations may be missing.")
-                
+
         except Exception as e:
             print(f"\\nSEEDING FAILED: {e}")
             import traceback

@@ -1,7 +1,7 @@
-{# 
+{#
   Order Detail Modal Partial
   Shared component used by both my_account.html and orders.html
-  
+
   Include this in your template with:
   {% include 'frontend/partials/order_detail_modal.html' %}
 #}
@@ -256,13 +256,13 @@
         flex-wrap: wrap;
         gap: 12px;
     }
-    
+
     .modal-order-item .item-qty,
     .modal-order-item .item-total {
         min-width: auto;
         padding: 8px 0;
     }
-    
+
     .modal-order-item .item-qty {
         padding: 0 16px;
     }
@@ -304,253 +304,34 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
         integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
         crossorigin=""></script>
-<script>
-let orderDeliveryMap = null;
-
-// Show order detail in modal
-async function showOrderDetail(orderId) {
-    try {
-        const response = await apiRequest(`/orders/${orderId}`);
-        const result = await response.json();
-
-        if (response.ok && result.success) {
-            const order = result.data.order;
-            displayOrderDetail(order);
-            $('#orderDetailModal').modal('show');
-        } else {
-            showNotification(result.message || '{{ "Failed to load order details"|t }}', 'error');
-        }
-    } catch (error) {
-        console.error('Failed to load order detail:', error);
-        showNotification('{{ "Failed to load order details"|t }}', 'error');
-    }
-}
-
-// Render order detail content
-function displayOrderDetail(order) {
-    const modalContent = document.getElementById('orderDetailContent');
-    const reorderBtn = document.getElementById('reorderBtn');
-    const cancelBtn = document.getElementById('cancelOrderBtn');
-    
-    // Show/hide action buttons based on order status
-    reorderBtn.style.display = order.status === 'delivered' ? 'inline-block' : 'none';
-    cancelBtn.style.display = ['pending', 'confirmed'].includes(order.status) ? 'inline-block' : 'none';
-    
-    reorderBtn.onclick = () => reorderItems(order.id);
-    cancelBtn.onclick = () => cancelOrder(order.id);
-    
-    modalContent.innerHTML = `
-        <div class="order-detail-content">
-            <!-- Order Header -->
-            <div class="row mb-4 align-items-center">
-                <div class="col-md-8">
-                    <h4 class="mb-2">{{ 'Order'|t }} #${order.order_number}</h4>
-                    <p class="text-muted mb-0"><i class="far fa-calendar-alt mr-1"></i>{{ 'Placed on'|t }} ${formatOrderDate(order.created_at)}</p>
-                </div>
-                <div class="col-md-4 text-right">
-                    <span class="order-status status-${order.status}">${capitalizeStatus(order.status)}</span>
-                </div>
-            </div>
-            
-            <!-- Order Items -->
-            <div class="order-items-section mb-4">
-                <h5 class="mb-3"><i class="far fa-box mr-2"></i>{{ 'Order Items'|t }}</h5>
-                <div class="card">
-                    <div class="card-body">
-                        <div class="modal-order-items">
-                            ${(order.order_items || []).map(item => `
-                                <div class="modal-order-item">
-                                    <img class="item-image" src="${item.product_image_url || item.product?.image_url || '/static/images/products/default.jpg'}" alt="${item.product_name || item.product?.name || 'Product'}">
-                                    <div class="item-info">
-                                        <div class="item-name">${item.product_name || item.product?.name || 'Product'}</div>
-                                        <div class="item-sku">{{ 'SKU'|t }}: ${item.product_sku || item.product?.sku || 'N/A'}</div>
-                                    </div>
-                                    <div class="item-qty">
-                                        <span class="qty-label">{{ 'Quantity'|t }}</span>
-                                        <span class="qty-value">${item.quantity}</span>
-                                    </div>
-                                    <div class="item-total">
-                                        <span class="total-label">{{ 'Price'|t }}</span>
-                                        <span class="total-value">${formatOrderAmount(item.total_price || item.unit_price * item.quantity)}</span>
-                                    </div>
-                                </div>
-                            `).join('')}
-                        </div>
-                    </div>
-                </div>
-            </div>
-            
-            <!-- Delivery Address & Order Summary -->
-            <div class="row mb-4 align-items-start">
-                <div class="col-md-6">
-                    <h5 class="mb-3"><i class="far fa-map-marker-alt mr-2"></i>{{ 'Delivery Address'|t }}</h5>
-                    <div class="card h-100">
-                        <div class="card-body">
-                            ${order.delivery_address ? `
-                                <div class="address-card-content">
-                                    ${order.delivery_address.title || order.delivery_address.label ? `<div class="address-label"><i class="far fa-tag"></i>${order.delivery_address.title || order.delivery_address.label}</div>` : ''}
-                                    <div class="address-text">
-                                        <div class="address-line">${order.delivery_address.street_address || order.delivery_address.full_address || ''}</div>
-                                        ${order.delivery_address.district ? `<div class="address-line">${order.delivery_address.district}</div>` : ''}
-                                    </div>
-                                    ${order.delivery_address.delivery_instructions || order.delivery_address.delivery_notes ? `<div class="text-muted mb-2" style="font-size: 13px;"><i class="far fa-sticky-note mr-1"></i>${order.delivery_address.delivery_instructions || order.delivery_address.delivery_notes}</div>` : ''}
-                                    ${(order.delivery_address.latitude && order.delivery_address.longitude) ? `<div id="orderDeliveryMap"></div>` : ''}
-                                </div>
-                            ` : `
-                                <div class="address-card-content">
-                                    <p class="no-address">{{ 'No delivery address provided'|t }}</p>
-                                </div>
-                            `}
-                        </div>
-                    </div>
-                </div>
-                <div class="col-md-6">
-                    <h5 class="mb-3"><i class="far fa-receipt mr-2"></i>{{ 'Order Summary'|t }}</h5>
-                    <div class="card h-100">
-                        <div class="card-body">
-                            <div class="order-summary-row">
-                                <span class="label">{{ 'Subtotal'|t }}</span>
-                                <span class="value">${formatOrderAmount(order.subtotal || order.total_amount)}</span>
-                            </div>
-                            <div class="order-summary-row">
-                                <span class="label">{{ 'Delivery Fee'|t }}</span>
-                                <span class="value">${formatOrderAmount(order.delivery_fee || 0)}</span>
-                            </div>
-                            <div class="order-summary-row">
-                                <span class="label">{{ 'Tax'|t }}</span>
-                                <span class="value">${formatOrderAmount(order.tax_amount || 0)}</span>
-                            </div>
-                            <div class="order-summary-total">
-                                <span class="label">{{ 'Total'|t }}</span>
-                                <span class="value">${formatOrderAmount(order.total_amount)}</span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            
-            <!-- Tracking Information -->
-            ${order.tracking_number ? `
-                <div class="tracking-section">
-                    <h5><i class="far fa-truck mr-2"></i>{{ 'Order Tracking'|t }}</h5>
-                    <div class="d-flex justify-content-between align-items-center">
-                        <span><strong>{{ 'Tracking Number'|t }}:</strong> ${order.tracking_number}</span>
-                        <button class="btn btn-sm btn-outline-primary" onclick="trackOrderPackage('${order.tracking_number}')">
-                            <i class="far fa-external-link"></i> {{ 'Track Package'|t }}
-                        </button>
-                    </div>
-                </div>
-            ` : ''}
-        </div>
-    `;
-    
-    // Initialize map if coordinates are available
-    if (order.delivery_address && order.delivery_address.latitude && order.delivery_address.longitude) {
-        setTimeout(() => {
-            initOrderDeliveryMap(
-                order.delivery_address.latitude,
-                order.delivery_address.longitude,
-                order.delivery_address.title || order.delivery_address.label || order.delivery_address.street_address || '{{ "Delivery Location"|t }}'
-            );
-        }, 300);
-    }
-}
-
-// Initialize delivery map
-function initOrderDeliveryMap(lat, lng, label) {
-    // Clean up existing map instance
-    if (orderDeliveryMap) {
-        orderDeliveryMap.remove();
-        orderDeliveryMap = null;
-    }
-    
-    const mapContainer = document.getElementById('orderDeliveryMap');
-    if (!mapContainer) return;
-    
-    // Initialize map
-    orderDeliveryMap = L.map('orderDeliveryMap', {
-        zoomControl: true,
-        scrollWheelZoom: false,
-        dragging: true
-    }).setView([lat, lng], 16);
-    
-    // Add OpenStreetMap tiles
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-        maxZoom: 19
-    }).addTo(orderDeliveryMap);
-    
-    // Add marker with popup
-    const marker = L.marker([lat, lng]).addTo(orderDeliveryMap);
-    marker.bindPopup(`<strong>${label}</strong>`).openPopup();
-    
-    // Invalidate size after modal is fully visible
-    setTimeout(() => {
-        orderDeliveryMap.invalidateSize();
-    }, 100);
-}
-
-// Clean up map when modal is hidden
-$('#orderDetailModal').on('hidden.bs.modal', function () {
-    if (orderDeliveryMap) {
-        orderDeliveryMap.remove();
-        orderDeliveryMap = null;
-    }
-});
-
-// Helper functions for order modal
-function formatOrderAmount(amount) {
-    if (!amount) return '0 UZS';
-    return Math.round(amount).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ') + ' UZS';
-}
-
-function formatOrderDate(dateString) {
-    if (!dateString) return '';
-    const date = new Date(dateString);
-    return date.toLocaleDateString('en-GB', { year: 'numeric', month: 'short', day: 'numeric' });
-}
-
-function capitalizeStatus(str) {
-    if (!str) return '';
-    return str.charAt(0).toUpperCase() + str.slice(1).replace(/_/g, ' ');
-}
-
-// Order actions
-async function cancelOrder(orderId) {
-    if (!confirm('{{ "Are you sure you want to cancel this order?"|t }}')) return;
-    try {
-        const response = await apiRequest(`/orders/${orderId}/cancel`, { method: 'POST' });
-        if (response.ok) {
-            showNotification('{{ "Order cancelled successfully"|t }}', 'success');
-            $('#orderDetailModal').modal('hide');
-            setTimeout(() => window.location.reload(), 1000);
-        } else {
-            const result = await response.json();
-            showNotification(result.message || '{{ "Failed to cancel order"|t }}', 'error');
-        }
-    } catch (error) {
-        showNotification('{{ "Failed to cancel order"|t }}', 'error');
-    }
-}
-
-async function reorderItems(orderId) {
-    try {
-        showNotification('{{ "Adding items to cart..."|t }}', 'info');
-        const response = await apiRequest(`/orders/${orderId}/reorder`, { method: 'POST' });
-        if (response.ok) {
-            showNotification('{{ "Items added to cart!"|t }}', 'success');
-            setTimeout(() => window.location.href = '{{ url_for("frontend.cart") }}', 1000);
-        } else {
-            const result = await response.json();
-            showNotification(result.message || '{{ "Failed to add items to cart"|t }}', 'error');
-        }
-    } catch (error) {
-        showNotification('{{ "Failed to add items to cart"|t }}', 'error');
-    }
-}
-
-function trackOrderPackage(trackingNumber) {
-    // Open tracking in new window - can be customized per tracking provider
-    window.open(`https://track.example.com/${trackingNumber}`, '_blank');
-}
-</script>
+{% from "frontend/macros/page_data.html" import render_page_data %}
+{{ render_page_data({
+    'cart_url': url_for('frontend.cart'),
+    'i18n': {
+        'details_failed': 'Failed to load order details' | t,
+        'order': 'Order' | t,
+        'placed_on': 'Placed on' | t,
+        'order_items': 'Order Items' | t,
+        'sku': 'SKU' | t,
+        'quantity': 'Quantity' | t,
+        'price': 'Price' | t,
+        'delivery_address': 'Delivery Address' | t,
+        'no_address': 'No delivery address provided' | t,
+        'order_summary': 'Order Summary' | t,
+        'subtotal': 'Subtotal' | t,
+        'delivery_fee': 'Delivery Fee' | t,
+        'tax': 'Tax' | t,
+        'total': 'Total' | t,
+        'order_tracking': 'Order Tracking' | t,
+        'tracking_number': 'Tracking Number' | t,
+        'track_package': 'Track Package' | t,
+        'delivery_location': 'Delivery Location' | t,
+        'cancel_confirm': 'Are you sure you want to cancel this order?' | t,
+        'cancel_success': 'Order cancelled successfully' | t,
+        'cancel_failed': 'Failed to cancel order' | t,
+        'adding_to_cart': 'Adding items to cart...' | t,
+        'items_added': 'Items added to cart!' | t,
+        'add_failed': 'Failed to add items to cart' | t,
+    },
+}, element_id='order-detail-modal-data') }}
+<script src="{{ url_for('static', filename='js/pages/order-detail-modal.js') }}"></script>

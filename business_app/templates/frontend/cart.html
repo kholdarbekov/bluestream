@@ -553,7 +553,7 @@
                         <h3 style="margin: 0; font-size: 20px; font-weight: 700; color: #222;">
                             {{ 'Your Items'|t }} (<span id="items-count">0</span>)
                         </h3>
-                        <button onclick="clearCart()" class="clear-cart-btn">
+                        <button data-action="clear-cart" class="clear-cart-btn">
                             <i class="far fa-trash-alt"></i> {{ 'Clear Cart'|t }}
                         </button>
                     </div>
@@ -625,330 +625,34 @@
 {% endblock %}
 
 {% block extra_js %}
-<script>
-// Configuration
-const API_BASE = '/api/v1';
-const PRODUCT_DETAIL_URL_TEMPLATE = '{{ url_for("frontend.product_detail", product_id=0) }}'.replace('/0', '/{id}');
-const PRODUCT_DETAIL_URL_SLUG_TEMPLATE = '{{ url_for("frontend.product_detail_slug", slug="__SLUG__") }}';
-
-// Cart state
-let cartItems = [];
-let isAuthenticated = CURRENT_USER !== null; // Check if user is logged in
-
-// Initialize cart on page load
-document.addEventListener('DOMContentLoaded', async function() {
-    showLoading();
-    
-    // Wait for the base.html sync to complete FIRST.
-    // This ensures we don't render stale "zombie" items from localStorage before
-    // the global sync has had a chance to wipe them (if the server cart is empty).
-    if (window.cartSyncPromise) {
-        await window.cartSyncPromise;
-    }
-
-    await loadCart();
-});
-
-// API request helper - uses cookies for auth, delegates to base apiRequest for consistency
-// Note: This page uses the base.html apiRequest which handles 401 redirects properly
-
-// Local syncCartToDatabase function removed - we use the central one in base.html
-// to ensure a single source of truth and prevent race conditions.
-
-// Load and display cart
-async function loadCart() {
-    cartItems = JSON.parse(localStorage.getItem('cart') || '[]');
-
-    if (cartItems.length === 0) {
-        showEmptyCart();
-        updateCartCount();
-        return;
-    }
-
-    try {
-        const productIds = cartItems.map(item => item.product_id);
-        const response = await apiRequest('/products/bulk', {
-            method: 'POST',
-            body: JSON.stringify({
-                product_ids: productIds,
-                language: '{{ current_language }}'
-            })
-        });
-
-        if (response.ok) {
-            const data = await response.json();
-            if (data.success && data.data && data.data.products && data.data.products.length > 0) {
-                renderCart(data.data.products);
-            } else {
-                showEmptyCart();
-            }
-        } else {
-            showError('Failed to load cart items');
-        }
-    } catch (error) {
-        console.error('Error loading cart:', error);
-        showError('Error loading cart');
-    } finally {
-        hideLoading();
-    }
-}
-
-// Render cart items
-function renderCart(products) {
-    const container = document.getElementById('cart-items-container');
-    let cartHTML = '';
-    let subtotal = 0;
-
-    cartItems.forEach(cartItem => {
-        const product = products.find(p => p.id === cartItem.product_id);
-        if (!product) return;
-
-        // Get price from pricing object (returned by serialize_product)
-        const pricing = product.pricing || {};
-        const price = parseFloat(pricing.current_price || pricing.base_price || product.base_price || 0);
-        const itemTotal = price * cartItem.quantity;
-        subtotal += itemTotal;
-
-        // Stock status - read from inventory object if available
-        let stockStatus = '{{ "In stock"|t }}';
-        let stockClass = 'in-stock';
-        const inventory = product.inventory || {};
-        const trackInventory = inventory.track_inventory !== undefined ? inventory.track_inventory : product.track_inventory;
-        const stockQuantity = inventory.stock_quantity !== undefined ? inventory.stock_quantity : product.stock_quantity;
-
-        if (trackInventory && stockQuantity !== undefined && stockQuantity !== null) {
-            if (stockQuantity === 0) {
-                stockStatus = '{{ "Out of stock"|t }}';
-                stockClass = 'out-of-stock';
-            } else if (stockQuantity < cartItem.quantity) {
-                stockStatus = `{{ "Only"|t }} ${stockQuantity} {{ "available"|t }}`;
-                stockClass = 'low-stock';
-            } else if (stockQuantity < 10) {
-                stockStatus = `{{ "Low stock"|t }} (${stockQuantity})`;
-                stockClass = 'low-stock';
-            }
-        }
-
-        // Get product image from media.images array or fallback
-        const productImages = (product.media && product.media.images) || product.images || [];
-        const productImage = productImages.length > 0 ? productImages[0] : '{{ url_for("static", filename="images/resource/shop/shop-1.jpg") }}';
-
-        const productUrl = product.slug
-            ? PRODUCT_DETAIL_URL_SLUG_TEMPLATE.replace('__SLUG__', encodeURIComponent(product.slug))
-            : PRODUCT_DETAIL_URL_TEMPLATE.replace('{id}', product.id);
-
-        cartHTML += `
-            <div class="cart-item-card" data-product-id="${product.id}">
-                <div class="item-image">
-                    <img src="${productImage}" alt="${product.name}">
-                </div>
-                <div class="item-details">
-                    <div class="item-name">
-                        <a href="${productUrl}">${product.name}</a>
-                    </div>
-                    <div class="item-stock ${stockClass}">${stockStatus}</div>
-                    <div class="item-price-row">
-                        <span class="item-unit-price">${formatPrice(price)} × ${cartItem.quantity}</span>
-                        <span class="item-total-price">${formatPrice(itemTotal)}</span>
-                    </div>
-                </div>
-                <div class="item-actions">
-                    <div class="quantity-control">
-                        <button class="qty-btn" onclick="updateQuantity(${product.id}, ${cartItem.quantity - 1})" ${cartItem.quantity <= 1 ? 'disabled' : ''}>
-                            <i class="far fa-minus"></i>
-                        </button>
-                        <input type="text" class="qty-input" value="${cartItem.quantity}" readonly>
-                        <button class="qty-btn" onclick="updateQuantity(${product.id}, ${cartItem.quantity + 1})">
-                            <i class="far fa-plus"></i>
-                        </button>
-                    </div>
-                    <button class="remove-btn" onclick="removeFromCart(${product.id})" title="{{ 'Remove'|t }}">
-                        <i class="far fa-times"></i>
-                    </button>
-                </div>
-            </div>
-        `;
-    });
-
-    container.innerHTML = cartHTML;
-
-    // Update summary
-    updateSummary(subtotal);
-    updateCartCount();
-
-    // Show cart content
-    document.getElementById('cart-content').style.display = 'block';
-    document.getElementById('items-count').textContent = cartItems.length;
-}
-
-// Minimum order amount (in UZS)
-const MIN_ORDER_AMOUNT = {{ config.get('MIN_ORDER_AMOUNT', 20000) }};
-
-// Update cart summary
-function updateSummary(subtotal) {
-    document.getElementById('summary-subtotal').textContent = formatPrice(subtotal);
-    document.getElementById('summary-total').textContent = formatPrice(subtotal);
-    
-    // Update minimum order warning
-    const warningEl = document.getElementById('min-order-warning');
-    const titleEl = document.getElementById('min-order-title');
-    const textEl = document.getElementById('min-order-text');
-    const progressEl = document.getElementById('min-order-progress');
-    const checkoutBtn = document.getElementById('checkout-btn');
-    
-    if (subtotal < MIN_ORDER_AMOUNT) {
-        const remaining = MIN_ORDER_AMOUNT - subtotal;
-        const progress = Math.min((subtotal / MIN_ORDER_AMOUNT) * 100, 100);
-        
-        warningEl.style.display = 'flex';
-        warningEl.classList.add('error');
-        warningEl.classList.remove('success');
-        warningEl.querySelector('i').className = 'far fa-exclamation-triangle';
-        
-        titleEl.textContent = '{{ "Minimum order amount not met"|t }}';
-        textEl.textContent = '{{ "Add"|t }} ' + formatPrice(remaining) + ' {{ "more to checkout"|t }}. {{ "Minimum order amount"|t }}: ' + formatPrice(MIN_ORDER_AMOUNT);
-        progressEl.style.width = progress + '%';
-        
-        // Disable checkout button
-        checkoutBtn.classList.add('checkout-btn-disabled');
-        checkoutBtn.onclick = function(e) {
-            e.preventDefault();
-            showNotification('{{ "Minimum order amount is"|t }} ' + formatPrice(MIN_ORDER_AMOUNT), 'warning');
-        };
-    } else {
-        // Show success message
-        warningEl.style.display = 'flex';
-        warningEl.classList.remove('error');
-        warningEl.classList.add('success');
-        warningEl.querySelector('i').className = 'far fa-check-circle';
-        
-        titleEl.textContent = '{{ "Ready for checkout!"|t }}';
-        textEl.textContent = '{{ "Your order meets the minimum amount"|t }}';
-        progressEl.style.width = '100%';
-        
-        // Enable checkout button
-        checkoutBtn.classList.remove('checkout-btn-disabled');
-        checkoutBtn.onclick = null;
-    }
-}
-
-// Update quantity
-async function updateQuantity(productId, newQuantity) {
-    if (newQuantity < 1) return;
-
-    const itemIndex = cartItems.findIndex(item => item.product_id === productId);
-    if (itemIndex === -1) return;
-
-    cartItems[itemIndex].quantity = newQuantity;
-    localStorage.setItem('cart', JSON.stringify(cartItems));
-
-    // Update database if authenticated
-    if (isAuthenticated) {
-        try {
-            await apiRequest(`/cart/items/${productId}`, {
-                method: 'PUT',
-                body: JSON.stringify({ quantity: newQuantity })
-            });
-        } catch (error) {
-            console.error('Error updating cart in database:', error);
-        }
-    }
-
-    // Reload cart
-    await loadCart();
-}
-
-// Remove from cart
-async function removeFromCart(productId) {
-    if (!confirm('{{ "Are you sure you want to remove this item?"|t }}')) {
-        return;
-    }
-
-    cartItems = cartItems.filter(item => item.product_id !== productId);
-    localStorage.setItem('cart', JSON.stringify(cartItems));
-
-    // Update database if authenticated
-    if (isAuthenticated) {
-        try {
-            await apiRequest(`/cart/items/${productId}`, { method: 'DELETE' });
-        } catch (error) {
-            console.error('Error removing from database:', error);
-        }
-    }
-
-    showNotification('{{ "Product removed from cart"|t }}', 'success');
-
-    if (cartItems.length === 0) {
-        showEmptyCart();
-    } else {
-        await loadCart();
-    }
-
-    updateCartCount();
-}
-
-// Clear cart
-async function clearCart() {
-    if (!confirm('{{ "Are you sure you want to clear your cart?"|t }}')) {
-        return;
-    }
-
-    cartItems = [];
-    localStorage.setItem('cart', JSON.stringify(cartItems));
-
-    // Clear database if authenticated
-    if (isAuthenticated) {
-        try {
-            await apiRequest('/cart/clear', { method: 'POST' });
-        } catch (error) {
-            console.error('Error clearing database cart:', error);
-        }
-    }
-
-    showNotification('{{ "Cart cleared"|t }}', 'success');
-    showEmptyCart();
-    updateCartCount();
-}
-
-// Format price
-function formatPrice(amount) {
-    const num = parseFloat(amount) || 0;
-    return new Intl.NumberFormat('uz-UZ').format(Math.round(num)) + ' UZS';
-}
-
-// Update cart count in header
-function updateCartCount() {
-    const count = cartItems.reduce((sum, item) => sum + item.quantity, 0);
-    const cartCountElements = document.querySelectorAll('.cart-count, .cart-badge');
-    cartCountElements.forEach(el => {
-        el.textContent = count;
-        el.style.display = count > 0 ? 'block' : 'none';
-    });
-}
-
-// Show loading state
-function showLoading() {
-    document.getElementById('cart-loading').style.display = 'block';
-    document.getElementById('cart-content').style.display = 'none';
-    document.getElementById('empty-cart').style.display = 'none';
-}
-
-// Hide loading state
-function hideLoading() {
-    document.getElementById('cart-loading').style.display = 'none';
-}
-
-// Show empty cart
-function showEmptyCart() {
-    document.getElementById('cart-loading').style.display = 'none';
-    document.getElementById('cart-content').style.display = 'none';
-    document.getElementById('empty-cart').style.display = 'block';
-}
-
-// Show error
-function showError(message) {
-    showNotification(message, 'error');
-    hideLoading();
-}
-</script>
+{% from "frontend/macros/page_data.html" import render_page_data %}
+{{ render_page_data({
+    'product_detail_url_template': url_for('frontend.product_detail', product_id=0) | replace('/0', '/{id}'),
+    'product_detail_url_slug_template': url_for('frontend.product_detail_slug', slug='__SLUG__'),
+    'min_order_amount': config.get('MIN_ORDER_AMOUNT', 20000),
+    'current_language': current_language,
+    'default_image': url_for('static', filename='images/resource/shop/shop-1.jpg'),
+    'i18n': {
+        'in_stock': 'In stock' | t,
+        'out_of_stock': 'Out of stock' | t,
+        'only': 'Only' | t,
+        'available': 'available' | t,
+        'low_stock': 'Low stock' | t,
+        'remove': 'Remove' | t,
+        'min_not_met': 'Minimum order amount not met' | t,
+        'add': 'Add' | t,
+        'more_to_checkout': 'more to checkout' | t,
+        'min_order_amount': 'Minimum order amount' | t,
+        'min_warning': 'Minimum order amount is' | t,
+        'ready_checkout': 'Ready for checkout!' | t,
+        'meets_minimum': 'Your order meets the minimum amount' | t,
+        'load_failed': 'Failed to load cart items' | t,
+        'load_error': 'Error loading cart' | t,
+        'remove_confirm': 'Are you sure you want to remove this item?' | t,
+        'removed': 'Product removed from cart' | t,
+        'clear_confirm': 'Are you sure you want to clear your cart?' | t,
+        'cleared': 'Cart cleared' | t,
+    },
+}) }}
+<script src="{{ url_for('static', filename='js/pages/cart.js') }}"></script>
 {% endblock %}

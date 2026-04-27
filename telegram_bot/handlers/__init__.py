@@ -41,35 +41,35 @@ class SimpleHandlers:
         """Admin panel - access controlled by backend API"""
         language = await self._get_language(update)
         await self._send_response(update, i18n.get('telegram.admin.panel_coming_soon', language))
-    
+
     async def help_handler(self, update, context):
         language = await self._get_language(update)
         await self._send_response(update, i18n.get('telegram.help.command_hint', language))
-    
+
     async def support_menu(self, update, context):
         language = await self._get_language(update)
         await self._send_response(update, i18n.get('telegram.support.menu_coming_soon', language))
-    
+
     async def faq_handler(self, update, context):
         language = await self._get_language(update)
         await self._send_response(update, i18n.get('telegram.support.faq_coming_soon', language))
-    
+
     async def contact_support(self, update, context):
         language = await self._get_language(update)
         await self._send_response(update, i18n.get('telegram.support.contact_message', language))
-    
+
     async def handle_support_message(self, update, context, text):
         language = await self._get_language(update)
         await self._send_response(
             update,
             i18n.get('telegram.support.message_received', language).format(message=text)
         )
-    
+
     async def admin_orders(self, update, context):
         """Admin orders - access controlled by backend API"""
         language = await self._get_language(update)
         await self._send_response(update, i18n.get('telegram.admin.orders_panel_coming_soon', language))
-    
+
     async def admin_analytics(self, update, context):
         """Admin analytics - access controlled by backend API"""
         language = await self._get_language(update)

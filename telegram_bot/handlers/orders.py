@@ -75,36 +75,36 @@ class OrderHandlers(BaseHandler):
             f"\n🔁 COD prepaid used: {format_price(potential_applied)} UZS."
             f" Pay on delivery: {format_price(payable_after)} UZS."
         )
-    
+
     async def orders_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Show user's orders"""
         try:
             user = await user_middleware(update)
             if not user:
                 return
-            
+
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
-            
+
             # Get user token
             async with api_client as client:
                 user_token = await get_auth_token(update, context, client)
                 if not user_token:
                     await self._handle_auth_error(update, language)
                     return
-                
+
                 # Get user orders
                 response = await client.get_user_orders(user_token)
                 if not response.success:
                     await self._handle_api_error(update, response.error, language)
                     return
-                
+
                 orders = response.data.get('data', {}).get('orders', [])
-            
+
             if not orders:
                 no_orders_text = i18n.get('telegram.orders.no_orders', language)
                 keyboard = MenuKeyboards.main_menu(language)
-                
+
                 if update.callback_query:
                     try:
                         await update.callback_query.edit_message_text(
@@ -124,11 +124,11 @@ class OrderHandlers(BaseHandler):
                         reply_markup=keyboard
                     )
                 return
-            
+
             # Show orders list
             orders_text = i18n.get('telegram.orders.your_orders', language, count=len(orders)) + "\n\n"
             keyboard = OrderKeyboards.order_list(orders, language)
-            
+
             if update.callback_query:
                 try:
                     await update.callback_query.edit_message_text(
@@ -147,13 +147,13 @@ class OrderHandlers(BaseHandler):
                     text=orders_text,
                     reply_markup=keyboard
                 )
-            
+
             logger.info(f"Orders menu shown to user {user_id}")
-            
+
         except Exception as e:
             logger.error(f"Error in orders menu: {e}")
             await self._handle_error(update)
-    
+
     async def order_details(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Show order details"""
         try:
@@ -161,45 +161,45 @@ class OrderHandlers(BaseHandler):
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
             unknown_text = i18n.get('telegram.common.unknown', language)
-            
+
             # Extract order ID
             order_id = int(query.data.split('_')[1])
-            
+
             # Get order details
             async with api_client as client:
                 user_token = await get_auth_token(update, context, client)
                 if not user_token:
                     await self._handle_auth_error(update, language)
                     return
-                
+
                 response = await client.get_order(user_token, order_id)
                 if not response.success:
                     await self._handle_api_error(update, response.error, language)
                     return
-                
+
                 order = response.data['data']['order']
                 delivery = response.data['data']['delivery']
-            
+
             # Format order details
             details_text = MessageBuilder.build_order_summary(order, language)
             logger.info(f"order_details handler: details_text: {details_text}")
-            
+
             # Add order items if available
             if order.get('order_items'):
                 details_text += f"\n\n📋 {i18n.get('telegram.orders.items_header', language)}:\n"
                 for item in order['order_items']:
                     details_text += f"• {item.get('product_name', unknown_text)} x{item.get('quantity', 1)}\n"
                     details_text += f"  💰 {format_price(item.get('total_price', 0))} UZS\n"
-            
+
             details_text = escape_markdown(details_text, version=2)
-            
+
             # Add delivery info if available
             if order.get('delivery_address'):
-                # Make order delivery address title bold. 
+                # Make order delivery address title bold.
                 details_text += f"\n{i18n.get('telegram.orders.delivery_info', language)}:\n*{escape_markdown(order['delivery_address'].get('title', unknown_text), version=2)}* \- {escape_markdown(order['delivery_address'].get('full_address', ''), version=2)}"
-            
+
             keyboard = OrderKeyboards.order_details(order_id, order.get('status', ''), language)
-            
+
             logger.info(f"order_details handler: details_text after escaping: {details_text}")
             await query.edit_message_text(
                 text=details_text,
@@ -207,35 +207,35 @@ class OrderHandlers(BaseHandler):
                 parse_mode=constants.ParseMode.MARKDOWN_V2
             )
             await query.answer()
-            
+
             logger.info(f"Order {order_id} details shown to user {user_id}")
-            
+
         except Exception as e:
             logger.error(f"Error in order details: {e}")
             await self._handle_error(update)
-    
+
     async def cancel_order(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle order cancellation"""
         try:
             query = update.callback_query
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
-            
+
             # Extract order ID from callback data (format: cancel_order_123)
             order_id = int(query.data.split('_')[2])
-            
+
             # Confirm cancellation
             if 'confirm' not in query.data:
                 # Ask for confirmation first
                 confirm_keyboard = MenuKeyboards.yes_no_buttons(
-                    language, 
-                    yes_callback='cancel_order_confirm_yes', 
+                    language,
+                    yes_callback='cancel_order_confirm_yes',
                     no_callback='cancel_order_confirm_no'
                 )
-                
+
                 # Context needs to know which order we are cancelling
                 context.user_data['cancelling_order_id'] = order_id
-                
+
                 await query.edit_message_text(
                     text=i18n.get('telegram.orders.cancel_confirm', language),
                     reply_markup=confirm_keyboard
@@ -253,7 +253,7 @@ class OrderHandlers(BaseHandler):
             query = update.callback_query
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
-            
+
             # Check if this is for order cancellation
             order_id = context.user_data.get('cancelling_order_id')
             if not order_id:
@@ -266,9 +266,9 @@ class OrderHandlers(BaseHandler):
                 if not user_token:
                     await self._handle_auth_error(update, language)
                     return
-                
+
                 response = await client.cancel_order(user_token, order_id)
-                
+
                 if response.success:
                     await query.answer(i18n.get('telegram.orders.cancel_success', language))
                     # Clear context
@@ -277,7 +277,7 @@ class OrderHandlers(BaseHandler):
                     await self.orders_menu(update, context)
                 else:
                     await self._handle_api_error(update, response.error, language)
-                    
+
         except Exception as e:
             logger.error(f"Error processing cancellation: {e}")
             await self._handle_error(update)
@@ -288,21 +288,21 @@ class OrderHandlers(BaseHandler):
             query = update.callback_query
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
-            
+
             # Check if this is for order cancellation
             order_id = context.user_data.get('cancelling_order_id')
             if not order_id:
                 await query.answer()
                 return
-            
+
             # Clear context
             context.user_data.pop('cancelling_order_id', None)
-            
+
             # Return to order details
             # Hack: modify query.data to be what order_details expects
             query.data = f"order_{order_id}"
             await self.order_details(update, context)
-            
+
         except Exception as e:
             logger.error(f"Error denying cancellation: {e}")
             await self._handle_error(update)
@@ -313,30 +313,30 @@ class OrderHandlers(BaseHandler):
             query = update.callback_query
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
-            
+
             # Extract order ID from callback data (format: track_order_123)
             order_id = int(query.data.split('_')[2])
-            
+
             # Get order tracking details from API
             async with api_client as client:
                 user_token = await get_auth_token(update, context, client)
                 if not user_token:
                     await self._handle_auth_error(update, language)
                     return
-                
+
                 response = await client.track_order(user_token, order_id)
                 if not response.success:
                     await self._handle_api_error(update, response.error, language)
                     return
-                
+
                 tracking_data = response.data.get('data', {})
                 order = tracking_data.get('order', {})
                 delivery = tracking_data.get('delivery', {})
                 timeline = tracking_data.get('timeline', [])
                 time_remaining = tracking_data.get('estimated_time_remaining', {})
-            
+
             status_icons = ORDER_STATUS_ICONS
-            
+
             # Status labels mapping
             status_labels = {
                 'created': i18n.get('telegram.orders.status_created', language),
@@ -348,21 +348,21 @@ class OrderHandlers(BaseHandler):
                 'cancelled': i18n.get('telegram.orders.status_cancelled', language),
                 'returned': i18n.get('telegram.orders.status_returned', language)
             }
-            
+
             # Build tracking message header
             tracking_text = f"📍 *{i18n.get('telegram.orders.tracking_title', language)}*\n\n"
             tracking_text += f"🔢 {i18n.get('telegram.order.number', language, order.get('order_number', order_id))}\n\n"
-            
+
             # Build visual timeline
             tracking_text += f"━━━ {i18n.get('telegram.orders.timeline', language)} ━━━\n"
-            
+
             if timeline:
                 for entry in timeline:
                     status = entry.get('status', 'unknown')
                     timestamp = entry.get('timestamp', '')
                     is_current = entry.get('is_current', False)
                     notes = entry.get('notes', '')
-                    
+
                     # Format timestamp for display (convert UTC → display timezone)
                     formatted_time = ''
                     if timestamp:
@@ -375,16 +375,16 @@ class OrderHandlers(BaseHandler):
                         except (ValueError, TypeError) as e:
                             logger.warning(f"Failed to parse order timestamp '{timestamp}': {e}")
                             formatted_time = timestamp[:16] if len(timestamp) > 16 else timestamp
-                    
+
                     icon = status_icons.get(status, '📋')
                     label = status_labels.get(status, status.replace('_', ' ').title())
-                    
+
                     # Mark current status
                     if is_current:
                         tracking_text += f"🔵 {formatted_time} - {label} ← {i18n.get('telegram.orders.current_status', language)}\n"
                     else:
                         tracking_text += f"✅ {formatted_time} - {label}\n"
-                    
+
                     # Add notes if present (escape markdown special chars)
                     if notes:
                         # Escape markdown special characters
@@ -396,9 +396,9 @@ class OrderHandlers(BaseHandler):
                 icon = status_icons.get(current_status, '📋')
                 label = status_labels.get(current_status, current_status)
                 tracking_text += f"{icon} {label}\n"
-            
+
             tracking_text += "\n"
-            
+
             # Add estimated time remaining
             if time_remaining and time_remaining.get('total_minutes'):
                 mins = time_remaining.get('total_minutes', 0)
@@ -407,47 +407,47 @@ class OrderHandlers(BaseHandler):
                     tracking_text += f"⏰ {i18n.get('telegram.orders.estimated_remaining', language)}: {hours}h {mins % 60}m\n"
                 else:
                     tracking_text += f"⏰ {i18n.get('telegram.orders.estimated_remaining', language)}: {mins}m\n"
-            
+
             # Create back button (use order_tracking keyboard for tracking view)
             keyboard = OrderKeyboards.order_tracking(order_id, language)
-            
+
             await query.edit_message_text(
                 text=tracking_text,
                 reply_markup=keyboard,
                 parse_mode='Markdown'
             )
             await query.answer()
-            
+
             logger.info(f"Order {order_id} tracking with timeline shown to user {user_id}")
-            
+
         except Exception as e:
             logger.error(f"Error in track_order: {e}")
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
             await self._handle_error(update)
-    
+
     async def checkout_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle checkout process"""
         try:
             user = await user_middleware(update)
             if not user:
                 return
-            
+
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
-            
+
             # Get user's addresses
             async with api_client as client:
                 user_token = await get_auth_token(update, context, client)
                 if not user_token:
                     await self._handle_auth_error(update, language)
                     return
-                
+
                 response = await client.get_user_addresses(user_token)
                 if not response.success:
                     await self._handle_api_error(update, response.error, language)
                     return
-                
+
                 addresses = response.data.get('data', {}).get('addresses', [])
 
             # Store addresses for display in order confirmation
@@ -471,15 +471,15 @@ class OrderHandlers(BaseHandler):
                         text=add_address_text,
                         reply_markup=keyboard
                     )
-                
+
                 # Set state for address input
                 await self.user_repo.update_user_state(user_id, {'awaiting_input': 'address_location'})
                 return
-            
+
             # Show address selection
             address_text = i18n.get('telegram.orders.select_address', language)
             keyboard = OrderKeyboards.delivery_addresses(addresses, language)
-            
+
             if update.callback_query:
                 await update.callback_query.edit_message_text(
                     text=address_text,
@@ -491,21 +491,21 @@ class OrderHandlers(BaseHandler):
                     text=address_text,
                     reply_markup=keyboard
                 )
-            
+
         except Exception as e:
             logger.error(f"Error in checkout handler: {e}")
             await self._handle_error(update)
-    
+
     async def address_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle address selection"""
         try:
             query = update.callback_query
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
-            
+
             # Extract address ID
             address_id = int(query.data.split('_')[1])
-            
+
             # Store selected address and its display info
             context.user_data['selected_address_id'] = address_id
             address_map = context.user_data.get('checkout_addresses', {})
@@ -542,33 +542,33 @@ class OrderHandlers(BaseHandler):
             if restrictions.get('cod_restricted'):
                 payment_text += "\n\n" + self._cod_restriction_notice(restrictions)
             keyboard = OrderKeyboards.payment_methods(payment_methods, language)
-            
+
             await query.edit_message_text(
                 text=payment_text,
                 reply_markup=keyboard
             )
             await query.answer()
-            
+
         except Exception as e:
             logger.error(f"Error in address handler: {e}")
             await self._handle_error(update)
-    
+
     async def payment_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle payment method selection"""
         try:
             query = update.callback_query
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
-            
+
             # Extract payment method
             payment_method = query.data.split('_')[1]
 
             # Store payment method
             context.user_data['selected_payment_method'] = payment_method
-            
+
             # Show order confirmation
             await self._show_order_confirmation(update, context)
-            
+
         except Exception as e:
             logger.error(f"Error in payment handler: {e}")
             await self._handle_error(update)
@@ -597,7 +597,7 @@ class OrderHandlers(BaseHandler):
         except Exception as e:
             logger.error(f"Error cancelling checkout: {e}")
             await self._handle_error(update)
-    
+
     async def confirm_order(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle order confirmation"""
         try:
@@ -761,10 +761,10 @@ class OrderHandlers(BaseHandler):
         user_id = update.effective_user.id
         language = await i18n.get_user_language(user_id)
         unknown_text = i18n.get('telegram.common.unknown', language)
-        
+
         # Build confirmation message
         confirmation_text = i18n.get('telegram.orders.confirmation_title', language) + "\n\n"
-        
+
         # Get cart items from API by api_client.get_cart and show them
         cart_total_amount = 0
         async with api_client as client:
@@ -772,12 +772,12 @@ class OrderHandlers(BaseHandler):
             if not user_token:
                 await self._handle_auth_error(update, language)
                 return
-            
+
             response = await client.get_cart(user_token)
             if not response.success:
                 await self._handle_api_error(update, response.error, language)
                 return
-            
+
             cart = response.data['data']['cart']
             if not cart:
                 await self._handle_api_error(update, i18n.get('telegram.orders.cart_empty', language), language)
@@ -788,7 +788,7 @@ class OrderHandlers(BaseHandler):
                 item_subtotal_price = item.get('product', {}).get('current_price', 0) * item.get('quantity', 1)
                 cart_total_amount += item_subtotal_price
                 confirmation_text += f"  💰 {format_price(item_subtotal_price)} UZS\n\n"
-        
+
         # Add address info
         address_id = context.user_data.get('selected_address_id')
         if address_id:
@@ -833,9 +833,9 @@ class OrderHandlers(BaseHandler):
                 confirmation_text += f"💳 COD prepaid balance: {format_price(available_balance)} UZS\n"
                 confirmation_text += f"🔁 Auto-applied on this COD order: {format_price(potential_applied)} UZS\n"
                 confirmation_text += f"🧾 Estimated COD payable after prepaid: {format_price(payable_after)} UZS"
-        
+
         keyboard = OrderKeyboards.order_confirmation(language)
-        
+
         await update.callback_query.edit_message_text(
             text=confirmation_text,
             reply_markup=keyboard

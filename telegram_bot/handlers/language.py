@@ -16,10 +16,10 @@ logger = logging.getLogger(__name__)
 
 class LanguageHandler:
     """Language selection handler class"""
-    
+
     def __init__(self):
         self.user_repo = BotUserRepository(db_manager)
-    
+
     async def language_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Show language selection menu"""
         try:
@@ -67,7 +67,7 @@ class LanguageHandler:
                     await update.message.reply_text(error_msg)
             except Exception as e:
                 logger.warning(f"Failed to send error message in language handler fallback: {e}")
-    
+
     async def set_language(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle language selection"""
         try:

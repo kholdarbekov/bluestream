@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    
+
     <title>{% block title %}{{ company_name }}{% endblock %}</title>
     {% set page_title = self.title()|striptags|trim %}
     {% set page_description = meta_description|default(default_meta_description, true) %}
@@ -33,16 +33,16 @@
     <meta name="twitter:description" content="{{ page_description }}">
     <meta name="twitter:image" content="{{ default_og_image }}">
     {% block extra_meta %}{% endblock %}
-    
+
     <!-- Fav Icon -->
     <link rel="icon" href="{{ url_for('static', filename='images/favicon.ico') }}" type="image/x-icon">
-    
+
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Spartan:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Open+Sans:ital,wght@0,300;0,400;0,600;0,700;0,800;1,300;1,400;1,600;1,700;1,800&display=swap" rel="stylesheet">
-    
+
     <!-- Stylesheets -->
     <link href="{{ url_for('static', filename='css/font-awesome-all.css') }}" rel="stylesheet">
     <link href="{{ url_for('static', filename='css/flaticon.css') }}" rel="stylesheet">
@@ -56,13 +56,13 @@
     <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
     <link href="{{ url_for('static', filename='css/responsive.css') }}" rel="stylesheet">
     <link href="{{ url_for('static', filename='css/custom-base.css') }}" rel="stylesheet">
-    
+
     {% block extra_head %}{% endblock %}
 </head>
 
 <body>
     <div class="boxed_wrapper">
-        
+
         <!-- preloader -->
         <div class="loader-wrap">
             <div class="preloader">
@@ -155,7 +155,7 @@
                                 </div>
                             </div>
                         </li>
-                        
+
                         <!-- Language Selector -->
                         <li class="language-selector">
                             <div class="dropdown">
@@ -169,7 +169,7 @@
                                 </div>
                             </div>
                         </li>
-                        
+
                         <!-- Shopping Cart -->
                         <li class="cart-box">
                             <a href="{{ external_url_for_lang('frontend.cart') }}">
@@ -177,7 +177,7 @@
                                 <span id="cart-count">0</span>
                             </a>
                         </li>
-                        
+
                         <!-- User Menu -->
                         {% if current_user %}
                         <li class="user-menu">
@@ -196,7 +196,7 @@
                                         <i class="far fa-star"></i> {{ 'landing.account.loyalty'|t }}
                                     </a>
                                     <div class="dropdown-divider"></div>
-                                    <a class="dropdown-item" href="#" onclick="logout()">
+                                    <a class="dropdown-item" href="#" data-action="logout">
                                         <i class="far fa-sign-out"></i> {{ 'landing.nav.logout'|t }}
                                     </a>
                                 </div>
@@ -243,7 +243,7 @@
                                 </div>
                             </div>
                         </li>
-                        
+
                         <!-- Language Selector -->
                         <li class="language-selector">
                             <div class="dropdown">
@@ -257,7 +257,7 @@
                                 </div>
                             </div>
                         </li>
-                        
+
                         <!-- Shopping Cart -->
                         <li class="cart-box">
                             <a href="{{ external_url_for_lang('frontend.cart') }}">
@@ -265,7 +265,7 @@
                                 <span id="cart-count-sticky">0</span>
                             </a>
                         </li>
-                        
+
                         <!-- User Menu -->
                         {% if current_user %}
                         <li class="user-menu">
@@ -284,7 +284,7 @@
                                         <i class="far fa-star"></i> {{ 'landing.account.loyalty'|t }}
                                     </a>
                                     <div class="dropdown-divider"></div>
-                                    <a class="dropdown-item" href="#" onclick="logout()">
+                                    <a class="dropdown-item" href="#" data-action="logout">
                                         <i class="far fa-sign-out"></i> {{ 'landing.nav.logout'|t }}
                                     </a>
                                 </div>
@@ -307,7 +307,7 @@
         <div class="mobile-menu">
             <div class="menu-backdrop"></div>
             <div class="close-btn"><i class="fas fa-times"></i></div>
-            
+
             <nav class="menu-box">
                 <div class="nav-logo"><a href="{{ external_url_for_lang('frontend.index') }}"><img src="{{ url_for('static', filename='images/logo_aqua_element.svg') }}" alt="{{ company_name }}" title="{{ company_name }}"></a></div>
                 <div class="menu-outer"><!--Here Menu Will Come Automatically Via Javascript / Same Menu as in Header--></div>
@@ -481,637 +481,28 @@
     <script src="{{ url_for('static', filename='js/jquery-ui.js') }}"></script>
     <script src="{{ url_for('static', filename='js/jquery.nice-select.min.js') }}"></script>
     <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/pages/_page-data.js') }}"></script>
+
 
     <!-- Custom JavaScript -->
-    <script>
-        // Global variables
-        const API_BASE_URL = '{{ request.url_root }}api/v1';
-        const CURRENT_USER = {{ current_user|tojson if current_user else 'null' }};
-        
-        // Authentication token handling (now using httpOnly cookies)
-        function getAuthToken() {
-            // Tokens are now stored in httpOnly cookies and sent automatically
-            // No need to manually retrieve tokens from localStorage
-            return null;
-        }
-        
-        function setAuthToken(token, refreshToken = null) {
-            // Tokens are now set as httpOnly cookies by the server
-            // No need to manually store tokens in localStorage
-            console.warn('setAuthToken called but tokens are now handled via httpOnly cookies');
-        }
-        
-        function getRefreshToken() {
-            // Refresh tokens are now stored in httpOnly cookies
-            return null;
-        }
-        
-        function removeAuthTokens() {
-            // Clear any remaining localStorage data (migration cleanup)
-            localStorage.removeItem('access_token');
-            localStorage.removeItem('refresh_token');
-            localStorage.removeItem('user_session_id');
-            // Actual token removal is handled by the server during logout
-        }
-        
-        // Helper to delete a cookie
-        function deleteCookie(name, path = '/', domain = null) {
-            let cookieString = `${name}=; Max-Age=0; Path=${path};`;
-            if (domain) {
-                cookieString += ` Domain=${domain};`;
-            }
-            document.cookie = cookieString;
-        }
+    {% from "frontend/macros/page_data.html" import render_page_data %}
+    {{ render_page_data({
+        'api_base_url': request.url_root ~ 'api/v1',
+        'current_user': current_user,
+        'is_authenticated': true if current_user else false,
+        'login_url': url_for('frontend.login'),
+        'i18n': {
+            'success': 'Success' | t,
+            'error': 'Error' | t,
+            'warning': 'Warning' | t,
+            'info': 'Info' | t,
+            'logged_out': 'landing.notification.logged_out' | t,
+            'session_expired': 'landing.notification.session_expired' | t,
+            'product_added': 'landing.notification.product_added_to_cart' | t,
+        },
+    }, element_id='base-page-data') }}
+    <script src="{{ url_for('static', filename='js/pages/base.js') }}"></script>
 
-        // Enhanced logout function with API call
-        async function logout() {
-            try {
-                // Call logout API to clear httpOnly cookies on server
-                await apiRequest('/auth/logout', {
-                    method: 'POST',
-                    credentials: 'include'  // Include cookies in request
-                });
-            } catch (error) {
-                console.error('Logout API call failed:', error);
-                // Continue with client-side logout even if API fails
-            }
-
-            // Clear local storage
-            removeAuthTokens();
-            cart = [];
-            localStorage.removeItem('cart');
-
-            // Manually clear all auth-related cookies (JavaScript-accessible ones)
-            // This is a fallback in case server-side cookie clearing doesn't work
-            deleteCookie('csrf_access_token', '/', '.aqua-element.uz');
-            deleteCookie('csrf_refresh_token', '/', '.aqua-element.uz');
-            deleteCookie('csrf_access_token', '/');  // Also try without domain
-            deleteCookie('csrf_refresh_token', '/');
-
-            // Force redirect to login (using replace to prevent back button)
-            // This ensures cookies are properly cleared before next page load
-            window.location.replace('{{ url_for("frontend.login") }}');
-        }
-        
-        // Logout from all sessions
-        async function logoutAll() {
-            const token = getAuthToken();
-            
-            try {
-                if (token) {
-                    await apiRequest('/auth/logout-all', {
-                        method: 'POST'
-                    });
-                }
-            } catch (error) {
-                console.error('Logout all API call failed:', error);
-            }
-            
-            // Clear local storage
-            removeAuthTokens();
-            cart = [];
-            localStorage.removeItem('cart');
-            
-            showNotification('{{ "landing.notification.logged_out"|t }}', 'success');
-            
-            setTimeout(() => {
-                window.location.href = '{{ url_for("frontend.login") }}';
-            }, 1000);
-        }
-        
-        // Token refresh function
-        async function refreshToken() {
-            const refreshTokenValue = getRefreshToken();
-            
-            if (!refreshTokenValue) {
-                logout();
-                return null;
-            }
-            
-            try {
-                const response = await fetch(API_BASE_URL + '/auth/refresh-token', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        refresh_token: refreshTokenValue
-                    })
-                });
-                
-                const result = await response.json();
-                
-                if (response.ok && result.success) {
-                    setAuthToken(result.data.access_token);
-                    return result.data.access_token;
-                } else {
-                    // Refresh failed, need to login again
-                    logout();
-                    return null;
-                }
-            } catch (error) {
-                console.error('Token refresh failed:', error);
-                logout();
-                return null;
-            }
-        }
-        
-        // Cart management
-        let cart = JSON.parse(localStorage.getItem('cart') || '[]');
-        
-        function updateCartCount() {
-            const count = cart.reduce((sum, item) => sum + item.quantity, 0);
-            const cartCounters = document.querySelectorAll('#cart-count, #cart-count-sticky, .cart-box span');
-            
-            cartCounters.forEach(counter => {
-                counter.textContent = count;
-                counter.style.display = count > 0 ? 'inline' : 'none';
-            });
-        }
-        
-        async function addToCart(productId, quantity = 1) {
-            const existingItem = cart.find(item => item.product_id === productId);
-            if (existingItem) {
-                existingItem.quantity += quantity;
-            } else {
-                cart.push({ product_id: productId, quantity: quantity });
-            }
-            localStorage.setItem('cart', JSON.stringify(cart));
-            updateCartCount();
-            showNotification('{{ "landing.notification.product_added_to_cart"|t }}', 'success');
-
-            // Sync with backend if authenticated
-            if (CURRENT_USER) {
-                try {
-                    await apiRequest('/cart/items', {
-                        method: 'POST',
-                        body: JSON.stringify({
-                            product_id: productId,
-                            quantity: quantity
-                        })
-                    });
-                } catch (error) {
-                    console.error('Failed to sync item to backend cart:', error);
-                    // Silently fail as local cart is still valid
-                }
-            }
-        }
-        
-        function removeFromCart(productId) {
-            cart = cart.filter(item => item.product_id !== productId);
-            localStorage.setItem('cart', JSON.stringify(cart));
-            updateCartCount();
-        }
-        
-        // ============================================================
-        // Modern Toast Notification System
-        // ============================================================
-        (function() {
-            // Create toast container if it doesn't exist
-            let toastContainer = document.getElementById('toast-container');
-            if (!toastContainer) {
-                toastContainer = document.createElement('div');
-                toastContainer.id = 'toast-container';
-                toastContainer.style.cssText = `
-                    position: fixed;
-                    top: 20px;
-                    right: 20px;
-                    z-index: 99999;
-                    display: flex;
-                    flex-direction: column;
-                    gap: 10px;
-                    max-width: 400px;
-                    pointer-events: none;
-                `;
-                document.body.appendChild(toastContainer);
-            }
-            
-            // Add toast styles
-            const styleId = 'toast-notification-styles';
-            if (!document.getElementById(styleId)) {
-                const style = document.createElement('style');
-                style.id = styleId;
-                style.textContent = `
-                    .toast-notification {
-                        display: flex;
-                        align-items: flex-start;
-                        padding: 16px 20px;
-                        border-radius: 12px;
-                        background: #ffffff;
-                        box-shadow: 0 10px 40px rgba(0, 0, 0, 0.15), 0 4px 12px rgba(0, 0, 0, 0.1);
-                        pointer-events: auto;
-                        transform: translateX(120%);
-                        opacity: 0;
-                        transition: all 0.4s cubic-bezier(0.68, -0.55, 0.265, 1.55);
-                        cursor: pointer;
-                        min-width: 300px;
-                        max-width: 400px;
-                        backdrop-filter: blur(10px);
-                        border: 1px solid rgba(255, 255, 255, 0.2);
-                    }
-                    
-                    .toast-notification.show {
-                        transform: translateX(0);
-                        opacity: 1;
-                    }
-                    
-                    .toast-notification.hide {
-                        transform: translateX(120%);
-                        opacity: 0;
-                    }
-                    
-                    .toast-notification .toast-icon {
-                        flex-shrink: 0;
-                        width: 24px;
-                        height: 24px;
-                        margin-right: 14px;
-                        display: flex;
-                        align-items: center;
-                        justify-content: center;
-                        border-radius: 50%;
-                        font-size: 14px;
-                    }
-                    
-                    .toast-notification .toast-content {
-                        flex: 1;
-                        margin-right: 10px;
-                    }
-                    
-                    .toast-notification .toast-title {
-                        font-weight: 600;
-                        font-size: 14px;
-                        margin-bottom: 4px;
-                        color: #1a1a2e;
-                    }
-                    
-                    .toast-notification .toast-message {
-                        font-size: 13px;
-                        color: #666;
-                        line-height: 1.4;
-                    }
-                    
-                    .toast-notification .toast-close {
-                        flex-shrink: 0;
-                        width: 20px;
-                        height: 20px;
-                        display: flex;
-                        align-items: center;
-                        justify-content: center;
-                        border-radius: 50%;
-                        background: rgba(0, 0, 0, 0.05);
-                        color: #999;
-                        font-size: 12px;
-                        transition: all 0.2s ease;
-                        cursor: pointer;
-                    }
-                    
-                    .toast-notification .toast-close:hover {
-                        background: rgba(0, 0, 0, 0.1);
-                        color: #333;
-                    }
-                    
-                    .toast-notification .toast-progress {
-                        position: absolute;
-                        bottom: 0;
-                        left: 0;
-                        height: 3px;
-                        border-radius: 0 0 12px 12px;
-                        width: 100%;
-                        transform-origin: left;
-                    }
-                    
-                    /* Toast Types */
-                    .toast-notification.toast-success {
-                        border-left: 4px solid #10b981;
-                        background: linear-gradient(135deg, #ffffff 0%, #ecfdf5 100%);
-                    }
-                    .toast-notification.toast-success .toast-icon {
-                        background: #10b981;
-                        color: white;
-                    }
-                    .toast-notification.toast-success .toast-progress {
-                        background: #10b981;
-                    }
-                    
-                    .toast-notification.toast-error {
-                        border-left: 4px solid #ef4444;
-                        background: linear-gradient(135deg, #ffffff 0%, #fef2f2 100%);
-                    }
-                    .toast-notification.toast-error .toast-icon {
-                        background: #ef4444;
-                        color: white;
-                    }
-                    .toast-notification.toast-error .toast-progress {
-                        background: #ef4444;
-                    }
-                    
-                    .toast-notification.toast-warning {
-                        border-left: 4px solid #f59e0b;
-                        background: linear-gradient(135deg, #ffffff 0%, #fffbeb 100%);
-                    }
-                    .toast-notification.toast-warning .toast-icon {
-                        background: #f59e0b;
-                        color: white;
-                    }
-                    .toast-notification.toast-warning .toast-progress {
-                        background: #f59e0b;
-                    }
-                    
-                    .toast-notification.toast-info {
-                        border-left: 4px solid #3b82f6;
-                        background: linear-gradient(135deg, #ffffff 0%, #eff6ff 100%);
-                    }
-                    .toast-notification.toast-info .toast-icon {
-                        background: #3b82f6;
-                        color: white;
-                    }
-                    .toast-notification.toast-info .toast-progress {
-                        background: #3b82f6;
-                    }
-                    
-                    /* Mobile responsiveness */
-                    @media (max-width: 480px) {
-                        #toast-container {
-                            left: 10px;
-                            right: 10px;
-                            max-width: calc(100% - 20px);
-                        }
-                        .toast-notification {
-                            min-width: auto;
-                            max-width: 100%;
-                        }
-                    }
-                    
-                    /* Animation for progress bar */
-                    @keyframes shrinkProgress {
-                        from { transform: scaleX(1); }
-                        to { transform: scaleX(0); }
-                    }
-                `;
-                document.head.appendChild(style);
-            }
-        })();
-        
-        function showNotification(message, type = 'info', duration = 5000) {
-            const container = document.getElementById('toast-container');
-            if (!container) return;
-            
-            // Icon mapping
-            const icons = {
-                success: '✓',
-                error: '✕',
-                warning: '⚠',
-                info: 'ℹ'
-            };
-            
-            // Title mapping
-            const titles = {
-                success: '{{ "Success"|t }}',
-                error: '{{ "Error"|t }}',
-                warning: '{{ "Warning"|t }}',
-                info: '{{ "Info"|t }}'
-            };
-            
-            // Create toast element
-            const toast = document.createElement('div');
-            toast.className = `toast-notification toast-${type}`;
-            toast.innerHTML = `
-                <div class="toast-icon">${icons[type] || icons.info}</div>
-                <div class="toast-content">
-                    <div class="toast-title">${titles[type] || titles.info}</div>
-                    <div class="toast-message">${message}</div>
-                </div>
-                <div class="toast-close">✕</div>
-                <div class="toast-progress" style="animation: shrinkProgress ${duration}ms linear forwards;"></div>
-            `;
-            
-            // Add to container
-            container.appendChild(toast);
-            
-            // Trigger animation
-            requestAnimationFrame(() => {
-                toast.classList.add('show');
-            });
-            
-            // Close handler
-            const closeToast = () => {
-                toast.classList.remove('show');
-                toast.classList.add('hide');
-                setTimeout(() => {
-                    if (toast.parentNode) {
-                        toast.parentNode.removeChild(toast);
-                    }
-                }, 400);
-            };
-            
-            // Close on click
-            toast.querySelector('.toast-close').addEventListener('click', (e) => {
-                e.stopPropagation();
-                closeToast();
-            });
-            
-            toast.addEventListener('click', closeToast);
-            
-            // Auto dismiss
-            if (duration > 0) {
-                setTimeout(closeToast, duration);
-            }
-            
-            return toast;
-        }
-        
-        // Helper to get cookie value by name
-        function getCookie(name) {
-            const value = `; ${document.cookie}`;
-            const parts = value.split(`; ${name}=`);
-            if (parts.length === 2) return parts.pop().split(';').shift();
-            return null;
-        }
-
-        // Enhanced API helper functions with httpOnly cookie authentication
-        async function apiRequest(url, options = {}) {
-            console.info('API_BASE_URL:', API_BASE_URL);
-            const headers = {
-                'Content-Type': 'application/json',
-                ...options.headers
-            };
-
-            // Add platform header for cross-platform tracking
-            headers['X-Platform'] = 'web';
-
-            // Add CSRF token for state-changing methods (POST, PUT, PATCH, DELETE)
-            const method = (options.method || 'GET').toUpperCase();
-            if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
-                const csrfToken = getCookie('csrf_access_token');
-                if (csrfToken) {
-                    headers['X-CSRF-TOKEN'] = csrfToken;
-                }
-            }
-
-            const response = await fetch(API_BASE_URL + url, {
-                ...options,
-                headers,
-                credentials: 'include'  // Always include cookies
-            });
-
-            // Handle 401 (unauthorized) - attempt token refresh
-            if (response.status === 401 && !url.includes('/auth/refresh-token')) {
-                try {
-                    // Attempt token refresh via API call (server will handle cookie refresh)
-                    const refreshResponse = await fetch(API_BASE_URL + '/auth/refresh-token', {
-                        method: 'POST',
-                        credentials: 'include'
-                    });
-
-                    if (refreshResponse.ok) {
-                        // Retry the original request with refreshed cookies
-                        return fetch(API_BASE_URL + url, {
-                            ...options,
-                            headers,
-                            credentials: 'include'
-                        });
-                    }
-                } catch (error) {
-                    console.error('Token refresh failed:', error);
-                }
-
-                // If refresh fails, redirect to login with return URL
-                const currentPath = window.location.pathname + window.location.search;
-                const loginUrl = '{{ url_for("frontend.login") }}' + '?next=' + encodeURIComponent(currentPath);
-                window.location.href = loginUrl;
-
-                // Throw an error to stop further processing of the response
-                throw new Error('Session expired. Redirecting to login...');
-            }
-
-            return response;
-        }
-        
-        // Session management
-        async function validateSession() {
-            const token = getAuthToken();
-            
-            if (!token) {
-                return false;
-            }
-            
-            try {
-                const response = await apiRequest('/auth/validate-token', {
-                    method: 'POST'
-                });
-                
-                const result = await response.json();
-                return response.ok && result.success;
-            } catch (error) {
-                console.error('Session validation failed:', error);
-                return false;
-            }
-        }
-        
-        // Check session periodically
-        function startSessionMonitoring() {
-            // Validate session every 15 minutes
-            setInterval(async () => {
-                const isValid = await validateSession();
-                if (!isValid) {
-                    showNotification('{{ "landing.notification.session_expired"|t }}', 'warning');
-                    setTimeout(logout, 3000);
-                }
-            }, 15 * 60 * 1000);
-        }
-        
-        // Sync cart from database to localStorage for authenticated users
-        async function syncCartFromDatabase() {
-            try {
-                console.log('SYNC: Requesting cart from server...');
-                const response = await apiRequest('/cart/');
-                console.log('SYNC: Response status:', response.status);
-                
-                if (response.ok) {
-                    const data = await response.json();
-                    console.log('SYNC: Data received:', data);
-                    
-                    if (data.success) {
-                        let dbCart = [];
-                        
-                        // Parse server cart if it exists
-                        if (data.data.cart && data.data.cart.cart_items) {
-                            console.log('SYNC: Server has cart items:', data.data.cart.cart_items);
-                            dbCart = data.data.cart.cart_items.map(item => ({
-                                product_id: item.product_id,
-                                quantity: item.quantity
-                            }));
-                        } else {
-                            console.log('SYNC: Server cart is empty (null or no items)');
-                        }
-                        
-                        // SERVER TRUTH: Always overwrite local cart with database cart (even if empty)
-                        console.log('SYNC: Overwriting localStorage with:', dbCart);
-                        localStorage.setItem('cart', JSON.stringify(dbCart));
-                        cart = dbCart;
-                    } else {
-                        console.error('SYNC: API returned success=false', data);
-                    }
-                } else {
-                    console.error('SYNC: API request failed');
-                }
-            } catch (error) {
-                console.error('Error syncing cart from database:', error);
-            }
-        }
-
-        // Lightweight SEO performance pass:
-        // lazy-load non-critical images while keeping above-the-fold media eager.
-        function optimizeNonCriticalImages() {
-            const criticalSelectors = [
-                '.logo img',
-                '.footer-logo img',
-                '.nav-logo img',
-                '.banner-style-two img',
-                '.page-title img',
-                '.main-product-img'
-            ];
-            const criticalImages = new Set();
-            criticalSelectors.forEach((selector) => {
-                document.querySelectorAll(selector).forEach((img) => criticalImages.add(img));
-            });
-
-            document.querySelectorAll('img').forEach((img) => {
-                if (criticalImages.has(img)) {
-                    return;
-                }
-                if (!img.hasAttribute('loading')) {
-                    img.setAttribute('loading', 'lazy');
-                }
-                if (!img.hasAttribute('decoding')) {
-                    img.setAttribute('decoding', 'async');
-                }
-            });
-        }
-        
-        // Initialize on page load
-        document.addEventListener('DOMContentLoaded', async function() {
-            optimizeNonCriticalImages();
-
-            // For authenticated users, sync cart from database first
-            // We expose this promise so other scripts (cart.html, checkout.html) can wait for it
-            // to ensure they don't read stale localStorage data before we've synced correctly.
-            {% if current_user %}
-            window.cartSyncPromise = syncCartFromDatabase();
-            await window.cartSyncPromise;
-            {% else %}
-            window.cartSyncPromise = Promise.resolve();
-            {% endif %}
-            
-            updateCartCount();
-            
-            // Start session monitoring if user is logged in
-            if (getAuthToken()) {
-                startSessionMonitoring();
-            }
-        });
-    </script>
-    
     {% block extra_js %}{% endblock %}
 </body>
 </html>

@@ -2735,7 +2735,7 @@ Copyright (c) 2015 Daniel Eden
 	-webkit-transform: scale3d(1.1, 1.1, 1.1);
     transform: scale3d(1.1, 1.1, 1.1);
   }
-  
+
   66.666666% {
     opacity: 1;
 	-webkit-transform: scale3d(1, 1, 1);
@@ -2755,7 +2755,7 @@ Copyright (c) 2015 Daniel Eden
 	-webkit-transform: scale3d(1.1, 1.1, 1.1);
     transform: scale3d(1.1, 1.1, 1.1);
   }
-  
+
   66.666666% {
     opacity: 1;
 	-webkit-transform: scale3d(1, 1, 1);
@@ -3606,28 +3606,28 @@ to {
 
 .banner .parallax-container div img,
 .fullwidth-video-section .play-link .icon-box{
-    animation-name: zoom-fade; 
-    animation-duration: 5s; 
+    animation-name: zoom-fade;
+    animation-duration: 5s;
     animation-iteration-count: infinite;
     animation-timing-function: linear;
-  
-  -webkit-animation-name: zoom-fade; 
-    -webkit-animation-duration: 5s; 
+
+  -webkit-animation-name: zoom-fade;
+    -webkit-animation-duration: 5s;
     -webkit-animation-iteration-count: infinite;
     -webkit-animation-timing-function: linear;
-  
-  -moz-animation-name: zoom-fade; 
-    -moz-animation-duration: 5s; 
+
+  -moz-animation-name: zoom-fade;
+    -moz-animation-duration: 5s;
     -moz-animation-iteration-count: infinite;
     -moz-animation-timing-function: linear;
-  
-  -ms-animation-name: zoom-fade; 
-    -ms-animation-duration: 5s; 
+
+  -ms-animation-name: zoom-fade;
+    -ms-animation-duration: 5s;
     -ms-animation-iteration-count: infinite;
     -ms-animation-timing-function: linear;
-  
-  -o-animation-name: zoom-fade; 
-    -o-animation-duration: 5s; 
+
+  -o-animation-name: zoom-fade;
+    -o-animation-duration: 5s;
     -o-animation-iteration-count: infinite;
     -o-animation-timing-function: linear;
 }
@@ -3638,7 +3638,7 @@ to {
     from {
         transform: rotate(0deg);
     }
-    to { 
+    to {
         transform: rotate(360deg);
     }
 }
@@ -3646,7 +3646,7 @@ to {
     from {
         -webkit-transform: rotate(0deg);
     }
-    to { 
+    to {
         -webkit-transform: rotate(360deg);
     }
 }
@@ -3654,7 +3654,7 @@ to {
     from {
         -moz-transform: rotate(0deg);
     }
-    to { 
+    to {
         -moz-transform: rotate(360deg);
     }
 }
@@ -3662,36 +3662,36 @@ to {
     from {
         -o-transform: rotate(0deg);
     }
-    to { 
+    to {
         -o-transform: rotate(360deg);
     }
 }
 
 .page-banner .icon-one,
 .main-banner .icon-one{
-    animation-name: rotateme; 
-    animation-duration: 7s; 
+    animation-name: rotateme;
+    animation-duration: 7s;
     animation-iteration-count: infinite;
     animation-timing-function: linear;
-  
-  -webkit-animation-name: rotateme; 
-    -webkit-animation-duration: 7s; 
+
+  -webkit-animation-name: rotateme;
+    -webkit-animation-duration: 7s;
     -webkit-animation-iteration-count: infinite;
     -webkit-animation-timing-function: linear;
-  
-  -moz-animation-name: rotateme; 
-    -moz-animation-duration: 7s; 
+
+  -moz-animation-name: rotateme;
+    -moz-animation-duration: 7s;
     -moz-animation-iteration-count: infinite;
     -moz-animation-timing-function: linear;
-  
-  -ms-animation-name: rotateme; 
-    -ms-animation-duration: 7s; 
- 
+
+  -ms-animation-name: rotateme;
+    -ms-animation-duration: 7s;
+
  -ms-animation-iteration-count: infinite;
     -ms-animation-timing-function: linear;
-  
-  -o-animation-name: rotateme; 
-    -o-animation-duration: 7s; 
+
+  -o-animation-name: rotateme;
+    -o-animation-duration: 7s;
     -o-animation-iteration-count: infinite;
     -o-animation-timing-function: linear;
 }
@@ -3702,28 +3702,28 @@ to {
 .page-banner .icon-six,
 .page-banner .icon-two,
 .rotate-me {
-    animation-name: rotateme; 
-    animation-duration: 24s; 
+    animation-name: rotateme;
+    animation-duration: 24s;
     animation-iteration-count: infinite;
     animation-timing-function: linear;
-  
-  -webkit-animation-name: rotateme; 
-    -webkit-animation-duration: 24s; 
+
+  -webkit-animation-name: rotateme;
+    -webkit-animation-duration: 24s;
     -webkit-animation-iteration-count: infinite;
     -webkit-animation-timing-function: linear;
-  
-  -moz-animation-name: rotateme; 
-    -moz-animation-duration: 24s; 
+
+  -moz-animation-name: rotateme;
+    -moz-animation-duration: 24s;
     -moz-animation-iteration-count: infinite;
     -moz-animation-timing-function: linear;
-  
-  -ms-animation-name: rotateme; 
-    -ms-animation-duration: 24s; 
+
+  -ms-animation-name: rotateme;
+    -ms-animation-duration: 24s;
     -ms-animation-iteration-count: infinite;
     -ms-animation-timing-function: linear;
-  
-  -o-animation-name: rotateme; 
-    -o-animation-duration: 24s; 
+
+  -o-animation-name: rotateme;
+    -o-animation-duration: 24s;
     -o-animation-iteration-count: infinite;
     -o-animation-timing-function: linear;
 }
@@ -3768,7 +3768,7 @@ to {
 squares{0%{-webkit-transform:scale(1);transform:scale(1);opacity:0}20%{-webkit-transform:scale(1.24);transform:scale(1.24);opacity:1}100%{-webkit-transform:scale(2.1);transform:scale(2.1);opacity:0}}
 @-moz-keyframes squares{0%{-moz-transform:scale(1);transform:scale(1);opacity:0}20%{-moz-transform:scale(1.24);transform:scale(1.24);opacity:1}100%{-moz-transform:scale(2.1);transform:scale(2.1);opacity:0}}
 @-o-keyframes squares{0%{-o-transform:scale(1);transform:scale(1);opacity:0}20%{-o-transform:scale(1.24);transform:scale(1.24);opacity:1}100%{-o-transform:scale(2.1);transform:scale(2.1);opacity:0}}
-@keyframes squares{0%{-webkit-transform:scale(1);-moz-transform:scale(1);-o-transform:scale(1);transform:scale(1);opacity:0}20%{-webkit-transform:scale(1.24);-moz-transform:scale(1.24);-o-transform:scale(1.24);transform:scale(1.24);opacity:1}100%{-webkit-transform:scale(2.1);-moz-transform:scale(2.1);-o-transform:scale(2.1);transform:scale(2.1);opacity:0}} 
+@keyframes squares{0%{-webkit-transform:scale(1);-moz-transform:scale(1);-o-transform:scale(1);transform:scale(1);opacity:0}20%{-webkit-transform:scale(1.24);-moz-transform:scale(1.24);-o-transform:scale(1.24);transform:scale(1.24);opacity:1}100%{-webkit-transform:scale(2.1);-moz-transform:scale(2.1);-o-transform:scale(2.1);transform:scale(2.1);opacity:0}}
 
 
 

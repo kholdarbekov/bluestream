@@ -420,16 +420,10 @@
 {% endblock %}
 
 {% block extra_js %}
-<script>
-// Send order confirmation notification
-document.addEventListener('DOMContentLoaded', function() {
-    // Update cart count to 0
-    updateCartCount();
-
-    // Show success notification
-    {% if order %}
-    showNotification('{{ "Order placed successfully!"|t }}', 'success');
-    {% endif %}
-});
-</script>
+{% from "frontend/macros/page_data.html" import render_page_data %}
+{{ render_page_data({
+    'order_success': true if (order is defined and order) else false,
+    'i18n': {'order_success': 'Order placed successfully!' | t},
+}) }}
+<script src="{{ url_for('static', filename='js/pages/order-confirmation.js') }}"></script>
 {% endblock %}

@@ -4,7 +4,7 @@
 function gMap () {
     if ($('.google-map').length) {
         $('.google-map').each(function () {
-            // getting options from html 
+            // getting options from html
             var mapName = $(this).attr('id');
             var mapLat = $(this).data('map-lat');
             var mapLng = $(this).data('map-lng');
@@ -94,7 +94,7 @@ function gMap () {
                     }
                 ];
 
-            
+
             // if zoom not defined the zoom value will be 15;
             if (!mapZoom) {
                 var mapZoom = 11;
@@ -105,7 +105,7 @@ function gMap () {
                 div: '#'+mapName,
                 scrollwheel: false,
                 lat: mapLat,
-                lng: mapLng,                
+                lng: mapLng,
                 styles: styles,
                 zoom: mapZoom
             });
@@ -124,13 +124,13 @@ function gMap () {
                     title: "New York"
                 });
             }
-        });  
+        });
     };
 }
 
 
 
-// instance of fuction while Document ready event   
+// instance of fuction while Document ready event
 jQuery(document).on('ready', function () {
     (function ($) {
         gMap();

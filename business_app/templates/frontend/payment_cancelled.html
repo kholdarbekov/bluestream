@@ -146,7 +146,7 @@
             </div>
 
             <div class="action-buttons">
-                <button onclick="retryPayment()" class="theme-btn btn-one">
+                <button data-action="retry-payment" class="theme-btn btn-one">
                     <i class="far fa-redo"></i> {{ 'Retry Payment'|t }}
                 </button>
                 <a href="{{ url_for('frontend.my_orders') }}" class="theme-btn btn-two">
@@ -172,36 +172,15 @@
 {% endblock %}
 
 {% block extra_js %}
-<script>
-function retryPayment() {
-    {% if order %}
-    // Show loading
-    showNotification('{{ "Preparing payment..."|t }}', 'info');
-
-    // Retry payment by creating a new payment link
-    fetch('/api/v1/orders/{{ order.id }}/retry-payment', {
-        method: 'POST',
-        headers: {
-            'Authorization': 'Bearer ' + localStorage.getItem('access_token'),
-            'Content-Type': 'application/json'
-        }
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success && data.data.payment_url) {
-            // Redirect to payment gateway
-            window.location.href = data.data.payment_url;
-        } else {
-            showNotification('{{ "Failed to retry payment. Please try again later."|t }}', 'error');
-        }
-    })
-    .catch(error => {
-        console.error('Error retrying payment:', error);
-        showNotification('{{ "An error occurred. Please try again."|t }}', 'error');
-    });
-    {% else %}
-    window.location.href = '{{ url_for("frontend.cart") }}';
-    {% endif %}
-}
-</script>
+{% from "frontend/macros/page_data.html" import render_page_data %}
+{{ render_page_data({
+    'order_id': order.id if (order is defined and order) else none,
+    'cart_url': url_for('frontend.cart'),
+    'i18n': {
+        'preparing': 'Preparing payment...' | t,
+        'retry_failed': 'Failed to retry payment. Please try again later.' | t,
+        'error': 'An error occurred. Please try again.' | t,
+    },
+}) }}
+<script src="{{ url_for('static', filename='js/pages/payment-cancelled.js') }}"></script>
 {% endblock %}

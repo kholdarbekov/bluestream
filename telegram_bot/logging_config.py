@@ -10,12 +10,12 @@ def setup_logging(log_level="INFO", log_to_file=False, log_file_path="bot.log"):
     """
     Setup logging configuration for the bot
     """
-    
+
     # Create logs directory if it doesn't exist
     if log_to_file:
         log_path = Path(log_file_path)
         log_path.parent.mkdir(parents=True, exist_ok=True)
-    
+
     # Define logging configuration
     logging_config = {
         'version': 1,
@@ -47,7 +47,7 @@ def setup_logging(log_level="INFO", log_to_file=False, log_file_path="bot.log"):
             },
             'handlers': {
                 'level': log_level,
-                'handlers': ['console'], 
+                'handlers': ['console'],
                 'propagate': False
             },
             'api_client': {
@@ -97,7 +97,7 @@ def setup_logging(log_level="INFO", log_to_file=False, log_file_path="bot.log"):
             'handlers': ['console']
         }
     }
-    
+
     # Add file handler if requested
     if log_to_file:
         logging_config['handlers']['file'] = {
@@ -108,34 +108,34 @@ def setup_logging(log_level="INFO", log_to_file=False, log_file_path="bot.log"):
             'maxBytes': 10485760,  # 10MB
             'backupCount': 5
         }
-        
+
         # Add file handler to all loggers
         for logger_name in logging_config['loggers']:
             logging_config['loggers'][logger_name]['handlers'].append('file')
-        
+
         logging_config['root']['handlers'].append('file')
-    
+
     # Apply logging configuration
     logging.config.dictConfig(logging_config)
-    
+
     # Set up root logger
     root_logger = logging.getLogger()
     root_logger.setLevel(getattr(logging, log_level.upper()))
-    
+
     print(f"Logging configured - Level: {log_level}, File: {log_to_file}")
-    
+
     return root_logger
 
 def log_bot_startup_info():
     """Log important bot startup information"""
     logger = logging.getLogger('bot')
-    
+
     logger.info("=" * 60)
     logger.info("TELEGRAM BOT STARTING UP")
     logger.info("=" * 60)
-    
+
     from config import config
-    
+
     # Log configuration (without sensitive data)
     logger.info(f"Bot Token: {'*' * 20}...{config.telegram.bot_token[-10:] if config.telegram.bot_token else 'NOT SET'}")
     logger.info(f"Webhook URL: {config.telegram.webhook_url or 'POLLING MODE'}")
@@ -143,5 +143,5 @@ def log_bot_startup_info():
     logger.info(f"Database URL: {config.database.url.split('@')[0] if config.database.url else 'NOT SET'}@...")
     logger.info(f"Default Language: {config.localization.default_language}")
     logger.info(f"Supported Languages: {config.localization.supported_languages}")
-    
+
     logger.info("=" * 60)

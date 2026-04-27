@@ -22,7 +22,7 @@ class Translation:
         self.supported_languages = config.localization.supported_languages
         self.missing_keys: Dict[str, set] = {}  # Track missing keys by language
         self._missing_key_log_limit = 100  # Max missing keys to track
-        
+
     async def load_translations(self):
         """Load translations from database"""
         try:
@@ -164,16 +164,16 @@ class Translation:
         query = """
         INSERT INTO translations (language, key, value, category, is_active)
         VALUES ($1, $2, $3, 'telegram', TRUE)
-        ON CONFLICT (key, language) 
+        ON CONFLICT (key, language)
         DO UPDATE SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP
         """
         await db_manager.execute(query, language, key, value)
-        
+
         # Update in-memory cache
         if language not in self.translations:
             self.translations[language] = {}
         self.translations[language][key] = value
-    
+
     async def get_user_language(self, telegram_id: int) -> str:
         """Get user's preferred language"""
         query = """
@@ -181,7 +181,7 @@ class Translation:
         """
         language = await db_manager.fetchval(query, str(telegram_id))
         return language or config.localization.default_language
-    
+
     def get_language_flag(self, language_code: str) -> str:
         """Get flag emoji for language"""
         flags = getattr(config.localization, 'language_flags', None) or {

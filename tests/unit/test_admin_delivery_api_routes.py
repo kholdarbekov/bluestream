@@ -65,4 +65,3 @@ def test_update_admin_delivery_route_delegates_to_service(client, app, admin_use
     )
     body = response.get_json()
     assert body['data']['delivery']['status'] == 'in_transit'
-

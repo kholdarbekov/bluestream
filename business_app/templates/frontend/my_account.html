@@ -326,15 +326,15 @@
     .stats-section .col-lg-3 {
         margin-bottom: 15px;
     }
-    
+
     .welcome-section .card-body {
         padding: 20px;
     }
-    
+
     .welcome-section h3 {
         font-size: 1.25rem;
     }
-    
+
     .quick-actions-section .btn {
         margin-bottom: 10px;
     }
@@ -370,7 +370,7 @@
 <div class="stats-section mb-4">
     <div class="row">
         <div class="col-lg-3 col-md-6 col-sm-6">
-            <div class="stat-card clickable" onclick="window.location.href='{{ url_for('frontend.my_orders') }}'">
+            <div class="stat-card clickable" data-nav-href="{{ url_for('frontend.my_orders') }}">
                 <div class="card text-center">
                     <div class="card-body">
                         <i class="far fa-shopping-bag text-primary" style="font-size: 2rem;"></i>
@@ -382,7 +382,7 @@
             </div>
         </div>
         <div class="col-lg-3 col-md-6 col-sm-6">
-            <div class="stat-card clickable" onclick="window.location.href='{{ url_for('frontend.my_subscriptions') }}'">
+            <div class="stat-card clickable" data-nav-href="{{ url_for('frontend.my_subscriptions') }}">
                 <div class="card text-center">
                     <div class="card-body">
                         <i class="far fa-sync-alt text-success" style="font-size: 2rem;"></i>
@@ -394,7 +394,7 @@
             </div>
         </div>
         <div class="col-lg-3 col-md-6 col-sm-6">
-            <div class="stat-card clickable" onclick="window.location.href='{{ url_for('frontend.my_loyalty') }}'">
+            <div class="stat-card clickable" data-nav-href="{{ url_for('frontend.my_loyalty') }}">
                 <div class="card text-center">
                     <div class="card-body">
                         <i class="far fa-star text-warning" style="font-size: 2rem;"></i>
@@ -406,7 +406,7 @@
             </div>
         </div>
         <div class="col-lg-3 col-md-6 col-sm-6">
-            <div class="stat-card clickable" onclick="window.location.href='{{ url_for('frontend.addresses') }}'">
+            <div class="stat-card clickable" data-nav-href="{{ url_for('frontend.addresses') }}">
                 <div class="card text-center">
                     <div class="card-body">
                         <i class="far fa-map-marker-alt text-info" style="font-size: 2rem;"></i>
@@ -452,7 +452,7 @@
                             </td>
                             <td>{{ "{:,.0f}".format(order.total_amount)|replace(",", " ") }} UZS</td>
                             <td>
-                                <button class="btn btn-sm btn-outline-primary" onclick="showOrderDetail({{ order.id }})">{{ 'View'|t }}</button>
+                                <button class="btn btn-sm btn-outline-primary" data-action="show-order" data-order-id="{{ order.id }}">{{ 'View'|t }}</button>
                             </td>
                         </tr>
                         {% endfor %}
@@ -527,7 +527,7 @@
                             {% else %}
                             <div class="platform-item">
                                 <span class="platform-name">{{ 'Telegram Bot'|t }}</span>
-                                <button class="btn btn-sm btn-outline-primary" onclick="connectTelegram()">{{ 'Connect'|t }}</button>
+                                <button class="btn btn-sm btn-outline-primary" data-action="connect-telegram">{{ 'Connect'|t }}</button>
                             </div>
                             {% endif %}
                         </div>
@@ -575,7 +575,7 @@
                     </a>
                 </div>
                 <div class="col-md-3">
-                    <button class="btn btn-outline-warning btn-block action-btn" onclick="downloadAccountData()">
+                    <button class="btn btn-outline-warning btn-block action-btn" data-action="download-account-data">
                         <i class="far fa-download"></i>
                         {{ 'Export Data'|t }}
                     </button>
@@ -590,133 +590,22 @@
 {% endblock %}
 
 {% block cabinet_extra_js %}
-<script>
-// Initialize unified account dashboard
-document.addEventListener('DOMContentLoaded', function() {
-    // Check verification status and show prompts if needed
-    checkVerificationStatus();
-    
-    // Load real-time dashboard data
-    loadDashboardData();
-    
-    // Update real-time data periodically
-    setInterval(updateDashboardData, 300000); // 5 minutes
-    
-    // Initialize sync status monitoring
-    monitorSyncStatus();
-});
-
-function checkVerificationStatus() {
-    {% if not user.email_verified_at %}
-    showNotification('{{ "Please verify your email address to access all features"|t }}', 'warning');
-    {% endif %}
-    
-    {% if not user.phone_verified_at %}
-    showNotification('{{ "Please verify your phone number for enhanced security"|t }}', 'info');
-    {% endif %}
-}
-
-async function loadDashboardData() {
-    try {
-        // Load addresses count
-        const addressResponse = await apiRequest('/auth/addresses');
-        const addressResult = await addressResponse.json();
-        if (addressResponse.ok && addressResult.success) {
-            document.getElementById('addressesCount').textContent = addressResult.data.addresses.length;
-        }
-        
-        // Load total orders count
-        const ordersResponse = await apiRequest('/orders/summary');
-        const ordersResult = await ordersResponse.json();
-        if (ordersResponse.ok && ordersResult.success) {
-            document.getElementById('totalOrdersCount').textContent = ordersResult.data.total_orders || {{ recent_orders|length }};
-        }
-    } catch (error) {
-        console.error('Failed to load dashboard data:', error);
-    }
-}
-
-function updateDashboardData() {
-    // Fetch updated user stats and refresh relevant sections
-    loadDashboardData();
-    
-    apiRequest('/auth/profile')
-        .then(response => response.json())
-        .then(data => {
-            if (data.success) {
-                // Update sync status
-                updateSyncStatus('synchronized');
-                console.log('Profile data updated');
-            }
-        })
-        .catch(error => {
-            console.error('Failed to update dashboard data:', error);
-            updateSyncStatus('error');
-        });
-}
-
-function monitorSyncStatus() {
-    // Check cross-platform sync status
-    setInterval(() => {
-        const syncElement = document.getElementById('syncStatus');
-        if (syncElement) {
-            // Simulate sync check (in real implementation, this would check actual sync status)
-            updateSyncStatus('synchronized');
-        }
-    }, 60000); // 1 minute
-}
-
-function updateSyncStatus(status) {
-    const syncElement = document.getElementById('syncStatus');
-    if (syncElement) {
-        switch (status) {
-            case 'synchronized':
-                syncElement.textContent = '{{ "Synchronized"|t }}';
-                syncElement.className = 'text-success';
-                break;
-            case 'syncing':
-                syncElement.textContent = '{{ "Syncing..."|t }}';
-                syncElement.className = 'text-warning';
-                break;
-            case 'error':
-                syncElement.textContent = '{{ "Sync Error"|t }}';
-                syncElement.className = 'text-danger';
-                break;
-        }
-    }
-}
-
-function connectTelegram() {
-    showNotification('{{ "Telegram connection feature coming soon!"|t }}', 'info');
-    // In future implementation, this would generate a connection link/QR code
-}
-
-async function downloadAccountData() {
-    try {
-        showNotification('{{ "Preparing your account data for download..."|t }}', 'info');
-        
-        const response = await apiRequest('/auth/export-data', {
-            method: 'POST'
-        });
-        
-        if (response.ok) {
-            const blob = await response.blob();
-            const url = window.URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.style.display = 'none';
-            a.href = url;
-            a.download = 'account-data.json';
-            document.body.appendChild(a);
-            a.click();
-            window.URL.revokeObjectURL(url);
-            showNotification('{{ "Account data downloaded successfully!"|t }}', 'success');
-        } else {
-            throw new Error('Failed to download data');
-        }
-    } catch (error) {
-        console.error('Failed to download account data:', error);
-        showNotification('{{ "Failed to download account data. Please try again."|t }}', 'error');
-    }
-}
-</script>
+{% from "frontend/macros/page_data.html" import render_page_data %}
+{{ render_page_data({
+    'email_verified': true if user.email_verified_at else false,
+    'phone_verified': true if user.phone_verified_at else false,
+    'recent_orders_count': recent_orders|length,
+    'i18n': {
+        'verify_email_prompt': 'Please verify your email address to access all features' | t,
+        'verify_phone_prompt': 'Please verify your phone number for enhanced security' | t,
+        'synchronized': 'Synchronized' | t,
+        'syncing': 'Syncing...' | t,
+        'sync_error': 'Sync Error' | t,
+        'telegram_coming_soon': 'Telegram connection feature coming soon!' | t,
+        'preparing_download': 'Preparing your account data for download...' | t,
+        'download_success': 'Account data downloaded successfully!' | t,
+        'download_failed': 'Failed to download account data. Please try again.' | t,
+    },
+}) }}
+<script src="{{ url_for('static', filename='js/pages/my-account.js') }}"></script>
 {% endblock %}

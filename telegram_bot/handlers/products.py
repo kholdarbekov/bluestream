@@ -130,7 +130,7 @@ class ProductHandlers(BaseHandler):
         except Exception as e:
             logger.warning(f"Failed to download product image from {url}: {e}")
             return None
-    
+
     async def products_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Show product categories"""
         try:
@@ -139,18 +139,18 @@ class ProductHandlers(BaseHandler):
             # user = await user_middleware(update)
             # if not user:
             #     return
-            
+
             user_id = update.effective_user.id
             logger.info(f"Products menu requested by user {user_id}")
             language = await i18n.get_user_language(user_id)
-            
+
             # Get user token for API calls (uses TokenManager for caching)
             async with api_client as client:
                 user_token = await get_auth_token(update, context, client)
                 if not user_token:
                     await self._handle_auth_error(update, language)
                     return
-                
+
                 # Get product categories
                 response = await client.get_product_categories(user_token, language=language)
                 if not response.success:
@@ -178,7 +178,7 @@ class ProductHandlers(BaseHandler):
 
             logger.info(f"Menu text: {menu_text}")
             logger.info(f"Keyboard created with {len(keyboard.inline_keyboard)} rows")
-            
+
             if update.callback_query:
                 logger.info("Editing message via callback query...")
                 try:
@@ -217,29 +217,29 @@ class ProductHandlers(BaseHandler):
                 logger.info("New message sent")
 
             logger.info(f"Product categories shown to user {user_id}")
-            
+
         except Exception as e:
             logger.error(f"Error in products menu: {e}")
             await self._handle_error(update)
-    
+
     async def category_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle category selection and show products"""
         try:
             query = update.callback_query
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
-            
+
             # Extract category ID
             category_id = query.data.split('_')[1]
             page = int(context.user_data.get('current_page', 1))
-            
+
             # Get user token
             async with api_client as client:
                 user_token = await get_auth_token(update, context, client)
                 if not user_token:
                     await self._handle_auth_error(update, language)
                     return
-                
+
                 # Get products in category
                 response = await client.get_products(
                     user_token,
@@ -248,7 +248,7 @@ class ProductHandlers(BaseHandler):
                     per_page=6,
                     language=language
                 )
-                
+
                 if not response.success:
                     await self._handle_api_error(update, response.error, language)
                     return
@@ -261,7 +261,7 @@ class ProductHandlers(BaseHandler):
                     # Fallback to old structure
                     products = response.data.get('products', [])
                     total_pages = response.data.get('total_pages', 1)
-                
+
                 # Fetch category details for image
                 category_img_url = None
                 try:
@@ -272,7 +272,7 @@ class ProductHandlers(BaseHandler):
                         category_img_url = category_data.get('image_url') or category_data.get('icon_url')
                 except Exception as cat_error:
                     logger.warning(f"Failed to fetch category details: {cat_error}")
-            
+
             # Store category for pagination
             context.user_data['current_category'] = category_id
             context.user_data['current_page'] = page
@@ -339,53 +339,53 @@ class ProductHandlers(BaseHandler):
                         reply_markup=keyboard,
                         parse_mode=constants.ParseMode.MARKDOWN_V2
                     )
-            
+
             await query.answer()
 
             logger.info(f"Products in category {category_id} shown to user {user_id}")
-            
+
         except Exception as e:
             logger.error(f"Error in category handler: {e}")
             await self._handle_error(update)
-    
+
     async def product_details(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Show product details"""
         try:
             query = update.callback_query
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
-            
+
             # Extract product ID
             if 'back_to_product_' in query.data:
                 product_id = int(query.data.split('_')[3])  # back_to_product_{id}
             else:
                 product_id = int(query.data.split('_')[1])  # product_{id}
-            
+
             # Get user token
             async with api_client as client:
                 user_token = await get_auth_token(update, context, client)
                 if not user_token:
                     await self._handle_auth_error(update, language)
                     return
-                
+
                 # Get product details
                 response = await client.get_product(user_token, product_id, language=language)
                 if not response.success:
                     await self._handle_api_error(update, response.error, language)
                     return
-                
+
                 product = response.data['data']['product']
-            
+
             # Get category ID for back button
             category_id = product.get('category', {}).get('id')
-            
+
             # Format product details
             details_text = self._format_product_details(product, language)
             keyboard = ProductKeyboards.product_details(product_id, category_id, language)
-            
+
             # Get product image (supports media.images, media.image_urls, images, image_url)
             image_url = self._extract_product_image_url(product)
-            
+
             if image_url:
                 should_send_direct_url = not self._is_private_image_url(image_url)
                 if should_send_direct_url:
@@ -455,37 +455,37 @@ class ProductHandlers(BaseHandler):
                         reply_markup=keyboard,
                         parse_mode=constants.ParseMode.MARKDOWN_V2
                     )
-            
+
             await query.answer()
-            
+
             logger.info(f"Product {product_id} details shown to user {user_id}")
-            
+
         except Exception as e:
             logger.error(f"Error in product details: {e}")
             await self._handle_error(update)
-    
+
     async def add_to_cart(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Show quantity selector for adding to cart"""
         try:
             query = update.callback_query
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
-            
+
             # Extract product ID
             product_id = int(query.data.split('_')[3])  # add_to_cart_{product_id}
-            
+
             # Get product details for quantity selector
             async with api_client as client:
                 user_token = await get_auth_token(update, context, client)
                 if not user_token:
                     await self._handle_auth_error(update, language)
                     return
-                
+
                 response = await client.get_product(user_token, product_id, language=language)
                 if not response.success:
                     await self._handle_api_error(update, response.error, language)
                     return
-                
+
                 product = response.data['data']['product']
 
                 # Add product to cart via API
@@ -497,7 +497,7 @@ class ProductHandlers(BaseHandler):
                 if not add_response.success:
                     await self._handle_api_error(update, add_response.error, language)
                     return
-                
+
                 # Get actual quantity from cart response
                 current_qty = 1
                 try:
@@ -508,7 +508,7 @@ class ProductHandlers(BaseHandler):
                             break
                 except Exception as e:
                     logger.error(f"Error parsing cart response: {e}")
-            
+
             # Show quantity selector
             unit_price = self._get_effective_unit_price(product)
             quantity_text = (
@@ -517,31 +517,31 @@ class ProductHandlers(BaseHandler):
                 f"{i18n.get('telegram.price', language)}: {format_price(unit_price * current_qty)} UZS"
             )
             keyboard = ProductKeyboards.quantity_selector(product_id, current_qty, language)
-            
+
             await self._edit_or_replace_callback_message(
                 query,
                 quantity_text,
                 reply_markup=keyboard,
             )
             await query.answer()
-            
+
         except Exception as e:
             logger.error(f"Error in add to cart: {e}")
             await self._handle_error(update)
-    
+
     async def quantity_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle quantity increase/decrease"""
         try:
             query = update.callback_query
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
-            
+
             # Parse callback data: qty_{inc/dec}_{product_id}_{current_qty}
             parts = query.data.split('_')
             action = parts[1]  # inc or dec
             product_id = int(parts[2])
             current_qty = int(parts[3])
-            
+
             if action == 'inc':
                 new_qty = min(current_qty + 1, 99)  # Max 99 items
             elif action == 'dec':
@@ -549,7 +549,7 @@ class ProductHandlers(BaseHandler):
             else:
                 await query.answer(i18n.get('telegram.products.invalid_action', language))
                 return
-            
+
             # Get product for price calculation
             async with api_client as client:
                 user_token = await get_auth_token(update, context, client)
@@ -571,28 +571,28 @@ class ProductHandlers(BaseHandler):
                     if not update_response.success:
                         await self._handle_api_error(update, update_response.error, language)
                         return
-                    
+
                     await self._edit_or_replace_callback_message(
                         query,
                         quantity_text,
                         reply_markup=keyboard,
                     )
-            
+
             await query.answer()
-            
+
         except Exception as e:
             logger.error(f"Error in quantity handler: {e}")
             await self._handle_error(update)
-    
+
     async def cart_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle cart actions"""
         try:
             query = update.callback_query
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
-            
+
             action = query.data.split('_')[1]  # cart_{action}
-            
+
             if action == 'view':
                 await self.show_cart(update, context)
             elif action == 'clear':
@@ -601,24 +601,24 @@ class ProductHandlers(BaseHandler):
                 # Redirect to order handler
                 from .orders import order_handlers
                 await order_handlers.checkout_handler(update, context)
-            
+
         except Exception as e:
             logger.error(f"Error in cart handler: {e}")
             await self._handle_error(update)
-    
+
     async def search_products(self, update: Update, context: ContextTypes.DEFAULT_TYPE, search_term: str):
         """Handle product search"""
         try:
             user_id = update.effective_user.id
             language = await i18n.get_user_language(user_id)
-            
+
             # Get user token
             async with api_client as client:
                 user_token = await get_auth_token(update, context, client)
                 if not user_token:
                     await self._handle_auth_error(update, language)
                     return
-                
+
                 # Search products
                 response = await client.get_products(
                     user_token,
@@ -626,20 +626,20 @@ class ProductHandlers(BaseHandler):
                     page=1,
                     language=language
                 )
-                
+
                 if not response.success:
                     await self._handle_api_error(update, response.error, language)
                     return
-                
+
                 products_data = response.data
                 products = products_data.get('products', [])
-            
+
             if not products:
                 await update.message.reply_text(
                     i18n.get('telegram.products.no_results_for_search', language, search_term=search_term)
                 )
                 return
-            
+
             # Show search results
             search_title = i18n.get(
                 'telegram.products.search_results_for',
@@ -648,53 +648,53 @@ class ProductHandlers(BaseHandler):
             )
             search_text = f"{search_title}\n\n{self._format_products_list(products, language)}"
             keyboard = ProductKeyboards.product_list(products, 1, 1, language)
-            
+
             await update.message.reply_text(
                 text=search_text,
                 reply_markup=keyboard
             )
-            
+
             # Clear search state
             await self.user_repo.update_user_state(user_id, {})
-            
+
         except Exception as e:
             logger.error(f"Error in product search: {e}")
             language = await i18n.get_user_language(update.effective_user.id)
             await update.message.reply_text(i18n.get('telegram.error.product_error', language))
-    
+
     def _format_products_list(self, products: List[Dict], language: str) -> str:
         """Format products list for display"""
         if not products:
             return i18n.get('telegram.products.no_products_found', language)
-        
+
         formatted_lines = []
         for product in products:
             price_str = escape_markdown(format_price(self._get_effective_unit_price(product)), version=2)
             stock_indicator = "✅" if product['inventory'].get('stock_quantity', 0) > 0 else "❌"
-            
+
             formatted_lines.append(
                 f"{stock_indicator} *{escape_markdown(product['name'], version=2)}*\n"
                 f"   💰 {price_str} UZS \| 📦 {escape_markdown(str(product['specifications'].get('volume', 'N/A')), version=2)}{escape_markdown(product['specifications'].get('volume_unit', ''), version=2)}"
             )
-        
+
         return "\n\n".join(formatted_lines)
-    
+
     def _format_product_details(self, product: Dict, language: str) -> str:
         """Format single product details"""
         price_str = escape_markdown(format_price(self._get_effective_unit_price(product)), version=2)
         stock = product['inventory'].get('stock_quantity', 0)
         stock_status = i18n.get('telegram.products.in_stock', language) if stock > 0 else i18n.get('telegram.products.out_of_stock', language)
-        
+
         details = [
             f"🏷️ *{escape_markdown(product['name'], version=2)}*",
             f"💰 {i18n.get('telegram.price', language)}: {price_str} UZS",
             f"📦 {i18n.get('telegram.products.volume_label', language)}: {escape_markdown(str(product['specifications'].get('volume', 'N/A')), version=2)}{escape_markdown(product['specifications'].get('volume_unit', ''), version=2)}",
             f"📊 {i18n.get('telegram.products.stock_label', language)}: {stock_status}",
         ]
-        
+
         if product.get('description'):
             details.append(f"📝 {escape_markdown(product['description'], version=2)}")
-        
+
         if product.get('category'):
             details.append(
                 f"📂 {i18n.get('telegram.products.category_label', language)}: "
@@ -702,34 +702,34 @@ class ProductHandlers(BaseHandler):
             )
 
         return "\n\n".join(details)
-    
+
     async def show_cart(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Show shopping cart contents"""
         # This loads cart from database
         user_id = update.effective_user.id
         language = await i18n.get_user_language(user_id)
-        
+
         # Minimum order amount (should match backend config)
         MIN_ORDER_AMOUNT = 20000  # TODO: Consider fetching from API config endpoint
-        
+
         async with api_client as client:
             user_token = await get_auth_token(update, context, client)
             if not user_token:
                 await self._handle_auth_error(update, language)
                 return
-            
+
             response = await client.get_cart(user_token)
             if not response.success:
                 await self._handle_api_error(update, response.error, language)
                 return
-            
+
             cart_data = response.data
             cart = cart_data.get('data', {}).get('cart') or {}
             cart_items = cart.get('cart_items', [])
-        
+
         cart_is_empty = None
         meets_minimum = True
-        
+
         if not cart_items:
             cart_text = i18n.get('telegram.cart_empty', language)
             cart_is_empty = True
@@ -758,50 +758,50 @@ class ProductHandlers(BaseHandler):
                 lines.append(f"💳 COD prepaid balance: {format_price(available_balance)} UZS")
                 lines.append(f"🔁 Auto-applied on next COD order: {format_price(potential_applied)} UZS")
                 lines.append(f"🧾 Estimated COD payable after prepaid: {format_price(payable_after)} UZS")
-            
+
             # Add minimum order warning if needed
             if total_amount < MIN_ORDER_AMOUNT:
                 meets_minimum = False
                 remaining = MIN_ORDER_AMOUNT - total_amount
                 lines.append("")
-                lines.append("⚠️ " + i18n.get('telegram.cart_min_order_warning', language, 
+                lines.append("⚠️ " + i18n.get('telegram.cart_min_order_warning', language,
                     min_amount=format_price(MIN_ORDER_AMOUNT),
                     remaining=format_price(remaining)))
             else:
                 lines.append("")
                 lines.append("✅ " + i18n.get('telegram.cart_ready_checkout', language))
-            
+
             cart_text = "\n".join(lines)
-        
+
         keyboard = OrderKeyboards.cart_actions(language, cart_is_empty, meets_minimum)
-        
+
         await self._edit_or_replace_callback_message(
             update.callback_query,
             cart_text,
             reply_markup=keyboard,
         )
         await update.callback_query.answer()
-    
+
     async def _clear_cart(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Clear shopping cart"""
         user_id = update.effective_user.id
         language = await i18n.get_user_language(user_id)
-        
+
         # Clear cart
         async with api_client as client:
             user_token = await get_auth_token(update, context, client)
             if not user_token:
                 await self._handle_auth_error(update, language)
                 return
-            
+
             response = await client.clear_cart(user_token)
             if not response.success:
                 await self._handle_api_error(update, response.error, language)
                 return
-        
+
         await update.callback_query.answer(i18n.get('telegram.products.cart_cleared', language))
         await self.show_cart(update, context)
-    
+
 
 
 # Global handler instance

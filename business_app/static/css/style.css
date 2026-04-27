@@ -1,4 +1,4 @@
- 
+
 /* Css For Acuasafe */
 
 /************ TABLE OF CONTENTS ***************
@@ -44,7 +44,7 @@
 
 
 
-/*** 
+/***
 
 ====================================================================
   Reset
@@ -59,7 +59,7 @@
 }
 
 
-/*** 
+/***
 
 ====================================================================
   Global Settings
@@ -142,7 +142,7 @@ input,button,select,textarea{
 ul,li{
   list-style:none;
   padding:0px;
-  margin:0px; 
+  margin:0px;
 }
 
 input{
@@ -272,7 +272,7 @@ h1,h2,h3,h4,h5,h6{
 
 .handle-preloader .animation-preloader .spinner{
   border: 3px solid #ffffff;
-  border-top-color: rgba(255, 255, 255, 0.5); 
+  border-top-color: rgba(255, 255, 255, 0.5);
 }
 
 /* AnimaciÃ³n del preloader */
@@ -493,7 +493,7 @@ img {
 
 
 
-/*** 
+/***
 
 ====================================================================
                         Home-Page-One
@@ -796,7 +796,7 @@ img {
 
 .main-menu .navigation > li.current > a,
 .main-menu .navigation > li:hover > a{
-  
+
 }
 
 .main-menu .navigation > li.dropdown > a:before{
@@ -830,7 +830,7 @@ img {
 
 .main-menu .navigation > li > ul.from-right{
   left:auto;
-  right:0px;  
+  right:0px;
 }
 
 .main-menu .navigation > li > ul > li{
@@ -893,7 +893,7 @@ img {
   font-size:16px;
   font-weight:800;
   text-align:center;
-  z-index:5;  
+  z-index:5;
 }
 
 .main-menu .navigation > li > ul > li > ul{
@@ -915,7 +915,7 @@ img {
 
 .main-menu .navigation > li > ul > li > ul.from-right{
   left:auto;
-  right:0px;  
+  right:0px;
 }
 
 .main-menu .navigation > li > ul > li > ul > li{
@@ -924,7 +924,7 @@ img {
 }
 
 .main-menu .navigation > li > ul > li > ul > li:last-child{
-  border-bottom:none; 
+  border-bottom:none;
 }
 
 .main-menu .navigation > li > ul > li > ul > li > a{
@@ -951,7 +951,7 @@ img {
 }
 
 .main-menu .navigation > li > ul > li > ul > li > a:hover{
-  
+
 }
 
 .main-menu .navigation > li > ul > li > ul > li.dropdown > a:after{
@@ -964,7 +964,7 @@ img {
   line-height:24px;
   font-size:16px;
   font-weight:900;
-  z-index:5;  
+  z-index:5;
 }
 
 .main-menu .navigation > li.dropdown:hover > ul,
@@ -978,7 +978,7 @@ img {
 .main-menu .navigation li > ul > li.dropdown:hover > ul{
   visibility:visible;
   opacity:1;
-  top: 0%; 
+  top: 0%;
   margin-top: 0px;
 }
 
@@ -1000,7 +1000,7 @@ img {
 
 .main-menu .navigation li.current.dropdown .dropdown-btn,
 .main-menu .navigation li:hover .dropdown-btn{
-  
+
 }
 
 .main-menu .navigation li.dropdown ul li.dropdown .dropdown-btn{
@@ -1083,13 +1083,13 @@ img {
 }
 
 .mobile-menu .navbar-collapse{
-  display:block !important; 
+  display:block !important;
 }
 
 .mobile-menu .nav-logo{
   position:relative;
   padding:50px 25px;
-  text-align:left;  
+  text-align:left;
   padding-bottom: 100px;
 }
 
@@ -1216,7 +1216,7 @@ img {
   -moz-transition: all 500ms ease;
   -ms-transition: all 500ms ease;
   -o-transition: all 500ms ease;
-  transition: all 500ms ease; 
+  transition: all 500ms ease;
 }
 
 .mobile-menu .navigation li ul li > a{
@@ -1236,7 +1236,7 @@ img {
   -moz-transition: all 500ms ease;
   -ms-transition: all 500ms ease;
   -o-transition: all 500ms ease;
-  transition: all 500ms ease; 
+  transition: all 500ms ease;
 }
 
 .mobile-menu .navigation li.current > a:before{
@@ -1260,7 +1260,7 @@ img {
   -moz-transition: all 500ms ease;
   -ms-transition: all 500ms ease;
   -o-transition: all 500ms ease;
-  transition: all 500ms ease; 
+  transition: all 500ms ease;
   z-index:5;
 }
 
@@ -1268,7 +1268,7 @@ img {
   color: #ffffff;
   -webkit-transform:rotate(90deg);
   -ms-transform:rotate(90deg);
-  transform:rotate(90deg);  
+  transform:rotate(90deg);
 }
 
 .mobile-menu .navigation li > ul,
@@ -1297,11 +1297,11 @@ img {
   -moz-transition: all 500ms ease;
   -ms-transition: all 500ms ease;
   -o-transition: all 500ms ease;
-  transition: all 500ms ease; 
+  transition: all 500ms ease;
 }
 
 .mobile-menu .social-links li a:hover{
-  
+
 }
 
 div#mCSB_1_container{
@@ -1334,7 +1334,7 @@ div#mCSB_1_container{
 }
 
 .mobile-menu .contact-info ul li a:hover{
-  
+
 }
 
 .mobile-menu .contact-info ul li:last-child{
@@ -3018,7 +3018,7 @@ div#mCSB_1_container{
 
 
 
-/*** 
+/***
 
 ====================================================================
                         Home-Page-Two
@@ -3246,7 +3246,7 @@ div#mCSB_1_container{
   border-radius: 50%;
 }
 
-.about-style-two .video-inner .inner-box .video-btn a:after, 
+.about-style-two .video-inner .inner-box .video-btn a:after,
 .about-style-two .video-inner .inner-box .video-btn a:before {
   width: 100%;
   height: 100%;
@@ -3546,7 +3546,7 @@ div#mCSB_1_container{
 
 
 
-/*** 
+/***
 
 ====================================================================
                         Home-Page-Three
@@ -3743,7 +3743,7 @@ div#mCSB_1_container{
 }
 
 .tabs-box .tab.active-tab{
-  display:block;  
+  display:block;
 }
 
 .tabs-box .tab{
@@ -4228,7 +4228,7 @@ div#mCSB_1_container{
   border-radius: 50%;
 }
 
-.video-section .video-inner .inner-box .video-btn a:after, 
+.video-section .video-inner .inner-box .video-btn a:after,
 .video-section .video-inner .inner-box .video-btn a:before {
   width: 100%;
   height: 100%;
@@ -4264,7 +4264,7 @@ div#mCSB_1_container{
 
 
 
-/*** 
+/***
 
 ====================================================================
                         About-Page
@@ -4482,7 +4482,7 @@ div#mCSB_1_container{
 
 
 
-/*** 
+/***
 
 ====================================================================
                         Faq-Page
@@ -4578,7 +4578,7 @@ div#mCSB_1_container{
 }
 
 .accordion-box .block .acc-content.current{
-  display:block;  
+  display:block;
 }
 
 .accordion-box .block .acc-content p{
@@ -4677,7 +4677,7 @@ div#mCSB_1_container{
 
 
 
-/*** 
+/***
 
 ====================================================================
                         Gallery-Page
@@ -4812,7 +4812,7 @@ div#mCSB_1_container{
 
 
 
-/*** 
+/***
 
 ====================================================================
                         Service-Page
@@ -5117,7 +5117,7 @@ div#mCSB_1_container{
 
 
 
-/*** 
+/***
 
 ====================================================================
                         Shop-Page
@@ -5287,7 +5287,7 @@ div#mCSB_1_container{
   height:4px;
   border:none;
   margin-bottom:24px;
-  background:#f0f0f0; 
+  background:#f0f0f0;
 }
 
 .range-slider .ui-slider .ui-slider-range{
@@ -5303,7 +5303,7 @@ div#mCSB_1_container{
   height:18px;
   border: none;
   border-radius:50%;
-  cursor:pointer; 
+  cursor:pointer;
   margin-left: 0px;
   background: #002c8f;
   box-shadow: 0px 5px 15px 0 rgba(0,0,0,0.4);
@@ -5750,7 +5750,7 @@ div#mCSB_1_container{
 .shop-details .product-discription .tabs-content .customer-review .single-review .inner h5 span{
   font-size: 15px;
   font-weight: 400;
-  color: #93959e; 
+  color: #93959e;
 }
 
 .shop-details .product-discription .tabs-content .customer-review .single-review .inner p{
@@ -5937,7 +5937,7 @@ div#mCSB_1_container{
 .bootstrap-touchspin .input-group-btn-vertical i{
   top: 2px;
   left: 7px;
-  font-size: inherit !important; 
+  font-size: inherit !important;
 }
 
 .bootstrap-touchspin .input-group-btn-vertical .bootstrap-touchspin-down{
@@ -5963,7 +5963,7 @@ div#mCSB_1_container{
 
 
 
-/*** 
+/***
 
 ====================================================================
                         Cart-Page
@@ -6256,7 +6256,7 @@ div#mCSB_1_container{
 .bootstrap-touchspin .input-group-btn-vertical i{
   top: 15px;
   left: 15px;
-  font-size: inherit !important; 
+  font-size: inherit !important;
 }
 
 .bootstrap-touchspin .input-group-btn-vertical .bootstrap-touchspin-down{
@@ -6287,7 +6287,7 @@ div#mCSB_1_container{
 }
 
 
-/*** 
+/***
 
 ====================================================================
                         Checkout-page
@@ -6321,7 +6321,7 @@ div#mCSB_1_container{
 }
 
 .checkout-section .upper-box .single-box a{
-  
+
 }
 
 .checkout-section .customer a:hover,
@@ -6413,7 +6413,7 @@ div#mCSB_1_container{
 }
 
 .checkout-section .billing-form .form-group input:focus{
-  
+
 }
 
 .checkout-section .billing-form .select-box .ui-state-default{
@@ -6467,7 +6467,7 @@ div#mCSB_1_container{
 }
 
 .checkout-section .additional-info .note-book textarea:focus{
-  
+
 }
 
 .checkout-section .order-info{
@@ -6691,7 +6691,7 @@ div#mCSB_1_container{
 
 
 
-/*** 
+/***
 
 ====================================================================
                         Blog-page
@@ -7120,7 +7120,7 @@ div#mCSB_1_container{
 
 
 
-/*** 
+/***
 
 ====================================================================
                         Contact-page

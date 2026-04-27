@@ -322,28 +322,28 @@
         flex-direction: column;
         gap: 15px;
     }
-    
+
     .address-icon {
         width: 40px;
         height: 40px;
         font-size: 18px;
     }
-    
+
     .address-header {
         flex-direction: column;
         align-items: flex-start;
     }
-    
+
     .address-actions {
         margin-top: 10px;
         width: 100%;
     }
-    
+
     .address-actions .btn {
         flex: 1;
         text-align: center;
     }
-    
+
     .address-details strong {
         min-width: auto;
     }
@@ -356,7 +356,7 @@
 <div class="add-address-section mb-4">
     <div class="d-flex justify-content-between align-items-center">
         <h3>{{ 'My Addresses'|t }}</h3>
-        <button class="btn btn-primary" onclick="showAddAddressModal()">
+        <button class="btn btn-primary" data-action="show-add-address">
             <i class="far fa-plus"></i> {{ 'Add New Address'|t }}
         </button>
     </div>
@@ -579,153 +579,29 @@
         integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
 <!-- Address Wizard -->
 <script src="{{ url_for('static', filename='js/address-wizard.js') }}"></script>
-<script>
-let addresses = [];
-let editingAddressId = null;
-
-// Load addresses on page load
-document.addEventListener('DOMContentLoaded', function() {
-    loadAddresses();
-});
-
-// Load user addresses
-async function loadAddresses() {
-    try {
-        const response = await apiRequest('/auth/addresses');
-        const result = await response.json();
-        
-        if (response.ok && result.success) {
-            addresses = result.data.addresses;
-            renderAddresses();
-        } else {
-            console.error('Failed to load addresses:', result.message);
-            renderAddresses(); // Show empty state
-        }
-    } catch (error) {
-        console.error('Error loading addresses:', error);
-        renderAddresses(); // Show empty state
-    }
-}
-
-// Render addresses list
-function renderAddresses() {
-    const addressesList = document.getElementById('addressesList');
-
-    if (addresses.length === 0) {
-        // Show empty state message
-        addressesList.innerHTML = `
-            <div class="text-center py-5" id="noAddressesMessage">
-                <i class="far fa-map-marker-alt" style="font-size: 4rem; color: #ccc;"></i>
-                <h4 class="mt-3">{{ 'No addresses saved yet'|t }}</h4>
-                <p class="text-muted">{{ 'Add your delivery addresses to make ordering easier'|t }}</p>
-                <button class="btn btn-primary" onclick="showAddAddressModal()">
-                    <i class="far fa-plus"></i> {{ 'Add Your First Address'|t }}
-                </button>
-            </div>
-        `;
-        return;
-    }
-
-    const addressesHTML = addresses.map(address => `
-        <div class="address-card ${address.is_default ? 'default' : ''}">
-            <div class="address-card-content">
-                <div class="address-icon">
-                    <i class="fas ${address.is_business ? 'fa-building' : 'fa-map-marker-alt'}"></i>
-                </div>
-                <div class="address-info">
-                    <div class="address-header">
-                        <div class="address-title-wrapper">
-                            <h5 class="address-title">${address.title}</h5>
-                            ${address.is_default ? '<span class="default-badge">{{ "Default"|t }}</span>' : ''}
-                            ${address.is_business ? '<span class="business-badge">{{ "Business"|t }}</span>' : ''}
-                        </div>
-                        <div class="address-actions">
-                            <button class="btn btn-outline-primary btn-sm" onclick="editAddress(${address.id})">
-                                <i class="far fa-edit"></i> {{ 'Edit'|t }}
-                            </button>
-                            ${!address.is_default ? `
-                            <button class="btn btn-outline-success btn-sm" onclick="setDefaultAddress(${address.id})">
-                                <i class="far fa-check-circle"></i> {{ 'Set Default'|t }}
-                            </button>
-                            <button class="btn btn-outline-danger btn-sm" onclick="deleteAddress(${address.id})">
-                                <i class="far fa-trash-alt"></i> {{ 'Delete'|t }}
-                            </button>
-                            ` : ''}
-                        </div>
-                    </div>
-                    <div class="address-details">
-                        <p><strong>{{ 'landing.contact.info.address'|t }}:</strong> <span>${address.full_address || address.street_address}</span></p>
-                        <p><strong>{{ 'City'|t }}:</strong> <span>${address.city}${address.district ? ', ' + address.district : ''}</span></p>
-                        ${address.apartment_number ? `<p><strong>{{ 'Apartment/Floor'|t }}:</strong> <span>${address.apartment_number}</span></p>` : ''}
-                        ${address.landmark ? `<p><strong>{{ 'Landmark'|t }}:</strong> <span>${address.landmark}</span></p>` : ''}
-                        ${address.delivery_instructions ? `<p><strong>{{ 'Instructions'|t }}:</strong> <span>${address.delivery_instructions}</span></p>` : ''}
-                    </div>
-                </div>
-            </div>
-        </div>
-    `).join('');
-    
-    addressesList.innerHTML = addressesHTML;
-}
-
-// Note: showAddAddressModal() is defined in address-wizard.js
-
-// Edit address - uses the wizard
-function editAddress(addressId) {
-    const address = addresses.find(a => a.id === addressId);
-    if (!address) return;
-
-    // Use the wizard for editing
-    if (typeof editAddressWizard === 'function') {
-        editAddressWizard(address);
-    } else {
-        console.error('Address wizard not loaded');
-    }
-}
-
-// Set default address
-async function setDefaultAddress(addressId) {
-    try {
-        const response = await apiRequest(`/auth/addresses/${addressId}`, {
-            method: 'PUT',
-            body: JSON.stringify({ is_default: true })
-        });
-        
-        const result = await response.json();
-        
-        if (response.ok) {
-            showNotification('{{ "Default address updated!"|t }}', 'success');
-            await loadAddresses(); // Reload addresses
-        } else {
-            showNotification(result.message || '{{ "Failed to set default address"|t }}', 'error');
-        }
-    } catch (error) {
-        showNotification('{{ "Network error. Please try again."|t }}', 'error');
-    }
-}
-
-// Delete address
-async function deleteAddress(addressId) {
-    if (!confirm('{{ "Are you sure you want to delete this address?"|t }}')) {
-        return;
-    }
-    
-    try {
-        const response = await apiRequest(`/auth/addresses/${addressId}`, {
-            method: 'DELETE'
-        });
-        
-        const result = await response.json();
-        
-        if (response.ok) {
-            showNotification('{{ "Address deleted successfully!"|t }}', 'success');
-            await loadAddresses(); // Reload addresses
-        } else {
-            showNotification(result.message || '{{ "Failed to delete address"|t }}', 'error');
-        }
-    } catch (error) {
-        showNotification('{{ "Network error. Please try again."|t }}', 'error');
-    }
-}
-</script>
+{% from "frontend/macros/page_data.html" import render_page_data %}
+{{ render_page_data({
+    'i18n': {
+        'no_addresses': 'No addresses saved yet' | t,
+        'add_first_hint': 'Add your delivery addresses to make ordering easier' | t,
+        'add_first_button': 'Add Your First Address' | t,
+        'default_badge': 'Default' | t,
+        'business_badge': 'Business' | t,
+        'edit': 'Edit' | t,
+        'set_default': 'Set Default' | t,
+        'delete': 'Delete' | t,
+        'address_label': 'landing.contact.info.address' | t,
+        'city': 'City' | t,
+        'apartment': 'Apartment/Floor' | t,
+        'landmark': 'Landmark' | t,
+        'instructions': 'Instructions' | t,
+        'default_updated': 'Default address updated!' | t,
+        'set_default_failed': 'Failed to set default address' | t,
+        'delete_confirm': 'Are you sure you want to delete this address?' | t,
+        'delete_success': 'Address deleted successfully!' | t,
+        'delete_failed': 'Failed to delete address' | t,
+        'network_error': 'Network error. Please try again.' | t,
+    },
+}) }}
+<script src="{{ url_for('static', filename='js/pages/addresses.js') }}"></script>
 {% endblock %}

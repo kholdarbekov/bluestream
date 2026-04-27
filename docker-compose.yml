@@ -1,3 +1,16 @@
+# Local development stack.
+#
+#   docker compose up -d --build
+#
+# Internal-service ports (Postgres, Redis, debugpy, Flower, business_app
+# direct, admin_ui direct) are bound to 127.0.0.1 so they're reachable
+# from your machine but never publicly exposed — the production overlay
+# inherits these bindings, so on a server they stay safely localhost-only
+# and traffic enters through nginx (port 81).
+#
+# Production overlay: docker-compose.production.yml
+#   docker compose -f docker-compose.yml -f docker-compose.production.yml up -d --build
+
 services:
   postgres:
     image: postgres:17-alpine
@@ -9,7 +22,7 @@ services:
     volumes:
       - postgres_data_new:/var/lib/postgresql/data
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     healthcheck:
       test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-bluestream_db}" ]
       interval: 10s
@@ -34,7 +47,7 @@ services:
   redis:
     image: redis:8-alpine
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -87,7 +100,7 @@ services:
     environment:
       - TZ=${DISPLAY_TIMEZONE:-Asia/Tashkent}
       - FLASK_APP=business_app:create_app
-      - FLASK_ENV=${FLASK_ENV:-production}
+      - FLASK_ENV=${FLASK_ENV:-development}
       - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-dummy_password}@postgres:5432/${POSTGRES_DB:-bluestream_db}
       - REDIS_URL=redis://redis:6379/0
       - SECRET_KEY=${SECRET_KEY}
@@ -121,8 +134,8 @@ services:
       target: business_app
     environment:
       - TZ=${DISPLAY_TIMEZONE:-Asia/Tashkent}
-      - FLASK_ENV=${FLASK_ENV:-production}
-      - FLASK_DEBUG=${FLASK_DEBUG:-0}
+      - FLASK_ENV=${FLASK_ENV:-development}
+      - FLASK_DEBUG=${FLASK_DEBUG:-1}
       - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-dummy_password}@postgres:5432/${POSTGRES_DB:-bluestream_db}
       - REDIS_URL=redis://redis:6379/0
       - SECRET_KEY=${SECRET_KEY}
@@ -157,8 +170,8 @@ services:
       - uploads_data:/app/uploads
       - ./logs:/app/logs
     ports:
-      - "5000:80"
-      - "5678:5678"
+      - "127.0.0.1:5000:80"
+      - "127.0.0.1:5678:5678"
     depends_on:
       postgres:
         condition: service_healthy
@@ -168,7 +181,7 @@ services:
         condition: service_completed_successfully
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:80/health" ]
-      interval: 300s
+      interval: 60s
       timeout: 10s
       retries: 3
       start_period: 60s
@@ -209,7 +222,7 @@ services:
       - ./shared:/app/shared
       - ./logs:/app/logs
     ports:
-      - "5679:5679"
+      - "127.0.0.1:5679:5679"
     depends_on:
       postgres:
         condition: service_healthy
@@ -412,18 +425,15 @@ services:
         max-file: "3"
 
   # CEL-006: Flower dashboard for Celery (queues, workers, task history).
-  # Internal-only — no published port. Access from the host with:
-  #   docker compose exec flower wget -qO- http://localhost:5555/
-  # or temporarily expose via `docker compose port flower 5555` / a one-off
-  # `-p 127.0.0.1:5555:5555` override. FLOWER_BASIC_AUTH must be set even on
-  # the internal network — defense-in-depth in case a sibling container is
-  # ever compromised.
+  # In dev, exposed on 127.0.0.1:5555 with a default basic-auth credential
+  # so `docker compose up` works without setting FLOWER_BASIC_AUTH. The
+  # production overlay tightens this — FLOWER_BASIC_AUTH becomes required.
   flower:
     image: mher/flower:2.0
     environment:
       - TZ=${DISPLAY_TIMEZONE:-Asia/Tashkent}
       - CELERY_BROKER_URL=redis://redis:6379/0
-      - FLOWER_BASIC_AUTH=${FLOWER_BASIC_AUTH:?FLOWER_BASIC_AUTH must be set, e.g. admin:somelongpassword}
+      - FLOWER_BASIC_AUTH=${FLOWER_BASIC_AUTH:-admin:devpassword}
       - FLOWER_PERSISTENT=True
       - FLOWER_DB=/data/flower.db
       - FLOWER_STATE_SAVE_INTERVAL=60000
@@ -431,6 +441,8 @@ services:
     command: celery --broker=redis://redis:6379/0 flower --persistent=True --db=/data/flower.db --port=5555
     volumes:
       - flower_data:/data
+    ports:
+      - "127.0.0.1:5555:5555"
     depends_on:
       redis:
         condition: service_healthy
@@ -459,7 +471,8 @@ services:
 
   # CEL-006: Prometheus exporter for Celery (danihodovic/celery-exporter).
   # Consumes the worker event stream (enabled via `-E` on celery_worker) and
-  # exposes Prometheus metrics on :9540. Scraped by Prometheus job `celery`.
+  # exposes Prometheus metrics on :9540. Scraped by Prometheus job `celery`
+  # in the production overlay.
   celery_exporter:
     image: danihodovic/celery-exporter:0.10.13
     environment:
@@ -500,10 +513,10 @@ services:
       context: ./admin_ui
       dockerfile: Dockerfile
     ports:
-      - "3000:80"
+      - "127.0.0.1:3000:80"
     environment:
-      - REACT_APP_API_URL=https://aqua-element.uz/api/v1
-      - REACT_APP_ENVIRONMENT=${ENVIRONMENT:-production}
+      - REACT_APP_API_URL=${REACT_APP_API_URL:-http://localhost:81/api/v1}
+      - REACT_APP_ENVIRONMENT=${ENVIRONMENT:-development}
       - REACT_APP_APP_NAME=Aqua Element Admin
       - REACT_APP_VERSION=1.0.0
       - REACT_APP_TIMEZONE_OFFSET=${DISPLAY_TIMEZONE_OFFSET:-+05:00}
@@ -527,6 +540,7 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+
   nginx:
     image: nginx:1.29-alpine
     ports:

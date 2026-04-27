@@ -1,19 +1,29 @@
-# Production Docker Compose configuration with strict resource limits
-# Use with: docker-compose -f docker-compose.yml -f docker-compose.production.yml up
+# Production overlay for single-host docker compose up.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.production.yml up -d --build
+#
+# Deployment target: single host. Swarm-only directives (placement
+# constraints, replicas, overlay networks) are intentionally not used —
+# they're no-ops under `docker compose up` and would mislead readers. To
+# scale workers on a single host, use `--scale celery_worker=N` instead
+# of `replicas`.
+#
+# What this overlay does on top of the dev base:
+#  - flips FLASK_ENV/DEBUG to production for business_app
+#  - tightens FLOWER_BASIC_AUTH from optional to required
+#  - bumps resource limits and gunicorn / celery worker counts
+#  - adds production tuning for postgres (pg_stat_statements, WAL, logging)
+#    and redis (snapshot policy, memory cap, optional auth)
+#  - sets PROMETHEUS_MULTIPROC_DIR for gunicorn workers' shared metrics
+#  - adds the monitoring stack (prometheus, alertmanager, grafana, loki)
+#    on 127.0.0.1 — access via SSH tunnel
+#
+# All host-bound ports inherited from the base file are 127.0.0.1-only,
+# so traffic enters through nginx (port 81) and the rest stays local to
+# the host.
 
 services:
   postgres:
-    deploy:
-      resources:
-        limits:
-          memory: 2G
-          cpus: '2.0'
-        reservations:
-          memory: 1G
-          cpus: '1.0'
-      placement:
-        constraints:
-          - node.role == manager
     environment:
       POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256 --data-checksums
     command: >
@@ -44,16 +54,19 @@ services:
       -c log_lock_waits=on
       -c log_statement=ddl
       -c log_temp_files=0
-
-  redis:
     deploy:
       resources:
         limits:
+          memory: 2G
+          cpus: '2.0'
+        reservations:
           memory: 1G
           cpus: '1.0'
-        reservations:
-          memory: 512M
-          cpus: '0.5'
+
+  redis:
+    # REDIS_PASSWORD is optional — leave empty to run without auth, or set
+    # it in .env to require a password. If you set it, also include the
+    # password in REDIS_URL for every consuming service.
     command: >
       redis-server
       --appendonly yes
@@ -70,9 +83,19 @@ services:
       --rdbcompression yes
       --rdbchecksum yes
       --requirepass ${REDIS_PASSWORD:-}
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.0'
+        reservations:
+          memory: 512M
+          cpus: '0.5'
 
   business_app:
     environment:
+      - FLASK_ENV=production
+      - FLASK_DEBUG=0
       - GUNICORN_WORKERS=4
       - GUNICORN_THREADS=2
       - GUNICORN_MAX_REQUESTS=2000
@@ -80,8 +103,9 @@ services:
       - GUNICORN_WORKER_CONNECTIONS=1000
       - GUNICORN_TIMEOUT=60
       - GUNICORN_KEEPALIVE=10
-      # INF-003: prometheus_client multiprocess shared dir (must be writable by
-      # every worker; ephemeral tmpfs is ideal — counters are re-derived on boot).
+      # INF-003: prometheus_client multiprocess shared dir (must be writable
+      # by every worker; ephemeral tmpfs is ideal — counters are re-derived
+      # on boot).
       - PROMETHEUS_MULTIPROC_DIR=/tmp/prom-multiproc
     deploy:
       resources:
@@ -91,9 +115,6 @@ services:
         reservations:
           memory: 1G
           cpus: '1.0'
-      placement:
-        constraints:
-          - node.role == manager
     ulimits:
       nofile:
         soft: 65536
@@ -114,6 +135,10 @@ services:
 
   celery_worker:
     environment:
+      # Force production regardless of what .env says — celery imports
+      # business_app code, so this needs to match business_app above.
+      - FLASK_ENV=production
+      - FLASK_DEBUG=0
       - CELERY_WORKER_CONCURRENCY=8
       - CELERY_WORKER_MAX_MEMORY_PER_CHILD=500000
       - CELERY_WORKER_MAX_TASKS_PER_CHILD=1000
@@ -125,7 +150,6 @@ services:
         reservations:
           memory: 1G
           cpus: '1.0'
-      replicas: 2
     command: >
       celery -A business_app.tasks.celery_app worker
       -E
@@ -137,6 +161,9 @@ services:
       --prefetch-multiplier=1
 
   celery_beat:
+    environment:
+      - FLASK_ENV=production
+      - FLASK_DEBUG=0
     deploy:
       resources:
         limits:
@@ -145,30 +172,11 @@ services:
         reservations:
           memory: 256M
           cpus: '0.25'
-      placement:
-        constraints:
-          - node.role == manager
 
-  admin_ui:
-    deploy:
-      resources:
-        limits:
-          memory: 512M
-          cpus: '1.0'
-        reservations:
-          memory: 256M
-          cpus: '0.5'
-
-  # CEL-006: Flower is stateful (persists task history to flower_data volume)
-  # so pin to manager node like celery_beat. Internal-only — no published port.
   flower:
-    deploy:
-      placement:
-        constraints:
-          - node.role == manager
+    environment:
+      - FLOWER_BASIC_AUTH=${FLOWER_BASIC_AUTH:?FLOWER_BASIC_AUTH must be set, e.g. admin:somelongpassword}
 
-  # CEL-006: Stateless event consumer; can run on any node. Tightened resource
-  # ceiling — exporter footprint is small.
   celery_exporter:
     deploy:
       resources:
@@ -179,11 +187,23 @@ services:
           memory: 64M
           cpus: '0.1'
 
-  # Production monitoring services
+  admin_ui:
+    environment:
+      - REACT_APP_API_URL=${REACT_APP_API_URL:-https://aqua-element.uz/api/v1}
+      - REACT_APP_ENVIRONMENT=${ENVIRONMENT:-production}
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '1.0'
+        reservations:
+          memory: 256M
+          cpus: '0.5'
+
   prometheus:
     image: prom/prometheus:latest
     ports:
-      - "9090:9090"
+      - "127.0.0.1:9090:9090"
     volumes:
       - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./monitoring/alert_rules.yml:/etc/prometheus/alert_rules.yml:ro
@@ -206,14 +226,19 @@ services:
           memory: 256M
           cpus: '0.25'
     restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
-  # INF-003: Alertmanager for routing Prometheus alerts to Slack.
-  # Secret material (Slack webhook URL) is loaded via Docker Compose file-mount
-  # secret at /run/secrets/slack_webhook_url — see monitoring/alertmanager.yml.
+  # INF-003: Alertmanager routes Prometheus alerts to Slack. The webhook
+  # URL is loaded via Compose file-mount secret at
+  # /run/secrets/slack_webhook_url — see monitoring/alertmanager.yml.
   alertmanager:
     image: prom/alertmanager:latest
     ports:
-      - "9093:9093"
+      - "127.0.0.1:9093:9093"
     volumes:
       - ./monitoring/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
       - alertmanager_data:/alertmanager
@@ -232,16 +257,23 @@ services:
           memory: 64M
           cpus: '0.1'
     restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   grafana:
     image: grafana/grafana:latest
     ports:
-      - "3001:3000"
+      - "127.0.0.1:3001:3000"
     volumes:
       - grafana_data:/var/lib/grafana
       - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards
       - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources
     environment:
+      # GRAFANA_PASSWORD defaults to `admin` for backwards compatibility —
+      # set it in .env to something real before exposing Grafana to anyone.
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
       - GF_INSTALL_PLUGINS=grafana-clock-panel,grafana-simple-json-datasource
     deploy:
@@ -253,12 +285,16 @@ services:
           memory: 128M
           cpus: '0.25'
     restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
-  # Log aggregation
   loki:
     image: grafana/loki:latest
     ports:
-      - "3100:3100"
+      - "127.0.0.1:3100:3100"
     volumes:
       - ./monitoring/loki-config.yml:/etc/loki/local-config.yaml
       - loki_data:/loki
@@ -272,6 +308,11 @@ services:
           memory: 256M
           cpus: '0.25'
     restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 volumes:
   prometheus_data:
@@ -280,15 +321,10 @@ volumes:
   loki_data:
 
 # INF-003: Alertmanager receiver credential (Slack webhook URL).
-# File-mount secret for plain Docker Compose (non-Swarm). The file must exist
-# at the path below before `docker compose up` — see README or INF-003 setup
-# notes for how to populate it. chmod 600 recommended so only the docker
-# daemon / compose user can read it.
+# File-mount secret for plain Docker Compose (non-Swarm). The file must
+# exist at the path below before `docker compose up` — see README or
+# INF-003 setup notes for how to populate it. chmod 600 recommended so
+# only the docker daemon / compose user can read it.
 secrets:
   slack_webhook_url:
     file: ./secrets/slack_webhook_url.txt
-
-networks:
-  default:
-    driver: overlay
-    attachable: true

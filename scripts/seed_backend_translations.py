@@ -3638,6 +3638,11 @@ BACKEND_TRANSLATIONS = {
             'Пожалуйста, подождите. Ссылка для оплаты придёт автоматически. Не закрывайте чат.'
         ),
     },
+    'telegram.orders.payment_link_ready_notice': {
+        'en': '✅ Order #{order_number} is ready — payment link sent below.',
+        'uz': '✅ #{order_number}-sonli buyurtma tayyor — to\'lov havolasi quyida yuborildi.',
+        'ru': '✅ Заказ №{order_number} готов — ссылка для оплаты отправлена ниже.',
+    },
     'telegram.orders.asl_belgisi_error_message': {
         'en': (
             '⚠️ The Asl belgisi (tax authority) system is temporarily unavailable.\n\n'

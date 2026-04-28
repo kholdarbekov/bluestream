@@ -693,9 +693,16 @@ class OrderHandlers(BaseHandler):
                     'order_items': order.get('order_items', [])
                 }
 
-                # Send external payment link
+                # Send external payment link.
+                # For card/click we just waited ~1 minute on the Asl Belgisi
+                # registration; deliver the link as a new message so Telegram
+                # pushes a notification to the user.
                 invoice_sent = await payment_handlers.send_payment_link(
-                    update, context, order_for_payment, payment_method=provider_method
+                    update,
+                    context,
+                    order_for_payment,
+                    payment_method=provider_method,
+                    send_as_new_message=(provider_method == 'click'),
                 )
 
                 if not invoice_sent:

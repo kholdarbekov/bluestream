@@ -36,12 +36,18 @@ class PaymentHandlers(BaseHandler):
         context: ContextTypes.DEFAULT_TYPE,
         order_data: Dict[str, Any],
         payment_method: str = 'click',
+        send_as_new_message: bool = False,
     ) -> bool:
         """
         Send external payment link to user via Redirect Method.
 
         Differs from native invoice: sends a message with an inline button
         that redirects to the configured PSP checkout page.
+
+        When send_as_new_message=True, the payment link is sent as a brand new
+        message (which triggers a Telegram notification) and the original
+        callback-query message is edited to a brief "ready" status. Used after
+        the Asl Belgisi wait so users get a notification the link arrived.
         """
         try:
             user_id = update.effective_user.id
@@ -118,28 +124,49 @@ class PaymentHandlers(BaseHandler):
 
             keyboard = PaymentKeyboards.payment_link(payment_url, language)
 
-            # Edit the existing confirmation message instead of sending a new one
             query = update.callback_query
-            if query:
+            message_id = None
+
+            if send_as_new_message and query:
+                # New-message mode: deliver the payment link as a fresh message
+                # (so Telegram pushes a notification) and then update the old
+                # "preparing" message to a brief ready-status notice.
+                chat_id = update.effective_chat.id
+                sent_message = await context.bot.send_message(
+                    chat_id=chat_id,
+                    text=msg_text,
+                    reply_markup=keyboard,
+                )
+                message_id = sent_message.message_id
+
+                ready_notice = i18n.get(
+                    'telegram.orders.payment_link_ready_notice',
+                    language,
+                    order_number=order_number,
+                )
+                try:
+                    await query.edit_message_text(text=ready_notice)
+                except Exception as edit_err:
+                    logger.warning(
+                        f"Failed to update preparing message after sending new payment link: {edit_err}"
+                    )
+            elif query:
+                # Edit the existing callback-query message in place
                 sent_message = await query.edit_message_text(
                     text=msg_text,
                     reply_markup=keyboard
                 )
+                if hasattr(sent_message, 'message_id'):
+                    message_id = sent_message.message_id
+                else:
+                    message_id = query.message.message_id
             else:
                 sent_message = await update.effective_message.reply_text(
                     text=msg_text,
                     reply_markup=keyboard
                 )
-
-            # Store payment message_id in Redis for webhook to edit on success
-            message_id = None
-            if query:
                 if hasattr(sent_message, 'message_id'):
                     message_id = sent_message.message_id
-                else:
-                    message_id = query.message.message_id
-            elif hasattr(sent_message, 'message_id'):
-                message_id = sent_message.message_id
 
             if message_id and order_id:
                 try:

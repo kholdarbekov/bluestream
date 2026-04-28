@@ -1794,6 +1794,7 @@ def create_order_for_user():
             "consume_marking_codes": consume_marking_codes,
             "delivery_notes": delivery_notes,
             "order_source": "admin",
+            "created_by_staff_id": current_user_id,
         }
 
         order = order_service.create_order(user_id, order_data)

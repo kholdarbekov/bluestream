@@ -14,7 +14,7 @@ from business_app.models.order import Order
 from business_app.services.payment_service import PaymentService
 from business_app.services.payment_fiscalization_service import PaymentFiscalizationService
 from business_app.services.notification_service import NotificationService
-from business_app.utils.constants import PaymentMethod, PaymentStatus, OrderStatus
+from business_app.utils.constants import PaymentMethod, PaymentStatus, OrderStatus, NotificationChannel
 from business_app import db
 
 logger = get_task_logger(__name__)
@@ -513,9 +513,10 @@ def send_payment_reminder(self, order_id: int):
         notification_service.send_notification(
             order.user_id,
             "payment_reminder",
+            channels=[NotificationChannel.TELEGRAM],
             template_data={
                 "order_number": order.order_number,
-                "order_total": order.total_amount,
+                "order_total": float(order.total_amount) if order.total_amount is not None else None,
                 "payment_deadline": (order.created_at + timedelta(hours=24)).isoformat(),
             },
         )

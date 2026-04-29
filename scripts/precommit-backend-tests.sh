@@ -20,8 +20,11 @@
 # deliberately doesn't bake in.
 #
 # REDIS_URL is overridden to DB 15 so flushdb in conftest's `reset_redis_state`
-# never touches the production-ish DB 0 the running stack uses. DATABASE_URL
-# stays as compose defines it — migration roundtrip tests create uuid-suffixed
+# never touches the production-ish DB 0 the running stack uses. The compose
+# Redis now runs `--requirepass`, so the test URL must carry the same
+# REDIS_PASSWORD (sourced from .env) — otherwise every redis call from the
+# app under test fails with `AuthenticationError`. DATABASE_URL stays as
+# compose defines it — migration roundtrip tests create uuid-suffixed
 # transient DBs on the same Postgres server and don't touch `bluestream_db`.
 #
 # The image baked from main may pre-date pytest-xdist + pytest-timeout in
@@ -64,8 +67,17 @@ fi
 # tests still hit the test Redis DB and TestingConfig regardless of what
 # `.env` says about REDIS_URL / FLASK_ENV.
 env_file_arg=()
+redis_password=""
 if [[ -f "${repo_root}/.env" ]]; then
     env_file_arg=(--env-file "${repo_root}/.env")
+    # Pull REDIS_PASSWORD straight from .env so the test REDIS_URL override
+    # below can carry the same credential the running compose stack uses.
+    redis_password="$(grep -E '^REDIS_PASSWORD=' "${repo_root}/.env" | head -n1 | cut -d= -f2- | tr -d '\r"'"'")"
+fi
+if [[ -n "${redis_password}" ]]; then
+    test_redis_url="redis://:${redis_password}@redis:6379/15"
+else
+    test_redis_url="redis://redis:6379/15"
 fi
 
 # `--dist=worksteal` overrides the `--dist=loadfile` set in pytest.ini.
@@ -87,7 +99,7 @@ exec docker run --rm \
     "${env_file_arg[@]}" \
     -v "${repo_root}:/app" \
     -w /app \
-    -e REDIS_URL="redis://redis:6379/15" \
+    -e REDIS_URL="${test_redis_url}" \
     -e FLASK_ENV=testing \
     -e TESTING=true \
     "${image}" \

@@ -37,6 +37,7 @@ def make_celery(app=None):
             "business_app.tasks.loyalty_tasks",
             "business_app.tasks.tryout_tasks",
             "business_app.tasks.backup_tasks",
+            "business_app.tasks.marking_code_tasks",
         ],
     )
 
@@ -176,6 +177,15 @@ def make_celery(app=None):
             "task": "backup.uploads",
             "schedule": crontab(hour=3, minute=0, day_of_week=0),
         },
+        # Pre-register marking codes with the Tax Committee (Asl Belgisi)
+        # daily at 00:00 UTC (05:00 Tashkent). Sizes the per-product pool
+        # from the previous 7 days of card+click sales, then fans out a
+        # replenish task per fiscalisable product. Card payments during the
+        # day allocate from this pool and skip the synchronous TC call.
+        "pre-register-marking-codes": {
+            "task": "business_app.tasks.marking_code_tasks.pre_register_marking_codes_daily",
+            "schedule": crontab(hour=0, minute=0),
+        },
     }
 
     # Set timezone
@@ -237,6 +247,7 @@ celery.conf.task_routes = {
     "business_app.tasks.loyalty_tasks.*": {"queue": "loyalty"},
     "business_app.tasks.tryout_tasks.*": {"queue": "maintenance"},
     "business_app.tasks.backup_tasks.*": {"queue": "maintenance"},
+    "business_app.tasks.marking_code_tasks.*": {"queue": "payment"},
 }
 
 

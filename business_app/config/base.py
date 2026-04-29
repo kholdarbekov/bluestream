@@ -308,6 +308,18 @@ class BaseConfig:
     TAX_COMMITTEE_UTILISATION_DELAY_SECONDS = int(os.environ.get("TAX_COMMITTEE_UTILISATION_DELAY_SECONDS", 120) or 120)
     PRE_PAYMENT_UTILISATION_WAIT_SECONDS = int(os.environ.get("PRE_PAYMENT_UTILISATION_WAIT_SECONDS", 45) or 45)
 
+    # Proactive marking-code pre-registration (daily Celery task) — sizes the
+    # per-product pool so card/click orders skip the synchronous TC call.
+    MARKING_CODE_TREND_WINDOW_DAYS = int(os.environ.get("MARKING_CODE_TREND_WINDOW_DAYS", 7) or 7)
+    MARKING_CODE_RUNWAY_DAYS = int(os.environ.get("MARKING_CODE_RUNWAY_DAYS", 1) or 1)
+    MARKING_CODE_SAFETY_MULTIPLIER = float(os.environ.get("MARKING_CODE_SAFETY_MULTIPLIER", 1.5) or 1.5)
+    MARKING_CODE_TARGET_MIN = int(os.environ.get("MARKING_CODE_TARGET_MIN", 5) or 5)
+    MARKING_CODE_TARGET_MAX = int(os.environ.get("MARKING_CODE_TARGET_MAX", 500) or 500)
+    MARKING_CODE_LOW_WATER_RATIO = float(os.environ.get("MARKING_CODE_LOW_WATER_RATIO", 0.25) or 0.25)
+    MARKING_CODE_UTILISATION_BATCH_SIZE = int(os.environ.get("MARKING_CODE_UTILISATION_BATCH_SIZE", 200) or 200)
+    MARKING_CODE_REPLENISH_LOCK_TTL = int(os.environ.get("MARKING_CODE_REPLENISH_LOCK_TTL", 1800) or 1800)
+    MARKING_CODE_REPLENISH_DEDUP_TTL = int(os.environ.get("MARKING_CODE_REPLENISH_DEDUP_TTL", 300) or 300)
+
     # Delivery Configuration
     DEFAULT_DELIVERY_FEE = int(os.environ.get("DEFAULT_DELIVERY_FEE", 5000))  # UZS
     FREE_DELIVERY_THRESHOLD = int(os.environ.get("FREE_DELIVERY_THRESHOLD", 50000))  # UZS

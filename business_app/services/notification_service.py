@@ -353,7 +353,7 @@ class NotificationService:
         template_data = {
             "order_number": order.order_number,
             "order_status": order.status.value,
-            "order_total": order.total_amount,
+            "order_total": float(order.total_amount) if order.total_amount is not None else None,
             "delivery_address": order.delivery_address.street_address if order.delivery_address else None,
             "estimated_delivery": (
                 order.estimated_delivery_time.isoformat()
@@ -364,7 +364,7 @@ class NotificationService:
                 {
                     "name": item.product.name if item.product else "Unknown",
                     "quantity": item.quantity,
-                    "price": item.total_price,
+                    "price": float(item.total_price) if item.total_price is not None else None,
                 }
                 for item in order.order_items
             ],

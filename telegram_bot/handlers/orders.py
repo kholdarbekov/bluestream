@@ -660,18 +660,25 @@ class OrderHandlers(BaseHandler):
             # For card/click: show "preparing" message and wait until payment_ready_at
             # so the Tax Committee utilisation is at least PRE_PAYMENT_UTILISATION_WAIT_SECONDS
             # before the user sees the payment link.
+            #
+            # When the proactive marking-code pool covers the order the backend
+            # returns payment_ready_at == now → remaining ≤ 0 → no preparing
+            # message is shown and the link is delivered immediately via the
+            # original edit-in-place path (no need for the notification UX
+            # because there was nothing to wait for).
+            needed_wait = False
             if payment_method in ['card', 'click']:
                 payment_ready_at_str = response_payload.get('payment_ready_at')
                 if payment_ready_at_str:
-                    preparing_text = i18n.get('telegram.orders.preparing_payment_message', language).format(
-                        order_number=order.get('order_number', str(order['id']))
-                    )
-                    await query.edit_message_text(text=preparing_text)
-
                     payment_ready_at = datetime.fromisoformat(payment_ready_at_str.replace('Z', '+00:00'))
                     remaining = (payment_ready_at - datetime.now(timezone.utc)).total_seconds()
                     logger.info(f"Payment for order: {order.get('order_number')} will be ready at {payment_ready_at_str}, waiting for {remaining:.2f} seconds before showing payment link to user {user_id}")
                     if remaining > 0:
+                        needed_wait = True
+                        preparing_text = i18n.get('telegram.orders.preparing_payment_message', language).format(
+                            order_number=order.get('order_number', str(order['id']))
+                        )
+                        await query.edit_message_text(text=preparing_text)
                         await asyncio.sleep(remaining)
 
             # Handle different payment methods
@@ -694,15 +701,16 @@ class OrderHandlers(BaseHandler):
                 }
 
                 # Send external payment link.
-                # For card/click we just waited ~1 minute on the Asl Belgisi
-                # registration; deliver the link as a new message so Telegram
-                # pushes a notification to the user.
+                # Only use the "new message + notification" UX when we actually
+                # made the user wait — i.e. the slow path. When the proactive
+                # pool covered the order, fall back to edit-in-place because
+                # there's no preparing message to replace.
                 invoice_sent = await payment_handlers.send_payment_link(
                     update,
                     context,
                     order_for_payment,
                     payment_method=provider_method,
-                    send_as_new_message=(provider_method == 'click'),
+                    send_as_new_message=(needed_wait and provider_method == 'click'),
                 )
 
                 if not invoice_sent:

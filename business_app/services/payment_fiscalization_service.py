@@ -207,22 +207,27 @@ class PaymentFiscalizationService:
         self,
         payment: Payment,
         max_retries: int = 3,
-    ) -> Optional[datetime]:
+    ) -> Dict[str, Any]:
         """Pre-utilise marking codes at order-confirmation time for card/click payments.
 
         Called synchronously during order creation before the payment link is surfaced
         to the user.  Guarantees the Tax Committee utilisation happens at least
-        PRE_PAYMENT_UTILISATION_WAIT_SECONDS before the customer actually pays.
+        PRE_PAYMENT_UTILISATION_WAIT_SECONDS before the customer actually pays —
+        unless the proactive pool already covers the order, in which case the TC
+        roundtrip is skipped entirely (fast_path=True) and the customer needs no wait.
 
         Steps:
           1. Create / fetch the PaymentFiscalization record.
           2. Reserve marking codes (idempotent — skips already-allocated codes).
-          3. Send utilisation request to Tax Committee with up to *max_retries* attempts.
-          4. Record tax_committee_utilised_at on the fiscal record.
+          3. If every reserved code is already pre-utilised at the Tax Committee,
+             stamp the fiscal record and return fast_path=True.
+          4. Otherwise, send utilisation request to Tax Committee with up to
+             *max_retries* attempts and record tax_committee_utilised_at.
 
         Returns:
-            The tax_committee_utilised_at datetime (UTC) if utilisation happened or was
-            already recorded; None if the order has no marking-code products.
+            ``{"utilised_at": datetime|None, "fast_path": bool}``. ``fast_path`` is
+            True when the TC call was skipped because the pool covered the order;
+            the API uses this to short-circuit the customer-facing wait.
 
         Raises:
             TaxCommitteeUnavailableError: after *max_retries* exhausted.
@@ -232,6 +237,26 @@ class PaymentFiscalizationService:
 
         fiscalization = self.ensure_fiscalization_record(payment)
         self.reserve_required_marking_codes(payment)
+
+        # Fast path: if every reserved code came from the proactive pool (i.e.
+        # tax_committee_utilised_at is set on every row), the codes are already
+        # APPLIED at the Tax Committee. We can skip the TC roundtrip entirely
+        # and the customer pays without the 45-60 s wait.
+        reserved_codes = self._get_reserved_codes(payment)
+        if reserved_codes and all(code.tax_committee_utilised_at is not None for _, code in reserved_codes):
+            if fiscalization.tax_committee_utilised_at is None:
+                fiscalization.tax_committee_utilised_at = datetime.now(timezone.utc)
+            db.session.commit()
+            self._log_fiscal_step(
+                "pre_utilise_marking_codes_skipped_pool_covered",
+                payment=payment,
+                fiscalization=fiscalization,
+                reserved_count=len(reserved_codes),
+            )
+            return {
+                "utilised_at": fiscalization.tax_committee_utilised_at,
+                "fast_path": True,
+            }
 
         # Retry Tax Committee utilisation up to max_retries times
         last_error: Optional[Exception] = None
@@ -277,7 +302,10 @@ class PaymentFiscalizationService:
             fiscalization=fiscalization,
             utilised_at=fiscalization.tax_committee_utilised_at,
         )
-        return fiscalization.tax_committee_utilised_at
+        return {
+            "utilised_at": fiscalization.tax_committee_utilised_at,
+            "fast_path": False,
+        }
 
     def payment_requires_click_fiscalization(self, payment: Payment) -> bool:
         method_value = (
@@ -1039,7 +1067,13 @@ class PaymentFiscalizationService:
                     report_id=report_id,
                 )
 
+                utilised_at = datetime.now(timezone.utc)
                 for order_item, code in codes_to_utilise:
+                    # Stamp the per-row timestamp so the next allocation /
+                    # daily task sees this code as already pre-utilised and
+                    # never re-utilises it at the Tax Committee.
+                    if code.tax_committee_utilised_at is None:
+                        code.tax_committee_utilised_at = utilised_at
                     db.session.add(
                         OrderItemMarkingCodeAllocation(
                             order_item_id=order_item.id,
@@ -1064,9 +1098,14 @@ class PaymentFiscalizationService:
                     product_id=product_id,
                     codes_count=len(codes_already_applied),
                 )
+                already_utilised_at = datetime.now(timezone.utc)
                 for order_item, code in codes_already_applied:
                     id_code = self._extract_identification_code(code.code)
                     tc_status = status_map.get(id_code, "APPLIED")
+                    # Trust the Tax Committee — if it says APPLIED/INTRODUCED,
+                    # mirror that locally so we don't re-check next time.
+                    if code.tax_committee_utilised_at is None:
+                        code.tax_committee_utilised_at = already_utilised_at
                     db.session.add(
                         OrderItemMarkingCodeAllocation(
                             order_item_id=order_item.id,
@@ -1292,12 +1331,19 @@ class PaymentFiscalizationService:
                 continue
 
             missing_count = int(order_item.quantity or 0) - len(already_allocated)
+            # Prefer pre-utilised codes (tax_committee_utilised_at IS NOT NULL)
+            # so card orders skip the synchronous TC call. NULL sorts last via
+            # the boolean flip below — non-NULL rows are picked first.
             available_codes = (
                 ProductMarkingCode.query.filter_by(
                     product_id=order_item.product_id,
                     status=MarkingCodeStatus.AVAILABLE,
                 )
-                .order_by(ProductMarkingCode.created_at.asc(), ProductMarkingCode.id.asc())
+                .order_by(
+                    ProductMarkingCode.tax_committee_utilised_at.is_(None).asc(),
+                    ProductMarkingCode.created_at.asc(),
+                    ProductMarkingCode.id.asc(),
+                )
                 .with_for_update()
                 .limit(missing_count)
                 .all()
@@ -1312,9 +1358,18 @@ class PaymentFiscalizationService:
                     available=len(available_codes),
                     product_id=order_item.product_id,
                 )
+                # Pool empty for this product — kick off a replenish so the
+                # next customer doesn't hit the same wall.
+                self._safe_trigger_replenish(order_item.product_id, "on_empty")
                 raise ValidationError(
                     f"Not enough marking codes for product {product.name}. Required: {missing_count}, available: {len(available_codes)}"  # noqa: E501
                 )
+
+            # Track whether we dipped into un-utilised codes — if so, schedule
+            # a replenish so the next card order still gets the fast path.
+            picked_un_utilised = sum(1 for c in available_codes if c.tax_committee_utilised_at is None)
+            if picked_un_utilised:
+                self._safe_trigger_replenish(order_item.product_id, "low_water_during_reservation")
 
             for code in available_codes:
                 code.status = MarkingCodeStatus.RESERVED
@@ -1360,12 +1415,49 @@ class PaymentFiscalizationService:
                 additional_data={"reserved_marking_codes": reserved_count},
             )
 
+            # Low-water-mark check after the reservation lands — fire a
+            # replenish for any product whose pre-utilised pool dropped below
+            # MARKING_CODE_LOW_WATER_RATIO of target.
+            for order_item in order.order_items or []:
+                product = order_item.product
+                if product and product.requires_marking_codes:
+                    self._maybe_trigger_low_water_replenish(product.id)
+
         self._log_fiscal_step(
             "reserve_required_marking_codes_completed",
             payment=payment,
             reserved=reserved_count,
         )
         return {"reserved": reserved_count}
+
+    def _safe_trigger_replenish(self, product_id: int, run_kind: str) -> None:
+        """Best-effort enqueue of the replenish task; never fails the caller."""
+        try:
+            from business_app.services.marking_code_pool_service import MarkingCodePoolService
+
+            MarkingCodePoolService().trigger_replenish_async(int(product_id), run_kind)
+        except Exception:
+            current_app.logger.warning(
+                "fiscalization: failed to enqueue marking-code replenish",
+                extra={"product_id": product_id, "run_kind": run_kind},
+                exc_info=True,
+            )
+
+    def _maybe_trigger_low_water_replenish(self, product_id: int) -> None:
+        """Fire a replenish if the pre-utilised pool for ``product_id`` is
+        below the configured low-water ratio of its target."""
+        try:
+            from business_app.services.marking_code_pool_service import MarkingCodePoolService
+
+            pool = MarkingCodePoolService()
+            if pool.is_below_low_water(int(product_id)):
+                pool.trigger_replenish_async(int(product_id), "low_water")
+        except Exception:
+            current_app.logger.debug(
+                "fiscalization: low-water check failed",
+                extra={"product_id": product_id},
+                exc_info=True,
+            )
 
     def release_reserved_marking_codes(
         self,

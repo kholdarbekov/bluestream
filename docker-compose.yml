@@ -354,7 +354,7 @@ services:
         condition: service_completed_successfully
     # CEL-006: `-E` enables task lifecycle events so Flower and the
     # celery-exporter can observe started/succeeded/failed/retried transitions.
-    command: celery -A business_app.tasks.celery_app worker -E --loglevel=info --concurrency=${CELERY_WORKER_CONCURRENCY:-4} --max-memory-per-child=${CELERY_WORKER_MAX_MEMORY_PER_CHILD:-200000} --max-tasks-per-child=${CELERY_WORKER_MAX_TASKS_PER_CHILD:-1000}
+    command: celery -A business_app.tasks.celery_app worker -E --loglevel=info -Q celery,payment,notifications,delivery,analytics,subscriptions,orders,maintenance,loyalty --concurrency=${CELERY_WORKER_CONCURRENCY:-4} --max-memory-per-child=${CELERY_WORKER_MAX_MEMORY_PER_CHILD:-200000} --max-tasks-per-child=${CELERY_WORKER_MAX_TASKS_PER_CHILD:-1000}
     healthcheck:
       test: [ "CMD", "celery", "-A", "business_app.tasks.celery_app", "status" ]
       interval: 60s

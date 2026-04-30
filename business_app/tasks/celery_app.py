@@ -6,7 +6,7 @@ This file should be placed in business_app/tasks/celery_app.py
 import logging
 from celery import Celery
 from celery.schedules import crontab
-from celery.signals import before_task_publish, task_prerun
+from celery.signals import before_task_publish, setup_logging, task_prerun
 from flask import g, has_request_context
 import os
 from shared.constants import DISPLAY_TIMEZONE
@@ -232,6 +232,14 @@ def set_task_request_id(task=None, **kwargs):
         # Store on task request for easy access in task code
         task.request.request_id = request_id
         logger.debug(f"Task {task.name} running with request_id={request_id}")
+
+
+@setup_logging.connect
+def keep_app_logging_config(**kwargs):
+    # Connecting any receiver here makes celery skip worker_hijack_root_logger,
+    # which would otherwise wipe the handlers our setup_enhanced_logging
+    # installed on the `celery` logger and silence beat's scheduler logs.
+    pass
 
 
 # Task routing configuration

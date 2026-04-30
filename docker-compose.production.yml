@@ -154,6 +154,7 @@ services:
       celery -A business_app.tasks.celery_app worker
       -E
       --loglevel=info
+      -Q celery,payment,notifications,delivery,analytics,subscriptions,orders,maintenance,loyalty
       --concurrency=8
       --max-memory-per-child=500000
       --max-tasks-per-child=1000

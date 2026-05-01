@@ -1,12 +1,28 @@
 # Re-export unified TimestampMixin from base module (timezone-aware)
 from business_app.models.base import TimestampMixin  # noqa: F401
 
-# Ensure all models are imported so Alembic autogenerate detects them
-from business_app.models.bottle import (  # noqa: F401
-    BottleBalance,
-    BottleLedger,
-    BottleFine,
-    DriverBottleSession,
-    DriverBottleSessionOrder,
-    DriverBottleTransfer,
-)
+# Import all model modules so every mapped class is registered with the
+# SQLAlchemy registry before the first query runs. Without this, string-based
+# relationships (e.g. User.cart -> "Cart") can fail to resolve at mapper
+# configuration time when the referenced module hasn't been imported yet by
+# any code path in the current worker process.
+from business_app.models import translatable  # noqa: F401, E402
+from business_app.models import translation  # noqa: F401, E402
+from business_app.models import product  # noqa: F401, E402
+from business_app.models import user  # noqa: F401, E402
+from business_app.models import cart  # noqa: F401, E402
+from business_app.models import corporate  # noqa: F401, E402
+from business_app.models import order  # noqa: F401, E402
+from business_app.models import order_sequence  # noqa: F401, E402
+from business_app.models import delivery  # noqa: F401, E402
+from business_app.models import payment  # noqa: F401, E402
+from business_app.models import subscription  # noqa: F401, E402
+from business_app.models import review  # noqa: F401, E402
+from business_app.models import loyalty  # noqa: F401, E402
+from business_app.models import notification  # noqa: F401, E402
+from business_app.models import analytics  # noqa: F401, E402
+from business_app.models import audit  # noqa: F401, E402
+from business_app.models import blog  # noqa: F401, E402
+from business_app.models import bottle  # noqa: F401, E402
+from business_app.models import staff  # noqa: F401, E402
+from business_app.models import tryout  # noqa: F401, E402

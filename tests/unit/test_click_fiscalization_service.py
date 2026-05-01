@@ -521,6 +521,215 @@ class TestClickFiscalizationService:
         assert payment.failure_reason == 'Timed out'
         assert marking_code.status == MarkingCodeStatus.AVAILABLE
 
+    def test_normalize_error_code_strict_rejects_none_empty_whitespace(self):
+        with pytest.raises(ValidationError, match='missing'):
+            ClickPaymentProviderService._normalize_error_code(None)
+        with pytest.raises(ValidationError, match='missing'):
+            ClickPaymentProviderService._normalize_error_code('')
+        with pytest.raises(ValidationError, match='missing'):
+            ClickPaymentProviderService._normalize_error_code('   ')
+        with pytest.raises(ValidationError, match='Invalid'):
+            ClickPaymentProviderService._normalize_error_code('abc')
+        assert ClickPaymentProviderService._normalize_error_code('0') == 0
+        assert ClickPaymentProviderService._normalize_error_code(0) == 0
+        assert ClickPaymentProviderService._normalize_error_code('-9') == -9
+        assert ClickPaymentProviderService._normalize_error_code(' -1 ') == -1
+
+    def _build_pending_click_payment(self, db, sample_order):
+        sample_order.payment_method = PaymentMethod.CLICK
+        payment = Payment(
+            order_id=sample_order.id,
+            user_id=sample_order.user_id,
+            payment_method=PaymentMethod.CLICK,
+            amount=sample_order.total_amount,
+            currency='UZS',
+            status=PaymentStatus.PENDING,
+            payment_id=f'click-cb-{sample_order.id}',
+        )
+        db.session.add(payment)
+        db.session.commit()
+        return payment
+
+    def test_click_complete_missing_error_field_does_not_promote(
+        self, app, db, payment_service, sample_order,
+    ):
+        _configure_click_fiscal_context(app)
+        app.config['CLICK_SHOP_SECRET_KEY'] = 'click-secret'
+        app.config['CLICK_TEST_MODE'] = True
+        payment = self._build_pending_click_payment(db, sample_order)
+
+        provider = ClickPaymentProviderService(payment_service=payment_service)
+        payload = _sign_click_payload(provider, {
+            'click_trans_id': 'txn-missing-err',
+            'service_id': provider.service_id or '1',
+            'merchant_trans_id': sample_order.order_number,
+            'merchant_prepare_id': payment.id,
+            'click_paydoc_id': '1234567890',
+            'amount': str(payment.amount),
+            'action': '1',
+            'sign_time': '1700000010',
+            'error': '0',
+            'error_note': '',
+        })
+        # Drop the error field after signing — Click's signature does not cover it.
+        payload.pop('error')
+
+        with patch.object(payment_service, '_handle_successful_payment') as handle_success, patch.object(
+            payment_service, 'queue_click_fiscalization',
+        ) as queue_fiscalization:
+            response = provider.handle_complete(payload)
+
+        db.session.refresh(payment)
+        assert response['error'] == -8
+        assert response['error_note'] == 'Error in request'
+        assert payment.status == PaymentStatus.CANCELLED
+        assert payment.failure_reason == 'Click callback missing error code'
+        handle_success.assert_not_called()
+        queue_fiscalization.assert_not_called()
+
+    def test_click_complete_empty_error_field_does_not_promote(
+        self, app, db, payment_service, sample_order,
+    ):
+        _configure_click_fiscal_context(app)
+        app.config['CLICK_SHOP_SECRET_KEY'] = 'click-secret'
+        app.config['CLICK_TEST_MODE'] = True
+        payment = self._build_pending_click_payment(db, sample_order)
+
+        provider = ClickPaymentProviderService(payment_service=payment_service)
+        payload = _sign_click_payload(provider, {
+            'click_trans_id': 'txn-empty-err',
+            'service_id': provider.service_id or '1',
+            'merchant_trans_id': sample_order.order_number,
+            'merchant_prepare_id': payment.id,
+            'click_paydoc_id': '1234567890',
+            'amount': str(payment.amount),
+            'action': '1',
+            'sign_time': '1700000011',
+            'error': '0',
+            'error_note': '',
+        })
+        payload['error'] = ''
+
+        with patch.object(payment_service, '_handle_successful_payment') as handle_success, patch.object(
+            payment_service, 'queue_click_fiscalization',
+        ) as queue_fiscalization:
+            response = provider.handle_complete(payload)
+
+        db.session.refresh(payment)
+        assert response['error'] == -8
+        assert payment.status == PaymentStatus.CANCELLED
+        assert payment.failure_reason == 'Click callback missing error code'
+        handle_success.assert_not_called()
+        queue_fiscalization.assert_not_called()
+
+    def test_click_complete_zero_error_missing_click_trans_id_does_not_promote(
+        self, app, db, payment_service, sample_order,
+    ):
+        _configure_click_fiscal_context(app)
+        app.config['CLICK_SHOP_SECRET_KEY'] = 'click-secret'
+        app.config['CLICK_TEST_MODE'] = True
+        payment = self._build_pending_click_payment(db, sample_order)
+
+        provider = ClickPaymentProviderService(payment_service=payment_service)
+        payload = _sign_click_payload(provider, {
+            'click_trans_id': '',
+            'service_id': provider.service_id or '1',
+            'merchant_trans_id': sample_order.order_number,
+            'merchant_prepare_id': payment.id,
+            'click_paydoc_id': '1234567890',
+            'amount': str(payment.amount),
+            'action': '1',
+            'sign_time': '1700000012',
+            'error': '0',
+            'error_note': 'Success',
+        })
+
+        with patch.object(payment_service, '_handle_successful_payment') as handle_success, patch.object(
+            payment_service, 'queue_click_fiscalization',
+        ) as queue_fiscalization:
+            response = provider.handle_complete(payload)
+
+        db.session.refresh(payment)
+        assert response['error'] == -8
+        assert payment.status == PaymentStatus.CANCELLED
+        assert payment.failure_reason == 'Click callback claimed success without trans_id/paydoc_id'
+        handle_success.assert_not_called()
+        queue_fiscalization.assert_not_called()
+
+    def test_click_complete_zero_error_missing_click_paydoc_id_does_not_promote(
+        self, app, db, payment_service, sample_order,
+    ):
+        _configure_click_fiscal_context(app)
+        app.config['CLICK_SHOP_SECRET_KEY'] = 'click-secret'
+        app.config['CLICK_TEST_MODE'] = True
+        payment = self._build_pending_click_payment(db, sample_order)
+
+        provider = ClickPaymentProviderService(payment_service=payment_service)
+        payload = _sign_click_payload(provider, {
+            'click_trans_id': 'txn-no-paydoc',
+            'service_id': provider.service_id or '1',
+            'merchant_trans_id': sample_order.order_number,
+            'merchant_prepare_id': payment.id,
+            'click_paydoc_id': '',
+            'amount': str(payment.amount),
+            'action': '1',
+            'sign_time': '1700000013',
+            'error': '0',
+            'error_note': 'Success',
+        })
+
+        with patch.object(payment_service, '_handle_successful_payment') as handle_success, patch.object(
+            payment_service, 'queue_click_fiscalization',
+        ) as queue_fiscalization:
+            response = provider.handle_complete(payload)
+
+        db.session.refresh(payment)
+        assert response['error'] == -8
+        assert payment.status == PaymentStatus.CANCELLED
+        assert payment.failure_reason == 'Click callback claimed success without trans_id/paydoc_id'
+        handle_success.assert_not_called()
+        queue_fiscalization.assert_not_called()
+
+    def test_update_payment_status_leaves_pending_when_provider_raises(
+        self, db, payment_service, pending_marked_click_payment,
+    ):
+        payment, _marking_code = pending_marked_click_payment
+        original_status = payment.status
+
+        with patch.object(
+            payment_service,
+            '_get_click_provider_service',
+            return_value=Mock(check_payment_status=Mock(side_effect=PaymentError('boom'))),
+        ):
+            result = payment_service.update_payment_status(payment)
+
+        db.session.refresh(payment)
+        assert payment.status == original_status == PaymentStatus.PENDING
+        assert result is payment
+
+    def test_update_payment_status_does_not_promote_without_provider_transaction_id(
+        self, db, payment_service, pending_marked_click_payment,
+    ):
+        payment, _marking_code = pending_marked_click_payment
+
+        with patch.object(
+            payment_service,
+            '_get_click_provider_service',
+            return_value=Mock(check_payment_status=Mock(return_value={
+                'status': 'completed',
+                'provider_transaction_id': None,
+                'raw': {'payment_status': 1},
+            })),
+        ), patch.object(payment_service, '_handle_successful_payment') as handle_success, patch.object(
+            payment_service, 'queue_click_fiscalization',
+        ) as queue_fiscalization:
+            payment_service.update_payment_status(payment)
+
+        db.session.refresh(payment)
+        assert payment.status == PaymentStatus.PENDING
+        handle_success.assert_not_called()
+        queue_fiscalization.assert_not_called()
+
     def test_build_merchant_headers_uses_auth_digest_format(self, app):
         _configure_click_fiscal_context(app)
         app.config['CLICK_TEST_MODE'] = False

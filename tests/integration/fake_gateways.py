@@ -103,6 +103,11 @@ def make_click_webhook_form(
     }
     if merchant_prepare_id is not None:
         body['merchant_prepare_id'] = str(merchant_prepare_id)
+    if click_paydoc_id is None and str(action) == '1':
+        # Click's protocol requires click_paydoc_id in Complete callbacks.
+        # Default it deterministically per (trans_id, sign_time) so existing
+        # tests stay protocol-compliant without explicit boilerplate.
+        click_paydoc_id = f"paydoc-{click_trans_id}-{sign_time}"
     if click_paydoc_id is not None:
         body['click_paydoc_id'] = str(click_paydoc_id)
     if extra:

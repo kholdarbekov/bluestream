@@ -12,7 +12,7 @@ from sqlalchemy.orm import joinedload
 
 from business_app.models.order import Order
 from business_app.models.payment import Payment, PaymentTransaction, CreditCard
-from business_app.utils.exceptions import PaymentError, ValidationError, NotFoundError
+from business_app.utils.exceptions import PaymentError, ProviderUnavailableError, ValidationError, NotFoundError
 from business_app.utils.constants import (
     PaymeErrors,
 )
@@ -651,14 +651,32 @@ class PaymentService:
 
         provider = payment.payment_provider
         if provider == PaymentMethod.CLICK.value:
-            status_data = self._get_click_provider_service().check_payment_status(payment)
+            try:
+                status_data = self._get_click_provider_service().check_payment_status(payment)
+            except (PaymentError, ProviderUnavailableError) as exc:
+                current_app.logger.warning(
+                    "Click status check failed; leaving payment PENDING",
+                    extra={"payment_id": payment.id, "order_id": payment.order_id, "error": str(exc)},
+                )
+                db.session.rollback()
+                return payment
             provider_status = str(status_data.get("status") or "").lower()
             if provider_status in {"completed", PaymentStatus.COMPLETED.value, "success"}:
+                provider_txn_id = status_data.get("provider_transaction_id")
+                if not provider_txn_id:
+                    current_app.logger.warning(
+                        "Click reported completed without provider_transaction_id; leaving PENDING",
+                        extra={
+                            "payment_id": payment.id,
+                            "order_id": payment.order_id,
+                            "raw": status_data.get("raw"),
+                        },
+                    )
+                    db.session.rollback()
+                    return payment
                 payment.status = PaymentStatus.COMPLETED
                 payment.paid_at = payment.paid_at or datetime.now(timezone.utc)
-                payment.provider_transaction_id = (
-                    status_data.get("provider_transaction_id") or payment.provider_transaction_id
-                )
+                payment.provider_transaction_id = provider_txn_id
                 self._handle_successful_payment(payment)
                 self.queue_click_fiscalization(payment.id)
                 db.session.commit()

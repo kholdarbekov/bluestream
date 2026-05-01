@@ -49,6 +49,7 @@ from tests.integration.fake_gateways import (
     TEST_PAYME_SECRET_KEY,
     UnscriptedGatewayCall,
     apply_test_provider_secrets,
+    make_click_signature,
     make_click_webhook_form,
     make_payme_webhook_body,
 )
@@ -371,6 +372,129 @@ class TestWebhookStateMachine:
 
         payment = Payment.query.filter_by(order_id=sample_order.id).one()
         assert payment.status == PaymentStatus.PENDING
+
+    def _post_click_prepare_for_complete(self, matrix_client, order, click_trans_id):
+        prepare_body = make_click_webhook_form(
+            action='0',
+            click_trans_id=click_trans_id,
+            merchant_trans_id=order.order_number,
+            amount=str(int(order.total_amount)),
+            secret_key=TEST_CLICK_SHOP_SECRET_KEY,
+        )
+        resp = matrix_client.post(
+            WEBHOOK_PATH.format(provider='click'),
+            data=prepare_body,
+            content_type='application/x-www-form-urlencoded',
+        )
+        return resp.get_json()['merchant_prepare_id']
+
+    def _build_click_complete_form(
+        self, *, order, click_trans_id, merchant_prepare_id, click_paydoc_id='9988776655',
+    ):
+        import time as _time
+        import uuid as _uuid
+        sign_time = str(int(_time.time()))
+        body = {
+            'click_trans_id': str(click_trans_id),
+            'service_id': '55',
+            'merchant_trans_id': str(order.order_number),
+            'merchant_prepare_id': str(merchant_prepare_id),
+            'click_paydoc_id': str(click_paydoc_id),
+            'amount': str(int(order.total_amount)),
+            'action': '1',
+            'sign_time': sign_time,
+            'error': '0',
+            'error_note': 'Success',
+        }
+        body['sign_string'] = make_click_signature(body, TEST_CLICK_SHOP_SECRET_KEY)
+        body['timestamp'] = sign_time
+        body['nonce'] = f'click-test-{click_trans_id}-1-{sign_time}-{_uuid.uuid4().hex[:8]}'
+        return body
+
+    def test_click_complete_with_missing_error_field_does_not_mark_paid(
+        self, matrix_app, matrix_client, db, sample_order, no_fiscalization,
+    ):
+        _seed_click_payment(db, sample_order)
+        merchant_prepare_id = self._post_click_prepare_for_complete(
+            matrix_client, sample_order, 'click-tx-missing-err',
+        )
+
+        body = self._build_click_complete_form(
+            order=sample_order,
+            click_trans_id='click-tx-missing-err',
+            merchant_prepare_id=merchant_prepare_id,
+        )
+        body.pop('error')
+
+        resp = matrix_client.post(
+            WEBHOOK_PATH.format(provider='click'),
+            data=body,
+            content_type='application/x-www-form-urlencoded',
+        )
+        assert resp.status_code == 200
+        assert resp.get_json()['error'] == -8
+
+        payment = Payment.query.filter_by(order_id=sample_order.id).one()
+        assert payment.status == PaymentStatus.CANCELLED
+        assert payment.failure_reason == 'Click callback missing error code'
+        order = Order.query.get(sample_order.id)
+        assert order.status != OrderStatus.CONFIRMED
+
+    def test_click_complete_with_empty_string_error_does_not_mark_paid(
+        self, matrix_app, matrix_client, db, sample_order, no_fiscalization,
+    ):
+        _seed_click_payment(db, sample_order)
+        merchant_prepare_id = self._post_click_prepare_for_complete(
+            matrix_client, sample_order, 'click-tx-empty-err',
+        )
+
+        body = self._build_click_complete_form(
+            order=sample_order,
+            click_trans_id='click-tx-empty-err',
+            merchant_prepare_id=merchant_prepare_id,
+        )
+        body['error'] = ''
+
+        resp = matrix_client.post(
+            WEBHOOK_PATH.format(provider='click'),
+            data=body,
+            content_type='application/x-www-form-urlencoded',
+        )
+        assert resp.status_code == 200
+        assert resp.get_json()['error'] == -8
+
+        payment = Payment.query.filter_by(order_id=sample_order.id).one()
+        assert payment.status == PaymentStatus.CANCELLED
+        order = Order.query.get(sample_order.id)
+        assert order.status != OrderStatus.CONFIRMED
+
+    def test_click_complete_zero_error_no_click_trans_id_does_not_mark_paid(
+        self, matrix_app, matrix_client, db, sample_order, no_fiscalization,
+    ):
+        _seed_click_payment(db, sample_order)
+        merchant_prepare_id = self._post_click_prepare_for_complete(
+            matrix_client, sample_order, 'click-tx-no-trans',
+        )
+
+        body = self._build_click_complete_form(
+            order=sample_order,
+            click_trans_id='',
+            merchant_prepare_id=merchant_prepare_id,
+        )
+
+        resp = matrix_client.post(
+            WEBHOOK_PATH.format(provider='click'),
+            data=body,
+            content_type='application/x-www-form-urlencoded',
+        )
+        assert resp.status_code == 200
+        assert resp.get_json()['error'] == -8
+
+        payment = Payment.query.filter_by(order_id=sample_order.id).one()
+        assert payment.status == PaymentStatus.CANCELLED
+        assert payment.failure_reason == 'Click callback claimed success without trans_id/paydoc_id'
+        order = Order.query.get(sample_order.id)
+        assert order.status != OrderStatus.CONFIRMED
 
     # ---- Payme ------------------------------------------------------------
 

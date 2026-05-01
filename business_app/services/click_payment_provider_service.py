@@ -229,10 +229,18 @@ class ClickPaymentProviderService:
 
     @staticmethod
     def _normalize_error_code(value: Any) -> int:
+        # Click protocol marks `error` as required in both Prepare and Complete
+        # callbacks. Treating None/"" as 0 would silently promote a malformed
+        # callback to "success" and mark the payment paid.
+        if value is None:
+            raise ValidationError("Click error code missing")
+        text = str(value).strip()
+        if text == "":
+            raise ValidationError("Click error code missing")
         try:
-            return int(str(value or 0).strip())
-        except (TypeError, ValueError):
-            raise ValidationError("Invalid Click error code")
+            return int(text)
+        except (TypeError, ValueError) as exc:
+            raise ValidationError("Invalid Click error code") from exc
 
     @staticmethod
     def _build_success_response(
@@ -439,7 +447,36 @@ class ClickPaymentProviderService:
             self._append_callback_audit(payment, stage="complete", request_payload=payload, response_payload=response)
             return response
 
-        click_error = self._normalize_error_code(payload.get("error"))
+        try:
+            click_error = self._normalize_error_code(payload.get("error"))
+        except ValidationError as exc:
+            self._log_flow_step(
+                "complete_missing_error_code",
+                level="error",
+                payment=payment,
+                raw_error_field=payload.get("error"),
+                reason=str(exc),
+            )
+            payment.status = PaymentStatus.CANCELLED
+            payment.failure_reason = "Click callback missing error code"
+            payment.webhook_processed = True
+            payment.webhook_attempts = int(payment.webhook_attempts or 0) + 1
+            self._record_transaction(
+                payment,
+                "click_complete_invalid_payload",
+                payload,
+                success=False,
+                status="cancelled",
+            )
+            self._get_payment_fiscalization_service().release_reserved_marking_codes(
+                payment,
+                reason="click_complete_invalid_payload",
+            )
+            response = self._build_error_response(-8, "Error in request")
+            self._append_callback_audit(payment, stage="complete", request_payload=payload, response_payload=response)
+            db.session.flush()
+            return response
+
         click_error_note = str(payload.get("error_note") or "").strip() or "Transaction cancelled"
 
         provider_data = dict(payment.provider_data or {})
@@ -498,6 +535,37 @@ class ClickPaymentProviderService:
             self._log_flow_step(
                 "complete_response_sent_cancelled", payment=payment, response_error=response.get("error")
             )
+            return response
+
+        # Positive-success gate: per Click protocol both fields are required in
+        # a Complete callback. Reject the success branch if either is missing
+        # so a malformed "error=0" payload cannot promote the payment.
+        click_trans_id_raw = str(payload.get("click_trans_id") or "").strip()
+        click_paydoc_id_raw = str(payload.get("click_paydoc_id") or "").strip()
+        if not click_trans_id_raw or not click_paydoc_id_raw:
+            self._log_flow_step(
+                "complete_success_missing_identifiers",
+                level="error",
+                payment=payment,
+                click_trans_id_present=bool(click_trans_id_raw),
+                click_paydoc_id_present=bool(click_paydoc_id_raw),
+            )
+            payment.status = PaymentStatus.CANCELLED
+            payment.failure_reason = "Click callback claimed success without trans_id/paydoc_id"
+            self._record_transaction(
+                payment,
+                "click_complete_invalid_success",
+                payload,
+                success=False,
+                status="cancelled",
+            )
+            self._get_payment_fiscalization_service().release_reserved_marking_codes(
+                payment,
+                reason="click_complete_invalid_success",
+            )
+            response = self._build_error_response(-8, "Error in request")
+            self._append_callback_audit(payment, stage="complete", request_payload=payload, response_payload=response)
+            db.session.flush()
             return response
 
         payment.status = PaymentStatus.COMPLETED

@@ -407,11 +407,16 @@ class ProductHandlers(BaseHandler):
                     # This covers localhost/internal/relative URLs that Telegram cannot fetch directly.
                     fetch_url = self._build_internal_fetch_url(image_url)
                     downloaded_image = await self._download_image_bytes(fetch_url) if fetch_url else None
+
+                    # Always replace the previous message to keep navigation tidy:
+                    # whether we send a photo or fall back to a text message, delete
+                    # the message that hosted the button the user just clicked first.
+                    try:
+                        await query.message.delete()
+                    except Exception:
+                        pass
+
                     if downloaded_image:
-                        try:
-                            await query.message.delete()
-                        except Exception:
-                            pass
                         try:
                             await context.bot.send_photo(
                                 chat_id=user_id,
@@ -488,23 +493,27 @@ class ProductHandlers(BaseHandler):
 
                 product = response.data['data']['product']
 
+                # Default add-to-cart quantity to the product's minimum so users
+                # don't immediately fall foul of the per-product purchase rule.
+                min_order_qty = int((product.get('inventory') or {}).get('min_order_quantity', 1) or 1)
+
                 # Add product to cart via API
                 add_response = await client.add_to_cart(
                     user_token,
                     product_id,
-                    quantity=1
+                    quantity=min_order_qty,
                 )
                 if not add_response.success:
                     await self._handle_api_error(update, add_response.error, language)
                     return
 
                 # Get actual quantity from cart response
-                current_qty = 1
+                current_qty = min_order_qty
                 try:
                     cart_data = add_response.data.get('data', {}).get('cart', {})
                     for item in cart_data.get('cart_items', []):
                         if item.get('product_id') == product_id:
-                            current_qty = item.get('quantity', 1)
+                            current_qty = item.get('quantity', min_order_qty)
                             break
                 except Exception as e:
                     logger.error(f"Error parsing cart response: {e}")
@@ -516,6 +525,10 @@ class ProductHandlers(BaseHandler):
                 f"{i18n.get('telegram.quantity', language)}: {current_qty}\n"
                 f"{i18n.get('telegram.price', language)}: {format_price(unit_price * current_qty)} UZS"
             )
+            if min_order_qty > 1:
+                quantity_text += (
+                    f"\nℹ️ {i18n.get('telegram.products.min_order_quantity_label', language, min_qty=min_order_qty)}"
+                )
             keyboard = ProductKeyboards.quantity_selector(product_id, current_qty, language)
 
             await self._edit_or_replace_callback_message(
@@ -542,24 +555,33 @@ class ProductHandlers(BaseHandler):
             product_id = int(parts[2])
             current_qty = int(parts[3])
 
-            if action == 'inc':
-                new_qty = min(current_qty + 1, 99)  # Max 99 items
-            elif action == 'dec':
-                new_qty = max(current_qty - 1, 1)   # Min 1 item
-            else:
+            # Validate the action up-front so a malformed callback short-circuits
+            # before we hit the API.
+            if action not in ('inc', 'dec'):
                 await query.answer(i18n.get('telegram.products.invalid_action', language))
                 return
 
-            # Get product for price calculation
+            # Get product for price calculation and the per-product purchase minimum.
             async with api_client as client:
                 user_token = await get_auth_token(update, context, client)
                 response = await client.get_product(user_token, product_id, language=language)
                 if response.success:
                     product = response.data['data']['product']
+                    min_order_qty = int((product.get('inventory') or {}).get('min_order_quantity', 1) or 1)
+
+                    if action == 'inc':
+                        new_qty = min(current_qty + 1, 99)  # Max 99 items
+                    else:  # dec — floor at product min
+                        new_qty = max(current_qty - 1, min_order_qty)
+
                     total_price = self._get_effective_unit_price(product) * new_qty
 
                     # Update quantity display
                     quantity_text = f"🛒 {product['name']}\n\n{i18n.get('telegram.quantity', language)}: {new_qty}\n{i18n.get('telegram.total', language)}: {format_price(total_price)} UZS"
+                    if min_order_qty > 1:
+                        quantity_text += (
+                            f"\nℹ️ {i18n.get('telegram.products.min_order_quantity_label', language, min_qty=min_order_qty)}"
+                        )
                     keyboard = ProductKeyboards.quantity_selector(product_id, new_qty, language)
 
                     # Update cart via API
@@ -692,6 +714,12 @@ class ProductHandlers(BaseHandler):
             f"📊 {i18n.get('telegram.products.stock_label', language)}: {stock_status}",
         ]
 
+        min_order_qty = int(product['inventory'].get('min_order_quantity', 1) or 1)
+        if min_order_qty > 1:
+            details.append(
+                f"📐 {i18n.get('telegram.products.min_order_quantity_label', language, min_qty=min_order_qty)}"
+            )
+
         if product.get('description'):
             details.append(f"📝 {escape_markdown(product['description'], version=2)}")
 
@@ -736,6 +764,7 @@ class ProductHandlers(BaseHandler):
         else:
             lines = [i18n.get('telegram.cart_title', language) + ":\n"]
             total_amount = 0
+            min_qty_violations = []
             for item in cart_items:
                 product = item['product']
                 quantity = item['quantity']
@@ -746,6 +775,16 @@ class ProductHandlers(BaseHandler):
                 lines.append(
                     f"🛒 {product['name']} x {quantity} = {format_price(line_total)} UZS"
                 )
+
+                # Per-product purchase minimum (mirrors backend rule).
+                inventory = product.get('inventory') or {}
+                min_qty = int(inventory.get('min_order_quantity', 1) or 1)
+                if quantity < min_qty:
+                    min_qty_violations.append({
+                        'name': product['name'],
+                        'min_qty': min_qty,
+                        'remaining': min_qty - quantity,
+                    })
             cart_is_empty = total_amount <= 0
             lines.append(f"\n💰 {i18n.get('telegram.cart_total', language)}: {format_price(total_amount)} UZS")
 
@@ -767,7 +806,20 @@ class ProductHandlers(BaseHandler):
                 lines.append("⚠️ " + i18n.get('telegram.cart_min_order_warning', language,
                     min_amount=format_price(MIN_ORDER_AMOUNT),
                     remaining=format_price(remaining)))
-            else:
+
+            # Per-product minimum order quantity warnings.
+            if min_qty_violations:
+                meets_minimum = False
+                lines.append("")
+                for v in min_qty_violations:
+                    lines.append("⚠️ " + i18n.get(
+                        'telegram.cart_min_qty_warning', language,
+                        product_name=v['name'],
+                        min_qty=v['min_qty'],
+                        remaining=v['remaining'],
+                    ))
+
+            if meets_minimum:
                 lines.append("")
                 lines.append("✅ " + i18n.get('telegram.cart_ready_checkout', language))
 

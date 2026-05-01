@@ -82,6 +82,9 @@ class Product(db.Model, TimestampMixin, TranslatableMixin):
     tracks_returnable_bottles = Column(Boolean, nullable=False, default=False, index=True)
     returnable_bottles_per_unit = Column(Numeric(precision=12, scale=2), nullable=False, default=Decimal("0.00"))
     expire_days = Column(Integer, nullable=True, default=180)
+    # Per-product purchase minimum (cart/order rule). Distinct from PriceRule.min_quantity,
+    # which is for bulk-discount tiers, and from min_stock_level, which is a restock threshold.
+    min_order_quantity = Column(Integer, nullable=False, default=1, server_default="1")
 
     # Media and content
     images = Column(JSON, default=[])
@@ -159,6 +162,7 @@ class Product(db.Model, TimestampMixin, TranslatableMixin):
                 "tracks_returnable_bottles": bool(self.tracks_returnable_bottles),
                 "returnable_bottles_per_unit": float(self.returnable_bottles_per_unit or 0),
                 "expire_days": self.expire_days,
+                "min_order_quantity": int(self.min_order_quantity or 1),
                 "fiscal_profile": self.fiscal_profile.to_dict() if self.fiscal_profile else None,
             }
         )

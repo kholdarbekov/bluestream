@@ -391,7 +391,7 @@ class TestOrderHandlerWave2:
         monkeypatch.setattr(orders_module.i18n, "get_user_language", AsyncMock(return_value="en"))
         monkeypatch.setattr(orders_module.i18n, "get", _i18n_get)
         monkeypatch.setattr(orders_module, "get_auth_token", AsyncMock(return_value="jwt"))
-        monkeypatch.setattr(orders_module.OrderKeyboards, "order_confirmation", lambda _l: "confirm-kbd")
+        monkeypatch.setattr(orders_module.OrderKeyboards, "order_confirmation", lambda *_a, **_k: "confirm-kbd")
         monkeypatch.setattr(orders_module, "api_client", FakeAPIClientContext(get_cart=_resp(success=True, data=cart_data)))
 
         await handler._show_order_confirmation(update, context)
@@ -428,7 +428,7 @@ class TestOrderHandlerWave2:
         monkeypatch.setattr(orders_module.i18n, "get_user_language", AsyncMock(return_value="en"))
         monkeypatch.setattr(orders_module.i18n, "get", _i18n_get)
         monkeypatch.setattr(orders_module, "get_auth_token", AsyncMock(return_value="jwt"))
-        monkeypatch.setattr(orders_module.OrderKeyboards, "order_confirmation", lambda _l: "confirm-kbd")
+        monkeypatch.setattr(orders_module.OrderKeyboards, "order_confirmation", lambda *_a, **_k: "confirm-kbd")
         monkeypatch.setattr(orders_module, "api_client", FakeAPIClientContext(get_cart=_resp(success=True, data=cart_data)))
 
         await handler._show_order_confirmation(update, context)

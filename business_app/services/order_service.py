@@ -1204,6 +1204,14 @@ class OrderService:
 
             quantity = int(item["quantity"])
 
+            # Per-product purchase minimum. Fire before contract pricing to avoid
+            # unnecessary DB work on rejected orders.
+            min_order_quantity = int(product.min_order_quantity or 1)
+            if quantity < min_order_quantity:
+                raise ValidationError(
+                    f"{product.name}: minimum order quantity is {min_order_quantity} " f"(you ordered {quantity})"
+                )
+
             fallback_price = Decimal(str(product.calculate_price(quantity=quantity)))
             resolution = corporate_service.resolve_contract_pricing_for_user_product(
                 user_id=user_id,

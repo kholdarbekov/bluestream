@@ -71,16 +71,30 @@ done
 log "restarting nginx to refresh upstream DNS resolution"
 "${COMPOSE[@]}" restart nginx
 
-log "smoke check: http://localhost:81/health"
-http_code=$(curl -sS -o /dev/null -w '%{http_code}' \
-            -H 'Host: aqua-element.uz' \
-            --max-time 10 \
-            http://localhost:81/health || echo "000")
-if [[ "$http_code" != "200" ]]; then
-    warn "smoke check returned HTTP $http_code (expected 200)"
-    warn "last 50 lines of nginx logs:"
-    "${COMPOSE[@]}" logs --tail=50 nginx >&2 || true
-    fail "deploy completed but origin is not serving 200"
-fi
+log "smoke check: http://localhost:81/health (polling up to 20s)"
+# `docker compose restart` returns when the container's main process is
+# started, not when nginx has bound :80 and is accept()-ing connections.
+# A single-shot curl in that window gets a TCP RST from docker-proxy.
+# Poll instead so the legitimate ~1s startup race doesn't fail the deploy.
+deadline=$((SECONDS + 20))
+http_code="000"
+while :; do
+    http_code=$(curl -sS -o /dev/null -w '%{http_code}' \
+                -H 'Host: aqua-element.uz' \
+                --max-time 5 \
+                http://localhost:81/health 2>/dev/null || true)
+    [[ -z "$http_code" ]] && http_code="000"
+    if [[ "$http_code" == "200" ]]; then
+        log "smoke check passed (HTTP 200)"
+        break
+    fi
+    if (( SECONDS >= deadline )); then
+        warn "smoke check returned HTTP $http_code (expected 200)"
+        warn "last 50 lines of nginx logs:"
+        "${COMPOSE[@]}" logs --tail=50 nginx >&2 || true
+        fail "deploy completed but origin is not serving 200"
+    fi
+    sleep 1
+done
 
 log "deploy complete — origin returning HTTP 200"

@@ -433,14 +433,30 @@ class OrderKeyboards:
         return KeyboardBuilder.build_inline_keyboard(buttons)
 
     @staticmethod
-    def order_confirmation(language: str = 'en') -> InlineKeyboardMarkup:
-        """Order confirmation buttons"""
-        buttons = [
-            [
+    def order_confirmation(language: str = 'en', meets_minimum: bool = True) -> InlineKeyboardMarkup:
+        """Order confirmation buttons.
+
+        When ``meets_minimum`` is False, the Confirm button is replaced by a
+        non-actionable warning so the user must go back and fix the cart
+        before placing the order.
+        """
+        if meets_minimum:
+            primary_row = [
                 {'text': i18n.get('telegram.order.confirm', language), 'callback_data': 'confirm_order'},
-                {'text': i18n.get('telegram.cancel', language), 'callback_data': 'cancel_order'}
-            ],
-            [{'text': i18n.get('telegram.order.edit', language), 'callback_data': 'edit_order'}]
+                {'text': i18n.get('telegram.cancel', language), 'callback_data': 'cancel_order'},
+            ]
+        else:
+            primary_row = [
+                {
+                    'text': '⚠️ ' + i18n.get('telegram.cart.add_more', language),
+                    'callback_data': 'cart_view',
+                },
+                {'text': i18n.get('telegram.cancel', language), 'callback_data': 'cancel_order'},
+            ]
+
+        buttons = [
+            primary_row,
+            [{'text': i18n.get('telegram.order.edit', language), 'callback_data': 'edit_order'}],
         ]
 
         return KeyboardBuilder.build_inline_keyboard(buttons)

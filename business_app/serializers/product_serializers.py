@@ -79,6 +79,7 @@ class ProductInventorySchema(BaseModel):
     is_tryout_eligible: bool = Field(default=True)
     tracks_returnable_bottles: bool = Field(default=False)
     returnable_bottles_per_unit: float = Field(default=0.0)
+    min_order_quantity: int = Field(default=1, ge=1)
 
 
 class ProductRatingsSchema(BaseModel):
@@ -269,6 +270,7 @@ class CreateProductRequest(BaseModel):
     tracks_returnable_bottles: bool = Field(default=False)
     returnable_bottles_per_unit: Decimal = Field(default=Decimal("0.00"), ge=0)
     expire_days: Optional[int] = Field(None, ge=1)
+    min_order_quantity: int = Field(default=1, ge=1)
 
     @field_validator("base_price")
     @classmethod
@@ -300,6 +302,7 @@ class UpdateProductRequest(BaseModel):
     tracks_returnable_bottles: Optional[bool] = None
     returnable_bottles_per_unit: Optional[Decimal] = Field(None, ge=0)
     expire_days: Optional[int] = Field(None, ge=1)
+    min_order_quantity: Optional[int] = Field(None, ge=1)
 
     @field_validator("base_price")
     @classmethod
@@ -423,6 +426,7 @@ def serialize_product(product: Product, language: str = "uz", user=None, quantit
                 "is_tryout_eligible": bool(getattr(product, "is_tryout_eligible", True)),
                 "tracks_returnable_bottles": bool(getattr(product, "tracks_returnable_bottles", False)),
                 "returnable_bottles_per_unit": float(getattr(product, "returnable_bottles_per_unit", 0) or 0),
+                "min_order_quantity": int(getattr(product, "min_order_quantity", 1) or 1),
                 # 'restock_date': product.restock_date.isoformat() if product.restock_date else None
             },
             "ratings": {

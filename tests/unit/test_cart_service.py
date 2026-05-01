@@ -135,3 +135,34 @@ class TestCartService:
                 product_id=sample_product.id,
                 quantity=3,
             )
+
+    def test_validate_cart_items_rejects_quantity_below_min_order_quantity(
+        self, cart_service, sample_product, db
+    ):
+        sample_product.min_order_quantity = 3
+        db.session.add(sample_product)
+        db.session.commit()
+
+        validated, errors = cart_service.validate_cart_items(
+            [{"product_id": sample_product.id, "quantity": 2}]
+        )
+
+        assert validated == []
+        assert len(errors) == 1
+        assert "minimum order quantity is 3" in errors[0]
+        assert "you ordered 2" in errors[0]
+
+    def test_validate_cart_items_passes_at_min_order_quantity(
+        self, cart_service, sample_product, db
+    ):
+        sample_product.min_order_quantity = 3
+        db.session.add(sample_product)
+        db.session.commit()
+
+        validated, errors = cart_service.validate_cart_items(
+            [{"product_id": sample_product.id, "quantity": 3}]
+        )
+
+        assert errors == []
+        assert len(validated) == 1
+        assert validated[0]["quantity"] == 3

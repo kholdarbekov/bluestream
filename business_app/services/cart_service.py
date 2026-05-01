@@ -115,6 +115,15 @@ class CartService:
                     errors.append(f"Product {product_id} ({product.name}): {error_message}")
                     continue
 
+            # Per-product purchase minimum.
+            min_order_quantity = int(product.min_order_quantity or 1)
+            if quantity < min_order_quantity:
+                errors.append(
+                    f"Product {product_id} ({product.name}): minimum order quantity is "
+                    f"{min_order_quantity} (you ordered {quantity})"
+                )
+                continue
+
             # Calculate price
             unit_price = self._calculate_unit_price(product, quantity, user)
 

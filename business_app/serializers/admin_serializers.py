@@ -789,6 +789,7 @@ def serialize_product_admin(product: Product) -> Dict[str, Any]:
             "volume_unit": product.volume_unit,
             "stock_quantity": product.stock_quantity if product.track_inventory else None,
             "min_stock_level": product.min_stock_level,
+            "min_order_quantity": int(getattr(product, "min_order_quantity", 1) or 1),
             "is_active": product.is_active,
             "status": "active" if product.is_active else "inactive",  # Frontend expects 'status'
             "is_featured": product.is_featured,

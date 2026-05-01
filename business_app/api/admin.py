@@ -2291,6 +2291,7 @@ def create_product():
             stock_quantity=data.get("stock_quantity", 0),
             min_stock_level=data.get("min_stock_level", 0),
             max_stock_level=data.get("max_stock_level", 1000),
+            min_order_quantity=max(int(data.get("min_order_quantity", 1) or 1), 1),
             images=data.get("images", []),
             nutrition_facts=data.get("nutrition_facts", {}),
             ingredients=data.get("ingredients"),
@@ -2430,6 +2431,11 @@ def update_product(product_id):
             product.min_stock_level = data["min_stock_level"]
         if "max_stock_level" in data:
             product.max_stock_level = data["max_stock_level"]
+        if "min_order_quantity" in data and data["min_order_quantity"] is not None:
+            min_qty = int(data["min_order_quantity"])
+            if min_qty < 1:
+                return validation_error_response(errors={"min_order_quantity": "Must be at least 1"})
+            product.min_order_quantity = min_qty
         if "images" in data:
             product.images = data["images"]
         if "nutrition_facts" in data:

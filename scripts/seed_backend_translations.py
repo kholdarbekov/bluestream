@@ -5078,10 +5078,20 @@ BACKEND_TRANSLATIONS = {
         'uz': 'Cart min order warning',
         'ru': 'Cart min order warning'
     },
+    'telegram.cart_min_qty_warning': {
+        'en': '{product_name}: minimum order quantity is {min_qty}, add {remaining} more',
+        'uz': '{product_name}: minimal buyurtma soni {min_qty}, yana {remaining} ta qo\'shing',
+        'ru': '{product_name}: минимальное количество заказа {min_qty}, добавьте ещё {remaining}'
+    },
     'telegram.cart_ready_checkout': {
         'en': 'Cart ready checkout',
         'uz': 'Cart ready checkout',
         'ru': 'Cart ready checkout'
+    },
+    'telegram.products.min_order_quantity_label': {
+        'en': 'Minimum order: {min_qty}',
+        'uz': 'Minimal buyurtma: {min_qty}',
+        'ru': 'Минимальный заказ: {min_qty}'
     },
     'telegram.cart_total': {
         'en': 'Cart total',
@@ -5838,6 +5848,21 @@ ADMIN_UI_PRODUCT_TRANSLATIONS = {
     'ui.products.stock': _ui_tr('Stock', 'Qoldiq', 'Остаток'),
     'ui.products.stock_quantity_label': _ui_tr('Stock Quantity'),
     'ui.products.stock_quantity_required': _ui_tr('Stock quantity is required'),
+    'ui.products.min_order_quantity_label': _ui_tr(
+        'Minimum Order Quantity',
+        'Minimal buyurtma soni',
+        'Минимальное количество заказа',
+    ),
+    'ui.products.min_order_quantity_tooltip': _ui_tr(
+        'Customers cannot check out with fewer units of this product than this minimum.',
+        "Mijozlar ushbu mahsulotning ushbu minimumdan kam birligini xarid qila olmaydi.",
+        'Покупатели не смогут оформить заказ с меньшим количеством этого товара.',
+    ),
+    'ui.products.min_order_quantity_min': _ui_tr(
+        'Must be at least 1',
+        "Kamida 1 bo'lishi kerak",
+        'Должно быть не меньше 1',
+    ),
     'ui.products.total_inventory_value': _ui_tr('Total Inventory Value', 'Jami ombor qiymati', 'Общая стоимость запасов'),
     'ui.products.total_products': _ui_tr('Total Products', 'Jami mahsulotlar', 'Всего товаров'),
     'ui.products.tracks_returnable_bottles': _ui_tr('Tracks Returnable Bottles'),

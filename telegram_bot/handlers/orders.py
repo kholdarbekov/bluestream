@@ -782,6 +782,7 @@ class OrderHandlers(BaseHandler):
 
         # Get cart items from API by api_client.get_cart and show them
         cart_total_amount = 0
+        min_qty_violations: list = []
         async with api_client as client:
             user_token = await get_auth_token(update, context, client)
             if not user_token:
@@ -799,10 +800,22 @@ class OrderHandlers(BaseHandler):
                 return
             confirmation_text += f"{i18n.get('telegram.orders.items_header', language)}:\n"
             for item in cart.get('cart_items', []):
-                confirmation_text += f"• {item.get('product', {}).get('name', unknown_text)} x{item.get('quantity', 1)}\n"
-                item_subtotal_price = item.get('product', {}).get('current_price', 0) * item.get('quantity', 1)
+                product_payload = item.get('product') or {}
+                quantity = item.get('quantity', 1)
+                confirmation_text += f"• {product_payload.get('name', unknown_text)} x{quantity}\n"
+                item_subtotal_price = product_payload.get('current_price', 0) * quantity
                 cart_total_amount += item_subtotal_price
                 confirmation_text += f"  💰 {format_price(item_subtotal_price)} UZS\n\n"
+
+                # Per-product purchase minimum (mirrors backend rule).
+                inventory = product_payload.get('inventory') or {}
+                min_qty = int(inventory.get('min_order_quantity', 1) or 1)
+                if quantity < min_qty:
+                    min_qty_violations.append({
+                        'name': product_payload.get('name', unknown_text),
+                        'min_qty': min_qty,
+                        'remaining': min_qty - quantity,
+                    })
 
         # Add address info
         address_id = context.user_data.get('selected_address_id')
@@ -849,7 +862,32 @@ class OrderHandlers(BaseHandler):
                 confirmation_text += f"🔁 Auto-applied on this COD order: {format_price(potential_applied)} UZS\n"
                 confirmation_text += f"🧾 Estimated COD payable after prepaid: {format_price(payable_after)} UZS"
 
-        keyboard = OrderKeyboards.order_confirmation(language)
+        # Block confirm if per-product or order-level minimum isn't met.
+        # Mirror products.py / cart_service / order_service rules so the bot
+        # surfaces backend validation up-front instead of after submit.
+        MIN_ORDER_AMOUNT = 20000  # TODO: source from API config endpoint
+        amount_met = cart_total_amount >= MIN_ORDER_AMOUNT
+        qty_met = not min_qty_violations
+        meets_minimum = amount_met and qty_met
+
+        if not meets_minimum:
+            confirmation_text += "\n\n────────────────\n"
+            if not amount_met:
+                remaining_amount = MIN_ORDER_AMOUNT - cart_total_amount
+                confirmation_text += "⚠️ " + i18n.get(
+                    'telegram.cart_min_order_warning', language,
+                    min_amount=format_price(MIN_ORDER_AMOUNT),
+                    remaining=format_price(remaining_amount),
+                ) + "\n"
+            for v in min_qty_violations:
+                confirmation_text += "⚠️ " + i18n.get(
+                    'telegram.cart_min_qty_warning', language,
+                    product_name=v['name'],
+                    min_qty=v['min_qty'],
+                    remaining=v['remaining'],
+                ) + "\n"
+
+        keyboard = OrderKeyboards.order_confirmation(language, meets_minimum=meets_minimum)
 
         await update.callback_query.edit_message_text(
             text=confirmation_text,

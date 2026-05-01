@@ -589,6 +589,15 @@
                         </div>
                     </div>
 
+                    <!-- Per-product minimum order quantity warnings -->
+                    <div id="min-qty-warnings" class="min-order-warning error" style="display: none;">
+                        <i class="far fa-exclamation-triangle"></i>
+                        <div class="min-order-warning-content">
+                            <div class="min-order-warning-title">{{ 'Minimum order quantity not met'|t }}</div>
+                            <div class="min-order-warning-text" id="min-qty-warning-list"></div>
+                        </div>
+                    </div>
+
                     <div class="delivery-notice" style="border-color: #17a2b8; background: #e7f5ff; color: #0c5460;">
                         <i class="far fa-truck"></i>
                         {{ 'Delivery fee will be calculated at checkout'|t }}
@@ -652,6 +661,8 @@
         'removed': 'Product removed from cart' | t,
         'clear_confirm': 'Are you sure you want to clear your cart?' | t,
         'cleared': 'Cart cleared' | t,
+        'min_qty_warning_line': '{name}: minimum {min}, add {remaining} more' | t,
+        'min_qty_warning_short': 'Some items are below their minimum order quantity' | t,
     },
 }) }}
 <script src="{{ url_for('static', filename='js/pages/cart.js') }}"></script>

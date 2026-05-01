@@ -56,6 +56,35 @@ class TestOrderService:
         assert items[0]["product_id"] == sample_product.id
         assert subtotal > 0
 
+    def test_process_order_items_rejects_quantity_below_min_order_quantity(
+        self, order_service, sample_product, sample_user, db, monkeypatch
+    ):
+        sample_product.min_order_quantity = 5
+        db.session.add(sample_product)
+        db.session.commit()
+
+        availability = [
+            SimpleNamespace(
+                product_id=sample_product.id,
+                requested_quantity=2,
+                available_quantity=sample_product.stock_quantity,
+                reserved_quantity=0,
+                is_available=True,
+                reason="Available",
+            )
+        ]
+        monkeypatch.setattr(
+            order_service.inventory_service,
+            "check_multiple_products_availability",
+            lambda *_args, **_kwargs: availability,
+        )
+
+        with pytest.raises(ValidationError, match="minimum order quantity is 5"):
+            order_service._process_order_items(
+                [{"product_id": sample_product.id, "quantity": 2}],
+                user_id=sample_user.id,
+            )
+
     def test_status_transition_rules(self, order_service):
         assert order_service._is_valid_status_transition(OrderStatus.PENDING, OrderStatus.CONFIRMED) is True
         assert order_service._is_valid_status_transition(OrderStatus.DELIVERED, OrderStatus.PENDING) is False

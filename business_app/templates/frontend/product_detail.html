@@ -264,6 +264,12 @@
                                     {{ 'Out of Stock'|t }}
                                 </span>
                                 {% endif %}
+                                {% if (product.min_order_quantity or 1) > 1 %}
+                                <span class="stock-label stock-min-qty">
+                                    <i class="fas fa-info-circle"></i>
+                                    {{ 'Minimum order'|t }}: {{ product.min_order_quantity }}
+                                </span>
+                                {% endif %}
                             </div>
                         </div>
 
@@ -313,7 +319,7 @@
                                 <label>{{ 'Soni'|t }}</label>
                                 <div class="qty-buttons">
                                     <button type="button" class="qty-minus" data-action="change-qty" data-delta="-1">-</button>
-                                    <input type="text" id="qtyInput" value="1" readonly>
+                                    <input type="text" id="qtyInput" value="{{ product.min_order_quantity or 1 }}" readonly data-min-qty="{{ product.min_order_quantity or 1 }}">
                                     <button type="button" class="qty-plus" data-action="change-qty" data-delta="1">+</button>
                                 </div>
                             </div>
@@ -471,6 +477,7 @@
 {% from "frontend/macros/page_data.html" import render_page_data %}
 {{ render_page_data({
     'max_qty': product.stock_quantity or 999,
+    'min_order_quantity': product.min_order_quantity or 1,
     'i18n': {'added_to_wishlist': 'Added to wishlist!' | t},
 }) }}
 <script src="{{ url_for('static', filename='js/pages/product-detail.js') }}"></script>

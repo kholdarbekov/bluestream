@@ -403,6 +403,7 @@ const Products = () => {
       category_id: product.category_id,
       price: product.price,
       stock_quantity: product.stock_quantity,
+      min_order_quantity: product.min_order_quantity ?? 1,
       volume: product.volume,
       status: product.status,
       is_featured: product.is_featured,
@@ -1008,7 +1009,7 @@ const Products = () => {
     : [];
 
   const buildProductForm = (form, onFinish, fileList, setFileList, loading) => (
-    <Form form={form} layout="vertical" onFinish={onFinish} initialValues={{ is_tryout_eligible: true }}>
+    <Form form={form} layout="vertical" onFinish={onFinish} initialValues={{ is_tryout_eligible: true, min_order_quantity: 1 }}>
       <Tabs
         defaultActiveKey="uz"
         items={[
@@ -1109,6 +1110,19 @@ const Products = () => {
         <Col span={12}>
           <Form.Item name="stock_quantity" label={t('ui.products.stock_quantity_label', 'Stock Quantity')} rules={[{ required: true, message: t('ui.products.stock_quantity_required', 'Stock quantity is required') }]}>
             <InputNumber style={{ width: '100%' }} min={0} />
+          </Form.Item>
+        </Col>
+      </Row>
+
+      <Row gutter={16}>
+        <Col span={12}>
+          <Form.Item
+            name="min_order_quantity"
+            label={t('ui.products.min_order_quantity_label', 'Minimum Order Quantity')}
+            tooltip={t('ui.products.min_order_quantity_tooltip', 'Customers cannot check out with fewer units of this product than this minimum.')}
+            rules={[{ type: 'number', min: 1, message: t('ui.products.min_order_quantity_min', 'Must be at least 1') }]}
+          >
+            <InputNumber style={{ width: '100%' }} min={1} step={1} placeholder="1" />
           </Form.Item>
         </Col>
       </Row>

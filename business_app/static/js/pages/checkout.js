@@ -45,6 +45,7 @@
         var container = document.getElementById('summary-items');
         var html = '';
         var subtotal = 0;
+        var minQtyViolations = [];
 
         cartItems.forEach(function (cartItem) {
             var product = products.find(function (p) { return p.id === cartItem.product_id; });
@@ -54,6 +55,19 @@
             var price = parseFloat(pricing.current_price || pricing.base_price || product.base_price || 0);
             var itemTotal = price * cartItem.quantity;
             subtotal += itemTotal;
+
+            var minOrderQty = parseInt(
+                (product.inventory && product.inventory.min_order_quantity) ||
+                product.min_order_quantity || 1,
+                10
+            ) || 1;
+            if (cartItem.quantity < minOrderQty) {
+                minQtyViolations.push({
+                    name: product.name,
+                    min_qty: minOrderQty,
+                    remaining: minOrderQty - cartItem.quantity,
+                });
+            }
 
             var productImages = (product.media && product.media.images) || product.images || [];
             var productImage = productImages.length > 0 ? productImages[0] : PAGE_DATA.default_image;
@@ -71,6 +85,7 @@
         container.innerHTML = html;
 
         window.currentSubtotal = subtotal;
+        window.currentMinQtyViolations = minQtyViolations;
         updateSummaryTotals(subtotal, null);
     }
 
@@ -100,21 +115,40 @@
         var titleEl = document.getElementById('min-order-title');
         var textEl = document.getElementById('min-order-text');
         var placeOrderBtn = document.getElementById('place-order-btn');
+        var minQtyViolations = window.currentMinQtyViolations || [];
+        var amountMet = subtotal >= MIN_ORDER_AMOUNT;
+        var qtyMet = minQtyViolations.length === 0;
 
-        if (subtotal < MIN_ORDER_AMOUNT) {
+        if (!amountMet) {
             var remaining = MIN_ORDER_AMOUNT - subtotal;
 
             warningEl.style.display = 'flex';
             titleEl.textContent = PAGE_DATA.i18n.min_not_met;
             textEl.textContent = PAGE_DATA.i18n.add + ' ' + formatPrice(remaining) + ' ' +
                 PAGE_DATA.i18n.more_to_place + '. ' + PAGE_DATA.i18n.min_order_amount + ': ' + formatPrice(MIN_ORDER_AMOUNT);
+        } else if (!qtyMet) {
+            warningEl.style.display = 'flex';
+            titleEl.textContent = PAGE_DATA.i18n.min_qty_warning_short || 'Minimum order quantity not met';
+            textEl.textContent = minQtyViolations.map(function (v) {
+                var template = PAGE_DATA.i18n.min_qty_warning_line ||
+                    '{name}: minimum {min}, add {remaining} more';
+                return template
+                    .replace('{name}', v.name)
+                    .replace('{min}', v.min_qty)
+                    .replace('{remaining}', v.remaining);
+            }).join('; ');
+        } else {
+            warningEl.style.display = 'none';
+        }
 
+        if (!amountMet || !qtyMet) {
             placeOrderBtn.disabled = true;
             placeOrderBtn.style.opacity = '0.6';
             placeOrderBtn.style.cursor = 'not-allowed';
-            placeOrderBtn.title = PAGE_DATA.i18n.min_warning + ' ' + formatPrice(MIN_ORDER_AMOUNT);
+            placeOrderBtn.title = !amountMet
+                ? (PAGE_DATA.i18n.min_warning + ' ' + formatPrice(MIN_ORDER_AMOUNT))
+                : (PAGE_DATA.i18n.min_qty_warning_short || 'Some items are below their minimum order quantity');
         } else {
-            warningEl.style.display = 'none';
             placeOrderBtn.disabled = false;
             placeOrderBtn.style.opacity = '';
             placeOrderBtn.style.cursor = '';

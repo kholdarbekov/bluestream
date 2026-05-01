@@ -1,11 +1,13 @@
 (function () {
     var PAGE_DATA = getPageData();
-    var qty = 1;
+    var qtyInput = document.getElementById('qtyInput');
+    var minQty = parseInt((qtyInput && qtyInput.dataset.minQty) || PAGE_DATA.min_order_quantity || 1, 10) || 1;
+    var qty = parseInt((qtyInput && qtyInput.value) || minQty, 10) || minQty;
     var maxQty = PAGE_DATA.max_qty;
 
     function changeQty(delta) {
         var newQty = qty + delta;
-        if (newQty >= 1 && newQty <= maxQty) {
+        if (newQty >= minQty && newQty <= maxQty) {
             qty = newQty;
             document.getElementById('qtyInput').value = qty;
         }

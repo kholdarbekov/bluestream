@@ -23,9 +23,13 @@ scrape_configs:
       - targets: ['postgres:5432']
     scrape_interval: 30s
 
+  # Scrape redis_exporter (oliver006/redis_exporter), not redis directly:
+  # Redis speaks RESP, not HTTP, and aborts HTTP scrapes with a "Possible
+  # SECURITY ATTACK" log line. Job name stays `redis` so the
+  # `up{job="redis"}` alert in alert_rules.yml keeps working.
   - job_name: 'redis'
     static_configs:
-      - targets: ['redis:6379']
+      - targets: ['redis_exporter:9121']
     scrape_interval: 30s
 
   # CEL-006: scrape danihodovic/celery-exporter on :9540. Replaces the legacy

@@ -18,7 +18,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import relationship, backref
 import uuid
 from business_app import db
-from business_app.utils.constants import (
+from shared.enums import (
     PaymentMethod,
     PaymentStatus,
     FiscalizationStatus,

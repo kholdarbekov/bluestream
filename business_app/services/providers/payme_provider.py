@@ -31,11 +31,13 @@ from business_app.models.payment import Payment, PaymentTransaction
 from business_app.models.user import User
 from business_app.utils.audit_logger import audit_logger, AuditEventType, AuditSeverity
 from business_app.utils.constants import (
+    PaymeErrors,
+    PaymeState,
+)
+from shared.enums import (
     OrderStatus,
     PaymentMethod,
     PaymentStatus,
-    PaymeErrors,
-    PaymeState,
 )
 from business_app.utils.exceptions import ConflictError, NotFoundError, PaymentError, ValidationError
 from business_app.utils.helpers import to_ms

@@ -2,7 +2,8 @@
 
 from typing import Any, Iterable, Optional
 
-from business_app.utils.constants import UserRole, UserType
+from shared.enums import UserRole, UserType
+from shared.enums import EntitySubtype
 
 LEGACY_ENTITY_BUSINESS_TYPES = {
     "business",
@@ -81,12 +82,15 @@ def is_entity_user_type(
     staff_roles: Any = None,
     legacy_business_type: Any = None,
 ) -> bool:
-    return normalize_user_type(
-        value,
-        role=role,
-        staff_roles=staff_roles,
-        legacy_business_type=legacy_business_type,
-    ) == UserType.ENTITY.value
+    return (
+        normalize_user_type(
+            value,
+            role=role,
+            staff_roles=staff_roles,
+            legacy_business_type=legacy_business_type,
+        )
+        == UserType.ENTITY.value
+    )
 
 
 def is_staff_user_type(
@@ -96,12 +100,15 @@ def is_staff_user_type(
     staff_roles: Any = None,
     legacy_business_type: Any = None,
 ) -> bool:
-    return normalize_user_type(
-        value,
-        role=role,
-        staff_roles=staff_roles,
-        legacy_business_type=legacy_business_type,
-    ) == UserType.STAFF.value
+    return (
+        normalize_user_type(
+            value,
+            role=role,
+            staff_roles=staff_roles,
+            legacy_business_type=legacy_business_type,
+        )
+        == UserType.STAFF.value
+    )
 
 
 def infer_non_staff_user_type(value: Any) -> str:
@@ -110,3 +117,25 @@ def infer_non_staff_user_type(value: Any) -> str:
     if normalized in LEGACY_ENTITY_BUSINESS_TYPES or normalized == UserType.ENTITY.value:
         return UserType.ENTITY.value
     return UserType.INDIVIDUAL.value
+
+
+VALID_ENTITY_SUBTYPE_VALUES = (
+    EntitySubtype.WORKPLACE.value,
+    EntitySubtype.GROCERY_STORE.value,
+)
+
+
+def normalize_entity_subtype(value: Any) -> Optional[str]:
+    """Coerce input into a canonical entity_subtype string or None."""
+    normalized = _normalize_enum_or_string(value)
+    if normalized in VALID_ENTITY_SUBTYPE_VALUES:
+        return normalized
+    return None
+
+
+def is_grocery_store_subtype(value: Any) -> bool:
+    return normalize_entity_subtype(value) == EntitySubtype.GROCERY_STORE.value
+
+
+def is_workplace_subtype(value: Any) -> bool:
+    return normalize_entity_subtype(value) == EntitySubtype.WORKPLACE.value

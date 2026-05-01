@@ -16,7 +16,7 @@ from business_app.models.payment import Payment, PaymentFiscalization
 from business_app.models.product import Product, ProductMarkingCode
 from business_app.services.product_fiscal_service import ProductFiscalService
 from business_app.utils.audit_logger import audit_logger
-from business_app.utils.constants import (
+from shared.enums import (
     FiscalizationStatus,
     MarkingCodeLedgerEventType,
     MarkingCodeStatus,

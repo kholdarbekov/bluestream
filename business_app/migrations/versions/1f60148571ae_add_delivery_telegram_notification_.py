@@ -5,12 +5,13 @@ Revises: 62f836d8701b
 Create Date: 2026-03-05 23:54:49.066777
 
 """
+
 from alembic import op
 import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
-revision = '1f60148571ae'
-down_revision = '62f836d8701b'
+revision = "1f60148571ae"
+down_revision = "62f836d8701b"
 branch_labels = None
 depends_on = None
 
@@ -40,10 +41,12 @@ def upgrade():
         )
     )
 
-    with op.batch_alter_table('notification_preferences', schema=None) as batch_op:
-        batch_op.create_unique_constraint('uq_notification_preferences_user_type_channel', ['user_id', 'notification_type', 'channel'])
+    with op.batch_alter_table("notification_preferences", schema=None) as batch_op:
+        batch_op.create_unique_constraint(
+            "uq_notification_preferences_user_type_channel", ["user_id", "notification_type", "channel"]
+        )
 
 
 def downgrade():
-    with op.batch_alter_table('notification_preferences', schema=None) as batch_op:
-        batch_op.drop_constraint('uq_notification_preferences_user_type_channel', type_='unique')
+    with op.batch_alter_table("notification_preferences", schema=None) as batch_op:
+        batch_op.drop_constraint("uq_notification_preferences_user_type_channel", type_="unique")

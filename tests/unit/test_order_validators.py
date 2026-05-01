@@ -4,7 +4,7 @@ from datetime import UTC, date, datetime, timedelta
 
 import pytest
 
-from business_app.utils.constants import PaymentMethod
+from shared.enums import PaymentMethod
 from business_app.utils.order_validators import (
     OrderInputValidator,
     sanitize_search_query,

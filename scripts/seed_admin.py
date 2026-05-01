@@ -25,9 +25,7 @@ from flask import Flask
 from business_app import create_app
 from business_app.services.auth_service import AuthService
 from business_app.utils.exceptions import ConflictError, ValidationError
-from business_app.utils.constants import UserRole, UserStatus
-
-# Set up logging
+from shared.enums import UserRole, UserStatus
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'

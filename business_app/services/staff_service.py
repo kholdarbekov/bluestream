@@ -23,7 +23,7 @@ from business_app.utils.state_validators import (
     assert_order_address_for_status,
     assert_order_creator_for_source,
 )
-from business_app.utils.constants import UserRole, UserStatus, OrderStatus, DeliveryStatus, PaymentMethod, UserType
+from shared.enums import UserRole, UserStatus, OrderStatus, DeliveryStatus, PaymentMethod, UserType
 from shared.staff_constants import (
     STAFF_BOT_ROLES,
     STAFF_ACTIONS,
@@ -1765,6 +1765,29 @@ class StaffService:
         from business_app.services.cash_collection_service import CashCollectionService
         from business_app.services.corporate_contract_service import CorporateContractService
 
+        entity_subtype_value = (
+            user.entity_subtype.value
+            if user.entity_subtype is not None and hasattr(user.entity_subtype, "value")
+            else user.entity_subtype
+        )
+
+        # Entity users with no subtype assigned cannot place orders. Surface a
+        # clear restriction flag so admin UI can show "assign subtype first".
+        if user.is_entity_user and user.normalized_entity_subtype is None:
+            return {
+                "customer_id": user_id,
+                "entity_subtype": None,
+                "available_methods": [],
+                "payment_restrictions": {
+                    "cod_restricted": True,
+                    "cod_restriction_reason": "entity_subtype_unassigned",
+                    "requires_subtype_assignment": True,
+                    "active_cod_debt_count": 0,
+                    "available_prepayment_balance": 0.0,
+                },
+                "has_business_account": False,
+            }
+
         methods = [
             {
                 "method": PaymentMethod.CASH.value,
@@ -1783,7 +1806,13 @@ class StaffService:
             },
         ]
 
-        corporate_balances = CorporateContractService().get_active_contract_balances_for_user(user_id)
+        # Business Account is only available to workplace entities. Grocery
+        # stores never use prepaid bottle settlement; they pay cash/card and
+        # carry money debt.
+        is_grocery_store = bool(user.is_grocery_store)
+        corporate_balances = (
+            [] if is_grocery_store else CorporateContractService().get_active_contract_balances_for_user(user_id)
+        )
         if corporate_balances:
             methods.append(
                 {
@@ -1794,11 +1823,14 @@ class StaffService:
             )
 
         cod_context = CashCollectionService().get_cod_restriction_context(user_id)
+        # Grocery stores are exempt from the COD restriction cap (already
+        # enforced in get_cod_restriction_context).
         if cod_context["cod_restricted"]:
             methods = [method for method in methods if method["method"] != PaymentMethod.CASH.value]
 
         return {
             "customer_id": user_id,
+            "entity_subtype": entity_subtype_value,
             "available_methods": methods,
             "payment_restrictions": cod_context,
             "has_business_account": bool(corporate_balances),

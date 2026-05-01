@@ -2,6 +2,7 @@
 Notifications API endpoints for the Water Business Platform
 This file should be placed in business_app/api/notifications.py
 """
+
 from flask import Blueprint, current_app, request
 from flask_jwt_extended import get_jwt_identity, jwt_required
 
@@ -23,27 +24,25 @@ from business_app.utils.exceptions import ForbiddenError, NotFoundError, Validat
 from business_app.utils.service_factory import get_notification_service
 from business_app.utils.translations import get_translation
 
-notifications_bp = Blueprint('notifications', __name__)
+notifications_bp = Blueprint("notifications", __name__)
 
 
-@notifications_bp.route('/', methods=['GET'])
+@notifications_bp.route("/", methods=["GET"])
 @jwt_required()
 def get_notifications():
     """Get user notifications with pagination"""
     try:
         current_user_id = get_jwt_identity()
 
-        page = int(request.args.get('page', 1))
-        per_page = min(int(request.args.get('per_page', 20)), 50)
-        status = request.args.get('status')
-        notification_type = request.args.get('type')
-        channel = request.args.get('channel')
+        page = int(request.args.get("page", 1))
+        per_page = min(int(request.args.get("per_page", 20)), 50)
+        status = request.args.get("status")
+        notification_type = request.args.get("type")
+        channel = request.args.get("channel")
 
-        unread_only_raw = request.args.get('unread_only')
+        unread_only_raw = request.args.get("unread_only")
         unread_only = (
-            str(unread_only_raw).lower() in {'1', 'true', 'yes', 'on'}
-            if unread_only_raw is not None
-            else False
+            str(unread_only_raw).lower() in {"1", "true", "yes", "on"} if unread_only_raw is not None else False
         )
 
         notifications_data = get_notification_service().get_user_notifications_paginated(
@@ -57,23 +56,23 @@ def get_notifications():
         )
 
         return paginated_response(
-            items=[serialize_notification(notif) for notif in notifications_data['items']],
-            page=notifications_data['page'],
-            per_page=notifications_data['per_page'],
-            total=notifications_data['total'],
-            additional_meta={'unread_count': notifications_data['unread_count']},
+            items=[serialize_notification(notif) for notif in notifications_data["items"]],
+            page=notifications_data["page"],
+            per_page=notifications_data["per_page"],
+            total=notifications_data["total"],
+            additional_meta={"unread_count": notifications_data["unread_count"]},
         )
 
     except ValidationError as e:
         return error_response(e.message, status_code=400)
     except ValueError:
-        return error_response('Invalid pagination value', status_code=400)
+        return error_response("Invalid pagination value", status_code=400)
     except Exception as e:
         current_app.logger.error(f"Get notifications error: {e}")
-        return internal_error_response('Failed to get notifications')
+        return internal_error_response("Failed to get notifications")
 
 
-@notifications_bp.route('/<int:notification_id>', methods=['GET'])
+@notifications_bp.route("/<int:notification_id>", methods=["GET"])
 @jwt_required()
 def get_notification(notification_id):
     """Get specific notification details"""
@@ -85,16 +84,16 @@ def get_notification(notification_id):
             mark_as_read=True,
         )
 
-        return success_response(data={'notification': serialize_notification(notification)})
+        return success_response(data={"notification": serialize_notification(notification)})
 
     except NotFoundError as e:
         return not_found_response(e.message)
     except Exception as e:
         current_app.logger.error(f"Get notification error: {e}")
-        return internal_error_response('Failed to get notification')
+        return internal_error_response("Failed to get notification")
 
 
-@notifications_bp.route('/<int:notification_id>/mark-read', methods=['POST'])
+@notifications_bp.route("/<int:notification_id>/mark-read", methods=["POST"])
 @jwt_required()
 def mark_notification_read(notification_id):
     """Mark a notification as read"""
@@ -105,16 +104,16 @@ def mark_notification_read(notification_id):
             user_id=current_user_id,
         )
 
-        return success_response(message=get_translation('api.notifications.success.marked_read'))
+        return success_response(message=get_translation("api.notifications.success.marked_read"))
 
     except NotFoundError as e:
         return not_found_response(e.message)
     except Exception as e:
         current_app.logger.error(f"Mark notification read error: {e}")
-        return internal_error_response('Failed to mark notification as read')
+        return internal_error_response("Failed to mark notification as read")
 
 
-@notifications_bp.route('/mark-all-read', methods=['POST'])
+@notifications_bp.route("/mark-all-read", methods=["POST"])
 @jwt_required()
 def mark_all_notifications_read():
     """Mark all notifications as read"""
@@ -122,14 +121,14 @@ def mark_all_notifications_read():
         current_user_id = get_jwt_identity()
         marked_count = get_notification_service().mark_all_notifications_read(current_user_id)
 
-        return success_response(message=f'{marked_count} notifications marked as read')
+        return success_response(message=f"{marked_count} notifications marked as read")
 
     except Exception as e:
         current_app.logger.error(f"Mark all notifications read error: {e}")
-        return internal_error_response('Failed to mark all notifications as read')
+        return internal_error_response("Failed to mark all notifications as read")
 
 
-@notifications_bp.route('/<int:notification_id>/delete', methods=['DELETE'])
+@notifications_bp.route("/<int:notification_id>/delete", methods=["DELETE"])
 @jwt_required()
 def delete_notification(notification_id):
     """Delete a notification"""
@@ -140,16 +139,16 @@ def delete_notification(notification_id):
             user_id=current_user_id,
         )
 
-        return success_response(message=get_translation('api.notifications.success.deleted'))
+        return success_response(message=get_translation("api.notifications.success.deleted"))
 
     except NotFoundError as e:
         return not_found_response(e.message)
     except Exception as e:
         current_app.logger.error(f"Delete notification error: {e}")
-        return internal_error_response('Failed to delete notification')
+        return internal_error_response("Failed to delete notification")
 
 
-@notifications_bp.route('/preferences', methods=['GET'])
+@notifications_bp.route("/preferences", methods=["GET"])
 @jwt_required()
 def get_notification_preferences():
     """Get user's notification preferences"""
@@ -157,14 +156,14 @@ def get_notification_preferences():
         current_user_id = get_jwt_identity()
         preferences = get_notification_service().create_default_preferences(current_user_id)
 
-        return success_response(data={'preferences': serialize_notification_preferences(preferences)})
+        return success_response(data={"preferences": serialize_notification_preferences(preferences)})
 
     except Exception as e:
         current_app.logger.error(f"Get notification preferences error: {e}")
-        return internal_error_response('Failed to get notification preferences')
+        return internal_error_response("Failed to get notification preferences")
 
 
-@notifications_bp.route('/preferences', methods=['PUT'])
+@notifications_bp.route("/preferences", methods=["PUT"])
 @jwt_required()
 @validate_json()
 def update_notification_preferences():
@@ -179,20 +178,20 @@ def update_notification_preferences():
         )
 
         return success_response(
-            data={'preferences': serialize_notification_preferences(preferences)},
-            message='Notification preferences updated successfully',
+            data={"preferences": serialize_notification_preferences(preferences)},
+            message="Notification preferences updated successfully",
         )
 
     except ValidationError as e:
         return error_response(e.message, status_code=400)
     except Exception as e:
         current_app.logger.error(f"Update notification preferences error: {e}")
-        return internal_error_response('Failed to update notification preferences')
+        return internal_error_response("Failed to update notification preferences")
 
 
-@notifications_bp.route('/push-token', methods=['POST'])
+@notifications_bp.route("/push-token", methods=["POST"])
 @jwt_required()
-@validate_json(['token', 'platform'])
+@validate_json(["token", "platform"])
 def register_push_token():
     """Register or update push notification token"""
     try:
@@ -201,23 +200,23 @@ def register_push_token():
 
         get_notification_service().register_push_token_for_user(
             user_id=current_user_id,
-            token=data.get('token'),
-            platform=data.get('platform'),
-            device_id=data.get('device_id'),
+            token=data.get("token"),
+            platform=data.get("platform"),
+            device_id=data.get("device_id"),
         )
 
-        return success_response(message=get_translation('api.notifications.success.push_registered'))
+        return success_response(message=get_translation("api.notifications.success.push_registered"))
 
     except ValidationError as e:
         return error_response(e.message, status_code=400)
     except Exception as e:
         current_app.logger.error(f"Register push token error: {e}")
-        return internal_error_response('Failed to register push token')
+        return internal_error_response("Failed to register push token")
 
 
-@notifications_bp.route('/push-token', methods=['DELETE'])
+@notifications_bp.route("/push-token", methods=["DELETE"])
 @jwt_required()
-@validate_json(['token'])
+@validate_json(["token"])
 def unregister_push_token():
     """Unregister push notification token"""
     try:
@@ -226,43 +225,38 @@ def unregister_push_token():
 
         get_notification_service().unregister_push_token_for_user(
             current_user_id,
-            data.get('token'),
+            data.get("token"),
         )
 
-        return success_response(message=get_translation('api.notifications.success.push_unregistered'))
+        return success_response(message=get_translation("api.notifications.success.push_unregistered"))
 
     except Exception as e:
         current_app.logger.error(f"Unregister push token error: {e}")
-        return internal_error_response('Failed to unregister push token')
+        return internal_error_response("Failed to unregister push token")
 
 
-@notifications_bp.route('/templates', methods=['GET'])
+@notifications_bp.route("/templates", methods=["GET"])
 @cache_response(3600)
 def get_notification_templates():
     """Get available notification templates"""
     try:
-        _ = request.args.get('language', 'uz')
-        category = request.args.get('category')
+        _ = request.args.get("language", "uz")
+        category = request.args.get("category")
 
         templates = get_notification_service().get_active_templates(category=category)
 
         return success_response(
-            data={
-                'templates': [
-                    serialize_notification_template(template)
-                    for template in templates
-                ]
-            }
+            data={"templates": [serialize_notification_template(template) for template in templates]}
         )
 
     except Exception as e:
         current_app.logger.error(f"Get notification templates error: {e}")
-        return internal_error_response('Failed to get notification templates')
+        return internal_error_response("Failed to get notification templates")
 
 
-@notifications_bp.route('/test', methods=['POST'])
+@notifications_bp.route("/test", methods=["POST"])
 @jwt_required()
-@validate_json(['template_id'])
+@validate_json(["template_id"])
 @rate_limit(5, 300)
 def send_test_notification():
     """Send a test notification"""
@@ -270,14 +264,14 @@ def send_test_notification():
         current_user_id = get_jwt_identity()
         data = request.get_json() or {}
 
-        template_id = data.get('template_id')
-        channel = data.get('channel', 'push')
-        test_data = data.get('test_data', {})
+        template_id = data.get("template_id")
+        channel = data.get("channel", "push")
+        test_data = data.get("test_data", {})
 
         try:
             template_id = int(template_id)
         except (TypeError, ValueError):
-            return error_response('template_id must be an integer', status_code=400)
+            return error_response("template_id must be an integer", status_code=400)
 
         result = get_notification_service().send_test_notification_from_template(
             user_id=current_user_id,
@@ -288,7 +282,7 @@ def send_test_notification():
 
         return success_response(
             data=result,
-            message='Test notification sent successfully',
+            message="Test notification sent successfully",
         )
 
     except ValidationError as e:
@@ -297,16 +291,16 @@ def send_test_notification():
         return not_found_response(e.message)
     except Exception as e:
         current_app.logger.error(f"Send test notification error: {e}")
-        return internal_error_response('Failed to send test notification')
+        return internal_error_response("Failed to send test notification")
 
 
-@notifications_bp.route('/statistics', methods=['GET'])
+@notifications_bp.route("/statistics", methods=["GET"])
 @jwt_required()
 def get_notification_statistics():
     """Get user's notification statistics"""
     try:
         current_user_id = get_jwt_identity()
-        period = request.args.get('period', 'month')
+        period = request.args.get("period", "month")
 
         stats = get_notification_service().get_notification_statistics_for_user(
             user_id=current_user_id,
@@ -316,10 +310,10 @@ def get_notification_statistics():
 
     except Exception as e:
         current_app.logger.error(f"Get notification statistics error: {e}")
-        return internal_error_response('Failed to get notification statistics')
+        return internal_error_response("Failed to get notification statistics")
 
 
-@notifications_bp.route('/channels', methods=['GET'])
+@notifications_bp.route("/channels", methods=["GET"])
 @jwt_required()
 def get_notification_channels():
     """Get user's available notification channels"""
@@ -327,18 +321,18 @@ def get_notification_channels():
         current_user_id = get_jwt_identity()
         channels = get_notification_service().get_user_notification_channels(current_user_id)
 
-        return success_response(data={'channels': channels})
+        return success_response(data={"channels": channels})
 
     except NotFoundError as e:
         return not_found_response(e.message)
     except Exception as e:
         current_app.logger.error(f"Get notification channels error: {e}")
-        return internal_error_response('Failed to get notification channels')
+        return internal_error_response("Failed to get notification channels")
 
 
-@notifications_bp.route('/bulk-send', methods=['POST'])
+@notifications_bp.route("/bulk-send", methods=["POST"])
 @jwt_required()
-@validate_json(['user_ids', 'template_code'])
+@validate_json(["user_ids", "template_code"])
 @rate_limit(1, 3600)
 def send_bulk_notification():
     """Send bulk notification (admin only)"""
@@ -348,15 +342,15 @@ def send_bulk_notification():
 
         result = get_notification_service().queue_bulk_notification(
             sender_id=current_user_id,
-            user_ids=data.get('user_ids'),
-            template_code=data.get('template_code'),
-            template_data=data.get('template_data', {}),
-            channels=data.get('channels', ['push', 'email']),
+            user_ids=data.get("user_ids"),
+            template_code=data.get("template_code"),
+            template_data=data.get("template_data", {}),
+            channels=data.get("channels", ["push", "email"]),
         )
 
         return success_response(
             data=result,
-            message='Bulk notification queued successfully',
+            message="Bulk notification queued successfully",
         )
 
     except ValidationError as e:
@@ -367,21 +361,21 @@ def send_bulk_notification():
         return forbidden_response(e.message)
     except Exception as e:
         current_app.logger.error(f"Send bulk notification error: {e}")
-        return internal_error_response('Failed to send bulk notification')
+        return internal_error_response("Failed to send bulk notification")
 
 
-@notifications_bp.route('/delivery-reports', methods=['GET'])
+@notifications_bp.route("/delivery-reports", methods=["GET"])
 @jwt_required()
 def get_delivery_reports():
     """Get notification delivery reports"""
     try:
         current_user_id = get_jwt_identity()
 
-        page = int(request.args.get('page', 1))
-        per_page = min(int(request.args.get('per_page', 50)), 100)
-        start_date = request.args.get('start_date')
-        end_date = request.args.get('end_date')
-        channel = request.args.get('channel')
+        page = int(request.args.get("page", 1))
+        per_page = min(int(request.args.get("per_page", 50)), 100)
+        start_date = request.args.get("start_date")
+        end_date = request.args.get("end_date")
+        channel = request.args.get("channel")
 
         reports_data = get_notification_service().get_delivery_reports_paginated(
             requester_id=current_user_id,
@@ -393,11 +387,11 @@ def get_delivery_reports():
         )
 
         return paginated_response(
-            items=reports_data['items'],
-            page=reports_data['page'],
-            per_page=reports_data['per_page'],
-            total=reports_data['total'],
-            additional_meta={'summary': reports_data['summary']},
+            items=reports_data["items"],
+            page=reports_data["page"],
+            per_page=reports_data["per_page"],
+            total=reports_data["total"],
+            additional_meta={"summary": reports_data["summary"]},
         )
 
     except ValidationError as e:
@@ -405,7 +399,7 @@ def get_delivery_reports():
     except ForbiddenError as e:
         return forbidden_response(e.message)
     except ValueError:
-        return error_response('Invalid pagination value', status_code=400)
+        return error_response("Invalid pagination value", status_code=400)
     except Exception as e:
         current_app.logger.error(f"Get delivery reports error: {e}")
-        return internal_error_response('Failed to get delivery reports')
+        return internal_error_response("Failed to get delivery reports")

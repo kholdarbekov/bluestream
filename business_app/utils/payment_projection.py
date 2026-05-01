@@ -3,8 +3,7 @@
 from decimal import Decimal
 from typing import Any, Dict, Optional
 
-from business_app.utils.constants import PaymentMethod, PaymentStatus
-
+from shared.enums import PaymentMethod, PaymentStatus
 
 PREPAID_METHOD_VALUES = {
     PaymentMethod.CARD.value,
@@ -31,10 +30,7 @@ def is_settled_prepayment(payment: Any) -> bool:
     """Return True when payment is a non-COD prepaid payment marked completed."""
     method_value = _enum_value(getattr(payment, "payment_method", None))
     status_value = _enum_value(getattr(payment, "status", None))
-    return (
-        method_value in PREPAID_METHOD_VALUES
-        and status_value == PaymentStatus.COMPLETED.value
-    )
+    return method_value in PREPAID_METHOD_VALUES and status_value == PaymentStatus.COMPLETED.value
 
 
 def get_payment_projection(payment: Any) -> Dict[str, Any]:

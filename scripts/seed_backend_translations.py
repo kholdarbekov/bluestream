@@ -355,6 +355,11 @@ BACKEND_TRANSLATIONS = {
         'uz': 'Bir yoki bir nechta buyurtma mahsuloti uchun korporativ oldindan to\'lov qoldig\'i yetarli emas.',
         'ru': 'Корпоративного предоплаченного остатка недостаточно для одной или нескольких позиций заказа.'
     },
+    'api.orders.error.business_account_grocery_disallowed': {
+        'en': 'Business Account payment is not available for grocery store accounts.',
+        'uz': 'Business Account to\'lov usuli oziq-ovqat do\'kon hisoblari uchun mavjud emas.',
+        'ru': 'Способ оплаты Business Account недоступен для счетов продуктовых магазинов.'
+    },
     'api.orders.error.ambiguous_contract_pricing': {
         'en': 'Ambiguous contract pricing for product {product_id}. Multiple active contracts match: {contract_numbers}',
         'uz': '{product_id} mahsulot uchun shartnoma narxi noaniq. Bir nechta faol shartnoma mos keldi: {contract_numbers}',
@@ -2676,6 +2681,91 @@ BACKEND_TRANSLATIONS = {
         'en': 'Users created with user type "Entity" become selectable in the Corporate Contracts screen.',
         'uz': '"Yuridik shaxs" turi bilan yaratilgan foydalanuvchilar Corporate Contracts sahifasida tanlanadi.',
         'ru': 'Пользователи с типом "Юридическое лицо" становятся доступными для выбора на экране Corporate Contracts.'
+    },
+    'ui.users.entity_subtype': {
+        'en': 'Entity Subtype',
+        'uz': 'Yuridik shaxs kichik turi',
+        'ru': 'Подтип юр. лица'
+    },
+    'ui.users.select_entity_subtype': {
+        'en': 'Select subtype',
+        'uz': 'Kichik turini tanlang',
+        'ru': 'Выберите подтип'
+    },
+    'ui.users.entity_subtype_workplace': {
+        'en': 'Workplace',
+        'uz': 'Ish joyi',
+        'ru': 'Рабочее место'
+    },
+    'ui.users.entity_subtype_grocery_store': {
+        'en': 'Grocery Store',
+        'uz': 'Oziq-ovqat do\'koni',
+        'ru': 'Продуктовый магазин'
+    },
+    'ui.users.entity_subtype_required': {
+        'en': 'Entity subtype is required for new entity users',
+        'uz': 'Yangi yuridik foydalanuvchilar uchun kichik tur majburiy',
+        'ru': 'Для новых юридических пользователей подтип обязателен'
+    },
+    'ui.users.entity_subtype_unassigned': {
+        'en': 'Subtype unassigned',
+        'uz': 'Kichik tur tayinlanmagan',
+        'ru': 'Подтип не назначен'
+    },
+    'ui.users.entity_subtype_unassigned_note': {
+        'en': 'This customer cannot place orders until you assign a subtype.',
+        'uz': 'Bu mijoz kichik turi tayinlanmaguncha buyurtma bera olmaydi.',
+        'ru': 'Этот клиент не может оформлять заказы, пока не назначен подтип.'
+    },
+    'ui.users.entity_subtype_workplace_hint': {
+        'en': 'Workplaces prepay via Business Account; debt is tracked per product in bottle units.',
+        'uz': 'Ish joylari Business Account orqali oldindan to\'laydi; qarz har bir mahsulot uchun shisha sonida hisoblanadi.',
+        'ru': 'Рабочие места предоплачивают через Business Account; долг учитывается по каждому товару в бутылках.'
+    },
+    'ui.users.entity_subtype_grocery_hint': {
+        'en': 'Grocery stores pay cash/card on or after delivery; debt is tracked in money. Business Account is unavailable.',
+        'uz': 'Oziq-ovqat do\'konlari yetkazib berishda yoki keyinroq naqd/karta bilan to\'laydi; qarz pul birligida hisoblanadi. Business Account mavjud emas.',
+        'ru': 'Продуктовые магазины платят наличными/картой при доставке или позже; долг учитывается в деньгах. Business Account недоступен.'
+    },
+    'ui.corporate.tracking_mode': {
+        'en': 'Tracking Mode',
+        'uz': 'Hisoblash rejimi',
+        'ru': 'Режим учёта'
+    },
+    'ui.corporate.tracking_mode_units': {
+        'en': 'Units (Workplace)',
+        'uz': 'Shisha soni (Ish joyi)',
+        'ru': 'В бутылках (Рабочее место)'
+    },
+    'ui.corporate.tracking_mode_amount': {
+        'en': 'Money (Grocery Store)',
+        'uz': 'Pul (Oziq-ovqat do\'koni)',
+        'ru': 'Деньги (Продуктовый магазин)'
+    },
+    'ui.corporate.outstanding_amount': {
+        'en': 'Outstanding (debt)',
+        'uz': 'Qoldiq qarz',
+        'ru': 'Текущий долг'
+    },
+    'ui.corporate.lifetime_charged': {
+        'en': 'Lifetime Charged',
+        'uz': 'Jami hisoblangan',
+        'ru': 'Всего начислено'
+    },
+    'ui.corporate.lifetime_collected': {
+        'en': 'Lifetime Collected',
+        'uz': 'Jami yig\'ilgan',
+        'ru': 'Всего собрано'
+    },
+    'ui.corporate.last_charged': {
+        'en': 'Last Charged',
+        'uz': 'Oxirgi hisoblash',
+        'ru': 'Последнее начисление'
+    },
+    'ui.corporate.last_collected': {
+        'en': 'Last Collected',
+        'uz': 'Oxirgi yig\'ilish',
+        'ru': 'Последнее поступление'
     },
     'ui.users.edit_user': {
         'en': 'Edit User',

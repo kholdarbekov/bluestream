@@ -2,6 +2,7 @@
 Bot Management API
 Endpoints for managing Telegram bot operations
 """
+
 import logging
 from flask import Blueprint, request, jsonify
 
@@ -10,12 +11,12 @@ from business_app.utils.decorators import require_auth, require_admin, verify_we
 
 logger = logging.getLogger(__name__)
 
-bot_bp = Blueprint('bot', __name__)
+bot_bp = Blueprint("bot", __name__)
 
 config = get_config()
 
 
-@bot_bp.route('/reload-translations', methods=['POST'])
+@bot_bp.route("/reload-translations", methods=["POST"])
 @verify_webhook_signature()
 def reload_translations():
     """
@@ -37,15 +38,12 @@ def reload_translations():
         bot_webhook_url = config.BOT_WEBHOOK_URL
         if not bot_webhook_url:
             logger.error("BOT_WEBHOOK_URL not configured")
-            return jsonify({
-                'success': False,
-                'message': 'Bot webhook URL not configured'
-            }), 500
+            return jsonify({"success": False, "message": "Bot webhook URL not configured"}), 500
 
         # Prepare webhook payload
         payload = {
-            'action': 'reload_translations',
-            'timestamp': request.json.get('timestamp') if request.json else None
+            "action": "reload_translations",
+            "timestamp": request.json.get("timestamp") if request.json else None,
         }
 
         # Send async request to bot
@@ -54,7 +52,7 @@ def reload_translations():
                 async with session.post(
                     f"{bot_webhook_url}/internal/reload-translations",
                     json=payload,
-                    timeout=aiohttp.ClientTimeout(total=10)
+                    timeout=aiohttp.ClientTimeout(total=10),
                 ) as response:
                     return await response.json(), response.status
 
@@ -64,43 +62,33 @@ def reload_translations():
 
             if status_code == 200:
                 logger.info("Successfully triggered bot translation reload")
-                return jsonify({
-                    'success': True,
-                    'message': 'Translation reload triggered',
-                    'bot_response': response_data
-                }), 200
+                return (
+                    jsonify(
+                        {"success": True, "message": "Translation reload triggered", "bot_response": response_data}
+                    ),
+                    200,
+                )
             else:
                 logger.error(f"Bot reload failed with status {status_code}: {response_data}")
-                return jsonify({
-                    'success': False,
-                    'message': 'Bot reload request failed',
-                    'details': response_data
-                }), 500
+                return (
+                    jsonify({"success": False, "message": "Bot reload request failed", "details": response_data}),
+                    500,
+                )
 
         except asyncio.TimeoutError:
             logger.error("Bot reload request timed out")
-            return jsonify({
-                'success': False,
-                'message': 'Bot reload request timed out'
-            }), 504
+            return jsonify({"success": False, "message": "Bot reload request timed out"}), 504
 
         except Exception as e:
             logger.error(f"Error sending reload request to bot: {e}", exc_info=True)
-            return jsonify({
-                'success': False,
-                'message': f'Failed to communicate with bot: {str(e)}'
-            }), 500
+            return jsonify({"success": False, "message": f"Failed to communicate with bot: {str(e)}"}), 500
 
     except Exception as e:
         logger.error(f"Error in reload_translations webhook: {e}", exc_info=True)
-        return jsonify({
-            'success': False,
-            'message': 'Internal server error',
-            'error': str(e)
-        }), 500
+        return jsonify({"success": False, "message": "Internal server error", "error": str(e)}), 500
 
 
-@bot_bp.route('/health', methods=['GET'])
+@bot_bp.route("/health", methods=["GET"])
 def bot_health():
     """
     Check bot health status
@@ -114,47 +102,43 @@ def bot_health():
     try:
         bot_webhook_url = config.BOT_WEBHOOK_URL
         if not bot_webhook_url:
-            return jsonify({
-                'success': False,
-                'message': 'Bot webhook URL not configured',
-                'status': 'unconfigured'
-            }), 200
+            return (
+                jsonify({"success": False, "message": "Bot webhook URL not configured", "status": "unconfigured"}),
+                200,
+            )
 
         async def check_bot_health():
             async with aiohttp.ClientSession() as session:
-                async with session.get(
-                    f"{bot_webhook_url}/health",
-                    timeout=aiohttp.ClientTimeout(total=5)
-                ) as response:
+                async with session.get(f"{bot_webhook_url}/health", timeout=aiohttp.ClientTimeout(total=5)) as response:
                     return await response.json(), response.status
 
         try:
             response_data, status_code = asyncio.run(check_bot_health())
 
-            return jsonify({
-                'success': status_code == 200,
-                'message': 'Bot health check complete',
-                'bot_status': response_data,
-                'status': 'healthy' if status_code == 200 else 'unhealthy'
-            }), 200
+            return (
+                jsonify(
+                    {
+                        "success": status_code == 200,
+                        "message": "Bot health check complete",
+                        "bot_status": response_data,
+                        "status": "healthy" if status_code == 200 else "unhealthy",
+                    }
+                ),
+                200,
+            )
 
         except Exception as e:
-            return jsonify({
-                'success': False,
-                'message': f'Bot health check failed: {str(e)}',
-                'status': 'unreachable'
-            }), 200
+            return (
+                jsonify({"success": False, "message": f"Bot health check failed: {str(e)}", "status": "unreachable"}),
+                200,
+            )
 
     except Exception as e:
         logger.error(f"Error in bot health check: {e}", exc_info=True)
-        return jsonify({
-            'success': False,
-            'message': 'Health check error',
-            'error': str(e)
-        }), 500
+        return jsonify({"success": False, "message": "Health check error", "error": str(e)}), 500
 
 
-@bot_bp.route('/stats', methods=['GET'])
+@bot_bp.route("/stats", methods=["GET"])
 @require_auth
 @require_admin()
 def get_bot_stats():
@@ -170,16 +154,12 @@ def get_bot_stats():
     try:
         bot_webhook_url = config.BOT_WEBHOOK_URL
         if not bot_webhook_url:
-            return jsonify({
-                'success': False,
-                'message': 'Bot webhook URL not configured'
-            }), 500
+            return jsonify({"success": False, "message": "Bot webhook URL not configured"}), 500
 
         async def get_stats():
             async with aiohttp.ClientSession() as session:
                 async with session.get(
-                    f"{bot_webhook_url}/internal/stats",
-                    timeout=aiohttp.ClientTimeout(total=10)
+                    f"{bot_webhook_url}/internal/stats", timeout=aiohttp.ClientTimeout(total=10)
                 ) as response:
                     return await response.json(), response.status
 
@@ -187,27 +167,17 @@ def get_bot_stats():
             response_data, status_code = asyncio.run(get_stats())
 
             if status_code == 200:
-                return jsonify({
-                    'success': True,
-                    'data': response_data
-                }), 200
+                return jsonify({"success": True, "data": response_data}), 200
             else:
-                return jsonify({
-                    'success': False,
-                    'message': 'Failed to get bot stats',
-                    'details': response_data
-                }), status_code
+                return (
+                    jsonify({"success": False, "message": "Failed to get bot stats", "details": response_data}),
+                    status_code,
+                )
 
         except Exception as e:
             logger.error(f"Error getting bot stats: {e}", exc_info=True)
-            return jsonify({
-                'success': False,
-                'message': f'Failed to get bot stats: {str(e)}'
-            }), 500
+            return jsonify({"success": False, "message": f"Failed to get bot stats: {str(e)}"}), 500
 
     except Exception as e:
         logger.error(f"Error in get_bot_stats: {e}", exc_info=True)
-        return jsonify({
-            'success': False,
-            'message': 'Internal server error'
-        }), 500
+        return jsonify({"success": False, "message": "Internal server error"}), 500

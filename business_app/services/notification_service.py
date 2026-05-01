@@ -42,8 +42,10 @@ from business_app.utils.constants import (
     NotificationType,
     NotificationChannel,
     NotificationStatus,
-    DeliveryStatus,
     Priority,
+)
+from shared.enums import (
+    DeliveryStatus,
     UserRole,
 )
 from business_app.utils.translations import get_translation

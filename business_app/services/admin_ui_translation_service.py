@@ -64,32 +64,44 @@ class AdminUiTranslationService:
     def get_namespaces(cls) -> list[str]:
         """Return available i18next namespace names for admin UI translations."""
 
-        categories = db.session.query(distinct(Translation.category)).filter(
-            Translation.is_active.is_(True),
-            or_(
-                Translation.category == cls.SHARED_UI_CATEGORY,
-                Translation.category.like(f"{cls.SCOPED_UI_CATEGORY_PREFIX}%"),
-            ),
-        ).all()
+        categories = (
+            db.session.query(distinct(Translation.category))
+            .filter(
+                Translation.is_active.is_(True),
+                or_(
+                    Translation.category == cls.SHARED_UI_CATEGORY,
+                    Translation.category.like(f"{cls.SCOPED_UI_CATEGORY_PREFIX}%"),
+                ),
+            )
+            .all()
+        )
 
         namespaces = {"common"}
         for (category,) in categories:
             if category and category.startswith(cls.SCOPED_UI_CATEGORY_PREFIX):
-                namespaces.add(category[len(cls.SCOPED_UI_CATEGORY_PREFIX):])
+                namespaces.add(category[len(cls.SCOPED_UI_CATEGORY_PREFIX) :])
 
         return sorted(namespaces)
 
     @classmethod
     def _get_shared_ui_records(cls, language: str) -> list[Translation]:
-        return cls._base_query(language).filter(
-            Translation.category == cls.SHARED_UI_CATEGORY,
-        ).all()
+        return (
+            cls._base_query(language)
+            .filter(
+                Translation.category == cls.SHARED_UI_CATEGORY,
+            )
+            .all()
+        )
 
     @classmethod
     def _get_all_scoped_ui_records(cls, language: str) -> list[Translation]:
-        return cls._base_query(language).filter(
-            Translation.category.like(f"{cls.SCOPED_UI_CATEGORY_PREFIX}%"),
-        ).all()
+        return (
+            cls._base_query(language)
+            .filter(
+                Translation.category.like(f"{cls.SCOPED_UI_CATEGORY_PREFIX}%"),
+            )
+            .all()
+        )
 
     @classmethod
     def _get_legacy_namespace_records(
@@ -102,10 +114,14 @@ class AdminUiTranslationService:
             return []
 
         prefix_filters = [Translation.key.like(f"{prefix}%") for prefix in prefixes]
-        return cls._base_query(language).filter(
-            Translation.category == cls.SHARED_UI_CATEGORY,
-            or_(*prefix_filters),
-        ).all()
+        return (
+            cls._base_query(language)
+            .filter(
+                Translation.category == cls.SHARED_UI_CATEGORY,
+                or_(*prefix_filters),
+            )
+            .all()
+        )
 
     @classmethod
     def _get_scoped_namespace_records(
@@ -120,9 +136,13 @@ class AdminUiTranslationService:
         if category == cls.SHARED_UI_CATEGORY:
             return []
 
-        return cls._base_query(language).filter(
-            Translation.category == category,
-        ).all()
+        return (
+            cls._base_query(language)
+            .filter(
+                Translation.category == category,
+            )
+            .all()
+        )
 
     @classmethod
     def _base_query(cls, language: str):

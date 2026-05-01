@@ -16,9 +16,11 @@ from business_app.services.driver_cash_custody_service import DriverCashCustodyS
 from business_app.services.driver_reconciliation_service import DriverReconciliationService
 from business_app.services.staff_service import StaffService
 from business_app.utils.constants import (
+    NotificationChannel,
+)
+from shared.enums import (
     DeliveryStatus,
     DriverCashSessionStatus,
-    NotificationChannel,
     OrderStatus,
     PaymentMethod,
     PaymentStatus,

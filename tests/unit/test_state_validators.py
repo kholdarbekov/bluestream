@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from business_app.utils.constants import (
+from shared.enums import (
     DeliveryStatus,
     OrderStatus,
     PaymentMethod,

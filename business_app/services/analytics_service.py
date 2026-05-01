@@ -20,7 +20,7 @@ from business_app.models.delivery import Delivery
 from business_app.models.product import Product
 from business_app.models.analytics import UserBehavior
 from business_app.models.order import OrderItem
-from business_app.utils.constants import OrderStatus, DeliveryStatus, UserStatus
+from shared.enums import OrderStatus, DeliveryStatus, UserStatus
 from business_app import db
 
 

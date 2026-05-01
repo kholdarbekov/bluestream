@@ -10,7 +10,7 @@ from business_app.models.order import Order
 from business_app.models.user import User
 from business_app.services.admin_delivery_service import AdminDeliveryService
 from business_app.services.staff_service import StaffService
-from business_app.utils.constants import DeliveryStatus, OrderStatus, PaymentMethod, UserRole, UserStatus, UserType
+from shared.enums import DeliveryStatus, OrderStatus, PaymentMethod, UserRole, UserStatus, UserType
 from business_app.utils.exceptions import ValidationError
 from business_app.utils.password_security import hash_password
 

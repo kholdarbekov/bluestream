@@ -8,7 +8,8 @@ import pytest
 from business_app.models.loyalty import LoyaltyPoints, LoyaltyProgram, LoyaltyReward, LoyaltyTransaction
 from business_app.models.user import User
 from business_app.services.loyalty_service import LoyaltyService
-from business_app.utils.constants import LoyaltyTransactionType, UserRole
+from business_app.utils.constants import LoyaltyTransactionType
+from shared.enums import UserRole
 from business_app.utils.exceptions import ValidationError
 from business_app.utils.password_security import hash_password
 

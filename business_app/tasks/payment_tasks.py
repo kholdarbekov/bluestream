@@ -14,7 +14,8 @@ from business_app.models.order import Order
 from business_app.services.payment_service import PaymentService
 from business_app.services.payment_fiscalization_service import PaymentFiscalizationService
 from business_app.services.notification_service import NotificationService
-from business_app.utils.constants import PaymentMethod, PaymentStatus, OrderStatus, NotificationChannel
+from business_app.utils.constants import NotificationChannel
+from shared.enums import PaymentMethod, PaymentStatus, OrderStatus
 from business_app import db
 
 logger = get_task_logger(__name__)

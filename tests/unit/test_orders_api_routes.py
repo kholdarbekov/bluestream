@@ -9,9 +9,7 @@ from flask_jwt_extended import create_access_token
 
 from business_app.models.order import Order
 from business_app.models.user import UserAddress
-from business_app.utils.constants import OrderStatus, PaymentMethod
-
-
+from shared.enums import OrderStatus, PaymentMethod
 def _auth_headers(app, user_id: int) -> dict:
     with app.app_context():
         token = create_access_token(identity=user_id, additional_claims={'role': 'admin'})

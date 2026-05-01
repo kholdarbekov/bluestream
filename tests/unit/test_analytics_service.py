@@ -11,9 +11,7 @@ from business_app.models.order import Order, OrderItem
 from business_app.services.analytics_service import AnalyticsService
 from business_app.models.analytics import UserBehavior
 from business_app.models.user import UserAddress
-from business_app.utils.constants import OrderStatus, PaymentMethod
-
-
+from shared.enums import OrderStatus, PaymentMethod
 @pytest.fixture
 def analytics_service():
     return AnalyticsService()

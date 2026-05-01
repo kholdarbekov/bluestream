@@ -28,7 +28,7 @@ from business_app import create_app
 from business_app.services.auth_service import AuthService
 from business_app.models.user import User
 from business_app.utils.exceptions import ConflictError, ValidationError
-from business_app.utils.constants import UserRole, UserStatus
+from shared.enums import UserRole, UserStatus
 from business_app import db
 
 # Set up logging

@@ -29,7 +29,7 @@ from business_app.models.user import User
 from business_app.models.product import Product, ProductCategory
 from business_app.models.order import Order
 from business_app.models.payment import Payment
-from business_app.utils.constants import UserRole, UserType, OrderStatus, PaymentStatus, PaymentMethod
+from shared.enums import UserRole, UserType, OrderStatus, PaymentStatus, PaymentMethod
 from business_app.utils.password_security import hash_password
 
 

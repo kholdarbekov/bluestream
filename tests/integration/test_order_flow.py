@@ -6,9 +6,7 @@ import pytest
 
 from business_app.models.delivery import DeliveryTimeSlot
 from business_app.models.order import Order
-from business_app.utils.constants import OrderStatus
-
-
+from shared.enums import OrderStatus
 @pytest.mark.integration
 @pytest.mark.order
 class TestOrderFlow:

@@ -7,9 +7,7 @@ import pytest
 
 from business_app.models.subscription import Subscription
 from business_app.models.user import UserAddress
-from business_app.utils.constants import PaymentMethod, SubscriptionFrequency
-
-
+from shared.enums import PaymentMethod, SubscriptionFrequency
 def _create_address(client, headers, **overrides):
     payload = {
         "title": "Home",

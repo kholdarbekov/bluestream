@@ -7,16 +7,9 @@ Performance optimizations:
 - Batch fetching for lists
 - Cache invalidation on updates
 """
-from datetime import datetime, UTC
-from sqlalchemy import Column, Integer, String, Text, ForeignKey, Boolean, Index, UniqueConstraint
-from sqlalchemy.orm import relationship, backref
+
 from sqlalchemy.ext.declarative import declared_attr
-from sqlalchemy.ext.hybrid import hybrid_property
-from business_app import db
-from business_app.models.base import TimestampMixin
 from business_app.utils.helpers import get_current_language
-import json
-from functools import lru_cache
 from typing import Dict, Optional, List
 from flask import current_app
 
@@ -56,7 +49,7 @@ class TranslatableMixin:
 
     def _ensure_cache_initialized(self):
         """Ensure translation cache exists (for SQLAlchemy objects loaded from DB)"""
-        if not hasattr(self, '_translation_cache'):
+        if not hasattr(self, "_translation_cache"):
             self._translation_cache: Dict[str, Dict[str, str]] = {}
 
     def _get_cache_key(self, field_name: str, language: str) -> str:
@@ -69,8 +62,7 @@ class TranslatableMixin:
         if field_name:
             # Clear cache for specific field
             self._translation_cache = {
-                k: v for k, v in self._translation_cache.items()
-                if not k.startswith(f"{field_name}:")
+                k: v for k, v in self._translation_cache.items() if not k.startswith(f"{field_name}:")
             }
         else:
             # Clear all cache
@@ -103,10 +95,7 @@ class TranslatableMixin:
 
         # Get from unified Translation model
         translation_obj = Translation.get_entity_translation(
-            entity_type=self.__class__.__name__,
-            entity_id=self.id,
-            field_name=field_name,
-            language=language
+            entity_type=self.__class__.__name__, entity_id=self.id, field_name=field_name, language=language
         )
 
         if translation_obj and translation_obj.value:
@@ -116,21 +105,21 @@ class TranslatableMixin:
 
         # Get original value from the column
         original_value = getattr(self, field_name, None)
-        
-        # If the requested language is the default language (uz), 
+
+        # If the requested language is the default language (uz),
         # prioritize the original column value over fallbacks
         # This prevents English translations from overriding the Uzbek default value
         # stored in the column when no explicit Uzbek translation exists.
-        default_language = 'uz' # Default fallback
-        if hasattr(current_app, 'config'):
-            default_language = current_app.config.get('DEFAULT_LANGUAGE', 'uz')
-            
+        default_language = "uz"  # Default fallback
+        if hasattr(current_app, "config"):
+            default_language = current_app.config.get("DEFAULT_LANGUAGE", "uz")
+
         if language == default_language and original_value:
             self._translation_cache[cache_key] = original_value
             return original_value
 
         # Fallback chain: uz → en → ru
-        fallback_languages = ['uz', 'en', 'ru']
+        fallback_languages = ["uz", "en", "ru"]
         if language in fallback_languages:
             fallback_languages.remove(language)
 
@@ -144,10 +133,7 @@ class TranslatableMixin:
                 return value
 
             translation_obj = Translation.get_entity_translation(
-                entity_type=self.__class__.__name__,
-                entity_id=self.id,
-                field_name=field_name,
-                language=fallback_lang
+                entity_type=self.__class__.__name__, entity_id=self.id, field_name=field_name, language=fallback_lang
             )
             if translation_obj and translation_obj.value:
                 # Cache for both fallback language and requested language
@@ -159,7 +145,7 @@ class TranslatableMixin:
         # Cache the original value as fallback
         self._translation_cache[cache_key] = original_value
         return original_value
-    
+
     def set_translated(self, field_name: str, content: str, language: str):
         """
         Set translated content for a field
@@ -177,37 +163,33 @@ class TranslatableMixin:
             entity_id=self.id,
             field_name=field_name,
             language=language,
-            value=content
+            value=content,
         )
 
         # Clear cache for this field since it was updated
         self._clear_translation_cache(field_name)
 
         return result
-    
+
     def get_all_translations(self, field_name):
         """Get all translations for a field"""
         if field_name not in self._translatable_fields:
             raise ValueError(f"Field '{field_name}' is not translatable in {self.__class__.__name__}")
-        
+
         # Import here to avoid circular imports
         from business_app.models.translation import Translation
-        
+
         return Translation.get_all_entity_translations(
-            entity_type=self.__class__.__name__,
-            entity_id=self.id,
-            field_name=field_name
+            entity_type=self.__class__.__name__, entity_id=self.id, field_name=field_name
         )
-    
+
     def set_translations(self, translations_dict):
         """Set multiple translations at once"""
         # Import here to avoid circular imports
         from business_app.models.translation import Translation
 
         Translation.bulk_set_entity_translations(
-            entity_type=self.__class__.__name__,
-            entity_id=self.id,
-            translations_dict=translations_dict
+            entity_type=self.__class__.__name__, entity_id=self.id, translations_dict=translations_dict
         )
 
         # Clear entire cache since multiple fields may have been updated
@@ -245,23 +227,21 @@ class TranslatableMixin:
             fields = cls._translatable_fields
 
         # Get entity IDs
-        entity_ids = [instance.id for instance in instances if hasattr(instance, 'id')]
+        entity_ids = [instance.id for instance in instances if hasattr(instance, "id")]
         if not entity_ids:
             return
 
         # Batch fetch all translations for these entities and fields
         entity_type = cls.__name__
         translations = Translation.query.filter(
-            Translation.key.like(f"{entity_type}.%.%"),
-            Translation.language == language,
-            Translation.is_active == True
+            Translation.key.like(f"{entity_type}.%.%"), Translation.language == language, Translation.is_active == True
         ).all()
 
         # Build lookup map: {entity_id: {field_name: value}}
         translation_map: Dict[int, Dict[str, str]] = {}
         for translation in translations:
             # Parse key: EntityType.field_name.entity_id
-            parts = translation.key.split('.')
+            parts = translation.key.split(".")
             if len(parts) == 3:
                 _, field_name, entity_id_str = parts
                 try:
@@ -275,7 +255,7 @@ class TranslatableMixin:
 
         # Populate caches for all instances
         for instance in instances:
-            if not hasattr(instance, 'id'):
+            if not hasattr(instance, "id"):
                 continue
 
             # Ensure cache is initialized
@@ -294,28 +274,28 @@ class TranslatableMixin:
         Override this method in your models to customize the output
         """
         result = {}
-        
+
         # Get base fields
         for column in self.__table__.columns:
             if column.name not in self._translatable_fields:
                 value = getattr(self, column.name)
-                if hasattr(value, 'isoformat'):  # Handle datetime
+                if hasattr(value, "isoformat"):  # Handle datetime
                     value = value.isoformat()
-                elif hasattr(value, 'value'):  # Handle enums
+                elif hasattr(value, "value"):  # Handle enums
                     value = value.value
                 result[column.name] = value
-        
+
         # Get translatable fields
         for field_name in self._translatable_fields:
             if include_all_translations:
                 # Include all translations
-                result[f'{field_name}_translations'] = self.get_all_translations(field_name)
+                result[f"{field_name}_translations"] = self.get_all_translations(field_name)
                 # Also include the current language version
                 result[field_name] = self.get_translated(field_name, language)
             else:
                 # Only include current language
                 result[field_name] = self.get_translated(field_name, language)
-        
+
         return result
 
 
@@ -325,19 +305,20 @@ def create_translatable_properties(model_class, translatable_fields):
     This creates properties like 'name_translated' that automatically get the current language
     """
     for field_name in translatable_fields:
+
         def make_property(field):
             def getter(self):
                 return self.get_translated(field)
-            
+
             def setter(self, value):
                 current_lang = get_current_language()
                 self.set_translated(field, value, current_lang)
-            
+
             return property(getter, setter)
-        
+
         # Create the property
         prop = make_property(field_name)
-        setattr(model_class, f'{field_name}_translated', prop)
+        setattr(model_class, f"{field_name}_translated", prop)
 
 
 # Decorator to make a model translatable
@@ -346,17 +327,18 @@ def translatable(*fields):
     Class decorator to make fields translatable
     Usage: @translatable('name', 'description')
     """
+
     def decorator(cls):
         # Set the translatable fields
         cls._translatable_fields = list(fields)
-        
+
         # Add the mixin
         if TranslatableMixin not in cls.__bases__:
             cls.__bases__ = (TranslatableMixin,) + cls.__bases__
-        
+
         # Create helper properties
         create_translatable_properties(cls, fields)
-        
+
         return cls
-    
+
     return decorator

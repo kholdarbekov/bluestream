@@ -9,7 +9,7 @@ from sqlalchemy import or_
 
 from business_app import db
 from business_app.models.user import User
-from business_app.utils.constants import UserStatus
+from shared.enums import UserStatus
 from business_app.services.token_service import TokenService
 
 logger = logging.getLogger(__name__)

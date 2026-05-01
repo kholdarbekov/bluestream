@@ -30,8 +30,7 @@ from business_app import db, redis_client
 from business_app.models.order import Order, OrderItem
 from business_app.models.payment import Payment
 from business_app.models.product import Product, ProductMarkingCode
-from business_app.utils.constants import MarkingCodeStatus, PaymentMethod, PaymentStatus
-
+from shared.enums import MarkingCodeStatus, PaymentMethod, PaymentStatus
 
 _FISCALISATION_PAYMENT_METHODS = (PaymentMethod.CARD.value, PaymentMethod.CLICK.value)
 

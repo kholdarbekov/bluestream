@@ -406,6 +406,11 @@ class AdminService {
     return response.data;
   }
 
+  async adjustCorporateContractAmount(contractId, payload) {
+    const response = await api.post(`/admin/corporate/contracts/${contractId}/adjustments`, payload);
+    return response.data;
+  }
+
   async getCorporateContractBalance(contractId) {
     const response = await api.get(`/admin/corporate/contracts/${contractId}/balance`);
     return response.data;

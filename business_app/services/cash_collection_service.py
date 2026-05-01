@@ -18,7 +18,7 @@ from business_app.models.payment import (
 )
 from business_app.models.user import User
 from business_app.utils.audit_logger import AuditEventType, AuditSeverity, audit_logger
-from business_app.utils.constants import (
+from shared.enums import (
     CashCollectionSource,
     OrderStatus,
     PaymentMethod,
@@ -128,16 +128,26 @@ class CashCollectionService:
         return len(self.get_active_cod_payments_for_customer(customer_id))
 
     def is_customer_cod_restricted(self, customer_id: int) -> bool:
+        # Grocery stores carry money debt by design and are exempt from the
+        # active-COD-debt cap.
+        customer = User.query.get(customer_id)
+        if customer and customer.is_grocery_store:
+            return False
         return self.get_active_cod_debt_count(customer_id) >= self.COD_ACTIVE_DEBT_LIMIT
 
     def get_cod_restriction_context(self, customer_id: int) -> Dict[str, Any]:
         active_debt_count = self.get_active_cod_debt_count(customer_id)
+        customer = User.query.get(customer_id)
+        is_grocery_store = bool(customer and customer.is_grocery_store)
+        is_restricted = False if is_grocery_store else active_debt_count >= self.COD_ACTIVE_DEBT_LIMIT
         return {
             "active_cod_debt_count": active_debt_count,
-            "cod_restricted": active_debt_count >= self.COD_ACTIVE_DEBT_LIMIT,
+            "cod_restricted": is_restricted,
             "available_prepayment_balance": float(self.get_customer_prepaid_balance(customer_id)),
             "cod_restriction_reason": (
-                "customer_has_max_active_cod_debts" if active_debt_count >= self.COD_ACTIVE_DEBT_LIMIT else None
+                "customer_has_max_active_cod_debts"
+                if not is_grocery_store and active_debt_count >= self.COD_ACTIVE_DEBT_LIMIT
+                else None
             ),
         }
 
@@ -450,12 +460,46 @@ class CashCollectionService:
                 }
             )
 
+        # For grocery stores, surface the headline contract debt (money mode)
+        # alongside per-payment outstandings so the bot/admin can show the full
+        # picture. Workplace and individual customers leave these as None.
+        grocery_debt: Optional[Dict[str, Any]] = None
+        if customer.is_grocery_store:
+            try:
+                from business_app.services.corporate_contract_service import CorporateContractService
+
+                corporate_service = CorporateContractService()
+                contract = corporate_service.get_active_amount_contract_for_user(customer.id)
+                if contract and contract.prepayment_account:
+                    account = contract.prepayment_account
+                    grocery_debt = {
+                        "contract_id": contract.id,
+                        "currency": contract.currency,
+                        "outstanding_amount": float(account.outstanding_amount or 0),
+                        "lifetime_charged": float(account.lifetime_charged or 0),
+                        "lifetime_collected": float(account.lifetime_collected or 0),
+                        "last_charged_at": account.last_charged_at.isoformat() if account.last_charged_at else None,
+                        "last_collected_at": (
+                            account.last_collected_at.isoformat() if account.last_collected_at else None
+                        ),
+                    }
+            except Exception:
+                # Defensive: never fail the COD statement just because debt
+                # lookup hit an edge case. Log via audit if needed.
+                grocery_debt = None
+
         return {
             "customer_id": customer_id,
+            "entity_subtype": (
+                customer.entity_subtype.value
+                if customer.entity_subtype is not None and hasattr(customer.entity_subtype, "value")
+                else customer.entity_subtype
+            ),
             "active_cod_debt_count": self.get_active_cod_debt_count(customer_id),
             "cod_restricted": self.is_customer_cod_restricted(customer_id),
             "total_outstanding_amount": float(total_outstanding),
             "available_prepayment_balance": float(self.get_customer_prepaid_balance(customer_id)),
+            "grocery_debt": grocery_debt,
             "items": items,
         }
 
@@ -697,6 +741,28 @@ class CashCollectionService:
             delivery_id=event.delivery_id,
             collector_user_id=event.collector_user_id,
         )
+
+        # Mirror collected money onto the grocery-store contract debt ledger.
+        # One COLLECT entry per cash event covers the full amount: outstanding_amount
+        # decreases by the collected sum regardless of how it allocates across
+        # individual order Payments. Residual cash (unapplied_amount > 0) takes
+        # the contract balance into credit territory (negative outstanding_amount).
+        if customer.is_grocery_store and normalized_amount > Decimal("0.00"):
+            from business_app.services.corporate_contract_service import CorporateContractService
+
+            corporate_service = CorporateContractService()
+            contract = corporate_service.get_active_amount_contract_for_user(customer.id)
+            if contract:
+                corporate_service.record_money_collection(
+                    contract=contract,
+                    amount=normalized_amount,
+                    source=source_enum.value,
+                    order_id=order_id,
+                    delivery_id=delivery_id,
+                    cash_event_id=event.id,
+                    actor_user_id=recorded_by_user_id or collector_user_id,
+                    notes=notes,
+                )
 
         audit_logger.log_event(
             event_type=AuditEventType.PAYMENT_PROCESSED,

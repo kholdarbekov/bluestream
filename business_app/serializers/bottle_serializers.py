@@ -10,6 +10,7 @@ from pydantic.alias_generators import to_camel
 # Pydantic request models
 # ------------------------------------------------------------------
 
+
 class BottleAdjustmentRequest(BaseModel):
     user_id: int
     address_id: int
@@ -102,6 +103,7 @@ class AdminResolveTransferRequest(BaseModel):
 # Serializer functions
 # ------------------------------------------------------------------
 
+
 def serialize_bottle_balance(balance, include_user: bool = False) -> Dict[str, Any]:
     """Serialize a BottleBalance with optional user/address details."""
     data = balance.to_dict()
@@ -117,9 +119,7 @@ def serialize_bottle_balance(balance, include_user: bool = False) -> Dict[str, A
     return data
 
 
-def serialize_bottle_balance_list(
-    balances: List, include_user: bool = True
-) -> List[Dict[str, Any]]:
+def serialize_bottle_balance_list(balances: List, include_user: bool = True) -> List[Dict[str, Any]]:
     """Serialize a list of BottleBalance records."""
     return [serialize_bottle_balance(b, include_user=include_user) for b in balances]
 
@@ -174,14 +174,12 @@ def serialize_bottle_session(
     data = session.to_dict()
 
     if session.driver:
-        data["driver_name"] = (
-            f"{session.driver.first_name or ''} {session.driver.last_name or ''}".strip()
-        )
+        data["driver_name"] = f"{session.driver.first_name or ''} {session.driver.last_name or ''}".strip()
         data["driver_phone"] = session.driver.phone
 
     if include_orders:
         orders_out = []
-        for so in (session.session_orders or []):
+        for so in session.session_orders or []:
             o = so.order
             if o:
                 accepted_by = so.accepted_by_driver
@@ -193,8 +191,7 @@ def serialize_bottle_session(
                     "total_amount": float(o.total_amount) if o.total_amount else None,
                     "accepted_by_driver_id": so.accepted_by_driver_id,
                     "accepted_by_driver_name": (
-                        f"{accepted_by.first_name or ''} {accepted_by.last_name or ''}".strip()
-                        if accepted_by else None
+                        f"{accepted_by.first_name or ''} {accepted_by.last_name or ''}".strip() if accepted_by else None
                     ),
                     "items": [
                         {
@@ -207,11 +204,13 @@ def serialize_bottle_session(
                 }
                 orders_out.append(entry)
             else:
-                orders_out.append({
-                    "order_id": so.order_id,
-                    "accepted_by_driver_id": so.accepted_by_driver_id,
-                    "added_at": so.added_at.isoformat() if so.added_at else None,
-                })
+                orders_out.append(
+                    {
+                        "order_id": so.order_id,
+                        "accepted_by_driver_id": so.accepted_by_driver_id,
+                        "added_at": so.added_at.isoformat() if so.added_at else None,
+                    }
+                )
         data["orders"] = orders_out
 
     if include_transfers:
@@ -220,21 +219,22 @@ def serialize_bottle_session(
 
     if include_members:
         members_out = []
-        for m in (session.memberships or []):
+        for m in session.memberships or []:
             member_driver = m.member_driver
             member_name = (
-                f"{member_driver.first_name or ''} {member_driver.last_name or ''}".strip()
-                if member_driver else None
+                f"{member_driver.first_name or ''} {member_driver.last_name or ''}".strip() if member_driver else None
             )
-            members_out.append({
-                "membership_id": m.id,
-                "member_driver_id": m.member_driver_id,
-                "member_name": member_name,
-                "member_phone": member_driver.phone if member_driver else None,
-                "status": m.status.value if hasattr(m.status, "value") else m.status,
-                "joined_at": m.joined_at.isoformat() if m.joined_at else None,
-                "left_at": m.left_at.isoformat() if m.left_at else None,
-            })
+            members_out.append(
+                {
+                    "membership_id": m.id,
+                    "member_driver_id": m.member_driver_id,
+                    "member_name": member_name,
+                    "member_phone": member_driver.phone if member_driver else None,
+                    "status": m.status.value if hasattr(m.status, "value") else m.status,
+                    "joined_at": m.joined_at.isoformat() if m.joined_at else None,
+                    "left_at": m.left_at.isoformat() if m.left_at else None,
+                }
+            )
         data["members"] = members_out
 
     return data
@@ -263,8 +263,10 @@ def serialize_bottle_transfer(transfer) -> Dict[str, Any]:
 # Co-driver session membership serializers & request models
 # ------------------------------------------------------------------
 
+
 class JoinSessionRequest(BaseModel):
     """Request body for POST /staff/bottles/session/join."""
+
     session_id: int = Field(..., description="ID of the DriverBottleSession to join")
 
 
@@ -290,9 +292,7 @@ def serialize_session_membership(membership) -> Dict[str, Any]:
 def serialize_joinable_session(session) -> Dict[str, Any]:
     """Compact session view for the join-session list."""
     owner = session.driver
-    owner_name = (
-        f"{owner.first_name or ''} {owner.last_name or ''}".strip() if owner else None
-    )
+    owner_name = f"{owner.first_name or ''} {owner.last_name or ''}".strip() if owner else None
     return {
         "session_id": session.id,
         "session_ref": session.session_ref,
@@ -303,19 +303,14 @@ def serialize_joinable_session(session) -> Dict[str, Any]:
         "current_inventory": session.current_inventory,
         "bottles_delivered": session.bottles_delivered,
         "started_at": session.started_at.isoformat() if session.started_at else None,
-        "active_members_count": sum(
-            1 for m in (session.memberships or [])
-            if m.status.value == "active"
-        ),
+        "active_members_count": sum(1 for m in (session.memberships or []) if m.status.value == "active"),
     }
 
 
 def serialize_membership_session_info(membership, session) -> Dict[str, Any]:
     """Current membership info for GET /staff/bottles/session/membership."""
     owner = session.driver
-    owner_name = (
-        f"{owner.first_name or ''} {owner.last_name or ''}".strip() if owner else None
-    )
+    owner_name = f"{owner.first_name or ''} {owner.last_name or ''}".strip() if owner else None
     return {
         "membership_id": membership.id,
         "session_id": session.id,

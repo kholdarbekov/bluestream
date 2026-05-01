@@ -2,6 +2,7 @@
 Translations API endpoints for admin UI i18n support
 Serves translations from database in i18next-compatible format
 """
+
 from flask import Blueprint, jsonify
 from business_app.services.admin_ui_translation_service import AdminUiTranslationService
 from business_app.utils.rate_limiting import exempt_from_rate_limit
@@ -9,10 +10,10 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-translations_bp = Blueprint('translations', __name__)
+translations_bp = Blueprint("translations", __name__)
 
 
-@translations_bp.route('/<language>/<namespace>', methods=['GET'])
+@translations_bp.route("/<language>/<namespace>", methods=["GET"])
 @exempt_from_rate_limit
 def get_translations(language, namespace):
     """
@@ -46,7 +47,7 @@ def get_translations(language, namespace):
         return jsonify({}), 200
 
 
-@translations_bp.route('/reload', methods=['POST'])
+@translations_bp.route("/reload", methods=["POST"])
 @exempt_from_rate_limit
 def reload_translations():
     """
@@ -61,21 +62,14 @@ def reload_translations():
     try:
         # This endpoint just confirms the request
         # The actual reload happens on the frontend when it calls i18n.reloadResources()
-        return jsonify({
-            'success': True,
-            'message': 'Translation reload triggered successfully'
-        }), 200
+        return jsonify({"success": True, "message": "Translation reload triggered successfully"}), 200
 
     except Exception as e:
         logger.error(f"Error triggering translation reload: {e}")
-        return jsonify({
-            'success': False,
-            'message': 'Failed to trigger translation reload',
-            'error': str(e)
-        }), 500
+        return jsonify({"success": False, "message": "Failed to trigger translation reload", "error": str(e)}), 500
 
 
-@translations_bp.route('/namespaces', methods=['GET'])
+@translations_bp.route("/namespaces", methods=["GET"])
 @exempt_from_rate_limit
 def get_namespaces():
     """
@@ -87,15 +81,8 @@ def get_namespaces():
     try:
         namespaces = AdminUiTranslationService.get_namespaces()
 
-        return jsonify({
-            'success': True,
-            'namespaces': namespaces
-        }), 200
+        return jsonify({"success": True, "namespaces": namespaces}), 200
 
     except Exception as e:
         logger.error(f"Error getting namespaces: {e}")
-        return jsonify({
-            'success': False,
-            'message': 'Failed to get namespaces',
-            'error': str(e)
-        }), 500
+        return jsonify({"success": False, "message": "Failed to get namespaces", "error": str(e)}), 500

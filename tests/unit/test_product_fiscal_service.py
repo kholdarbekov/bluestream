@@ -3,9 +3,7 @@
 from business_app import db
 from business_app.models.product import ProductMarkingCode
 from business_app.services.product_fiscal_service import ProductFiscalService
-from business_app.utils.constants import MarkingCodeStatus
-
-
+from shared.enums import MarkingCodeStatus
 def test_import_marking_codes_csv_preserves_gs1_separator(db, sample_product):
     """Full GS1 marking codes containing ASCII 29 (GS) must be stored intact."""
     code_with_gs = '010460791191734421xzMK7TLH\x1d9151234567890'

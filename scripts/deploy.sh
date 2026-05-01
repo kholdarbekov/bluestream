@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+#
+# Production deploy wrapper.
+#
+# Why this script exists: nginx OSS (the image we run) resolves upstream
+# hostnames once at config load. After `docker compose up -d --build`,
+# rebuilt services like business_app get new container IPs, but nginx is
+# left untouched and keeps dialing the old IP — every request 502s until
+# nginx itself is recreated. Compose's depends_on only sequences startup;
+# it doesn't propagate "my dependency was replaced, restart me." So we
+# always restart nginx after any rebuild.
+#
+# Usage:
+#   scripts/deploy.sh             # build + up + restart nginx + smoke check
+#   scripts/deploy.sh --no-build  # skip rebuild (e.g. nginx-config-only changes)
+
+set -euo pipefail
+
+COMPOSE=(docker compose -f docker-compose.yml -f docker-compose.production.yml)
+NO_BUILD=0
+
+for arg in "$@"; do
+    case "$arg" in
+        --no-build) NO_BUILD=1 ;;
+        -h|--help)
+            sed -n '3,17p' "$0" | sed 's/^# \{0,1\}//'
+            exit 0
+            ;;
+        *)
+            echo "unknown arg: $arg" >&2
+            exit 2
+            ;;
+    esac
+done
+
+log()  { printf '\033[0;32m[deploy]\033[0m %s\n' "$*"; }
+warn() { printf '\033[1;33m[deploy]\033[0m %s\n' "$*" >&2; }
+fail() { printf '\033[0;31m[deploy]\033[0m %s\n' "$*" >&2; exit 1; }
+
+log "compose files: docker-compose.yml + docker-compose.production.yml"
+
+if [[ $NO_BUILD -eq 1 ]]; then
+    log "starting services (no rebuild)"
+    "${COMPOSE[@]}" up -d
+else
+    log "building and starting services"
+    "${COMPOSE[@]}" up -d --build
+fi
+
+log "waiting for business_app to become healthy (max 90s)"
+deadline=$((SECONDS + 90))
+while :; do
+    status=$("${COMPOSE[@]}" ps --format '{{.Service}} {{.Health}}' 2>/dev/null \
+             | awk '$1=="business_app" {print $2}')
+    if [[ "$status" == "healthy" ]]; then
+        log "business_app healthy"
+        break
+    fi
+    if (( SECONDS >= deadline )); then
+        warn "business_app did not become healthy within 90s (last status: ${status:-unknown})"
+        warn "last 100 lines of business_app logs:"
+        "${COMPOSE[@]}" logs --tail=100 business_app >&2 || true
+        fail "aborting before nginx restart so the live container keeps serving"
+    fi
+    sleep 2
+done
+
+# The critical step. nginx OSS does not re-resolve upstream DNS at runtime;
+# any rebuild that gives business_app/admin_ui a new IP leaves nginx pointing
+# at the dead old one until we recreate it.
+log "restarting nginx to refresh upstream DNS resolution"
+"${COMPOSE[@]}" restart nginx
+
+log "smoke check: http://localhost:81/health"
+http_code=$(curl -sS -o /dev/null -w '%{http_code}' \
+            -H 'Host: aqua-element.uz' \
+            --max-time 10 \
+            http://localhost:81/health || echo "000")
+if [[ "$http_code" != "200" ]]; then
+    warn "smoke check returned HTTP $http_code (expected 200)"
+    warn "last 50 lines of nginx logs:"
+    "${COMPOSE[@]}" logs --tail=50 nginx >&2 || true
+    fail "deploy completed but origin is not serving 200"
+fi
+
+log "deploy complete — origin returning HTTP 200"

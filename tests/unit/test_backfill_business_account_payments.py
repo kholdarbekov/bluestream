@@ -11,7 +11,7 @@ from business_app.models.corporate import (
 from business_app.models.order import Order, OrderItem
 from business_app.models.product import Product, ProductCategory
 from business_app.models.payment import Payment
-from business_app.utils.constants import OrderStatus, PaymentMethod, PaymentStatus
+from shared.enums import OrderStatus, PaymentMethod, PaymentStatus
 from scripts.backfill_business_account_payments import backfill_business_account_payments
 
 

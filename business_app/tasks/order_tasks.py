@@ -16,7 +16,8 @@ from business_app.models.product import Product
 from business_app.services.order_service import OrderService
 from business_app.services.notification_service import NotificationService
 from business_app.services.analytics_service import AnalyticsService
-from business_app.utils.constants import OrderStatus, PaymentStatus, UserRole, NotificationChannel
+from business_app.utils.constants import NotificationChannel
+from shared.enums import OrderStatus, PaymentStatus, UserRole
 from business_app.utils.helpers import get_current_language
 from business_app import db
 

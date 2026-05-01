@@ -10,9 +10,7 @@ from business_app.models.delivery import Delivery
 from business_app.models.order import OrderStatus
 from business_app.services.admin_report_service import AdminReportService
 from business_app.services.cash_collection_service import CashCollectionService
-from business_app.utils.constants import DeliveryStatus, PaymentMethod
-
-
+from shared.enums import DeliveryStatus, PaymentMethod
 @pytest.mark.unit
 def test_financial_summary_uses_cash_collection_ledger_for_cod(app, sample_order, sample_user, delivery_driver):
     with app.app_context():

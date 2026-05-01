@@ -71,7 +71,7 @@ from business_app.utils.query_optimization import (
     AggregationOptimizer,
 )
 from business_app.services.inventory_service import get_inventory_service, InventoryOperationType
-from business_app.utils.constants import (
+from shared.enums import (
     UserRole,
     SubscriptionStatus,
     OrderStatus,
@@ -79,8 +79,6 @@ from business_app.utils.constants import (
     UserStatus,
     PaymentStatus,
 )
-
-# from business_app.tasks.admin_tasks import send_bulk_email_task, generate_report_task
 from business_app import db
 from business_app.utils.helpers import get_current_language
 from business_app.utils.user_types import normalize_user_type
@@ -378,6 +376,57 @@ def topup_corporate_contract(contract_id):
         _rollback_db_session()
         current_app.logger.error(f"Corporate topup error: {e}")
         return internal_error_response("Failed to top up corporate contract")
+
+
+@admin_bp.route("/corporate/contracts/<int:contract_id>/adjustments", methods=["POST"])
+@jwt_required()
+@manager_or_higher_required
+def adjust_corporate_contract_amount(contract_id):
+    """Post a manual money-mode adjustment to a grocery-store contract.
+
+    Payload: {"amount": <decimal>, "reason": "<required text>"}
+    Positive `amount` increases customer debt; negative decreases it (write-off
+    or correction). Reason is required and is stored on the ledger entry.
+    """
+    try:
+        current_user_id = get_jwt_identity()
+        payload = request.get_json() or {}
+
+        amount = payload.get("amount")
+        reason = (payload.get("reason") or "").strip()
+        if amount is None:
+            return validation_error_response("amount is required")
+        if not reason:
+            return validation_error_response("reason is required")
+
+        service = get_corporate_contract_service()
+        contract = service.get_contract_by_id(contract_id)
+        ledger_entry = service.post_money_adjustment(
+            contract=contract,
+            amount=Decimal(str(amount)),
+            actor_user_id=current_user_id,
+            reason=reason,
+        )
+        balance = service.get_balance(contract_id)
+        _commit_db_session()
+
+        return created_response(
+            data={
+                "ledger_entry": ledger_entry.to_dict(),
+                "balance": balance,
+            },
+            message="Adjustment recorded",
+        )
+    except ValidationError as e:
+        _rollback_db_session()
+        return validation_error_response(str(e))
+    except NotFoundError as e:
+        _rollback_db_session()
+        return not_found_response(message=str(e))
+    except Exception as e:
+        _rollback_db_session()
+        current_app.logger.error(f"Corporate amount adjustment error: {e}")
+        return internal_error_response("Failed to record adjustment")
 
 
 @admin_bp.route("/corporate/contracts/<int:contract_id>/balance", methods=["GET"])
@@ -1311,6 +1360,7 @@ def create_user():
         company_name = data.get("company_name", "").strip() if data.get("company_name") else None
         tax_id = data.get("tax_id", "").strip() if data.get("tax_id") else None
         user_type = data.get("user_type", "").strip() if data.get("user_type") else None
+        entity_subtype = data.get("entity_subtype", "").strip() if data.get("entity_subtype") else None
         notes = data.get("notes", "").strip() if data.get("notes") else None
 
         # Validate required fields
@@ -1333,6 +1383,7 @@ def create_user():
             company_name=company_name,
             tax_id=tax_id,
             user_type=user_type,
+            entity_subtype=entity_subtype,
             notes=notes,
         )
 
@@ -1364,7 +1415,9 @@ def update_user(user_id):
 
         auth_service = AuthService()
 
-        user = auth_service.update_user_by_admin(
+        # entity_subtype: only forward when client explicitly sent a value (the
+        # service uses a sentinel to distinguish "not provided" from "set to NULL").
+        update_kwargs = dict(
             user_id=user_id,
             updated_by_admin_id=current_user_id,
             phone=data.get("phone", "").strip(),
@@ -1375,6 +1428,13 @@ def update_user(user_id):
             tax_id=data.get("tax_id", "").strip() if data.get("tax_id") else None,
             user_type=data.get("user_type", "").strip() if data.get("user_type") else None,
         )
+        if "entity_subtype" in data:
+            raw_subtype = data.get("entity_subtype")
+            update_kwargs["entity_subtype"] = (
+                raw_subtype.strip() if isinstance(raw_subtype, str) and raw_subtype.strip() else None
+            )
+
+        user = auth_service.update_user_by_admin(**update_kwargs)
 
         return success_response(data={"user": serialize_user_admin(user)}, message="User updated successfully")
     except ConflictError as e:

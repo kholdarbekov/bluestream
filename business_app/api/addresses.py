@@ -18,8 +18,7 @@ from business_app.utils.api_responses import (
     validation_error_response,
 )
 from business_app.utils.translations import get_translation
-from business_app.utils.constants import get_all_districts
-from shared.constants import is_within_tashkent, get_geo_config
+from shared.constants import is_within_tashkent, get_geo_config, get_all_districts
 from business_app import db
 
 addresses_bp = Blueprint("addresses", __name__)

@@ -7,7 +7,7 @@ from flask_jwt_extended import create_access_token
 
 from business_app.models.user import User, UserAddress
 from business_app.utils.exceptions import ValidationError
-from business_app.utils.constants import UserRole, UserType
+from shared.enums import UserRole, UserType
 from business_app.utils.password_security import hash_password
 
 
@@ -314,6 +314,7 @@ def test_admin_create_user_allows_entity_user_type(
             "phone": "+998901231199",
             "email": "corp-client@example.com",
             "user_type": "entity",
+            "entity_subtype": "workplace",
             "company_name": "ACME WATER LLC",
             "tax_id": "AB-12345",
         },
@@ -323,6 +324,7 @@ def test_admin_create_user_allows_entity_user_type(
     payload = response.get_json()
     assert payload["success"] is True
     assert payload["data"]["user"]["user_type"] == "entity"
+    assert payload["data"]["user"]["entity_subtype"] == "workplace"
     assert payload["data"]["user"]["company_name"] == "ACME WATER LLC"
     assert payload["data"]["user"]["tax_id"] == "AB-12345"
 

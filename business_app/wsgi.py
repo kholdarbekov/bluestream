@@ -1,7 +1,7 @@
 """
 WSGI entry point for the Water Business Platform
 """
-import os
+
 from business_app import create_app
 from business_app.config import get_config
 

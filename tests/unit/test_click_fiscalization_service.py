@@ -11,7 +11,7 @@ from business_app.models.product import Product, ProductFiscalProfile, ProductMa
 from business_app.services.click_payment_provider_service import ClickPaymentProviderService
 from business_app.services.payment_fiscalization_service import PaymentFiscalizationService
 from business_app.services.payment_service import PaymentService
-from business_app.utils.constants import (
+from shared.enums import (
     FiscalizationStatus,
     MarkingCodeLedgerEventType,
     MarkingCodeStatus,

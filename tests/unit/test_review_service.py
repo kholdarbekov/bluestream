@@ -11,7 +11,7 @@ from business_app.models.product import Product
 from business_app.models.review import Review
 from business_app.models.user import User
 from business_app.services.review_service import ReviewService
-from business_app.utils.constants import OrderStatus, UserRole
+from shared.enums import OrderStatus, UserRole
 from business_app.utils.exceptions import ConflictError, ForbiddenError, NotFoundError, ValidationError
 from business_app.utils.password_security import hash_password
 

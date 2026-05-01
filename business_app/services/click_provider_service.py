@@ -5,4 +5,3 @@ from business_app.services.click_payment_provider_service import ClickPaymentPro
 
 class ClickProviderService(ClickPaymentProviderService):
     """Stable import path for Click provider workflows."""
-

@@ -729,25 +729,81 @@ const contractBalanceQuery = useQuery({
                         : t('ui.corporate.debt_disallowed', 'No debt')}
                     </Tag>
                   </Descriptions.Item>
+                  <Descriptions.Item label={t('ui.corporate.tracking_mode', 'Tracking Mode')}>
+                    <Tag color={selectedContract.tracking_mode === 'amount' ? 'orange' : 'blue'}>
+                      {selectedContract.tracking_mode === 'amount'
+                        ? t('ui.corporate.tracking_mode_amount', 'Money (Grocery Store)')
+                        : t('ui.corporate.tracking_mode_units', 'Units (Workplace)')}
+                    </Tag>
+                  </Descriptions.Item>
                 </Descriptions>
 
                 <Divider>{t('ui.corporate.balance', 'Balance')}</Divider>
 
-                <Row gutter={[12, 12]}>
-                  <Col xs={12} md={8}>
-                    <Statistic title={t('ui.corporate.tracked_products', 'Tracked Products')} value={balanceSummary.tracked_products_count || 0} />
-                  </Col>
-                  <Col xs={12} md={8}>
-                    <Statistic title={t('ui.corporate.products_reserved', 'Reserved Products')} value={balanceSummary.products_with_reservations_count || 0} />
-                  </Col>
-                  <Col xs={12} md={8}>
-                    <Statistic title={t('ui.corporate.products_in_debt', 'Products In Debt')} value={balanceSummary.products_in_debt_count || 0} valueStyle={{ color: '#cf1322' }} />
-                  </Col>
-                  <Col xs={12} md={8}>
-                    <Statistic title={t('ui.corporate.last_topup', 'Last Topup')} value={balanceSummary.last_topup_at ? formatDateTimeShort(balanceSummary.last_topup_at) : '-'} />
-                  </Col>
-                </Row>
+                {selectedContract.tracking_mode === 'amount' ? (
+                  <Row gutter={[12, 12]}>
+                    <Col xs={24} md={8}>
+                      <Statistic
+                        title={t('ui.corporate.outstanding_amount', 'Outstanding (debt)')}
+                        value={balanceSummary.outstanding_amount || 0}
+                        precision={2}
+                        suffix={selectedContract.currency}
+                        valueStyle={{
+                          color: Number(balanceSummary.outstanding_amount || 0) > 0
+                            ? '#cf1322'
+                            : Number(balanceSummary.outstanding_amount || 0) < 0
+                            ? '#3f8600'
+                            : undefined
+                        }}
+                      />
+                    </Col>
+                    <Col xs={12} md={8}>
+                      <Statistic
+                        title={t('ui.corporate.lifetime_charged', 'Lifetime Charged')}
+                        value={balanceSummary.lifetime_charged || 0}
+                        precision={2}
+                        suffix={selectedContract.currency}
+                      />
+                    </Col>
+                    <Col xs={12} md={8}>
+                      <Statistic
+                        title={t('ui.corporate.lifetime_collected', 'Lifetime Collected')}
+                        value={balanceSummary.lifetime_collected || 0}
+                        precision={2}
+                        suffix={selectedContract.currency}
+                      />
+                    </Col>
+                    <Col xs={12} md={8}>
+                      <Statistic
+                        title={t('ui.corporate.last_charged', 'Last Charged')}
+                        value={balanceSummary.last_charged_at ? formatDateTimeShort(balanceSummary.last_charged_at) : '-'}
+                      />
+                    </Col>
+                    <Col xs={12} md={8}>
+                      <Statistic
+                        title={t('ui.corporate.last_collected', 'Last Collected')}
+                        value={balanceSummary.last_collected_at ? formatDateTimeShort(balanceSummary.last_collected_at) : '-'}
+                      />
+                    </Col>
+                  </Row>
+                ) : (
+                  <Row gutter={[12, 12]}>
+                    <Col xs={12} md={8}>
+                      <Statistic title={t('ui.corporate.tracked_products', 'Tracked Products')} value={balanceSummary.tracked_products_count || 0} />
+                    </Col>
+                    <Col xs={12} md={8}>
+                      <Statistic title={t('ui.corporate.products_reserved', 'Reserved Products')} value={balanceSummary.products_with_reservations_count || 0} />
+                    </Col>
+                    <Col xs={12} md={8}>
+                      <Statistic title={t('ui.corporate.products_in_debt', 'Products In Debt')} value={balanceSummary.products_in_debt_count || 0} valueStyle={{ color: '#cf1322' }} />
+                    </Col>
+                    <Col xs={12} md={8}>
+                      <Statistic title={t('ui.corporate.last_topup', 'Last Topup')} value={balanceSummary.last_topup_at ? formatDateTimeShort(balanceSummary.last_topup_at) : '-'} />
+                    </Col>
+                  </Row>
+                )}
 
+                {selectedContract.tracking_mode !== 'amount' && (
                 <Table
                   rowKey={(record) => `balance-${record.product_id}`}
                   dataSource={balanceProducts}
@@ -814,6 +870,7 @@ const contractBalanceQuery = useQuery({
                     emptyText: t('ui.corporate.no_balance_products', 'No prepayment-eligible products configured yet.')
                   }}
                 />
+                )}
 
                 <Divider>{t('ui.corporate.price_overrides', 'Price Overrides')}</Divider>
 

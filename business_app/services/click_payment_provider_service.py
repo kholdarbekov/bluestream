@@ -14,7 +14,7 @@ from flask import current_app
 from business_app import db
 from business_app.models.order import Order
 from business_app.models.payment import CreditCard, Payment, PaymentTransaction
-from business_app.utils.constants import PaymentMethod, PaymentStatus
+from shared.enums import PaymentMethod, PaymentStatus
 from business_app.utils.exceptions import PaymentError, ProviderUnavailableError, ValidationError
 from business_app.utils.http_client import RetryConfig, request_with_retry
 

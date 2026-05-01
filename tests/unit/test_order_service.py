@@ -10,7 +10,7 @@ import pytest
 
 from business_app.models.delivery import Delivery
 from business_app.services.order_service import OrderService
-from business_app.utils.constants import DeliveryStatus, OrderStatus, PaymentMethod, PaymentStatus
+from shared.enums import DeliveryStatus, OrderStatus, PaymentMethod, PaymentStatus
 from business_app.utils.exceptions import ConflictError, ValidationError
 
 

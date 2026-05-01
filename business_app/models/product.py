@@ -2,7 +2,8 @@ from decimal import Decimal
 from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, Text, ForeignKey, Enum, JSON, Index, Numeric
 from sqlalchemy.orm import relationship
 from business_app import db
-from business_app.utils.constants import PriceRuleType, MarkingCodeStatus
+from business_app.utils.constants import PriceRuleType
+from shared.enums import MarkingCodeStatus
 from business_app.models import TimestampMixin
 from business_app.models.translatable import TranslatableMixin, translatable
 import enum

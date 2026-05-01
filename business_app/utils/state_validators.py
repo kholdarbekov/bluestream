@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import FrozenSet, Optional
 
-from business_app.utils.constants import (
+from shared.enums import (
     DeliveryStatus,
     OrderStatus,
     PaymentMethod,

@@ -10,7 +10,8 @@ from sqlalchemy import event
 from business_app.models.order import Order, OrderItem
 from business_app.models.product import PriceRule, Product
 from business_app.services.product_service import ProductService
-from business_app.utils.constants import OrderStatus, PriceRuleType
+from business_app.utils.constants import PriceRuleType
+from shared.enums import OrderStatus
 from business_app.utils.exceptions import NotFoundError, ValidationError
 
 

@@ -5,6 +5,7 @@ Revises: a7c4d9e2f1b6
 Create Date: 2026-03-01 20:45:00.000000
 
 """
+
 from alembic import op
 
 
@@ -41,5 +42,9 @@ def downgrade():
     )
 
     op.execute("ALTER TABLE deliveries ALTER COLUMN status TYPE delivery_status USING status::delivery_status")
-    op.execute("ALTER TABLE delivery_status_history ALTER COLUMN old_status TYPE delivery_status USING old_status::delivery_status")
-    op.execute("ALTER TABLE delivery_status_history ALTER COLUMN new_status TYPE delivery_status USING new_status::delivery_status")
+    op.execute(
+        "ALTER TABLE delivery_status_history ALTER COLUMN old_status TYPE delivery_status USING old_status::delivery_status"
+    )
+    op.execute(
+        "ALTER TABLE delivery_status_history ALTER COLUMN new_status TYPE delivery_status USING new_status::delivery_status"
+    )

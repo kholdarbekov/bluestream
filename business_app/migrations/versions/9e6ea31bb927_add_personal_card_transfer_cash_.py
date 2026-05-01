@@ -5,11 +5,12 @@ Revises: 7775db6340cf
 Create Date: 2026-03-11 15:43:14.888141
 
 """
+
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision = '9e6ea31bb927'
-down_revision = '7775db6340cf'
+revision = "9e6ea31bb927"
+down_revision = "7775db6340cf"
 branch_labels = None
 depends_on = None
 

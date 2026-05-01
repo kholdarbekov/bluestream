@@ -17,8 +17,9 @@ from business_app.utils.security_validators import SecurityValidator
 from business_app.utils.validators import EmailValidator, PhoneValidator, PasswordValidator
 from business_app.utils.helpers import generate_otp, format_phone_number, generate_random_string
 from business_app.utils.password_security import hash_password, verify_password, needs_password_rehash
-from business_app.utils.constants import UserRole, UserStatus, UserType
-from business_app.utils.user_types import infer_non_staff_user_type
+from shared.enums import UserRole, UserStatus, UserType
+from business_app.utils.user_types import infer_non_staff_user_type, normalize_entity_subtype
+from shared.enums import EntitySubtype
 from business_app.utils.translations import get_translation
 from business_app.tasks.notification_tasks import send_verification_sms_task
 from business_app import db
@@ -936,6 +937,7 @@ class AuthService:
         company_name: str = None,
         tax_id: str = None,
         user_type: str = None,
+        entity_subtype: str = None,
     ) -> User:
         """
         Create a user account via admin panel (for call center operations).
@@ -1025,6 +1027,23 @@ class AuthService:
                 {"company_name": ["Company name is required for entity users"]},
             )
 
+        # Entity subtype: required when user_type is entity (so admin must
+        # explicitly pick workplace vs grocery_store). Disallowed for non-entities.
+        normalized_entity_subtype = None
+        if normalized_user_type == UserType.ENTITY.value:
+            normalized_entity_subtype = normalize_entity_subtype(entity_subtype)
+            if normalized_entity_subtype is None:
+                raise ValidationError(
+                    get_translation("error.validation.failed"),
+                    {"entity_subtype": ["Entity subtype must be 'workplace' or 'grocery_store' for entity users"]},
+                )
+        else:
+            if entity_subtype is not None:
+                raise ValidationError(
+                    get_translation("error.validation.failed"),
+                    {"entity_subtype": ["Entity subtype may only be set when user_type is 'entity'"]},
+                )
+
         if normalized_user_type != UserType.ENTITY.value:
             normalized_company_name = None
             normalized_tax_id = None
@@ -1049,6 +1068,7 @@ class AuthService:
             preferred_language="uz",  # Default language for Uzbekistan
             company_name=normalized_company_name,
             tax_id=normalized_tax_id,
+            entity_subtype=(EntitySubtype(normalized_entity_subtype) if normalized_entity_subtype else None),
         )
 
         db.session.add(user)
@@ -1077,6 +1097,7 @@ class AuthService:
         company_name: str = None,
         tax_id: str = None,
         user_type: str = None,
+        entity_subtype: Any = ...,
     ) -> User:
         """Update a user from the admin panel using the simplified two-type business model."""
         user = User.query.get(user_id)
@@ -1147,6 +1168,56 @@ class AuthService:
                 {"company_name": ["Company name is required for entity users"]},
             )
 
+        # Entity subtype handling on update.
+        # `entity_subtype` defaults to the sentinel `...` -- meaning "not provided,
+        # leave unchanged". Passing None explicitly clears it. Switching subtype
+        # while the user has any non-terminated contract is blocked.
+        current_subtype_value = (
+            user.entity_subtype.value
+            if user.entity_subtype is not None and hasattr(user.entity_subtype, "value")
+            else user.entity_subtype
+        )
+        new_subtype_value: Any = current_subtype_value
+        if entity_subtype is not ...:
+            if entity_subtype is None:
+                new_subtype_value = None
+            else:
+                new_subtype_value = normalize_entity_subtype(entity_subtype)
+                if new_subtype_value is None:
+                    raise ValidationError(
+                        get_translation("error.validation.failed"),
+                        {"entity_subtype": ["Entity subtype must be 'workplace' or 'grocery_store'"]},
+                    )
+
+        if normalized_user_type != UserType.ENTITY.value:
+            new_subtype_value = None
+
+        # Block actual subtype switches (workplace <-> grocery_store) when the
+        # user still has non-terminated contracts: the contract's tracking_mode
+        # is locked at create-time and won't survive the switch. The first-time
+        # assignment from NULL is always allowed -- legacy entity users default
+        # to NULL after the migration and admins must be able to assign one.
+        if (
+            current_subtype_value is not None
+            and new_subtype_value is not None
+            and new_subtype_value != current_subtype_value
+        ):
+            from business_app.models.corporate import CorporateContract, CorporateContractStatus
+
+            non_terminated_contracts = CorporateContract.query.filter(
+                CorporateContract.user_id == user_id,
+                CorporateContract.status != CorporateContractStatus.TERMINATED,
+            ).count()
+            if non_terminated_contracts > 0:
+                raise ValidationError(
+                    get_translation("error.validation.failed"),
+                    {
+                        "entity_subtype": [
+                            "Terminate active or non-terminated contracts before switching entity subtype",
+                        ]
+                    },
+                )
+
         if normalized_user_type != UserType.ENTITY.value:
             normalized_company_name = None
             normalized_tax_id = None
@@ -1159,6 +1230,7 @@ class AuthService:
             user.user_type = normalized_user_type
         user.company_name = normalized_company_name
         user.tax_id = normalized_tax_id
+        user.entity_subtype = EntitySubtype(new_subtype_value) if new_subtype_value else None
 
         db.session.add(user)
         db.session.commit()

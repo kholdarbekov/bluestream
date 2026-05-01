@@ -9,6 +9,7 @@ Usage:
 
     message = get_error_message(ErrorCode.USER_NOT_FOUND, language='uz')
 """
+
 from enum import Enum
 from typing import Optional, Dict, Any
 from business_app.utils.translations import get_translation
@@ -120,7 +121,6 @@ ERROR_MESSAGE_MAP: Dict[ErrorCode, str] = {
     ErrorCode.ACCOUNT_LOCKED: "error.auth.account_locked",
     ErrorCode.ACCOUNT_INACTIVE: "error.auth.account_inactive",
     ErrorCode.INSUFFICIENT_PERMISSIONS: "error.auth.insufficient_permissions",
-
     # Validation
     ErrorCode.VALIDATION_ERROR: "error.validation.generic",
     ErrorCode.INVALID_EMAIL: "error.validation.invalid_email",
@@ -132,7 +132,6 @@ ERROR_MESSAGE_MAP: Dict[ErrorCode, str] = {
     ErrorCode.INVALID_INPUT_FORMAT: "error.validation.invalid_input_format",
     ErrorCode.INVALID_DATE_FORMAT: "error.validation.invalid_date_format",
     ErrorCode.INVALID_BOOLEAN: "error.validation.invalid_boolean",
-
     # Resource Not Found
     ErrorCode.RESOURCE_NOT_FOUND: "error.not_found.generic",
     ErrorCode.ORDER_NOT_FOUND: "error.not_found.order",
@@ -143,7 +142,6 @@ ERROR_MESSAGE_MAP: Dict[ErrorCode, str] = {
     ErrorCode.SUBSCRIPTION_NOT_FOUND: "error.not_found.subscription",
     ErrorCode.DELIVERY_NOT_FOUND: "error.not_found.delivery",
     ErrorCode.NOTIFICATION_NOT_FOUND: "error.not_found.notification",
-
     # Business Logic
     ErrorCode.OUT_OF_STOCK: "error.business.out_of_stock",
     ErrorCode.INSUFFICIENT_INVENTORY: "error.business.insufficient_inventory",
@@ -158,7 +156,6 @@ ERROR_MESSAGE_MAP: Dict[ErrorCode, str] = {
     ErrorCode.INVALID_TIME_SLOT: "error.business.invalid_time_slot",
     ErrorCode.TIME_SLOT_UNAVAILABLE: "error.business.time_slot_unavailable",
     ErrorCode.MINIMUM_ORDER_NOT_MET: "error.business.minimum_order_not_met",
-
     # Payment
     ErrorCode.PAYMENT_METHOD_INVALID: "error.payment.method_invalid",
     ErrorCode.PAYMENT_GATEWAY_ERROR: "error.payment.gateway_error",
@@ -170,13 +167,11 @@ ERROR_MESSAGE_MAP: Dict[ErrorCode, str] = {
     ErrorCode.PAYMENT_DECLINED: "error.payment.declined",
     ErrorCode.REFUND_NOT_ALLOWED: "error.payment.refund_not_allowed",
     ErrorCode.REFUND_ALREADY_PROCESSED: "error.payment.refund_already_processed",
-
     # Rate Limiting & Security
     ErrorCode.RATE_LIMIT_EXCEEDED: "error.security.rate_limit_exceeded",
     ErrorCode.TOO_MANY_REQUESTS: "error.security.too_many_requests",
     ErrorCode.SUSPICIOUS_ACTIVITY: "error.security.suspicious_activity",
     ErrorCode.CSRF_TOKEN_INVALID: "error.security.csrf_invalid",
-
     # Server Errors
     ErrorCode.INTERNAL_ERROR: "error.server.internal_error",
     ErrorCode.DATABASE_ERROR: "error.server.database_error",
@@ -185,7 +180,6 @@ ERROR_MESSAGE_MAP: Dict[ErrorCode, str] = {
     ErrorCode.FILE_UPLOAD_ERROR: "error.server.file_upload_error",
     ErrorCode.FILE_TOO_LARGE: "error.validation.file_too_large",
     ErrorCode.INVALID_FILE_TYPE: "error.validation.invalid_file_type",
-
     # Conflict
     ErrorCode.RESOURCE_ALREADY_EXISTS: "error.conflict.resource_already_exists",
     ErrorCode.DUPLICATE_ENTRY: "error.conflict.duplicate_entry",
@@ -200,13 +194,11 @@ ERROR_STATUS_MAP: Dict[ErrorCode, int] = {
     ErrorCode.UNAUTHORIZED: 401,
     ErrorCode.TOKEN_EXPIRED: 401,
     ErrorCode.TOKEN_INVALID: 401,
-
     # 403 Forbidden
     ErrorCode.FORBIDDEN: 403,
     ErrorCode.ACCOUNT_LOCKED: 403,
     ErrorCode.ACCOUNT_INACTIVE: 403,
     ErrorCode.INSUFFICIENT_PERMISSIONS: 403,
-
     # 404 Not Found
     ErrorCode.RESOURCE_NOT_FOUND: 404,
     ErrorCode.USER_NOT_FOUND: 404,
@@ -218,7 +210,6 @@ ERROR_STATUS_MAP: Dict[ErrorCode, int] = {
     ErrorCode.SUBSCRIPTION_NOT_FOUND: 404,
     ErrorCode.DELIVERY_NOT_FOUND: 404,
     ErrorCode.NOTIFICATION_NOT_FOUND: 404,
-
     # 409 Conflict
     ErrorCode.EMAIL_ALREADY_EXISTS: 409,
     ErrorCode.PHONE_ALREADY_EXISTS: 409,
@@ -231,7 +222,6 @@ ERROR_STATUS_MAP: Dict[ErrorCode, int] = {
     ErrorCode.SUBSCRIPTION_ALREADY_ACTIVE: 409,
     ErrorCode.SUBSCRIPTION_ALREADY_CANCELLED: 409,
     ErrorCode.DELIVERY_ALREADY_COMPLETED: 409,
-
     # 422 Unprocessable Entity
     ErrorCode.VALIDATION_ERROR: 422,
     ErrorCode.INVALID_EMAIL: 422,
@@ -248,7 +238,6 @@ ERROR_STATUS_MAP: Dict[ErrorCode, int] = {
     ErrorCode.INVALID_CARD_EXPIRY: 422,
     ErrorCode.FILE_TOO_LARGE: 422,
     ErrorCode.INVALID_FILE_TYPE: 422,
-
     # 400 Bad Request (Business Logic)
     ErrorCode.OUT_OF_STOCK: 400,
     ErrorCode.INSUFFICIENT_INVENTORY: 400,
@@ -264,15 +253,12 @@ ERROR_STATUS_MAP: Dict[ErrorCode, int] = {
     ErrorCode.PAYMENT_DECLINED: 400,
     ErrorCode.REFUND_NOT_ALLOWED: 400,
     ErrorCode.REFUND_ALREADY_PROCESSED: 400,
-
     # 429 Too Many Requests
     ErrorCode.RATE_LIMIT_EXCEEDED: 429,
     ErrorCode.TOO_MANY_REQUESTS: 429,
-
     # 403 Security
     ErrorCode.SUSPICIOUS_ACTIVITY: 403,
     ErrorCode.CSRF_TOKEN_INVALID: 403,
-
     # 500 Internal Server Error
     ErrorCode.INTERNAL_ERROR: 500,
     ErrorCode.DATABASE_ERROR: 500,
@@ -283,11 +269,7 @@ ERROR_STATUS_MAP: Dict[ErrorCode, int] = {
 }
 
 
-def get_error_message(
-    error_code: ErrorCode,
-    language: Optional[str] = None,
-    **params: Any
-) -> str:
+def get_error_message(error_code: ErrorCode, language: Optional[str] = None, **params: Any) -> str:
     """
     Get translated error message for given error code.
 
@@ -306,10 +288,7 @@ def get_error_message(
         >>> get_error_message(ErrorCode.REQUIRED_FIELD_MISSING, field_name='email')
         "Email field is required"
     """
-    translation_key = ERROR_MESSAGE_MAP.get(
-        error_code,
-        "error.server.internal_error"
-    )
+    translation_key = ERROR_MESSAGE_MAP.get(error_code, "error.server.internal_error")
 
     return get_translation(translation_key, language=language, **params)
 
@@ -334,11 +313,7 @@ def get_error_status_code(error_code: ErrorCode) -> int:
     return ERROR_STATUS_MAP.get(error_code, 500)
 
 
-def create_error_response(
-    error_code: ErrorCode,
-    language: Optional[str] = None,
-    **params: Any
-) -> tuple[dict, int]:
+def create_error_response(error_code: ErrorCode, language: Optional[str] = None, **params: Any) -> tuple[dict, int]:
     """
     Create standardized error response with translated message.
 
@@ -364,8 +339,4 @@ def create_error_response(
     message = get_error_message(error_code, language=language, **params)
     status_code = get_error_status_code(error_code)
 
-    return {
-        'success': False,
-        'error_code': error_code.value,
-        'message': message
-    }, status_code
+    return {"success": False, "error_code": error_code.value, "message": message}, status_code

@@ -4,14 +4,13 @@ from collections import Counter
 from decimal import Decimal
 from typing import Any, Dict, Iterable, List, Optional
 
-from flask import current_app
 from sqlalchemy import func
 
 from business_app import db
 from business_app.models.product import Product, ProductFiscalProfile, ProductMarkingCode
 from business_app.models.audit import AuditEventType, AuditSeverity
 from business_app.utils.audit_logger import audit_logger
-from business_app.utils.constants import MarkingCodeStatus
+from shared.enums import MarkingCodeStatus
 from business_app.utils.exceptions import NotFoundError, ValidationError
 
 
@@ -98,8 +97,8 @@ class ProductFiscalService:
 
     @staticmethod
     def _validate_click_contract_fields(product: Product) -> None:
-        vat_value = Decimal(str(product.vat_percent or 0)).quantize(Decimal('0.01'))
-        if vat_value < Decimal('0') or vat_value > Decimal('100'):
+        vat_value = Decimal(str(product.vat_percent or 0)).quantize(Decimal("0.01"))
+        if vat_value < Decimal("0") or vat_value > Decimal("100"):
             raise ValidationError("VAT percent must be between 0 and 100")
         if vat_value != vat_value.to_integral_value():
             raise ValidationError("VAT percent must be an integer for Click fiscalization")
@@ -217,9 +216,7 @@ class ProductFiscalService:
             .all()
         }
         if existing_codes:
-            raise ValidationError(
-                f"Marking codes already exist: {', '.join(sorted(existing_codes)[:10])}"
-            )
+            raise ValidationError(f"Marking codes already exist: {', '.join(sorted(existing_codes)[:10])}")
 
         created_items: List[ProductMarkingCode] = []
         for code in normalized_codes:
@@ -312,7 +309,7 @@ class ProductFiscalService:
                 "product_id": product_id,
                 "actor_user_id": actor_user_id,
                 "marking_code_id": marking_code.id,
-                "status": marking_code.status.value if hasattr(marking_code.status, 'value') else marking_code.status,
+                "status": marking_code.status.value if hasattr(marking_code.status, "value") else marking_code.status,
             },
         )
 
@@ -387,12 +384,16 @@ class ProductFiscalService:
                 continue
             valid_codes.append(entry["code"])
 
-        created_payload = self.create_marking_codes(
-            product_id,
-            valid_codes,
-            actor_user_id=actor_user_id,
-            notes="Imported from CSV",
-        ) if valid_codes else {"created": 0, "codes": [], "summary": self.get_marking_code_counts(product_id)}
+        created_payload = (
+            self.create_marking_codes(
+                product_id,
+                valid_codes,
+                actor_user_id=actor_user_id,
+                notes="Imported from CSV",
+            )
+            if valid_codes
+            else {"created": 0, "codes": [], "summary": self.get_marking_code_counts(product_id)}
+        )
 
         return {
             "created": created_payload["created"],
@@ -432,7 +433,7 @@ class ProductFiscalService:
     def _parse_csv_codes(self, csv_content: str) -> List[Dict[str, Any]]:
         # Normalize literal \u001d escape sequences that some exporters write as a
         # 6-character string instead of the actual GS character (U+001D / ASCII 29).
-        normalized = (csv_content or "").replace('\\u001d', '\x1d')
+        normalized = (csv_content or "").replace("\\u001d", "\x1d")
 
         # Marking codes can contain commas, semicolons, and other characters that
         # csv.Sniffer would misdetect as field delimiters. The file format is one
@@ -442,8 +443,8 @@ class ProductFiscalService:
         # treats \x1d (ASCII 29 / GS) as a line separator, which would silently split
         # marking codes that contain embedded GS characters.
         _HEADER_WORDS = {"code", "marking_code", "label", "labels"}
-        normalized_lines = normalized.replace('\r\n', '\n').replace('\r', '\n')
-        lines = [line.strip() for line in normalized_lines.split('\n')]
+        normalized_lines = normalized.replace("\r\n", "\n").replace("\r", "\n")
+        lines = [line.strip() for line in normalized_lines.split("\n")]
         lines = [line for line in lines if line]
 
         if not lines:
@@ -453,7 +454,4 @@ class ProductFiscalService:
         data_lines = lines[1:] if has_header else lines
         start_index = 2 if has_header else 1
 
-        return [
-            {"row": index, "code": line}
-            for index, line in enumerate(data_lines, start=start_index)
-        ]
+        return [{"row": index, "code": line} for index, line in enumerate(data_lines, start=start_index)]

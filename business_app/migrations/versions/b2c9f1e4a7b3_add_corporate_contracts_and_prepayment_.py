@@ -5,6 +5,7 @@ Revises: cea8f329e11e
 Create Date: 2026-02-27 17:40:00.000000
 
 """
+
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
@@ -92,14 +93,18 @@ def upgrade():
             ["contract_id", "is_active"],
             unique=False,
         )
-        batch_op.create_index(batch_op.f("ix_corporate_contract_product_prices_contract_id"), ["contract_id"], unique=False)
+        batch_op.create_index(
+            batch_op.f("ix_corporate_contract_product_prices_contract_id"), ["contract_id"], unique=False
+        )
         batch_op.create_index(batch_op.f("ix_corporate_contract_product_prices_is_active"), ["is_active"], unique=False)
         batch_op.create_index(
             batch_op.f("ix_corporate_contract_product_prices_is_prepayment_eligible"),
             ["is_prepayment_eligible"],
             unique=False,
         )
-        batch_op.create_index(batch_op.f("ix_corporate_contract_product_prices_product_id"), ["product_id"], unique=False)
+        batch_op.create_index(
+            batch_op.f("ix_corporate_contract_product_prices_product_id"), ["product_id"], unique=False
+        )
 
     op.create_table(
         "corporate_prepayment_accounts",
@@ -168,7 +173,9 @@ def upgrade():
             unique=False,
         )
         batch_op.create_index(batch_op.f("ix_corporate_prepayment_ledger_account_id"), ["account_id"], unique=False)
-        batch_op.create_index(batch_op.f("ix_corporate_prepayment_ledger_actor_user_id"), ["actor_user_id"], unique=False)
+        batch_op.create_index(
+            batch_op.f("ix_corporate_prepayment_ledger_actor_user_id"), ["actor_user_id"], unique=False
+        )
         batch_op.create_index(batch_op.f("ix_corporate_prepayment_ledger_contract_id"), ["contract_id"], unique=False)
         batch_op.create_index(batch_op.f("ix_corporate_prepayment_ledger_delivery_id"), ["delivery_id"], unique=False)
         batch_op.create_index(batch_op.f("ix_corporate_prepayment_ledger_event_type"), ["event_type"], unique=False)

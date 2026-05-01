@@ -10,9 +10,7 @@ from business_app import db
 from business_app.models.corporate import CorporateContractProductPrice
 from business_app.models.order import Order
 from business_app.services.payment_service import PaymentService
-from business_app.utils.constants import OrderStatus, PaymentMethod
-
-
+from shared.enums import OrderStatus, PaymentMethod
 def _is_fully_contract_backed(order: Order) -> bool:
     if not order.order_items:
         return False

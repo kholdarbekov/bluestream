@@ -13,7 +13,7 @@ from business_app.models.review import Review
 from business_app.models.subscription import Subscription
 from business_app.models.user import User
 from business_app.services.delivery_service import DeliveryService
-from business_app.utils.constants import DeliveryStatus, OrderStatus, SubscriptionStatus, UserRole, UserStatus
+from shared.enums import DeliveryStatus, OrderStatus, SubscriptionStatus, UserRole, UserStatus
 
 
 class AdminBulkActionService:

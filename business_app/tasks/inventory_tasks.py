@@ -1,8 +1,9 @@
 """
 Inventory management tasks for the BlueStream platform
 """
+
 import logging
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 
 from celery import shared_task
 from flask import current_app
@@ -12,7 +13,6 @@ from business_app.models.product import Product
 from business_app.services.notification_service import NotificationService
 from business_app.utils.audit_logger import audit_logger, AuditEventType, AuditSeverity
 from business_app.utils.helpers import get_current_language
-from business_app import db
 
 logger = logging.getLogger(__name__)
 
@@ -25,13 +25,13 @@ def cleanup_expired_inventory_reservations(self):
     """
     try:
         logger.info("Starting cleanup of expired inventory reservations")
-        
+
         result = get_inventory_service().cleanup_expired_reservations()
-        
-        if result['success']:
-            cleaned_count = result.get('cleaned_count', 0)
+
+        if result["success"]:
+            cleaned_count = result.get("cleaned_count", 0)
             logger.info(f"Successfully cleaned up {cleaned_count} expired inventory reservations")
-            
+
             # Log cleanup activity
             audit_logger.log_event(
                 event_type=AuditEventType.SYSTEM_MAINTENANCE,
@@ -39,14 +39,14 @@ def cleanup_expired_inventory_reservations(self):
                 severity=AuditSeverity.LOW,
                 resource_type="inventory_system",
                 description=f"Cleaned up {cleaned_count} expired inventory reservations",
-                additional_data={'cleaned_count': cleaned_count}
+                additional_data={"cleaned_count": cleaned_count},
             )
-            
-            return {'success': True, 'cleaned_count': cleaned_count}
+
+            return {"success": True, "cleaned_count": cleaned_count}
         else:
             logger.error(f"Failed to cleanup expired reservations: {result.get('reason')}")
-            return {'success': False, 'error': result.get('reason')}
-            
+            return {"success": False, "error": result.get("reason")}
+
     except Exception as exc:
         logger.error(f"Cleanup expired reservations task failed: {exc}")
         raise self.retry(exc=exc, countdown=60)
@@ -59,46 +59,46 @@ def send_low_stock_alert_task(self, product_id: int):
     """
     try:
         logger.info(f"Sending low stock alert for product {product_id}")
-        
+
         product = Product.query.get(product_id)
         if not product:
             logger.error(f"Product {product_id} not found for low stock alert")
-            return {'success': False, 'error': 'Product not found'}
-        
+            return {"success": False, "error": "Product not found"}
+
         # Get inventory status
         inventory_status = get_inventory_service().get_inventory_status(product_id)
-        
+
         # Prepare notification data
         language = get_current_language()
         notification_data = {
-            'product_id': product.id,
-            'product_name': product.get_translated('name', language),
-            'sku': product.sku,
-            'current_stock': inventory_status['current_stock'],
-            'available_quantity': inventory_status['available_quantity'],
-            'min_stock_level': inventory_status['min_stock_level'],
-            'is_out_of_stock': inventory_status['is_out_of_stock']
+            "product_id": product.id,
+            "product_name": product.get_translated("name", language),
+            "sku": product.sku,
+            "current_stock": inventory_status["current_stock"],
+            "available_quantity": inventory_status["available_quantity"],
+            "min_stock_level": inventory_status["min_stock_level"],
+            "is_out_of_stock": inventory_status["is_out_of_stock"],
         }
-        
+
         # Send notification to administrators
         notification_service = NotificationService()
-        
+
         # Send email to administrators
-        admin_emails = current_app.config.get('ADMIN_EMAILS', [])
+        admin_emails = current_app.config.get("ADMIN_EMAILS", [])
         for email in admin_emails:
             try:
                 notification_service.send_email_notification(
                     recipient_email=email,
-                    template='low_stock_alert',
+                    template="low_stock_alert",
                     template_data=notification_data,
-                    subject=f"Low Stock Alert: {product.get_translated('name', language)}"
+                    subject=f"Low Stock Alert: {product.get_translated('name', language)}",
                 )
             except Exception as e:
                 logger.error(f"Failed to send low stock email to {email}: {e}")
-        
+
         # Send Telegram notification if configured
         try:
-            telegram_chat_id = current_app.config.get('ADMIN_TELEGRAM_CHAT_ID')
+            telegram_chat_id = current_app.config.get("ADMIN_TELEGRAM_CHAT_ID")
             if telegram_chat_id:
                 message = (
                     f"🚨 LOW STOCK ALERT\n\n"
@@ -108,17 +108,14 @@ def send_low_stock_alert_task(self, product_id: int):
                     f"Available: {inventory_status['available_quantity']}\n"
                     f"Minimum Level: {inventory_status['min_stock_level']}\n"
                 )
-                
-                if inventory_status['is_out_of_stock']:
+
+                if inventory_status["is_out_of_stock"]:
                     message += "\n❌ PRODUCT IS OUT OF STOCK"
-                
-                notification_service.send_telegram_notification(
-                    chat_id=telegram_chat_id,
-                    message=message
-                )
+
+                notification_service.send_telegram_notification(chat_id=telegram_chat_id, message=message)
         except Exception as e:
             logger.error(f"Failed to send low stock Telegram notification: {e}")
-        
+
         # Log the alert
         audit_logger.log_event(
             event_type=AuditEventType.INVENTORY_UPDATED,
@@ -127,89 +124,93 @@ def send_low_stock_alert_task(self, product_id: int):
             resource_type="product_inventory",
             resource_id=str(product_id),
             description=f"Low stock alert sent for {product.get_translated('name', language)}",
-            additional_data=notification_data
+            additional_data=notification_data,
         )
-        
+
         logger.info(f"Low stock alert sent for product {product_id}")
-        return {'success': True, 'product_id': product_id}
-        
+        return {"success": True, "product_id": product_id}
+
     except Exception as exc:
         logger.error(f"Low stock alert task failed for product {product_id}: {exc}")
         raise self.retry(exc=exc, countdown=120)
 
 
 @shared_task(bind=True, max_retries=3, time_limit=600, soft_time_limit=540)
-def generate_inventory_report_task(self, report_type: str = 'daily'):
+def generate_inventory_report_task(self, report_type: str = "daily"):
     """
     Generate inventory report
     """
     try:
         logger.info(f"Generating {report_type} inventory report")
-        
+
         # Get all active products
         products = Product.query.filter_by(is_active=True).all()
-        
+
         low_stock_products = []
         out_of_stock_products = []
         total_inventory_value = 0
-        
+
         language = get_current_language()
         for product in products:
             try:
                 inventory_status = get_inventory_service().get_inventory_status(product.id)
 
-                if inventory_status['is_out_of_stock']:
-                    out_of_stock_products.append({
-                        'id': product.id,
-                        'name': product.get_translated('name', language),
-                        'sku': product.sku,
-                        'stock': inventory_status['current_stock']
-                    })
-                elif inventory_status['is_low_stock']:
-                    low_stock_products.append({
-                        'id': product.id,
-                        'name': product.get_translated('name', language),
-                        'sku': product.sku,
-                        'stock': inventory_status['current_stock'],
-                        'min_level': inventory_status['min_stock_level']
-                    })
-                
+                if inventory_status["is_out_of_stock"]:
+                    out_of_stock_products.append(
+                        {
+                            "id": product.id,
+                            "name": product.get_translated("name", language),
+                            "sku": product.sku,
+                            "stock": inventory_status["current_stock"],
+                        }
+                    )
+                elif inventory_status["is_low_stock"]:
+                    low_stock_products.append(
+                        {
+                            "id": product.id,
+                            "name": product.get_translated("name", language),
+                            "sku": product.sku,
+                            "stock": inventory_status["current_stock"],
+                            "min_level": inventory_status["min_stock_level"],
+                        }
+                    )
+
                 # Calculate inventory value
-                if product.base_price and inventory_status['current_stock']:
-                    total_inventory_value += float(product.base_price) * inventory_status['current_stock']
-                    
+                if product.base_price and inventory_status["current_stock"]:
+                    total_inventory_value += float(product.base_price) * inventory_status["current_stock"]
+
             except Exception as e:
                 logger.error(f"Error processing product {product.id} for inventory report: {e}")
                 continue
-        
+
         # Prepare report data
         report_data = {
-            'report_type': report_type,
-            'generated_at': datetime.now(timezone.utc).isoformat(),
-            'total_products': len(products),
-            'low_stock_count': len(low_stock_products),
-            'out_of_stock_count': len(out_of_stock_products),
-            'total_inventory_value': total_inventory_value,
-            'low_stock_products': low_stock_products[:10],  # Top 10
-            'out_of_stock_products': out_of_stock_products[:10]  # Top 10
+            "report_type": report_type,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "total_products": len(products),
+            "low_stock_count": len(low_stock_products),
+            "out_of_stock_count": len(out_of_stock_products),
+            "total_inventory_value": total_inventory_value,
+            "low_stock_products": low_stock_products[:10],  # Top 10
+            "out_of_stock_products": out_of_stock_products[:10],  # Top 10
         }
-        
+
         # Send report to administrators
-        admin_emails = current_app.config.get('ADMIN_EMAILS', [])
+        admin_emails = current_app.config.get("ADMIN_EMAILS", [])
         if admin_emails:
             notification_service = NotificationService()
-            
+
             for email in admin_emails:
                 try:
                     notification_service.send_email_notification(
                         recipient_email=email,
-                        template='inventory_report',
+                        template="inventory_report",
                         template_data=report_data,
-                        subject=f"Inventory Report - {report_type.title()}"
+                        subject=f"Inventory Report - {report_type.title()}",
                     )
                 except Exception as e:
                     logger.error(f"Failed to send inventory report to {email}: {e}")
-        
+
         # Log report generation
         audit_logger.log_event(
             event_type=AuditEventType.DATA_EXPORT,
@@ -218,25 +219,25 @@ def generate_inventory_report_task(self, report_type: str = 'daily'):
             resource_type="inventory_system",
             description=f"Generated {report_type} inventory report",
             additional_data={
-                'report_type': report_type,
-                'total_products': len(products),
-                'low_stock_count': len(low_stock_products),
-                'out_of_stock_count': len(out_of_stock_products)
-            }
+                "report_type": report_type,
+                "total_products": len(products),
+                "low_stock_count": len(low_stock_products),
+                "out_of_stock_count": len(out_of_stock_products),
+            },
         )
-        
+
         logger.info(f"Successfully generated {report_type} inventory report")
         return {
-            'success': True, 
-            'report_type': report_type,
-            'summary': {
-                'total_products': len(products),
-                'low_stock_count': len(low_stock_products),
-                'out_of_stock_count': len(out_of_stock_products),
-                'total_inventory_value': total_inventory_value
-            }
+            "success": True,
+            "report_type": report_type,
+            "summary": {
+                "total_products": len(products),
+                "low_stock_count": len(low_stock_products),
+                "out_of_stock_count": len(out_of_stock_products),
+                "total_inventory_value": total_inventory_value,
+            },
         }
-        
+
     except Exception as exc:
         logger.error(f"Inventory report generation failed: {exc}")
         raise self.retry(exc=exc, countdown=300)
@@ -249,65 +250,67 @@ def auto_reorder_products_task(self):
     """
     try:
         logger.info("Checking for products that need reordering")
-        
+
         # Get products that are below minimum stock level
         products_to_reorder = []
         language = get_current_language()
 
         products = Product.query.filter(
-            Product.is_active == True,
-            Product.min_stock_level.isnot(None),
-            Product.max_stock_level.isnot(None)
+            Product.is_active == True, Product.min_stock_level.isnot(None), Product.max_stock_level.isnot(None)
         ).all()
-        
+
         for product in products:
             try:
                 inventory_status = get_inventory_service().get_inventory_status(product.id)
-                
+
                 # Check if product needs reordering
-                if (inventory_status['available_quantity'] <= product.min_stock_level and 
-                    product.max_stock_level > product.min_stock_level):
-                    
-                    suggested_quantity = product.max_stock_level - inventory_status['current_stock']
-                    
-                    products_to_reorder.append({
-                        'product_id': product.id,
-                        'product_name': product.get_translated('name', language),
-                        'sku': product.sku,
-                        'current_stock': inventory_status['current_stock'],
-                        'available_quantity': inventory_status['available_quantity'],
-                        'min_stock_level': product.min_stock_level,
-                        'max_stock_level': product.max_stock_level,
-                        'suggested_quantity': suggested_quantity
-                    })
-                    
+                if (
+                    inventory_status["available_quantity"] <= product.min_stock_level
+                    and product.max_stock_level > product.min_stock_level
+                ):
+
+                    suggested_quantity = product.max_stock_level - inventory_status["current_stock"]
+
+                    products_to_reorder.append(
+                        {
+                            "product_id": product.id,
+                            "product_name": product.get_translated("name", language),
+                            "sku": product.sku,
+                            "current_stock": inventory_status["current_stock"],
+                            "available_quantity": inventory_status["available_quantity"],
+                            "min_stock_level": product.min_stock_level,
+                            "max_stock_level": product.max_stock_level,
+                            "suggested_quantity": suggested_quantity,
+                        }
+                    )
+
             except Exception as e:
                 logger.error(f"Error checking reorder for product {product.id}: {e}")
                 continue
-        
+
         if products_to_reorder:
             # Send reorder suggestions to administrators
-            admin_emails = current_app.config.get('ADMIN_EMAILS', [])
+            admin_emails = current_app.config.get("ADMIN_EMAILS", [])
             if admin_emails:
                 notification_service = NotificationService()
-                
+
                 report_data = {
-                    'products_to_reorder': products_to_reorder,
-                    'total_products': len(products_to_reorder),
-                    'generated_at': datetime.now(timezone.utc).isoformat()
+                    "products_to_reorder": products_to_reorder,
+                    "total_products": len(products_to_reorder),
+                    "generated_at": datetime.now(timezone.utc).isoformat(),
                 }
-                
+
                 for email in admin_emails:
                     try:
                         notification_service.send_email_notification(
                             recipient_email=email,
-                            template='reorder_suggestions',
+                            template="reorder_suggestions",
                             template_data=report_data,
-                            subject=f"Reorder Suggestions - {len(products_to_reorder)} Products"
+                            subject=f"Reorder Suggestions - {len(products_to_reorder)} Products",
                         )
                     except Exception as e:
                         logger.error(f"Failed to send reorder suggestions to {email}: {e}")
-            
+
             # Log reorder suggestions
             audit_logger.log_event(
                 event_type=AuditEventType.INVENTORY_UPDATED,
@@ -315,16 +318,16 @@ def auto_reorder_products_task(self):
                 severity=AuditSeverity.MEDIUM,
                 resource_type="inventory_system",
                 description=f"Generated reorder suggestions for {len(products_to_reorder)} products",
-                additional_data={'products_count': len(products_to_reorder)}
+                additional_data={"products_count": len(products_to_reorder)},
             )
-        
+
         logger.info(f"Auto-reorder check completed: {len(products_to_reorder)} products need reordering")
         return {
-            'success': True,
-            'products_to_reorder_count': len(products_to_reorder),
-            'products_to_reorder': products_to_reorder[:5]  # Return first 5 for logging
+            "success": True,
+            "products_to_reorder_count": len(products_to_reorder),
+            "products_to_reorder": products_to_reorder[:5],  # Return first 5 for logging
         }
-        
+
     except Exception as exc:
         logger.error(f"Auto-reorder check failed: {exc}")
         raise self.retry(exc=exc, countdown=600)

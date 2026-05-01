@@ -1,6 +1,7 @@
 """
 Audit log model for tracking all system activities
 """
+
 from enum import Enum
 from business_app import db
 from business_app.models import TimestampMixin
@@ -72,15 +73,19 @@ class AuditSeverity(Enum):
 class AuditLog(db.Model, TimestampMixin):
     """Database model for audit logs."""
 
-    __tablename__ = 'audit_logs'
+    __tablename__ = "audit_logs"
 
     id = db.Column(db.Integer, primary_key=True)
     event_id = db.Column(db.String(36), unique=True, nullable=False, index=True)
-    event_type = db.Column(db.Enum(AuditEventType, values_callable=lambda x: [e.value for e in x]), nullable=False, index=True)
-    severity = db.Column(db.Enum(AuditSeverity, values_callable=lambda x: [e.value for e in x]), nullable=False, index=True)
+    event_type = db.Column(
+        db.Enum(AuditEventType, values_callable=lambda x: [e.value for e in x]), nullable=False, index=True
+    )
+    severity = db.Column(
+        db.Enum(AuditSeverity, values_callable=lambda x: [e.value for e in x]), nullable=False, index=True
+    )
 
     # User context
-    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True, index=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True, index=True)
     user_role = db.Column(db.String(50), nullable=True)
     session_id = db.Column(db.String(255), nullable=True)
 
@@ -107,28 +112,28 @@ class AuditLog(db.Model, TimestampMixin):
     additional_data = db.Column(db.JSON, nullable=True)
 
     def __repr__(self):
-        return f'<AuditLog {self.event_id}: {self.event_type.value} by {self.user_id}>'
+        return f"<AuditLog {self.event_id}: {self.event_type.value} by {self.user_id}>"
 
     def to_dict(self):
         return {
-            'id': self.id,
-            'event_id': self.event_id,
-            'event_type': self.event_type.value,
-            'severity': self.severity.value,
-            'user_id': self.user_id,
-            'user_role': self.user_role,
-            'ip_address': self.ip_address,
-            'endpoint': self.endpoint,
-            'method': self.method,
-            'resource_type': self.resource_type,
-            'resource_id': self.resource_id,
-            'action': self.action,
-            'description': self.description,
-            'old_values': self.old_values,
-            'new_values': self.new_values,
-            'duration_ms': self.duration_ms,
-            'success': self.success,
-            'error_message': self.error_message,
-            'additional_data': self.additional_data,
-            'created_at': self.created_at.isoformat() if self.created_at else None
+            "id": self.id,
+            "event_id": self.event_id,
+            "event_type": self.event_type.value,
+            "severity": self.severity.value,
+            "user_id": self.user_id,
+            "user_role": self.user_role,
+            "ip_address": self.ip_address,
+            "endpoint": self.endpoint,
+            "method": self.method,
+            "resource_type": self.resource_type,
+            "resource_id": self.resource_id,
+            "action": self.action,
+            "description": self.description,
+            "old_values": self.old_values,
+            "new_values": self.new_values,
+            "duration_ms": self.duration_ms,
+            "success": self.success,
+            "error_message": self.error_message,
+            "additional_data": self.additional_data,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
         }

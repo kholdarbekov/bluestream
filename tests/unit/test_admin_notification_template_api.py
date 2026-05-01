@@ -4,9 +4,7 @@ from unittest.mock import Mock
 
 from flask_jwt_extended import create_access_token
 
-from business_app.utils.constants import UserRole
-
-
+from shared.enums import UserRole
 def _admin_headers(app, user_id: int) -> dict:
     with app.app_context():
         token = create_access_token(

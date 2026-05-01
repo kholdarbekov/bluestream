@@ -11,9 +11,7 @@ from business_app.tasks.subscription_tasks import (
     process_daily_subscription_billing,
     send_renewal_reminders,
 )
-from business_app.utils.constants import PaymentMethod, SubscriptionFrequency, SubscriptionStatus
-
-
+from shared.enums import PaymentMethod, SubscriptionFrequency, SubscriptionStatus
 def _create_address(sample_user):
     address = UserAddress(
         user_id=sample_user.id,

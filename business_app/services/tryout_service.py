@@ -21,7 +21,7 @@ from business_app.models.tryout import (
 from business_app.models.user import User, UserAddress
 from business_app.services.auth_service import AuthService
 from business_app.services.maps_service import MapsService
-from business_app.utils.constants import (
+from shared.enums import (
     TryoutBottleLedgerEventType,
     TryoutOutcome,
     TryoutStatus,
@@ -72,7 +72,9 @@ class TryoutService:
             joinedload(TryoutTask.tryout).joinedload(ProductTryout.trial_contact),
             joinedload(TryoutTask.tryout).selectinload(ProductTryout.items).joinedload(ProductTryoutItem.product),
             joinedload(TryoutTask.tryout).selectinload(ProductTryout.tasks).joinedload(TryoutTask.assigned_driver),
-            joinedload(TryoutTask.tryout).selectinload(ProductTryout.bottle_ledger_entries).joinedload(TryoutBottleLedger.product),
+            joinedload(TryoutTask.tryout)
+            .selectinload(ProductTryout.bottle_ledger_entries)
+            .joinedload(TryoutBottleLedger.product),
         ).get(task_id)
         if not task:
             raise NotFoundError("Try-out task not found")
@@ -185,10 +187,14 @@ class TryoutService:
             "delivery_notes": snapshot.get("delivery_notes"),
             "is_default": True,
         }
-        existing = UserAddress.query.filter_by(
-            user_id=user_id,
-            full_address=payload["full_address"],
-        ).order_by(UserAddress.id.desc()).first()
+        existing = (
+            UserAddress.query.filter_by(
+                user_id=user_id,
+                full_address=payload["full_address"],
+            )
+            .order_by(UserAddress.id.desc())
+            .first()
+        )
         if existing:
             auth_service.update_user_address(user_id, existing.id, payload)
             if not existing.is_default:
@@ -268,9 +274,11 @@ class TryoutService:
     def _get_open_handoff_task(tryout: ProductTryout) -> Optional[TryoutTask]:
         return next(
             (
-                task for task in (tryout.tasks or [])
+                task
+                for task in (tryout.tasks or [])
                 if TryoutService._status_value(task.task_type) == TryoutTaskType.HANDOFF.value
-                and TryoutService._status_value(task.status) in {TryoutTaskStatus.OPEN.value, TryoutTaskStatus.ASSIGNED.value}
+                and TryoutService._status_value(task.status)
+                in {TryoutTaskStatus.OPEN.value, TryoutTaskStatus.ASSIGNED.value}
             ),
             None,
         )
@@ -279,9 +287,11 @@ class TryoutService:
     def _get_open_pickup_task(tryout: ProductTryout) -> Optional[TryoutTask]:
         return next(
             (
-                task for task in (tryout.tasks or [])
+                task
+                for task in (tryout.tasks or [])
                 if TryoutService._status_value(task.task_type) == TryoutTaskType.PICKUP.value
-                and TryoutService._status_value(task.status) in {TryoutTaskStatus.OPEN.value, TryoutTaskStatus.ASSIGNED.value}
+                and TryoutService._status_value(task.status)
+                in {TryoutTaskStatus.OPEN.value, TryoutTaskStatus.ASSIGNED.value}
             ),
             None,
         )
@@ -310,11 +320,7 @@ class TryoutService:
     @staticmethod
     def get_outstanding_bottles_by_product(tryout: ProductTryout) -> Dict[int, Decimal]:
         outstanding = TryoutService._calculate_outstanding_from_entries(tryout.bottle_ledger_entries or [])
-        return {
-            product_id: units
-            for product_id, units in outstanding.items()
-            if units > 0
-        }
+        return {product_id: units for product_id, units in outstanding.items() if units > 0}
 
     @staticmethod
     def _compute_total_returnables_due(tryout: ProductTryout) -> Decimal:
@@ -400,15 +406,19 @@ class TryoutService:
         return task
 
     @staticmethod
-    def _ensure_pickup_task(tryout: ProductTryout, actor_user_id: Optional[int], assigned_driver_user_id: Optional[int] = None) -> Optional[TryoutTask]:
+    def _ensure_pickup_task(
+        tryout: ProductTryout, actor_user_id: Optional[int], assigned_driver_user_id: Optional[int] = None
+    ) -> Optional[TryoutTask]:
         if TryoutService._compute_total_returnables_due(tryout) <= 0:
             return None
 
         existing = next(
             (
-                task for task in (tryout.tasks or [])
+                task
+                for task in (tryout.tasks or [])
                 if TryoutService._status_value(task.task_type) == TryoutTaskType.PICKUP.value
-                and TryoutService._status_value(task.status) in {TryoutTaskStatus.OPEN.value, TryoutTaskStatus.ASSIGNED.value}
+                and TryoutService._status_value(task.status)
+                in {TryoutTaskStatus.OPEN.value, TryoutTaskStatus.ASSIGNED.value}
             ),
             None,
         )
@@ -458,8 +468,24 @@ class TryoutService:
     @staticmethod
     def serialize_tryout(tryout: ProductTryout) -> Dict[str, Any]:
         outstanding_products = TryoutService._serialize_outstanding_products(tryout)
-        handoff_task = next((task for task in tryout.tasks if TryoutService._status_value(task.task_type) == TryoutTaskType.HANDOFF.value), None)
-        pickup_task = next((task for task in tryout.tasks if TryoutService._status_value(task.task_type) == TryoutTaskType.PICKUP.value and TryoutService._status_value(task.status) in {TryoutTaskStatus.OPEN.value, TryoutTaskStatus.ASSIGNED.value, TryoutTaskStatus.COMPLETED.value}), None)
+        handoff_task = next(
+            (
+                task
+                for task in tryout.tasks
+                if TryoutService._status_value(task.task_type) == TryoutTaskType.HANDOFF.value
+            ),
+            None,
+        )
+        pickup_task = next(
+            (
+                task
+                for task in tryout.tasks
+                if TryoutService._status_value(task.task_type) == TryoutTaskType.PICKUP.value
+                and TryoutService._status_value(task.status)
+                in {TryoutTaskStatus.OPEN.value, TryoutTaskStatus.ASSIGNED.value, TryoutTaskStatus.COMPLETED.value}
+            ),
+            None,
+        )
         converted_user = tryout.converted_user
         return {
             **tryout.to_dict(),
@@ -470,19 +496,37 @@ class TryoutService:
             "pickup_state": TryoutService._compute_pickup_state(tryout),
             "outstanding_bottles_total": sum(row["units"] for row in outstanding_products),
             "outstanding_bottle_products": outstanding_products,
-            "assigned_handoff_driver": {
-                "user_id": handoff_task.assigned_driver_user_id,
-                "name": handoff_task.assigned_driver.full_name if handoff_task and handoff_task.assigned_driver else None,
-            } if handoff_task else None,
-            "assigned_pickup_driver": {
-                "user_id": pickup_task.assigned_driver_user_id,
-                "name": pickup_task.assigned_driver.full_name if pickup_task and pickup_task.assigned_driver else None,
-            } if pickup_task else None,
-            "converted_user": {
-                "id": converted_user.id,
-                "full_name": converted_user.full_name,
-                "phone": converted_user.phone,
-            } if converted_user else None,
+            "assigned_handoff_driver": (
+                {
+                    "user_id": handoff_task.assigned_driver_user_id,
+                    "name": (
+                        handoff_task.assigned_driver.full_name
+                        if handoff_task and handoff_task.assigned_driver
+                        else None
+                    ),
+                }
+                if handoff_task
+                else None
+            ),
+            "assigned_pickup_driver": (
+                {
+                    "user_id": pickup_task.assigned_driver_user_id,
+                    "name": (
+                        pickup_task.assigned_driver.full_name if pickup_task and pickup_task.assigned_driver else None
+                    ),
+                }
+                if pickup_task
+                else None
+            ),
+            "converted_user": (
+                {
+                    "id": converted_user.id,
+                    "full_name": converted_user.full_name,
+                    "phone": converted_user.phone,
+                }
+                if converted_user
+                else None
+            ),
         }
 
     @staticmethod
@@ -547,7 +591,9 @@ class TryoutService:
         return TryoutService._load_tryout(tryout.id)
 
     @staticmethod
-    def _apply_handoff(tryout: ProductTryout, task: TryoutTask, actor_user_id: Optional[int], notes: Optional[str]) -> None:
+    def _apply_handoff(
+        tryout: ProductTryout, task: TryoutTask, actor_user_id: Optional[int], notes: Optional[str]
+    ) -> None:
         handoff_at = task.completed_at or datetime.now(UTC)
         tryout.handoff_completed_at = handoff_at
         if not tryout.return_due_at:
@@ -594,15 +640,19 @@ class TryoutService:
         if actor_user_id and total_bottles_handed_off > 0:
             try:
                 from business_app.services.bottle_tracking_service import BottleTrackingService
+
                 BottleTrackingService().update_session_delivery_tally(
                     actor_user_id,
                     bottles_delivered=int(total_bottles_handed_off),
                 )
             except Exception:
                 import logging
+
                 logging.getLogger(__name__).warning(
                     "[BOTTLE] tryout handoff session tally failed for tryout=%s actor=%s",
-                    tryout.id, actor_user_id, exc_info=True,
+                    tryout.id,
+                    actor_user_id,
+                    exc_info=True,
                 )
 
         db.session.expire(tryout, ["bottle_ledger_entries"])
@@ -630,10 +680,7 @@ class TryoutService:
     def create_task(tryout_id: int, payload: Dict[str, Any], actor_user_id: int) -> TryoutTask:
         tryout = TryoutService._load_tryout(tryout_id)
         task_type = TryoutTaskType(payload["task_type"])
-        if (
-            task_type == TryoutTaskType.PICKUP
-            and TryoutService._compute_total_returnables_due(tryout) <= 0
-        ):
+        if task_type == TryoutTaskType.PICKUP and TryoutService._compute_total_returnables_due(tryout) <= 0:
             raise ValidationError("Pickup task cannot be created for a try-out without returnable bottles")
         due_at = payload.get("due_at") or (tryout.return_due_at if task_type == TryoutTaskType.PICKUP else None)
         task = TryoutService._create_task(
@@ -670,7 +717,14 @@ class TryoutService:
         return TryoutService._load_task(task.id)
 
     @staticmethod
-    def record_pickup(task_id: int, pickups: List[Dict[str, Any]], actor_user_id: int, *, notes: Optional[str] = None, idempotency_key: Optional[str] = None) -> ProductTryout:
+    def record_pickup(
+        task_id: int,
+        pickups: List[Dict[str, Any]],
+        actor_user_id: int,
+        *,
+        notes: Optional[str] = None,
+        idempotency_key: Optional[str] = None,
+    ) -> ProductTryout:
         task = TryoutService._load_task(task_id)
         if TryoutService._status_value(task.task_type) != TryoutTaskType.PICKUP.value:
             raise ValidationError("Task is not a pickup task")
@@ -723,7 +777,10 @@ class TryoutService:
             task.completed_at = datetime.now(UTC)
             task.completed_by_user_id = actor_user_id
         task.completion_payload = {
-            "pickups": [{"product_id": int(line["product_id"]), "units": float(TryoutService._as_decimal(line["units"]))} for line in pickups],
+            "pickups": [
+                {"product_id": int(line["product_id"]), "units": float(TryoutService._as_decimal(line["units"]))}
+                for line in pickups
+            ],
             "notes": notes,
         }
 
@@ -732,15 +789,19 @@ class TryoutService:
         if actor_user_id and total_picked_up > 0:
             try:
                 from business_app.services.bottle_tracking_service import BottleTrackingService
+
                 BottleTrackingService().update_session_delivery_tally(
                     actor_user_id,
                     bottles_collected=int(total_picked_up),
                 )
             except Exception:
                 import logging
+
                 logging.getLogger(__name__).warning(
                     "[BOTTLE] tryout pickup session tally failed for task=%s actor=%s",
-                    task_id, actor_user_id, exc_info=True,
+                    task_id,
+                    actor_user_id,
+                    exc_info=True,
                 )
 
         TryoutService._sync_tryout_status(tryout)
@@ -748,19 +809,32 @@ class TryoutService:
         return TryoutService._load_tryout(tryout.id)
 
     @staticmethod
-    def adjust_bottles(tryout_id: int, product_id: int, units: Any, actor_user_id: int, *, notes: Optional[str] = None, idempotency_key: Optional[str] = None) -> ProductTryout:
+    def adjust_bottles(
+        tryout_id: int,
+        product_id: int,
+        units: Any,
+        actor_user_id: int,
+        *,
+        notes: Optional[str] = None,
+        idempotency_key: Optional[str] = None,
+    ) -> ProductTryout:
         tryout = TryoutService._load_tryout(tryout_id)
         units_decimal = TryoutService._as_decimal(units)
         if units_decimal == 0:
             raise ValidationError("Adjustment units cannot be zero")
 
-        key = idempotency_key or f"adjustment:tryout:{tryout_id}:product:{product_id}:{units_decimal}:{datetime.now(UTC).isoformat()}"
+        key = (
+            idempotency_key
+            or f"adjustment:tryout:{tryout_id}:product:{product_id}:{units_decimal}:{datetime.now(UTC).isoformat()}"
+        )
         existing = TryoutBottleLedger.query.filter_by(idempotency_key=key).first()
         if existing:
             return TryoutService._load_tryout(tryout_id)
 
         projected = dict(TryoutService.get_outstanding_bottles_by_product(tryout))
-        projected[product_id] = projected.get(product_id, Decimal("0.00")) + TryoutService._quantize_units(units_decimal)
+        projected[product_id] = projected.get(product_id, Decimal("0.00")) + TryoutService._quantize_units(
+            units_decimal
+        )
         if projected[product_id] < 0:
             raise ValidationError("Bottle adjustment would make outstanding quantity negative")
 
@@ -838,7 +912,9 @@ class TryoutService:
                     assigned_driver_user_id=assigned_driver_user_id or actor_user_id,
                     notes="Completed from edit",
                 )
-            handoff_task.assigned_driver_user_id = handoff_task.assigned_driver_user_id or assigned_driver_user_id or actor_user_id
+            handoff_task.assigned_driver_user_id = (
+                handoff_task.assigned_driver_user_id or assigned_driver_user_id or actor_user_id
+            )
             handoff_task.status = TryoutTaskStatus.COMPLETED
             handoff_task.completed_at = datetime.now(UTC)
             handoff_task.completed_by_user_id = actor_user_id
@@ -913,7 +989,9 @@ class TryoutService:
             joinedload(TryoutTask.tryout).joinedload(ProductTryout.trial_contact),
             joinedload(TryoutTask.tryout).selectinload(ProductTryout.items).joinedload(ProductTryoutItem.product),
             joinedload(TryoutTask.tryout).selectinload(ProductTryout.tasks).joinedload(TryoutTask.assigned_driver),
-            joinedload(TryoutTask.tryout).selectinload(ProductTryout.bottle_ledger_entries).joinedload(TryoutBottleLedger.product),
+            joinedload(TryoutTask.tryout)
+            .selectinload(ProductTryout.bottle_ledger_entries)
+            .joinedload(TryoutBottleLedger.product),
             joinedload(TryoutTask.assigned_driver),
         ).filter(
             TryoutTask.status.in_([TryoutTaskStatus.OPEN, TryoutTaskStatus.ASSIGNED]),
@@ -931,26 +1009,38 @@ class TryoutService:
 
     @staticmethod
     def list_history_for_driver(driver_user_id: int) -> List[TryoutTask]:
-        return TryoutTask.query.options(
-            joinedload(TryoutTask.tryout).joinedload(ProductTryout.trial_contact),
-            joinedload(TryoutTask.tryout).selectinload(ProductTryout.items).joinedload(ProductTryoutItem.product),
-            joinedload(TryoutTask.tryout).selectinload(ProductTryout.tasks).joinedload(TryoutTask.assigned_driver),
-            joinedload(TryoutTask.tryout).selectinload(ProductTryout.bottle_ledger_entries).joinedload(TryoutBottleLedger.product),
-            joinedload(TryoutTask.assigned_driver),
-        ).filter(
-            TryoutTask.completed_by_user_id == driver_user_id,
-            TryoutTask.status == TryoutTaskStatus.COMPLETED,
-        ).order_by(TryoutTask.completed_at.desc().nullslast(), TryoutTask.id.desc()).all()
+        return (
+            TryoutTask.query.options(
+                joinedload(TryoutTask.tryout).joinedload(ProductTryout.trial_contact),
+                joinedload(TryoutTask.tryout).selectinload(ProductTryout.items).joinedload(ProductTryoutItem.product),
+                joinedload(TryoutTask.tryout).selectinload(ProductTryout.tasks).joinedload(TryoutTask.assigned_driver),
+                joinedload(TryoutTask.tryout)
+                .selectinload(ProductTryout.bottle_ledger_entries)
+                .joinedload(TryoutBottleLedger.product),
+                joinedload(TryoutTask.assigned_driver),
+            )
+            .filter(
+                TryoutTask.completed_by_user_id == driver_user_id,
+                TryoutTask.status == TryoutTaskStatus.COMPLETED,
+            )
+            .order_by(TryoutTask.completed_at.desc().nullslast(), TryoutTask.id.desc())
+            .all()
+        )
 
     @staticmethod
     def list_active_tryouts_for_driver(driver_user_id: int) -> List[ProductTryout]:
-        tryouts = ProductTryout.query.options(
-            joinedload(ProductTryout.trial_contact),
-            joinedload(ProductTryout.converted_user),
-            selectinload(ProductTryout.items).joinedload(ProductTryoutItem.product),
-            selectinload(ProductTryout.tasks).joinedload(TryoutTask.assigned_driver),
-            selectinload(ProductTryout.bottle_ledger_entries).joinedload(TryoutBottleLedger.product),
-        ).filter(ProductTryout.status.in_([TryoutStatus.ACTIVE, TryoutStatus.SCHEDULED])).order_by(ProductTryout.id.desc()).all()
+        tryouts = (
+            ProductTryout.query.options(
+                joinedload(ProductTryout.trial_contact),
+                joinedload(ProductTryout.converted_user),
+                selectinload(ProductTryout.items).joinedload(ProductTryoutItem.product),
+                selectinload(ProductTryout.tasks).joinedload(TryoutTask.assigned_driver),
+                selectinload(ProductTryout.bottle_ledger_entries).joinedload(TryoutBottleLedger.product),
+            )
+            .filter(ProductTryout.status.in_([TryoutStatus.ACTIVE, TryoutStatus.SCHEDULED]))
+            .order_by(ProductTryout.id.desc())
+            .all()
+        )
 
         filtered = []
         for tryout in tryouts:
@@ -1011,11 +1101,15 @@ class AdminTryoutService:
         if start_date:
             query = query.filter(ProductTryout.created_at >= AdminTryoutService._parse_date_boundary(start_date))
         if end_date:
-            query = query.filter(ProductTryout.created_at < AdminTryoutService._parse_date_boundary(end_date, end_of_day=True))
+            query = query.filter(
+                ProductTryout.created_at < AdminTryoutService._parse_date_boundary(end_date, end_of_day=True)
+            )
         if due_start_date:
             query = query.filter(ProductTryout.return_due_at >= AdminTryoutService._parse_date_boundary(due_start_date))
         if due_end_date:
-            query = query.filter(ProductTryout.return_due_at < AdminTryoutService._parse_date_boundary(due_end_date, end_of_day=True))
+            query = query.filter(
+                ProductTryout.return_due_at < AdminTryoutService._parse_date_boundary(due_end_date, end_of_day=True)
+            )
 
         rows = query.order_by(ProductTryout.id.desc()).all()
         serialized = [TryoutService.serialize_tryout(row) for row in rows]
@@ -1024,7 +1118,8 @@ class AdminTryoutService:
             serialized = [row for row in serialized if row["pickup_state"] == pickup_state]
         if driver_id:
             serialized = [
-                row for row in serialized
+                row
+                for row in serialized
                 if (row.get("assigned_handoff_driver") or {}).get("user_id") == driver_id
                 or (row.get("assigned_pickup_driver") or {}).get("user_id") == driver_id
             ]
@@ -1043,9 +1138,7 @@ class AdminTryoutService:
             "converted_count": sum(1 for row in serialized if row["outcome"] == TryoutOutcome.CONVERTED.value),
             "returned_count": sum(1 for row in serialized if row["pickup_state"] == "returned"),
         }
-        summary["collection_rate"] = round(
-            (summary["returned_count"] / total) * 100, 2
-        ) if total else 0.0
+        summary["collection_rate"] = round((summary["returned_count"] / total) * 100, 2) if total else 0.0
 
         return {
             "items": page_items,

@@ -2,6 +2,7 @@
 Standardized API Response Helpers
 Provides type-safe, consistent response formats for all API endpoints
 """
+
 from typing import Any, Dict, List, Optional, Union
 from flask import jsonify
 from pydantic import BaseModel, Field, ConfigDict
@@ -9,6 +10,7 @@ from pydantic import BaseModel, Field, ConfigDict
 
 class APIResponse(BaseModel):
     """Standard API response model"""
+
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     success: bool = Field(..., description="Whether the request was successful")
@@ -20,6 +22,7 @@ class APIResponse(BaseModel):
 
 class PaginationMeta(BaseModel):
     """Pagination metadata"""
+
     page: int = Field(..., ge=1, description="Current page number")
     per_page: int = Field(..., ge=1, le=100, description="Items per page")
     total: int = Field(..., ge=0, description="Total number of items")
@@ -28,12 +31,7 @@ class PaginationMeta(BaseModel):
     has_prev: bool = Field(..., description="Whether there is a previous page")
 
 
-def success_response(
-    data: Any = None,
-    message: str = None,
-    meta: Dict[str, Any] = None,
-    status_code: int = 200
-):
+def success_response(data: Any = None, message: str = None, meta: Dict[str, Any] = None, status_code: int = 200):
     """
     Create a successful API response
 
@@ -53,20 +51,12 @@ def success_response(
             status_code=201
         )
     """
-    response = APIResponse(
-        success=True,
-        message=message,
-        data=data,
-        meta=meta
-    )
+    response = APIResponse(success=True, message=message, data=data, meta=meta)
     return jsonify(response.model_dump(exclude_none=True)), status_code
 
 
 def error_response(
-    message: str,
-    errors: Union[List[str], Dict[str, Any], str, None] = None,
-    status_code: int = 400,
-    data: Any = None
+    message: str, errors: Union[List[str], Dict[str, Any], str, None] = None, status_code: int = 400, data: Any = None
 ):
     """
     Create an error API response
@@ -104,22 +94,12 @@ def error_response(
         elif isinstance(errors, list):
             error_list = errors
 
-    response = APIResponse(
-        success=False,
-        message=message,
-        errors=error_list,
-        data=data
-    )
+    response = APIResponse(success=False, message=message, errors=error_list, data=data)
     return jsonify(response.model_dump(exclude_none=True)), status_code
 
 
 def paginated_response(
-    items: List[Any],
-    page: int,
-    per_page: int,
-    total: int,
-    message: str = None,
-    additional_meta: Dict[str, Any] = None
+    items: List[Any], page: int, per_page: int, total: int, message: str = None, additional_meta: Dict[str, Any] = None
 ):
     """
     Create a paginated API response
@@ -149,12 +129,7 @@ def paginated_response(
     pages = math.ceil(total / per_page) if per_page > 0 else 0
 
     pagination = PaginationMeta(
-        page=page,
-        per_page=per_page,
-        total=total,
-        pages=pages,
-        has_next=page < pages,
-        has_prev=page > 1
+        page=page, per_page=per_page, total=total, pages=pages, has_next=page < pages, has_prev=page > 1
     )
 
     meta = pagination.model_dump()
@@ -163,15 +138,10 @@ def paginated_response(
     if additional_meta:
         meta.update(additional_meta)
 
-    return success_response(
-        data={'items': items},
-        message=message,
-        meta=meta,
-        status_code=200
-    )
+    return success_response(data={"items": items}, message=message, meta=meta, status_code=200)
 
 
-def created_response(data: Any = None, message: str = 'Resource created successfully'):
+def created_response(data: Any = None, message: str = "Resource created successfully"):
     """
     Create a 201 Created response
 
@@ -192,10 +162,10 @@ def no_content_response():
     Returns:
         Flask response tuple ('', 204)
     """
-    return '', 204
+    return "", 204
 
 
-def not_found_response(message: str = 'Resource not found', resource_type: str = None):
+def not_found_response(message: str = "Resource not found", resource_type: str = None):
     """
     Create a 404 Not Found response
 
@@ -212,7 +182,7 @@ def not_found_response(message: str = 'Resource not found', resource_type: str =
     return error_response(message=message, status_code=404)
 
 
-def unauthorized_response(message: str = 'Authentication required'):
+def unauthorized_response(message: str = "Authentication required"):
     """
     Create a 401 Unauthorized response
 
@@ -225,7 +195,7 @@ def unauthorized_response(message: str = 'Authentication required'):
     return error_response(message=message, status_code=401)
 
 
-def forbidden_response(message: str = 'Access forbidden'):
+def forbidden_response(message: str = "Access forbidden"):
     """
     Create a 403 Forbidden response
 
@@ -255,14 +225,14 @@ def validation_error_response(*args, **kwargs):
         except ValidationError as e:
             return validation_error_response(e.errors())
     """
-    errors = kwargs.pop('errors', None)
+    errors = kwargs.pop("errors", None)
     if args:
         if errors is None:
             errors = args[0]
         elif not errors:
             errors = args[0]
     if errors is None:
-        errors = 'Validation failed'
+        errors = "Validation failed"
 
     error_list = []
 
@@ -270,8 +240,8 @@ def validation_error_response(*args, **kwargs):
         # Handle Pydantic validation errors
         for error in errors:
             if isinstance(error, dict):
-                field = ' -> '.join(str(loc) for loc in error.get('loc', []))
-                msg = error.get('msg', 'Validation error')
+                field = " -> ".join(str(loc) for loc in error.get("loc", []))
+                msg = error.get("msg", "Validation error")
                 error_list.append(f"{field}: {msg}" if field else msg)
             else:
                 error_list.append(str(error))
@@ -282,14 +252,10 @@ def validation_error_response(*args, **kwargs):
     else:
         error_list = [str(errors)]
 
-    return error_response(
-        message='Validation failed',
-        errors=error_list,
-        status_code=400
-    )
+    return error_response(message="Validation failed", errors=error_list, status_code=400)
 
 
-def conflict_response(message: str = 'Resource already exists'):
+def conflict_response(message: str = "Resource already exists"):
     """
     Create a 409 Conflict response
 
@@ -302,7 +268,7 @@ def conflict_response(message: str = 'Resource already exists'):
     return error_response(message=message, status_code=409)
 
 
-def internal_error_response(message: str = 'Internal server error', error_id: str = None):
+def internal_error_response(message: str = "Internal server error", error_id: str = None):
     """
     Create a 500 Internal Server Error response
 
@@ -313,29 +279,25 @@ def internal_error_response(message: str = 'Internal server error', error_id: st
     Returns:
         Flask response tuple (json, 500)
     """
-    meta = {'error_id': error_id} if error_id else None
+    meta = {"error_id": error_id} if error_id else None
 
-    response = APIResponse(
-        success=False,
-        message=message,
-        meta=meta
-    )
+    response = APIResponse(success=False, message=message, meta=meta)
     return jsonify(response.model_dump(exclude_none=True)), 500
 
 
 # Export all response functions
 __all__ = [
-    'APIResponse',
-    'PaginationMeta',
-    'success_response',
-    'error_response',
-    'paginated_response',
-    'created_response',
-    'no_content_response',
-    'not_found_response',
-    'unauthorized_response',
-    'forbidden_response',
-    'validation_error_response',
-    'conflict_response',
-    'internal_error_response'
+    "APIResponse",
+    "PaginationMeta",
+    "success_response",
+    "error_response",
+    "paginated_response",
+    "created_response",
+    "no_content_response",
+    "not_found_response",
+    "unauthorized_response",
+    "forbidden_response",
+    "validation_error_response",
+    "conflict_response",
+    "internal_error_response",
 ]

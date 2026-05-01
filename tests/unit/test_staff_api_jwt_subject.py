@@ -1,9 +1,7 @@
 """Regression tests for JWT subject consistency in staff auth flow."""
 
 from flask_jwt_extended import create_refresh_token, decode_token
-from business_app.utils.constants import UserStatus
-
-
+from shared.enums import UserStatus
 def test_global_identity_loader_normalizes_integer_identity(app):
     """JWT manager should normalize any integer identity to string."""
     with app.app_context():

@@ -2,24 +2,33 @@
 Authentication API routes for the Water Business Platform
 This file should be placed in business_app/api/auth.py
 """
+
 import logging
 from datetime import datetime, timezone, timedelta
-from flask import Blueprint, request, jsonify, current_app
-from flask_jwt_extended import jwt_required, get_jwt_identity, get_jwt, set_access_cookies, set_refresh_cookies, unset_jwt_cookies
+from flask import Blueprint, request, current_app
+from flask_jwt_extended import (
+    jwt_required,
+    get_jwt_identity,
+    get_jwt,
+    set_access_cookies,
+    set_refresh_cookies,
+    unset_jwt_cookies,
+)
 from flasgger import swag_from
-from pydantic import ValidationError as PydanticValidationError
 
 from business_app.utils.service_factory import get_auth_service
 from business_app.utils.decorators import (
-    require_auth, validate_json, handle_exceptions,
-    rate_limit, rate_limit_by_telegram_id, log_request
+    validate_json,
+    handle_exceptions,
+    rate_limit,
+    rate_limit_by_telegram_id,
+    log_request,
 )
 from business_app.middleware import jwt_required_with_refresh
-from business_app.utils.validators import phone_validator, email_validator
+from business_app.utils.validators import phone_validator
 from business_app.utils.exceptions import ValidationError, UnauthorizedError, ConflictError
-from business_app.utils.helpers import get_current_language
 from business_app.utils.translations import get_translation
-from business_app.utils.constants import UserRole, UserStatus
+from shared.enums import UserRole, UserStatus
 from business_app.utils.csrf_protection import csrf_required
 from business_app.models.user import User
 from business_app import db
@@ -29,23 +38,21 @@ from business_app.utils.api_responses import (
     created_response,
     not_found_response,
     unauthorized_response,
-    forbidden_response,
     validation_error_response,
     internal_error_response,
-    conflict_response
+    conflict_response,
 )
 
 
 # Create blueprint
-auth_bp = Blueprint('auth', __name__)
+auth_bp = Blueprint("auth", __name__)
 
 logger = logging.getLogger(__name__)
 
 
-
-@auth_bp.route('/register', methods=['POST'])
+@auth_bp.route("/register", methods=["POST"])
 @rate_limit(10, 3600)  # 10 registrations per hour
-@validate_json(['password', 'first_name'])  # Only password and first_name always required
+@validate_json(["password", "first_name"])  # Only password and first_name always required
 @handle_exceptions
 @log_request
 def register():
@@ -125,69 +132,61 @@ def register():
     data = request.get_json()
 
     # Validate: email is required for this endpoint (email-based registration)
-    if not data.get('email'):
+    if not data.get("email"):
         return validation_error_response(
-            errors={'email': [get_translation('api.auth.email_required_for_registration')]}
+            errors={"email": [get_translation("api.auth.email_required_for_registration")]}
         )
 
     # Last name is optional but recommended
-    if not data.get('last_name'):
-        data['last_name'] = ''
+    if not data.get("last_name"):
+        data["last_name"] = ""
 
     try:
         user, tokens = get_auth_service().register_user(
-            email=data['email'],
-            password=data['password'],
-            phone=data.get('phone'),  # Phone is optional for email registration
-            first_name=data['first_name'],
-            last_name=data['last_name'],
-            date_of_birth=data.get('date_of_birth'),
-            gender=data.get('gender'),
-            referral_code=data.get('referral_code'),
-            registration_method='email'  # Mark as email registration
+            email=data["email"],
+            password=data["password"],
+            phone=data.get("phone"),  # Phone is optional for email registration
+            first_name=data["first_name"],
+            last_name=data["last_name"],
+            date_of_birth=data.get("date_of_birth"),
+            gender=data.get("gender"),
+            referral_code=data.get("referral_code"),
+            registration_method="email",  # Mark as email registration
         )
 
         # Create response with standardized format
         response_data, status_code = created_response(
             data={
-                'user': {
-                    'id': user.id,
-                    'email': user.email,
-                    'phone': user.phone,
-                    'first_name': user.first_name,
-                    'last_name': user.last_name,
-                    'status': user.status.value if hasattr(user.status, 'value') else user.status,
-                    'email_verified': user.email_verified_at is not None,
-                    'phone_verified': user.phone_verified_at is not None
+                "user": {
+                    "id": user.id,
+                    "email": user.email,
+                    "phone": user.phone,
+                    "first_name": user.first_name,
+                    "last_name": user.last_name,
+                    "status": user.status.value if hasattr(user.status, "value") else user.status,
+                    "email_verified": user.email_verified_at is not None,
+                    "phone_verified": user.phone_verified_at is not None,
                 },
-                'tokens': tokens
+                "tokens": tokens,
             },
-            message=get_translation('api.auth.registration_successful')
+            message=get_translation("api.auth.registration_successful"),
         )
 
         # Set JWT cookies for frontend navigation (same as login)
-        set_access_cookies(response_data, tokens['access_token'])
-        set_refresh_cookies(response_data, tokens['refresh_token'])
+        set_access_cookies(response_data, tokens["access_token"])
+        set_refresh_cookies(response_data, tokens["refresh_token"])
 
         return response_data, status_code
 
     except ValidationError as e:
-        return error_response(
-            message=e.message,
-            errors=e.details,
-            status_code=400
-        )
+        return error_response(message=e.message, errors=e.details, status_code=400)
     except ConflictError as e:
-        return error_response(
-            message=e.message,
-            errors=e.details,
-            status_code=409
-        )
+        return error_response(message=e.message, errors=e.details, status_code=409)
 
 
-@auth_bp.route('/login', methods=['POST'])
+@auth_bp.route("/login", methods=["POST"])
 @rate_limit(20, 3600)  # 20 login attempts per hour
-@validate_json(['identifier', 'password'])
+@validate_json(["identifier", "password"])
 @handle_exceptions
 @log_request
 def login():
@@ -243,57 +242,51 @@ def login():
         description: Account locked
     """
     data = request.get_json()
-    
+
     try:
-        user, tokens = get_auth_service().login_user(
-            identifier=data['identifier'].strip(),
-            password=data['password']
-        )
-        
+        user, tokens = get_auth_service().login_user(identifier=data["identifier"].strip(), password=data["password"])
+
         # Create response with standardized format
         response_data, status_code = success_response(
             data={
-                'user': {
-                    'id': user.id,
-                    'email': user.email,
-                    'phone': user.phone,
-                    'first_name': user.first_name,
-                    'last_name': user.last_name,
-                    'role': user.role.value if hasattr(user.role, 'value') else user.role,
-                    'status': user.status.value if hasattr(user.status, 'value') else user.status,
-                    'email_verified': user.email_verified_at is not None,
-                    'phone_verified': user.phone_verified_at is not None,
-                    'last_login': user.last_login.isoformat() if user.last_login else None
+                "user": {
+                    "id": user.id,
+                    "email": user.email,
+                    "phone": user.phone,
+                    "first_name": user.first_name,
+                    "last_name": user.last_name,
+                    "role": user.role.value if hasattr(user.role, "value") else user.role,
+                    "status": user.status.value if hasattr(user.status, "value") else user.status,
+                    "email_verified": user.email_verified_at is not None,
+                    "phone_verified": user.phone_verified_at is not None,
+                    "last_login": user.last_login.isoformat() if user.last_login else None,
                 },
-                'tokens': tokens,
-                'permissions': get_auth_service().get_user_permissions(user.id)
+                "tokens": tokens,
+                "permissions": get_auth_service().get_user_permissions(user.id),
             },
-            message=get_translation('api.auth.login_successful')
+            message=get_translation("api.auth.login_successful"),
         )
 
         # Set JWT cookies for frontend navigation
-        set_access_cookies(response_data, tokens['access_token'])
-        set_refresh_cookies(response_data, tokens['refresh_token'])
+        set_access_cookies(response_data, tokens["access_token"])
+        set_refresh_cookies(response_data, tokens["refresh_token"])
 
         return response_data, status_code
 
     except UnauthorizedError as e:
         return unauthorized_response(message=e.message)
     except ValidationError as e:
-        return error_response(
-            message=e.message,
-            errors=e.details,
-            status_code=423
-        )
+        return error_response(message=e.message, errors=e.details, status_code=423)
 
 
 # =============================================================================
 # Phone Registration Endpoints (Uzbekistan +998 only)
 # =============================================================================
 
-@auth_bp.route('/phone/register/init', methods=['POST'])
+
+@auth_bp.route("/phone/register/init", methods=["POST"])
 @rate_limit(3, 600)  # 3 requests per 10 minutes per IP
-@validate_json(['phone'])
+@validate_json(["phone"])
 @handle_exceptions
 @log_request
 def phone_register_init():
@@ -362,38 +355,28 @@ def phone_register_init():
     except PydanticValidationError as e:
         errors = {}
         for error in e.errors():
-            field = error['loc'][0] if error['loc'] else 'general'
+            field = error["loc"][0] if error["loc"] else "general"
             if field not in errors:
                 errors[field] = []
-            errors[field].append(error['msg'])
+            errors[field].append(error["msg"])
         return validation_error_response(errors=errors)
 
     try:
-        result = get_auth_service().initiate_phone_registration(
-            phone=req.phone,
-            language=req.preferred_language
-        )
+        result = get_auth_service().initiate_phone_registration(phone=req.phone, language=req.preferred_language)
 
-        return success_response(
-            data=result,
-            message=get_translation('api.auth.otp_sent')
-        )
+        return success_response(data=result, message=get_translation("api.auth.otp_sent"))
 
     except ValidationError as e:
-        error_code = getattr(e, 'error_code', None)
-        status_code = 429 if error_code in ['RESEND_COOLDOWN', 'OTP_MAX_ATTEMPTS'] else 400
-        return error_response(
-            message=e.message,
-            errors=e.details,
-            status_code=status_code
-        )
+        error_code = getattr(e, "error_code", None)
+        status_code = 429 if error_code in ["RESEND_COOLDOWN", "OTP_MAX_ATTEMPTS"] else 400
+        return error_response(message=e.message, errors=e.details, status_code=status_code)
     except ConflictError as e:
         return conflict_response(message=e.message)
 
 
-@auth_bp.route('/phone/register/verify', methods=['POST'])
+@auth_bp.route("/phone/register/verify", methods=["POST"])
 @rate_limit(10, 600)  # 10 requests per 10 minutes per IP
-@validate_json(['phone', 'otp_code', 'first_name', 'password'])
+@validate_json(["phone", "otp_code", "first_name", "password"])
 @handle_exceptions
 @log_request
 def phone_register_verify():
@@ -495,10 +478,10 @@ def phone_register_verify():
     except PydanticValidationError as e:
         errors = {}
         for error in e.errors():
-            field = error['loc'][0] if error['loc'] else 'general'
+            field = error["loc"][0] if error["loc"] else "general"
             if field not in errors:
                 errors[field] = []
-            errors[field].append(error['msg'])
+            errors[field].append(error["msg"])
         return validation_error_response(errors=errors)
 
     try:
@@ -508,52 +491,48 @@ def phone_register_verify():
             first_name=req.first_name,
             last_name=req.last_name,
             password=req.password,
-            referral_code=req.referral_code
+            referral_code=req.referral_code,
         )
 
         # Create response
         response_data, status_code = created_response(
             data={
-                'user': {
-                    'id': user.id,
-                    'phone': user.phone,
-                    'email': user.email,
-                    'first_name': user.first_name,
-                    'last_name': user.last_name,
-                    'is_verified': user.is_verified,
-                    'registration_method': user.registration_method
+                "user": {
+                    "id": user.id,
+                    "phone": user.phone,
+                    "email": user.email,
+                    "first_name": user.first_name,
+                    "last_name": user.last_name,
+                    "is_verified": user.is_verified,
+                    "registration_method": user.registration_method,
                 },
-                'tokens': tokens
+                "tokens": tokens,
             },
-            message=get_translation('api.auth.registration_successful')
+            message=get_translation("api.auth.registration_successful"),
         )
 
         # Set JWT cookies
-        set_access_cookies(response_data, tokens['access_token'])
-        set_refresh_cookies(response_data, tokens['refresh_token'])
+        set_access_cookies(response_data, tokens["access_token"])
+        set_refresh_cookies(response_data, tokens["refresh_token"])
 
         return response_data, status_code
 
     except ValidationError as e:
-        error_code = getattr(e, 'error_code', None)
-        if error_code == 'OTP_EXPIRED':
+        error_code = getattr(e, "error_code", None)
+        if error_code == "OTP_EXPIRED":
             status_code = 400
-        elif error_code in ['INVALID_OTP', 'OTP_MAX_ATTEMPTS']:
-            status_code = 429 if error_code == 'OTP_MAX_ATTEMPTS' else 400
+        elif error_code in ["INVALID_OTP", "OTP_MAX_ATTEMPTS"]:
+            status_code = 429 if error_code == "OTP_MAX_ATTEMPTS" else 400
         else:
             status_code = 400
-        return error_response(
-            message=e.message,
-            errors=e.details,
-            status_code=status_code
-        )
+        return error_response(message=e.message, errors=e.details, status_code=status_code)
     except ConflictError as e:
         return conflict_response(message=e.message)
 
 
-@auth_bp.route('/phone/resend-otp', methods=['POST'])
+@auth_bp.route("/phone/resend-otp", methods=["POST"])
 @rate_limit(3, 300)  # 3 requests per 5 minutes per IP
-@validate_json(['phone'])
+@validate_json(["phone"])
 @handle_exceptions
 @log_request
 def phone_resend_otp():
@@ -616,28 +595,21 @@ def phone_resend_otp():
     except PydanticValidationError as e:
         errors = {}
         for error in e.errors():
-            field = error['loc'][0] if error['loc'] else 'general'
+            field = error["loc"][0] if error["loc"] else "general"
             if field not in errors:
                 errors[field] = []
-            errors[field].append(error['msg'])
+            errors[field].append(error["msg"])
         return validation_error_response(errors=errors)
 
     try:
         result = get_auth_service().resend_phone_registration_otp(phone=req.phone)
 
-        return success_response(
-            data=result,
-            message=get_translation('api.auth.otp_resent')
-        )
+        return success_response(data=result, message=get_translation("api.auth.otp_resent"))
 
     except ValidationError as e:
-        error_code = getattr(e, 'error_code', None)
-        status_code = 429 if error_code in ['RESEND_COOLDOWN', 'OTP_MAX_ATTEMPTS'] else 400
-        return error_response(
-            message=e.message,
-            errors=e.details,
-            status_code=status_code
-        )
+        error_code = getattr(e, "error_code", None)
+        status_code = 429 if error_code in ["RESEND_COOLDOWN", "OTP_MAX_ATTEMPTS"] else 400
+        return error_response(message=e.message, errors=e.details, status_code=status_code)
     except ConflictError as e:
         return conflict_response(message=e.message)
 
@@ -647,8 +619,8 @@ def phone_resend_otp():
 # =============================================================================
 
 
-@auth_bp.route('/send-otp', methods=['POST'])
-@validate_json(['phone'])
+@auth_bp.route("/send-otp", methods=["POST"])
+@validate_json(["phone"])
 @jwt_required()
 @rate_limit(3, 60)  # 3 OTP requests per minute
 @handle_exceptions
@@ -682,40 +654,33 @@ def send_otp():
         description: Phone number already in use
     """
     data = request.get_json()
-    phone = data.get('phone')
+    phone = data.get("phone")
     user_id = get_jwt_identity()
-    
+
     if phone_validator(phone):
-        return validation_error_response(
-            errors=[get_translation('error.validation.invalid_phone')]
-        )
+        return validation_error_response(errors=[get_translation("error.validation.invalid_phone")])
 
     # Check if phone number is already in use by another user
-    existing_user = User.query.filter(
-        User.phone == phone,
-        User.id != user_id,
-        User.status != 'inactive'
-    ).first()
+    existing_user = User.query.filter(User.phone == phone, User.id != user_id, User.status != "inactive").first()
 
     if existing_user:
         # Log suspicious activity
         from business_app.utils.audit_logger import audit_suspicious_activity
+
         audit_suspicious_activity(
             f"User {user_id} attempted to verify phone {phone} already in use by user {existing_user.id}",
-            additional_data={'target_phone': phone, 'existing_user_id': existing_user.id}
+            additional_data={"target_phone": phone, "existing_user_id": existing_user.id},
         )
-        return error_response(
-            message=get_translation('api.auth.email_already_exists'),
-            status_code=409
-        )
-    
+        return error_response(message=get_translation("api.auth.email_already_exists"), status_code=409)
+
     # Store pending phone number in Redis for verification
     auth_service = get_auth_service()
     pending_phone_key = f"pending_phone:{user_id}"
     auth_service.redis_client.setex(pending_phone_key, 1800, phone)  # 30 minutes expiry
-    
+
     # Log phone verification attempt
     from business_app.utils.audit_logger import audit_logger, AuditEventType, AuditSeverity
+
     audit_logger.log_event(
         event_type=AuditEventType.SENSITIVE_DATA_ACCESS,
         action="phone_verification_requested",
@@ -723,28 +688,24 @@ def send_otp():
         resource_type="user_phone",
         resource_id=str(user_id),
         description=f"Phone verification requested for {phone}",
-        additional_data={'new_phone': phone}
+        additional_data={"new_phone": phone},
     )
-    
+
     # Generate and send OTP to the new phone number
     success = auth_service.send_verification_sms(user_id, phone)
 
     if success:
         return success_response(
-            data={
-                'phone_masked': phone[:3] + '***' + phone[-4:] if len(phone) > 7 else '***'
-            },
-            message=get_translation('api.auth.phone_verified')
+            data={"phone_masked": phone[:3] + "***" + phone[-4:] if len(phone) > 7 else "***"},
+            message=get_translation("api.auth.phone_verified"),
         )
     else:
-        return internal_error_response(
-            message=get_translation('error.server_error')
-        )
-  
+        return internal_error_response(message=get_translation("error.server_error"))
 
-@auth_bp.route('/refresh', methods=['POST'])
-@auth_bp.route('/refresh-token', methods=['POST'])  # Alias for backwards compatibility
-@validate_json(['refresh_token'])
+
+@auth_bp.route("/refresh", methods=["POST"])
+@auth_bp.route("/refresh-token", methods=["POST"])  # Alias for backwards compatibility
+@validate_json(["refresh_token"])
 @handle_exceptions
 @log_request
 def refresh():
@@ -780,35 +741,33 @@ def refresh():
         description: Invalid refresh token
     """
     data = request.get_json()
-    
+
     try:
         # Support both AuthService and TokenService for token refresh
         try:
-            tokens = get_auth_service().refresh_token(data['refresh_token'])
+            tokens = get_auth_service().refresh_token(data["refresh_token"])
         except AttributeError:
             from business_app.services.token_service import TokenService
+
             token_service = TokenService()
-            tokens = token_service.refresh_access_token(data['refresh_token'])
-        
-        return success_response(
-            data=tokens,
-            message=get_translation('api.auth.token_invalid')
-        )
+            tokens = token_service.refresh_access_token(data["refresh_token"])
+
+        return success_response(data=tokens, message=get_translation("api.auth.token_invalid"))
 
     except UnauthorizedError as e:
         return unauthorized_response(message=e.message)
     except Exception as e:
         logger.error(f"Token refresh failed: {e}")
-        return unauthorized_response(message=get_translation('api.auth.token_invalid'))
+        return unauthorized_response(message=get_translation("api.auth.token_invalid"))
 
 
-@auth_bp.route('/refresh-cookie', methods=['POST'])
+@auth_bp.route("/refresh-cookie", methods=["POST"])
 @jwt_required(refresh=True)  # This reads refresh token from cookie
 @handle_exceptions
 def refresh_with_cookie():
     """
     Refresh Access Token using HttpOnly Cookie
-    
+
     This is the Flask-JWT-Extended recommended approach for cookie-based auth.
     The refresh token is read from the httpOnly cookie automatically.
     ---
@@ -821,34 +780,33 @@ def refresh_with_cookie():
         description: Invalid or expired refresh token
     """
     from flask_jwt_extended import get_jwt_identity, create_access_token, set_access_cookies
-    
+
     # Get current user from refresh token
     current_user_id = get_jwt_identity()
-    
+
     # Create new access token
     new_access_token = create_access_token(identity=current_user_id)
-    
+
     # Create response and set new access token cookie
     response_data = success_response(
-        data={'refreshed': True},
-        message=get_translation('api.auth.token_refreshed_successfully')
+        data={"refreshed": True}, message=get_translation("api.auth.token_refreshed_successfully")
     )
-    
+
     # Handle tuple response
     if isinstance(response_data, tuple):
         response_obj, status_code = response_data
     else:
         response_obj = response_data
         status_code = 200
-    
+
     set_access_cookies(response_obj, new_access_token)
-    
+
     logger.info(f"Token refreshed via cookie for user {current_user_id}")
     return response_obj, status_code
 
 
-@auth_bp.route('/verify-email', methods=['POST'])
-@validate_json(['token'])
+@auth_bp.route("/verify-email", methods=["POST"])
+@validate_json(["token"])
 @handle_exceptions
 @log_request
 def verify_email():
@@ -876,24 +834,19 @@ def verify_email():
         description: Invalid or expired token
     """
     data = request.get_json()
-    
-    success = get_auth_service().verify_email(data['token'])
+
+    success = get_auth_service().verify_email(data["token"])
 
     if success:
-        return success_response(
-            message=get_translation('api.auth.phone_verified')
-        )
+        return success_response(message=get_translation("api.auth.phone_verified"))
     else:
-        return error_response(
-            message=get_translation('api.auth.token_invalid'),
-            status_code=400
-        )
+        return error_response(message=get_translation("api.auth.token_invalid"), status_code=400)
 
 
-@auth_bp.route('/verify-phone', methods=['POST'])
-@auth_bp.route('/verify-otp', methods=['POST'])  # Alias for backwards compatibility
+@auth_bp.route("/verify-phone", methods=["POST"])
+@auth_bp.route("/verify-otp", methods=["POST"])  # Alias for backwards compatibility
 @rate_limit(30, 3600)
-@validate_json(['otp'])
+@validate_json(["otp"])
 @handle_exceptions
 @log_request
 def verify_phone():
@@ -929,38 +882,37 @@ def verify_phone():
         description: No pending phone verification found
     """
     data = request.get_json()
-    
+
     # Support both JWT-based and user_id-based verification
-    if '/verify-otp' in request.path and 'user_id' in data:
+    if "/verify-otp" in request.path and "user_id" in data:
         # Legacy verify-otp endpoint behavior
-        user_id = data['user_id']
+        user_id = data["user_id"]
     else:
         # JWT-based verification
         user_id = get_jwt_identity()
-    
+
     try:
         auth_service = get_auth_service()
-        
+
         # Get pending phone number from Redis
         pending_phone_key = f"pending_phone:{user_id}"
         pending_phone = auth_service.redis_client.get(pending_phone_key)
-        
+
         if not pending_phone:
             # Log suspicious activity
             from business_app.utils.audit_logger import audit_suspicious_activity
+
             audit_suspicious_activity(
                 f"User {user_id} attempted phone verification without pending phone number",
-                additional_data={'attempted_otp': data['otp']}
+                additional_data={"attempted_otp": data["otp"]},
             )
-            return not_found_response(
-                message=get_translation('error.not_found')
-            )
-        
-        pending_phone = pending_phone.decode('utf-8')
-        
+            return not_found_response(message=get_translation("error.not_found"))
+
+        pending_phone = pending_phone.decode("utf-8")
+
         # Verify OTP
-        success = auth_service.verify_phone(user_id, data['otp'])
-        
+        success = auth_service.verify_phone(user_id, data["otp"])
+
         if success:
             # OTP is valid, now update the user's phone number
             user = User.query.get(user_id)
@@ -969,77 +921,72 @@ def verify_phone():
                 user.phone = pending_phone
                 user.phone_verified_at = datetime.now(timezone.utc)
                 db.session.commit()
-                
+
                 # Remove pending phone from Redis
                 auth_service.redis_client.delete(pending_phone_key)
-                
+
                 # Log successful phone update with audit trail
                 from business_app.utils.audit_logger import audit_logger, AuditEventType, AuditSeverity
+
                 audit_logger.log_event(
                     event_type=AuditEventType.USER_UPDATED,
                     action="phone_number_verified_and_updated",
                     severity=AuditSeverity.HIGH,
                     resource_type="user_phone",
                     resource_id=str(user_id),
-                    description=f"Phone number successfully verified and updated",
-                    old_values={'phone': old_phone},
-                    new_values={'phone': pending_phone, 'phone_verified_at': user.phone_verified_at.isoformat()},
-                    success=True
+                    description="Phone number successfully verified and updated",
+                    old_values={"phone": old_phone},
+                    new_values={"phone": pending_phone, "phone_verified_at": user.phone_verified_at.isoformat()},
+                    success=True,
                 )
-                
-                logger.info(f"Phone verified and updated successfully for user {user_id}: {old_phone} -> {pending_phone}")
+
+                logger.info(
+                    f"Phone verified and updated successfully for user {user_id}: {old_phone} -> {pending_phone}"
+                )
                 return success_response(
-                    data={
-                        'phone': pending_phone,
-                        'phone_verified': True
-                    },
-                    message=get_translation('api.auth.phone_verified')
+                    data={"phone": pending_phone, "phone_verified": True},
+                    message=get_translation("api.auth.phone_verified"),
                 )
             else:
-                return not_found_response(
-                    message=get_translation('error.not_found')
-                )
+                return not_found_response(message=get_translation("error.not_found"))
         else:
             # Log failed verification attempt
             from business_app.utils.audit_logger import audit_logger, AuditEventType, AuditSeverity
+
             audit_logger.log_event(
                 event_type=AuditEventType.SENSITIVE_DATA_ACCESS,
                 action="phone_verification_failed",
                 severity=AuditSeverity.MEDIUM,
                 resource_type="user_phone",
                 resource_id=str(user_id),
-                description=f"Failed phone verification attempt",
-                additional_data={'pending_phone': pending_phone, 'provided_otp': data['otp']},
+                description="Failed phone verification attempt",
+                additional_data={"pending_phone": pending_phone, "provided_otp": data["otp"]},
                 success=False,
-                error_message="Invalid OTP provided"
+                error_message="Invalid OTP provided",
             )
-            
+
             logger.warning(f"Invalid OTP provided for user {user_id}")
-            return error_response(
-                message=get_translation('api.auth.invalid_credentials'),
-                status_code=400
-            )
+            return error_response(message=get_translation("api.auth.invalid_credentials"), status_code=400)
 
     except Exception as e:
         logger.error(f"Error in verify phone/OTP: {e}")
         # Log system error
         from business_app.utils.audit_logger import audit_logger, AuditEventType, AuditSeverity
+
         audit_logger.log_event(
             event_type=AuditEventType.SYSTEM_MAINTENANCE,
             action="phone_verification_system_error",
             severity=AuditSeverity.HIGH,
             resource_type="user_phone",
             resource_id=str(user_id),
-            description=f"System error during phone verification",
+            description="System error during phone verification",
             success=False,
-            error_message=str(e)
+            error_message=str(e),
         )
-        return internal_error_response(
-            message=get_translation('error.server_error')
-        )
+        return internal_error_response(message=get_translation("error.server_error"))
 
 
-@auth_bp.route('/resend-email-verification', methods=['POST'])
+@auth_bp.route("/resend-email-verification", methods=["POST"])
 @jwt_required()
 @rate_limit(5, 3600)  # 5 resends per hour
 @handle_exceptions
@@ -1058,14 +1005,12 @@ def resend_email_verification():
     """
     user_id = get_jwt_identity()
 
-    success = get_auth_service().send_verification_email(user_id)
+    get_auth_service().send_verification_email(user_id)
 
-    return success_response(
-        message=get_translation('success.sent')
-    )
+    return success_response(message=get_translation("success.sent"))
 
 
-@auth_bp.route('/resend-sms-verification', methods=['POST'])
+@auth_bp.route("/resend-sms-verification", methods=["POST"])
 @jwt_required()
 @rate_limit(5, 3600)  # 5 resends per hour
 @handle_exceptions
@@ -1084,16 +1029,14 @@ def resend_sms_verification():
     """
     user_id = get_jwt_identity()
 
-    success = get_auth_service().send_verification_sms(user_id)
+    get_auth_service().send_verification_sms(user_id)
 
-    return success_response(
-        message=get_translation('success.sent')
-    )
+    return success_response(message=get_translation("success.sent"))
 
 
-@auth_bp.route('/forgot-password', methods=['POST'])
+@auth_bp.route("/forgot-password", methods=["POST"])
 @rate_limit(5, 3600)  # 5 password reset requests per hour
-@validate_json(['identifier'])
+@validate_json(["identifier"])
 @handle_exceptions
 @log_request
 def forgot_password():
@@ -1120,18 +1063,16 @@ def forgot_password():
         description: Password reset email sent (always returns success)
     """
     data = request.get_json()
-    
+
     # Always return success to prevent email enumeration
-    get_auth_service().request_password_reset(data['identifier'].strip())
+    get_auth_service().request_password_reset(data["identifier"].strip())
 
-    return success_response(
-        message=get_translation('success.sent')
-    )
+    return success_response(message=get_translation("success.sent"))
 
 
-@auth_bp.route('/reset-password', methods=['POST'])
+@auth_bp.route("/reset-password", methods=["POST"])
 @csrf_required
-@validate_json(['token', 'new_password'])
+@validate_json(["token", "new_password"])
 @handle_exceptions
 @log_request
 def reset_password():
@@ -1164,32 +1105,23 @@ def reset_password():
         description: Invalid token or weak password
     """
     data = request.get_json()
-    
+
     try:
-        success = get_auth_service().reset_password(data['token'], data['new_password'])
+        success = get_auth_service().reset_password(data["token"], data["new_password"])
 
         if success:
-            return success_response(
-                message=get_translation('success.updated')
-            )
+            return success_response(message=get_translation("success.updated"))
         else:
-            return error_response(
-                message=get_translation('api.auth.token_invalid'),
-                status_code=400
-            )
+            return error_response(message=get_translation("api.auth.token_invalid"), status_code=400)
 
     except ValidationError as e:
-        return error_response(
-            message=e.message,
-            errors=e.details,
-            status_code=400
-        )
+        return error_response(message=e.message, errors=e.details, status_code=400)
 
 
-@auth_bp.route('/change-password', methods=['POST'])
+@auth_bp.route("/change-password", methods=["POST"])
 @jwt_required()
 @csrf_required
-@validate_json(['current_password', 'new_password'])
+@validate_json(["current_password", "new_password"])
 @handle_exceptions
 @log_request
 def change_password():
@@ -1227,35 +1159,22 @@ def change_password():
     """
     data = request.get_json()
     user_id = get_jwt_identity()
-    
+
     try:
-        success = get_auth_service().change_password(
-            user_id,
-            data['current_password'],
-            data['new_password']
-        )
+        success = get_auth_service().change_password(user_id, data["current_password"], data["new_password"])
 
         if success:
-            return success_response(
-                message=get_translation('success.updated')
-            )
+            return success_response(message=get_translation("success.updated"))
         else:
-            return error_response(
-                message=get_translation('error.server_error'),
-                status_code=400
-            )
+            return error_response(message=get_translation("error.server_error"), status_code=400)
 
     except ValidationError as e:
-        return error_response(
-            message=e.message,
-            errors=e.details,
-            status_code=400
-        )
+        return error_response(message=e.message, errors=e.details, status_code=400)
     except UnauthorizedError as e:
         return unauthorized_response(message=e.message)
 
 
-@auth_bp.route('/profile', methods=['GET'])
+@auth_bp.route("/profile", methods=["GET"])
 @jwt_required()
 @handle_exceptions
 def get_profile():
@@ -1279,12 +1198,10 @@ def get_profile():
               $ref: '#/definitions/UserProfile'
     """
     user_id = get_jwt_identity()
-    return success_response(
-        data=get_auth_service().get_user_profile_data(user_id)
-    )
+    return success_response(data=get_auth_service().get_user_profile_data(user_id))
 
 
-@auth_bp.route('/permissions', methods=['GET'])
+@auth_bp.route("/permissions", methods=["GET"])
 @jwt_required()
 @handle_exceptions
 def get_permissions():
@@ -1312,12 +1229,10 @@ def get_permissions():
     user_id = get_jwt_identity()
     permissions = get_auth_service().get_user_permissions(user_id)
 
-    return success_response(
-        data=permissions
-    )
+    return success_response(data=permissions)
 
 
-@auth_bp.route('/addresses', methods=['GET'])
+@auth_bp.route("/addresses", methods=["GET"])
 @jwt_required()
 @handle_exceptions
 def get_user_addresses():
@@ -1348,16 +1263,12 @@ def get_user_addresses():
     user_id = get_jwt_identity()
     addresses = get_auth_service().get_user_addresses(user_id)
 
-    return success_response(
-        data={
-            'addresses': [addr.to_dict() for addr in addresses]
-        }
-    )
+    return success_response(data={"addresses": [addr.to_dict() for addr in addresses]})
 
 
-@auth_bp.route('/addresses', methods=['POST'])
+@auth_bp.route("/addresses", methods=["POST"])
 @jwt_required()
-@validate_json(['title'])
+@validate_json(["title"])
 @handle_exceptions
 def add_user_address():
     """
@@ -1416,15 +1327,10 @@ def add_user_address():
     data = request.get_json()
     address = get_auth_service().add_user_address(user_id, data)
 
-    return created_response(
-        data={
-            'address': address.to_dict()
-        },
-        message=get_translation('address_added_successfully')
-    )
+    return created_response(data={"address": address.to_dict()}, message=get_translation("address_added_successfully"))
 
 
-@auth_bp.route('/addresses/<int:address_id>', methods=['PUT', 'PATCH'])
+@auth_bp.route("/addresses/<int:address_id>", methods=["PUT", "PATCH"])
 @jwt_required()
 @validate_json(required_fields=None)  # Remove required fields for partial updates
 @handle_exceptions
@@ -1500,14 +1406,11 @@ def update_user_address(address_id):
     address = get_auth_service().update_user_address(user_id, address_id, data)
 
     return success_response(
-        data={
-            'address': address.to_dict()
-        },
-        message=get_translation('api.auth.address_updated_successfully')
+        data={"address": address.to_dict()}, message=get_translation("api.auth.address_updated_successfully")
     )
 
 
-@auth_bp.route('/addresses/<int:address_id>', methods=['DELETE'])
+@auth_bp.route("/addresses/<int:address_id>", methods=["DELETE"])
 @jwt_required()
 @handle_exceptions
 def delete_user_address(address_id):
@@ -1535,12 +1438,10 @@ def delete_user_address(address_id):
     user_id = get_jwt_identity()
     get_auth_service().delete_user_address(user_id, address_id)
 
-    return success_response(
-        message=get_translation('success.deleted')
-    )
+    return success_response(message=get_translation("success.deleted"))
 
 
-@auth_bp.route('/addresses/<int:address_id>/set-default', methods=['PATCH'])
+@auth_bp.route("/addresses/<int:address_id>/set-default", methods=["PATCH"])
 @jwt_required()
 @handle_exceptions
 def set_default_address(address_id):
@@ -1566,15 +1467,10 @@ def set_default_address(address_id):
     user_id = get_jwt_identity()
     address = get_auth_service().set_default_user_address(user_id, address_id)
 
-    return success_response(
-        data={
-            'address': address.to_dict()
-        },
-        message=get_translation('success.updated')
-    )
+    return success_response(data={"address": address.to_dict()}, message=get_translation("success.updated"))
 
 
-@auth_bp.route('/profile', methods=['PUT'])
+@auth_bp.route("/profile", methods=["PUT"])
 @jwt_required()
 @handle_exceptions
 def update_profile():
@@ -1623,13 +1519,14 @@ def update_profile():
     user_id = get_jwt_identity()
     data = request.get_json() or {}
     result = get_auth_service().update_user_profile_data(user_id, data)
-    user_data = result['user']
+    user_data = result["user"]
 
     # Add warning if phone update was attempted
-    if result['phone_update_attempted']:
-        current_phone = user_data.get('phone')
+    if result["phone_update_attempted"]:
+        current_phone = user_data.get("phone")
         # Log attempt to update phone through profile endpoint
         from business_app.utils.audit_logger import audit_logger, AuditEventType, AuditSeverity
+
         audit_logger.log_event(
             event_type=AuditEventType.SENSITIVE_DATA_ACCESS,
             action="phone_update_blocked_profile_endpoint",
@@ -1637,29 +1534,23 @@ def update_profile():
             resource_type="user_phone",
             resource_id=str(user_id),
             description="Blocked attempt to update phone number through profile endpoint",
-            additional_data={'attempted_phone': data.get('phone'), 'current_phone': current_phone},
+            additional_data={"attempted_phone": data.get("phone"), "current_phone": current_phone},
             success=False,
-            error_message="Phone number updates must be done through verification process"
+            error_message="Phone number updates must be done through verification process",
         )
         logger.warning(f"User {user_id} attempted to update phone directly through profile endpoint")
-        user_data['phone_change_instructions'] = get_translation('use_change_phone_endpoint')
+        user_data["phone_change_instructions"] = get_translation("use_change_phone_endpoint")
         return success_response(
-            data={
-                'user': user_data,
-                'warning': get_translation('error.forbidden')
-            },
-            message=get_translation('success.updated')
+            data={"user": user_data, "warning": get_translation("error.forbidden")},
+            message=get_translation("success.updated"),
         )
 
-    return success_response(
-        data={'user': user_data},
-        message=get_translation('profile_updated_successfully')
-    )
+    return success_response(data={"user": user_data}, message=get_translation("profile_updated_successfully"))
 
 
-@auth_bp.route('/change-phone', methods=['POST'])
+@auth_bp.route("/change-phone", methods=["POST"])
 @jwt_required()
-@validate_json(['new_phone'])
+@validate_json(["new_phone"])
 @rate_limit(5, 3600)  # 5 phone change requests per hour
 @handle_exceptions
 @log_request
@@ -1695,53 +1586,41 @@ def change_phone():
         description: Too many phone change requests
     """
     data = request.get_json()
-    new_phone = data.get('new_phone')
+    new_phone = data.get("new_phone")
     user_id = get_jwt_identity()
-    
+
     if phone_validator(new_phone):
-        return validation_error_response(
-            errors=[get_translation('error.validation.invalid_phone')]
-        )
+        return validation_error_response(errors=[get_translation("error.validation.invalid_phone")])
 
     user = User.query.get(user_id)
     if not user:
-        return not_found_response(
-            message=get_translation('error.not_found')
-        )
+        return not_found_response(message=get_translation("error.not_found"))
 
     # Check if it's the same as current phone
     if user.phone == new_phone:
-        return error_response(
-            message=get_translation('error.forbidden'),
-            status_code=400
-        )
-    
+        return error_response(message=get_translation("error.forbidden"), status_code=400)
+
     # Check if phone number is already in use by another user
-    existing_user = User.query.filter(
-        User.phone == new_phone,
-        User.id != user_id,
-        User.status != 'inactive'
-    ).first()
-    
+    existing_user = User.query.filter(User.phone == new_phone, User.id != user_id, User.status != "inactive").first()
+
     if existing_user:
         # Log suspicious activity
         from business_app.utils.audit_logger import audit_suspicious_activity
+
         audit_suspicious_activity(
             f"User {user_id} attempted to change to phone {new_phone} already in use by user {existing_user.id}",
-            additional_data={'target_phone': new_phone, 'existing_user_id': existing_user.id}
+            additional_data={"target_phone": new_phone, "existing_user_id": existing_user.id},
         )
-        return error_response(
-            message=get_translation('api.auth.email_already_exists'),
-            status_code=409
-        )
-    
+        return error_response(message=get_translation("api.auth.email_already_exists"), status_code=409)
+
     # Store pending phone number change request with audit
     auth_service = get_auth_service()
     pending_phone_key = f"pending_phone:{user_id}"
     auth_service.redis_client.setex(pending_phone_key, 1800, new_phone)  # 30 minutes expiry
-    
+
     # Log phone change request with audit
     from business_app.utils.audit_logger import audit_logger, AuditEventType, AuditSeverity
+
     audit_logger.log_event(
         event_type=AuditEventType.USER_UPDATED,
         action="phone_change_requested",
@@ -1749,34 +1628,28 @@ def change_phone():
         resource_type="user_phone",
         resource_id=str(user_id),
         description=f"Phone change requested from {user.phone} to {new_phone}",
-        old_values={'phone': user.phone},
-        new_values={'pending_phone': new_phone},
-        additional_data={
-            'current_phone': user.phone,
-            'requested_phone': new_phone,
-            'request_ip': request.remote_addr
-        }
+        old_values={"phone": user.phone},
+        new_values={"pending_phone": new_phone},
+        additional_data={"current_phone": user.phone, "requested_phone": new_phone, "request_ip": request.remote_addr},
     )
-    
+
     # Generate and send OTP to the new phone number
     success = auth_service.send_verification_sms(user_id, new_phone)
 
     if success:
         return success_response(
             data={
-                'current_phone': user.phone,
-                'new_phone_masked': new_phone[:3] + '***' + new_phone[-4:] if len(new_phone) > 7 else '***',
-                'expires_in': 1800  # 30 minutes
+                "current_phone": user.phone,
+                "new_phone_masked": new_phone[:3] + "***" + new_phone[-4:] if len(new_phone) > 7 else "***",
+                "expires_in": 1800,  # 30 minutes
             },
-            message=get_translation('success.sent')
+            message=get_translation("success.sent"),
         )
     else:
-        return internal_error_response(
-            message=get_translation('error.server_error')
-        )
+        return internal_error_response(message=get_translation("error.server_error"))
 
 
-@auth_bp.route('/cancel-phone-change', methods=['POST'])
+@auth_bp.route("/cancel-phone-change", methods=["POST"])
 @jwt_required()
 @handle_exceptions
 @log_request
@@ -1796,23 +1669,22 @@ def cancel_phone_change():
     """
     user_id = get_jwt_identity()
     auth_service = get_auth_service()
-    
+
     # Check if there's a pending phone change
     pending_phone_key = f"pending_phone:{user_id}"
     pending_phone = auth_service.redis_client.get(pending_phone_key)
-    
-    if not pending_phone:
-        return not_found_response(
-            message=get_translation('error.not_found')
-        )
 
-    pending_phone = pending_phone.decode('utf-8')
+    if not pending_phone:
+        return not_found_response(message=get_translation("error.not_found"))
+
+    pending_phone = pending_phone.decode("utf-8")
 
     # Remove pending phone change
     auth_service.redis_client.delete(pending_phone_key)
 
     # Log cancellation with audit
     from business_app.utils.audit_logger import audit_logger, AuditEventType, AuditSeverity
+
     audit_logger.log_event(
         event_type=AuditEventType.USER_UPDATED,
         action="phone_change_cancelled",
@@ -1820,17 +1692,15 @@ def cancel_phone_change():
         resource_type="user_phone",
         resource_id=str(user_id),
         description=f"Phone change to {pending_phone} was cancelled by user",
-        additional_data={'cancelled_phone': pending_phone}
+        additional_data={"cancelled_phone": pending_phone},
     )
 
-    return success_response(
-        message=get_translation('success.deleted')
-    )
+    return success_response(message=get_translation("success.deleted"))
 
 
-@auth_bp.route('/telegram-login', methods=['POST'])
+@auth_bp.route("/telegram-login", methods=["POST"])
 @rate_limit_by_telegram_id(100, 3600)  # 100 per hour PER TELEGRAM USER (not shared IP)
-@validate_json(['telegram_id'])
+@validate_json(["telegram_id"])
 @handle_exceptions
 @log_request
 def telegram_login():
@@ -1881,62 +1751,43 @@ def telegram_login():
     """
     logger.info("=== TELEGRAM LOGIN API ENDPOINT CALLED ===")
     data = request.get_json()
-    telegram_id = data['telegram_id']
-    
+    telegram_id = data["telegram_id"]
+
     logger.info(f"Telegram login request for user: {telegram_id}")
-    logger.info(f"Request data: telegram_id={telegram_id}, username={data.get('username')}, "
-               f"first_name={data.get('first_name')}, last_name={data.get('last_name')}")
-    
+    logger.info(
+        f"Request data: telegram_id={telegram_id}, username={data.get('username')}, "
+        f"first_name={data.get('first_name')}, last_name={data.get('last_name')}"
+    )
+
     try:
         # Try to authenticate existing telegram user
         logger.info("Calling auth service to authenticate telegram user")
         user, tokens = get_auth_service().authenticate_telegram_user(
             telegram_id=telegram_id,
-            username=data.get('username'),
-            first_name=data.get('first_name'),
-            last_name=data.get('last_name')
+            username=data.get("username"),
+            first_name=data.get("first_name"),
+            last_name=data.get("last_name"),
         )
         logger.info(f"Authentication successful for user: {user.id}")
-        
-        logger.info("Preparing successful response")
-        response_data = {
-            'success': True,
-            'data': {
-                'access_token': tokens['access_token'],
-                'refresh_token': tokens['refresh_token'],
-                'user': {
-                    'id': user.id,
-                    'telegram_id': user.telegram_id,
-                    'email': user.email,
-                    'phone': user.phone,
-                    'first_name': user.first_name,
-                    'last_name': user.last_name,
-                    'role': user.role.value if hasattr(user.role, 'value') else user.role,
-                    'status': user.status.value if hasattr(user.status, 'value') else user.status,
-                    'is_verified': user.is_verified,
-                    'is_premium': user.is_premium
-                }
-            }
-        }
-        
+
         logger.info(f"Returning successful response for user: {user.id}")
         logger.info("=== TELEGRAM LOGIN API SUCCESS ===")
         return success_response(
             data={
-                'access_token': tokens['access_token'],
-                'refresh_token': tokens['refresh_token'],
-                'user': {
-                    'id': user.id,
-                    'telegram_id': user.telegram_id,
-                    'email': user.email,
-                    'phone': user.phone,
-                    'first_name': user.first_name,
-                    'last_name': user.last_name,
-                    'role': user.role.value if hasattr(user.role, 'value') else user.role,
-                    'status': user.status.value if hasattr(user.status, 'value') else user.status,
-                    'is_verified': user.is_verified,
-                    'is_premium': user.is_premium
-                }
+                "access_token": tokens["access_token"],
+                "refresh_token": tokens["refresh_token"],
+                "user": {
+                    "id": user.id,
+                    "telegram_id": user.telegram_id,
+                    "email": user.email,
+                    "phone": user.phone,
+                    "first_name": user.first_name,
+                    "last_name": user.last_name,
+                    "role": user.role.value if hasattr(user.role, "value") else user.role,
+                    "status": user.status.value if hasattr(user.status, "value") else user.status,
+                    "is_verified": user.is_verified,
+                    "is_premium": user.is_premium,
+                },
             }
         )
 
@@ -1944,29 +1795,24 @@ def telegram_login():
         logger.error(f"Unauthorized error during telegram login: {e}")
         # User not found - create a temporary guest user or return specific error
         return error_response(
-            message=get_translation('api.auth.unauthorized'),
-            data={
-                'telegram_id': telegram_id,
-                'registration_required': True,
-                'error_code': 'USER_NOT_REGISTERED'
-            },
-            status_code=401
+            message=get_translation("api.auth.unauthorized"),
+            data={"telegram_id": telegram_id, "registration_required": True, "error_code": "USER_NOT_REGISTERED"},
+            status_code=401,
         )
     except Exception as e:
         logger.error(f"Unexpected error during telegram login: {e}")
         logger.error(f"Exception type: {type(e)}")
         import traceback
+
         logger.error(f"Traceback: {traceback.format_exc()}")
         logger.error("=== TELEGRAM LOGIN API ERROR ===")
 
-        return internal_error_response(
-            message=get_translation('api.auth.invalid_credentials')
-        )
+        return internal_error_response(message=get_translation("api.auth.invalid_credentials"))
 
 
-@auth_bp.route('/telegram-register', methods=['POST'])
+@auth_bp.route("/telegram-register", methods=["POST"])
 @rate_limit_by_telegram_id(30, 3600)  # 30 per hour PER TELEGRAM USER (not shared container IP)
-@validate_json(['telegram_id'])
+@validate_json(["telegram_id"])
 @handle_exceptions
 @log_request
 def telegram_register():
@@ -2023,127 +1869,125 @@ def telegram_register():
     """
     logger.info("=== TELEGRAM REGISTER API ENDPOINT CALLED (UNIFIED TABLE) ===")
     data = request.get_json()
-    telegram_id = data['telegram_id']
-    
+    telegram_id = data["telegram_id"]
+
     logger.info(f"Telegram registration request for user: {telegram_id}")
     logger.info(f"Request data: {data}")
-    
+
     try:
         # Check if user already exists in unified table
         existing_user = User.query.filter_by(telegram_id=str(telegram_id)).first()
-        
+
         if existing_user:
             logger.info(f"User already exists with telegram_id: {telegram_id}")
             # Return login response instead of error
             from business_app.services.token_service import TokenService
+
             token_service = TokenService()
             tokens = token_service.generate_tokens(existing_user)
-            
+
             # Check for cross-platform linking opportunities
             from business_app.services.cross_platform_sync_service import cross_platform_sync_service
+
             sync_suggestions = cross_platform_sync_service.suggest_account_linking(existing_user)
             platform_status = cross_platform_sync_service.get_user_platform_status(existing_user)
 
             return success_response(
                 data={
-                    'user': existing_user.to_dict(),
-                    'tokens': tokens,
-                    'platform_status': platform_status,
-                    'linking_suggestions': sync_suggestions
+                    "user": existing_user.to_dict(),
+                    "tokens": tokens,
+                    "platform_status": platform_status,
+                    "linking_suggestions": sync_suggestions,
                 },
-                message=get_translation('api.auth.email_already_exists')
+                message=get_translation("api.auth.email_already_exists"),
             )
-        
+
         # Check for potential account matches before creating new user
         from business_app.services.cross_platform_sync_service import cross_platform_sync_service
-        
+
         # Look for existing accounts with matching phone (if provided)
         potential_matches = []
-        if data.get('phone'):
-            potential_matches = cross_platform_sync_service.find_potential_matches(
-                phone=data['phone']
-            )
-        
+        if data.get("phone"):
+            potential_matches = cross_platform_sync_service.find_potential_matches(phone=data["phone"])
+
         # If matches found, suggest linking instead of creating new account
         if potential_matches:
             logger.info(f"Found {len(potential_matches)} potential account matches for telegram registration")
             return error_response(
-                message=get_translation('api.auth.email_already_exists'),
+                message=get_translation("api.auth.email_already_exists"),
                 data={
-                    'error_code': 'ACCOUNT_MATCH_FOUND',
-                    'potential_matches': [
+                    "error_code": "ACCOUNT_MATCH_FOUND",
+                    "potential_matches": [
                         {
-                            'user_id': match.id,
-                            'email': match.email,
-                            'name': f"{match.first_name} {match.last_name}".strip(),
-                            'registration_source': match.registration_source,
-                            'has_telegram': bool(match.telegram_id)
+                            "user_id": match.id,
+                            "email": match.email,
+                            "name": f"{match.first_name} {match.last_name}".strip(),
+                            "registration_source": match.registration_source,
+                            "has_telegram": bool(match.telegram_id),
                         }
                         for match in potential_matches[:3]  # Limit to 3 suggestions
                     ],
-                    'linking_options': [
+                    "linking_options": [
                         {
-                            'action': 'link_with_existing',
-                            'description': get_translation('api.auth.link_with_existing_description'),
-                            'endpoint': '/api/v1/auth/link-web-account'
+                            "action": "link_with_existing",
+                            "description": get_translation("api.auth.link_with_existing_description"),
+                            "endpoint": "/api/v1/auth/link-web-account",
                         }
-                    ]
+                    ],
                 },
-                status_code=409
+                status_code=409,
             )
-        
+
         # Create new telegram user in unified table
         logger.info("Creating new telegram user in unified table...")
-        
+
         user = User(
             telegram_id=str(telegram_id),
-            first_name=data.get('first_name', 'Telegram User'),
-            last_name=data.get('last_name', ''),
+            first_name=data.get("first_name", "Telegram User"),
+            last_name=data.get("last_name", ""),
             email=f"telegram_{telegram_id}@bluestream.local",  # Placeholder email
             phone=None,  # Phone will be collected later
             password_hash="telegram_user",  # Placeholder, no password needed
             role=UserRole.CUSTOMER,
             status=UserStatus.ACTIVE,
             is_verified=False,
-            registration_source='telegram',
-            preferred_language=data.get('language_code', 'en'),
+            registration_source="telegram",
+            preferred_language=data.get("language_code", "en"),
             # Bot-specific fields in unified table
-            telegram_username=data.get('username'),
+            telegram_username=data.get("username"),
             is_bot_active=True,
-            bot_state='{}',  # Empty initial state
-            last_bot_interaction=datetime.now(timezone.utc)
+            bot_state="{}",  # Empty initial state
+            last_bot_interaction=datetime.now(timezone.utc),
         )
-        
+
         db.session.add(user)
         db.session.commit()
-        
+
         # Generate tokens using TokenService
         from business_app.services.token_service import TokenService
+
         token_service = TokenService()
         tokens = token_service.generate_tokens(user)
-        
+
         logger.info(f"Successfully created telegram user with ID: {user.id}")
 
         return created_response(
-            data={
-                'user': user.to_dict(),
-                'tokens': tokens
-            },
-            message=get_translation('api.auth.registration_successful')
+            data={"user": user.to_dict(), "tokens": tokens}, message=get_translation("api.auth.registration_successful")
         )
-        
+
     except Exception as e:
         logger.error(f"Unexpected error during telegram registration: {e}")
         import traceback
+
         logger.error(f"Traceback: {traceback.format_exc()}")
         db.session.rollback()
 
-        return internal_error_response(message=get_translation('error.server_error'))
+        return internal_error_response(message=get_translation("error.server_error"))
 
 
-@auth_bp.route('/link-telegram', methods=['POST'])
+@auth_bp.route("/link-telegram", methods=["POST"])
 @jwt_required()
-@validate_json(['telegram_id'])
+@validate_json(["telegram_id"])
 @handle_exceptions
 @log_request
 def link_telegram():
@@ -2187,22 +2031,22 @@ def link_telegram():
 
     return success_response(
         data={
-            'user': {
-                'id': user.id,
-                'telegram_id': user.telegram_id,
-                'first_name': user.first_name,
-                'last_name': user.last_name,
-                'email': user.email,
-                'phone': user.phone
+            "user": {
+                "id": user.id,
+                "telegram_id": user.telegram_id,
+                "first_name": user.first_name,
+                "last_name": user.last_name,
+                "email": user.email,
+                "phone": user.phone,
             }
         },
-        message=get_translation('success.saved')
+        message=get_translation("success.saved"),
     )
 
 
-@auth_bp.route('/link-web-account', methods=['POST'])
+@auth_bp.route("/link-web-account", methods=["POST"])
 @rate_limit(10, 3600)  # 10 attempts per hour
-@validate_json(['telegram_id', 'email', 'password'])
+@validate_json(["telegram_id", "email", "password"])
 @handle_exceptions
 @log_request
 def link_web_account():
@@ -2241,34 +2085,34 @@ def link_web_account():
     """
     data = request.get_json()
     link_result = get_auth_service().link_web_account(
-        telegram_id=str(data['telegram_id']),
-        email=data['email'],
-        password=data['password'],
+        telegram_id=str(data["telegram_id"]),
+        email=data["email"],
+        password=data["password"],
     )
-    web_user = link_result['user']
-    tokens = link_result['tokens']
+    web_user = link_result["user"]
+    tokens = link_result["tokens"]
 
     return success_response(
         data={
-            'user': {
-                'id': web_user.id,
-                'telegram_id': web_user.telegram_id,
-                'email': web_user.email,
-                'phone': web_user.phone,
-                'first_name': web_user.first_name,
-                'last_name': web_user.last_name,
-                'role': web_user.role,
-                'status': web_user.status
+            "user": {
+                "id": web_user.id,
+                "telegram_id": web_user.telegram_id,
+                "email": web_user.email,
+                "phone": web_user.phone,
+                "first_name": web_user.first_name,
+                "last_name": web_user.last_name,
+                "role": web_user.role,
+                "status": web_user.status,
             },
-            'tokens': tokens
+            "tokens": tokens,
         },
-        message=get_translation('success.saved')
+        message=get_translation("success.saved"),
     )
 
 
-@auth_bp.route('/check-phone-availability', methods=['POST'])
+@auth_bp.route("/check-phone-availability", methods=["POST"])
 @rate_limit_by_telegram_id(30, 3600)  # 30 per hour per telegram user
-@validate_json(['phone', 'telegram_id'])
+@validate_json(["phone", "telegram_id"])
 @handle_exceptions
 @log_request
 def check_phone_availability():
@@ -2308,25 +2152,19 @@ def check_phone_availability():
     """
     data = request.get_json()
     availability = get_auth_service().check_phone_availability_for_telegram(
-        phone=data['phone'],
-        telegram_id=str(data['telegram_id']),
+        phone=data["phone"],
+        telegram_id=str(data["telegram_id"]),
     )
 
-    if availability['available']:
-        return success_response(
-            data=availability,
-            message=get_translation('api.auth.phone_available')
-        )
+    if availability["available"]:
+        return success_response(data=availability, message=get_translation("api.auth.phone_available"))
 
-    return success_response(
-        data=availability,
-        message=get_translation('api.auth.phone_already_registered')
-    )
+    return success_response(data=availability, message=get_translation("api.auth.phone_already_registered"))
 
 
-@auth_bp.route('/link-phone-account/send-otp', methods=['POST'])
+@auth_bp.route("/link-phone-account/send-otp", methods=["POST"])
 @rate_limit_by_telegram_id(5, 3600)  # 5 OTP requests per hour per telegram user
-@validate_json(['phone', 'telegram_id'])
+@validate_json(["phone", "telegram_id"])
 @handle_exceptions
 @log_request
 def link_phone_send_otp():
@@ -2359,23 +2197,20 @@ def link_phone_send_otp():
     """
     data = request.get_json()
     otp_result = get_auth_service().send_phone_link_otp(
-        phone=data['phone'],
-        telegram_id=str(data['telegram_id']),
+        phone=data["phone"],
+        telegram_id=str(data["telegram_id"]),
     )
     logger.info(
         "OTP sent for account linking: telegram_user=%s, phone=%s",
-        data.get('telegram_id'),
-        data.get('phone'),
+        data.get("telegram_id"),
+        data.get("phone"),
     )
-    return success_response(
-        data=otp_result,
-        message=get_translation('api.auth.otp_sent_success')
-    )
+    return success_response(data=otp_result, message=get_translation("api.auth.otp_sent_success"))
 
 
-@auth_bp.route('/link-phone-account/verify', methods=['POST'])
+@auth_bp.route("/link-phone-account/verify", methods=["POST"])
 @rate_limit_by_telegram_id(10, 3600)  # 10 verification attempts per hour
-@validate_json(['telegram_id', 'otp'])
+@validate_json(["telegram_id", "otp"])
 @handle_exceptions
 @log_request
 def link_phone_verify():
@@ -2408,25 +2243,21 @@ def link_phone_verify():
     """
     data = request.get_json()
     link_result = get_auth_service().verify_phone_link_and_merge_accounts(
-        telegram_id=str(data['telegram_id']),
-        otp=data['otp'],
+        telegram_id=str(data["telegram_id"]),
+        otp=data["otp"],
     )
-    logger.info("Successfully linked accounts: telegram_id=%s", data.get('telegram_id'))
-    
+    logger.info("Successfully linked accounts: telegram_id=%s", data.get("telegram_id"))
+
     return success_response(
-        data={
-            'user': link_result['user'].to_dict(),
-            'tokens': link_result['tokens'],
-            'linked': link_result['linked']
-        },
-        message=get_translation('api.auth.accounts_linked_successfully')
+        data={"user": link_result["user"].to_dict(), "tokens": link_result["tokens"], "linked": link_result["linked"]},
+        message=get_translation("api.auth.accounts_linked_successfully"),
     )
 
 
-@auth_bp.route('/sync-profile', methods=['POST'])
+@auth_bp.route("/sync-profile", methods=["POST"])
 @jwt_required()
 @handle_exceptions
-@log_request  
+@log_request
 def sync_profile():
     """
     Sync Profile Information Between Platforms
@@ -2466,19 +2297,20 @@ def sync_profile():
     """
     current_user_id = get_jwt_identity()
     data = request.get_json() or {}
-    
+
     user = User.query.get(current_user_id)
     if not user:
-        return not_found_response(message=get_translation('user_not_found'))
-    
+        return not_found_response(message=get_translation("user_not_found"))
+
     # Update fields based on sync source priority
-    sync_source = data.get('sync_source', 'web')
+    sync_source = data.get("sync_source", "web")
     updated_fields = []
-    
+
     # Phone numbers must be verified through the proper verification process
-    if data.get('phone'):
+    if data.get("phone"):
         # Log attempt to update phone through sync endpoint
         from business_app.utils.audit_logger import audit_logger, AuditEventType, AuditSeverity
+
         audit_logger.log_event(
             event_type=AuditEventType.SENSITIVE_DATA_ACCESS,
             action="phone_update_blocked_sync_endpoint",
@@ -2486,597 +2318,573 @@ def sync_profile():
             resource_type="user_phone",
             resource_id=str(current_user_id),
             description="Blocked attempt to update phone number through sync endpoint",
-            additional_data={
-                'attempted_phone': data['phone'], 
-                'current_phone': user.phone,
-                'sync_source': sync_source
-            },
+            additional_data={"attempted_phone": data["phone"], "current_phone": user.phone, "sync_source": sync_source},
             success=False,
-            error_message="Phone number updates must be done through verification process"
+            error_message="Phone number updates must be done through verification process",
         )
         logger.warning(f"User {current_user_id} attempted to update phone through sync endpoint from {sync_source}")
-    
+
     # Only update email if it's not a placeholder telegram email
-    if data.get('email') and not user.email.endswith('@bluestream.local'):
+    if data.get("email") and not user.email.endswith("@bluestream.local"):
         # Don't overwrite real email with telegram placeholder
         pass
-    elif data.get('email') and user.email.endswith('@bluestream.local'):
+    elif data.get("email") and user.email.endswith("@bluestream.local"):
         # Replace placeholder email with real one
-        user.email = data['email']
-        updated_fields.append('email')
-    
+        user.email = data["email"]
+        updated_fields.append("email")
+
     # Update names if source is telegram and current names are empty/placeholder
-    if sync_source == 'telegram':
-        if data.get('first_name') and (not user.first_name or user.first_name == 'Telegram User'):
-            user.first_name = data['first_name']
-            updated_fields.append('first_name')
-        if data.get('last_name') and not user.last_name:
-            user.last_name = data['last_name']
-            updated_fields.append('last_name')
-    
+    if sync_source == "telegram":
+        if data.get("first_name") and (not user.first_name or user.first_name == "Telegram User"):
+            user.first_name = data["first_name"]
+            updated_fields.append("first_name")
+        if data.get("last_name") and not user.last_name:
+            user.last_name = data["last_name"]
+            updated_fields.append("last_name")
+
     # Update language preference
-    if data.get('preferred_language'):
-        user.preferred_language = data['preferred_language']
-        updated_fields.append('preferred_language')
-    
+    if data.get("preferred_language"):
+        user.preferred_language = data["preferred_language"]
+        updated_fields.append("preferred_language")
+
     if updated_fields:
         from datetime import datetime, timezone
+
         user.updated_at = datetime.now(timezone.utc)
         db.session.commit()
 
     return success_response(
         data={
-            'updated_fields': updated_fields,
-            'user': {
-                'id': user.id,
-                'telegram_id': user.telegram_id,
-                'email': user.email,
-                'phone': user.phone,
-                'first_name': user.first_name,
-                'last_name': user.last_name,
-                'preferred_language': user.preferred_language,
-                'registration_source': user.registration_source
-            }
+            "updated_fields": updated_fields,
+            "user": {
+                "id": user.id,
+                "telegram_id": user.telegram_id,
+                "email": user.email,
+                "phone": user.phone,
+                "first_name": user.first_name,
+                "last_name": user.last_name,
+                "preferred_language": user.preferred_language,
+                "registration_source": user.registration_source,
+            },
         },
-        message=get_translation('success.updated')
+        message=get_translation("success.updated"),
     )
 
 
-
-
-@auth_bp.route('/admin/create-user', methods=['POST'])
+@auth_bp.route("/admin/create-user", methods=["POST"])
 @rate_limit(10, 3600)
-@validate_json(['email', 'password', 'first_name', 'last_name', 'role'])
-@swag_from({
-    'tags': ['Admin'],
-    'description': 'Create a new user (admin only)',
-    'security': [{'Bearer': []}],
-    'parameters': [
-        {
-            'name': 'body',
-            'in': 'body',
-            'required': True,
-            'schema': {
-                'type': 'object',
-                'properties': {
-                    'email': {'type': 'string', 'example': 'admin@aqua-element.uz'},
-                    'password': {'type': 'string', 'example': 'SecurePassword123'},
-                    'first_name': {'type': 'string', 'example': 'John'},
-                    'last_name': {'type': 'string', 'example': 'Admin'},
-                    'role': {'type': 'string', 'enum': ['admin', 'manager', 'operator', 'delivery_driver'], 'example': 'admin'},
-                    'phone': {'type': 'string', 'example': '+998901234567'}
+@validate_json(["email", "password", "first_name", "last_name", "role"])
+@swag_from(
+    {
+        "tags": ["Admin"],
+        "description": "Create a new user (admin only)",
+        "security": [{"Bearer": []}],
+        "parameters": [
+            {
+                "name": "body",
+                "in": "body",
+                "required": True,
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "email": {"type": "string", "example": "admin@aqua-element.uz"},
+                        "password": {"type": "string", "example": "SecurePassword123"},
+                        "first_name": {"type": "string", "example": "John"},
+                        "last_name": {"type": "string", "example": "Admin"},
+                        "role": {
+                            "type": "string",
+                            "enum": ["admin", "manager", "operator", "delivery_driver"],
+                            "example": "admin",
+                        },
+                        "phone": {"type": "string", "example": "+998901234567"},
+                    },
+                    "required": ["email", "password", "first_name", "last_name", "role"],
                 },
-                'required': ['email', 'password', 'first_name', 'last_name', 'role']
             }
-        }
-    ],
-    'responses': {
-        '201': {
-            'description': 'User created successfully',
-            'schema': {
-                'type': 'object',
-                'properties': {
-                    'success': {'type': 'boolean', 'example': True},
-                    'message': {'type': 'string', 'example': 'User created successfully'},
-                    'user': {
-                        'type': 'object',
-                        'properties': {
-                            'id': {'type': 'integer'},
-                            'email': {'type': 'string'},
-                            'role': {'type': 'string'},
-                            'status': {'type': 'string'}
-                        }
-                    }
-                }
-            }
+        ],
+        "responses": {
+            "201": {
+                "description": "User created successfully",
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "success": {"type": "boolean", "example": True},
+                        "message": {"type": "string", "example": "User created successfully"},
+                        "user": {
+                            "type": "object",
+                            "properties": {
+                                "id": {"type": "integer"},
+                                "email": {"type": "string"},
+                                "role": {"type": "string"},
+                                "status": {"type": "string"},
+                            },
+                        },
+                    },
+                },
+            },
+            "400": {"description": "Validation error"},
+            "403": {"description": "Insufficient permissions"},
+            "409": {"description": "User already exists"},
         },
-        '400': {'description': 'Validation error'},
-        '403': {'description': 'Insufficient permissions'},
-        '409': {'description': 'User already exists'}
     }
-})
+)
 def admin_create_user():
     """Create a new user (admin only)"""
     from business_app.middleware.auth_middleware import admin_required
     from flask_jwt_extended import jwt_required
-    
+
     # Apply decorators manually since we're inside the function
     @jwt_required()
     @admin_required
     def _create_user():
         try:
             data = request.get_json()
-            
+
             # Validate role
-            valid_roles = [UserRole.ADMIN.value, UserRole.MANAGER.value, UserRole.OPERATOR.value, UserRole.DELIVERY_DRIVER.value]
-            if data['role'] not in valid_roles:
-                return {
-                    'success': False,
-                    'message': f'Invalid role. Must be one of: {", ".join(valid_roles)}'
-                }, 400
+            valid_roles = [
+                UserRole.ADMIN.value,
+                UserRole.MANAGER.value,
+                UserRole.OPERATOR.value,
+                UserRole.DELIVERY_DRIVER.value,
+            ]
+            if data["role"] not in valid_roles:
+                return {"success": False, "message": f'Invalid role. Must be one of: {", ".join(valid_roles)}'}, 400
 
             # Create user using auth service
             auth_service = get_auth_service()
 
             try:
-                if data['role'] == UserRole.ADMIN.value:
+                if data["role"] == UserRole.ADMIN.value:
                     user = auth_service.create_admin_user(
-                        phone=data['phone'],
-                        email=data['email'],
-                        password=data['password'],
-                        first_name=data['first_name'],
-                        last_name=data['last_name']
+                        phone=data["phone"],
+                        email=data["email"],
+                        password=data["password"],
+                        first_name=data["first_name"],
+                        last_name=data["last_name"],
                     )
                 else:
                     # Create regular user with specified role
                     user, tokens = auth_service.register_user(
-                        email=data['email'],
-                        password=data['password'],
-                        phone=data.get('phone', ''),
-                        first_name=data['first_name'],
-                        last_name=data['last_name'],
-                        role=data['role'],
-                        status='active',
+                        email=data["email"],
+                        password=data["password"],
+                        phone=data.get("phone", ""),
+                        first_name=data["first_name"],
+                        last_name=data["last_name"],
+                        role=data["role"],
+                        status="active",
                         email_verified_at=datetime.now(timezone.utc),
-                        is_verified=True
+                        is_verified=True,
                     )
-                
+
                 logger.info(f"Admin created new user: {user.email} with role {user.role}")
-                
+
                 return {
-                    'success': True,
-                    'message': 'User created successfully',
-                    'user': {
-                        'id': user.id,
-                        'email': user.email,
-                        'first_name': user.first_name,
-                        'last_name': user.last_name,
-                        'role': user.role.value if hasattr(user.role, 'value') else user.role,
-                        'status': user.status.value if hasattr(user.status, 'value') else user.status,
-                        'created_at': user.created_at.isoformat() if user.created_at else None
-                    }
+                    "success": True,
+                    "message": "User created successfully",
+                    "user": {
+                        "id": user.id,
+                        "email": user.email,
+                        "first_name": user.first_name,
+                        "last_name": user.last_name,
+                        "role": user.role.value if hasattr(user.role, "value") else user.role,
+                        "status": user.status.value if hasattr(user.status, "value") else user.status,
+                        "created_at": user.created_at.isoformat() if user.created_at else None,
+                    },
                 }, 201
-                
+
             except ConflictError as e:
-                return {'success': False, 'message': str(e)}, 409
+                return {"success": False, "message": str(e)}, 409
             except ValidationError as e:
-                return {'success': False, 'message': str(e), 'errors': e.details}, 400
-            
+                return {"success": False, "message": str(e), "errors": e.details}, 400
+
         except Exception as e:
             logger.error(f"Error in admin create user: {e}")
-            return {'success': False, 'message': get_translation('error.server_error')}, 500
-    
+            return {"success": False, "message": get_translation("error.server_error")}, 500
+
     return _create_user()
 
 
-@auth_bp.route('/admin/users', methods=['GET'])
-@swag_from({
-    'tags': ['Admin'],
-    'description': 'Get list of all users (admin/manager only)',
-    'security': [{'Bearer': []}],
-    'parameters': [
-        {
-            'name': 'page',
-            'in': 'query',
-            'type': 'integer',
-            'default': 1,
-            'description': 'Page number'
+@auth_bp.route("/admin/users", methods=["GET"])
+@swag_from(
+    {
+        "tags": ["Admin"],
+        "description": "Get list of all users (admin/manager only)",
+        "security": [{"Bearer": []}],
+        "parameters": [
+            {"name": "page", "in": "query", "type": "integer", "default": 1, "description": "Page number"},
+            {"name": "per_page", "in": "query", "type": "integer", "default": 20, "description": "Items per page"},
+            {"name": "role", "in": "query", "type": "string", "description": "Filter by role"},
+            {"name": "status", "in": "query", "type": "string", "description": "Filter by status"},
+        ],
+        "responses": {
+            "200": {
+                "description": "Users retrieved successfully",
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "success": {"type": "boolean", "example": True},
+                        "users": {"type": "array"},
+                        "pagination": {"type": "object"},
+                    },
+                },
+            },
+            "403": {"description": "Insufficient permissions"},
         },
-        {
-            'name': 'per_page',
-            'in': 'query',
-            'type': 'integer',
-            'default': 20,
-            'description': 'Items per page'
-        },
-        {
-            'name': 'role',
-            'in': 'query',
-            'type': 'string',
-            'description': 'Filter by role'
-        },
-        {
-            'name': 'status',
-            'in': 'query',
-            'type': 'string',
-            'description': 'Filter by status'
-        }
-    ],
-    'responses': {
-        '200': {
-            'description': 'Users retrieved successfully',
-            'schema': {
-                'type': 'object',
-                'properties': {
-                    'success': {'type': 'boolean', 'example': True},
-                    'users': {'type': 'array'},
-                    'pagination': {'type': 'object'}
-                }
-            }
-        },
-        '403': {'description': 'Insufficient permissions'}
     }
-})
+)
 def admin_get_users():
     """Get list of all users (admin/manager only)"""
     from business_app.middleware.auth_middleware import manager_or_admin_required
     from flask_jwt_extended import jwt_required
-    
+
     @jwt_required()
     @manager_or_admin_required
     def _get_users():
         try:
-            page = request.args.get('page', 1, type=int)
-            per_page = min(request.args.get('per_page', 20, type=int), 100)
-            role_filter = request.args.get('role')
-            status_filter = request.args.get('status')
-            
+            page = request.args.get("page", 1, type=int)
+            per_page = min(request.args.get("per_page", 20, type=int), 100)
+            role_filter = request.args.get("role")
+            status_filter = request.args.get("status")
+
             # Build query
             query = User.query
-            
+
             if role_filter:
                 query = query.filter(User.role == role_filter)
-            
+
             if status_filter:
                 query = query.filter(User.status == status_filter)
-            
+
             # Paginate
-            pagination = query.paginate(
-                page=page,
-                per_page=per_page,
-                error_out=False
-            )
-            
+            pagination = query.paginate(page=page, per_page=per_page, error_out=False)
+
             users = []
             for user in pagination.items:
-                users.append({
-                    'id': user.id,
-                    'email': user.email,
-                    'first_name': user.first_name,
-                    'last_name': user.last_name,
-                    'phone': user.phone,
-                    'role': user.role.value if hasattr(user.role, 'value') else user.role,
-                    'status': user.status.value if hasattr(user.status, 'value') else user.status,
-                    'is_verified': user.is_verified,
-                    'email_verified': user.email_verified_at is not None,
-                    'phone_verified': user.phone_verified_at is not None,
-                    'last_login': user.last_login.isoformat() if user.last_login else None,
-                    'created_at': user.created_at.isoformat() if user.created_at else None,
-                    'registration_source': user.registration_source,
-                    'telegram_id': user.telegram_id
-                })
-            
+                users.append(
+                    {
+                        "id": user.id,
+                        "email": user.email,
+                        "first_name": user.first_name,
+                        "last_name": user.last_name,
+                        "phone": user.phone,
+                        "role": user.role.value if hasattr(user.role, "value") else user.role,
+                        "status": user.status.value if hasattr(user.status, "value") else user.status,
+                        "is_verified": user.is_verified,
+                        "email_verified": user.email_verified_at is not None,
+                        "phone_verified": user.phone_verified_at is not None,
+                        "last_login": user.last_login.isoformat() if user.last_login else None,
+                        "created_at": user.created_at.isoformat() if user.created_at else None,
+                        "registration_source": user.registration_source,
+                        "telegram_id": user.telegram_id,
+                    }
+                )
+
             return {
-                'success': True,
-                'users': users,
-                'pagination': {
-                    'page': page,
-                    'per_page': per_page,
-                    'total': pagination.total,
-                    'pages': pagination.pages,
-                    'has_next': pagination.has_next,
-                    'has_prev': pagination.has_prev
-                }
+                "success": True,
+                "users": users,
+                "pagination": {
+                    "page": page,
+                    "per_page": per_page,
+                    "total": pagination.total,
+                    "pages": pagination.pages,
+                    "has_next": pagination.has_next,
+                    "has_prev": pagination.has_prev,
+                },
             }, 200
-            
+
         except Exception as e:
             logger.error(f"Error in admin get users: {e}")
-            return {'success': False, 'message': get_translation('error.server_error')}, 500
-    
+            return {"success": False, "message": get_translation("error.server_error")}, 500
+
     return _get_users()
 
 
-@auth_bp.route('/orders/summary', methods=['GET'])
+@auth_bp.route("/orders/summary", methods=["GET"])
 @jwt_required()
 @handle_exceptions
 def get_orders_summary():
     """Get user orders summary across all platforms"""
     user_id = get_jwt_identity()
-    
+
     try:
         from business_app.models.order import Order
         from sqlalchemy import func
-        
+
         # Get total orders count
         total_orders = Order.query.filter_by(user_id=user_id).count()
-        
+
         # Get orders by status
-        order_stats = db.session.query(
-            Order.status,
-            func.count(Order.id).label('count')
-        ).filter_by(user_id=user_id).group_by(Order.status).all()
-        
+        order_stats = (
+            db.session.query(Order.status, func.count(Order.id).label("count"))
+            .filter_by(user_id=user_id)
+            .group_by(Order.status)
+            .all()
+        )
+
         # Get orders by platform/source
-        platform_stats = db.session.query(
-            Order.order_source,
-            func.count(Order.id).label('count')
-        ).filter_by(user_id=user_id).group_by(Order.order_source).all()
-        
+        platform_stats = (
+            db.session.query(Order.order_source, func.count(Order.id).label("count"))
+            .filter_by(user_id=user_id)
+            .group_by(Order.order_source)
+            .all()
+        )
+
         # Get recent orders
-        recent_orders = Order.query.filter_by(user_id=user_id).order_by(
-            Order.created_at.desc()
-        ).limit(5).all()
-        
+        recent_orders = Order.query.filter_by(user_id=user_id).order_by(Order.created_at.desc()).limit(5).all()
+
         return success_response(
             data={
-                'total_orders': total_orders,
-                'order_stats': [{'status': stat.status, 'count': stat.count} for stat in order_stats],
-                'platform_stats': [{'platform': stat.order_source, 'count': stat.count} for stat in platform_stats],
-                'recent_orders': [{
-                    'id': order.id,
-                    'order_number': order.order_number,
-                    'status': order.status,
-                    'platform': order.order_source,
-                    'total_amount': float(order.total_amount),
-                    'created_at': order.created_at.isoformat()
-                } for order in recent_orders]
+                "total_orders": total_orders,
+                "order_stats": [{"status": stat.status, "count": stat.count} for stat in order_stats],
+                "platform_stats": [{"platform": stat.order_source, "count": stat.count} for stat in platform_stats],
+                "recent_orders": [
+                    {
+                        "id": order.id,
+                        "order_number": order.order_number,
+                        "status": order.status,
+                        "platform": order.order_source,
+                        "total_amount": float(order.total_amount),
+                        "created_at": order.created_at.isoformat(),
+                    }
+                    for order in recent_orders
+                ],
             }
         )
     except Exception as e:
         logger.error(f"Failed to get orders summary: {e}")
-        return internal_error_response(message=get_translation('error.server_error'))
+        return internal_error_response(message=get_translation("error.server_error"))
 
 
-@auth_bp.route('/sync-platform-data', methods=['POST'])
+@auth_bp.route("/sync-platform-data", methods=["POST"])
 @jwt_required()
-@validate_json(['platform'])
+@validate_json(["platform"])
 @handle_exceptions
 def sync_platform_data():
     """Sync user data across platforms"""
     user_id = get_jwt_identity()
     data = request.get_json()
-    platform = data.get('platform')
-    
-    if platform not in ['web', 'telegram']:
-        return error_response(message=get_translation('error.forbidden'), status_code=400)
-    
+    platform = data.get("platform")
+
+    if platform not in ["web", "telegram"]:
+        return error_response(message=get_translation("error.forbidden"), status_code=400)
+
     try:
         # Update user's last platform activity
         user = User.query.get(user_id)
         if user:
             user.last_platform_activity = platform
             db.session.commit()
-        
+
         # Sync orders, addresses, and other data
-        sync_results = {
-            'orders_synced': 0,
-            'addresses_synced': 0,
-            'profile_synced': True
-        }
-        
+        sync_results = {"orders_synced": 0, "addresses_synced": 0, "profile_synced": True}
+
         # In future implementation, this would sync actual data between platforms
         # For now, we'll just return success
-        
-        return success_response(
-            data=sync_results,
-            message=get_translation('success.updated')
-        )
+
+        return success_response(data=sync_results, message=get_translation("success.updated"))
     except Exception as e:
         logger.error(f"Failed to sync platform data: {e}")
-        return internal_error_response(message=get_translation('error.server_error'))
+        return internal_error_response(message=get_translation("error.server_error"))
 
 
-@auth_bp.route('/export-data', methods=['POST'])
+@auth_bp.route("/export-data", methods=["POST"])
 @jwt_required()
-@rate_limit(max_requests=2, window_seconds=3600, per='user')  # 2 data exports per hour per user
+@rate_limit(max_requests=2, window_seconds=3600, per="user")  # 2 data exports per hour per user
 @handle_exceptions
 def export_account_data():
     """Export user account data for download"""
     user_id = get_jwt_identity()
-    
+
     try:
         user = User.query.get(user_id)
         if not user:
-            return not_found_response(message=get_translation('error.not_found'))
-        
+            return not_found_response(message=get_translation("error.not_found"))
+
         # Collect user data
         from business_app.models.order import Order
         from business_app.models.user import UserAddress
-        
+
         orders = Order.query.filter_by(user_id=user_id).all()
         addresses = UserAddress.query.filter_by(user_id=user_id).all()
-        
+
         export_data = {
-            'user_profile': {
-                'id': user.id,
-                'email': user.email,
-                'phone': user.phone,
-                'first_name': user.first_name,
-                'last_name': user.last_name,
-                'date_of_birth': user.date_of_birth.isoformat() if user.date_of_birth else None,
-                'gender': user.gender,
-                'preferred_language': user.preferred_language,
-                'status': user.status.value if hasattr(user.status, 'value') else user.status,
-                'registration_source': user.registration_source,
-                'created_at': user.created_at.isoformat() if user.created_at else None,
-                'email_verified_at': user.email_verified_at.isoformat() if user.email_verified_at else None,
-                'phone_verified_at': user.phone_verified_at.isoformat() if user.phone_verified_at else None
+            "user_profile": {
+                "id": user.id,
+                "email": user.email,
+                "phone": user.phone,
+                "first_name": user.first_name,
+                "last_name": user.last_name,
+                "date_of_birth": user.date_of_birth.isoformat() if user.date_of_birth else None,
+                "gender": user.gender,
+                "preferred_language": user.preferred_language,
+                "status": user.status.value if hasattr(user.status, "value") else user.status,
+                "registration_source": user.registration_source,
+                "created_at": user.created_at.isoformat() if user.created_at else None,
+                "email_verified_at": user.email_verified_at.isoformat() if user.email_verified_at else None,
+                "phone_verified_at": user.phone_verified_at.isoformat() if user.phone_verified_at else None,
             },
-            'orders': [{
-                'id': order.id,
-                'order_number': order.order_number,
-                'status': order.status,
-                'platform': order.order_source,
-                'total_amount': float(order.total_amount),
-                'created_at': order.created_at.isoformat()
-            } for order in orders],
-            'addresses': [{
-                'id': addr.id,
-                'title': addr.title,
-                'full_address': addr.full_address,
-                'city': addr.city,
-                'is_default': addr.is_default,
-                'is_business': addr.is_business
-            } for addr in addresses],
-            'export_date': db.func.now().isoformat()
+            "orders": [
+                {
+                    "id": order.id,
+                    "order_number": order.order_number,
+                    "status": order.status,
+                    "platform": order.order_source,
+                    "total_amount": float(order.total_amount),
+                    "created_at": order.created_at.isoformat(),
+                }
+                for order in orders
+            ],
+            "addresses": [
+                {
+                    "id": addr.id,
+                    "title": addr.title,
+                    "full_address": addr.full_address,
+                    "city": addr.city,
+                    "is_default": addr.is_default,
+                    "is_business": addr.is_business,
+                }
+                for addr in addresses
+            ],
+            "export_date": db.func.now().isoformat(),
         }
-        
+
         import json
         from flask import Response
-        
+
         json_data = json.dumps(export_data, indent=2, ensure_ascii=False)
-        
+
         return Response(
             json_data,
-            mimetype='application/json',
-            headers={
-                'Content-Disposition': f'attachment; filename=account-data-{user_id}.json'
-            }
+            mimetype="application/json",
+            headers={"Content-Disposition": f"attachment; filename=account-data-{user_id}.json"},
         )
     except Exception as e:
         logger.error(f"Failed to export account data: {e}")
-        return internal_error_response(message=get_translation('error.server_error'))
+        return internal_error_response(message=get_translation("error.server_error"))
 
 
-
-
-@auth_bp.route('/validate-token', methods=['POST'])
+@auth_bp.route("/validate-token", methods=["POST"])
 @jwt_required()
 @handle_exceptions
 def validate_token():
     """Validate current token integrity"""
     try:
         from business_app.services.token_service import TokenService
+
         token_service = TokenService()
-        
+
         # Get token from header
-        auth_header = request.headers.get('Authorization', '')
-        if not auth_header.startswith('Bearer '):
-            return unauthorized_response(message=get_translation('api.auth.unauthorized'))
-        
-        token = auth_header.split(' ')[1]
+        auth_header = request.headers.get("Authorization", "")
+        if not auth_header.startswith("Bearer "):
+            return unauthorized_response(message=get_translation("api.auth.unauthorized"))
+
+        token = auth_header.split(" ")[1]
         result = token_service.validate_token_integrity(token)
-        
-        if result['valid']:
+
+        if result["valid"]:
             return success_response(
                 data={
-                    'user_id': result['user'].id,
-                    'email': result['user'].email,
-                    'role': result['user'].role,
-                    'verified': result['user'].is_verified
+                    "user_id": result["user"].id,
+                    "email": result["user"].email,
+                    "role": result["user"].role,
+                    "verified": result["user"].is_verified,
                 },
-                message=get_translation('success.saved')
+                message=get_translation("success.saved"),
             )
         else:
-            return unauthorized_response(message=result['reason'])
-            
+            return unauthorized_response(message=result["reason"])
+
     except Exception as e:
         logger.error(f"Token validation failed: {e}")
-        return unauthorized_response(message=get_translation('api.auth.token_invalid'))
+        return unauthorized_response(message=get_translation("api.auth.token_invalid"))
 
 
-@auth_bp.route('/sessions', methods=['GET'])
+@auth_bp.route("/sessions", methods=["GET"])
 @jwt_required()
 @handle_exceptions
 def get_user_sessions():
     """Get all active sessions for the current user"""
     user_id = get_jwt_identity()
-    
+
     try:
         from business_app.services.token_service import TokenService
+
         token_service = TokenService()
-        
+
         sessions = token_service.get_user_sessions(user_id)
-        
+
         # Format sessions for response
         formatted_sessions = []
         for session in sessions:
-            formatted_sessions.append({
-                'session_id': session.get('session_id'),
-                'platform': session.get('platform'),
-                'ip_address': session.get('ip'),
-                'user_agent': session.get('user_agent'),
-                'created_at': session.get('created_at'),
-                'last_refresh': session.get('last_refresh'),
-                'is_current': session.get('session_id') == get_jwt().get('session_id')
-            })
-        
-        return success_response(
-            data={
-                'sessions': formatted_sessions,
-                'total_sessions': len(formatted_sessions)
-            }
-        )
-        
+            formatted_sessions.append(
+                {
+                    "session_id": session.get("session_id"),
+                    "platform": session.get("platform"),
+                    "ip_address": session.get("ip"),
+                    "user_agent": session.get("user_agent"),
+                    "created_at": session.get("created_at"),
+                    "last_refresh": session.get("last_refresh"),
+                    "is_current": session.get("session_id") == get_jwt().get("session_id"),
+                }
+            )
+
+        return success_response(data={"sessions": formatted_sessions, "total_sessions": len(formatted_sessions)})
+
     except Exception as e:
         logger.error(f"Failed to get user sessions: {e}")
-        return internal_error_response(message=get_translation('error.server_error'))
+        return internal_error_response(message=get_translation("error.server_error"))
 
 
-@auth_bp.route('/sessions/<session_id>', methods=['DELETE'])
+@auth_bp.route("/sessions/<session_id>", methods=["DELETE"])
 @jwt_required()
 @handle_exceptions
 def revoke_session(session_id):
     """Revoke a specific session"""
     user_id = get_jwt_identity()
-    current_session_id = get_jwt().get('session_id')
-    
+    current_session_id = get_jwt().get("session_id")
+
     try:
         from business_app.services.token_service import TokenService
+
         token_service = TokenService()
-        
+
         # Get user sessions to find the target session
         sessions = token_service.get_user_sessions(user_id)
         target_session = None
-        
+
         for session in sessions:
-            if session.get('session_id') == session_id:
+            if session.get("session_id") == session_id:
                 target_session = session
                 break
-        
+
         if not target_session:
-            return not_found_response(message=get_translation('error.not_found'))
-        
+            return not_found_response(message=get_translation("error.not_found"))
+
         # Blacklist tokens for this session with proper expiry
-        if 'access_token_jti' in target_session:
-            access_expires = current_app.config.get('JWT_ACCESS_TOKEN_EXPIRES', timedelta(hours=1))
-            token_service.blacklist_token(target_session['access_token_jti'], expires_delta=access_expires)
-        if 'refresh_token_jti' in target_session:
-            refresh_expires = current_app.config.get('JWT_REFRESH_TOKEN_EXPIRES', timedelta(days=30))
-            token_service.blacklist_token(target_session['refresh_token_jti'], expires_delta=refresh_expires)
-        
+        if "access_token_jti" in target_session:
+            access_expires = current_app.config.get("JWT_ACCESS_TOKEN_EXPIRES", timedelta(hours=1))
+            token_service.blacklist_token(target_session["access_token_jti"], expires_delta=access_expires)
+        if "refresh_token_jti" in target_session:
+            refresh_expires = current_app.config.get("JWT_REFRESH_TOKEN_EXPIRES", timedelta(days=30))
+            token_service.blacklist_token(target_session["refresh_token_jti"], expires_delta=refresh_expires)
+
         # Remove session info
         token_service._remove_session_info(user_id, session_id)
-        
+
         # Check if user revoked their current session
         is_current_session = session_id == current_session_id
 
         return success_response(
-            data={
-                'revoked_session_id': session_id,
-                'is_current_session': is_current_session
-            },
-            message=get_translation('success.deleted')
+            data={"revoked_session_id": session_id, "is_current_session": is_current_session},
+            message=get_translation("success.deleted"),
         )
-        
+
     except Exception as e:
         logger.error(f"Failed to revoke session {session_id}: {e}")
-        return internal_error_response(message=get_translation('error.server_error'))
+        return internal_error_response(message=get_translation("error.server_error"))
 
 
-
-
-@auth_bp.route('/logout', methods=['POST'])
+@auth_bp.route("/logout", methods=["POST"])
 @jwt_required()
 @handle_exceptions
 def logout():
@@ -3104,23 +2912,24 @@ def logout():
     """
     user_id = get_jwt_identity()
     claims = get_jwt()
-    jti = claims['jti']
-    session_id = claims.get('session_id')
+    jti = claims["jti"]
+    session_id = claims.get("session_id")
 
     try:
         from business_app.services.token_service import TokenService
+
         token_service = TokenService()
 
         # Blacklist the current token with proper expiry
         # Get the actual token from Authorization header to extract proper expiry
-        auth_header = request.headers.get('Authorization', '')
-        if auth_header.startswith('Bearer '):
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
             current_token = auth_header[7:]  # Remove "Bearer " prefix
             blacklisted = token_service.blacklist_token_by_string(current_token)
             logger.info(f"Token blacklisted for user {user_id}: {blacklisted}")
         else:
             # Fallback to JTI with default expiry
-            access_expires = current_app.config.get('JWT_ACCESS_TOKEN_EXPIRES', timedelta(hours=1))
+            access_expires = current_app.config.get("JWT_ACCESS_TOKEN_EXPIRES", timedelta(hours=1))
             blacklisted = token_service.blacklist_token(jti, expires_delta=access_expires)
             logger.info(f"Token JTI blacklisted for user {user_id}: {blacklisted}")
 
@@ -3131,7 +2940,7 @@ def logout():
 
         # Create response and clear JWT cookies
         # Handle both tuple and Response object returns from success_response
-        response_result = success_response(message=get_translation('api.auth.logout_successful'))
+        response_result = success_response(message=get_translation("api.auth.logout_successful"))
 
         if isinstance(response_result, tuple):
             response = response_result[0]  # Extract response object from tuple
@@ -3146,33 +2955,33 @@ def logout():
 
         # Also manually clear CSRF cookies (Flask-JWT-Extended only clears JWT cookies)
         # Get cookie configuration from app config
-        cookie_domain = current_app.config.get('JWT_COOKIE_DOMAIN', None)
-        cookie_path = current_app.config.get('JWT_COOKIE_PATH', '/')
-        cookie_secure = current_app.config.get('JWT_COOKIE_SECURE', False)
-        cookie_samesite = current_app.config.get('JWT_COOKIE_SAMESITE', 'Lax')
+        cookie_domain = current_app.config.get("JWT_COOKIE_DOMAIN", None)
+        cookie_path = current_app.config.get("JWT_COOKIE_PATH", "/")
+        cookie_secure = current_app.config.get("JWT_COOKIE_SECURE", False)
+        cookie_samesite = current_app.config.get("JWT_COOKIE_SAMESITE", "Lax")
 
         # Clear CSRF token cookies explicitly
         response.set_cookie(
-            'csrf_access_token',
-            value='',
+            "csrf_access_token",
+            value="",
             max_age=0,
             expires=0,
             path=cookie_path,
             domain=cookie_domain,
             secure=cookie_secure,
             httponly=False,
-            samesite=cookie_samesite
+            samesite=cookie_samesite,
         )
         response.set_cookie(
-            'csrf_refresh_token',
-            value='',
+            "csrf_refresh_token",
+            value="",
             max_age=0,
             expires=0,
             path=cookie_path,
             domain=cookie_domain,
             secure=cookie_secure,
             httponly=False,
-            samesite=cookie_samesite
+            samesite=cookie_samesite,
         )
 
         logger.info(f"JWT cookies cleared, response Set-Cookie headers: {response.headers.getlist('Set-Cookie')}")
@@ -3182,45 +2991,48 @@ def logout():
 
     except Exception as e:
         logger.error(f"Logout failed for user {user_id}: {e}", exc_info=True)
-        return internal_error_response(message=get_translation('error.server_error'))
+        return internal_error_response(message=get_translation("error.server_error"))
 
 
-@auth_bp.route('/logout-all', methods=['POST'])
-@auth_bp.route('/sessions/revoke-all', methods=['POST'])  # Alias for backwards compatibility
+@auth_bp.route("/logout-all", methods=["POST"])
+@auth_bp.route("/sessions/revoke-all", methods=["POST"])  # Alias for backwards compatibility
 @jwt_required()
 @handle_exceptions
 def logout_all():
     """Logout from all sessions or revoke all sessions except current"""
     user_id = get_jwt_identity()
-    current_session_id = get_jwt().get('session_id')
-    
+    current_session_id = get_jwt().get("session_id")
+
     # Check if this is a revoke-all request (exclude current session)
-    exclude_current = '/sessions/revoke-all' in request.path
-    
+    exclude_current = "/sessions/revoke-all" in request.path
+
     try:
         from business_app.services.token_service import TokenService
+
         token_service = TokenService()
-        
+
         if exclude_current:
             # Revoke all tokens except current session
             success = token_service.revoke_user_tokens(user_id, exclude_session_id=current_session_id)
-            message = get_translation('success.deleted') if success else get_translation('error.server_error')
+            message = get_translation("success.deleted") if success else get_translation("error.server_error")
         else:
             # Revoke all user tokens including current
             success = token_service.revoke_user_tokens(user_id)
-            message = get_translation('api.auth.logout_successful') if success else get_translation('error.server_error')
-        
+            message = (
+                get_translation("api.auth.logout_successful") if success else get_translation("error.server_error")
+            )
+
         if success:
             return success_response(message=message)
         else:
             return internal_error_response(message=message)
-            
+
     except Exception as e:
         logger.error(f"Logout/revoke all failed for user {user_id}: {e}")
-        return internal_error_response(message=get_translation('error.server_error'))
+        return internal_error_response(message=get_translation("error.server_error"))
 
 
-@auth_bp.route('/platform-status', methods=['GET'])
+@auth_bp.route("/platform-status", methods=["GET"])
 @jwt_required_with_refresh()
 def get_platform_status():
     """
@@ -3250,24 +3062,19 @@ def get_platform_status():
     user = User.query.get(user_id)
 
     if not user:
-        return not_found_response(message=get_translation('error.not_found'))
+        return not_found_response(message=get_translation("error.not_found"))
 
     from business_app.services.cross_platform_sync_service import cross_platform_sync_service
-    
+
     platform_status = cross_platform_sync_service.get_user_platform_status(user)
     linking_suggestions = cross_platform_sync_service.suggest_account_linking(user)
 
-    return success_response(
-        data={
-            'platform_status': platform_status,
-            'linking_suggestions': linking_suggestions
-        }
-    )
+    return success_response(data={"platform_status": platform_status, "linking_suggestions": linking_suggestions})
 
 
-@auth_bp.route('/suggest-auto-link', methods=['POST'])
+@auth_bp.route("/suggest-auto-link", methods=["POST"])
 @jwt_required_with_refresh()
-@validate_json(['target_user_id'])
+@validate_json(["target_user_id"])
 def suggest_auto_link():
     """
     Suggest Automatic Account Linking
@@ -3301,76 +3108,67 @@ def suggest_auto_link():
     """
     data = request.get_json()
     current_user_id = get_jwt_identity()
-    target_user_id = data['target_user_id']
-    confirm = data.get('confirm', False)
-    
+    target_user_id = data["target_user_id"]
+    confirm = data.get("confirm", False)
+
     current_user = User.query.get(current_user_id)
     target_user = User.query.get(target_user_id)
-    
+
     if not current_user or not target_user:
-        return not_found_response(message=get_translation('error.not_found'))
-    
+        return not_found_response(message=get_translation("error.not_found"))
+
     from business_app.services.cross_platform_sync_service import cross_platform_sync_service
-    
+
     if not confirm:
         # Just analyze and return suggestion
         if current_user.registration_source == target_user.registration_source:
-            return conflict_response(message=get_translation('error.forbidden'))
-        
+            return conflict_response(message=get_translation("error.forbidden"))
+
         return success_response(
             data={
-                'link_preview': {
-                    'primary_account': {
-                        'id': current_user.id,
-                        'email': current_user.email,
-                        'platform': current_user.registration_source,
-                        'name': current_user.full_name
+                "link_preview": {
+                    "primary_account": {
+                        "id": current_user.id,
+                        "email": current_user.email,
+                        "platform": current_user.registration_source,
+                        "name": current_user.full_name,
                     },
-                    'secondary_account': {
-                        'id': target_user.id,
-                        'email': target_user.email,
-                        'platform': target_user.registration_source,
-                        'name': target_user.full_name
+                    "secondary_account": {
+                        "id": target_user.id,
+                        "email": target_user.email,
+                        "platform": target_user.registration_source,
+                        "name": target_user.full_name,
                     },
-                    'benefits': [
-                        'Unified account across all platforms',
-                        'Single login for web and Telegram',
-                        'Synchronized preferences and data'
-                    ]
+                    "benefits": [
+                        "Unified account across all platforms",
+                        "Single login for web and Telegram",
+                        "Synchronized preferences and data",
+                    ],
                 }
             },
-            message=get_translation('success.saved')
+            message=get_translation("success.saved"),
         )
-    
+
     # Perform the linking
     result = cross_platform_sync_service.auto_link_accounts(
-        primary_user=current_user,
-        secondary_user=target_user,
-        link_type='merge'
+        primary_user=current_user, secondary_user=target_user, link_type="merge"
     )
-    
-    if result['success']:
+
+    if result["success"]:
         # Generate new tokens for the linked account
         from business_app.services.token_service import TokenService
+
         token_service = TokenService()
         tokens = token_service.generate_tokens(current_user)
-        
+
         return success_response(
-            data={
-                'user': current_user.to_dict(),
-                'tokens': tokens,
-                'link_result': result
-            },
-            message=result['message']
+            data={"user": current_user.to_dict(), "tokens": tokens, "link_result": result}, message=result["message"]
         )
     else:
-        return error_response(
-            message=result.get('error', 'Failed to link accounts'),
-            status_code=400
-        )
+        return error_response(message=result.get("error", "Failed to link accounts"), status_code=400)
 
 
-@auth_bp.route('/generate-telegram-auth', methods=['POST'])
+@auth_bp.route("/generate-telegram-auth", methods=["POST"])
 @jwt_required()
 @handle_exceptions
 def generate_telegram_auth():
@@ -3393,81 +3191,76 @@ def generate_telegram_auth():
     user = User.query.get(user_id)
 
     if not user:
-        return not_found_response(message=get_translation('error.not_found'))
+        return not_found_response(message=get_translation("error.not_found"))
 
     # Check if user already has Telegram access
     if user.telegram_id:
-        return error_response(
-            message=get_translation('error.forbidden'),
-            status_code=400
-        )
-    
+        return error_response(message=get_translation("error.forbidden"), status_code=400)
+
     # Generate a secure auth code for Telegram bot linking
     import secrets
     import string
     from datetime import timedelta
-    
-    auth_code = ''.join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(8))
-    
+
+    auth_code = "".join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(8))
+
     # Store the auth code with expiry (5 minutes)
     from business_app.services.token_service import TokenService
+
     token_service = TokenService()
-    
+
     # Store auth code in Redis with user_id
     auth_data = {
-        'user_id': user_id,
-        'email': user.email,
-        'created_at': datetime.now(timezone.utc).isoformat(),
-        'type': 'telegram_auth'
+        "user_id": user_id,
+        "email": user.email,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "type": "telegram_auth",
     }
-    
+
     try:
         token_service._ensure_redis_connection()
         if token_service.redis_available:
             import json
+
             token_service.redis_client.setex(
-                f"telegram_auth:{auth_code}",
-                300,  # 5 minutes expiry
-                json.dumps(auth_data)
+                f"telegram_auth:{auth_code}", 300, json.dumps(auth_data)  # 5 minutes expiry
             )
         else:
             # Fallback to in-memory storage (not recommended for production)
-            if not hasattr(token_service, '_telegram_auth_codes'):
+            if not hasattr(token_service, "_telegram_auth_codes"):
                 token_service._telegram_auth_codes = {}
             token_service._telegram_auth_codes[auth_code] = {
                 **auth_data,
-                'expires_at': datetime.now(timezone.utc) + timedelta(minutes=5)
+                "expires_at": datetime.now(timezone.utc) + timedelta(minutes=5),
             }
     except Exception as e:
         logger.error(f"Failed to store telegram auth code: {e}")
-        return internal_error_response(message=get_translation('api.auth.error.auth_code_failed'))
-    
+        return internal_error_response(message=get_translation("api.auth.error.auth_code_failed"))
+
     # Create Telegram bot link
-    bot_username = current_app.config.get('TELEGRAM_BOT_USERNAME', 'bluewaterbot')
+    bot_username = current_app.config.get("TELEGRAM_BOT_USERNAME", "bluewaterbot")
     telegram_link = f"https://t.me/{bot_username}?start=auth_{auth_code}"
 
     return success_response(
         data={
-            'auth_code': auth_code,
-            'telegram_link': telegram_link,
-            'expires_in': 300,  # 5 minutes
-            'instructions': [
-                get_translation('api.auth.telegram_auth_instruction_open', link=telegram_link),
+            "auth_code": auth_code,
+            "telegram_link": telegram_link,
+            "expires_in": 300,  # 5 minutes
+            "instructions": [
+                get_translation("api.auth.telegram_auth_instruction_open", link=telegram_link),
                 get_translation(
-                    'api.auth.telegram_auth_instruction_manual',
-                    bot_username=bot_username,
-                    auth_code=auth_code
+                    "api.auth.telegram_auth_instruction_manual", bot_username=bot_username, auth_code=auth_code
                 ),
-                get_translation('api.auth.telegram_auth_instruction_auto_link')
-            ]
+                get_translation("api.auth.telegram_auth_instruction_auto_link"),
+            ],
         },
-        message=get_translation('success.saved')
+        message=get_translation("success.saved"),
     )
 
 
-@auth_bp.route('/generate-web-auth', methods=['POST'])
+@auth_bp.route("/generate-web-auth", methods=["POST"])
 @rate_limit(5, 300)  # 5 attempts per 5 minutes
-@validate_json(['telegram_id'])
+@validate_json(["telegram_id"])
 @handle_exceptions
 def generate_web_auth():
     """
@@ -3496,82 +3289,80 @@ def generate_web_auth():
         description: User already has web access
     """
     data = request.get_json()
-    telegram_id = str(data['telegram_id'])
-    
+    telegram_id = str(data["telegram_id"])
+
     # Find telegram user
     user = User.query.filter_by(telegram_id=telegram_id).first()
     if not user:
-        return not_found_response(message=get_translation('error.not_found'))
-    
+        return not_found_response(message=get_translation("error.not_found"))
+
     # Check if user already has proper web access
-    if user.email and not user.email.startswith('telegram_') and user.password_hash != 'telegram_user':
-        return error_response(
-            message=get_translation('error.forbidden'),
-            status_code=400
-        )
-    
+    if user.email and not user.email.startswith("telegram_") and user.password_hash != "telegram_user":
+        return error_response(message=get_translation("error.forbidden"), status_code=400)
+
     # Generate secure temporary web auth token
     from business_app.services.token_service import TokenService
+
     token_service = TokenService()
-    
+
     # Generate temporary access tokens for web login
     temp_tokens = token_service.generate_tokens(user)
-    
+
     # Create a secure one-time web auth link
     import secrets
+
     web_auth_token = secrets.token_urlsafe(32)
-    
+
     # Store the web auth token
     auth_data = {
-        'user_id': user.id,
-        'telegram_id': telegram_id,
-        'access_token': temp_tokens['access_token'],
-        'refresh_token': temp_tokens['refresh_token'],
-        'created_at': datetime.now(timezone.utc).isoformat(),
-        'type': 'web_auth'
+        "user_id": user.id,
+        "telegram_id": telegram_id,
+        "access_token": temp_tokens["access_token"],
+        "refresh_token": temp_tokens["refresh_token"],
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "type": "web_auth",
     }
-    
+
     try:
         token_service._ensure_redis_connection()
         if token_service.redis_available:
             import json
+
             token_service.redis_client.setex(
-                f"web_auth:{web_auth_token}",
-                600,  # 10 minutes expiry
-                json.dumps(auth_data)
+                f"web_auth:{web_auth_token}", 600, json.dumps(auth_data)  # 10 minutes expiry
             )
         else:
             # Fallback to in-memory storage
-            if not hasattr(token_service, '_web_auth_tokens'):
+            if not hasattr(token_service, "_web_auth_tokens"):
                 token_service._web_auth_tokens = {}
             token_service._web_auth_tokens[web_auth_token] = {
                 **auth_data,
-                'expires_at': datetime.now(timezone.utc) + timedelta(minutes=10)
+                "expires_at": datetime.now(timezone.utc) + timedelta(minutes=10),
             }
     except Exception as e:
         logger.error(f"Failed to store web auth token: {e}")
-        return internal_error_response(message=get_translation('api.auth.error.web_token_failed'))
-    
+        return internal_error_response(message=get_translation("api.auth.error.web_token_failed"))
+
     # Create web app authentication link
-    web_app_url = current_app.config.get('WEB_APP_URL', 'https://aqua-element.uz')
+    web_app_url = current_app.config.get("WEB_APP_URL", "https://aqua-element.uz")
     web_auth_link = f"{web_app_url}/auth/telegram-login?token={web_auth_token}"
 
     return success_response(
         data={
-            'auth_token': web_auth_token,
-            'web_auth_link': web_auth_link,
-            'expires_in': 600,  # 10 minutes
-            'instructions': [
-                get_translation('api.auth.web_auth_instruction_open', link=web_auth_link),
-                get_translation('api.auth.web_auth_instruction_auto_login'),
-                get_translation('api.auth.web_auth_instruction_expiry', minutes=10)
-            ]
+            "auth_token": web_auth_token,
+            "web_auth_link": web_auth_link,
+            "expires_in": 600,  # 10 minutes
+            "instructions": [
+                get_translation("api.auth.web_auth_instruction_open", link=web_auth_link),
+                get_translation("api.auth.web_auth_instruction_auto_login"),
+                get_translation("api.auth.web_auth_instruction_expiry", minutes=10),
+            ],
         },
-        message=get_translation('success.saved')
+        message=get_translation("success.saved"),
     )
 
 
-@auth_bp.route('/verify-telegram-auth/<auth_code>', methods=['POST'])
+@auth_bp.route("/verify-telegram-auth/<auth_code>", methods=["POST"])
 @rate_limit(10, 300)  # 10 attempts per 5 minutes
 @handle_exceptions
 def verify_telegram_auth(auth_code):
@@ -3616,16 +3407,18 @@ def verify_telegram_auth(auth_code):
         description: Telegram ID already linked
     """
     data = request.get_json()
-    
+
     # Retrieve auth code data
     from business_app.services.token_service import TokenService
+
     token_service = TokenService()
-    
+
     auth_data = None
     try:
         token_service._ensure_redis_connection()
         if token_service.redis_available:
             import json
+
             auth_data_str = token_service.redis_client.get(f"telegram_auth:{auth_code}")
             if auth_data_str:
                 auth_data = json.loads(auth_data_str)
@@ -3633,59 +3426,52 @@ def verify_telegram_auth(auth_code):
                 token_service.redis_client.delete(f"telegram_auth:{auth_code}")
         else:
             # Check in-memory storage
-            if hasattr(token_service, '_telegram_auth_codes') and auth_code in token_service._telegram_auth_codes:
+            if hasattr(token_service, "_telegram_auth_codes") and auth_code in token_service._telegram_auth_codes:
                 stored_data = token_service._telegram_auth_codes[auth_code]
-                if datetime.now(timezone.utc) < stored_data['expires_at']:
+                if datetime.now(timezone.utc) < stored_data["expires_at"]:
                     auth_data = stored_data
                 # Delete used code
                 del token_service._telegram_auth_codes[auth_code]
     except Exception as e:
         logger.error(f"Failed to retrieve auth code: {e}")
-    
+
     if not auth_data:
-        return error_response(
-            message=get_translation('api.auth.token_expired'),
-            status_code=400
-        )
-    
+        return error_response(message=get_translation("api.auth.token_expired"), status_code=400)
+
     # Get the web user
-    user = User.query.get(auth_data['user_id'])
+    user = User.query.get(auth_data["user_id"])
     if not user:
-        return not_found_response(message=get_translation('error.not_found'))
-    
-    telegram_id = str(data['telegram_id'])
-    
+        return not_found_response(message=get_translation("error.not_found"))
+
+    telegram_id = str(data["telegram_id"])
+
     # Check if this telegram_id is already linked to another account
     existing_telegram_user = User.query.filter_by(telegram_id=telegram_id).first()
     if existing_telegram_user and existing_telegram_user.id != user.id:
-        return conflict_response(message=get_translation('api.auth.email_already_exists'))
-    
+        return conflict_response(message=get_translation("api.auth.email_already_exists"))
+
     # Link the telegram account to web user
     user.telegram_id = telegram_id
-    user.telegram_username = data.get('telegram_username')
+    user.telegram_username = data.get("telegram_username")
     user.is_bot_active = True
     user.last_bot_interaction = datetime.now(timezone.utc)
-    
+
     # Update name if web user has incomplete info
-    if data.get('first_name') and not user.first_name:
-        user.first_name = data['first_name']
-    if data.get('last_name') and not user.last_name:
-        user.last_name = data['last_name']
-    
+    if data.get("first_name") and not user.first_name:
+        user.first_name = data["first_name"]
+    if data.get("last_name") and not user.last_name:
+        user.last_name = data["last_name"]
+
     db.session.commit()
-    
+
     logger.info(f"Successfully linked Telegram account {telegram_id} to web user {user.id}")
 
     return success_response(
-        data={
-            'user': user.to_dict(),
-            'linked_platforms': ['web', 'telegram']
-        },
-        message=get_translation('success.saved')
+        data={"user": user.to_dict(), "linked_platforms": ["web", "telegram"]}, message=get_translation("success.saved")
     )
 
 
-@auth_bp.route('/verify-web-auth/<auth_token>', methods=['GET'])
+@auth_bp.route("/verify-web-auth/<auth_token>", methods=["GET"])
 @rate_limit(10, 600)  # 10 attempts per 10 minutes
 @handle_exceptions
 def verify_web_auth(auth_token):
@@ -3708,13 +3494,15 @@ def verify_web_auth(auth_token):
     """
     # Retrieve auth token data
     from business_app.services.token_service import TokenService
+
     token_service = TokenService()
-    
+
     auth_data = None
     try:
         token_service._ensure_redis_connection()
         if token_service.redis_available:
             import json
+
             auth_data_str = token_service.redis_client.get(f"web_auth:{auth_token}")
             if auth_data_str:
                 auth_data = json.loads(auth_data_str)
@@ -3722,36 +3510,31 @@ def verify_web_auth(auth_token):
                 token_service.redis_client.delete(f"web_auth:{auth_token}")
         else:
             # Check in-memory storage
-            if hasattr(token_service, '_web_auth_tokens') and auth_token in token_service._web_auth_tokens:
+            if hasattr(token_service, "_web_auth_tokens") and auth_token in token_service._web_auth_tokens:
                 stored_data = token_service._web_auth_tokens[auth_token]
-                if datetime.now(timezone.utc) < stored_data['expires_at']:
+                if datetime.now(timezone.utc) < stored_data["expires_at"]:
                     auth_data = stored_data
                 # Delete used token
                 del token_service._web_auth_tokens[auth_token]
     except Exception as e:
         logger.error(f"Failed to retrieve web auth token: {e}")
-    
+
     if not auth_data:
-        return error_response(
-            message=get_translation('api.auth.token_expired'),
-            status_code=400
-        )
-    
+        return error_response(message=get_translation("api.auth.token_expired"), status_code=400)
+
     # Get the user
-    user = User.query.get(auth_data['user_id'])
+    user = User.query.get(auth_data["user_id"])
     if not user:
-        return not_found_response(message=get_translation('error.not_found'))
-    
+        return not_found_response(message=get_translation("error.not_found"))
+
     # Return the authentication tokens
     return success_response(
         data={
-            'user': user.to_dict(),
-            'tokens': {
-                'access_token': auth_data['access_token'],
-                'refresh_token': auth_data['refresh_token']
-            },
-            'linked_platforms': ['telegram', 'web'] if user.email and not user.email.startswith('telegram_') else ['telegram']
+            "user": user.to_dict(),
+            "tokens": {"access_token": auth_data["access_token"], "refresh_token": auth_data["refresh_token"]},
+            "linked_platforms": (
+                ["telegram", "web"] if user.email and not user.email.startswith("telegram_") else ["telegram"]
+            ),
         },
-        message=get_translation('api.auth.login_successful')
+        message=get_translation("api.auth.login_successful"),
     )
-  

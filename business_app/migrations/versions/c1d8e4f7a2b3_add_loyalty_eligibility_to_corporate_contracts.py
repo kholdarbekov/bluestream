@@ -5,6 +5,7 @@ Revises: b5a4f0d9c3e1
 Create Date: 2026-03-01 21:10:00.000000
 
 """
+
 from alembic import op
 import sqlalchemy as sa
 
@@ -33,8 +34,7 @@ def upgrade():
         )
 
     op.execute(
-        "UPDATE corporate_contracts SET is_loyalty_points_eligible = FALSE "
-        "WHERE is_loyalty_points_eligible IS NULL"
+        "UPDATE corporate_contracts SET is_loyalty_points_eligible = FALSE " "WHERE is_loyalty_points_eligible IS NULL"
     )
 
 

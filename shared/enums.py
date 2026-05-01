@@ -2,7 +2,7 @@
 Shared enum definitions for the Water Business Platform.
 Canonical source of truth for enums used across backend, bot, and admin services.
 
-Backend re-exports these via business_app.utils.constants for backward compatibility.
+Import directly from this module — never via business_app.utils.constants.
 """
 from enum import Enum
 
@@ -139,6 +139,27 @@ class UserType(Enum):
     INDIVIDUAL = 'individual'
     ENTITY = 'entity'
     STAFF = 'staff'
+
+
+class EntitySubtype(Enum):
+    """Subtype distinguishing real corporate workplaces from grocery-store retail accounts.
+
+    Only meaningful when the parent user has user_type=ENTITY.
+    Workplaces use the prepaid bottle-unit ledger (BUSINESS_ACCOUNT payment).
+    Grocery stores pay cash/card on or after delivery and track debt in money.
+    """
+    WORKPLACE = 'workplace'
+    GROCERY_STORE = 'grocery_store'
+
+
+class CorporateContractTrackingMode(Enum):
+    """How a corporate contract's prepayment account tracks balances.
+
+    UNITS  -- per-product bottle-unit ledger (workplace, original behavior).
+    AMOUNT -- single money-only ledger on the account (grocery store).
+    """
+    UNITS = 'units'
+    AMOUNT = 'amount'
 
 
 class UserStatus(Enum):

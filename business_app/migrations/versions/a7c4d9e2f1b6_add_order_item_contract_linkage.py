@@ -5,6 +5,7 @@ Revises: f4b8c2d9a1e7
 Create Date: 2026-02-28 18:53:00.000000
 
 """
+
 from alembic import op
 import sqlalchemy as sa
 
@@ -28,7 +29,9 @@ def upgrade():
             ["id"],
         )
         batch_op.create_index(batch_op.f("ix_order_items_contract_id"), ["contract_id"], unique=False)
-        batch_op.create_index(batch_op.f("ix_order_items_contract_product_price_id"), ["contract_product_price_id"], unique=False)
+        batch_op.create_index(
+            batch_op.f("ix_order_items_contract_product_price_id"), ["contract_product_price_id"], unique=False
+        )
 
 
 def downgrade():

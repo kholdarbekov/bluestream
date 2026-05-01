@@ -11,7 +11,7 @@ from business_app.models.delivery import Delivery, DeliveryPerson, DeliveryStatu
 from business_app.models.order import Order, OrderItem
 from business_app.models.user import User, UserAddress
 from business_app.services.staff_service import StaffService
-from business_app.utils.constants import DeliveryStatus, OrderStatus, PaymentMethod
+from shared.enums import DeliveryStatus, OrderStatus, PaymentMethod
 from business_app.utils.exceptions import NotFoundError, ValidationError
 
 
@@ -113,10 +113,7 @@ class AdminDeliveryService:
         summary = AdminDeliveryService._build_summary(query)
 
         return {
-            "items": [
-                AdminDeliveryService.serialize_delivery(delivery)
-                for delivery in pagination.items
-            ],
+            "items": [AdminDeliveryService.serialize_delivery(delivery) for delivery in pagination.items],
             "page": pagination.page,
             "per_page": pagination.per_page,
             "total": pagination.total,
@@ -173,28 +170,22 @@ class AdminDeliveryService:
         if old_person_id == new_person_id:
             return delivery
 
-        new_profile = (
-            DeliveryPerson.query.filter_by(user_id=new_person_id)
-            .with_for_update()
-            .first()
-        )
+        new_profile = DeliveryPerson.query.filter_by(user_id=new_person_id).with_for_update().first()
         if not new_profile:
             raise NotFoundError("Delivery person not found")
 
         max_concurrent = new_profile.max_concurrent_deliveries or 3
         active_delivery_count = StaffService.get_active_delivery_count(new_person_id)
         if active_delivery_count >= max_concurrent:
-            raise ValidationError(
-                f"Delivery person has reached max concurrent deliveries ({max_concurrent})"
-            )
+            raise ValidationError(f"Delivery person has reached max concurrent deliveries ({max_concurrent})")
 
         order_payment_method = delivery.order.payment_method if delivery.order else None
-        if order_payment_method == 'cash' or getattr(order_payment_method, 'value', None) == 'cash':
+        if order_payment_method == "cash" or getattr(order_payment_method, "value", None) == "cash":
             from business_app.services.driver_reconciliation_service import DriverReconciliationService
 
             if DriverReconciliationService().is_driver_blocked_from_cod(new_person_id):
                 raise ValidationError(
-                    "Delivery person is blocked from new cash on delivery assignments until reconciliation issues are resolved"
+                    "Delivery person is blocked from new cash on delivery assignments until reconciliation issues are resolved"  # noqa: E501
                 )
 
         now = datetime.now(UTC)
@@ -244,20 +235,18 @@ class AdminDeliveryService:
             "customer_name": customer.full_name if customer else None,
             "customer_phone": customer.phone if customer else None,
             "driver_id": driver.id if driver else None,
-            "driver_name": (
-                getattr(driver_profile, "full_name", None)
-                or (driver.full_name if driver else None)
-            ),
-            "driver_phone": (
-                getattr(driver_profile, "phone", None)
-                or (driver.phone if driver else None)
-            ),
+            "driver_name": (getattr(driver_profile, "full_name", None) or (driver.full_name if driver else None)),
+            "driver_phone": (getattr(driver_profile, "phone", None) or (driver.phone if driver else None)),
             "delivery_address": address.full_address if address else None,
             "delivery_instructions": address.delivery_instructions if address else None,
             "scheduled_date": delivery.scheduled_date.isoformat() if delivery.scheduled_date else None,
             "scheduled_time_slot": delivery.scheduled_time_slot,
-            "estimated_delivery_time": delivery.estimated_delivery_time.isoformat() if delivery.estimated_delivery_time else None,
-            "actual_delivery_time": delivery.actual_delivery_time.isoformat() if delivery.actual_delivery_time else None,
+            "estimated_delivery_time": (
+                delivery.estimated_delivery_time.isoformat() if delivery.estimated_delivery_time else None
+            ),
+            "actual_delivery_time": (
+                delivery.actual_delivery_time.isoformat() if delivery.actual_delivery_time else None
+            ),
             "delivered_at": delivery.delivered_at.isoformat() if delivery.delivered_at else None,
             "created_at": delivery.created_at.isoformat() if delivery.created_at else None,
             "updated_at": delivery.updated_at.isoformat() if delivery.updated_at else None,
@@ -269,35 +258,29 @@ class AdminDeliveryService:
             "cash_collected": float(delivery.cash_collected) if delivery.cash_collected is not None else None,
             "order_total_amount": float(order.total_amount) if order and order.total_amount is not None else 0.0,
             "payment_method": (
-                order.payment_method.value
-                if order and getattr(order, "payment_method", None)
-                else None
+                order.payment_method.value if order and getattr(order, "payment_method", None) else None
             ),
             "payment_status": (
                 order.payment.status.value
                 if order and getattr(order, "payment", None) and hasattr(order.payment.status, "value")
-                else (
-                    str(order.payment.status)
-                    if order and getattr(order, "payment", None)
-                    else None
-                )
+                else (str(order.payment.status) if order and getattr(order, "payment", None) else None)
             ),
             "amount_collected": (
-                float(order.payment.amount_collected or 0)
-                if order and getattr(order, "payment", None)
-                else 0.0
+                float(order.payment.amount_collected or 0) if order and getattr(order, "payment", None) else 0.0
             ),
             "outstanding_amount": (
-                float(order.payment.outstanding_amount or 0)
-                if order and getattr(order, "payment", None)
-                else 0.0
+                float(order.payment.outstanding_amount or 0) if order and getattr(order, "payment", None) else 0.0
             ),
             "items_summary": AdminDeliveryService._build_items_summary(order),
-            "current_location": {
-                "lat": delivery.current_location_lat,
-                "lng": delivery.current_location_lng,
-                "last_update": delivery.last_location_update.isoformat() if delivery.last_location_update else None,
-            } if delivery.current_location_lat is not None and delivery.current_location_lng is not None else None,
+            "current_location": (
+                {
+                    "lat": delivery.current_location_lat,
+                    "lng": delivery.current_location_lng,
+                    "last_update": delivery.last_location_update.isoformat() if delivery.last_location_update else None,
+                }
+                if delivery.current_location_lat is not None and delivery.current_location_lng is not None
+                else None
+            ),
             "status_history": [
                 {
                     "id": item.id,
@@ -447,22 +430,12 @@ class AdminDeliveryService:
     @staticmethod
     def _build_summary(query) -> Dict[str, Any]:
         total = query.count()
-        grouped = (
-            query.with_entities(Delivery.status, func.count(Delivery.id))
-            .group_by(Delivery.status)
-            .all()
-        )
-        counts = {
-            AdminDeliveryService._status_value(status): count
-            for status, count in grouped
-        }
+        grouped = query.with_entities(Delivery.status, func.count(Delivery.id)).group_by(Delivery.status).all()
+        counts = {AdminDeliveryService._status_value(status): count for status, count in grouped}
 
         scheduled = counts.get(DeliveryStatus.SCHEDULED.value, 0)
         pending = counts.get(DeliveryStatus.PENDING.value, 0)
-        active = sum(
-            counts.get(status.value, 0)
-            for status in ACTIVE_DELIVERY_STATUSES
-        )
+        active = sum(counts.get(status.value, 0) for status in ACTIVE_DELIVERY_STATUSES)
         delivered = counts.get(DeliveryStatus.DELIVERED.value, 0)
         failed = counts.get(DeliveryStatus.FAILED.value, 0)
         cancelled = counts.get(DeliveryStatus.CANCELLED.value, 0)

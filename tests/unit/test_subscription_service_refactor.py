@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 import pytest
 
 from business_app.services.subscription_service import SubscriptionService
-from business_app.utils.constants import SubscriptionStatus
+from shared.enums import SubscriptionStatus
 from business_app.utils.exceptions import ValidationError
 
 

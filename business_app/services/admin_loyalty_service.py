@@ -74,20 +74,25 @@ class AdminLoyaltyService:
 
         latest_activity_subquery = AdminLoyaltyService._latest_activity_subquery()
 
-        row_query = db.session.query(
-            LoyaltyPoints,
-            User,
-            LoyaltyProgram.name.label("program_name"),
-            latest_activity_subquery.c.last_activity_at.label("latest_activity_at"),
-        ).join(
-            User,
-            User.id == LoyaltyPoints.user_id,
-        ).outerjoin(
-            LoyaltyProgram,
-            LoyaltyProgram.id == LoyaltyPoints.program_id,
-        ).outerjoin(
-            latest_activity_subquery,
-            latest_activity_subquery.c.user_id == LoyaltyPoints.user_id,
+        row_query = (
+            db.session.query(
+                LoyaltyPoints,
+                User,
+                LoyaltyProgram.name.label("program_name"),
+                latest_activity_subquery.c.last_activity_at.label("latest_activity_at"),
+            )
+            .join(
+                User,
+                User.id == LoyaltyPoints.user_id,
+            )
+            .outerjoin(
+                LoyaltyProgram,
+                LoyaltyProgram.id == LoyaltyPoints.program_id,
+            )
+            .outerjoin(
+                latest_activity_subquery,
+                latest_activity_subquery.c.user_id == LoyaltyPoints.user_id,
+            )
         )
         row_query = AdminLoyaltyService._apply_member_filters(
             row_query,
@@ -151,10 +156,14 @@ class AdminLoyaltyService:
                 "active_members": summary.active_members,
                 "total_points_in_circulation": summary.total_points_in_circulation,
                 "total_points_earned": summary.total_points_earned,
-                "average_points_balance": round(
-                    summary.total_points_in_circulation / pagination.total,
-                    2,
-                ) if pagination.total else 0,
+                "average_points_balance": (
+                    round(
+                        summary.total_points_in_circulation / pagination.total,
+                        2,
+                    )
+                    if pagination.total
+                    else 0
+                ),
             },
         }
 
@@ -174,28 +183,18 @@ class AdminLoyaltyService:
             .limit(10)
             .all()
         )
-        redemptions = [
-            txn for txn in transactions
-            if txn.transaction_type == LoyaltyTransactionType.REDEEMED
-        ]
+        redemptions = [txn for txn in transactions if txn.transaction_type == LoyaltyTransactionType.REDEEMED]
 
         return {
             "member": AdminLoyaltyService.serialize_member(account, user),
-            "recent_transactions": [
-                serialize_loyalty_transaction(item) for item in transactions
-            ],
-            "recent_redemptions": [
-                serialize_loyalty_transaction(item) for item in redemptions
-            ],
+            "recent_transactions": [serialize_loyalty_transaction(item) for item in transactions],
+            "recent_redemptions": [serialize_loyalty_transaction(item) for item in redemptions],
             "referral_statistics": loyalty_service.get_referral_statistics(user_id),
             "tier_progress": loyalty_service.calculate_tier_progress(user_id),
             "streak": {
                 "current_streak": account.current_streak or 0,
                 "orders_this_month": account.streak_orders_this_month or 0,
-                "last_streak_update": (
-                    account.last_streak_update.isoformat()
-                    if account.last_streak_update else None
-                ),
+                "last_streak_update": (account.last_streak_update.isoformat() if account.last_streak_update else None),
             },
         }
 
@@ -238,10 +237,7 @@ class AdminLoyaltyService:
             "total_earned": account.total_earned or 0,
             "total_redeemed": account.total_redeemed or 0,
             "points_to_next_tier": account.points_to_next_tier or 0,
-            "tier_valid_until": (
-                account.tier_valid_until.isoformat()
-                if account.tier_valid_until else None
-            ),
+            "tier_valid_until": (account.tier_valid_until.isoformat() if account.tier_valid_until else None),
             "last_activity_at": last_activity.isoformat() if last_activity else None,
             "member_since": account.created_at.isoformat() if account.created_at else None,
         }
@@ -274,16 +270,20 @@ class AdminLoyaltyService:
             .group_by(LoyaltyTierConfig.program_id)
             .subquery()
         )
-        query = db.session.query(
-            LoyaltyProgram,
-            func.coalesce(member_counts_subquery.c.member_count, 0).label("member_count"),
-            func.coalesce(tier_counts_subquery.c.tier_count, 0).label("tier_count"),
-        ).outerjoin(
-            member_counts_subquery,
-            member_counts_subquery.c.program_id == LoyaltyProgram.id,
-        ).outerjoin(
-            tier_counts_subquery,
-            tier_counts_subquery.c.program_id == LoyaltyProgram.id,
+        query = (
+            db.session.query(
+                LoyaltyProgram,
+                func.coalesce(member_counts_subquery.c.member_count, 0).label("member_count"),
+                func.coalesce(tier_counts_subquery.c.tier_count, 0).label("tier_count"),
+            )
+            .outerjoin(
+                member_counts_subquery,
+                member_counts_subquery.c.program_id == LoyaltyProgram.id,
+            )
+            .outerjoin(
+                tier_counts_subquery,
+                tier_counts_subquery.c.program_id == LoyaltyProgram.id,
+            )
         )
 
         if search:
@@ -328,10 +328,20 @@ class AdminLoyaltyService:
     ) -> Dict[str, Any]:
         """Serialize a loyalty program with derived counts."""
         payload = program.to_dict()
-        payload.update({
-            "member_count": member_count if member_count is not None else LoyaltyPoints.query.filter_by(program_id=program.id).count(),
-            "tier_count": tier_count if tier_count is not None else LoyaltyTierConfig.query.filter_by(program_id=program.id).count(),
-        })
+        payload.update(
+            {
+                "member_count": (
+                    member_count
+                    if member_count is not None
+                    else LoyaltyPoints.query.filter_by(program_id=program.id).count()
+                ),  # noqa: E501
+                "tier_count": (
+                    tier_count
+                    if tier_count is not None
+                    else LoyaltyTierConfig.query.filter_by(program_id=program.id).count()
+                ),  # noqa: E501
+            }
+        )
         return payload
 
     @staticmethod
@@ -375,10 +385,7 @@ class AdminLoyaltyService:
         ).paginate(page=page, per_page=per_page, error_out=False)
 
         return {
-            "items": [
-                AdminLoyaltyService.serialize_reward(reward, language=language)
-                for reward in pagination.items
-            ],
+            "items": [AdminLoyaltyService.serialize_reward(reward, language=language) for reward in pagination.items],
             "page": pagination.page,
             "per_page": pagination.per_page,
             "total": pagination.total,
@@ -419,13 +426,10 @@ class AdminLoyaltyService:
             payload["redemption_stats"] = {
                 "total_redemptions": reward.redemptions_used or 0,
                 "remaining_redemptions": (
-                    reward.max_redemptions - (reward.redemptions_used or 0)
-                    if reward.max_redemptions else None
+                    reward.max_redemptions - (reward.redemptions_used or 0) if reward.max_redemptions else None
                 ),
-                "is_available": reward.is_active and (
-                    not reward.max_redemptions
-                    or (reward.redemptions_used or 0) < reward.max_redemptions
-                ),
+                "is_available": reward.is_active
+                and (not reward.max_redemptions or (reward.redemptions_used or 0) < reward.max_redemptions),
             }
         return payload
 
@@ -459,13 +463,12 @@ class AdminLoyaltyService:
         transactions = transaction_query.all()
 
         earned_transactions = [
-            txn for txn in transactions
-            if txn.transaction_type in {LoyaltyTransactionType.EARNED, LoyaltyTransactionType.BONUS}
-            and txn.points > 0
+            txn
+            for txn in transactions
+            if txn.transaction_type in {LoyaltyTransactionType.EARNED, LoyaltyTransactionType.BONUS} and txn.points > 0
         ]
         redeemed_transactions = [
-            txn for txn in transactions
-            if txn.transaction_type == LoyaltyTransactionType.REDEEMED and txn.points < 0
+            txn for txn in transactions if txn.transaction_type == LoyaltyTransactionType.REDEEMED and txn.points < 0
         ]
 
         total_redeemed_points = abs(sum(txn.points for txn in redeemed_transactions))
@@ -476,9 +479,7 @@ class AdminLoyaltyService:
             func.count(LoyaltyPoints.id),
         )
         if program_id:
-            tier_distribution_query = tier_distribution_query.filter(
-                LoyaltyPoints.program_id == program_id
-            )
+            tier_distribution_query = tier_distribution_query.filter(LoyaltyPoints.program_id == program_id)
         tier_distribution = [
             {"tier": tier_name, "count": count}
             for tier_name, count in tier_distribution_query.group_by(
@@ -496,9 +497,12 @@ class AdminLoyaltyService:
             }
             for reward in reward_query.filter(
                 LoyaltyReward.redemptions_used > 0,
-            ).order_by(
+            )
+            .order_by(
                 LoyaltyReward.redemptions_used.desc(),
-            ).limit(10).all()
+            )
+            .limit(10)
+            .all()
         ]
 
         points_by_day: Dict[str, Dict[str, int]] = {}
@@ -524,32 +528,32 @@ class AdminLoyaltyService:
             if program_id and program.id != program_id:
                 continue
             program_accounts = [account for account in accounts if account.program_id == program.id]
-            program_breakdown.append({
-                "program_id": program.id,
-                "program_name": program.name,
-                "member_count": len(program_accounts),
-                "points_in_circulation": sum(
-                    max(0, account.current_balance or 0) for account in program_accounts
-                ),
-                "reward_count": LoyaltyReward.query.filter_by(program_id=program.id).count(),
-            })
+            program_breakdown.append(
+                {
+                    "program_id": program.id,
+                    "program_name": program.name,
+                    "member_count": len(program_accounts),
+                    "points_in_circulation": sum(max(0, account.current_balance or 0) for account in program_accounts),
+                    "reward_count": LoyaltyReward.query.filter_by(program_id=program.id).count(),
+                }
+            )
 
         return {
             "summary": {
                 "total_members": len(accounts),
-                "active_members": len([
-                    account for account in accounts if (account.current_balance or 0) > 0
-                ]),
-                "total_points_in_circulation": sum(
-                    max(0, account.current_balance or 0) for account in accounts
-                ),
+                "active_members": len([account for account in accounts if (account.current_balance or 0) > 0]),
+                "total_points_in_circulation": sum(max(0, account.current_balance or 0) for account in accounts),
                 "points_earned": total_earned_points,
                 "points_redeemed": total_redeemed_points,
                 "total_redemptions": len(redeemed_transactions),
-                "avg_redemption_value": round(
-                    total_redeemed_points / len(redeemed_transactions),
-                    2,
-                ) if redeemed_transactions else 0,
+                "avg_redemption_value": (
+                    round(
+                        total_redeemed_points / len(redeemed_transactions),
+                        2,
+                    )
+                    if redeemed_transactions
+                    else 0
+                ),
             },
             "tier_distribution": tier_distribution,
             "top_rewards": top_rewards,
@@ -558,10 +562,14 @@ class AdminLoyaltyService:
                 "points_earned": total_earned_points,
                 "points_redeemed": total_redeemed_points,
                 "total_redemptions": len(redeemed_transactions),
-                "redemption_rate": round(
-                    (total_redeemed_points / total_earned_points) * 100,
-                    2,
-                ) if total_earned_points else 0,
+                "redemption_rate": (
+                    round(
+                        (total_redeemed_points / total_earned_points) * 100,
+                        2,
+                    )
+                    if total_earned_points
+                    else 0
+                ),
             },
             "program_breakdown": program_breakdown,
         }

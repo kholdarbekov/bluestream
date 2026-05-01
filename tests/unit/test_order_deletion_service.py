@@ -16,16 +16,16 @@ from business_app.models.payment import (
 )
 from business_app.services.order_deletion_service import OrderDeletionService
 from business_app.utils.constants import (
-    CashCollectionSource,
-    DeliveryStatus,
     LoyaltyTransactionType,
     NotificationChannel,
+)
+from shared.enums import (
+    CashCollectionSource,
+    DeliveryStatus,
     OrderStatus,
     PaymentMethod,
     PaymentStatus,
 )
-
-
 def _create_order(*, user_id: int, order_number: str, amount: Decimal) -> Order:
     order = Order(
         user_id=user_id,

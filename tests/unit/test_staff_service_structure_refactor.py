@@ -9,7 +9,7 @@ from business_app.models.payment import Payment
 from business_app.models.order import Order
 from business_app.models.user import User
 from business_app.services.staff_service import StaffService
-from business_app.utils.constants import OrderStatus, PaymentMethod, PaymentStatus, UserRole
+from shared.enums import OrderStatus, PaymentMethod, PaymentStatus, UserRole
 from business_app.utils.exceptions import NotFoundError
 from business_app.utils.password_security import hash_password
 

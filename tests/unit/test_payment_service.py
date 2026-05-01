@@ -9,7 +9,7 @@ import pytest
 
 from business_app.models.payment import CreditCard, Payment
 from business_app.services.payment_service import PaymentService
-from business_app.utils.constants import PaymentMethod, PaymentStatus
+from shared.enums import PaymentMethod, PaymentStatus
 from business_app.utils.exceptions import NotFoundError, PaymentError, ValidationError
 
 

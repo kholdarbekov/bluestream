@@ -19,7 +19,7 @@ from sqlalchemy.orm import relationship, backref
 
 from business_app import db
 from business_app.models import TimestampMixin
-from business_app.utils.constants import (
+from shared.enums import (
     TryoutBottleLedgerEventType,
     TryoutOutcome,
     TryoutStatus,
@@ -76,9 +76,7 @@ class TrialContact(db.Model, TimestampMixin):
 
 class TrialContactAddress(db.Model, TimestampMixin):
     __tablename__ = "trial_contact_addresses"
-    __table_args__ = (
-        Index("idx_trial_contact_addresses_contact", "trial_contact_id"),
-    )
+    __table_args__ = (Index("idx_trial_contact_addresses_contact", "trial_contact_id"),)
 
     id = Column(Integer, primary_key=True)
     trial_contact_id = Column(Integer, ForeignKey("trial_contacts.id"), nullable=False, index=True)

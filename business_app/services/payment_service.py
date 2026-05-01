@@ -14,11 +14,13 @@ from business_app.models.order import Order
 from business_app.models.payment import Payment, PaymentTransaction, CreditCard
 from business_app.utils.exceptions import PaymentError, ValidationError, NotFoundError
 from business_app.utils.constants import (
+    PaymeErrors,
+)
+from shared.enums import (
     OrderStatus,
     PaymentStatus,
     PaymentMethod,
     FiscalizationStatus,
-    PaymeErrors,
 )
 from business_app.utils.helpers import generate_random_string
 from business_app.utils.payment_projection import (

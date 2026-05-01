@@ -3,9 +3,7 @@
 from unittest.mock import patch
 
 from business_app.services.admin_bulk_action_service import AdminBulkActionService
-from business_app.utils.constants import OrderStatus
-
-
+from shared.enums import OrderStatus
 def test_bulk_order_cancel_delegates_to_order_service(sample_order, admin_user):
     sample_order.status = OrderStatus.PENDING
 

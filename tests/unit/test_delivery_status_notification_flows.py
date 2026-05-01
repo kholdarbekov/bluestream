@@ -10,9 +10,7 @@ from business_app.models.user import UserAddress
 from business_app.services.admin_bulk_action_service import AdminBulkActionService
 from business_app.services.staff_service import StaffService
 from business_app.tasks import delivery_tasks
-from business_app.utils.constants import DeliveryStatus
-
-
+from shared.enums import DeliveryStatus
 def _driver_headers(app, user_id: int) -> dict:
     with app.app_context():
         token = create_access_token(identity=str(user_id))

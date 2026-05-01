@@ -5,9 +5,7 @@ from datetime import UTC, datetime
 from flask_jwt_extended import create_access_token
 
 from business_app.models.delivery import Delivery, DeliveryPerson
-from business_app.utils.constants import DeliveryStatus
-
-
+from shared.enums import DeliveryStatus
 def _auth_headers(app, user_id: int) -> dict:
     with app.app_context():
         token = create_access_token(identity=str(user_id), additional_claims={"role": "admin"})

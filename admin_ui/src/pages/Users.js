@@ -49,6 +49,21 @@ const USER_TYPE_OPTIONS = [
   { value: 'entity', labelKey: 'ui.users.user_type_entity', fallback: 'Entity' }
 ];
 
+const ENTITY_SUBTYPE_OPTIONS = [
+  { value: 'workplace', labelKey: 'ui.users.entity_subtype_workplace', fallback: 'Workplace' },
+  { value: 'grocery_store', labelKey: 'ui.users.entity_subtype_grocery_store', fallback: 'Grocery Store' }
+];
+
+const getEntitySubtypeMeta = (t, subtype) => {
+  if (subtype === 'grocery_store') {
+    return { color: 'orange', label: t('ui.users.entity_subtype_grocery_store', 'Grocery Store') };
+  }
+  if (subtype === 'workplace') {
+    return { color: 'blue', label: t('ui.users.entity_subtype_workplace', 'Workplace') };
+  }
+  return null;
+};
+
 const getUserTypeMeta = (t, userType) => {
   if (userType === 'entity') {
     return { color: 'gold', label: t('ui.users.user_type_entity', 'Entity') };
@@ -88,6 +103,7 @@ const Users = () => {
   const [createForm] = Form.useForm();
   const [addressForm] = Form.useForm();
   const selectedUserType = Form.useWatch('user_type', createForm);
+  const selectedEntitySubtype = Form.useWatch('entity_subtype', createForm);
   const isEditingStaffUser = editingUser?.user_type === 'staff';
 
   const queryClient = useQueryClient();
@@ -482,6 +498,19 @@ const Users = () => {
             <Tag color={getUserTypeMeta(t, record.user_type).color} size="small">
               {getUserTypeMeta(t, record.user_type).label}
             </Tag>
+            {(() => {
+              const subtypeMeta = getEntitySubtypeMeta(t, record.entity_subtype);
+              return subtypeMeta ? (
+                <Tag color={subtypeMeta.color} size="small">
+                  {subtypeMeta.label}
+                </Tag>
+              ) : null;
+            })()}
+            {record.user_type === 'entity' && !record.entity_subtype && (
+              <Tag color="warning" size="small" title={t('ui.users.entity_subtype_unassigned_note', 'Subtype unassigned')}>
+                {t('ui.users.entity_subtype_unassigned', 'Subtype unassigned')}
+              </Tag>
+            )}
             {record.is_verified && (
               <CheckCircleOutlined
                 style={{ color: '#52c41a' }}
@@ -692,6 +721,7 @@ const Users = () => {
       phone: user.phone || '',
       email: user.email || '',
       user_type: user.user_type || 'individual',
+      entity_subtype: user.entity_subtype || undefined,
       company_name: user.company_name || '',
       tax_id: user.tax_id || ''
     });
@@ -706,6 +736,12 @@ const Users = () => {
     if (payload.user_type !== 'entity') {
       payload.company_name = '';
       payload.tax_id = '';
+      payload.entity_subtype = null;
+    } else if (!payload.entity_subtype) {
+      // Required for new entity users; for edits we send null only when user
+      // explicitly cleared it. Empty/undefined on a new user falls through to
+      // the backend which rejects it. Keep payload pass-through.
+      payload.entity_subtype = payload.entity_subtype || null;
     }
 
     if (editingUser) {
@@ -1676,6 +1712,70 @@ const Users = () => {
               </Form.Item>
             </Col>
           </Row>
+
+          {selectedUserType === 'entity' && (
+            <Row gutter={16}>
+              <Col xs={24} sm={12}>
+                <Form.Item
+                  name="entity_subtype"
+                  label={t('ui.users.entity_subtype', 'Entity Subtype')}
+                  rules={[
+                    {
+                      validator: (_, value) => {
+                        if (!editingUser && !value) {
+                          return Promise.reject(new Error(
+                            t('ui.users.entity_subtype_required', 'Entity subtype is required for new entity users')
+                          ));
+                        }
+                        return Promise.resolve();
+                      }
+                    }
+                  ]}
+                  extra={
+                    selectedEntitySubtype === 'grocery_store'
+                      ? t(
+                          'ui.users.entity_subtype_grocery_hint',
+                          'Grocery stores pay cash/card on or after delivery; debt is tracked in money. Business Account is unavailable.'
+                        )
+                      : selectedEntitySubtype === 'workplace'
+                      ? t(
+                          'ui.users.entity_subtype_workplace_hint',
+                          'Workplaces prepay via Business Account; debt is tracked per product in bottle units.'
+                        )
+                      : null
+                  }
+                >
+                  <Select
+                    allowClear
+                    placeholder={t('ui.users.select_entity_subtype', 'Select subtype')}
+                  >
+                    {ENTITY_SUBTYPE_OPTIONS.map((option) => (
+                      <Option key={option.value} value={option.value}>
+                        {t(option.labelKey, option.fallback)}
+                      </Option>
+                    ))}
+                  </Select>
+                </Form.Item>
+              </Col>
+              {editingUser && !selectedEntitySubtype && (
+                <Col xs={24} sm={12}>
+                  <div style={{
+                    background: '#fff7e6',
+                    border: '1px solid #ffd591',
+                    borderRadius: 6,
+                    padding: 12,
+                    marginTop: 30
+                  }}>
+                    <strong>{t('ui.users.entity_subtype_unassigned', 'Subtype unassigned')}:</strong>{' '}
+                    {t(
+                      'ui.users.entity_subtype_unassigned_note',
+                      'This customer cannot place orders until you assign a subtype.'
+                    )}
+                  </div>
+                </Col>
+              )}
+            </Row>
+          )}
 
           <Form.Item
             name="tax_id"

@@ -34,10 +34,12 @@ from business_app.models.order import Order
 from business_app.models.payment import Payment, PaymentTransaction
 from business_app.models.user import UserAddress
 from business_app.utils.constants import (
+    PaymeState,
+)
+from shared.enums import (
     OrderStatus,
     PaymentMethod,
     PaymentStatus,
-    PaymeState,
 )
 from business_app.utils.exceptions import ProviderUnavailableError
 from tests.integration.fake_gateways import (

@@ -13,11 +13,13 @@ from business_app.models.user import User
 from business_app.models.delivery import DeliveryStatusHistory
 from business_app.utils.exceptions import ValidationError, NotFoundError, DeliveryError
 from business_app.utils.state_validators import assert_delivery_person_for_status
-from business_app.utils.constants import DeliveryStatus, DeliveryType, OrderStatus, TASHKENT_COORDINATES, DELIVERY_ZONES
+from business_app.utils.constants import DeliveryType, DELIVERY_ZONES
+from shared.enums import DeliveryStatus, OrderStatus
 from business_app.utils.helpers import (
     calculate_distance,
     get_time_slots,
 )
+from shared.constants import TASHKENT_COORDINATES
 from business_app import db
 
 

@@ -130,8 +130,5 @@ def record_staff_pickup(task_id: int):
 @jwt_required()
 @require_staff_roles("delivery_driver")
 def get_tryout_history():
-    items = [
-        TryoutService.serialize_task(task)
-        for task in TryoutService.list_history_for_driver(_current_actor_id())
-    ]
+    items = [TryoutService.serialize_task(task) for task in TryoutService.list_history_for_driver(_current_actor_id())]
     return success_response(data={"items": items, "total": len(items)})

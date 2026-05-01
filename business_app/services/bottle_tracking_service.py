@@ -20,7 +20,7 @@ from business_app.models.bottle import (
 )
 from business_app.models.order import Order, OrderItem
 from business_app.models.user import User
-from business_app.utils.constants import (
+from shared.enums import (
     BottleFineStatus,
     BottleLedgerEventType,
     DriverBottleSessionStatus,

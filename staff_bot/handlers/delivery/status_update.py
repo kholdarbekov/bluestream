@@ -445,9 +445,11 @@ class StatusUpdateHandler(BaseHandler):
                 )
                 return CASH_INPUT
 
-            delivery_info = context.user_data.get('current_delivery', {})
-            cash_due_amount = self._get_expected_cash_to_collect(delivery_info)
-            if cash_amount <= 0 or (cash_due_amount and cash_amount > cash_due_amount):
+            # Over-collection is allowed: a customer may pay down older debt
+            # at the door, especially grocery stores. The backend allocates
+            # to the current order first then to oldest open payments; any
+            # remainder lands on the customer's contract as credit.
+            if cash_amount <= 0:
                 await update.message.reply_text(
                     i18n.get('staff.delivery.invalid_amount', language)
                 )

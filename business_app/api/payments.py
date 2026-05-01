@@ -29,7 +29,8 @@ from business_app.serializers.payment_serializers import (
     get_available_payment_methods,
 )
 from business_app.utils.decorators import validate_json, rate_limit
-from business_app.utils.constants import PaymeErrors, PaymentStatus, PaymentMethodType, PaymentMethod
+from business_app.utils.constants import PaymeErrors, PaymentMethodType
+from shared.enums import PaymentStatus, PaymentMethod
 from business_app.utils.validation_helpers import (
     validate_list_request_params,
     FilterValidator,

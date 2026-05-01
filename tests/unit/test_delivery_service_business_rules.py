@@ -8,7 +8,8 @@ import pytest
 from business_app.models.delivery import Delivery, DeliveryStatusHistory
 from business_app.models.user import UserAddress
 from business_app.services.delivery_service import DeliveryService
-from business_app.utils.constants import DeliveryStatus, DeliveryType
+from business_app.utils.constants import DeliveryType
+from shared.enums import DeliveryStatus
 from business_app.utils.exceptions import DeliveryError, ValidationError
 
 

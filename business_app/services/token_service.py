@@ -12,7 +12,7 @@ from flask_jwt_extended import create_access_token, create_refresh_token, decode
 import jwt
 
 from business_app.models.user import User
-from business_app.utils.constants import UserStatus
+from shared.enums import UserStatus
 
 logger = logging.getLogger(__name__)
 

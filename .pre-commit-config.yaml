@@ -34,9 +34,17 @@ repos:
     hooks:
       - id: flake8
         files: ^business_app/
+        # Alembic migrations are auto-generated and frequently contain long
+        # SQL string literals (index definitions, server-generated DDL) that
+        # can't be wrapped without changing semantics. Lint them by hand.
+        exclude: ^business_app/migrations/
         args:
           - --max-line-length=120
-          - --extend-ignore=E203,W503
+          # E203/W503: black-compatible. E711/E712: SQLAlchemy filters
+          # idiomatically use `Column == None/True/False`, where the operator
+          # is overloaded into a SQL expression — `is_(...)` works but `==`
+          # is the conventional shorthand and reads cleaner in compound filters.
+          - --extend-ignore=E203,W503,E711,E712
 
   # Frontend lint runs against admin_ui via the project's own ESLint config
   # (eslint.config.mjs, ESLint 9 flat). Hook only fires when admin_ui/ files

@@ -20,12 +20,12 @@ RowKey = Tuple[Any, ...]
 class OrderDeletionService:
     """Delete an order and every dependent row by traversing FK relationships."""
 
-    ROOT_TABLE_NAME = 'orders'
-    ROOT_ORDER_NUMBER_COLUMN = 'order_number'
+    ROOT_TABLE_NAME = "orders"
+    ROOT_ORDER_NUMBER_COLUMN = "order_number"
 
     def build_deletion_plan(self, order_number: str) -> Dict[str, Any]:
         """Build a deletion plan for one order number without mutating data."""
-        if not str(order_number or '').strip():
+        if not str(order_number or "").strip():
             raise ValueError("order_number is required")
 
         metadata = self._reflect_metadata()
@@ -33,20 +33,18 @@ class OrderDeletionService:
         if root_table is None:
             raise RuntimeError(f"'{self.ROOT_TABLE_NAME}' table was not found")
         if self.ROOT_ORDER_NUMBER_COLUMN not in root_table.c:
-            raise RuntimeError(
-                f"'{self.ROOT_ORDER_NUMBER_COLUMN}' column is missing from '{self.ROOT_TABLE_NAME}'"
-            )
+            raise RuntimeError(f"'{self.ROOT_ORDER_NUMBER_COLUMN}' column is missing from '{self.ROOT_TABLE_NAME}'")
 
         root_row_keys = self._fetch_root_row_keys(root_table, order_number)
         if not root_row_keys:
             return {
-                'found': False,
-                'order_number': order_number,
-                'order_ids': [],
-                'rows_by_table': {},
-                'deletion_order': [],
-                'total_rows': 0,
-                '_row_keys_by_table': {},
+                "found": False,
+                "order_number": order_number,
+                "order_ids": [],
+                "rows_by_table": {},
+                "deletion_order": [],
+                "total_rows": 0,
+                "_row_keys_by_table": {},
             }
 
         referenced_by = self._build_referenced_by_map(metadata)
@@ -79,32 +77,28 @@ class OrderDeletionService:
                 queue.append(child_table_name)
 
         normalized_row_keys_by_table: Dict[str, List[RowKey]] = {
-            table_name: sorted(row_keys)
-            for table_name, row_keys in discovered_row_keys.items()
-            if row_keys
+            table_name: sorted(row_keys) for table_name, row_keys in discovered_row_keys.items() if row_keys
         }
-        rows_by_table = {
-            table_name: len(row_keys) for table_name, row_keys in normalized_row_keys_by_table.items()
-        }
+        rows_by_table = {table_name: len(row_keys) for table_name, row_keys in normalized_row_keys_by_table.items()}
         deletion_order = self._build_deletion_order(
             metadata=metadata,
             table_names_with_rows=set(normalized_row_keys_by_table.keys()),
         )
 
         return {
-            'found': True,
-            'order_number': order_number,
-            'order_ids': [row_key[0] for row_key in normalized_row_keys_by_table[self.ROOT_TABLE_NAME]],
-            'rows_by_table': rows_by_table,
-            'deletion_order': deletion_order,
-            'total_rows': sum(rows_by_table.values()),
-            '_row_keys_by_table': normalized_row_keys_by_table,
+            "found": True,
+            "order_number": order_number,
+            "order_ids": [row_key[0] for row_key in normalized_row_keys_by_table[self.ROOT_TABLE_NAME]],
+            "rows_by_table": rows_by_table,
+            "deletion_order": deletion_order,
+            "total_rows": sum(rows_by_table.values()),
+            "_row_keys_by_table": normalized_row_keys_by_table,
         }
 
     def execute_deletion_plan(self, plan: Dict[str, Any]) -> Dict[str, int]:
         """Execute a previously built deletion plan."""
-        row_keys_by_table: Dict[str, List[RowKey]] = plan.get('_row_keys_by_table') or {}
-        deletion_order: List[str] = plan.get('deletion_order') or []
+        row_keys_by_table: Dict[str, List[RowKey]] = plan.get("_row_keys_by_table") or {}
+        deletion_order: List[str] = plan.get("deletion_order") or []
         if not row_keys_by_table or not deletion_order:
             return {}
 
@@ -122,9 +116,7 @@ class OrderDeletionService:
                 where_condition = self._build_key_condition(pk_columns, row_keys)
                 result = db.session.execute(delete(table).where(where_condition))
                 deleted_rows_by_table[table_name] = (
-                    int(result.rowcount)
-                    if result.rowcount is not None and result.rowcount >= 0
-                    else len(row_keys)
+                    int(result.rowcount) if result.rowcount is not None and result.rowcount >= 0 else len(row_keys)
                 )
 
             db.session.commit()
@@ -137,43 +129,43 @@ class OrderDeletionService:
     def delete_order_by_number(self, order_number: str, *, apply_changes: bool = False) -> Dict[str, Any]:
         """Build plan and optionally execute it."""
         plan = self.build_deletion_plan(order_number)
-        if not plan['found']:
+        if not plan["found"]:
             return {
-                'found': False,
-                'applied': False,
-                'order_number': order_number,
-                'order_ids': [],
-                'rows_by_table': {},
-                'deletion_order': [],
-                'total_rows': 0,
-                'deleted_rows_by_table': {},
-                'deleted_total_rows': 0,
+                "found": False,
+                "applied": False,
+                "order_number": order_number,
+                "order_ids": [],
+                "rows_by_table": {},
+                "deletion_order": [],
+                "total_rows": 0,
+                "deleted_rows_by_table": {},
+                "deleted_total_rows": 0,
             }
 
         if not apply_changes:
             return {
-                'found': True,
-                'applied': False,
-                'order_number': plan['order_number'],
-                'order_ids': plan['order_ids'],
-                'rows_by_table': plan['rows_by_table'],
-                'deletion_order': plan['deletion_order'],
-                'total_rows': plan['total_rows'],
-                'deleted_rows_by_table': {},
-                'deleted_total_rows': 0,
+                "found": True,
+                "applied": False,
+                "order_number": plan["order_number"],
+                "order_ids": plan["order_ids"],
+                "rows_by_table": plan["rows_by_table"],
+                "deletion_order": plan["deletion_order"],
+                "total_rows": plan["total_rows"],
+                "deleted_rows_by_table": {},
+                "deleted_total_rows": 0,
             }
 
         deleted_rows_by_table = self.execute_deletion_plan(plan)
         return {
-            'found': True,
-            'applied': True,
-            'order_number': plan['order_number'],
-            'order_ids': plan['order_ids'],
-            'rows_by_table': plan['rows_by_table'],
-            'deletion_order': plan['deletion_order'],
-            'total_rows': plan['total_rows'],
-            'deleted_rows_by_table': deleted_rows_by_table,
-            'deleted_total_rows': sum(deleted_rows_by_table.values()),
+            "found": True,
+            "applied": True,
+            "order_number": plan["order_number"],
+            "order_ids": plan["order_ids"],
+            "rows_by_table": plan["rows_by_table"],
+            "deletion_order": plan["deletion_order"],
+            "total_rows": plan["total_rows"],
+            "deleted_rows_by_table": deleted_rows_by_table,
+            "deleted_total_rows": sum(deleted_rows_by_table.values()),
         }
 
     def _reflect_metadata(self) -> MetaData:
@@ -275,9 +267,7 @@ class OrderDeletionService:
 
         deletion_order = list(reversed(topological_order))
         if self.ROOT_TABLE_NAME in deletion_order:
-            deletion_order = [name for name in deletion_order if name != self.ROOT_TABLE_NAME] + [
-                self.ROOT_TABLE_NAME
-            ]
+            deletion_order = [name for name in deletion_order if name != self.ROOT_TABLE_NAME] + [self.ROOT_TABLE_NAME]
         return deletion_order
 
     def _primary_key_columns(self, table) -> List[Any]:
@@ -292,4 +282,3 @@ class OrderDeletionService:
         if len(columns) == 1:
             return columns[0].in_([row_key[0] for row_key in row_keys])
         return tuple_(*columns).in_(list(row_keys))
-

@@ -4,7 +4,6 @@ from decimal import Decimal
 from sqlalchemy import (
     Boolean,
     Column,
-    Date,
     DateTime,
     Enum as SqlEnum,
     ForeignKey,
@@ -21,7 +20,7 @@ from sqlalchemy.orm import relationship
 
 from business_app import db
 from business_app.models import TimestampMixin
-from business_app.utils.constants import (
+from shared.enums import (
     BottleFineStatus,
     BottleLedgerEventType,
     DriverBottleSessionStatus,
@@ -110,9 +109,7 @@ class BottleLedger(db.Model, TimestampMixin):
     balance_after = Column(Numeric(precision=12, scale=2), nullable=False)
 
     actor_user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
-    occurred_at = Column(
-        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
-    )
+    occurred_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
     notes = Column(Text, nullable=True)
     idempotency_key = Column(String(255), nullable=True)
     entry_metadata = Column(JSON, nullable=False, default=dict)
@@ -172,9 +169,7 @@ class BottleFine(db.Model, TimestampMixin):
         default=BottleFineStatus.PENDING,
     )
     issued_by = Column(Integer, ForeignKey("users.id"), nullable=False)
-    issued_at = Column(
-        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
-    )
+    issued_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
     paid_at = Column(DateTime(timezone=True), nullable=True)
     waived_at = Column(DateTime(timezone=True), nullable=True)
     waived_by = Column(Integer, ForeignKey("users.id"), nullable=True)
@@ -304,6 +299,7 @@ class DriverBottleSession(db.Model, TimestampMixin):
 
     def __init__(self, **kwargs):
         import uuid
+
         super().__init__(**kwargs)
         if not self.session_ref:
             self.session_ref = str(uuid.uuid4())
@@ -370,9 +366,7 @@ class DriverBottleSessionOrder(db.Model, TimestampMixin):
     )
 
     id = Column(Integer, primary_key=True)
-    session_id = Column(
-        Integer, ForeignKey("driver_bottle_sessions.id"), nullable=False, index=True
-    )
+    session_id = Column(Integer, ForeignKey("driver_bottle_sessions.id"), nullable=False, index=True)
     order_id = Column(Integer, ForeignKey("orders.id"), nullable=False, index=True)
     # The driver who actually accepted the order — may differ from session owner
     # when co-driver (session member) accepts the order. NULL for legacy records.
@@ -425,9 +419,7 @@ class DriverSessionMembership(db.Model, TimestampMixin):
     )
 
     id = Column(Integer, primary_key=True)
-    session_id = Column(
-        Integer, ForeignKey("driver_bottle_sessions.id"), nullable=False, index=True
-    )
+    session_id = Column(Integer, ForeignKey("driver_bottle_sessions.id"), nullable=False, index=True)
     # Denormalized for fast "who owns this session" lookups without a join
     session_owner_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     member_driver_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
@@ -496,16 +488,12 @@ class DriverBottleTransfer(db.Model, TimestampMixin):
     id = Column(Integer, primary_key=True)
     transfer_ref = Column(String(100), unique=True, nullable=False, index=True)
 
-    sender_session_id = Column(
-        Integer, ForeignKey("driver_bottle_sessions.id"), nullable=False, index=True
-    )
+    sender_session_id = Column(Integer, ForeignKey("driver_bottle_sessions.id"), nullable=False, index=True)
     sender_driver_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
 
     receiver_driver_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     # Populated when the receiver confirms (they may not have a session yet at send time)
-    receiver_session_id = Column(
-        Integer, ForeignKey("driver_bottle_sessions.id"), nullable=True, index=True
-    )
+    receiver_session_id = Column(Integer, ForeignKey("driver_bottle_sessions.id"), nullable=True, index=True)
 
     declared_quantity = Column(Integer, nullable=False)
     confirmed_quantity = Column(Integer, nullable=True)  # NULL until receiver confirms
@@ -550,6 +538,7 @@ class DriverBottleTransfer(db.Model, TimestampMixin):
 
     def __init__(self, **kwargs):
         import uuid
+
         super().__init__(**kwargs)
         if not self.transfer_ref:
             self.transfer_ref = str(uuid.uuid4())

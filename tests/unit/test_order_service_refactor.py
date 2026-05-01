@@ -9,7 +9,7 @@ import pytest
 from business_app.models.order import Order, OrderItem
 from business_app.models.user import UserAddress
 from business_app.services.order_service import OrderService
-from business_app.utils.constants import OrderStatus, PaymentMethod
+from shared.enums import OrderStatus, PaymentMethod
 from business_app.utils.exceptions import ForbiddenError, ValidationError
 
 

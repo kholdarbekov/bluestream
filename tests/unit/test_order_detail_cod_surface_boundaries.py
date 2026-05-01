@@ -3,9 +3,7 @@
 from decimal import Decimal
 from unittest.mock import Mock
 
-from business_app.utils.constants import PaymentMethod, PaymentStatus
-
-
+from shared.enums import PaymentMethod, PaymentStatus
 def test_admin_order_details_stay_order_scoped_for_cash_orders(
     client,
     db,

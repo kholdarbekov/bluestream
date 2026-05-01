@@ -18,7 +18,7 @@ from business_app.models.bottle import (
     DriverSessionMembership,
 )
 from business_app.services.bottle_tracking_service import BottleTrackingService
-from business_app.utils.constants import (
+from shared.enums import (
     DriverBottleSessionStatus,
     DriverSessionMembershipStatus,
     UserRole,
@@ -200,8 +200,7 @@ def test_standalone_collection_no_session_is_noop(db, sample_user):
 def test_bind_order_to_session_creates_record(db, sample_user):
     """bind_order_to_session creates a DriverBottleSessionOrder with correct fields."""
     from business_app.models.order import Order
-    from business_app.utils.constants import OrderStatus
-
+    from shared.enums import OrderStatus
     driver = _make_driver(db, "+998901000006")
     session = _open_session(db, driver)
 
@@ -231,8 +230,7 @@ def test_bind_order_to_session_creates_record(db, sample_user):
 def test_bind_order_to_session_is_idempotent(db, sample_user):
     """Calling bind_order_to_session twice for the same order is safe."""
     from business_app.models.order import Order
-    from business_app.utils.constants import OrderStatus
-
+    from shared.enums import OrderStatus
     driver = _make_driver(db, "+998901000007")
     session = _open_session(db, driver)
 
@@ -273,9 +271,7 @@ def test_staff_service_delivery_uses_session_tally_not_deprecated_load(
     from business_app.models.order import Order, OrderItem
     from business_app.models.user import UserAddress
     from business_app.services.staff_service import StaffService
-    from business_app.utils.constants import OrderStatus
-
-    # Enable returnable bottle tracking on the fixture product
+    from shared.enums import OrderStatus
     sample_product.tracks_returnable_bottles = True
     sample_product.returnable_bottles_per_unit = Decimal("1.00")
     db.session.flush()
@@ -318,7 +314,7 @@ def test_staff_service_delivery_uses_session_tally_not_deprecated_load(
     db.session.add(order_item)
     db.session.flush()
 
-    from business_app.utils.constants import DeliveryStatus
+    from shared.enums import DeliveryStatus
     delivery = Delivery(
         order_id=order.id,
         status=DeliveryStatus.ARRIVED,  # valid pre-condition for 'delivered' transition
@@ -589,8 +585,7 @@ def test_codriver_no_longer_sees_session_after_leave(db):
 @pytest.mark.unit
 def test_codriver_membership_revoked_when_owner_closes_session(db):
     """When the owner closes their session, all active co-driver memberships are revoked."""
-    from business_app.utils.constants import DriverSessionMembershipStatus as MStatus
-
+    from shared.enums import DriverSessionMembershipStatus as MStatus
     owner = _make_driver(db, "+998901000023", "OwnerClose")
     codriver = _make_driver(db, "+998901000024", "CoDriverClose")
     session = _open_session(db, owner)

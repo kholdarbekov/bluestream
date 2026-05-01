@@ -15,7 +15,7 @@ from business_app.models.order import Order
 from business_app.models.payment import Payment
 from business_app.models.delivery import DeliveryTimeSlot
 from business_app.utils.exceptions import ValidationError, NotFoundError, ConflictError
-from business_app.utils.constants import SubscriptionStatus, SubscriptionFrequency, PaymentMethod
+from shared.enums import SubscriptionStatus, SubscriptionFrequency, PaymentMethod
 from business_app.utils.translations import get_translation
 from sqlalchemy.orm import joinedload
 from business_app import db

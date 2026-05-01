@@ -18,7 +18,7 @@ from business_app.models.order import Order, OrderItem  # noqa: E402
 from business_app.models.product import Product  # noqa: E402
 from business_app.models.user import User, UserAddress  # noqa: E402
 from business_app.utils.exceptions import ValidationError, NotFoundError, ConflictError, ForbiddenError  # noqa: E402
-from business_app.utils.constants import (  # noqa: E402
+from shared.enums import (  # noqa: E402
     OrderStatus,
     PaymentStatus,
     DeliveryStatus,
@@ -91,6 +91,12 @@ class OrderService:
         if not user.phone:
             raise ValidationError("Phone number is required to place an order. Please update your profile.")
 
+        # Entity users must have an entity_subtype assigned (workplace vs grocery
+        # store) before they can place orders. Legacy entity rows are NULL until
+        # an admin sets it.
+        if user.is_entity_user and user.normalized_entity_subtype is None:
+            raise ValidationError("Entity subtype must be assigned by admin before placing orders")
+
         # Validate and calculate order items
         items_data = order_data["items"]
         order_items, subtotal = self._process_order_items(items_data, user_id=user_id)
@@ -114,7 +120,7 @@ class OrderService:
         payment_method = None
         payment_method_str = order_data.get("payment_method")
         if payment_method_str:
-            from business_app.utils.constants import PaymentMethod
+            from shared.enums import PaymentMethod
 
             payment_method_map = {
                 "cash": PaymentMethod.CASH,
@@ -901,7 +907,7 @@ class OrderService:
         process_payment_refund: bool = True,
     ) -> Order:
         """Cancel an order"""
-        from business_app.utils.constants import PaymentMethod
+        from shared.enums import PaymentMethod
 
         order = self.get_order(order_id, user_id)
 
@@ -1299,7 +1305,7 @@ class OrderService:
         self, order: Order, new_status: OrderStatus, bottles_returned: int = None, updated_by: int = None
     ):
         """Handle actions when order status changes"""
-        from business_app.utils.constants import PaymentMethod
+        from shared.enums import PaymentMethod
 
         if new_status == OrderStatus.CONFIRMED:
             # For non-cash orders, confirm inventory reservations - reduce actual stock
@@ -1366,13 +1372,25 @@ class OrderService:
             except Exception:
                 logger.exception("Failed to process loyalty triggers for delivered order %s", order.id)
 
-            # Consume reserved corporate prepayment units on successful delivery.
+            # Corporate prepayment ledger update on successful delivery.
+            # - Workplace (UNITS-mode) contracts: consume the units reserved at
+            #   order creation, recording per-product CONSUME ledger entries.
+            # - Grocery store (AMOUNT-mode) contracts: post a CHARGE ledger
+            #   entry for the order total against the contract's money debt.
             from business_app.services.corporate_contract_service import CorporateContractService
 
-            CorporateContractService().consume_for_order(
-                order_id=order.id,
-                delivery_id=order.delivery.id if order.delivery else None,
-            )
+            corporate_service = CorporateContractService()
+            if order.user and order.user.is_grocery_store:
+                corporate_service.charge_on_delivery(
+                    order=order,
+                    delivery_id=order.delivery.id if order.delivery else None,
+                    actor_user_id=updated_by,
+                )
+            else:
+                corporate_service.consume_for_order(
+                    order_id=order.id,
+                    delivery_id=order.delivery.id if order.delivery else None,
+                )
 
             # --- Returnable bottle tracking ---
             logger.info(

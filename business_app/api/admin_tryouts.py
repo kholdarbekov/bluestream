@@ -101,11 +101,15 @@ def convert_tryout(tryout_id: int):
             "tryout": TryoutService.serialize_tryout(result["tryout"]),
             "conversion": {
                 "action": result.get("action"),
-                "user": {
-                    "id": user.id,
-                    "full_name": user.full_name,
-                    "phone": user.phone,
-                } if user else None,
+                "user": (
+                    {
+                        "id": user.id,
+                        "full_name": user.full_name,
+                        "phone": user.phone,
+                    }
+                    if user
+                    else None
+                ),
             },
         }
     )

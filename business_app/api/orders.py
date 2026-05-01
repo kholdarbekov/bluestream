@@ -26,7 +26,8 @@ from business_app.serializers.order_serializers import (
     CartEstimateRequest,
 )
 from business_app.utils.decorators import validate_json, rate_limit, require_verification
-from business_app.utils.constants import OrderStatus, NotificationType, PaymentMethod
+from business_app.utils.constants import NotificationType
+from shared.enums import OrderStatus, PaymentMethod
 from business_app.utils.validation_helpers import validate_list_request_params
 from business_app.utils.error_handlers import handle_api_exception
 from business_app.utils.exceptions import (

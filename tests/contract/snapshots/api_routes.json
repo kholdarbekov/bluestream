@@ -399,6 +399,13 @@
     "rule": "/api/v1/admin/corporate/contracts/<int:contract_id>"
   },
   {
+    "endpoint": "admin.adjust_corporate_contract_amount",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/corporate/contracts/<int:contract_id>/adjustments"
+  },
+  {
     "endpoint": "admin.get_corporate_contract_balance",
     "methods": [
       "GET"

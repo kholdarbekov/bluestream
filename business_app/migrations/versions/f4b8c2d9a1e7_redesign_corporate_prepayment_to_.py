@@ -5,6 +5,7 @@ Revises: e1f9a6c4b2d1
 Create Date: 2026-02-28 18:12:00.000000
 
 """
+
 from alembic import op
 import sqlalchemy as sa
 
@@ -17,14 +18,19 @@ depends_on = None
 
 
 def _legacy_accounts(bind):
-    return bind.execute(
-        sa.text(
-            """
+    return (
+        bind.execute(
+            sa.text(
+                """
             SELECT id, contract_id, prepaid_units, reserved_units, consumed_units, last_topup_at
             FROM corporate_prepayment_accounts
             """
+            )
         )
-    ).mappings().all()
+        .mappings()
+        .all()
+    )
+
 
 def _legacy_ledger_count(bind, account_id):
     return bind.execute(
@@ -58,8 +64,12 @@ def upgrade():
     )
     with op.batch_alter_table("corporate_prepayment_legacy_snapshots", schema=None) as batch_op:
         batch_op.create_index("idx_corporate_prepayment_legacy_snapshots_contract", ["contract_id"], unique=False)
-        batch_op.create_index(batch_op.f("ix_corporate_prepayment_legacy_snapshots_account_id"), ["account_id"], unique=False)
-        batch_op.create_index(batch_op.f("ix_corporate_prepayment_legacy_snapshots_contract_id"), ["contract_id"], unique=False)
+        batch_op.create_index(
+            batch_op.f("ix_corporate_prepayment_legacy_snapshots_account_id"), ["account_id"], unique=False
+        )
+        batch_op.create_index(
+            batch_op.f("ix_corporate_prepayment_legacy_snapshots_contract_id"), ["contract_id"], unique=False
+        )
 
     op.create_table(
         "corporate_prepayment_balances",
@@ -79,7 +89,9 @@ def upgrade():
         sa.UniqueConstraint("account_id", "product_id", name="uq_corporate_prepayment_balance_account_product"),
     )
     with op.batch_alter_table("corporate_prepayment_balances", schema=None) as batch_op:
-        batch_op.create_index("idx_corporate_prepayment_balances_account_active", ["account_id", "is_active"], unique=False)
+        batch_op.create_index(
+            "idx_corporate_prepayment_balances_account_active", ["account_id", "is_active"], unique=False
+        )
         batch_op.create_index("idx_corporate_prepayment_balances_product", ["product_id"], unique=False)
         batch_op.create_index(batch_op.f("ix_corporate_prepayment_balances_account_id"), ["account_id"], unique=False)
         batch_op.create_index(batch_op.f("ix_corporate_prepayment_balances_is_active"), ["is_active"], unique=False)
@@ -90,13 +102,21 @@ def upgrade():
         batch_op.add_column(sa.Column("product_id", sa.Integer(), nullable=True))
         batch_op.add_column(sa.Column("order_item_id", sa.Integer(), nullable=True))
         batch_op.add_column(sa.Column("unit_price_snapshot", sa.Numeric(precision=12, scale=2), nullable=True))
-        batch_op.create_foreign_key("fk_corporate_prepayment_ledger_balance_id", "corporate_prepayment_balances", ["balance_id"], ["id"])
+        batch_op.create_foreign_key(
+            "fk_corporate_prepayment_ledger_balance_id", "corporate_prepayment_balances", ["balance_id"], ["id"]
+        )
         batch_op.create_foreign_key("fk_corporate_prepayment_ledger_product_id", "products", ["product_id"], ["id"])
-        batch_op.create_foreign_key("fk_corporate_prepayment_ledger_order_item_id", "order_items", ["order_item_id"], ["id"])
-        batch_op.create_index("idx_corporate_prepayment_ledger_product_event", ["product_id", "event_type"], unique=False)
+        batch_op.create_foreign_key(
+            "fk_corporate_prepayment_ledger_order_item_id", "order_items", ["order_item_id"], ["id"]
+        )
+        batch_op.create_index(
+            "idx_corporate_prepayment_ledger_product_event", ["product_id", "event_type"], unique=False
+        )
         batch_op.create_index(batch_op.f("ix_corporate_prepayment_ledger_balance_id"), ["balance_id"], unique=False)
         batch_op.create_index(batch_op.f("ix_corporate_prepayment_ledger_product_id"), ["product_id"], unique=False)
-        batch_op.create_index(batch_op.f("ix_corporate_prepayment_ledger_order_item_id"), ["order_item_id"], unique=False)
+        batch_op.create_index(
+            batch_op.f("ix_corporate_prepayment_ledger_order_item_id"), ["order_item_id"], unique=False
+        )
 
     bind = op.get_bind()
     for account in _legacy_accounts(bind):
@@ -156,9 +176,15 @@ def upgrade():
 
 def downgrade():
     with op.batch_alter_table("corporate_prepayment_accounts", schema=None) as batch_op:
-        batch_op.add_column(sa.Column("consumed_units", sa.Numeric(precision=12, scale=2), nullable=False, server_default="0.00"))
-        batch_op.add_column(sa.Column("reserved_units", sa.Numeric(precision=12, scale=2), nullable=False, server_default="0.00"))
-        batch_op.add_column(sa.Column("prepaid_units", sa.Numeric(precision=12, scale=2), nullable=False, server_default="0.00"))
+        batch_op.add_column(
+            sa.Column("consumed_units", sa.Numeric(precision=12, scale=2), nullable=False, server_default="0.00")
+        )
+        batch_op.add_column(
+            sa.Column("reserved_units", sa.Numeric(precision=12, scale=2), nullable=False, server_default="0.00")
+        )
+        batch_op.add_column(
+            sa.Column("prepaid_units", sa.Numeric(precision=12, scale=2), nullable=False, server_default="0.00")
+        )
 
     bind = op.get_bind()
     bind.execute(

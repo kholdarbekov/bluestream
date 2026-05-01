@@ -17,7 +17,7 @@ from business_app.models.corporate import (
 from business_app.models.order import Order, OrderItem
 from business_app.models.product import Product, ProductCategory
 from business_app.services.corporate_contract_service import CorporateContractService
-from business_app.utils.constants import OrderStatus
+from shared.enums import EntitySubtype, OrderStatus
 from business_app.utils.exceptions import ValidationError
 
 
@@ -134,6 +134,7 @@ def _get_product_balance(account_id: int, product_id: int) -> CorporatePrepaymen
 
 def test_resolve_unit_price_uses_contract_override(db, sample_user):
     sample_user.user_type = "entity"
+    sample_user.entity_subtype = EntitySubtype.WORKPLACE
     db.session.commit()
 
     service = CorporateContractService()
@@ -159,6 +160,7 @@ def test_resolve_unit_price_uses_contract_override(db, sample_user):
 
 def test_resolve_pricing_for_user_products_returns_contract_and_fallback(db, sample_user):
     sample_user.user_type = "entity"
+    sample_user.entity_subtype = EntitySubtype.WORKPLACE
     db.session.commit()
 
     service = CorporateContractService()
@@ -208,6 +210,7 @@ def test_resolve_pricing_for_user_products_uses_fallback_for_individual_user(db,
 
 def test_create_contract_defaults_loyalty_points_ineligible(db, sample_user):
     sample_user.user_type = "entity"
+    sample_user.entity_subtype = EntitySubtype.WORKPLACE
     db.session.commit()
 
     service = CorporateContractService()
@@ -232,6 +235,7 @@ def test_create_contract_defaults_loyalty_points_ineligible(db, sample_user):
 
 def test_create_contract_persists_explicit_loyalty_points_eligibility(db, sample_user):
     sample_user.user_type = "entity"
+    sample_user.entity_subtype = EntitySubtype.WORKPLACE
     db.session.commit()
 
     service = CorporateContractService()
@@ -252,6 +256,7 @@ def test_create_contract_persists_explicit_loyalty_points_eligibility(db, sample
 
 def test_update_contract_can_enable_loyalty_points_eligibility(db, sample_user):
     sample_user.user_type = "entity"
+    sample_user.entity_subtype = EntitySubtype.WORKPLACE
     db.session.commit()
 
     service = CorporateContractService()
@@ -269,6 +274,7 @@ def test_update_contract_can_enable_loyalty_points_eligibility(db, sample_user):
 
 def test_update_contract_can_disable_loyalty_points_eligibility(db, sample_user):
     sample_user.user_type = "entity"
+    sample_user.entity_subtype = EntitySubtype.WORKPLACE
     db.session.commit()
 
     service = CorporateContractService()
@@ -286,6 +292,7 @@ def test_update_contract_can_disable_loyalty_points_eligibility(db, sample_user)
 
 def test_create_contract_persists_explicit_allows_debt(db, sample_user):
     sample_user.user_type = "entity"
+    sample_user.entity_subtype = EntitySubtype.WORKPLACE
     db.session.commit()
 
     service = CorporateContractService()
@@ -306,6 +313,7 @@ def test_create_contract_persists_explicit_allows_debt(db, sample_user):
 
 def test_update_contract_can_toggle_allows_debt(db, sample_user):
     sample_user.user_type = "entity"
+    sample_user.entity_subtype = EntitySubtype.WORKPLACE
     db.session.commit()
 
     service = CorporateContractService()
@@ -323,6 +331,7 @@ def test_update_contract_can_toggle_allows_debt(db, sample_user):
 
 def test_resolve_contract_pricing_rejects_overlapping_matching_contracts(db, sample_user):
     sample_user.user_type = "entity"
+    sample_user.entity_subtype = EntitySubtype.WORKPLACE
     db.session.commit()
 
     service = CorporateContractService()
@@ -368,6 +377,7 @@ def test_resolve_contract_pricing_rejects_overlapping_matching_contracts(db, sam
 
 def test_preview_contract_price_overlaps_returns_conflict_details(db, sample_user):
     sample_user.user_type = "entity"
+    sample_user.entity_subtype = EntitySubtype.WORKPLACE
     db.session.commit()
 
     service = CorporateContractService()
@@ -393,6 +403,7 @@ def test_preview_contract_price_overlaps_returns_conflict_details(db, sample_use
 
 def test_validate_business_account_order_requires_every_item_to_be_contract_backed(db, sample_user):
     sample_user.user_type = "entity"
+    sample_user.entity_subtype = EntitySubtype.WORKPLACE
     db.session.commit()
 
     service = CorporateContractService()
@@ -416,6 +427,7 @@ def test_validate_business_account_order_requires_every_item_to_be_contract_back
 
 def test_validate_business_account_order_rejects_insufficient_balance_when_debt_disabled(db, sample_user):
     sample_user.user_type = "entity"
+    sample_user.entity_subtype = EntitySubtype.WORKPLACE
     db.session.commit()
 
     service = CorporateContractService()
@@ -450,6 +462,7 @@ def test_validate_business_account_order_rejects_insufficient_balance_when_debt_
 
 def test_validate_business_account_order_allows_shortage_when_contract_allows_debt(db, sample_user):
     sample_user.user_type = "entity"
+    sample_user.entity_subtype = EntitySubtype.WORKPLACE
     db.session.commit()
 
     service = CorporateContractService()
@@ -472,6 +485,7 @@ def test_validate_business_account_order_allows_shortage_when_contract_allows_de
 
 def test_validate_business_account_order_skips_balance_check_for_non_prepayment_items(db, sample_user):
     sample_user.user_type = "entity"
+    sample_user.entity_subtype = EntitySubtype.WORKPLACE
     db.session.commit()
 
     service = CorporateContractService()
@@ -499,6 +513,7 @@ def test_validate_business_account_order_skips_balance_check_for_non_prepayment_
 
 def test_reserve_then_consume_allows_negative_available_balance(db, sample_user):
     sample_user.user_type = "entity"
+    sample_user.entity_subtype = EntitySubtype.WORKPLACE
     db.session.commit()
 
     service = CorporateContractService()
@@ -541,6 +556,7 @@ def test_reserve_then_consume_allows_negative_available_balance(db, sample_user)
 
 def test_release_for_order_decrements_reserved_units(db, sample_user):
     sample_user.user_type = "entity"
+    sample_user.entity_subtype = EntitySubtype.WORKPLACE
     db.session.commit()
 
     service = CorporateContractService()
@@ -584,6 +600,7 @@ def test_release_for_order_decrements_reserved_units(db, sample_user):
 
 def test_topup_contract_updates_account_and_writes_ledger(db, sample_user):
     sample_user.user_type = "entity"
+    sample_user.entity_subtype = EntitySubtype.WORKPLACE
     db.session.commit()
 
     service = CorporateContractService()
@@ -610,6 +627,7 @@ def test_topup_contract_updates_account_and_writes_ledger(db, sample_user):
 
 def test_get_balance_keeps_products_separate_for_mixed_contract(db, sample_user):
     sample_user.user_type = "entity"
+    sample_user.entity_subtype = EntitySubtype.WORKPLACE
     db.session.commit()
 
     service = CorporateContractService()
@@ -639,6 +657,7 @@ def test_get_balance_keeps_products_separate_for_mixed_contract(db, sample_user)
 
 def test_get_loyalty_eligible_amount_uses_total_amount_for_non_contract_orders(db, sample_user):
     sample_user.user_type = "entity"
+    sample_user.entity_subtype = EntitySubtype.WORKPLACE
     db.session.commit()
 
     service = CorporateContractService()
@@ -660,6 +679,7 @@ def test_get_loyalty_eligible_amount_uses_total_amount_for_non_contract_orders(d
 
 def test_get_loyalty_eligible_amount_returns_zero_for_ineligible_contract_items(db, sample_user):
     sample_user.user_type = "entity"
+    sample_user.entity_subtype = EntitySubtype.WORKPLACE
     db.session.commit()
 
     service = CorporateContractService()
@@ -682,6 +702,7 @@ def test_get_loyalty_eligible_amount_returns_zero_for_ineligible_contract_items(
 
 def test_get_loyalty_eligible_amount_excludes_only_ineligible_contract_lines(db, sample_user):
     sample_user.user_type = "entity"
+    sample_user.entity_subtype = EntitySubtype.WORKPLACE
     db.session.commit()
 
     service = CorporateContractService()
@@ -745,6 +766,7 @@ def test_get_loyalty_eligible_amount_excludes_only_ineligible_contract_lines(db,
 
 def test_reserve_for_order_uses_stored_order_item_contract_linkage(db, sample_user):
     sample_user.user_type = "entity"
+    sample_user.entity_subtype = EntitySubtype.WORKPLACE
     db.session.commit()
 
     service = CorporateContractService()

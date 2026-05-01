@@ -5,6 +5,7 @@ Revises: d4e6f8a1b2c3
 Create Date: 2026-03-02 14:15:00.000000
 
 """
+
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
@@ -18,27 +19,40 @@ depends_on = None
 
 
 tryout_status_enum = postgresql.ENUM(
-    "draft", "scheduled", "active", "closed", "cancelled",
+    "draft",
+    "scheduled",
+    "active",
+    "closed",
+    "cancelled",
     name="tryout_status",
     create_type=False,
 )
 tryout_outcome_enum = postgresql.ENUM(
-    "pending", "converted", "declined",
+    "pending",
+    "converted",
+    "declined",
     name="tryout_outcome",
     create_type=False,
 )
 tryout_task_type_enum = postgresql.ENUM(
-    "handoff", "pickup",
+    "handoff",
+    "pickup",
     name="tryout_task_type",
     create_type=False,
 )
 tryout_task_status_enum = postgresql.ENUM(
-    "open", "assigned", "completed", "cancelled",
+    "open",
+    "assigned",
+    "completed",
+    "cancelled",
     name="tryout_task_status",
     create_type=False,
 )
 tryout_bottle_ledger_event_type_enum = postgresql.ENUM(
-    "handoff", "pickup", "adjustment", "void",
+    "handoff",
+    "pickup",
+    "adjustment",
+    "void",
     name="tryout_bottle_ledger_event_type",
     create_type=False,
 )
@@ -47,10 +61,18 @@ tryout_bottle_ledger_event_type_enum = postgresql.ENUM(
 def upgrade():
     with op.batch_alter_table("products", schema=None) as batch_op:
         batch_op.add_column(sa.Column("is_tryout_eligible", sa.Boolean(), nullable=False, server_default=sa.true()))
-        batch_op.add_column(sa.Column("tracks_returnable_bottles", sa.Boolean(), nullable=False, server_default=sa.false()))
-        batch_op.add_column(sa.Column("returnable_bottles_per_unit", sa.Numeric(precision=12, scale=2), nullable=False, server_default="0.00"))
+        batch_op.add_column(
+            sa.Column("tracks_returnable_bottles", sa.Boolean(), nullable=False, server_default=sa.false())
+        )
+        batch_op.add_column(
+            sa.Column(
+                "returnable_bottles_per_unit", sa.Numeric(precision=12, scale=2), nullable=False, server_default="0.00"
+            )
+        )
         batch_op.create_index(batch_op.f("ix_products_is_tryout_eligible"), ["is_tryout_eligible"], unique=False)
-        batch_op.create_index(batch_op.f("ix_products_tracks_returnable_bottles"), ["tracks_returnable_bottles"], unique=False)
+        batch_op.create_index(
+            batch_op.f("ix_products_tracks_returnable_bottles"), ["tracks_returnable_bottles"], unique=False
+        )
 
     bind = op.get_bind()
     tryout_status_enum.create(bind, checkfirst=True)
@@ -95,7 +117,9 @@ def upgrade():
         sa.PrimaryKeyConstraint("id"),
     )
     with op.batch_alter_table("trial_contact_addresses", schema=None) as batch_op:
-        batch_op.create_index(batch_op.f("ix_trial_contact_addresses_trial_contact_id"), ["trial_contact_id"], unique=False)
+        batch_op.create_index(
+            batch_op.f("ix_trial_contact_addresses_trial_contact_id"), ["trial_contact_id"], unique=False
+        )
         batch_op.create_index("idx_trial_contact_addresses_contact", ["trial_contact_id"], unique=False)
 
     op.create_table(
@@ -178,7 +202,9 @@ def upgrade():
         batch_op.create_index(batch_op.f("ix_tryout_tasks_tryout_id"), ["tryout_id"], unique=False)
         batch_op.create_index(batch_op.f("ix_tryout_tasks_task_type"), ["task_type"], unique=False)
         batch_op.create_index(batch_op.f("ix_tryout_tasks_status"), ["status"], unique=False)
-        batch_op.create_index(batch_op.f("ix_tryout_tasks_assigned_driver_user_id"), ["assigned_driver_user_id"], unique=False)
+        batch_op.create_index(
+            batch_op.f("ix_tryout_tasks_assigned_driver_user_id"), ["assigned_driver_user_id"], unique=False
+        )
         batch_op.create_index("idx_tryout_tasks_tryout_status", ["tryout_id", "status"], unique=False)
         batch_op.create_index("idx_tryout_tasks_driver_status", ["assigned_driver_user_id", "status"], unique=False)
 

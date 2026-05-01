@@ -20,6 +20,7 @@ from sqlalchemy.orm import relationship, backref
 
 from business_app import db
 from business_app.models import TimestampMixin
+from shared.enums import CorporateContractTrackingMode
 
 
 class CorporateContractStatus(Enum):
@@ -35,6 +36,10 @@ class CorporatePrepaymentEventType(Enum):
     CONSUME = "consume"
     RELEASE = "release"
     ADJUSTMENT = "adjustment"
+    # Money-only events used when the contract's tracking_mode == AMOUNT
+    # (grocery-store accounts). units/product_id/balance_id are NULL on these rows.
+    CHARGE = "charge"
+    COLLECT = "collect"
 
 
 class CorporateContract(db.Model, TimestampMixin):
@@ -66,6 +71,17 @@ class CorporateContract(db.Model, TimestampMixin):
     is_active = Column(Boolean, nullable=False, default=True, index=True)
     is_loyalty_points_eligible = Column(Boolean, nullable=False, default=False, index=True)
     allows_debt = Column(Boolean, nullable=False, default=False, index=True)
+    tracking_mode = Column(
+        SqlEnum(
+            CorporateContractTrackingMode,
+            name="corporate_contract_tracking_mode",
+            values_callable=lambda x: [e.value for e in x],
+        ),
+        nullable=False,
+        default=CorporateContractTrackingMode.UNITS,
+        server_default=CorporateContractTrackingMode.UNITS.value,
+        index=True,
+    )
     created_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     updated_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
 
@@ -111,6 +127,14 @@ class CorporateContract(db.Model, TimestampMixin):
             return False
         return True
 
+    @property
+    def is_amount_tracked(self) -> bool:
+        return self.tracking_mode == CorporateContractTrackingMode.AMOUNT
+
+    @property
+    def is_units_tracked(self) -> bool:
+        return self.tracking_mode == CorporateContractTrackingMode.UNITS
+
     def to_dict(self):
         return {
             "id": self.id,
@@ -126,6 +150,7 @@ class CorporateContract(db.Model, TimestampMixin):
             "is_active": self.is_active,
             "is_loyalty_points_eligible": self.is_loyalty_points_eligible,
             "allows_debt": self.allows_debt,
+            "tracking_mode": self.tracking_mode.value if hasattr(self.tracking_mode, "value") else self.tracking_mode,
             "is_currently_active": self.is_currently_active,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
@@ -189,6 +214,28 @@ class CorporatePrepaymentAccount(db.Model, TimestampMixin):
     contract_id = Column(Integer, ForeignKey("corporate_contracts.id"), nullable=False, index=True)
     is_active = Column(Boolean, nullable=False, default=True, index=True)
     last_topup_at = Column(DateTime(timezone=True), nullable=True)
+    # Money-mode fields. Used only when parent contract.tracking_mode == AMOUNT.
+    # Sign convention: outstanding_amount > 0 = customer owes us; < 0 = customer credit.
+    outstanding_amount = Column(
+        Numeric(precision=14, scale=2),
+        nullable=False,
+        default=Decimal("0.00"),
+        server_default="0",
+    )
+    lifetime_charged = Column(
+        Numeric(precision=14, scale=2),
+        nullable=False,
+        default=Decimal("0.00"),
+        server_default="0",
+    )
+    lifetime_collected = Column(
+        Numeric(precision=14, scale=2),
+        nullable=False,
+        default=Decimal("0.00"),
+        server_default="0",
+    )
+    last_charged_at = Column(DateTime(timezone=True), nullable=True)
+    last_collected_at = Column(DateTime(timezone=True), nullable=True)
 
     contract = relationship("CorporateContract", back_populates="prepayment_account")
     product_balances = relationship(
@@ -222,6 +269,11 @@ class CorporatePrepaymentAccount(db.Model, TimestampMixin):
             "tracked_products_count": self.tracked_products_count,
             "reserved_products_count": self.reserved_products_count,
             "debt_products_count": self.debt_products_count,
+            "outstanding_amount": float(self.outstanding_amount or 0),
+            "lifetime_charged": float(self.lifetime_charged or 0),
+            "lifetime_collected": float(self.lifetime_collected or 0),
+            "last_charged_at": self.last_charged_at.isoformat() if self.last_charged_at else None,
+            "last_collected_at": self.last_collected_at.isoformat() if self.last_collected_at else None,
             "last_topup_at": self.last_topup_at.isoformat() if self.last_topup_at else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
@@ -300,6 +352,8 @@ class CorporatePrepaymentLedger(db.Model, TimestampMixin):
     id = Column(Integer, primary_key=True)
     contract_id = Column(Integer, ForeignKey("corporate_contracts.id"), nullable=False, index=True)
     account_id = Column(Integer, ForeignKey("corporate_prepayment_accounts.id"), nullable=False, index=True)
+    # balance_id and product_id are required for UNITS-mode rows but NULL for
+    # AMOUNT-mode rows (CHARGE/COLLECT). Enforced via DB CHECK constraint.
     balance_id = Column(Integer, ForeignKey("corporate_prepayment_balances.id"), nullable=True, index=True)
     product_id = Column(Integer, ForeignKey("products.id"), nullable=True, index=True)
     order_id = Column(Integer, ForeignKey("orders.id"), nullable=True, index=True)
@@ -315,9 +369,12 @@ class CorporatePrepaymentLedger(db.Model, TimestampMixin):
         nullable=False,
         index=True,
     )
-    units = Column(Numeric(precision=12, scale=2), nullable=False, default=Decimal("0.00"))
+    # `units` is nullable now: required for UNITS-mode events
+    # (TOPUP/RESERVE/CONSUME/RELEASE/ADJUSTMENT), NULL for AMOUNT-mode events
+    # (CHARGE/COLLECT). Enforced via DB CHECK constraint.
+    units = Column(Numeric(precision=12, scale=2), nullable=True)
     unit_price_snapshot = Column(Numeric(precision=12, scale=2), nullable=True)
-    amount = Column(Numeric(precision=12, scale=2), nullable=True)
+    amount = Column(Numeric(precision=14, scale=2), nullable=True)
     currency = Column(String(3), nullable=False, default="UZS")
     transfer_reference = Column(String(255), nullable=True)
     notes = Column(Text, nullable=True)
@@ -346,7 +403,7 @@ class CorporatePrepaymentLedger(db.Model, TimestampMixin):
             "delivery_id": self.delivery_id,
             "actor_user_id": self.actor_user_id,
             "event_type": self.event_type.value if hasattr(self.event_type, "value") else self.event_type,
-            "units": float(self.units or 0),
+            "units": float(self.units) if self.units is not None else None,
             "unit_price_snapshot": float(self.unit_price_snapshot) if self.unit_price_snapshot is not None else None,
             "amount": float(self.amount) if self.amount is not None else None,
             "currency": self.currency,

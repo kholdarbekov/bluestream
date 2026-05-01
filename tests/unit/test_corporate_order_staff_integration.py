@@ -9,7 +9,7 @@ from business_app.models.user import User, UserAddress
 from business_app.services.order_service import OrderService
 from business_app.services.staff_service import StaffService
 from business_app.utils.exceptions import ValidationError
-from business_app.utils.constants import PaymentMethod, UserRole, UserType
+from shared.enums import EntitySubtype, PaymentMethod, UserRole, UserType
 from business_app.utils.password_security import hash_password
 
 
@@ -36,6 +36,7 @@ def test_order_service_create_order_supports_business_account_and_reserve(
     mock_inventory_service,
 ):
     sample_user.user_type = "entity"
+    sample_user.entity_subtype = EntitySubtype.WORKPLACE
     db.session.commit()
 
     address = UserAddress(
@@ -119,6 +120,7 @@ def test_staff_service_create_phone_order_supports_business_account_and_reserve(
     sample_product,
 ):
     sample_user.user_type = "entity"
+    sample_user.entity_subtype = EntitySubtype.WORKPLACE
     operator = _create_operator_user()
     db.session.add(operator)
     # ARCH-006: phone orders auto-CONFIRM and a CONFIRMED order requires a
@@ -183,6 +185,7 @@ def test_order_service_business_account_requires_applicable_contract(
     mock_inventory_service,
 ):
     sample_user.user_type = "entity"
+    sample_user.entity_subtype = EntitySubtype.WORKPLACE
     db.session.commit()
 
     address = UserAddress(
@@ -245,6 +248,7 @@ def test_staff_service_business_account_requires_applicable_contract(
     sample_product,
 ):
     sample_user.user_type = "entity"
+    sample_user.entity_subtype = EntitySubtype.WORKPLACE
     operator = _create_operator_user()
     db.session.add(operator)
     db.session.commit()

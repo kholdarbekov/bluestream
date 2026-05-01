@@ -9,7 +9,7 @@ import pytest
 from business_app.models.subscription import Subscription
 from business_app.models.user import User
 from business_app.services.auth_service import AuthService
-from business_app.utils.constants import PaymentMethod, SubscriptionFrequency, UserRole, UserStatus
+from shared.enums import PaymentMethod, SubscriptionFrequency, UserRole, UserStatus
 from business_app.utils.exceptions import ValidationError, ConflictError
 from business_app.utils.password_security import hash_password
 

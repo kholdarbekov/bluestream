@@ -5,7 +5,7 @@ from unittest.mock import Mock
 from flask_jwt_extended import create_access_token
 
 from business_app.models.user import User
-from business_app.utils.constants import UserRole, UserType
+from shared.enums import UserRole, UserType
 from business_app.utils.password_security import hash_password
 
 

@@ -1,6 +1,7 @@
 """
 CLI commands package for BlueStream
 """
+
 from .config import init_app as init_config_commands
 from .session_commands import register_session_commands
 

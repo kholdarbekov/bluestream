@@ -6,7 +6,7 @@ from unittest.mock import Mock, patch
 import pytest
 
 from business_app.services.order_service import OrderService
-from business_app.utils.constants import OrderStatus
+from shared.enums import OrderStatus
 from business_app.utils.exceptions import ConflictError, NotFoundError
 
 

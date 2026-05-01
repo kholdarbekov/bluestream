@@ -5,7 +5,7 @@ from unittest.mock import Mock
 
 from flask_jwt_extended import create_access_token
 
-from business_app.utils.constants import UserRole
+from shared.enums import UserRole
 from business_app.utils.exceptions import ValidationError
 
 def _auth_headers(app, user_id: int) -> dict:

@@ -12,10 +12,12 @@ from business_app.models.notification import Notification, NotificationPreferenc
 from business_app.models.translation import Translation
 from business_app.services.notification_service import NotificationService
 from business_app.utils.constants import (
-    DeliveryStatus,
     NotificationChannel,
     NotificationStatus,
     NotificationType,
+)
+from shared.enums import (
+    DeliveryStatus,
     OrderStatus,
     PaymentMethod,
 )

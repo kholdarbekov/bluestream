@@ -2,20 +2,18 @@
 Review Service for the Water Business Platform
 Handles all product review-related business logic including creation, moderation, and analytics
 """
+
 import logging
-from datetime import datetime, timedelta, UTC
+from datetime import datetime, UTC
 from typing import List, Dict, Any, Optional, Tuple
-from flask import current_app
-from sqlalchemy import and_, or_, func, desc
+from sqlalchemy import func
 
 from business_app.models.review import Review
 from business_app.models.product import Product
 from business_app.models.user import User
 from business_app.models.order import Order, OrderItem
 from business_app.utils.exceptions import ValidationError, NotFoundError, ConflictError, ForbiddenError
-from business_app.utils.service_logging import (
-    log_service_call, log_business_event, log_database_query
-)
+from business_app.utils.service_logging import log_service_call, log_business_event, log_database_query
 from business_app import db
 
 logger = logging.getLogger(__name__)
@@ -42,8 +40,8 @@ class ReviewService:
         self.review_edit_window_hours = 24
         self.auto_approve_threshold = 3  # Auto-approve after 3 approved reviews
 
-    @log_service_call(operation_type='review_create', track_performance=True)
-    @log_business_event(event_type='created', entity_type='review')
+    @log_service_call(operation_type="review_create", track_performance=True)
+    @log_business_event(event_type="created", entity_type="review")
     def create_review(
         self,
         user_id: int,
@@ -52,7 +50,7 @@ class ReviewService:
         title: Optional[str] = None,
         comment: Optional[str] = None,
         order_id: Optional[int] = None,
-        photos: Optional[List[str]] = None
+        photos: Optional[List[str]] = None,
     ) -> Review:
         """
         Create a new product review
@@ -90,10 +88,7 @@ class ReviewService:
             raise NotFoundError(f"Product with ID {product_id} not found")
 
         # Check for duplicate review
-        existing_review = Review.query.filter_by(
-            user_id=user_id,
-            product_id=product_id
-        ).first()
+        existing_review = Review.query.filter_by(user_id=user_id, product_id=product_id).first()
 
         if existing_review:
             raise ConflictError("You have already reviewed this product")
@@ -101,25 +96,19 @@ class ReviewService:
         # Verify purchase if order_id provided
         verified_purchase = False
         if order_id:
-            order = Order.query.filter_by(
-                id=order_id,
-                user_id=user_id
-            ).first()
+            order = Order.query.filter_by(id=order_id, user_id=user_id).first()
 
             if not order:
                 raise ValidationError("Invalid order ID")
 
             # Check if order contains this product
-            order_item = OrderItem.query.filter_by(
-                order_id=order_id,
-                product_id=product_id
-            ).first()
+            order_item = OrderItem.query.filter_by(order_id=order_id, product_id=product_id).first()
 
             if not order_item:
                 raise ForbiddenError("This product was not in the specified order")
 
             # Check if order is delivered
-            if order.status != 'delivered':
+            if order.status != "delivered":
                 raise ValidationError("Can only review products from delivered orders")
 
             verified_purchase = True
@@ -140,7 +129,7 @@ class ReviewService:
             title=title,
             comment=comment,
             photos=photos or [],
-            is_approved=auto_approve
+            is_approved=auto_approve,
         )
 
         db.session.add(review)
@@ -158,8 +147,8 @@ class ReviewService:
 
         return review
 
-    @log_service_call(operation_type='review_update', track_performance=True)
-    @log_business_event(event_type='updated', entity_type='review')
+    @log_service_call(operation_type="review_update", track_performance=True)
+    @log_business_event(event_type="updated", entity_type="review")
     def update_review(
         self,
         review_id: int,
@@ -167,7 +156,7 @@ class ReviewService:
         rating: Optional[int] = None,
         title: Optional[str] = None,
         comment: Optional[str] = None,
-        photos: Optional[List[str]] = None
+        photos: Optional[List[str]] = None,
     ) -> Review:
         """
         Update an existing review
@@ -233,14 +222,9 @@ class ReviewService:
 
         return review
 
-    @log_service_call(operation_type='review_delete', track_performance=True)
-    @log_business_event(event_type='deleted', entity_type='review')
-    def delete_review(
-        self,
-        review_id: int,
-        user_id: int,
-        is_admin: bool = False
-    ) -> None:
+    @log_service_call(operation_type="review_delete", track_performance=True)
+    @log_business_event(event_type="deleted", entity_type="review")
+    def delete_review(self, review_id: int, user_id: int, is_admin: bool = False) -> None:
         """
         Delete a review
 
@@ -271,16 +255,16 @@ class ReviewService:
 
         logger.info(f"Review deleted: ID={review_id}, User={user_id}, IsAdmin={is_admin}")
 
-    @log_service_call(operation_type='review_query', track_performance=True)
-    @log_database_query(query_type='SELECT', entity_type='review')
+    @log_service_call(operation_type="review_query", track_performance=True)
+    @log_database_query(query_type="SELECT", entity_type="review")
     def get_product_reviews(
         self,
         product_id: int,
         page: int = 1,
         per_page: int = 20,
         rating_filter: Optional[int] = None,
-        sort_by: str = 'recent',  # recent, helpful, highest, lowest
-        approved_only: bool = True
+        sort_by: str = "recent",  # recent, helpful, highest, lowest
+        approved_only: bool = True,
     ) -> Tuple[List[Review], int, int, int]:
         """
         Get reviews for a product with filtering and pagination
@@ -306,11 +290,11 @@ class ReviewService:
             query = query.filter_by(rating=rating_filter)
 
         # Apply sorting
-        if sort_by == 'helpful':
+        if sort_by == "helpful":
             query = query.order_by(Review.helpful_count.desc(), Review.created_at.desc())
-        elif sort_by == 'highest':
+        elif sort_by == "highest":
             query = query.order_by(Review.rating.desc(), Review.created_at.desc())
-        elif sort_by == 'lowest':
+        elif sort_by == "lowest":
             query = query.order_by(Review.rating.asc(), Review.created_at.desc())
         else:  # recent
             query = query.order_by(Review.created_at.desc())
@@ -320,15 +304,15 @@ class ReviewService:
 
         return pagination.items, pagination.total, page, per_page
 
-    @log_service_call(operation_type='review_moderate', track_performance=True)
-    @log_business_event(event_type='moderated', entity_type='review')
+    @log_service_call(operation_type="review_moderate", track_performance=True)
+    @log_business_event(event_type="moderated", entity_type="review")
     def moderate_review(
         self,
         review_id: int,
         moderator_id: int,
         approve: bool,
         moderator_notes: Optional[str] = None,
-        is_featured: bool = False
+        is_featured: bool = False,
     ) -> Review:
         """
         Moderate a review (approve/reject)
@@ -364,12 +348,8 @@ class ReviewService:
 
         return review
 
-    @log_service_call(operation_type='review_helpful', track_performance=True)
-    def mark_helpful(
-        self,
-        review_id: int,
-        user_id: int
-    ) -> Review:
+    @log_service_call(operation_type="review_helpful", track_performance=True)
+    def mark_helpful(self, review_id: int, user_id: int) -> Review:
         """
         Mark a review as helpful
 
@@ -397,11 +377,8 @@ class ReviewService:
 
         return review
 
-    @log_service_call(operation_type='review_stats', track_performance=True)
-    def get_product_review_stats(
-        self,
-        product_id: int
-    ) -> Dict[str, Any]:
+    @log_service_call(operation_type="review_stats", track_performance=True)
+    def get_product_review_stats(self, product_id: int) -> Dict[str, Any]:
         """
         Get review statistics for a product
 
@@ -412,17 +389,14 @@ class ReviewService:
             Dictionary with review stats
         """
         # Get all approved reviews for product
-        reviews = Review.query.filter_by(
-            product_id=product_id,
-            is_approved=True
-        ).all()
+        reviews = Review.query.filter_by(product_id=product_id, is_approved=True).all()
 
         if not reviews:
             return {
-                'total_reviews': 0,
-                'average_rating': 0.0,
-                'rating_distribution': {1: 0, 2: 0, 3: 0, 4: 0, 5: 0},
-                'verified_purchase_percentage': 0.0
+                "total_reviews": 0,
+                "average_rating": 0.0,
+                "rating_distribution": {1: 0, 2: 0, 3: 0, 4: 0, 5: 0},
+                "verified_purchase_percentage": 0.0,
             }
 
         # Calculate stats
@@ -441,10 +415,10 @@ class ReviewService:
         verified_percentage = (verified_count / total_reviews * 100) if total_reviews > 0 else 0
 
         return {
-            'total_reviews': total_reviews,
-            'average_rating': round(average_rating, 2),
-            'rating_distribution': rating_distribution,
-            'verified_purchase_percentage': round(verified_percentage, 1)
+            "total_reviews": total_reviews,
+            "average_rating": round(average_rating, 2),
+            "rating_distribution": rating_distribution,
+            "verified_purchase_percentage": round(verified_percentage, 1),
         }
 
     # Private helper methods
@@ -452,10 +426,7 @@ class ReviewService:
     def _should_auto_approve(self, user_id: int) -> bool:
         """Determine if user's review should be auto-approved"""
         # Count user's previously approved reviews
-        approved_count = Review.query.filter_by(
-            user_id=user_id,
-            is_approved=True
-        ).count()
+        approved_count = Review.query.filter_by(user_id=user_id, is_approved=True).count()
 
         return approved_count >= self.auto_approve_threshold
 
@@ -463,12 +434,11 @@ class ReviewService:
         """Update product's average rating"""
         try:
             # Calculate average rating from approved reviews
-            avg_rating = db.session.query(
-                func.avg(Review.rating)
-            ).filter(
-                Review.product_id == product_id,
-                Review.is_approved == True
-            ).scalar()
+            avg_rating = (
+                db.session.query(func.avg(Review.rating))
+                .filter(Review.product_id == product_id, Review.is_approved == True)
+                .scalar()
+            )
 
             # Update product if it has rating field
             # This would need to be added to Product model
@@ -486,6 +456,7 @@ class ReviewService:
         """Track review creation for analytics"""
         try:
             from business_app.utils.service_factory import get_analytics_service
+
             analytics = get_analytics_service()
 
             analytics.track_review_created(
@@ -493,7 +464,7 @@ class ReviewService:
                 product_id=review.product_id,
                 user_id=review.user_id,
                 rating=review.rating,
-                verified_purchase=verified_purchase
+                verified_purchase=verified_purchase,
             )
         except Exception as e:
             logger.warning(f"Failed to track review analytics: {e}")
@@ -512,4 +483,4 @@ def get_review_service() -> ReviewService:
 
 
 # Export
-__all__ = ['ReviewService', 'get_review_service']
+__all__ = ["ReviewService", "get_review_service"]

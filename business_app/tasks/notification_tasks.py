@@ -2,6 +2,7 @@
 Notification-related Celery tasks for the Water Business Platform
 This file should be placed in business_app/tasks/notification_tasks.py
 """
+
 from celery import shared_task
 from celery.utils.log import get_task_logger
 from datetime import datetime, timezone, timedelta
@@ -10,10 +11,7 @@ from flask import current_app
 
 from business_app.models.notification import Notification
 from business_app.models.user import User
-from business_app.models.order import Order
 from business_app.models.delivery import Delivery
-from business_app.models.payment import Payment
-from business_app.models.subscription import Subscription
 from business_app.services.notification_service import NotificationService
 from business_app.utils.constants import NotificationType, NotificationChannel
 from business_app import db
@@ -39,9 +37,9 @@ def execute_notification_campaign_task(self, campaign_id: int):
 def send_telegram_security_alert_task(self, user_id: int, alert_type: str, message: str):
     """
     Send security alert notification via Telegram.
-    
+
     Used for password changes, new logins from unknown devices, etc.
-    
+
     Args:
         user_id: User ID
         alert_type: Type of alert (password_change, new_login, suspicious_activity)
@@ -49,44 +47,42 @@ def send_telegram_security_alert_task(self, user_id: int, alert_type: str, messa
     """
     try:
         logger.info(f"Sending telegram security alert for user {user_id}: {alert_type}")
-        
+
         user = User.query.get(user_id)
         if not user:
             logger.error(f"User {user_id} not found")
-            return {'success': False, 'error': 'User not found'}
-        
+            return {"success": False, "error": "User not found"}
+
         if not user.telegram_id:
             logger.info(f"User {user_id} has no telegram_id, skipping")
-            return {'success': False, 'error': 'No telegram ID'}
-        
+            return {"success": False, "error": "No telegram ID"}
+
         notification_service = NotificationService()
-        
+
         # Format security alert message with timestamp
         from datetime import datetime, timezone
-        timestamp = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
-        
+
+        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
         template_data = {
-            'user_name': user.first_name or 'User',
-            'alert_type': alert_type,
-            'message': message,
-            'timestamp': timestamp,
-            'company_name': current_app.config.get('COMPANY_NAME', 'Bluestream')
+            "user_name": user.first_name or "User",
+            "alert_type": alert_type,
+            "message": message,
+            "timestamp": timestamp,
+            "company_name": current_app.config.get("COMPANY_NAME", "Bluestream"),
         }
-        
+
         result = notification_service.send_notification(
-            user_id,
-            NotificationType.SECURITY,
-            [NotificationChannel.TELEGRAM],
-            template_data
+            user_id, NotificationType.SECURITY, [NotificationChannel.TELEGRAM], template_data
         )
-        
-        if any(r.get('success') for r in result.values() if isinstance(r, dict)):
+
+        if any(r.get("success") for r in result.values() if isinstance(r, dict)):
             logger.info(f"Telegram security alert sent successfully to user {user_id}")
         else:
             logger.warning(f"Telegram security alert send returned: {result}")
-        
+
         return result
-        
+
     except Exception as exc:
         logger.error(f"Failed to send telegram security alert for user {user_id}: {exc}")
         raise self.retry(exc=exc)
@@ -96,9 +92,9 @@ def send_telegram_security_alert_task(self, user_id: int, alert_type: str, messa
 def send_account_locked_notification_task(self, user_id: int, lockout_until: str, lockout_minutes: int):
     """
     Send notification when user account is locked due to failed login attempts.
-    
+
     Sends alerts via SMS and Telegram to warn user of potential unauthorized access.
-    
+
     Args:
         user_id: User ID
         lockout_until: ISO format datetime when lockout expires
@@ -106,39 +102,39 @@ def send_account_locked_notification_task(self, user_id: int, lockout_until: str
     """
     try:
         logger.info(f"Sending account locked notification for user {user_id}")
-        
+
         user = User.query.get(user_id)
         if not user:
             logger.error(f"User {user_id} not found")
-            return {'success': False, 'error': 'User not found'}
-        
+            return {"success": False, "error": "User not found"}
+
         notification_service = NotificationService()
-        
+
         template_data = {
-            'user_name': user.first_name or 'User',
-            'lockout_until': lockout_until,
-            'lockout_minutes': lockout_minutes,
-            'company_name': current_app.config.get('COMPANY_NAME', 'Bluestream'),
-            'support_contact': current_app.config.get('SUPPORT_PHONE', '')
+            "user_name": user.first_name or "User",
+            "lockout_until": lockout_until,
+            "lockout_minutes": lockout_minutes,
+            "company_name": current_app.config.get("COMPANY_NAME", "Bluestream"),
+            "support_contact": current_app.config.get("SUPPORT_PHONE", ""),
         }
-        
+
         results = {}
-        
+
         # Send SMS if user has phone
         if user.phone:
             try:
                 sms_result = notification_service.send_sms_to_phone(
                     phone=user.phone,
                     notification_type=NotificationType.SECURITY,
-                    template_key='sms.account_locked',
+                    template_key="sms.account_locked",
                     template_data=template_data,
-                    language=user.preferred_language or 'uz'
+                    language=user.preferred_language or "uz",
                 )
-                results['sms'] = sms_result
+                results["sms"] = sms_result
             except Exception as e:
                 logger.warning(f"Failed to send account locked SMS: {e}")
-                results['sms'] = {'success': False, 'error': str(e)}
-        
+                results["sms"] = {"success": False, "error": str(e)}
+
         # Send Telegram if user has telegram_id
         if user.telegram_id:
             try:
@@ -148,28 +144,29 @@ def send_account_locked_notification_task(self, user_id: int, lockout_until: str
                     [NotificationChannel.TELEGRAM],
                     {
                         **template_data,
-                        'alert_type': 'account_locked',
-                        'message': f'Your account has been locked for {lockout_minutes} minutes due to too many failed login attempts.'
-                    }
+                        "alert_type": "account_locked",
+                        "message": f"Your account has been locked for {lockout_minutes} minutes due to too many failed login attempts.",  # noqa: E501
+                    },
                 )
-                results['telegram'] = tg_result
+                results["telegram"] = tg_result
             except Exception as e:
                 logger.warning(f"Failed to send account locked Telegram notification: {e}")
-                results['telegram'] = {'success': False, 'error': str(e)}
-        
+                results["telegram"] = {"success": False, "error": str(e)}
+
         logger.info(f"Account locked notifications sent for user {user_id}: {results}")
         return results
-        
+
     except Exception as exc:
         logger.error(f"Failed to send account locked notification for user {user_id}: {exc}")
         raise self.retry(exc=exc)
 
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=60, time_limit=120, soft_time_limit=100)
-def send_loyalty_notification_task(self, user_id: int, event_type: str, data: Dict[str, Any], 
-                                   notification_type_str: str = None):
+def send_loyalty_notification_task(
+    self, user_id: int, event_type: str, data: Dict[str, Any], notification_type_str: str = None
+):
     """Send loyalty program notification
-    
+
     Args:
         user_id: User to notify
         event_type: Type of loyalty event (earned, redeemed, etc.)
@@ -177,10 +174,12 @@ def send_loyalty_notification_task(self, user_id: int, event_type: str, data: Di
         notification_type_str: String value of NotificationType enum (e.g., 'loyalty_reward', 'reward_redeemed')
     """
     try:
-        logger.info(f"Sending loyalty notification for user {user_id}, event: {event_type}, type: {notification_type_str}")
-        
+        logger.info(
+            f"Sending loyalty notification for user {user_id}, event: {event_type}, type: {notification_type_str}"
+        )  # noqa: E501
+
         notification_service = NotificationService()
-        
+
         # Convert string to NotificationType enum if provided
         notification_type = None
         if notification_type_str:
@@ -188,12 +187,12 @@ def send_loyalty_notification_task(self, user_id: int, event_type: str, data: Di
                 notification_type = NotificationType(notification_type_str)
             except ValueError:
                 logger.warning(f"Invalid notification type: {notification_type_str}, using default")
-        
+
         result = notification_service.send_loyalty_notification(user_id, event_type, data, notification_type)
-        
+
         logger.info(f"Loyalty notification sent successfully for user {user_id}")
         return result
-        
+
     except Exception as exc:
         logger.error(f"Failed to send loyalty notification: {exc}")
         raise self.retry(exc=exc)
@@ -204,34 +203,36 @@ def notify_driver_assignment_task(self, delivery_id: int):
     """Notify driver about new delivery assignment"""
     try:
         logger.info(f"Notifying driver about delivery assignment {delivery_id}")
-        
+
         delivery = Delivery.query.get(delivery_id)
         if not delivery or not delivery.driver:
             logger.error(f"Delivery {delivery_id} not found or no driver assigned")
-            return {'success': False, 'error': 'Delivery or driver not found'}
-        
+            return {"success": False, "error": "Delivery or driver not found"}
+
         notification_service = NotificationService()
-        
+
         template_data = {
-            'delivery_id': delivery.id,
-            'tracking_code': delivery.tracking_code,
-            'order_number': delivery.order.order_number,
-            'customer_name': f"{delivery.order.user.first_name} {delivery.order.user.last_name}",
-            'delivery_address': delivery.delivery_address_street,
-            'customer_phone': delivery.order.user.phone,
-            'estimated_delivery_time': delivery.estimated_delivery_time.isoformat() if delivery.estimated_delivery_time else None
+            "delivery_id": delivery.id,
+            "tracking_code": delivery.tracking_code,
+            "order_number": delivery.order.order_number,
+            "customer_name": f"{delivery.order.user.first_name} {delivery.order.user.last_name}",
+            "delivery_address": delivery.delivery_address_street,
+            "customer_phone": delivery.order.user.phone,
+            "estimated_delivery_time": (
+                delivery.estimated_delivery_time.isoformat() if delivery.estimated_delivery_time else None
+            ),  # noqa: E501
         }
-        
+
         result = notification_service.send_notification(
             delivery.driver_id,
             NotificationType.DELIVERY_UPDATE,
             [NotificationChannel.SMS, NotificationChannel.TELEGRAM],
-            template_data
+            template_data,
         )
-        
+
         logger.info(f"Driver notification sent successfully for delivery {delivery_id}")
         return result
-        
+
     except Exception as exc:
         logger.error(f"Failed to notify driver: {exc}")
         raise self.retry(exc=exc)
@@ -242,29 +243,26 @@ def notify_delivery_cancellation_task(self, delivery_id: int):
     """Notify about delivery cancellation"""
     try:
         logger.info(f"Sending delivery cancellation notification for delivery {delivery_id}")
-        
+
         delivery = Delivery.query.get(delivery_id)
         if not delivery:
             logger.error(f"Delivery {delivery_id} not found")
-            return {'success': False, 'error': 'Delivery not found'}
-        
+            return {"success": False, "error": "Delivery not found"}
+
         notification_service = NotificationService()
-        
+
         template_data = {
-            'order_number': delivery.order.order_number,
-            'tracking_code': delivery.tracking_code,
-            'cancellation_reason': delivery.cancellation_reason or 'No reason provided',
-            'customer_service_phone': current_app.config['COMPANY_PHONE']
+            "order_number": delivery.order.order_number,
+            "tracking_code": delivery.tracking_code,
+            "cancellation_reason": delivery.cancellation_reason or "No reason provided",
+            "customer_service_phone": current_app.config["COMPANY_PHONE"],
         }
-        
+
         # Notify customer
         customer_result = notification_service.send_notification(
-            delivery.order.user_id,
-            NotificationType.DELIVERY_UPDATE,
-            None,
-            template_data
+            delivery.order.user_id, NotificationType.DELIVERY_UPDATE, None, template_data
         )
-        
+
         # Notify driver if assigned
         driver_result = {}
         if delivery.driver_id:
@@ -272,15 +270,12 @@ def notify_delivery_cancellation_task(self, delivery_id: int):
                 delivery.driver_id,
                 NotificationType.DELIVERY_UPDATE,
                 [NotificationChannel.SMS, NotificationChannel.TELEGRAM],
-                template_data
+                template_data,
             )
-        
+
         logger.info(f"Delivery cancellation notifications sent for delivery {delivery_id}")
-        return {
-            'customer_notification': customer_result,
-            'driver_notification': driver_result
-        }
-        
+        return {"customer_notification": customer_result, "driver_notification": driver_result}
+
     except Exception as exc:
         logger.error(f"Failed to send delivery cancellation notification: {exc}")
         raise self.retry(exc=exc)
@@ -296,49 +291,40 @@ def send_bulk_promotional_notification(user_ids: List[int], campaign_data: Dict[
 
         notification_service = NotificationService()
 
-        results = {
-            'total_users': len(user_ids),
-            'successful': 0,
-            'failed': 0,
-            'errors': []
-        }
+        results = {"total_users": len(user_ids), "successful": 0, "failed": 0, "errors": []}
 
         for batch_start in range(0, len(user_ids), batch_size):
-            batch = user_ids[batch_start:batch_start + batch_size]
+            batch = user_ids[batch_start : batch_start + batch_size]
             batch_num = batch_start // batch_size + 1
             logger.info(f"Processing batch {batch_num} ({len(batch)} users)")
 
             for user_id in batch:
                 try:
                     result = notification_service.send_notification(
-                        user_id,
-                        NotificationType.PROMOTIONAL,
-                        None,
-                        campaign_data
+                        user_id, NotificationType.PROMOTIONAL, None, campaign_data
                     )
 
-                    if any(r.get('success') for r in result.values()):
-                        results['successful'] += 1
+                    if any(r.get("success") for r in result.values()):
+                        results["successful"] += 1
                     else:
-                        results['failed'] += 1
+                        results["failed"] += 1
 
                 except Exception as e:
-                    results['failed'] += 1
-                    results['errors'].append({
-                        'user_id': user_id,
-                        'error': str(e)
-                    })
+                    results["failed"] += 1
+                    results["errors"].append({"user_id": user_id, "error": str(e)})
 
             # Brief pause between batches to avoid overwhelming external services
             if batch_start + batch_size < len(user_ids):
                 _time.sleep(1)
 
-        logger.info(f"Bulk promotional notification completed: {results['successful']} successful, {results['failed']} failed")
+        logger.info(
+            f"Bulk promotional notification completed: {results['successful']} successful, {results['failed']} failed"
+        )  # noqa: E501
         return results
 
     except Exception as e:
         logger.error(f"Bulk promotional notification failed: {e}")
-        return {'error': str(e)}
+        return {"error": str(e)}
 
 
 @shared_task(time_limit=120, soft_time_limit=100)
@@ -346,48 +332,45 @@ def send_daily_delivery_reminders():
     """Send daily delivery reminders to customers"""
     try:
         logger.info("Sending daily delivery reminders")
-        
+
         # Get deliveries scheduled for today that haven't been delivered
         today = datetime.now(timezone.utc).date()
         tomorrow = today + timedelta(days=1)
-        
+
         deliveries = Delivery.query.filter(
             Delivery.estimated_delivery_time >= today,
             Delivery.estimated_delivery_time < tomorrow,
-            Delivery.status.in_(['pending', 'assigned', 'picked_up', 'in_transit'])
+            Delivery.status.in_(["pending", "assigned", "picked_up", "in_transit"]),
         ).all()
-        
+
         notification_service = NotificationService()
         sent_count = 0
-        
+
         for delivery in deliveries:
             try:
                 template_data = {
-                    'order_number': delivery.order.order_number,
-                    'tracking_code': delivery.tracking_code,
-                    'estimated_delivery_time': delivery.estimated_delivery_time.strftime('%H:%M'),
-                    'delivery_address': delivery.delivery_address_street
+                    "order_number": delivery.order.order_number,
+                    "tracking_code": delivery.tracking_code,
+                    "estimated_delivery_time": delivery.estimated_delivery_time.strftime("%H:%M"),
+                    "delivery_address": delivery.delivery_address_street,
                 }
-                
+
                 notification_service.send_notification(
-                    delivery.order.user_id,
-                    NotificationType.DELIVERY_UPDATE,
-                    [NotificationChannel.SMS],
-                    template_data
+                    delivery.order.user_id, NotificationType.DELIVERY_UPDATE, [NotificationChannel.SMS], template_data
                 )
-                
+
                 sent_count += 1
-                
+
             except Exception as e:
                 logger.error(f"Failed to send delivery reminder for delivery {delivery.id}: {e}")
                 continue
-        
+
         logger.info(f"Sent {sent_count} delivery reminders")
-        return {'sent_count': sent_count}
-        
+        return {"sent_count": sent_count}
+
     except Exception as e:
         logger.error(f"Failed to send daily delivery reminders: {e}")
-        return {'error': str(e)}
+        return {"error": str(e)}
 
 
 @shared_task(time_limit=1800, soft_time_limit=1700)
@@ -395,23 +378,21 @@ def cleanup_old_notifications():
     """Clean up old notification records"""
     try:
         logger.info("Cleaning up old notifications")
-        
+
         # Delete notifications older than 6 months
         cutoff_date = datetime.now(timezone.utc) - timedelta(days=180)
-        
-        deleted_count = Notification.query.filter(
-            Notification.created_at < cutoff_date
-        ).delete()
-        
+
+        deleted_count = Notification.query.filter(Notification.created_at < cutoff_date).delete()
+
         db.session.commit()
-        
+
         logger.info(f"Cleaned up {deleted_count} old notification records")
-        return {'deleted_count': deleted_count}
-        
+        return {"deleted_count": deleted_count}
+
     except Exception as e:
         logger.error(f"Failed to clean up old notifications: {e}")
         db.session.rollback()
-        return {'error': str(e)}
+        return {"error": str(e)}
 
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=60, time_limit=120, soft_time_limit=100)
@@ -419,32 +400,32 @@ def send_emergency_notification(self, user_ids: List[int], message: str, channel
     """Send emergency notification to specified users"""
     try:
         logger.info(f"Sending emergency notification to {len(user_ids)} users")
-        
+
         if channels is None:
-            channels = ['sms', 'email', 'telegram']
-        
+            channels = ["sms", "email", "telegram"]
+
         notification_channels = [NotificationChannel(ch) for ch in channels]
         notification_service = NotificationService()
-        
+
         results = []
-        
+
         for user_id in user_ids:
             try:
                 result = notification_service.send_notification(
                     user_id,
                     NotificationType.SYSTEM_ALERT,
                     notification_channels,
-                    {'emergency_message': message, 'priority': 'urgent'}
+                    {"emergency_message": message, "priority": "urgent"},
                 )
-                results.append({'user_id': user_id, 'result': result})
-                
+                results.append({"user_id": user_id, "result": result})
+
             except Exception as e:
                 logger.error(f"Failed to send emergency notification to user {user_id}: {e}")
-                results.append({'user_id': user_id, 'error': str(e)})
-        
+                results.append({"user_id": user_id, "error": str(e)})
+
         logger.info(f"Emergency notification completed for {len(user_ids)} users")
         return results
-        
+
     except Exception as exc:
         logger.error(f"Emergency notification failed: {exc}")
         raise self.retry(exc=exc)
@@ -457,98 +438,85 @@ def process_notification_analytics():
         logger.info("Processing notification analytics")
 
         from business_app.utils.helpers import get_analytics_date_range
+
         start_date, end_date = get_analytics_date_range(days=1)
-        
+
         # Get notification metrics
-        total_notifications = Notification.query.filter(
-            Notification.created_at.between(start_date, end_date)
-        ).count()
-        
+        total_notifications = Notification.query.filter(Notification.created_at.between(start_date, end_date)).count()
+
         # Success rate by channel
         from sqlalchemy import func, case
-        channel_stats = db.session.query(
-            Notification.channels,
-            func.count(Notification.id),
-            func.avg(
-                case(
-                    [(Notification.status == 'sent', 1)],
-                    else_=0
-                ).label('success_rate')
+
+        channel_stats = (
+            db.session.query(
+                Notification.channels,
+                func.count(Notification.id),
+                func.avg(case([(Notification.status == "sent", 1)], else_=0).label("success_rate")),
             )
-        ).filter(
-            Notification.created_at.between(start_date, end_date)
-        ).group_by(Notification.channels).all()
-        
+            .filter(Notification.created_at.between(start_date, end_date))
+            .group_by(Notification.channels)
+            .all()
+        )
+
         # Notification type breakdown
-        type_breakdown = db.session.query(
-            Notification.notification_type,
-            func.count(Notification.id)
-        ).filter(
-            Notification.created_at.between(start_date, end_date)
-        ).group_by(Notification.notification_type).all()
-        
+        type_breakdown = (
+            db.session.query(Notification.notification_type, func.count(Notification.id))
+            .filter(Notification.created_at.between(start_date, end_date))
+            .group_by(Notification.notification_type)
+            .all()
+        )
+
         analytics_data = {
-            'date': start_date.date().isoformat(),
-            'total_notifications': total_notifications,
-            'channel_stats': [
-                {
-                    'channels': channels,
-                    'count': count,
-                    'success_rate': float(success_rate or 0)
-                }
+            "date": start_date.date().isoformat(),
+            "total_notifications": total_notifications,
+            "channel_stats": [
+                {"channels": channels, "count": count, "success_rate": float(success_rate or 0)}
                 for channels, count, success_rate in channel_stats
             ],
-            'type_breakdown': [
-                {
-                    'type': notification_type,
-                    'count': count
-                }
-                for notification_type, count in type_breakdown
-            ]
+            "type_breakdown": [
+                {"type": notification_type, "count": count} for notification_type, count in type_breakdown
+            ],
         }
-        
+
         # Store analytics data
         from business_app.services.analytics_service import AnalyticsService
+
         analytics_service = AnalyticsService()
         analytics_service.store_notification_analytics(analytics_data)
-        
+
         logger.info("Notification analytics processed successfully")
         return analytics_data
-        
+
     except Exception as e:
         logger.error(f"Failed to process notification analytics: {e}")
-        return {'error': str(e)}
+        return {"error": str(e)}
 
 
 @shared_task(bind=True, max_retries=2, time_limit=120, soft_time_limit=100)
-def send_scheduled_notification(self, user_id: int, notification_type: str, 
-                               template_data: Dict[str, Any], scheduled_time: str):
+def send_scheduled_notification(
+    self, user_id: int, notification_type: str, template_data: Dict[str, Any], scheduled_time: str
+):
     """Send scheduled notification at specified time"""
     try:
         # Parse scheduled time
         scheduled_datetime = datetime.fromisoformat(scheduled_time)
-        
+
         # Check if it's time to send
         if datetime.now(timezone.utc) < scheduled_datetime:
             # Reschedule for later
             eta = scheduled_datetime
             return self.retry(countdown=(eta - datetime.now(timezone.utc)).total_seconds())
-        
+
         logger.info(f"Sending scheduled notification for user {user_id}")
-        
+
         notification_service = NotificationService()
         notification_type_enum = NotificationType(notification_type)
-        
-        result = notification_service.send_notification(
-            user_id,
-            notification_type_enum,
-            None,
-            template_data
-        )
-        
+
+        result = notification_service.send_notification(user_id, notification_type_enum, None, template_data)
+
         logger.info(f"Scheduled notification sent successfully for user {user_id}")
         return result
-        
+
     except Exception as exc:
         logger.error(f"Failed to send scheduled notification: {exc}")
         raise self.retry(exc=exc)
@@ -559,29 +527,29 @@ def update_notification_preferences_bulk(user_preferences: List[Dict[str, Any]])
     """Update notification preferences for multiple users"""
     try:
         logger.info(f"Updating notification preferences for {len(user_preferences)} users")
-        
+
         notification_service = NotificationService()
         updated_count = 0
-        
+
         for user_pref in user_preferences:
             try:
-                user_id = user_pref['user_id']
-                preferences = user_pref['preferences']
-                
+                user_id = user_pref["user_id"]
+                preferences = user_pref["preferences"]
+
                 success = notification_service.update_notification_preferences(user_id, preferences)
                 if success:
                     updated_count += 1
-                    
+
             except Exception as e:
                 logger.error(f"Failed to update preferences for user {user_pref.get('user_id')}: {e}")
                 continue
-        
+
         logger.info(f"Updated notification preferences for {updated_count} users")
-        return {'updated_count': updated_count}
-        
+        return {"updated_count": updated_count}
+
     except Exception as e:
         logger.error(f"Bulk notification preferences update failed: {e}")
-        return {'error': str(e)}
+        return {"error": str(e)}
 
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=60, time_limit=120, soft_time_limit=100)
@@ -589,13 +557,13 @@ def send_order_notification_task(self, order_id: int, notification_type: str):
     """Send order-related notification"""
     try:
         logger.info(f"Sending order notification for order {order_id}, type: {notification_type}")
-        
+
         notification_service = NotificationService()
         result = notification_service.send_order_notification(order_id, notification_type)
-        
+
         logger.info(f"Order notification sent successfully for order {order_id}")
         return result
-        
+
     except Exception as exc:
         logger.error(f"Failed to send order notification: {exc}")
         raise self.retry(exc=exc)
@@ -606,13 +574,13 @@ def send_delivery_update_task(self, history_id: int):
     """Send delivery status update notification from a committed history event."""
     try:
         logger.info("Sending delivery update for history %s", history_id)
-        
+
         notification_service = NotificationService()
         result = notification_service.send_delivery_status_change_notification(history_id)
-        
+
         logger.info("Delivery update processed for history %s", history_id)
         return result
-        
+
     except Exception as exc:
         logger.error("Failed to send delivery update for history %s: %s", history_id, exc)
         raise self.retry(exc=exc)
@@ -626,10 +594,11 @@ def send_payment_confirmation_task(self, payment_id: int):
 
         # Idempotency check via Redis
         from business_app import redis_client
+
         idempotency_key = f"notif:payment_confirm:{payment_id}"
         if redis_client.get(idempotency_key):
             logger.info(f"Payment confirmation already sent for {payment_id}, skipping")
-            return {'success': True, 'skipped': True, 'reason': 'already_sent'}
+            return {"success": True, "skipped": True, "reason": "already_sent"}
 
         notification_service = NotificationService()
         result = notification_service.send_payment_notification(payment_id)
@@ -639,7 +608,7 @@ def send_payment_confirmation_task(self, payment_id: int):
 
         logger.info(f"Payment confirmation sent successfully for payment {payment_id}")
         return result
-        
+
     except Exception as exc:
         logger.error(f"Failed to send payment confirmation: {exc}")
         raise self.retry(exc=exc)
@@ -650,32 +619,29 @@ def send_verification_email_task(self, user_id: int, verification_token: str):
     """Send email verification notification"""
     try:
         logger.info(f"Sending email verification for user {user_id}")
-        
+
         user = User.query.get(user_id)
         if not user:
             logger.error(f"User {user_id} not found")
-            return {'success': False, 'error': 'User not found'}
-        
+            return {"success": False, "error": "User not found"}
+
         notification_service = NotificationService()
-        
+
         template_data = {
-            'user_name': f"{user.first_name} {user.last_name}",
-            'verification_token': verification_token,
-            'verification_code': verification_token,  # Alias for template compatibility
-            'verification_url': f"{current_app.config['COMPANY_WEBSITE']}/verify-email?token={verification_token}",
-            'company_name': current_app.config['COMPANY_NAME']
+            "user_name": f"{user.first_name} {user.last_name}",
+            "verification_token": verification_token,
+            "verification_code": verification_token,  # Alias for template compatibility
+            "verification_url": f"{current_app.config['COMPANY_WEBSITE']}/verify-email?token={verification_token}",
+            "company_name": current_app.config["COMPANY_NAME"],
         }
-        
+
         result = notification_service.send_notification(
-            user_id,
-            NotificationType.EMAIL_VERIFICATION,
-            [NotificationChannel.EMAIL],
-            template_data
+            user_id, NotificationType.EMAIL_VERIFICATION, [NotificationChannel.EMAIL], template_data
         )
 
         logger.info(f"Email verification sent successfully for user {user_id}")
         return result
-        
+
     except Exception as exc:
         logger.error(f"Failed to send email verification: {exc}")
         raise self.retry(exc=exc)
@@ -685,7 +651,7 @@ def send_verification_email_task(self, user_id: int, verification_token: str):
 def send_verification_sms_task(self, user_id: int, otp_code: str, phone_number: str = None):
     """
     Send SMS verification notification
-    
+
     Args:
         user_id: User ID
         otp_code: OTP code to send
@@ -693,49 +659,46 @@ def send_verification_sms_task(self, user_id: int, otp_code: str, phone_number: 
     """
     try:
         logger.info(f"Sending SMS verification for user {user_id} to {phone_number or 'user phone'}")
-        
+
         user = User.query.get(user_id)
         if not user:
             logger.error(f"User {user_id} not found")
-            return {'success': False, 'error': 'User not found'}
-        
+            return {"success": False, "error": "User not found"}
+
         # Use provided phone or user's phone
         target_phone = phone_number or user.phone
         if not target_phone:
             logger.error(f"No phone number available for user {user_id}")
-            return {'success': False, 'error': 'No phone number available'}
-        
+            return {"success": False, "error": "No phone number available"}
+
         notification_service = NotificationService()
-        
+
         template_data = {
-            'user_name': user.first_name,
-            'otp_code': otp_code,
-            'phone_number': target_phone,
-            'company_name': current_app.config['COMPANY_NAME']
+            "user_name": user.first_name,
+            "otp_code": otp_code,
+            "phone_number": target_phone,
+            "company_name": current_app.config["COMPANY_NAME"],
         }
-        
+
         # If explicit phone provided (like for account linking), use send_sms_to_phone
         # since user.phone may be None or different
         if phone_number:
             result = notification_service.send_sms_to_phone(
                 phone=target_phone,
                 notification_type=NotificationType.SYSTEM,
-                template_key='sms.verification.otp',
+                template_key="sms.verification.otp",
                 template_data=template_data,
-                language=getattr(user, 'preferred_language', 'en')
+                language=getattr(user, "preferred_language", "en"),
             )
         else:
             # Use standard send_notification when using user's own phone
             result = notification_service.send_notification(
-                user_id,
-                NotificationType.SYSTEM,
-                [NotificationChannel.SMS],
-                template_data
+                user_id, NotificationType.SYSTEM, [NotificationChannel.SMS], template_data
             )
-        
+
         logger.info(f"SMS verification sent successfully for user {user_id} to {target_phone}")
         return result
-        
+
     except Exception as exc:
         logger.error(f"Failed to send SMS verification: {exc}")
         raise self.retry(exc=exc)
@@ -746,32 +709,29 @@ def send_password_reset_email_task(self, user_id: int, reset_token: str):
     """Send password reset email"""
     try:
         logger.info(f"Sending password reset email for user {user_id}")
-        
+
         user = User.query.get(user_id)
         if not user:
             logger.error(f"User {user_id} not found")
-            return {'success': False, 'error': 'User not found'}
-        
+            return {"success": False, "error": "User not found"}
+
         notification_service = NotificationService()
-        
+
         template_data = {
-            'user_name': f"{user.first_name} {user.last_name}",
-            'reset_token': reset_token,
-            'reset_url': f"{current_app.config['COMPANY_WEBSITE']}/reset-password/{reset_token}",
-            'company_name': current_app.config['COMPANY_NAME'],
-            'expiry_hours': 24
+            "user_name": f"{user.first_name} {user.last_name}",
+            "reset_token": reset_token,
+            "reset_url": f"{current_app.config['COMPANY_WEBSITE']}/reset-password/{reset_token}",
+            "company_name": current_app.config["COMPANY_NAME"],
+            "expiry_hours": 24,
         }
-        
+
         result = notification_service.send_notification(
-            user_id,
-            NotificationType.PASSWORD_RESET,
-            [NotificationChannel.EMAIL],
-            template_data
+            user_id, NotificationType.PASSWORD_RESET, [NotificationChannel.EMAIL], template_data
         )
 
         logger.info(f"Password reset email sent successfully for user {user_id}")
         return result
-        
+
     except Exception as exc:
         logger.error(f"Failed to send password reset email: {exc}")
         raise self.retry(exc=exc)
@@ -781,47 +741,47 @@ def send_password_reset_email_task(self, user_id: int, reset_token: str):
 def send_password_reset_sms_task(self, user_id: int, otp_code: str):
     """
     Send password reset OTP via SMS.
-    
+
     Used for telegram users with placeholder emails who have a verified phone number.
     """
     try:
         logger.info(f"Sending password reset SMS for user {user_id}")
-        
+
         user = User.query.get(user_id)
         if not user:
             logger.error(f"User {user_id} not found")
-            return {'success': False, 'error': 'User not found'}
-        
+            return {"success": False, "error": "User not found"}
+
         if not user.phone:
             logger.error(f"User {user_id} has no phone number")
-            return {'success': False, 'error': 'No phone number'}
-        
+            return {"success": False, "error": "No phone number"}
+
         notification_service = NotificationService()
-        
+
         template_data = {
-            'user_name': user.first_name or 'User',
-            'otp_code': otp_code,
-            'phone_number': user.phone,
-            'company_name': current_app.config.get('COMPANY_NAME', 'Bluestream'),
-            'expiry_minutes': 10
+            "user_name": user.first_name or "User",
+            "otp_code": otp_code,
+            "phone_number": user.phone,
+            "company_name": current_app.config.get("COMPANY_NAME", "Bluestream"),
+            "expiry_minutes": 10,
         }
-        
+
         # Send password reset OTP via SMS
         result = notification_service.send_sms_to_phone(
             phone=user.phone,
             notification_type=NotificationType.PASSWORD_RESET,
-            template_key='sms.password_reset.otp',
+            template_key="sms.password_reset.otp",
             template_data=template_data,
-            language=user.preferred_language or 'uz'
+            language=user.preferred_language or "uz",
         )
-        
-        if result.get('success'):
+
+        if result.get("success"):
             logger.info(f"Password reset SMS sent successfully to user {user_id}")
         else:
             logger.warning(f"Password reset SMS send returned: {result}")
-        
+
         return result
-        
+
     except Exception as exc:
         logger.error(f"Failed to send password reset SMS for user {user_id}: {exc}")
         raise self.retry(exc=exc)
@@ -832,13 +792,13 @@ def send_subscription_confirmation_task(self, subscription_id: int):
     """Send subscription confirmation notification"""
     try:
         logger.info(f"Sending subscription confirmation for subscription {subscription_id}")
-        
+
         notification_service = NotificationService()
-        result = notification_service.send_subscription_notification(subscription_id, 'confirmed')
-        
+        result = notification_service.send_subscription_notification(subscription_id, "confirmed")
+
         logger.info(f"Subscription confirmation sent successfully for subscription {subscription_id}")
         return result
-        
+
     except Exception as exc:
         logger.error(f"Failed to send subscription confirmation: {exc}")
         raise self.retry(exc=exc)
@@ -849,28 +809,35 @@ def send_subscription_notification_task(self, subscription_id: int, event_type: 
     """Send subscription-related notification"""
     try:
         logger.info(f"Sending subscription notification for subscription {subscription_id}, event: {event_type}")
-        
+
         notification_service = NotificationService()
         result = notification_service.send_subscription_notification(subscription_id, event_type)
-        
+
         logger.info(f"Subscription notification sent successfully for subscription {subscription_id}")
         return result
-        
+
     except Exception as exc:
         logger.error(f"Failed to send subscription notification: {exc}")
         raise self.retry(exc=exc)
 
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=60, time_limit=1800, soft_time_limit=1700)
-def send_bulk_notification_task(self, notification_type: str, recipient_ids: List[int],
-                                template_data: Dict[str, Any] = None, channel: str = 'email',
-                                channels: List[str] = None,
-                                batch_size: int = 50):
+def send_bulk_notification_task(
+    self,
+    notification_type: str,
+    recipient_ids: List[int],
+    template_data: Dict[str, Any] = None,
+    channel: str = "email",
+    channels: List[str] = None,
+    batch_size: int = 50,
+):
     """Send bulk notifications to multiple recipients in batches"""
     import time as _time
 
     try:
-        logger.info(f"Starting bulk notification send: {notification_type} to {len(recipient_ids)} recipients (batch_size={batch_size})")
+        logger.info(
+            f"Starting bulk notification send: {notification_type} to {len(recipient_ids)} recipients (batch_size={batch_size})"  # noqa: E501
+        )
 
         template_data = template_data or {}
 
@@ -894,49 +861,45 @@ def send_bulk_notification_task(self, notification_type: str, recipient_ids: Lis
         results = []
 
         for batch_start in range(0, len(recipient_ids), batch_size):
-            batch = recipient_ids[batch_start:batch_start + batch_size]
+            batch = recipient_ids[batch_start : batch_start + batch_size]
             batch_num = batch_start // batch_size + 1
             logger.info(f"Processing batch {batch_num} ({len(batch)} recipients)")
 
             for recipient_id in batch:
                 try:
                     result = notification_service.send_notification(
-                        recipient_id,
-                        notification_type_enum,
-                        channels=channel_enums,
-                        template_data=template_data
+                        recipient_id, notification_type_enum, channels=channel_enums, template_data=template_data
                     )
                     successful_channels = [
-                        ch.value for ch in channel_enums
-                        if isinstance(result.get(ch.value), dict) and result[ch.value].get('success')
+                        ch.value
+                        for ch in channel_enums
+                        if isinstance(result.get(ch.value), dict) and result[ch.value].get("success")
                     ]
-                    results.append({
-                        'recipient_id': recipient_id,
-                        'success': bool(successful_channels),
-                        'channels': successful_channels,
-                    })
+                    results.append(
+                        {
+                            "recipient_id": recipient_id,
+                            "success": bool(successful_channels),
+                            "channels": successful_channels,
+                        }
+                    )
                 except Exception as e:
                     logger.error(f"Failed to send notification to recipient {recipient_id}: {e}")
-                    results.append({
-                        'recipient_id': recipient_id,
-                        'success': False,
-                        'error': str(e)
-                    })
+                    results.append({"recipient_id": recipient_id, "success": False, "error": str(e)})
 
             # Brief pause between batches to avoid overwhelming external services
             if batch_start + batch_size < len(recipient_ids):
                 _time.sleep(1)
 
-        successful_sends = sum(1 for r in results if r['success'])
+        successful_sends = sum(1 for r in results if r["success"])
         failed_sends = len(results) - successful_sends
 
         logger.info(f"Bulk notification completed: {successful_sends} successful, {failed_sends} failed")
 
         return {
-            'total_recipients': len(recipient_ids),
-            'successful_sends': successful_sends,
-            'failed_sends': failed_sends,
-            'results': results
+            "total_recipients": len(recipient_ids),
+            "successful_sends": successful_sends,
+            "failed_sends": failed_sends,
+            "results": results,
         }
 
     except Exception as exc:
@@ -948,8 +911,9 @@ def send_bulk_notification_task(self, notification_type: str, recipient_ids: Lis
 # Phone Registration OTP Tasks
 # =============================================================================
 
+
 @shared_task(bind=True, max_retries=3, default_retry_delay=30, time_limit=120, soft_time_limit=100)
-def send_registration_otp_task(self, phone: str, otp_code: str, language: str = 'uz'):
+def send_registration_otp_task(self, phone: str, otp_code: str, language: str = "uz"):
     """
     Send registration OTP via SMS to a phone number.
 
@@ -967,22 +931,22 @@ def send_registration_otp_task(self, phone: str, otp_code: str, language: str = 
 
         # Template data for registration OTP
         template_data = {
-            'otp_code': otp_code,
-            'phone_number': phone,
-            'company_name': current_app.config.get('COMPANY_NAME', 'Bluestream'),
-            'expiry_minutes': 3
+            "otp_code": otp_code,
+            "phone_number": phone,
+            "company_name": current_app.config.get("COMPANY_NAME", "Bluestream"),
+            "expiry_minutes": 3,
         }
 
         # Send SMS directly without user_id (user doesn't exist yet)
         result = notification_service.send_sms_to_phone(
             phone=phone,
             notification_type=NotificationType.SYSTEM,
-            template_key='sms.registration.otp',
+            template_key="sms.registration.otp",
             template_data=template_data,
-            language=language
+            language=language,
         )
 
-        if result.get('success'):
+        if result.get("success"):
             logger.info(f"Registration OTP sent successfully to {phone[:4]}***{phone[-4:]}")
         else:
             logger.warning(f"Registration OTP send returned: {result}")
@@ -1008,31 +972,31 @@ def send_welcome_sms_task(self, user_id: int):
         user = User.query.get(user_id)
         if not user:
             logger.error(f"User {user_id} not found for welcome SMS")
-            return {'success': False, 'error': 'User not found'}
+            return {"success": False, "error": "User not found"}
 
         if not user.phone:
             logger.error(f"User {user_id} has no phone number for welcome SMS")
-            return {'success': False, 'error': 'No phone number'}
+            return {"success": False, "error": "No phone number"}
 
         notification_service = NotificationService()
 
         template_data = {
-            'first_name': user.first_name or 'Customer',
-            'user_name': user.first_name or 'Customer',
-            'phone_number': user.phone,
-            'company_name': current_app.config.get('COMPANY_NAME', 'Bluestream')
+            "first_name": user.first_name or "Customer",
+            "user_name": user.first_name or "Customer",
+            "phone_number": user.phone,
+            "company_name": current_app.config.get("COMPANY_NAME", "Bluestream"),
         }
 
         # Send welcome SMS
         result = notification_service.send_sms_to_phone(
             phone=user.phone,
             notification_type=NotificationType.SYSTEM,
-            template_key='sms.welcome',
+            template_key="sms.welcome",
             template_data=template_data,
-            language=user.preferred_language or 'uz'
+            language=user.preferred_language or "uz",
         )
 
-        if result.get('success'):
+        if result.get("success"):
             logger.info(f"Welcome SMS sent successfully to user {user_id}")
         else:
             logger.warning(f"Welcome SMS send returned: {result}")

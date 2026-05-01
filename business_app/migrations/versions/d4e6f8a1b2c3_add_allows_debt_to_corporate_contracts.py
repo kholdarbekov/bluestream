@@ -5,6 +5,7 @@ Revises: c1d8e4f7a2b3
 Create Date: 2026-03-01 22:40:00.000000
 
 """
+
 from alembic import op
 import sqlalchemy as sa
 
@@ -32,10 +33,7 @@ def upgrade():
             unique=False,
         )
 
-    op.execute(
-        "UPDATE corporate_contracts SET allows_debt = FALSE "
-        "WHERE allows_debt IS NULL"
-    )
+    op.execute("UPDATE corporate_contracts SET allows_debt = FALSE " "WHERE allows_debt IS NULL")
 
 
 def downgrade():

@@ -84,6 +84,31 @@ const getOrderStatusColor = (status) => {
   }
 };
 
+const getMarkingActionColor = (action) => {
+  switch (action) {
+    case 'reserved':
+      return 'blue';
+    case 'used':
+      return 'geekblue';
+    case 'utilised':
+      return 'green';
+    case 'released':
+      return 'orange';
+    case 'created':
+      return 'cyan';
+    case 'imported':
+      return 'purple';
+    case 'restored':
+      return 'gold';
+    case 'archived':
+    default:
+      return 'default';
+  }
+};
+
+const humanizeAuditAction = (value) =>
+  value ? String(value).replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) : '—';
+
 const Orders = () => {
   const { t } = useTranslation('orders');
   const queryClient = useQueryClient();
@@ -743,7 +768,7 @@ const Orders = () => {
                     title: t('ui.orders.audit_action', 'Action'),
                     dataIndex: 'action',
                     key: 'action',
-                    render: (value) => value || '—',
+                    render: (value) => humanizeAuditAction(value),
                   },
                   {
                     title: t('ui.orders.audit_status', 'Status'),
@@ -905,6 +930,9 @@ const Orders = () => {
                     key: 'codes',
                     render: (codes) => (
                       <Space wrap>
+                        <Tag color="blue">
+                          {t('ui.orders.marking_codes_count', '{{count}} codes').replace('{{count}}', (codes || []).length)}
+                        </Tag>
                         {(codes || []).map((code) => (
                           <Tag key={code} style={{ fontFamily: 'monospace' }}>{code}</Tag>
                         ))}
@@ -927,6 +955,11 @@ const Orders = () => {
                     title: t('ui.orders.action', 'Action'),
                     dataIndex: 'action',
                     key: 'action',
+                    render: (value) => value ? (
+                      <Tag color={getMarkingActionColor(value)}>
+                        {t(`ui.orders.marking_code_event_${value}`, value)}
+                      </Tag>
+                    ) : '—',
                   },
                   {
                     title: t('ui.orders.marking_code', 'Marking Code'),

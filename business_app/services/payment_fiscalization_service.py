@@ -1288,16 +1288,16 @@ class PaymentFiscalizationService:
         return payload
 
     def marking_code_allocation_summary(self, order: Order) -> Dict[str, Any]:
-        summary = defaultdict(int)
-        codes_by_item: Dict[int, List[str]] = defaultdict(list)
+        summary: Dict[str, int] = defaultdict(int)
+        codes_by_item: Dict[int, set] = defaultdict(set)
         for allocation in order.marking_code_allocations or []:
             action_value = allocation.action.value if hasattr(allocation.action, "value") else str(allocation.action)
             summary[action_value] += 1
             if allocation.marking_code:
-                codes_by_item[allocation.order_item_id].append(allocation.marking_code.code)
+                codes_by_item[allocation.order_item_id].add(allocation.marking_code.code)
         return {
             "events": dict(summary),
-            "codes_by_order_item": dict(codes_by_item),
+            "codes_by_order_item": {item_id: sorted(codes) for item_id, codes in codes_by_item.items()},
         }
 
     def reserve_required_marking_codes(

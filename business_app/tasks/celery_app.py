@@ -6,7 +6,7 @@ This file should be placed in business_app/tasks/celery_app.py
 import logging
 from celery import Celery
 from celery.schedules import crontab
-from celery.signals import before_task_publish, setup_logging, task_prerun
+from celery.signals import before_task_publish, setup_logging, task_prerun, worker_process_init
 from flask import g, has_request_context
 import os
 from shared.constants import DISPLAY_TIMEZONE
@@ -14,12 +14,17 @@ from shared.constants import DISPLAY_TIMEZONE
 logger = logging.getLogger(__name__)
 
 
+_flask_app = None
+
+
 def make_celery(app=None):
     """Create and configure Celery app"""
+    global _flask_app
     if app is None:
         from .. import create_app
 
         app = create_app()
+    _flask_app = app
 
     celery = Celery(
         app.import_name,
@@ -240,6 +245,21 @@ def keep_app_logging_config(**kwargs):
     # which would otherwise wipe the handlers our setup_enhanced_logging
     # installed on the `celery` logger and silence beat's scheduler logs.
     pass
+
+
+@worker_process_init.connect
+def reset_db_connections_on_fork(**kwargs):
+    # make_celery() calls create_app() in the parent, which opens psycopg2
+    # sockets. Prefork children inherit those sockets; concurrent queries on
+    # a shared socket corrupt libpq's state — surfacing as "PGRES_TUPLES_OK
+    # and no message", "Could not locate column in row", and NotImplementedError.
+    # Disposing here forces each child to open its own pool.
+    from business_app import db
+
+    if _flask_app is None:
+        return
+    with _flask_app.app_context():
+        db.engine.dispose()
 
 
 # Task routing configuration

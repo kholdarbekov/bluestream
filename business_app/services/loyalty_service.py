@@ -660,6 +660,7 @@ class LoyaltyService:
         action_type: LoyaltyActionType = LoyaltyActionType.PURCHASE,
         reference_id: int = None,
         expires_at: datetime = None,
+        commit: bool = True,
     ) -> LoyaltyTransaction:
         """
         Award loyalty points to user
@@ -713,10 +714,13 @@ class LoyaltyService:
         # Check for tier upgrade
         self._check_tier_upgrade(account)
 
-        db.session.commit()
-
-        # Send notification
-        self._send_points_notification(user_id, points, "earned")
+        if commit:
+            db.session.commit()
+            # Send notification only after a successful commit so a rolled-back
+            # award does not push a stale push to the customer.
+            self._send_points_notification(user_id, points, "earned")
+        else:
+            db.session.flush()
 
         return transaction
 
@@ -1263,7 +1267,7 @@ class LoyaltyService:
             "points_needed_to_keep": points_needed,
         }
 
-    def update_streak(self, user_id: int):
+    def update_streak(self, user_id: int, commit: bool = True):
         """
         Updates streak for a user.
         Logic:
@@ -1302,7 +1306,9 @@ class LoyaltyService:
 
         if recent_orders_count >= 3 and not last_streak_tx:
             # Award Bonus
-            self.award_points(user_id, 300, "Streak Bonus: 3 Orders in 30 days", LoyaltyActionType.STREAK_BONUS)
+            self.award_points(
+                user_id, 300, "Streak Bonus: 3 Orders in 30 days", LoyaltyActionType.STREAK_BONUS, commit=commit
+            )
 
             # Update Streak Counter (Consecutive Months Logic is complex without Monthly Job,
             # but we can approximate: increment streak count)
@@ -1316,11 +1322,14 @@ class LoyaltyService:
                 # For simplicity now: Huge Bonus Points equivalent to bottle price (e.g. 15000 UZS -> 60 coins? No, that's small.  # noqa: E501
                 # Value of 10L bottle ~? Let's say 500 bonus points or Create a special Reward).
                 # User said "Free 10L bottle". We'll award points for it for now to be safe or a voucher.
-                self.award_points(user_id, 1000, "6-Month Streak Milestone Bonus", LoyaltyActionType.STREAK_BONUS)
+                self.award_points(
+                    user_id, 1000, "6-Month Streak Milestone Bonus", LoyaltyActionType.STREAK_BONUS, commit=commit
+                )
 
-            db.session.commit()
+            if commit:
+                db.session.commit()
 
-    def check_surprise_reward(self, user_id: int):
+    def check_surprise_reward(self, user_id: int, commit: bool = True):
         """
         Randomly award surprise points (5-10% chance).
         """
@@ -1330,7 +1339,11 @@ class LoyaltyService:
         if random.random() < 0.05:
             bonus = random.choice([50, 100, 200])  # Small delight
             self.award_points(
-                user_id, bonus, "Surprise Reward! Thanks for being loyal 💙", LoyaltyActionType.SURPRICE_REWARD
+                user_id,
+                bonus,
+                "Surprise Reward! Thanks for being loyal 💙",
+                LoyaltyActionType.SURPRICE_REWARD,
+                commit=commit,
             )
 
     def _get_tier_benefits(self, tier_name: str, program_id: int = None) -> Dict[str, Any]:

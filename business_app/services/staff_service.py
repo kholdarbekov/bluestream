@@ -1027,110 +1027,126 @@ class StaffService:
         new_status_enum = DeliveryStatus(new_status)
         old_status_enum = delivery.status
 
-        # Update delivery status
-        delivery.status = new_status_enum
-        delivery.updated_at = datetime.now(timezone.utc)
+        cod_debt_limit_breached = False
 
-        # Handle status-specific fields
-        now = datetime.now(timezone.utc)
-        if new_status == "picked_up":
-            delivery.route_data = delivery.route_data or {}
-            delivery.route_data["picked_up_at"] = now.isoformat()
-        elif new_status == "in_transit":
-            delivery.route_data = delivery.route_data or {}
-            delivery.route_data["in_transit_at"] = now.isoformat()
-        elif new_status == "arrived":
-            delivery.route_data = delivery.route_data or {}
-            delivery.route_data["arrived_at"] = now.isoformat()
-        elif new_status == "delivered":
-            delivery.delivered_at = now
-            delivery.actual_delivery_time = now
-            dp = DeliveryPerson.query.filter_by(user_id=delivery.delivery_person_id).first()
-            if dp:
-                dp.total_deliveries = (dp.total_deliveries or 0) + 1
-                dp.successful_deliveries = (dp.successful_deliveries or 0) + 1
-        elif new_status == "failed":
-            delivery.failed_delivery_reason = metadata.get("fail_reason", "other")
-            delivery.delivery_attempts = (delivery.delivery_attempts or 0) + 1
-            dp = DeliveryPerson.query.filter_by(user_id=delivery.delivery_person_id).first()
-            if dp:
-                dp.total_deliveries = (dp.total_deliveries or 0) + 1
+        try:
+            # Update delivery status
+            delivery.status = new_status_enum
+            delivery.updated_at = datetime.now(timezone.utc)
 
-        # Create status history
-        history = DeliveryStatusHistory(
-            delivery_id=delivery.id,
-            old_status=old_status_enum,
-            new_status=new_status_enum,
-            changed_by=staff_user_id,
-            changed_at=now,
-            notes=metadata.get("notes", f"Status updated via staff bot to {new_status}"),
-            reason=metadata.get("fail_reason"),
-        )
-        db.session.add(history)
-        db.session.flush()
-        history_id = history.id
+            # Handle status-specific fields
+            now = datetime.now(timezone.utc)
+            if new_status == "picked_up":
+                delivery.route_data = delivery.route_data or {}
+                delivery.route_data["picked_up_at"] = now.isoformat()
+            elif new_status == "in_transit":
+                delivery.route_data = delivery.route_data or {}
+                delivery.route_data["in_transit_at"] = now.isoformat()
+            elif new_status == "arrived":
+                delivery.route_data = delivery.route_data or {}
+                delivery.route_data["arrived_at"] = now.isoformat()
+            elif new_status == "delivered":
+                delivery.delivered_at = now
+                delivery.actual_delivery_time = now
+                dp = DeliveryPerson.query.filter_by(user_id=delivery.delivery_person_id).first()
+                if dp:
+                    dp.total_deliveries = (dp.total_deliveries or 0) + 1
+                    dp.successful_deliveries = (dp.successful_deliveries or 0) + 1
+            elif new_status == "failed":
+                delivery.failed_delivery_reason = metadata.get("fail_reason", "other")
+                delivery.delivery_attempts = (delivery.delivery_attempts or 0) + 1
+                dp = DeliveryPerson.query.filter_by(user_id=delivery.delivery_person_id).first()
+                if dp:
+                    dp.total_deliveries = (dp.total_deliveries or 0) + 1
 
-        # Sync order status per DELIVERY_TO_ORDER_STATUS_SYNC
-        order_status_str = DELIVERY_TO_ORDER_STATUS_SYNC.get(new_status)
-        if order_status_str and delivery.order:
-            if order_status_str == OrderStatus.DELIVERED.value:
-                current_order_status = (
-                    delivery.order.status.value if hasattr(delivery.order.status, "value") else delivery.order.status
-                )
-                if current_order_status != OrderStatus.DELIVERED.value:
-                    # Flush delivery updates first so OrderService can apply
-                    # delivery-linked business logic (inventory, loyalty) safely.
-                    db.session.flush()
-                    from business_app.services.order_service import OrderService
-
-                    OrderService().update_order_status(
-                        order_id=delivery.order_id,
-                        new_status=OrderStatus.DELIVERED,
-                        updated_by=staff_user_id,
-                        notes=metadata.get("notes", "Delivered via staff bot"),
-                        bottles_returned=metadata.get("bottles_returned"),
-                    )
-                    db.session.refresh(delivery)
-            else:
-                delivery.order.status = OrderStatus(order_status_str)
-                delivery.order.updated_at = now
-
-        if delivery.delivery_person_id:
-            db.session.flush()
-            StaffService.sync_active_delivery_counters([delivery.delivery_person_id])
-
-        db.session.commit()
-
-        if new_status == "delivered" and is_cash_order and cash_collection_service:
-            cash_amount = metadata.get("cash_collected")
-            if cash_amount is None:
-                cash_amount = Decimal("0.00")
-            collection_notes = metadata.get("notes")
-            if Decimal(str(cash_amount)) <= Decimal("0.00") and not collection_notes:
-                collection_notes = "No cash collected at delivery"
-
-            cash_collection_service.post_collection(
-                customer_id=delivery.order.user_id,
-                amount=cash_amount,
-                source="delivery_completion",
-                collector_user_id=staff_user_id,
-                recorded_by_user_id=staff_user_id,
-                order_id=delivery.order_id,
+            # Create status history
+            history = DeliveryStatusHistory(
                 delivery_id=delivery.id,
-                notes=collection_notes,
-                proof_data={
-                    "delivery_status_history_id": history_id,
-                    "status_metadata": metadata,
-                },
-                occurred_at=delivery.delivered_at or now,
+                old_status=old_status_enum,
+                new_status=new_status_enum,
+                changed_by=staff_user_id,
+                changed_at=now,
+                notes=metadata.get("notes", f"Status updated via staff bot to {new_status}"),
+                reason=metadata.get("fail_reason"),
             )
-            db.session.refresh(delivery)
+            db.session.add(history)
+            db.session.flush()
+            history_id = history.id
 
-            post_cod_debt_count = cash_collection_service.get_active_cod_debt_count(delivery.order.user_id)
-            if pre_cod_debt_count is not None and pre_cod_debt_count < 2 and post_cod_debt_count >= 2:
-                StaffService._notify_customer_cod_debt_limit(delivery.order.user_id)
+            # Sync order status per DELIVERY_TO_ORDER_STATUS_SYNC
+            order_status_str = DELIVERY_TO_ORDER_STATUS_SYNC.get(new_status)
+            if order_status_str and delivery.order:
+                if order_status_str == OrderStatus.DELIVERED.value:
+                    current_order_status = (
+                        delivery.order.status.value
+                        if hasattr(delivery.order.status, "value")
+                        else delivery.order.status
+                    )
+                    if current_order_status != OrderStatus.DELIVERED.value:
+                        # Flush delivery updates first so OrderService can apply
+                        # delivery-linked business logic (inventory, loyalty) safely.
+                        db.session.flush()
+                        from business_app.services.order_service import OrderService
 
-        # Notify customer about delivery status updates.
+                        OrderService().update_order_status(
+                            order_id=delivery.order_id,
+                            new_status=OrderStatus.DELIVERED,
+                            updated_by=staff_user_id,
+                            notes=metadata.get("notes", "Delivered via staff bot"),
+                            bottles_returned=metadata.get("bottles_returned"),
+                            commit=False,
+                        )
+                else:
+                    delivery.order.status = OrderStatus(order_status_str)
+                    delivery.order.updated_at = now
+
+            if delivery.delivery_person_id:
+                db.session.flush()
+                StaffService.sync_active_delivery_counters([delivery.delivery_person_id])
+
+            # Cash collection runs in the same transaction as the status update so
+            # a downstream failure rolls the delivery state back rather than
+            # leaving the system half-applied.
+            if new_status == "delivered" and is_cash_order and cash_collection_service:
+                cash_amount = metadata.get("cash_collected")
+                if cash_amount is None:
+                    cash_amount = Decimal("0.00")
+                collection_notes = metadata.get("notes")
+                if Decimal(str(cash_amount)) <= Decimal("0.00") and not collection_notes:
+                    collection_notes = "No cash collected at delivery"
+
+                cash_collection_service.post_collection(
+                    customer_id=delivery.order.user_id,
+                    amount=cash_amount,
+                    source="delivery_completion",
+                    collector_user_id=staff_user_id,
+                    recorded_by_user_id=staff_user_id,
+                    order_id=delivery.order_id,
+                    delivery_id=delivery.id,
+                    notes=collection_notes,
+                    proof_data={
+                        "delivery_status_history_id": history_id,
+                        "status_metadata": metadata,
+                    },
+                    occurred_at=delivery.delivered_at or now,
+                    commit=False,
+                )
+
+                post_cod_debt_count = cash_collection_service.get_active_cod_debt_count(delivery.order.user_id)
+                cod_debt_limit_breached = (
+                    pre_cod_debt_count is not None and pre_cod_debt_count < 2 and post_cod_debt_count >= 2
+                )
+
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+            raise
+
+        if new_status == "delivered" and is_cash_order and cod_debt_limit_breached:
+            StaffService._notify_customer_cod_debt_limit(delivery.order.user_id)
+
+        # Notify customer about delivery status updates (post-commit so a
+        # rolled-back transition does not fire a stale notification).
         try:
             from business_app.tasks.notification_tasks import send_delivery_update_task
 

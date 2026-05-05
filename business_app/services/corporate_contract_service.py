@@ -1046,9 +1046,11 @@ class CorporateContractService:
         ).get(order_id)
         if not order:
             raise NotFoundError("Order not found")
-        # Grocery-store (AMOUNT-mode) orders skip per-product unit reservation
-        # entirely. Money debt is posted at delivery via charge_on_delivery.
-        if order.user and order.user.is_grocery_store:
+        # Grocery-store users with an active AMOUNT-mode contract skip
+        # per-product unit reservation; money debt is posted at delivery via
+        # charge_on_delivery. Legacy grocery-store users still on a UNITS-mode
+        # (bottle) contract fall through to the normal reservation path.
+        if order.user and order.user.is_grocery_store and self.get_active_amount_contract_for_user(order.user.id):
             return []
         lines = self._get_prepayment_lines_for_order(order.order_items)
         if not lines:

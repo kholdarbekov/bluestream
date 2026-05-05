@@ -738,7 +738,7 @@ class ProductHandlers(BaseHandler):
         language = await i18n.get_user_language(user_id)
 
         # Minimum order amount (should match backend config)
-        MIN_ORDER_AMOUNT = 20000  # TODO: Consider fetching from API config endpoint
+        MIN_ORDER_AMOUNT = 30000  # TODO: Consider getting from env var
 
         async with api_client as client:
             user_token = await get_auth_token(update, context, client)

@@ -172,6 +172,7 @@ class DeliveryService:
         notes: str = None,
         current_location: Tuple[float, float] = None,
         sync_order_status: bool = True,
+        commit: bool = True,
     ) -> Delivery:
         """Update delivery status
 
@@ -184,6 +185,10 @@ class DeliveryService:
             sync_order_status: If True, update associated order status when delivery
                              is completed. Set to False when called from OrderService
                              to prevent circular callbacks.
+            commit: When False the caller owns the transaction boundary —
+                no commit is issued and post-commit side-effects
+                (notification dispatch) are skipped so a rolled-back
+                outer transaction does not fire stale events.
         """
         delivery = Delivery.query.get(delivery_id)
         if not delivery:
@@ -208,15 +213,18 @@ class DeliveryService:
         history = self._create_delivery_status_history(delivery_id, old_status, new_status, driver_id, notes)
         db.session.flush()
 
-        db.session.commit()
+        if commit:
+            db.session.commit()
 
-        # Handle status-specific actions
-        self._handle_delivery_status_change(
-            delivery,
-            new_status,
-            sync_order_status,
-            history_id=history.id,
-        )
+            # Handle status-specific actions (notification dispatch + optional
+            # order-status sync). Skipped when commit is deferred to the
+            # caller so the orchestrator owns the post-commit work.
+            self._handle_delivery_status_change(
+                delivery,
+                new_status,
+                sync_order_status,
+                history_id=history.id,
+            )
 
         return delivery
 
@@ -512,6 +520,7 @@ class DeliveryService:
         proof_photo: str = None,
         customer_signature: str = None,
         sync_order_status: bool = True,
+        commit: bool = True,
     ) -> Delivery:
         """Mark delivery as completed
 
@@ -523,6 +532,8 @@ class DeliveryService:
             sync_order_status: If True, update associated order status to DELIVERED.
                              Set to False when called from OrderService to prevent
                              circular callbacks.
+            commit: When False the caller owns the transaction boundary;
+                changes are flushed but not committed.
         """
         delivery = self.update_delivery_status(
             delivery_id,
@@ -530,6 +541,7 @@ class DeliveryService:
             driver_id,
             "Delivery completed successfully",
             sync_order_status=sync_order_status,
+            commit=commit,
         )
 
         # Add completion details
@@ -537,7 +549,8 @@ class DeliveryService:
         delivery.proof_of_delivery_photo = proof_photo
         delivery.customer_signature = customer_signature
 
-        db.session.commit()
+        if commit:
+            db.session.commit()
 
         return delivery
 

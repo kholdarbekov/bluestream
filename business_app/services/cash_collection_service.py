@@ -616,6 +616,7 @@ class CashCollectionService:
         manual_allocations: Optional[Iterable[Dict[str, Any]]] = None,
         allocation_mode: str = "auto",
         idempotency_key: Optional[str] = None,
+        commit: bool = True,
     ) -> CashCollectionEvent:
         customer = User.query.get(customer_id)
         if not customer:
@@ -781,7 +782,10 @@ class CashCollectionService:
             },
         )
 
-        db.session.commit()
+        if commit:
+            db.session.commit()
+        else:
+            db.session.flush()
         return event
 
     def _validate_collection_context(

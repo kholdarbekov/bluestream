@@ -845,8 +845,15 @@ class OrderService:
         updated_by: int = None,
         notes: str = None,
         bottles_returned: int = None,
+        commit: bool = True,
     ) -> Order:
-        """Update order status"""
+        """Update order status.
+
+        When ``commit`` is False the caller owns the transaction boundary —
+        the status change and any side-effects spawned by
+        ``_handle_status_change_actions`` are flushed but not committed,
+        so a downstream failure rolls the whole sequence back.
+        """
         order = Order.query.get(order_id)
         if not order:
             raise NotFoundError("Order not found")
@@ -885,13 +892,19 @@ class OrderService:
         # Create status history
         self._create_status_history(order_id, old_status, new_status, updated_by, notes)
 
-        db.session.commit()
+        db.session.flush()
 
-        # Send notification
-        self._send_order_notification(order, f"status_changed_{new_status.value}")
+        # Handle status-specific actions (run before commit so a failure rolls
+        # back the status change atomically).
+        self._handle_status_change_actions(
+            order, new_status, bottles_returned=bottles_returned, updated_by=updated_by, commit=commit
+        )
 
-        # Handle status-specific actions
-        self._handle_status_change_actions(order, new_status, bottles_returned=bottles_returned, updated_by=updated_by)
+        if commit:
+            db.session.commit()
+            # Notification dispatch happens only after a successful commit so
+            # rolled-back transitions do not fire stale notifications.
+            self._send_order_notification(order, f"status_changed_{new_status.value}")
 
         return order
 
@@ -1310,9 +1323,19 @@ class OrderService:
         auto_confirm_order_task.apply_async(args=[order_id], countdown=600)
 
     def _handle_status_change_actions(
-        self, order: Order, new_status: OrderStatus, bottles_returned: int = None, updated_by: int = None
+        self,
+        order: Order,
+        new_status: OrderStatus,
+        bottles_returned: int = None,
+        updated_by: int = None,
+        commit: bool = True,
     ):
-        """Handle actions when order status changes"""
+        """Handle actions when order status changes.
+
+        When ``commit`` is False the caller owns the transaction boundary and
+        no commit is issued from inside this method or the inner services it
+        invokes (delivery completion, cash-collection helpers).
+        """
         from shared.enums import PaymentMethod
 
         if new_status == OrderStatus.CONFIRMED:
@@ -1333,7 +1356,7 @@ class OrderService:
 
             # Award loyalty points only for non-cash orders (cash orders get points on delivery)
             if not is_cash_order:
-                self._process_loyalty_points_for_order(order)
+                self._process_loyalty_points_for_order(order, commit=commit)
 
         elif new_status == OrderStatus.DELIVERED:
             # Mark delivery as completed (sync_order_status=False to prevent circular callback)
@@ -1345,14 +1368,14 @@ class OrderService:
                     order.delivery.status.value if hasattr(order.delivery.status, "value") else order.delivery.status
                 )
                 if delivery_status != DeliveryStatus.DELIVERED.value:
-                    delivery_service.complete_delivery(order.delivery.id, sync_order_status=False)
+                    delivery_service.complete_delivery(order.delivery.id, sync_order_status=False, commit=commit)
 
             # For cash orders, confirm inventory and award loyalty points on delivery
             is_cash_order = order.payment_method == PaymentMethod.CASH if order.payment_method else False
             if is_cash_order:
                 self._confirm_inventory_for_order(order)
                 # Process loyalty points for cash orders
-                self._process_loyalty_points_for_order(order)
+                self._process_loyalty_points_for_order(order, commit=commit)
                 # Auto-apply any customer COD prepayment balance to this delivered COD order.
                 from business_app.services.cash_collection_service import CashCollectionService
 
@@ -1372,10 +1395,10 @@ class OrderService:
                 loyalty_service = LoyaltyService()
 
                 # Check/Update Streak
-                loyalty_service.update_streak(order.user_id)
+                loyalty_service.update_streak(order.user_id, commit=commit)
 
                 # Check for Surprise Reward
-                loyalty_service.check_surprise_reward(order.user_id)
+                loyalty_service.check_surprise_reward(order.user_id, commit=commit)
 
             except Exception:
                 logger.exception("Failed to process loyalty triggers for delivered order %s", order.id)
@@ -1388,7 +1411,11 @@ class OrderService:
             from business_app.services.corporate_contract_service import CorporateContractService
 
             corporate_service = CorporateContractService()
+            amount_contract = None
             if order.user and order.user.is_grocery_store:
+                amount_contract = corporate_service.get_active_amount_contract_for_user(order.user.id)
+
+            if amount_contract:
                 corporate_service.charge_on_delivery(
                     order=order,
                     delivery_id=order.delivery.id if order.delivery else None,
@@ -1491,7 +1518,8 @@ class OrderService:
                     exc_info=True,
                 )
 
-            db.session.commit()
+            if commit:
+                db.session.commit()
         elif new_status in {OrderStatus.CANCELLED, OrderStatus.RETURNED}:
             payment_synced = self._sync_payment_status_for_terminal_order_state(order, new_status)
             released_reserved_prepayment = False
@@ -1505,7 +1533,7 @@ class OrderService:
                 )
                 released_reserved_prepayment = True
 
-            if payment_synced or released_reserved_prepayment:
+            if commit and (payment_synced or released_reserved_prepayment):
                 db.session.commit()
 
     def _sync_payment_status_for_terminal_order_state(self, order: Order, new_status: OrderStatus) -> bool:
@@ -1537,7 +1565,7 @@ class OrderService:
         order.paid_at = None
         return True
 
-    def _process_loyalty_points_for_order(self, order: Order):
+    def _process_loyalty_points_for_order(self, order: Order, commit: bool = True):
         """
         Process loyalty points for an order:
         Award points based on the loyalty-eligible amount.
@@ -1558,7 +1586,12 @@ class OrderService:
             points_earned = loyalty_service.calculate_points_for_purchase(order.user_id, int(eligible_amount))
             if points_earned > 0:
                 loyalty_service.award_points(
-                    order.user_id, points_earned, f"Order #{order.order_number}", LoyaltyActionType.PURCHASE, order.id
+                    order.user_id,
+                    points_earned,
+                    f"Order #{order.order_number}",
+                    LoyaltyActionType.PURCHASE,
+                    order.id,
+                    commit=commit,
                 )
                 # Update order with earned points for reference
                 order.loyalty_points_earned = points_earned

@@ -573,7 +573,7 @@ class TokenService:
             if existing_data:
                 session_data = json.loads(existing_data)
                 session_data.update(updates)
-                return self.redis_client.setex(key, timedelta(days=30).total_seconds(), json.dumps(session_data))
+                return self.redis_client.setex(key, int(timedelta(days=30).total_seconds()), json.dumps(session_data))
 
             return False
         except Exception:

@@ -335,6 +335,23 @@ class OrdersPoolHandler(BaseHandler):
                 parse_mode='HTML'
             )
 
+            # Driver location is the single trigger for re-optimization. We
+            # always prompt for a fresh share after an accept \u2014 even when
+            # the previous share was "fresh" \u2014 because the driver has likely
+            # moved since then and we want the new route based on their
+            # current position, not their position N minutes ago. Once the
+            # location update arrives, the backend's POST /me/location
+            # endpoint re-runs optimization on the new start point.
+            try:
+                prompt = i18n.get('staff.delivery.share_location_after_accept', language)
+                button_text = i18n.get('staff.delivery.share_location_button', language)
+                await query.message.reply_text(
+                    prompt,
+                    reply_markup=CommonKeyboards.location_request(language, button_text),
+                )
+            except Exception as prompt_exc:
+                logger.warning(f"Failed to send share-location prompt: {prompt_exc}")
+
         except Exception as e:
             logger.error(f"Error confirming order acceptance: {e}", exc_info=True)
             await self._handle_error(update, context)

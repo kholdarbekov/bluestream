@@ -887,16 +887,15 @@ class StaffService:
                     error_code="STAFF_DRIVER_COD_BLOCKED",
                 )
 
-        # Check delivery person's capacity
+        # NOTE: The historical concurrent-deliveries cap was removed when implicit
+        # route optimization was introduced — drivers may now claim as many
+        # deliveries as needed and the optimizer handles ordering. The
+        # `DeliveryPerson.max_concurrent_deliveries` column is preserved for a
+        # possible future per-driver admin override but is no longer enforced.
+        # The row lock is retained for DB-level serialization on the driver's
+        # profile row; `dp` is also still used below to gate
+        # `sync_active_delivery_counters`.
         dp = DeliveryPerson.query.filter_by(user_id=delivery_person_id).with_for_update().first()
-        if dp:
-            max_concurrent = dp.max_concurrent_deliveries or 3
-            active_delivery_count = StaffService.get_active_delivery_count(delivery_person_id)
-            if active_delivery_count >= max_concurrent:
-                raise ValidationError(
-                    f"Maximum concurrent deliveries ({max_concurrent}) reached",
-                    error_code="STAFF_MAX_CONCURRENT_REACHED",
-                )
 
         # Check bottle session — driver must have an effective session (own or joined)
         # if the order contains returnable bottles; also validates capacity.
@@ -1206,6 +1205,30 @@ class StaffService:
                 user_id,
                 exc,
             )
+
+    @staticmethod
+    def update_driver_location(user_id: int, lat: float, lng: float) -> DeliveryPerson:
+        """
+        Update the driver's own current location (driver-level, not tied to a
+        specific delivery). Use this when the driver shares a one-shot or
+        live location for route optimization purposes — no in-progress
+        delivery is required.
+
+        Returns the updated DeliveryPerson.
+        """
+        if not (-90 <= lat <= 90) or not (-180 <= lng <= 180):
+            raise ValidationError("Invalid coordinates", error_code="STAFF_INVALID_COORDINATES")
+
+        dp = DeliveryPerson.query.filter_by(user_id=user_id).first()
+        if not dp:
+            raise NotFoundError("Delivery person profile not found", error_code="STAFF_DELIVERY_PERSON_NOT_FOUND")
+
+        dp.current_location_lat = lat
+        dp.current_location_lng = lng
+        dp.last_location_update = datetime.now(timezone.utc)
+
+        db.session.commit()
+        return dp
 
     @staticmethod
     def update_delivery_location(delivery_id: int, lat: float, lng: float) -> Delivery:

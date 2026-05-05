@@ -148,6 +148,8 @@ class StaffWebhookServer:
         self.app.router.add_post('/internal/order-reassigned', self.order_reassigned_handler)
         self.app.router.add_post('/internal/order-cancelled', self.order_cancelled_handler)
         self.app.router.add_post('/internal/reload-translations', reload_translations_handler)
+        self.app.router.add_post('/internal/route-updated', self.route_updated_handler)
+        self.app.router.add_post('/internal/pool-insertion-suggestion', self.pool_insertion_suggestion_handler)
         self.app.router.add_get('/health', health_handler)
         self.app.router.add_get('/internal/stats', self.stats_handler)
 
@@ -232,8 +234,11 @@ class StaffWebhookServer:
         })
 
     async def new_order_handler(self, request):
-        """
-        Notify delivery persons of a new order available for pickup.
+        """Broadcast a freshly-created pool order to every eligible driver
+        with an inline Accept/Decline UX. First driver to Accept wins
+        (server-side row lock returns 409 to the rest, which the bot
+        gracefully renders as 'already taken').
+
         POST /internal/new-order
         """
         try:
@@ -250,16 +255,46 @@ class StaffWebhookServer:
             if await self._is_duplicate_event(event_id, f"new_order:{order_id}"):
                 return web.json_response({'success': True, 'message': 'Already processed'})
 
-            # Get delivery persons who should be notified
             telegram_ids = data.get('delivery_person_telegram_ids', [])
             order_info = data.get('order_info', {})
+            delivery_id = order_info.get('delivery_id')
+
+            # Without a delivery_id we can't render Accept buttons that wire
+            # into the standard accept flow — log loudly so the missing
+            # field gets fixed at the source rather than silently skipped.
+            if not delivery_id:
+                logger.error(
+                    "new_order broadcast missing delivery_id (order=%s) — Accept/Decline UX disabled",
+                    order_id,
+                )
+
+            from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
             sent_count = 0
             for tid in telegram_ids:
                 try:
                     language = await i18n.get_user_language(int(tid))
                     message = self._format_new_order_message(order_info, language)
-                    await self.bot_app.bot.send_message(chat_id=tid, text=message, parse_mode='HTML')
+                    keyboard = None
+                    if delivery_id:
+                        # Accept reuses the existing confirm-accept callback so
+                        # the broadcast and pool browse share one downstream
+                        # flow (auth, row lock, location prompt, re-opt).
+                        keyboard = InlineKeyboardMarkup([
+                            [
+                                InlineKeyboardButton(
+                                    f"✅ {i18n.get('staff.delivery.accept', language)}",
+                                    callback_data=f"staff_confirm_accept_{int(delivery_id)}",
+                                ),
+                                InlineKeyboardButton(
+                                    f"❌ {i18n.get('staff.cancel', language)}",
+                                    callback_data=f"staff_decline_suggestion_{int(delivery_id)}",
+                                ),
+                            ]
+                        ])
+                    await self.bot_app.bot.send_message(
+                        chat_id=tid, text=message, parse_mode='HTML', reply_markup=keyboard,
+                    )
                     sent_count += 1
                 except Exception as e:
                     logger.error(f"Failed to notify delivery person {tid}: {e}")
@@ -380,6 +415,117 @@ class StaffWebhookServer:
             return web.json_response({'success': True, 'message': 'Cancellation notification sent'})
         except Exception as e:
             logger.error(f"Error handling order cancelled notification: {e}", exc_info=True)
+            return web.json_response({'success': False, 'message': 'Internal server error'}, status=500)
+
+    async def route_updated_handler(self, request):
+        """Notify driver that their optimized route changed.
+        POST /internal/route-updated
+
+        Best-effort ping; the driver receives a small toast directing them to
+        reopen "My active deliveries" to see the new sequence. We deliberately
+        avoid pushing the full sorted list here — the bot's existing list view
+        is the source of truth and re-fetches on open.
+        """
+        try:
+            if not await verify_webhook_signature(request):
+                return web.json_response({'success': False, 'message': 'Invalid signature'}, status=401)
+            if not self.bot_app:
+                return web.json_response({'success': False, 'message': 'Bot not initialized'}, status=503)
+
+            data = await request.json()
+            telegram_id = data.get('telegram_id')
+            driver_id = data.get('driver_id')
+            event_id = data.get('event_id')
+
+            if not telegram_id:
+                return web.json_response({'success': False, 'message': 'Missing telegram_id'}, status=400)
+
+            if await self._is_duplicate_event(event_id, f"route_updated:{telegram_id}:{driver_id}"):
+                return web.json_response({'success': True, 'message': 'Already processed'})
+
+            language = await i18n.get_user_language(int(telegram_id))
+            from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+            keyboard = InlineKeyboardMarkup([[
+                InlineKeyboardButton(
+                    f"\U0001f69a {i18n.get('staff.menu.active_deliveries', language)}",
+                    callback_data='staff_active_deliveries',
+                )
+            ]])
+            try:
+                await self.bot_app.bot.send_message(
+                    chat_id=int(telegram_id),
+                    text=f"\U0001f504 {i18n.get('staff.delivery.route_updated_toast', language)}",
+                    reply_markup=keyboard,
+                )
+            except Exception as e:
+                logger.warning(f"route_updated send failed for {telegram_id}: {e}")
+
+            return web.json_response({'success': True, 'message': 'Route-updated ping sent'})
+        except Exception as e:
+            logger.error(f"Error in route_updated_handler: {e}", exc_info=True)
+            return web.json_response({'success': False, 'message': 'Internal server error'}, status=500)
+
+    async def pool_insertion_suggestion_handler(self, request):
+        """Push an Accept/Decline suggestion for a freshly-pooled order that
+        fits the driver's current route.
+        POST /internal/pool-insertion-suggestion
+        """
+        try:
+            if not await verify_webhook_signature(request):
+                return web.json_response({'success': False, 'message': 'Invalid signature'}, status=401)
+            if not self.bot_app:
+                return web.json_response({'success': False, 'message': 'Bot not initialized'}, status=503)
+
+            data = await request.json()
+            telegram_id = data.get('telegram_id')
+            delivery_id = data.get('delivery_id')
+            order_no = data.get('order_no', '')
+            detour_km = data.get('detour_km', 0)
+            detour_min = data.get('detour_minutes', 0)
+            event_id = data.get('event_id')
+
+            if not telegram_id or not delivery_id:
+                return web.json_response({'success': False, 'message': 'Missing telegram_id or delivery_id'}, status=400)
+
+            if await self._is_duplicate_event(event_id, f"pool_insert:{telegram_id}:{delivery_id}"):
+                return web.json_response({'success': True, 'message': 'Already processed'})
+
+            language = await i18n.get_user_language(int(telegram_id))
+            text = i18n.get(
+                'staff.delivery.pool_insertion_offer',
+                language,
+                order_no=order_no,
+                km=f"{float(detour_km):.1f}",
+                minutes=int(round(float(detour_min))),
+            )
+
+            from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+            # Accept reuses the existing confirm-accept callback to share the
+            # same downstream flow and authorization checks.
+            keyboard = InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton(
+                        f"✅ {i18n.get('staff.delivery.accept', language)}",
+                        callback_data=f"staff_confirm_accept_{int(delivery_id)}",
+                    ),
+                    InlineKeyboardButton(
+                        f"❌ {i18n.get('staff.cancel', language)}",
+                        callback_data=f"staff_decline_suggestion_{int(delivery_id)}",
+                    ),
+                ]
+            ])
+            try:
+                await self.bot_app.bot.send_message(
+                    chat_id=int(telegram_id),
+                    text=text,
+                    reply_markup=keyboard,
+                )
+            except Exception as e:
+                logger.warning(f"pool_insertion send failed for {telegram_id}: {e}")
+
+            return web.json_response({'success': True, 'message': 'Suggestion sent'})
+        except Exception as e:
+            logger.error(f"Error in pool_insertion_suggestion_handler: {e}", exc_info=True)
             return web.json_response({'success': False, 'message': 'Internal server error'}, status=500)
 
     def _format_new_order_message(self, order_info: dict, language: str) -> str:

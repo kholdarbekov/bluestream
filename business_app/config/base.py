@@ -184,6 +184,18 @@ class BaseConfig:
     MAPS_PROVIDER = os.environ.get("MAPS_PROVIDER", "google")  # 'google', 'yandex', 'osm'
     GOOGLE_MAPS_API_KEY = get_secret("google_maps_api_key", "GOOGLE_MAPS_API_KEY", required=False)
     YANDEX_MAPS_API_KEY = get_secret("yandex_maps_api_key", "YANDEX_MAPS_API_KEY", required=False)
+    # HERE Matrix Routing v8 — primary provider for traffic-aware route
+    # optimization (250k requests/month free tier). Sign up at
+    # https://platform.here.com to obtain a key. Leave unset to fall through
+    # to Yandex / OSRM / Haversine.
+    HERE_MAPS_API_KEY = get_secret("here_maps_api_key", "HERE_MAPS_API_KEY", required=False)
+
+    # Route Optimization Configuration
+    ROUTE_INSERTION_MAX_DETOUR_KM = float(os.environ.get("ROUTE_INSERTION_MAX_DETOUR_KM", 5.0))
+    ROUTE_INSERTION_MAX_DETOUR_MIN = float(os.environ.get("ROUTE_INSERTION_MAX_DETOUR_MIN", 15.0))
+    MATRIX_CACHE_TTL_TRAFFIC_SECONDS = int(os.environ.get("MATRIX_CACHE_TTL_TRAFFIC_SECONDS", 1800))
+    MATRIX_CACHE_TTL_STATIC_SECONDS = int(os.environ.get("MATRIX_CACHE_TTL_STATIC_SECONDS", 86400))
+    DRIVER_LOCATION_FRESH_SECONDS = int(os.environ.get("DRIVER_LOCATION_FRESH_SECONDS", 1800))
 
     # Email Configuration (Legacy - SendGrid)
     SENDGRID_API_KEY = get_secret("sendgrid_api_key", "SENDGRID_API_KEY", required=False)

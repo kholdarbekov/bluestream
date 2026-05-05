@@ -3144,6 +3144,20 @@
     "rule": "/api/v1/staff/delivery/history"
   },
   {
+    "endpoint": "staff.update_my_location",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/staff/delivery/me/location"
+  },
+  {
+    "endpoint": "staff.manual_optimize_route",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/staff/delivery/optimize-route"
+  },
+  {
     "endpoint": "staff.get_order_pool",
     "methods": [
       "GET"

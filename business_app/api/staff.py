@@ -184,14 +184,23 @@ def get_order_pool():
 @require_staff_roles("delivery_driver")
 def accept_order(delivery_id):
     """Accept/pick an order from the pool (with row locking)"""
+    from business_app.services.route_optimization_service import RouteOptimizationService
+
     current_user_id = get_jwt_identity()
     delivery = StaffService.accept_order(delivery_id, current_user_id)
+
+    # Surface location_status so the bot can decide whether to prompt the
+    # driver to share their live location right after accepting. Without a
+    # known driver location the optimizer falls back to the depot / city
+    # center, which produces a misleading "Next stop" suggestion.
+    location_status = RouteOptimizationService().location_status(int(current_user_id))
 
     return success_response(
         {
             "delivery_id": delivery.id,
             "status": delivery.status.value if hasattr(delivery.status, "value") else delivery.status,
             "message": "Order accepted successfully",
+            "location_status": location_status,
         }
     )
 
@@ -218,6 +227,41 @@ def update_delivery_status(delivery_id):
             "message": "Status updated successfully",
         }
     )
+
+
+@staff_bp.route("/delivery/me/location", methods=["POST"])
+@handle_api_exception
+@jwt_required()
+@require_staff_roles("delivery_driver")
+def update_my_location():
+    """Update the driver's own current location (no delivery_id required).
+
+    Used for route-optimization purposes — accepts any one-shot or live
+    location share. After updating, immediately re-runs route optimization
+    so the next active-deliveries view shows the new optimal sequence.
+    Returns the active-deliveries payload (same shape as GET /delivery/active)
+    so the bot can render the freshly sorted list in one round-trip.
+    """
+    from business_app.services.route_optimization_service import RouteOptimizationService
+
+    current_user_id = int(get_jwt_identity())
+    data = request.get_json() or {}
+    try:
+        lat = float(data.get("latitude"))
+        lng = float(data.get("longitude"))
+    except (TypeError, ValueError):
+        raise ValidationError(
+            "latitude and longitude must be numeric",
+            error_code="STAFF_INVALID_COORDINATES",
+        )
+
+    StaffService.update_driver_location(current_user_id, lat, lng)
+
+    # Re-optimize synchronously now that we have a fresh start point.
+    RouteOptimizationService().optimize_for_driver(current_user_id, trigger="location_update")
+
+    # Reuse the active-deliveries response shape so the bot can edit-in-place.
+    return get_active_deliveries()
 
 
 @staff_bp.route("/delivery/<int:delivery_id>/location", methods=["POST"])
@@ -317,7 +361,59 @@ def get_active_deliveries():
             }
         )
 
-    return success_response({"items": items, "total": len(items)})
+    # Apply route optimization ordering + next-stop annotations.
+    from business_app.services.route_optimization_service import RouteOptimizationService
+
+    route_svc = RouteOptimizationService()
+    items = route_svc.annotate_active_items(current_user_id, items)
+
+    return success_response(
+        {
+            "items": items,
+            "total": len(items),
+            "location_status": route_svc.location_status(int(current_user_id)),
+        }
+    )
+
+
+@staff_bp.route("/delivery/optimize-route", methods=["POST"])
+@handle_api_exception
+@jwt_required()
+@require_staff_roles("delivery_driver")
+def manual_optimize_route():
+    """Manually re-run route optimization (driver tapped 'Optimize routes').
+
+    Runs synchronously (small N, fits in <2s) and returns the freshly sorted
+    active-deliveries payload so the bot can edit its message in place.
+
+    Refuses with 412 + LOCATION_REQUIRED when the driver has never shared
+    location — without a real start point any sequence we produce is just a
+    guess. The bot is expected to surface the share-location prompt rather
+    than silently proceeding.
+    """
+    from flask import jsonify
+    from business_app.services.route_optimization_service import RouteOptimizationService
+
+    current_user_id = int(get_jwt_identity())
+    service = RouteOptimizationService()
+
+    if service.location_status(current_user_id) == "missing":
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": "LOCATION_REQUIRED",
+                    "error_code": "LOCATION_REQUIRED",
+                    "message": "Driver location is required for route optimization",
+                }
+            ),
+            412,
+        )
+
+    service.optimize_for_driver(current_user_id, trigger="manual")
+
+    # Reuse /delivery/active's response shape for a consistent UX.
+    return get_active_deliveries()
 
 
 @staff_bp.route("/delivery/history", methods=["GET"])

@@ -3,12 +3,17 @@ Maps service for the Water Business Platform
 Supports Google Maps, Yandex Maps, and OpenStreetMap
 """
 
+import logging
 import requests
 from typing import Dict, Any, List, Tuple
 from flask import current_app
 
-from business_app.utils.exceptions import ExternalServiceError, ConfigurationError
+from business_app.utils.distance_matrix import get_distance_matrix as _get_distance_matrix
+from business_app.utils.exceptions import ExternalServiceError, ConfigurationError, ProviderUnavailableError
 from business_app.utils.helpers import calculate_distance
+from business_app.utils.http_client import RetryConfig, request_with_retry
+
+logger = logging.getLogger(__name__)
 
 
 class MapsService:
@@ -375,13 +380,89 @@ class MapsService:
         end_lon: float,
         waypoints: List[Tuple[float, float]] = None,
     ) -> Dict[str, Any]:
-        """Get route using Yandex Routing API"""
-        # Simplified implementation - Yandex routing requires more complex setup
-        # For now, return basic calculation
-        distance = calculate_distance(start_lat, start_lon, end_lat, end_lon)
-        duration = distance * 2  # Estimate 2 minutes per km
+        """Get route using Yandex Routing API (traffic-aware)."""
+        import time
 
-        return {"distance_km": distance, "duration_minutes": duration, "estimated_arrival": None, "polyline": None}
+        if not self.yandex_api_key:
+            raise ConfigurationError("Yandex Maps API key not configured")
+
+        # Yandex expects "lat,lng" pairs joined with "|" — start, intermediates, end.
+        coords = [(start_lat, start_lon)]
+        if waypoints:
+            coords.extend(waypoints)
+        coords.append((end_lat, end_lon))
+        params = {
+            "apikey": self.yandex_api_key,
+            "waypoints": "|".join(f"{lat},{lng}" for lat, lng in coords),
+            "mode": "driving",
+            # Yandex requires Unix timestamp (uint32 seconds), not "now".
+            "departure_time": int(time.time()),
+        }
+
+        try:
+            response = request_with_retry(
+                method="GET",
+                url=self.yandex_routing_url,
+                timeout_seconds=10,
+                retry_config=RetryConfig(max_retries=2, backoff_base_seconds=0.5),
+                circuit_key="yandex_route",
+                params=params,
+            )
+        except ProviderUnavailableError as exc:
+            logger.warning("Yandex routing unavailable, falling back to Haversine: %s", exc)
+            distance = calculate_distance(start_lat, start_lon, end_lat, end_lon)
+            return {
+                "distance_km": distance,
+                "duration_minutes": distance * 2.4,  # ~25 km/h city default
+                "duration_in_traffic_minutes": None,
+                "estimated_arrival": None,
+                "polyline": None,
+                "fallback": True,
+            }
+
+        if response.status_code >= 400:
+            logger.warning(
+                "Yandex routing returned %d: %s — falling back to Haversine",
+                response.status_code,
+                response.text[:200],
+            )
+            distance = calculate_distance(start_lat, start_lon, end_lat, end_lon)
+            return {
+                "distance_km": distance,
+                "duration_minutes": distance * 2.4,
+                "duration_in_traffic_minutes": None,
+                "estimated_arrival": None,
+                "polyline": None,
+                "fallback": True,
+            }
+
+        data = response.json()
+        route = data.get("route") or {}
+        distance_m = (route.get("distance") or {}).get("value", 0)
+        duration_s = (route.get("duration") or {}).get("value", 0)
+        duration_traffic_s = (route.get("duration_in_traffic") or {}).get("value")
+
+        return {
+            "distance_km": distance_m / 1000.0,
+            "duration_minutes": duration_s / 60.0,
+            "duration_in_traffic_minutes": (duration_traffic_s / 60.0) if duration_traffic_s else None,
+            "estimated_arrival": None,
+            "polyline": route.get("geometry"),
+        }
+
+    def get_distance_matrix(
+        self,
+        points: List[Tuple[float, float]],
+        traffic: bool = True,
+        use_cache: bool = True,
+    ) -> Tuple[Dict[Tuple[int, int], Dict[str, float]], str]:
+        """Return a distance/duration matrix for `points`.
+
+        Delegates to `business_app.utils.distance_matrix.get_distance_matrix`,
+        which handles Yandex matrix → pairwise → Haversine fallback and Redis
+        caching. Returns (matrix, source_label).
+        """
+        return _get_distance_matrix(points, traffic=traffic, provider=self.provider, use_cache=use_cache)
 
     def _yandex_find_nearby(
         self, latitude: float, longitude: float, place_type: str, radius: int

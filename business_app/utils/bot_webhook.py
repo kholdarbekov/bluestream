@@ -187,3 +187,110 @@ def trigger_bot_health_check() -> Dict[str, Any]:
     """
     logger.info("Checking bot health")
     return trigger_bot_webhook("/health", {})
+
+
+# ---------------------------------------------------------------------------
+# Staff bot webhook helpers
+#
+# The staff bot runs as a separate process at STAFF_BOT_WEBHOOK_URL (default
+# http://staff_bot:8081). These helpers POST signed payloads using the
+# `requests` library, so they are safe to call from Celery workers (no
+# event-loop juggling). HMAC signing matches the scheme used by
+# `business_app.tasks.staff_tasks._send_staff_webhook`.
+# ---------------------------------------------------------------------------
+
+
+def _send_staff_bot_webhook(endpoint: str, payload: Dict[str, Any], *, timeout: float = 10.0) -> bool:
+    """POST a signed JSON payload to the staff bot's internal webhook server.
+
+    Returns True on 2xx, False otherwise (no exception raised — callers may
+    safely ignore the result; the webhook is best-effort).
+    """
+    import os
+    import json
+    import requests
+
+    url_base = os.environ.get("STAFF_BOT_WEBHOOK_URL", "http://staff_bot:8081")
+    secret = os.environ.get("WEBHOOK_SECRET") or os.environ.get("JWT_SECRET_KEY", "")
+    if not secret:
+        logger.warning("Staff bot webhook secret missing — skipping %s", endpoint)
+        return False
+
+    body = json.dumps(payload).encode("utf-8")
+    signature = _get_webhook_signature(body, secret)
+    headers = {
+        "Content-Type": "application/json",
+        "X-Bot-Webhook-Signature": signature,
+        "X-Request-ID": str(uuid.uuid4())[:8],
+    }
+    url = f"{url_base.rstrip('/')}{endpoint}"
+
+    try:
+        response = requests.post(url, data=body, headers=headers, timeout=timeout)
+        if 200 <= response.status_code < 300:
+            return True
+        logger.warning("Staff bot webhook %s returned %d: %s", endpoint, response.status_code, response.text[:200])
+        return False
+    except requests.exceptions.ConnectionError:
+        logger.warning("Staff bot not reachable at %s — %s skipped", url, endpoint)
+        return False
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Staff bot webhook %s failed: %s", endpoint, exc)
+        return False
+
+
+def _resolve_driver_telegram_id(driver_id: int) -> Optional[int]:
+    """Look up telegram_id for a driver user_id. Returns None if not linked."""
+    try:
+        from business_app.models.user import User
+
+        user = User.query.filter_by(id=driver_id).first()
+        if user is None or not user.telegram_id:
+            return None
+        return int(user.telegram_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Failed to resolve telegram_id for driver_id=%s: %s", driver_id, exc)
+        return None
+
+
+def notify_route_updated(driver_id: int) -> bool:
+    """Tell the staff bot to refresh the driver's open active-deliveries view."""
+    telegram_id = _resolve_driver_telegram_id(driver_id)
+    if telegram_id is None:
+        logger.info("Skipping route-updated push: driver %s has no telegram_id", driver_id)
+        return False
+    return _send_staff_bot_webhook(
+        "/internal/route-updated",
+        {
+            "driver_id": driver_id,
+            "telegram_id": telegram_id,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+
+
+def notify_pool_insertion_suggestion(
+    *,
+    driver_id: int,
+    delivery_id: int,
+    order_no: str,
+    detour_km: float,
+    detour_minutes: float,
+) -> bool:
+    """Push a pool-order insertion suggestion to a specific driver's chat."""
+    telegram_id = _resolve_driver_telegram_id(driver_id)
+    if telegram_id is None:
+        logger.info("Skipping pool-insertion push: driver %s has no telegram_id", driver_id)
+        return False
+    return _send_staff_bot_webhook(
+        "/internal/pool-insertion-suggestion",
+        {
+            "driver_id": driver_id,
+            "telegram_id": telegram_id,
+            "delivery_id": delivery_id,
+            "order_no": order_no,
+            "detour_km": detour_km,
+            "detour_minutes": detour_minutes,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        },
+    )

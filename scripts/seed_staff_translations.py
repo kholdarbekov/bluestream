@@ -275,6 +275,91 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "uz": "#{number} buyurtma bekor qilindi.",
         "ru": "Заказ #{number} отменен.",
     },
+    "staff.delivery.next_stop": {
+        "en": "Next stop",
+        "uz": "Keyingi manzil",
+        "ru": "Следующая остановка",
+    },
+    "staff.delivery.eta_minutes": {
+        "en": "ETA: {minutes} min",
+        "uz": "Borish vaqti: {minutes} daq",
+        "ru": "Прибытие: {minutes} мин",
+    },
+    "staff.delivery.distance_km": {
+        "en": "{km} km away",
+        "uz": "{km} km uzoqlikda",
+        "ru": "{km} км до точки",
+    },
+    "staff.delivery.optimize_routes_button": {
+        "en": "Optimize routes",
+        "uz": "Yo'nalishni qayta hisoblash",
+        "ru": "Оптимизировать маршрут",
+    },
+    "staff.delivery.route_updated_toast": {
+        "en": "Route updated",
+        "uz": "Yo'nalish yangilandi",
+        "ru": "Маршрут обновлён",
+    },
+    "staff.delivery.share_location_prompt": {
+        "en": "Tap the button below to share your current location — one tap is enough, you don't need live location. Share again whenever you accept a new order so the route stays accurate.",
+        "uz": "Joriy joylashuvingizni yuborish uchun pastdagi tugmani bosing — bir marta bosish yetarli, jonli joylashuv shart emas. Yangi buyurtmani qabul qilganingizda yo'nalish aniq qolishi uchun qaytadan ulashing.",
+        "ru": "Нажмите кнопку ниже, чтобы отправить текущую геопозицию — одного нажатия достаточно, живая геопозиция не нужна. Отправляйте снова после принятия каждого нового заказа, чтобы маршрут оставался актуальным.",
+    },
+    "staff.delivery.share_location_after_accept": {
+        "en": "📍 Order accepted! Share your current location now so we can recalculate the optimal route from where you are.",
+        "uz": "📍 Buyurtma qabul qilindi! Eng yaxshi yo'nalishni siz turgan joydan qayta hisoblashimiz uchun joriy joylashuvingizni yuboring.",
+        "ru": "📍 Заказ принят! Отправьте текущую геопозицию, чтобы мы пересчитали оптимальный маршрут от вашего нынешнего местоположения.",
+    },
+    "staff.delivery.share_location_button": {
+        "en": "Share location",
+        "uz": "Joylashuvni yuborish",
+        "ru": "Отправить геопозицию",
+    },
+    "staff.delivery.location_stale_notice": {
+        "en": "Share your live location for better suggestions",
+        "uz": "Yaxshiroq taklif uchun jonli joylashuvni yoqing",
+        "ru": "Включите трансляцию геопозиции для точных подсказок",
+    },
+    "staff.delivery.pool_insertion_offer": {
+        "en": "Order #{order_no} fits your route (+{km} km, +{minutes} min). Accept?",
+        "uz": "#{order_no} buyurtma sizning yo'nalishingizga mos keladi (+{km} km, +{minutes} daq). Qabul qilasizmi?",
+        "ru": "Заказ #{order_no} вписывается в ваш маршрут (+{km} км, +{minutes} мин). Принять?",
+    },
+    "staff.delivery.suggestion_declined": {
+        "en": "Suggestion dismissed",
+        "uz": "Taklif rad etildi",
+        "ru": "Предложение отклонено",
+    },
+    "staff.delivery.location_required_notice": {
+        "en": "Share your location to get the optimal delivery order",
+        "uz": "Eng yaxshi yetkazib berish tartibini olish uchun joylashuvingizni yuboring",
+        "ru": "Отправьте свою геопозицию, чтобы получить оптимальный порядок доставок",
+    },
+    "staff.delivery.share_location_first_toast": {
+        "en": "Please share your location first — without it we can't compute the route",
+        "uz": "Avval joylashuvingizni yuboring — usiz yo'nalishni hisoblay olmaymiz",
+        "ru": "Сначала отправьте свою геопозицию — без неё мы не можем рассчитать маршрут",
+    },
+    "staff.delivery.location_received": {
+        "en": "Location received",
+        "uz": "Joylashuv qabul qilindi",
+        "ru": "Геопозиция получена",
+    },
+    "staff.delivery.route_recalculated": {
+        "en": "Route has been recalculated based on your current position.",
+        "uz": "Yo'nalish joriy joylashuvingiz asosida qayta hisoblandi.",
+        "ru": "Маршрут пересчитан на основе вашего текущего положения.",
+    },
+    "staff.delivery.tap_to_see_optimized": {
+        "en": "Tap to see the optimized order:",
+        "uz": "Optimallashtirilgan tartibni ko'rish uchun bosing:",
+        "ru": "Нажмите, чтобы увидеть оптимизированный порядок:",
+    },
+    "staff.delivery.location_update_failed": {
+        "en": "Couldn't save your location, please try again",
+        "uz": "Joylashuvingizni saqlay olmadik, qayta urinib ko'ring",
+        "ru": "Не удалось сохранить вашу геопозицию, попробуйте ещё раз",
+    },
     "staff.delivery.cash_collected_label": {
         "en": "Collected",
         "uz": "Yigildi",

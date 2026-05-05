@@ -309,60 +309,123 @@ def update_delivery_zones_task(self):
         raise self.retry(exc=exc)
 
 
-@shared_task(bind=True, max_retries=3, time_limit=600, soft_time_limit=540)
-def optimize_driver_route_task(self, driver_id: int):
-    """Optimize route for a specific driver"""
+@shared_task(bind=True, max_retries=3, default_retry_delay=30, time_limit=120, soft_time_limit=100)
+def optimize_driver_route_task(self, driver_id: int, trigger: str = "auto"):
+    """Recompute the optimal delivery sequence for a driver.
+
+    Persists the result to `DeliveryRoute.optimized_order` and pushes a
+    "/internal/route-updated" webhook to the staff bot so any open menu
+    refreshes. `trigger` is a human-readable label ("accept", "manual",
+    "cancel", "pool_insert") for log/observability.
+    """
     try:
-        logger.info(f"Optimizing route for driver {driver_id}")
+        from business_app.services.route_optimization_service import RouteOptimizationService
+        from business_app.utils.bot_webhook import notify_route_updated
 
-        # Get driver's pending deliveries
-        deliveries = Delivery.query.filter(
-            Delivery.delivery_person_id == driver_id,
-            Delivery.status.in_([DeliveryStatus.ASSIGNED, DeliveryStatus.IN_TRANSIT, DeliveryStatus.PICKED_UP]),
-        ).all()
+        service = RouteOptimizationService()
+        route = service.optimize_for_driver(driver_id, trigger=trigger)
 
-        if len(deliveries) <= 1:
-            logger.info(f"Driver {driver_id} has {len(deliveries)} deliveries, no optimization needed")
-            return {"optimized": False, "reason": "Insufficient deliveries"}
+        if route is None:
+            return {"optimized": False, "reason": "no_active_deliveries"}
 
-        delivery_service = DeliveryService()
+        try:
+            notify_route_updated(driver_id)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("route_updated webhook push failed driver=%s: %s", driver_id, exc)
 
-        # Get optimized order
-        optimized_deliveries = delivery_service._optimize_delivery_order(deliveries)
-
-        # Update delivery priorities/sequence
-        for i, delivery in enumerate(optimized_deliveries):
-            delivery.route_data = delivery.route_data or {}
-            delivery.route_data["sequence"] = i + 1
-            delivery.updated_at = datetime.now(timezone.utc)
-
-        db.session.commit()
-
-        # Calculate route metrics
-        route_data = {
+        return {
+            "optimized": True,
             "driver_id": driver_id,
-            "delivery_count": len(optimized_deliveries),
-            "total_distance_km": delivery_service._calculate_route_distance(optimized_deliveries),
-            "estimated_time_hours": len(optimized_deliveries) * 0.5,
-            "optimized_at": datetime.now(timezone.utc).isoformat(),
+            "trigger": trigger,
+            "delivery_count": len(route.optimized_order or []),
+            "total_distance_km": route.total_distance_km,
+            "estimated_duration_minutes": route.estimated_duration_minutes,
+            "matrix_source": (route.extra_data or {}).get("matrix_source"),
         }
 
-        # Send route update to driver
-        notification_service = NotificationService()
-        notification_service.send_notification(
-            driver_id,
-            "delivery_route_updated",
-            template_data={
-                "delivery_count": len(optimized_deliveries),
-                "estimated_time": route_data["estimated_time_hours"],
-            },
-        )
+    except Exception as exc:
+        db.session.rollback()
+        logger.error(f"Route optimization failed for driver {driver_id}: {exc}")
+        raise self.retry(exc=exc)
 
-        logger.info(f"Route optimized for driver {driver_id}: {len(optimized_deliveries)} deliveries")
-        return route_data
+
+@shared_task(bind=True, max_retries=3, default_retry_delay=30, time_limit=60, soft_time_limit=50)
+def evaluate_pool_insertion_suggestions_task(self, delivery_id: int):
+    """For a freshly-pooled delivery, find an active driver it can be slipped
+    into and push a suggestion to the staff bot.
+
+    Skips silently if:
+      - Delivery is already assigned to a driver.
+      - No active driver's route can absorb it within the configured detour
+        thresholds.
+    """
+    try:
+        from flask import current_app
+        from business_app.models.delivery import DeliveryPerson
+        from business_app.services.route_optimization_service import RouteOptimizationService
+        from business_app.utils.bot_webhook import notify_pool_insertion_suggestion
+
+        delivery = Delivery.query.get(delivery_id)
+        if not delivery:
+            return {"suggested": False, "reason": "delivery_not_found"}
+        if delivery.delivery_person_id is not None:
+            return {"suggested": False, "reason": "already_assigned"}
+
+        max_km = float(current_app.config.get("ROUTE_INSERTION_MAX_DETOUR_KM", 5.0))
+        max_min = float(current_app.config.get("ROUTE_INSERTION_MAX_DETOUR_MIN", 15.0))
+
+        # Candidate drivers: active + available + currently working hours.
+        candidates = DeliveryPerson.query.filter(
+            DeliveryPerson.is_active.is_(True),
+            DeliveryPerson.is_available.is_(True),
+        ).all()
+        candidates = [c for c in candidates if c.is_working_now]
+        if not candidates:
+            return {"suggested": False, "reason": "no_active_drivers"}
+
+        service = RouteOptimizationService()
+        best: Dict[str, Any] = {}
+        for cand in candidates:
+            cost = service.compute_insertion_cost(cand.user_id, delivery_id)
+            if cost is None:
+                continue
+            if cost["delta_km"] > max_km or cost["delta_minutes"] > max_min:
+                continue
+            if not best or cost["delta_km"] < best["delta_km"]:
+                best = {
+                    "driver_id": cand.user_id,
+                    "delta_km": cost["delta_km"],
+                    "delta_minutes": cost["delta_minutes"],
+                    "position": cost["position"],
+                }
+
+        if not best:
+            return {"suggested": False, "reason": "no_fit_within_thresholds"}
+
+        order_no = delivery.order.order_number if delivery.order else str(delivery.order_id)
+        try:
+            notify_pool_insertion_suggestion(
+                driver_id=best["driver_id"],
+                delivery_id=delivery_id,
+                order_no=order_no,
+                detour_km=round(best["delta_km"], 1),
+                detour_minutes=round(best["delta_minutes"]),
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("pool_insertion_suggestion webhook push failed: %s", exc)
+
+        logger.info(
+            "insertion_suggested delivery=%s driver=%s delta_km=%.2f delta_min=%.1f position=%d",
+            delivery_id,
+            best["driver_id"],
+            best["delta_km"],
+            best["delta_minutes"],
+            best["position"],
+        )
+        return {"suggested": True, **best}
 
     except Exception as exc:
-        logger.error(f"Route optimization failed for driver {driver_id}: {exc}")
+        logger.error(f"Pool insertion eval failed for delivery {delivery_id}: {exc}")
         raise self.retry(exc=exc)
 
 

@@ -162,6 +162,9 @@ class StaffConfig:
     """Staff-specific settings"""
     new_order_notification_enabled: bool = True
     location_update_interval_seconds: int = 30
+    # DEPRECATED: kept for backward compat with existing env files; the
+    # historical concurrent-deliveries cap was dropped when implicit route
+    # optimization shipped — drivers now claim freely and the optimizer orders.
     max_active_deliveries_per_person: int = 3
     order_pool_refresh_seconds: int = 60
 

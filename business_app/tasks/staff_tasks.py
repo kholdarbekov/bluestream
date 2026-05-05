@@ -100,21 +100,31 @@ def notify_staff_new_order(self, order_id: int, order_info: dict = None):
                 logger.info(f"No delivery persons to notify for order {order_id}")
                 return
 
-            # Build order info if not provided
+            # Build order info if not provided. We need delivery_id so the
+            # bot can render Accept/Decline buttons that route through the
+            # standard accept flow.
             if not order_info:
                 from business_app.models.order import Order
+                from business_app.models.delivery import Delivery
 
                 order = Order.query.get(order_id)
                 if not order:
                     logger.warning(f"Order {order_id} not found for notification")
                     return
 
+                delivery = Delivery.query.filter_by(order_id=order_id).first()
+                addr = order.delivery_address
+
                 order_info = {
                     "order_id": order_id,
+                    "delivery_id": delivery.id if delivery else None,
                     "order_number": order.order_number,
                     "total_amount": float(order.total_amount) if order.total_amount else 0,
                     "payment_method": order.payment_method.value if order.payment_method else "cash",
                     "item_count": len(order.order_items) if order.order_items else 0,
+                    "district": addr.district if addr else "",
+                    "address": addr.full_address if addr else "",
+                    "time_slot": order.delivery_time_slot or "",
                 }
 
             data = {

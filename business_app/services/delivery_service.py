@@ -101,6 +101,31 @@ class DeliveryService:
         # Schedule delivery assignment
         self._schedule_delivery_assignment(delivery.id)
 
+        # Broadcast the new pool order to every eligible driver with an
+        # inline Accept/Decline UX. First driver to Accept wins (server-side
+        # row lock in StaffService.accept_order returns 409 to the rest).
+        if delivery.delivery_person_id is None:
+            try:
+                from ..tasks.staff_tasks import notify_staff_new_order
+
+                notify_staff_new_order.delay(order_id)
+            except Exception as exc:  # noqa: BLE001
+                current_app.logger.warning("Failed to enqueue new-order broadcast for order %s: %s", order_id, exc)
+
+            # Also evaluate whether this delivery is a particularly cheap
+            # detour for one specific active driver — if so, that driver
+            # gets an additional targeted suggestion message with detour
+            # info (+km, +min). The broadcast above gives everyone visibility;
+            # this targeted message just adds context for the best fit.
+            try:
+                from ..tasks.delivery_tasks import evaluate_pool_insertion_suggestions_task
+
+                evaluate_pool_insertion_suggestions_task.delay(delivery.id)
+            except Exception as exc:  # noqa: BLE001
+                current_app.logger.warning(
+                    "Failed to enqueue pool insertion eval for delivery %s: %s", delivery.id, exc
+                )
+
         return delivery
 
     def assign_delivery_driver(self, delivery_id: int, driver_id: int) -> Delivery:
@@ -134,8 +159,8 @@ class DeliveryService:
         # Notify driver
         self._notify_driver(delivery)
 
-        # Optimize route if driver has multiple deliveries
-        self._optimize_driver_route(driver_id)
+        # Re-optimize route now that a new delivery has joined the driver's set.
+        self._optimize_driver_route(driver_id, trigger="accept")
 
         return delivery
 
@@ -544,10 +569,11 @@ class DeliveryService:
             delivery.delivery_notes = reason
             pending_commit = True
 
-        if delivery.delivery_person_id:
+        cancelled_driver_id = delivery.delivery_person_id
+        if cancelled_driver_id:
             from business_app.services.staff_service import StaffService
 
-            StaffService.sync_active_delivery_counters([delivery.delivery_person_id])
+            StaffService.sync_active_delivery_counters([cancelled_driver_id])
             pending_commit = True
 
         if pending_commit:
@@ -555,6 +581,11 @@ class DeliveryService:
 
         # Notify customer and driver
         self._notify_delivery_cancellation(delivery)
+
+        # Re-optimize the affected driver's remaining route now that this stop
+        # has been pulled.
+        if cancelled_driver_id:
+            self._optimize_driver_route(cancelled_driver_id, trigger="cancel")
 
         return delivery
 
@@ -583,12 +614,15 @@ class DeliveryService:
         return base_time + timedelta(minutes=estimated_minutes)
 
     def _is_driver_available(self, driver_id: int) -> bool:
-        """Check if driver is available for assignment"""
-        # Check active deliveries
-        active_deliveries = Delivery.query.filter_by(driver_id=driver_id, status=DeliveryStatus.IN_TRANSIT).count()
+        """Check if driver is available for assignment.
 
-        # Allow up to 5 concurrent deliveries per driver
-        return active_deliveries < 5
+        The historical concurrent-deliveries cap was removed when implicit
+        route optimization was introduced — drivers may now claim as many
+        deliveries as needed and the optimizer handles ordering. The
+        `DeliveryPerson.max_concurrent_deliveries` column is preserved for a
+        possible future per-driver admin override but is no longer enforced.
+        """
+        return True
 
     def _is_valid_delivery_status_transition(self, current: DeliveryStatus, new: DeliveryStatus) -> bool:
         """Check if delivery status transition is valid"""
@@ -701,11 +735,11 @@ class DeliveryService:
 
         notify_driver_assignment_task.delay(delivery.id)
 
-    def _optimize_driver_route(self, driver_id: int):
-        """Optimize route for a specific driver"""
+    def _optimize_driver_route(self, driver_id: int, trigger: str = "auto"):
+        """Optimize route for a specific driver (async)."""
         from ..tasks.delivery_tasks import optimize_driver_route_task
 
-        optimize_driver_route_task.delay(driver_id)
+        optimize_driver_route_task.delay(driver_id, trigger)
 
     def _parse_time_slot(self, time_slot: str) -> Tuple[datetime.time, datetime.time]:
         """Parse time slot string into start and end times"""

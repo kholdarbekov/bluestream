@@ -385,6 +385,9 @@ class StaffBot:
             CallbackQueryHandler(active_delivery_handler.show_active_deliveries, pattern="^staff_active_deliveries$"),
             CallbackQueryHandler(active_delivery_handler.view_active_delivery, pattern=r"^staff_view_active_\d+$"),
             CallbackQueryHandler(active_delivery_handler.navigate_to_address, pattern=r"^staff_navigate_\d+$"),
+            CallbackQueryHandler(active_delivery_handler.optimize_routes, pattern="^staff_optimize_routes$"),
+            CallbackQueryHandler(active_delivery_handler.share_location_prompt, pattern="^staff_share_location_prompt$"),
+            CallbackQueryHandler(active_delivery_handler.decline_suggestion, pattern=r"^staff_decline_suggestion_\d+$"),
 
             # Try-outs
             CallbackQueryHandler(tryout_handler.show_create_products, pattern="^staff_tryout_select_products$"),

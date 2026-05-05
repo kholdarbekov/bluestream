@@ -69,6 +69,37 @@ class DeliveryKeyboards:
         return InlineKeyboardMarkup(keyboard)
 
     @staticmethod
+    def active_list_top_actions(
+        language: str, *, show_share_location: bool
+    ) -> InlineKeyboardMarkup:
+        """Top-of-list actions for the My active deliveries hub.
+
+        Includes the manual "Optimize routes" button and (when the driver's
+        live location is missing/stale) a "Share location" button that
+        triggers the reply keyboard prompt.
+        """
+        keyboard = [[
+            InlineKeyboardButton(
+                f"\U0001f504 {i18n.get('staff.delivery.optimize_routes_button', language)}",
+                callback_data="staff_optimize_routes",
+            )
+        ]]
+        if show_share_location:
+            keyboard.append([
+                InlineKeyboardButton(
+                    f"\U0001f4cd {i18n.get('staff.delivery.share_location_button', language)}",
+                    callback_data="staff_share_location_prompt",
+                )
+            ])
+        keyboard.append([
+            InlineKeyboardButton(
+                f"⬅️ {i18n.get('staff.back', language)}",
+                callback_data="staff_back_to_main",
+            )
+        ])
+        return InlineKeyboardMarkup(keyboard)
+
+    @staticmethod
     def active_delivery_actions(
         language: str, delivery_id: int, current_status: str
     ) -> InlineKeyboardMarkup:

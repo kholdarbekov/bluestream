@@ -111,8 +111,12 @@ def test_accept_order_uses_live_count_instead_of_stale_cached_counter(db, sample
     assert StaffService.get_active_delivery_count(delivery_driver.id) == 1
 
 
-def test_accept_order_blocks_when_live_active_count_reaches_capacity(db, sample_user, delivery_driver):
-    _create_delivery_person(
+def test_accept_order_no_longer_caps_concurrent_deliveries(db, sample_user, delivery_driver):
+    """Cap removed when implicit route optimization shipped — drivers may now
+    claim freely beyond `max_concurrent_deliveries` and the optimizer handles
+    ordering. The column is preserved for a possible future per-driver admin
+    override but is no longer enforced at the accept site."""
+    profile = _create_delivery_person(
         db,
         delivery_driver,
         current_active_deliveries=0,
@@ -128,8 +132,14 @@ def test_accept_order_blocks_when_live_active_count_reaches_capacity(db, sample_
     )
     target_delivery = _create_delivery(db, target_order.id, status=DeliveryStatus.PENDING)
 
-    with pytest.raises(ValidationError, match="Maximum concurrent deliveries"):
-        StaffService.accept_order(target_delivery.id, delivery_driver.id)
+    accepted = StaffService.accept_order(target_delivery.id, delivery_driver.id)
+
+    db.session.refresh(profile)
+    db.session.refresh(accepted)
+    assert accepted.delivery_person_id == delivery_driver.id
+    assert accepted.status == DeliveryStatus.ASSIGNED
+    # Live count is now 2 (existing + target) even though max_concurrent was 1.
+    assert StaffService.get_active_delivery_count(delivery_driver.id) == 2
 
 
 def test_admin_reassign_uses_live_workload_and_resyncs_cached_counters(

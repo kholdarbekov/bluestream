@@ -352,14 +352,18 @@ class StaffAPIClient:
             data=data
         )
 
-    async def update_location(
-        self, token: str, delivery_id: int,
+    async def update_driver_location(
+        self, token: str,
         latitude: float, longitude: float
     ) -> APIResponse:
-        """Update delivery person's live location"""
+        """Update the driver's own current location (driver-level, no delivery
+        required). Used for route-optimization purposes — accepts any one-shot
+        or live location share. The backend re-runs route optimization on the
+        spot and returns the freshly sorted active-deliveries payload so the
+        bot can render the new sequence in one round-trip."""
         return await self._make_request(
             'POST',
-            f'{config.business_api.delivery_endpoint}/{delivery_id}/location',
+            f'{config.business_api.delivery_endpoint}/me/location',
             token=token,
             data={'latitude': latitude, 'longitude': longitude}
         )
@@ -370,6 +374,18 @@ class StaffAPIClient:
             'GET',
             f'{config.business_api.delivery_endpoint}/active',
             token=token
+        )
+
+    async def optimize_route(self, token: str) -> APIResponse:
+        """Manually re-run route optimization for the driver's active set.
+
+        Returns the freshly sorted active-deliveries payload (same shape as
+        get_active_deliveries) so the bot can edit-in-place.
+        """
+        return await self._make_request(
+            'POST',
+            f'{config.business_api.delivery_endpoint}/optimize-route',
+            token=token,
         )
 
     async def get_delivery_history(self, token: str, params: Dict = None) -> APIResponse:

@@ -1325,11 +1325,11 @@ class OrderService:
             else:
                 logger.info(f"Skipping inventory confirmation for cash order {order.id} - will deduct on delivery")
 
-            # Create delivery record
-            from .delivery_service import DeliveryService
+            # Create delivery record (idempotent — API/scheduled-task paths may have created it already)
+            if not order.delivery:
+                from .delivery_service import DeliveryService
 
-            delivery_service = DeliveryService()
-            delivery_service.create_delivery(order.id)
+                DeliveryService().create_delivery(order.id)
 
             # Award loyalty points only for non-cash orders (cash orders get points on delivery)
             if not is_cash_order:

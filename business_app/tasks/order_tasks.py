@@ -90,6 +90,7 @@ def auto_confirm_pending_orders():
 
         order_service = OrderService()
         confirmed_count = 0
+        failed_count = 0
 
         for order in pending_orders:
             try:
@@ -101,6 +102,17 @@ def auto_confirm_pending_orders():
                     order_service.update_order_status(
                         order.id, OrderStatus.CONFIRMED, notes="Auto-confirmed - payment verified"
                     )
+                    # Defence in depth: surface the silent failure mode where
+                    # the order is committed as CONFIRMED but delivery creation
+                    # fails inside _handle_status_change_actions.
+                    db.session.refresh(order)
+                    if not order.delivery:
+                        logger.error(
+                            "Order %s auto-confirmed but delivery was NOT created — address_id=%s, delivery_date=%s",
+                            order.id,
+                            order.delivery_address_id,
+                            order.delivery_date,
+                        )
                     confirmed_count += 1
                     logger.info(f"Auto-confirmed order {order.id}")
 
@@ -119,11 +131,14 @@ def auto_confirm_pending_orders():
                     )
 
             except Exception as e:
-                logger.error(f"Failed to auto-confirm order {order.id}: {e}")
+                # Roll back so a poisoned session doesn't cascade into the next iteration.
+                db.session.rollback()
+                failed_count += 1
+                logger.exception(f"Failed to auto-confirm order {order.id}: {e}")
                 continue
 
-        logger.info(f"Auto-confirmed {confirmed_count} pending orders")
-        return {"confirmed_count": confirmed_count}
+        logger.info(f"Auto-confirmed {confirmed_count} pending orders ({failed_count} failed)")
+        return {"confirmed_count": confirmed_count, "failed_count": failed_count}
 
     except Exception as e:
         logger.error(f"Failed to auto-confirm pending orders: {e}")

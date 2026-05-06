@@ -11,6 +11,7 @@ from staff_bot.i18n import i18n
 from staff_bot.keyboards.common import CommonKeyboards
 from staff_bot.keyboards.delivery import DeliveryKeyboards
 from staff_bot.permissions import require_auth, require_delivery_driver
+from staff_bot.utils import flow_state
 from staff_bot.utils.formatters import escape_html, format_currency, format_user_card
 from staff_bot.utils.search import detect_search_type
 
@@ -35,8 +36,20 @@ class BottleCollectionHandler(BaseHandler):
     """Handle standalone bottle collection and fine creation outside delivery flow."""
 
     @staticmethod
-    def _clear_flow(context: ContextTypes.DEFAULT_TYPE):
+    async def _clear_flow(
+        context: ContextTypes.DEFAULT_TYPE,
+        update: Update = None,
+    ):
+        """Clear the standalone-bottle flow flag plus the Redis mirror, and
+        deliver any pool-insertion suggestions deferred while the driver was
+        mid-collection. See `flow_state.clear_and_drain` for the queue
+        protocol; `update` is optional for legacy callers."""
         context.user_data.pop('pending_bottle_collection_flow', None)
+        if update and update.effective_user:
+            language = context.user_data.get('language') if context else None
+            await flow_state.clear_and_drain(
+                update.effective_user.id, context.bot, language=language
+            )
 
     @staticmethod
     def _format_bottle_statement(summary: dict, language: str) -> str:
@@ -78,7 +91,7 @@ class BottleCollectionHandler(BaseHandler):
     async def start_collection_search(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Prompt the driver to search for a customer with bottles."""
         language = await self._get_language(update, context)
-        self._clear_flow(context)
+        await self._clear_flow(context, update)
 
         text = i18n.get('staff.delivery.bottle_collection_search_prompt', language)
         cancel_keyboard = CommonKeyboards.back_button(language, "staff_cash_hub")
@@ -238,9 +251,16 @@ class BottleCollectionHandler(BaseHandler):
             flow['address_id'] = address_id
             flow['action'] = 'collect'
             context.user_data['pending_bottle_collection_flow'] = flow
+            # C-2: this is the text-input entry point for the bottle collect
+            # flow — mirror the marker so a webhook-driven pool suggestion
+            # gets queued instead of interrupting the qty prompt.
+            await flow_state.mark_active(
+                update.effective_user.id, 'pending_bottle_collection_flow'
+            )
 
             await query.edit_message_text(
                 i18n.get('staff.delivery.enter_bottle_collection_qty', language),
+                reply_markup=CommonKeyboards.flow_cancel(language),
                 parse_mode='HTML',
             )
             return BOTTLE_COLLECTION_QTY_INPUT
@@ -271,6 +291,7 @@ class BottleCollectionHandler(BaseHandler):
         context.user_data['pending_bottle_collection_flow'] = flow
         await update.message.reply_text(
             i18n.get('staff.delivery.enter_bottle_collection_note', language),
+            reply_markup=CommonKeyboards.flow_cancel(language),
             parse_mode='HTML',
         )
         return BOTTLE_COLLECTION_NOTE_INPUT
@@ -293,7 +314,7 @@ class BottleCollectionHandler(BaseHandler):
 
         if not all([customer_id, address_id, quantity]):
             await update.message.reply_text(i18n.get('staff.error_occurred', language))
-            self._clear_flow(context)
+            await self._clear_flow(context, update)
             return ConversationHandler.END
 
         try:
@@ -313,7 +334,7 @@ class BottleCollectionHandler(BaseHandler):
                 return ConversationHandler.END
 
             result = response.data or {}
-            self._clear_flow(context)
+            await self._clear_flow(context, update)
             await update.message.reply_text(
                 i18n.get(
                     'staff.delivery.bottle_collection_recorded', language,
@@ -352,9 +373,13 @@ class BottleCollectionHandler(BaseHandler):
             flow['address_id'] = address_id
             flow['action'] = 'fine'
             context.user_data['pending_bottle_collection_flow'] = flow
+            await flow_state.mark_active(
+                update.effective_user.id, 'pending_bottle_collection_flow'
+            )
 
             await query.edit_message_text(
                 i18n.get('staff.delivery.enter_fine_bottle_qty', language),
+                reply_markup=CommonKeyboards.flow_cancel(language),
                 parse_mode='HTML',
             )
             return BOTTLE_FINE_QTY_INPUT
@@ -385,6 +410,7 @@ class BottleCollectionHandler(BaseHandler):
         context.user_data['pending_bottle_collection_flow'] = flow
         await update.message.reply_text(
             i18n.get('staff.delivery.enter_fine_amount', language),
+            reply_markup=CommonKeyboards.flow_cancel(language),
             parse_mode='HTML',
         )
         return BOTTLE_FINE_AMOUNT_INPUT
@@ -412,6 +438,7 @@ class BottleCollectionHandler(BaseHandler):
         context.user_data['pending_bottle_collection_flow'] = flow
         await update.message.reply_text(
             i18n.get('staff.delivery.enter_fine_note', language),
+            reply_markup=CommonKeyboards.flow_cancel(language),
             parse_mode='HTML',
         )
         return BOTTLE_FINE_NOTE_INPUT
@@ -451,7 +478,7 @@ class BottleCollectionHandler(BaseHandler):
 
             if not bottle_balance_id:
                 await update.message.reply_text(i18n.get('staff.error_occurred', language))
-                self._clear_flow(context)
+                await self._clear_flow(context, update)
                 return ConversationHandler.END
 
             async with api_client as client:
@@ -470,7 +497,7 @@ class BottleCollectionHandler(BaseHandler):
                 await self._handle_api_response_error(update, response, language)
                 return ConversationHandler.END
 
-            self._clear_flow(context)
+            await self._clear_flow(context, update)
             await update.message.reply_text(
                 i18n.get(
                     'staff.delivery.bottle_fine_created', language,

@@ -11,6 +11,7 @@ from staff_bot.i18n import i18n
 from staff_bot.keyboards.common import CommonKeyboards
 from staff_bot.keyboards.delivery import DeliveryKeyboards
 from staff_bot.permissions import require_auth, require_delivery_driver
+from staff_bot.utils import flow_state
 from staff_bot.utils.formatters import escape_html, format_currency, format_user_card
 from staff_bot.utils.search import detect_search_type
 
@@ -25,8 +26,21 @@ class CashCollectionHandler(BaseHandler):
     """Handle standalone COD debt collection outside delivery completion."""
 
     @staticmethod
-    def _clear_flow(context: ContextTypes.DEFAULT_TYPE):
+    async def _clear_flow(
+        context: ContextTypes.DEFAULT_TYPE,
+        update: Update = None,
+    ):
+        """Clear the standalone-COD flow flag plus the Redis mirror, and
+        deliver any pool-insertion suggestions deferred while the driver
+        was mid-collection. See `flow_state.clear_and_drain` for the queue
+        protocol; `update` is optional so legacy call sites keep working
+        with degraded (in-memory-only) behaviour."""
         context.user_data.pop('pending_cod_collection_flow', None)
+        if update and update.effective_user:
+            language = context.user_data.get('language') if context else None
+            await flow_state.clear_and_drain(
+                update.effective_user.id, context.bot, language=language
+            )
 
     @staticmethod
     def _format_statement(statement: dict, language: str) -> str:
@@ -56,7 +70,7 @@ class CashCollectionHandler(BaseHandler):
     async def start_collection_search(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Prompt the driver to search for a customer with open COD debt."""
         language = await self._get_language(update, context)
-        self._clear_flow(context)
+        await self._clear_flow(context, update)
 
         text = i18n.get('staff.delivery.cod_collection_search_prompt', language)
         if update.callback_query:
@@ -197,12 +211,18 @@ class CashCollectionHandler(BaseHandler):
             'amount': total_outstanding,
             'total_outstanding_amount': total_outstanding,
         }
+        # C-2: mirror the flow into Redis so the webhook server can defer
+        # pool-insertion suggestions until this collection completes.
+        await flow_state.mark_active(
+            update.effective_user.id, 'pending_cod_collection_flow'
+        )
         await query.edit_message_text(
             i18n.get(
                 'staff.delivery.cod_collection_note_prompt',
                 language,
                 amount=format_currency(total_outstanding, language=language),
             ),
+            reply_markup=CommonKeyboards.flow_cancel(language),
             parse_mode='HTML',
         )
         return COLLECTION_NOTE_INPUT
@@ -218,8 +238,12 @@ class CashCollectionHandler(BaseHandler):
         context.user_data['pending_cod_collection_flow'] = {
             'customer_id': customer_id,
         }
+        await flow_state.mark_active(
+            update.effective_user.id, 'pending_cod_collection_flow'
+        )
         await query.edit_message_text(
             i18n.get('staff.delivery.cod_collection_amount_prompt', language),
+            reply_markup=CommonKeyboards.flow_cancel(language),
             parse_mode='HTML',
         )
         return COLLECTION_AMOUNT_INPUT
@@ -274,6 +298,7 @@ class CashCollectionHandler(BaseHandler):
                 language,
                 amount=format_currency(amount, language=language),
             ),
+            reply_markup=CommonKeyboards.flow_cancel(language),
             parse_mode='HTML',
         )
         return COLLECTION_NOTE_INPUT
@@ -294,7 +319,7 @@ class CashCollectionHandler(BaseHandler):
         notes = update.message.text.strip()
         if not customer_id or amount is None:
             await update.message.reply_text(i18n.get('staff.error_occurred', language))
-            self._clear_flow(context)
+            await self._clear_flow(context, update)
             return ConversationHandler.END
         if not notes:
             await update.message.reply_text(i18n.get('staff.delivery.collection_notes_required', language))
@@ -324,7 +349,7 @@ class CashCollectionHandler(BaseHandler):
             if statement_response.success:
                 remaining_outstanding = float((statement_response.data or {}).get('total_outstanding_amount') or 0)
 
-            self._clear_flow(context)
+            await self._clear_flow(context, update)
             await update.message.reply_text(
                 i18n.get(
                     'staff.delivery.cod_collection_recorded',

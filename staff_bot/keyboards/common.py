@@ -21,6 +21,27 @@ class CommonKeyboards:
         ]])
 
     @staticmethod
+    def flow_cancel(language: str) -> InlineKeyboardMarkup:
+        """Cancel button for free-text input prompts that drive a `pending_*_flow`.
+
+        The bot's catch-all text router (`_handle_text_message`) eats every
+        text update while any of `pending_delivery_cash_flow`,
+        `pending_reconciliation_flow`, `pending_cod_collection_flow`,
+        `pending_bottle_collection_flow`, or `tryout_pickup_task_id` is set \u2014
+        even reply-keyboard taps, because those send text. Without an inline
+        Cancel the user has no way back except typing a value the parser
+        accepts. Pair this button with the `staff_flow_cancel` global handler
+        registered in `bot.py`, which clears every flow flag and returns the
+        user to the cash hub.
+        """
+        return InlineKeyboardMarkup([[
+            InlineKeyboardButton(
+                f"\u274c {i18n.get('staff.cancel', language)}",
+                callback_data="staff_flow_cancel",
+            )
+        ]])
+
+    @staticmethod
     def confirm_cancel(
         language: str,
         confirm_data: str,

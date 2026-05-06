@@ -2,22 +2,74 @@
 Internal Webhook Server for Staff Bot
 Receives webhooks from backend for staff notifications (new orders, assignments, etc.)
 """
+import asyncio
 import hmac
 import hashlib
 import logging
 import os
+import time
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, Tuple
 from aiohttp import web
 import redis.asyncio as redis
 
 from staff_bot.config import config
 from staff_bot.database import db_manager
 from staff_bot.i18n import i18n
+from staff_bot.utils import flow_state
 from shared.redis_failure import report_redis_failure
 from shared.redis_keyspace import RedisKeyspace
 
 logger = logging.getLogger(__name__)
+
+
+class _TokenBucket:
+    """Per-endpoint token bucket rate limiter — dep-free, single-process.
+
+    The webhook endpoints are only meant to receive traffic from our own
+    backend, but the URL is reachable from inside the cluster's network and
+    a leaked secret would let an attacker flood any single endpoint. This
+    bucket lets the legitimate backend traffic through (well under any sane
+    rate) while clamping the worst case to `rate_per_sec` sustained with a
+    `burst` headroom for the natural batching the backend already does.
+    """
+
+    __slots__ = ("rate", "capacity", "_tokens", "_last", "_lock")
+
+    def __init__(self, rate_per_sec: float, burst: int):
+        self.rate = float(rate_per_sec)
+        self.capacity = float(burst)
+        self._tokens = float(burst)
+        self._last = time.monotonic()
+        self._lock = asyncio.Lock()
+
+    async def try_acquire(self) -> bool:
+        async with self._lock:
+            now = time.monotonic()
+            self._tokens = min(self.capacity, self._tokens + (now - self._last) * self.rate)
+            self._last = now
+            if self._tokens >= 1.0:
+                self._tokens -= 1.0
+                return True
+            return False
+
+
+async def _parse_json_body(request) -> Tuple[Optional[dict], Optional[web.Response]]:
+    """Parse the request body as JSON.
+
+    Returns (data, None) on success, or (None, error_response) on failure.
+    The previous code let `await request.json()` propagate to the catch-all
+    `except Exception` block which always returned 500 — masking client
+    errors as server errors and making it harder to spot a misbehaving
+    caller in the logs. 400 is the right status for malformed input.
+    """
+    try:
+        return await request.json(), None
+    except Exception as e:
+        logger.warning(f"Webhook JSON parse failed for {request.path}: {e}")
+        return None, web.json_response(
+            {'success': False, 'message': 'Invalid JSON body'}, status=400
+        )
 
 
 async def verify_webhook_signature(request):
@@ -46,6 +98,15 @@ async def reload_translations_handler(request):
     try:
         if not await verify_webhook_signature(request):
             return web.json_response({'success': False, 'message': 'Invalid signature'}, status=401)
+
+        # The translation-reload bucket is the tightest in the set (1/s, burst
+        # of 5) — translations are seeded by an admin action, so anything
+        # faster than that is either a runaway script or a flood.
+        server = request.app.get('staff_webhook_server')
+        if server is not None:
+            limited = await server._check_rate_limit(request)
+            if limited:
+                return limited
 
         await i18n.reload_translations()
         return web.json_response({
@@ -134,6 +195,36 @@ class StaffWebhookServer:
         self._dedup_ttl = int(os.environ.get('STAFF_WEBHOOK_DEDUP_TTL_SECONDS', '86400'))
         self._redis: Optional[redis.Redis] = None
         self._redis_connected = False
+        # Per-endpoint rate limits. Sized to comfortably absorb the backend's
+        # legitimate traffic — broadcast `new-order` happens once per pool
+        # insertion (single-digit / minute peak), the others are per-driver
+        # actions (low double-digit / minute peak). The limits below are 50×
+        # the realistic peaks, so legitimate callers never see 429s; the
+        # bucket exists purely to clamp a rogue / leaked-key flood.
+        self._rate_limiters = {
+            '/internal/new-order': _TokenBucket(rate_per_sec=20, burst=60),
+            '/internal/order-assigned': _TokenBucket(rate_per_sec=20, burst=60),
+            '/internal/order-reassigned': _TokenBucket(rate_per_sec=20, burst=60),
+            '/internal/order-cancelled': _TokenBucket(rate_per_sec=20, burst=60),
+            '/internal/route-updated': _TokenBucket(rate_per_sec=50, burst=120),
+            '/internal/pool-insertion-suggestion': _TokenBucket(rate_per_sec=50, burst=120),
+            '/internal/reload-translations': _TokenBucket(rate_per_sec=1, burst=5),
+        }
+
+    async def _check_rate_limit(self, request) -> Optional[web.Response]:
+        """Return a 429 response if the per-endpoint token bucket is empty,
+        otherwise None. Called at the top of each handler after the signature
+        check so we don't account unauthorized traffic against the legitimate
+        rate budget."""
+        limiter = self._rate_limiters.get(request.path)
+        if limiter is None:
+            return None
+        if await limiter.try_acquire():
+            return None
+        logger.warning(f"Webhook rate-limited: {request.path}")
+        return web.json_response(
+            {'success': False, 'message': 'Rate limit exceeded'}, status=429
+        )
 
     def set_application(self, application):
         """Set Telegram Application instance"""
@@ -142,6 +233,10 @@ class StaffWebhookServer:
     async def setup(self):
         """Setup webhook server routes"""
         self.app = web.Application(client_max_size=1024 * 1024)
+        # Stash a back-reference so the module-level handlers
+        # (reload_translations_handler, health_handler) can reach the
+        # rate-limit table without a global.
+        self.app['staff_webhook_server'] = self
 
         self.app.router.add_post('/internal/new-order', self.new_order_handler)
         self.app.router.add_post('/internal/order-assigned', self.order_assigned_handler)
@@ -245,10 +340,16 @@ class StaffWebhookServer:
             if not await verify_webhook_signature(request):
                 return web.json_response({'success': False, 'message': 'Invalid signature'}, status=401)
 
+            limited = await self._check_rate_limit(request)
+            if limited:
+                return limited
+
             if not self.bot_app:
                 return web.json_response({'success': False, 'message': 'Bot not initialized'}, status=503)
 
-            data = await request.json()
+            data, parse_error = await _parse_json_body(request)
+            if parse_error:
+                return parse_error
             order_id = data.get('order_id')
             event_id = data.get('event_id')
 
@@ -271,6 +372,7 @@ class StaffWebhookServer:
             from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
             sent_count = 0
+            failed_ids = []
             for tid in telegram_ids:
                 try:
                     language = await i18n.get_user_language(int(tid))
@@ -297,11 +399,24 @@ class StaffWebhookServer:
                     )
                     sent_count += 1
                 except Exception as e:
+                    failed_ids.append(int(tid) if isinstance(tid, (int, str)) else tid)
                     logger.error(f"Failed to notify delivery person {tid}: {e}")
 
+            # F-3: report partial success. The previous return shape was always
+            # `success: True`, even when 0/N sends landed — the backend had no
+            # signal to retry the failed recipients. Now success means "every
+            # send succeeded"; partial_success surfaces the mixed case so the
+            # backend can re-emit for the failed_ids without re-broadcasting
+            # to the ones that already received the message.
+            total = len(telegram_ids)
+            full_success = sent_count == total
             return web.json_response({
-                'success': True,
-                'message': f'Notified {sent_count}/{len(telegram_ids)} delivery persons'
+                'success': full_success,
+                'partial_success': not full_success and sent_count > 0,
+                'sent_count': sent_count,
+                'failed_count': total - sent_count,
+                'failed_telegram_ids': failed_ids,
+                'message': f'Notified {sent_count}/{total} delivery persons',
             })
         except Exception as e:
             logger.error(f"Error handling new order notification: {e}", exc_info=True)
@@ -315,10 +430,15 @@ class StaffWebhookServer:
         try:
             if not await verify_webhook_signature(request):
                 return web.json_response({'success': False, 'message': 'Invalid signature'}, status=401)
+            limited = await self._check_rate_limit(request)
+            if limited:
+                return limited
             if not self.bot_app:
                 return web.json_response({'success': False, 'message': 'Bot not initialized'}, status=503)
 
-            data = await request.json()
+            data, parse_error = await _parse_json_body(request)
+            if parse_error:
+                return parse_error
             telegram_id = data.get('telegram_id')
             order_info = data.get('order_info', {})
             event_id = data.get('event_id')
@@ -347,10 +467,15 @@ class StaffWebhookServer:
         try:
             if not await verify_webhook_signature(request):
                 return web.json_response({'success': False, 'message': 'Invalid signature'}, status=401)
+            limited = await self._check_rate_limit(request)
+            if limited:
+                return limited
             if not self.bot_app:
                 return web.json_response({'success': False, 'message': 'Bot not initialized'}, status=503)
 
-            data = await request.json()
+            data, parse_error = await _parse_json_body(request)
+            if parse_error:
+                return parse_error
             old_telegram_id = data.get('old_telegram_id')
             new_telegram_id = data.get('new_telegram_id')
             order_info = data.get('order_info', {})
@@ -362,13 +487,25 @@ class StaffWebhookServer:
             ):
                 return web.json_response({'success': True, 'message': 'Already processed'})
 
+            # F-3: track each leg of the reassignment so the caller can tell
+            # if neither, one, or both of the drivers were notified. Useful
+            # because reassignment is the rare case where a half-success
+            # (only the new driver got the ping) is still meaningful — they
+            # at least know the order is theirs — but the backend may want to
+            # retry for the old driver to clear their stale "you're assigned"
+            # state.
+            failed = []
+            sent = 0
+
             if old_telegram_id:
                 try:
                     lang = await i18n.get_user_language(int(old_telegram_id))
                     msg = i18n.get('staff.notification.order_reassigned_from', lang,
                                    number=order_info.get('order_number', ''))
                     await self.bot_app.bot.send_message(chat_id=old_telegram_id, text=msg)
+                    sent += 1
                 except Exception as e:
+                    failed.append({'telegram_id': old_telegram_id, 'role': 'old'})
                     logger.error(f"Failed to notify old delivery person {old_telegram_id}: {e}")
 
             if new_telegram_id:
@@ -377,10 +514,19 @@ class StaffWebhookServer:
                     msg = i18n.get('staff.notification.order_assigned', lang,
                                    number=order_info.get('order_number', ''))
                     await self.bot_app.bot.send_message(chat_id=new_telegram_id, text=msg)
+                    sent += 1
                 except Exception as e:
+                    failed.append({'telegram_id': new_telegram_id, 'role': 'new'})
                     logger.error(f"Failed to notify new delivery person {new_telegram_id}: {e}")
 
-            return web.json_response({'success': True, 'message': 'Reassignment notifications sent'})
+            return web.json_response({
+                'success': not failed,
+                'partial_success': bool(failed) and sent > 0,
+                'sent_count': sent,
+                'failed_count': len(failed),
+                'failed_recipients': failed,
+                'message': 'Reassignment notifications processed',
+            })
         except Exception as e:
             logger.error(f"Error handling order reassigned notification: {e}", exc_info=True)
             return web.json_response({'success': False, 'message': 'Internal server error'}, status=500)
@@ -393,10 +539,15 @@ class StaffWebhookServer:
         try:
             if not await verify_webhook_signature(request):
                 return web.json_response({'success': False, 'message': 'Invalid signature'}, status=401)
+            limited = await self._check_rate_limit(request)
+            if limited:
+                return limited
             if not self.bot_app:
                 return web.json_response({'success': False, 'message': 'Bot not initialized'}, status=503)
 
-            data = await request.json()
+            data, parse_error = await _parse_json_body(request)
+            if parse_error:
+                return parse_error
             telegram_id = data.get('telegram_id')
             order_info = data.get('order_info', {})
             event_id = data.get('event_id')
@@ -429,10 +580,15 @@ class StaffWebhookServer:
         try:
             if not await verify_webhook_signature(request):
                 return web.json_response({'success': False, 'message': 'Invalid signature'}, status=401)
+            limited = await self._check_rate_limit(request)
+            if limited:
+                return limited
             if not self.bot_app:
                 return web.json_response({'success': False, 'message': 'Bot not initialized'}, status=503)
 
-            data = await request.json()
+            data, parse_error = await _parse_json_body(request)
+            if parse_error:
+                return parse_error
             telegram_id = data.get('telegram_id')
             driver_id = data.get('driver_id')
             event_id = data.get('event_id')
@@ -473,10 +629,15 @@ class StaffWebhookServer:
         try:
             if not await verify_webhook_signature(request):
                 return web.json_response({'success': False, 'message': 'Invalid signature'}, status=401)
+            limited = await self._check_rate_limit(request)
+            if limited:
+                return limited
             if not self.bot_app:
                 return web.json_response({'success': False, 'message': 'Bot not initialized'}, status=503)
 
-            data = await request.json()
+            data, parse_error = await _parse_json_body(request)
+            if parse_error:
+                return parse_error
             telegram_id = data.get('telegram_id')
             delivery_id = data.get('delivery_id')
             order_no = data.get('order_no', '')
@@ -489,6 +650,34 @@ class StaffWebhookServer:
 
             if await self._is_duplicate_event(event_id, f"pool_insert:{telegram_id}:{delivery_id}"):
                 return web.json_response({'success': True, 'message': 'Already processed'})
+
+            # C-2: check whether the driver is mid-flow (cash collection,
+            # COD collect, bottle collect, reconciliation, tryout pickup).
+            # The text router would interpret an unrelated typed reply as
+            # input for the active flow, and an Accept tap would orphan
+            # the flow's pending_*_flow flag. Queue the suggestion instead;
+            # the flow's clear/finalize path drains the queue and dispatches
+            # the deferred message at the user's next idle moment.
+            active_flow = await flow_state.get_active_flow(int(telegram_id))
+            payload = {
+                'delivery_id': int(delivery_id),
+                'order_no': order_no,
+                'detour_km': detour_km,
+                'detour_minutes': detour_min,
+            }
+            if active_flow:
+                queued = await flow_state.queue_pool_suggestion(int(telegram_id), payload)
+                logger.info(
+                    f"pool_insertion deferred for {telegram_id} (active_flow={active_flow}, "
+                    f"queued={queued})"
+                )
+                return web.json_response({
+                    'success': True,
+                    'deferred': True,
+                    'queued': queued,
+                    'active_flow': active_flow,
+                    'message': 'Driver is mid-flow; suggestion queued',
+                })
 
             language = await i18n.get_user_language(int(telegram_id))
             text = i18n.get(

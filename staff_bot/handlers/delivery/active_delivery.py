@@ -2,6 +2,7 @@
 Active Delivery Handler for Staff Bot
 Shows and manages deliveries currently assigned to the delivery person.
 """
+import asyncio
 import hashlib
 import json
 import logging
@@ -29,6 +30,14 @@ logger = logging.getLogger(__name__)
 # not modified" errors from no-op header edits.
 _CARDS_KEY = 'active_list_card_ids'           # list[(chat_id, message_id)]
 _HEADER_SIG_KEY = 'active_list_header_sig'    # str: sha256(header + buttons)
+# Per-user asyncio.Lock that serializes the read-delete-render-store cycle
+# below. PTB normally serializes updates per-user through its update queue,
+# but webhook-pushed messages and any future `concurrent_updates=True` config
+# would bypass that — without this lock, two concurrent `show_active_deliveries`
+# calls would each read the same `_CARDS_KEY` snapshot, both delete the same
+# message IDs (the second deletion races into "message not found"), and both
+# write their own card list back, leaking the loser's cards as duplicates.
+_RENDER_LOCK_KEY = 'active_list_render_lock'  # asyncio.Lock
 
 
 class ActiveDeliveryHandler(BaseHandler):
@@ -100,6 +109,22 @@ class ActiveDeliveryHandler(BaseHandler):
 
         context.user_data[_HEADER_SIG_KEY] = new_sig
 
+    @staticmethod
+    def _get_render_lock(context: ContextTypes.DEFAULT_TYPE) -> asyncio.Lock:
+        """Return the per-user lock that serializes card list renders.
+
+        `setdefault` is the right primitive here: under CPython the GIL makes
+        the dict slot lookup-or-set atomic enough that we won't end up with
+        two distinct Lock instances for the same user, and even if we did
+        the worst case is one extra render which the signature compare in
+        `_render_header` would still no-op.
+        """
+        lock = context.user_data.get(_RENDER_LOCK_KEY)
+        if lock is None:
+            lock = asyncio.Lock()
+            context.user_data[_RENDER_LOCK_KEY] = lock
+        return lock
+
     @require_auth
     @require_delivery_driver
     async def show_active_deliveries(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -110,6 +135,10 @@ class ActiveDeliveryHandler(BaseHandler):
         when the user taps "Optimize routes"), we track the message IDs
         from the previous render in `context.user_data` and delete them
         before sending fresh cards.
+
+        The render is wrapped in a per-user `asyncio.Lock` so concurrent
+        invocations (e.g. user tap + webhook-driven re-render) cannot both
+        read the same `_CARDS_KEY` snapshot and stack duplicate cards.
         """
         language = await self._get_language(update, context)
         token = await self._get_auth_token(update, context)
@@ -117,6 +146,17 @@ class ActiveDeliveryHandler(BaseHandler):
             await self._handle_auth_error(update, language)
             return
 
+        async with self._get_render_lock(context):
+            await self._render_active_deliveries(update, context, language, token)
+
+    async def _render_active_deliveries(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        language: str,
+        token: str,
+    ):
+        """Inner render body — must run under the per-user render lock."""
         try:
             async with api_client as client:
                 response = await client.get_active_deliveries(token)

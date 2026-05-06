@@ -14,6 +14,7 @@ from staff_bot.keyboards.common import CommonKeyboards
 from staff_bot.keyboards.menu import MenuKeyboards
 from staff_bot.keyboards.tryouts import TryoutKeyboards
 from staff_bot.permissions import require_auth, require_delivery_driver
+from staff_bot.utils import flow_state
 from staff_bot.utils.formatters import escape_html, format_quantity
 from staff_bot.utils.validators import validate_name, validate_phone
 
@@ -201,10 +202,23 @@ class TryoutHandler(BaseHandler):
                 return int(task.get('id'))
         return None
 
-    def _clear_pickup_state(self, context: ContextTypes.DEFAULT_TYPE) -> None:
+    async def _clear_pickup_state(
+        self,
+        context: ContextTypes.DEFAULT_TYPE,
+        update: Update = None,
+    ) -> None:
+        """Clear the tryout-pickup flow flags plus the Redis mirror, and
+        deliver any pool-insertion suggestions deferred while the driver was
+        recording pickup quantities. `update` is optional for legacy callers
+        that only have `context`."""
         context.user_data.pop('tryout_pickup_task_id', None)
         context.user_data.pop('tryout_pickup_products', None)
         context.user_data.pop('tryout_pickup_state', None)
+        if update and update.effective_user:
+            language = context.user_data.get('language') if context else None
+            await flow_state.clear_and_drain(
+                update.effective_user.id, context.bot, language=language
+            )
 
     def _build_pickup_state(self, task: dict) -> dict:
         return {
@@ -496,7 +510,7 @@ class TryoutHandler(BaseHandler):
     @require_delivery_driver
     async def show_task_pool(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         language = await self._get_language(update, context)
-        self._clear_pickup_state(context)
+        await self._clear_pickup_state(context, update)
         token = await self._get_auth_token(update, context)
         if not token:
             await self._handle_auth_error(update, language)
@@ -649,6 +663,11 @@ class TryoutHandler(BaseHandler):
         context.user_data['tryout_pickup_task_id'] = task_id
         context.user_data['tryout_pickup_products'] = state.get('products', [])
         context.user_data['tryout_pickup_state'] = state
+        # C-2: enter the text-input pickup flow → mirror so a webhook-driven
+        # pool suggestion gets queued instead of clobbering the overview.
+        await flow_state.mark_active(
+            update.effective_user.id, 'tryout_pickup_task_id'
+        )
 
         await query.edit_message_text(
             self._build_pickup_overview(language, state),
@@ -879,7 +898,7 @@ class TryoutHandler(BaseHandler):
             await self._handle_api_response_error(update, response, language)
             return
 
-        self._clear_pickup_state(context)
+        await self._clear_pickup_state(context, update)
         await query.edit_message_text(
             i18n.get('staff.tryout.pickup_recorded', language),
             reply_markup=CommonKeyboards.back_button(language, "staff_tryout_active"),
@@ -902,7 +921,7 @@ class TryoutHandler(BaseHandler):
     @require_delivery_driver
     async def show_active_tryouts(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         language = await self._get_language(update, context)
-        self._clear_pickup_state(context)
+        await self._clear_pickup_state(context, update)
         token = await self._get_auth_token(update, context)
         if not token:
             await self._handle_auth_error(update, language)

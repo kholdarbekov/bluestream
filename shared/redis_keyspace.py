@@ -113,6 +113,25 @@ class RedisKeyspace:
     def staff_bot_invite(invite_token: str) -> str:
         return f"staff_bot:invite:{invite_token}"
 
+    # Tier: CACHE. Mirrors the in-process `pending_*_flow` flag for a driver
+    # so the webhook server (running in the same process but outside the PTB
+    # update context) can answer "is this user mid-flow?" without poking
+    # `Application.user_data`. Value is the active flow name; absence means
+    # "not in a text-input flow". TTL is a 30-min upper bound — any flow
+    # taking longer than that is almost certainly abandoned, so letting the
+    # mirror expire is safer than trusting a stale lock.
+    @staticmethod
+    def staff_bot_active_flow(telegram_id: int) -> str:
+        return f"staff_bot:active_flow:{telegram_id}"
+
+    # Tier: CACHE. Per-driver queue of pool-insertion suggestions deferred
+    # while they were mid-flow. The drainer pops from this list when the
+    # flow clears (or on the user's next non-flow callback). 15-min TTL
+    # because pool composition shifts fast — older suggestions are stale.
+    @staticmethod
+    def staff_bot_pool_suggestion_queue(telegram_id: int) -> str:
+        return f"staff_bot:pool_suggestion_queue:{telegram_id}"
+
     # ---- Backend (business_app) ------------------------------------------
 
     # Tier: SECURITY. Per-provider webhook replay guard.
@@ -171,6 +190,8 @@ KEYSPACE_TIERS: dict[str, RedisUsageTier] = {
     'staff_bot_refresh_lock':            RedisUsageTier.TIER_RELIABILITY,
     'staff_bot_webhook_event':           RedisUsageTier.TIER_RELIABILITY,
     'staff_bot_invite':                  RedisUsageTier.TIER_SECURITY,
+    'staff_bot_active_flow':             RedisUsageTier.TIER_CACHE,
+    'staff_bot_pool_suggestion_queue':   RedisUsageTier.TIER_CACHE,
     'webhook_provider_rate':             RedisUsageTier.TIER_SECURITY,
     'webhook_replay_nonce':              RedisUsageTier.TIER_SECURITY,
     'inventory_reservation':             RedisUsageTier.TIER_RESERVATION,

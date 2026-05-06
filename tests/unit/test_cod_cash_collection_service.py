@@ -1006,6 +1006,30 @@ class TestDriverReconciliationService:
         delivery_driver_profile,
     ):
         with app.app_context():
+            # B-1: the reminder body is now resolved from a DB-backed
+            # translation keyed off driver.preferred_language. Seed the
+            # `en` variant so the body assertion below has something
+            # concrete to match — without this, business_app.utils.translations
+            # falls back to returning the bare key (`staff.notification.…`)
+            # because the unit-test sqlite has no staff_bot translations.
+            from business_app.models.translation import Translation
+            db.session.add(Translation(
+                key='staff.notification.reconciliation_reminder_due',
+                language='en',
+                value=(
+                    'Reminder: cash reconciliation for {date} is pending. '
+                    'Expected on-hand cash: {expected_cash} UZS.'
+                ),
+                category='staff_bot',
+                is_active=True,
+            ))
+            db.session.add(Translation(
+                key='staff.notification.subject.driver_cash_reconciliation',
+                language='en',
+                value='Driver cash reconciliation',
+                category='staff_bot',
+                is_active=True,
+            ))
             delivery_driver.telegram_id = "104933915"
             db.session.commit()
 
@@ -1027,4 +1051,14 @@ class TestDriverReconciliationService:
 
             notification_instance.send_staff_telegram_message.assert_called_once()
             _, message = notification_instance.send_staff_telegram_message.call_args.args
-            assert "Reminder: Reconciliation for" in message
+            # Resolved body must come from the seeded translation, not from
+            # the bare-key fallback path (which would indicate the lookup
+            # failed to find anything in the staff_bot category).
+            assert message != 'staff.notification.reconciliation_reminder_due'
+            assert 'Reminder: cash reconciliation' in message
+            assert '15,000' in message  # placeholder substitution worked
+            # And the staff Telegram path is invoked with the driver's own
+            # language so downstream NotificationService doesn't fall back
+            # to the customer-bot's language settings.
+            staff_kwargs = notification_instance.send_staff_telegram_message.call_args.kwargs
+            assert staff_kwargs.get('language') == 'en'

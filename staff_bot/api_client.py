@@ -125,14 +125,35 @@ class StaffAPIClient:
             type(payload).__name__,
         )
 
+    async def start(self) -> None:
+        """Initialize the persistent HTTP client. Idempotent."""
+        if self._client is None:
+            self._client = self._build_http_client()
+
+    async def aclose(self) -> None:
+        """Close the persistent HTTP client. Called on bot shutdown."""
+        if self._client is not None:
+            try:
+                await self._client.aclose()
+            except Exception:
+                logger.debug("Failed to close persistent API client", exc_info=True)
+            finally:
+                self._client = None
+
     async def __aenter__(self):
-        self._client = self._build_http_client()
+        # The client is shared across handlers and owned by the bot lifecycle
+        # (started in post_init, closed in post_shutdown). Repeated `async with
+        # api_client as client:` calls are safe and reuse the same underlying
+        # httpx.AsyncClient — no per-request TLS handshake, no race on _client.
+        await self.start()
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
-        if self._client:
-            await self._client.aclose()
-            self._client = None
+        # Do NOT close here — the client is shared across all handlers.
+        # Closing on exit would (a) tear down a connection still in use by
+        # a concurrent handler that entered `async with` after us, and
+        # (b) force the next caller to pay the TLS handshake cost again.
+        return None
 
     async def _make_request(
         self, method: str, endpoint: str,
@@ -306,9 +327,15 @@ class StaffAPIClient:
             data=payload
         )
 
-    async def refresh_token(self, refresh_token: str) -> Optional[Dict]:
-        """Refresh JWT token"""
-        response = await self._make_request(
+    async def refresh_token(self, refresh_token: str) -> APIResponse:
+        """Refresh JWT token.
+
+        Returns the full APIResponse (rather than just `data`) so callers
+        can tell an explicit auth failure (status 401/403) apart from a
+        transport blip (no status / 5xx) — the former invalidates the
+        cached session, the latter should keep it and let the user retry.
+        """
+        return await self._make_request(
             'POST',
             f'{config.business_api.auth_endpoint}/refresh',
             # Staff refresh endpoint currently authorizes via refresh-token JWT.
@@ -316,7 +343,6 @@ class StaffAPIClient:
             # Keep body for backwards compatibility with alternate backend implementations.
             data={'refresh_token': refresh_token}
         )
-        return response.data if response.success else None
 
     # --- Delivery Operations ---
 

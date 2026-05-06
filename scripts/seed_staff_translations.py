@@ -1362,6 +1362,37 @@ EXTRA_TRANSLATIONS = {
     "staff.stats.period.day": {"en": "Day", "uz": "Kun", "ru": "День"},
     "staff.stats.period.week": {"en": "Week", "uz": "Hafta", "ru": "Неделя"},
     "staff.stats.period.month": {"en": "Month", "uz": "Oy", "ru": "Месяц"},
+    # ---------------------------------------------------------------- #
+    # Backend-emitted staff Telegram notifications (B-1).               #
+    # business_app composes these in the driver's preferred_language    #
+    # via business_app.utils.translations.get_translation, then sends   #
+    # them through NotificationService.send_staff_telegram_message.     #
+    # ---------------------------------------------------------------- #
+    "staff.notification.reconciliation_reminder_due": {
+        "en": "🔔 Reminder: cash reconciliation for {date} is pending. Expected on-hand cash: {expected_cash} UZS.",
+        "uz": "🔔 Eslatma: {date} sanasidagi naqd hisobotini topshirish kutilmoqda. Kutilayotgan naqd: {expected_cash} soʻm.",
+        "ru": "🔔 Напоминание: сверка наличных за {date} ещё не сдана. Ожидаемый остаток: {expected_cash} сум.",
+    },
+    "staff.notification.reconciliation_reminder_overdue": {
+        "en": "⚠️ Overdue: cash reconciliation for {date} is past due. Expected on-hand cash: {expected_cash} UZS.",
+        "uz": "⚠️ Muddati oʻtdi: {date} sanasidagi naqd hisoboti hali topshirilmagan. Kutilayotgan naqd: {expected_cash} soʻm.",
+        "ru": "⚠️ Просрочено: сверка наличных за {date} не сдана вовремя. Ожидаемый остаток: {expected_cash} сум.",
+    },
+    "staff.notification.manager_exception_summary": {
+        "en": "There are {count} unresolved driver cash sessions (mismatch/overdue) requiring review.",
+        "uz": "{count} ta hal qilinmagan haydovchi naqd sessiyasi (mos kelmagan/muddati oʻtgan) koʻrib chiqishni talab qiladi.",
+        "ru": "Есть {count} незакрытых сессий наличных у курьеров (расхождение/просрочка), требуют проверки.",
+    },
+    "staff.notification.subject.driver_cash_reconciliation": {
+        "en": "Driver cash reconciliation",
+        "uz": "Haydovchi naqd hisoboti",
+        "ru": "Сверка наличных курьера",
+    },
+    "staff.notification.subject.driver_cash_exceptions": {
+        "en": "Driver cash exceptions",
+        "uz": "Haydovchi naqd istisnolari",
+        "ru": "Расхождения наличных курьеров",
+    },
 }
 
 DELIVERY_TEXT_TRANSLATIONS = {

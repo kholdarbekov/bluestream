@@ -14,6 +14,7 @@ from staff_bot.keyboards.menu import MenuKeyboards
 from staff_bot.utils.formatters import format_delivery_status, format_currency, get_cod_cash_projection
 from staff_bot.permissions import require_auth, require_delivery_driver
 from staff_bot.i18n import i18n
+from staff_bot.utils import flow_state
 from shared.staff_constants import DELIVERY_STATUS_TRANSITIONS
 
 logger = logging.getLogger(__name__)
@@ -59,9 +60,26 @@ class StatusUpdateHandler(BaseHandler):
         return cash_amount
 
     @staticmethod
-    def _clear_delivery_cash_flow(context: ContextTypes.DEFAULT_TYPE):
+    async def _clear_delivery_cash_flow(
+        context: ContextTypes.DEFAULT_TYPE,
+        update: Update = None,
+    ):
+        """Clear in-memory cash/reconciliation flow flags AND the Redis mirror.
+
+        `update` is optional so existing callers that only have `context` keep
+        working — but every call site should prefer to pass `update` so the
+        Redis-side flow marker is also dropped and any pool-insertion
+        suggestions queued while the driver was mid-flow get delivered
+        immediately. The mirror is best-effort; if Redis is unreachable the
+        in-memory state still clears.
+        """
         context.user_data.pop('pending_delivery_cash_flow', None)
         context.user_data.pop('pending_reconciliation_flow', None)
+        if update and update.effective_user:
+            language = context.user_data.get('language') if context else None
+            await flow_state.clear_and_drain(
+                update.effective_user.id, context.bot, language=language
+            )
 
     @staticmethod
     def _get_expected_cash_to_collect(delivery_info: dict) -> float:
@@ -137,7 +155,7 @@ class StatusUpdateHandler(BaseHandler):
             await self._handle_api_response_error(update, response, language)
             return ConversationHandler.END
 
-        self._clear_delivery_cash_flow(context)
+        await self._clear_delivery_cash_flow(context, update)
         if context.user_data.get('current_delivery'):
             context.user_data['current_delivery']['status'] = 'delivered'
 
@@ -386,15 +404,33 @@ class StatusUpdateHandler(BaseHandler):
 
         try:
             delivery_id = int(query.data.split('_')[-1])
+            # F-2: set the flag *before* the prompt render and clear it on
+            # render failure. Otherwise an `edit_message_text` exception
+            # (network blip, message-too-old, parse error) leaves
+            # `pending_delivery_cash_flow` set with no UI to drive it — the
+            # next text the user sends gets parsed as cash for an order
+            # they never confirmed they were collecting on.
             context.user_data['pending_delivery_cash_flow'] = {
                 'delivery_id': delivery_id,
                 'flow_type': 'partial',
             }
-
-            await query.edit_message_text(
-                i18n.get('staff.delivery.enter_cash_amount', language),
-                parse_mode='HTML'
+            # C-2: mirror the active-flow marker into Redis so the webhook
+            # server's pool_insertion_suggestion_handler defers any inbound
+            # Accept-keyboard mid-flow instead of letting it interrupt the
+            # cash-amount prompt the user is about to answer.
+            await flow_state.mark_active(
+                update.effective_user.id, 'pending_delivery_cash_flow'
             )
+            try:
+                await query.edit_message_text(
+                    i18n.get('staff.delivery.enter_cash_amount', language),
+                    reply_markup=CommonKeyboards.flow_cancel(language),
+                    parse_mode='HTML'
+                )
+            except Exception:
+                context.user_data.pop('pending_delivery_cash_flow', None)
+                await flow_state.clear_active(update.effective_user.id)
+                raise
 
             return CASH_INPUT
 
@@ -417,10 +453,21 @@ class StatusUpdateHandler(BaseHandler):
                 'flow_type': 'none',
                 'cash_amount': 0.0,
             }
-            await query.edit_message_text(
-                i18n.get('staff.delivery.enter_no_cash_reason', language),
-                parse_mode='HTML',
+            await flow_state.mark_active(
+                update.effective_user.id, 'pending_delivery_cash_flow'
             )
+            try:
+                await query.edit_message_text(
+                    i18n.get('staff.delivery.enter_no_cash_reason', language),
+                    reply_markup=CommonKeyboards.flow_cancel(language),
+                    parse_mode='HTML',
+                )
+            except Exception:
+                # F-2: clear the flag if the prompt couldn't render — see
+                # start_partial_cash_collection above for rationale.
+                context.user_data.pop('pending_delivery_cash_flow', None)
+                await flow_state.clear_active(update.effective_user.id)
+                raise
             return CASH_NOTE_INPUT
 
         except Exception as e:
@@ -459,6 +506,7 @@ class StatusUpdateHandler(BaseHandler):
             context.user_data['pending_delivery_cash_flow'] = flow
             await update.message.reply_text(
                 i18n.get('staff.delivery.enter_partial_cash_reason', language),
+                reply_markup=CommonKeyboards.flow_cancel(language),
                 parse_mode='HTML',
             )
             return CASH_NOTE_INPUT
@@ -545,8 +593,12 @@ class StatusUpdateHandler(BaseHandler):
         language = await self._get_language(update, context)
 
         context.user_data['pending_reconciliation_flow'] = {'action': 'submit'}
+        await flow_state.mark_active(
+            update.effective_user.id, 'pending_reconciliation_flow'
+        )
         await query.edit_message_text(
             i18n.get('staff.delivery.enter_declared_cash', language),
+            reply_markup=CommonKeyboards.flow_cancel(language),
             parse_mode='HTML',
         )
         return RECONCILIATION_INPUT
@@ -560,8 +612,12 @@ class StatusUpdateHandler(BaseHandler):
         language = await self._get_language(update, context)
 
         context.user_data['pending_reconciliation_flow'] = {'action': 'transfer'}
+        await flow_state.mark_active(
+            update.effective_user.id, 'pending_reconciliation_flow'
+        )
         await query.edit_message_text(
             i18n.get('staff.delivery.enter_transfer_cash', language),
+            reply_markup=CommonKeyboards.flow_cancel(language),
             parse_mode='HTML',
         )
         return RECONCILIATION_INPUT
@@ -606,7 +662,7 @@ class StatusUpdateHandler(BaseHandler):
                 await self._handle_api_response_error(update, response, language)
                 return ConversationHandler.END
 
-            self._clear_delivery_cash_flow(context)
+            await self._clear_delivery_cash_flow(context, update)
             session = response.data or {}
             if flow_action == 'transfer':
                 success_title = i18n.get('staff.delivery.transfer_created', language)
@@ -749,6 +805,7 @@ class StatusUpdateHandler(BaseHandler):
 
         await query.edit_message_text(
             i18n.get('staff.delivery.enter_bottle_count', language),
+            reply_markup=CommonKeyboards.flow_cancel(language),
             parse_mode='HTML'
         )
         return BOTTLE_RETURN_INPUT

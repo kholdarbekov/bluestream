@@ -587,18 +587,53 @@ class DriverReconciliationService:
             return
 
         from business_app.services.notification_service import NotificationService
+        from business_app.utils.translations import get_translation
 
-        stage_prefix = "Overdue:" if stage == "overdue" else "Reminder:"
-        body = (
-            f"{stage_prefix} Reconciliation for {session.business_date.isoformat()} is pending. "
-            f"Expected on-hand cash: {float(session.expected_cash_on_hand or 0):,.0f} UZS."
+        # B-1: localize backend-emitted staff Telegram notifications.
+        # The driver's preferred_language is the source of truth — falling
+        # back to 'en' only when the column is null. Translation keys live
+        # in scripts/seed_staff_translations.py and are seeded under the
+        # 'staff_bot' category, so the same DB row backs both the staff bot
+        # i18n.get(...) calls and these backend-side lookups.
+        driver_language = getattr(driver, "preferred_language", None) or "en"
+        body_key = (
+            "staff.notification.reconciliation_reminder_overdue"
+            if stage == "overdue"
+            else "staff.notification.reconciliation_reminder_due"
         )
+        body = get_translation(
+            body_key,
+            language=driver_language,
+            date=session.business_date.isoformat(),
+            expected_cash=f"{float(session.expected_cash_on_hand or 0):,.0f}",
+        )
+        subject = get_translation(
+            "staff.notification.subject.driver_cash_reconciliation",
+            language=driver_language,
+        )
+
+        # The legacy `template_override.get_translated` lambda ignored its
+        # `language` argument and always returned the pre-built string. We
+        # now resolve per language so the in-app and Telegram surfaces both
+        # honour the recipient's preference.
+        def _get_translated(field_name, lang):
+            target_lang = lang or driver_language
+            if field_name == "subject":
+                return get_translation(
+                    "staff.notification.subject.driver_cash_reconciliation",
+                    language=target_lang,
+                )
+            return get_translation(
+                body_key,
+                language=target_lang,
+                date=session.business_date.isoformat(),
+                expected_cash=f"{float(session.expected_cash_on_hand or 0):,.0f}",
+            )
+
         template = SimpleNamespace(
-            subject="Driver cash reconciliation",
+            subject=subject,
             content=body,
-            get_translated=lambda field_name, _language: (
-                "Driver cash reconciliation" if field_name == "subject" else body
-            ),
+            get_translated=_get_translated,
         )
 
         notification_service = NotificationService()
@@ -615,7 +650,10 @@ class DriverReconciliationService:
         )
 
         if getattr(driver, "telegram_id", None):
-            notification_service.send_staff_telegram_message(driver, body)
+            # Pass `language` explicitly so the Telegram path resolves in the
+            # driver's language even if NotificationService falls back to
+            # `user.preferred_language` lookup downstream.
+            notification_service.send_staff_telegram_message(driver, body, language=driver_language)
 
     def notify_managers_about_exception_sessions(self) -> int:
         high_risk_sessions = DriverCashSession.query.filter(
@@ -636,22 +674,44 @@ class DriverReconciliationService:
         if not managers:
             return 0
 
-        body = (
-            f"There are {high_risk_sessions} unresolved driver cash sessions " f"(mismatch/overdue) requiring review."
-        )
-        template = SimpleNamespace(
-            subject="Driver cash exceptions",
-            content=body,
-            get_translated=lambda field_name, _language: (
-                "Driver cash exceptions" if field_name == "subject" else body
-            ),
-        )
-
         from business_app.services.notification_service import NotificationService
+        from business_app.utils.translations import get_translation
 
+        # B-1: each manager may speak a different language, so we can't
+        # build the body once outside the loop the way the legacy code did.
+        # The translation lookup is Redis-cached, so per-manager calls are
+        # effectively free after the first warm read.
         notified = 0
         for manager in managers:
             try:
+                manager_language = getattr(manager, "preferred_language", None) or "en"
+                body = get_translation(
+                    "staff.notification.manager_exception_summary",
+                    language=manager_language,
+                    count=high_risk_sessions,
+                )
+
+                def _get_translated(field_name, lang, _count=high_risk_sessions):
+                    target_lang = lang or manager_language
+                    if field_name == "subject":
+                        return get_translation(
+                            "staff.notification.subject.driver_cash_exceptions",
+                            language=target_lang,
+                        )
+                    return get_translation(
+                        "staff.notification.manager_exception_summary",
+                        language=target_lang,
+                        count=_count,
+                    )
+
+                template = SimpleNamespace(
+                    subject=get_translation(
+                        "staff.notification.subject.driver_cash_exceptions",
+                        language=manager_language,
+                    ),
+                    content=body,
+                    get_translated=_get_translated,
+                )
                 NotificationService().send_notification(
                     user_id=manager.id,
                     notification_type=NotificationType.SYSTEM_ALERT,

@@ -138,6 +138,12 @@ class StaffBot:
             await db_manager.connect()
             await self._validate_database_schema()
 
+            # Initialize the persistent backend HTTP client. Owned by the bot
+            # lifecycle so all handlers reuse a single httpx.AsyncClient with a
+            # shared connection pool — avoids per-request TLS handshakes and
+            # the concurrent-close race that the previous per-call build had.
+            await api_client.start()
+
             # Load translations
             await i18n.load_translations()
 
@@ -147,6 +153,14 @@ class StaffBot:
                 logger.info("TokenManager connected to Redis successfully")
             else:
                 logger.warning("TokenManager running without Redis - tokens will not be cached")
+
+            # C-2: install the flow-state mirror's Redis client. We share the
+            # TokenManager's connection — same Redis instance, same lifecycle.
+            # If TokenManager couldn't connect we pass None and flow_state
+            # silently degrades to "no flow active" for every check, which
+            # matches the pre-flow-marker behaviour exactly.
+            from staff_bot.utils import flow_state
+            flow_state.configure(self.token_manager.redis if self.token_manager._connected else None)
 
             # Build Telegram application
             request = ResilientHTTPXRequest(
@@ -315,6 +329,29 @@ class StaffBot:
         # Common handlers
         profile_handler = ProfileHandler()
         help_handler_instance = HelpHandler()
+
+        # ------------------------------------------------------------------
+        # Conversation-fallback wrappers
+        # ------------------------------------------------------------------
+        # PTB ConversationHandler keeps the user in their current state when a
+        # fallback handler returns None.  `status_update_handler.show_cash_hub`
+        # and `main_menu_handler` are reused as both regular menu handlers
+        # *and* conversation fallbacks — they correctly re-render the menu but
+        # don't return ConversationHandler.END, so the conversation never
+        # terminates and the user's next text input is captured by the
+        # in-state MessageHandler (e.g. parsed as a bottle quantity).
+        #
+        # That is exactly the trap a driver hit when, after BOTTLE_SESSION_REQUIRED
+        # → "Open session" → quantity prompt, they tapped the inline Back button
+        # and the bot kept asking for the quantity.  These tiny wrappers delegate
+        # to the underlying handler, then explicitly close the conversation.
+        async def _exit_to_cash_hub(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            await status_update_handler.show_cash_hub(update, context)
+            return ConversationHandler.END
+
+        async def _exit_to_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            await main_menu_handler(update, context)
+            return ConversationHandler.END
 
         # Store handler instances for text message routing
         self._delivery_handlers = {
@@ -660,8 +697,8 @@ class StaffBot:
             },
             fallbacks=[
                 CommandHandler("cancel", bottle_collection_handler.cancel if hasattr(bottle_collection_handler, 'cancel') else start_handler.cancel),
-                CallbackQueryHandler(status_update_handler.show_cash_hub, pattern="^staff_cash_hub$"),
-                CallbackQueryHandler(main_menu_handler, pattern="^staff_back_to_main$"),
+                CallbackQueryHandler(_exit_to_cash_hub, pattern="^staff_cash_hub$"),
+                CallbackQueryHandler(_exit_to_main_menu, pattern="^staff_back_to_main$"),
             ],
             per_chat=True,
             per_user=True,
@@ -688,8 +725,8 @@ class StaffBot:
             },
             fallbacks=[
                 CommandHandler("cancel", start_handler.cancel),
-                CallbackQueryHandler(status_update_handler.show_cash_hub, pattern="^staff_cash_hub$"),
-                CallbackQueryHandler(main_menu_handler, pattern="^staff_back_to_main$"),
+                CallbackQueryHandler(_exit_to_cash_hub, pattern="^staff_cash_hub$"),
+                CallbackQueryHandler(_exit_to_main_menu, pattern="^staff_back_to_main$"),
             ],
             per_chat=True,
             per_user=True,
@@ -715,8 +752,8 @@ class StaffBot:
             },
             fallbacks=[
                 CommandHandler("cancel", start_handler.cancel),
-                CallbackQueryHandler(status_update_handler.show_cash_hub, pattern="^staff_cash_hub$"),
-                CallbackQueryHandler(main_menu_handler, pattern="^staff_back_to_main$"),
+                CallbackQueryHandler(_exit_to_cash_hub, pattern="^staff_cash_hub$"),
+                CallbackQueryHandler(_exit_to_main_menu, pattern="^staff_back_to_main$"),
             ],
             per_chat=True,
             per_user=True,
@@ -741,7 +778,7 @@ class StaffBot:
             },
             fallbacks=[
                 CommandHandler("cancel", start_handler.cancel),
-                CallbackQueryHandler(main_menu_handler, pattern="^staff_back_to_main$"),
+                CallbackQueryHandler(_exit_to_main_menu, pattern="^staff_back_to_main$"),
             ],
             per_chat=True,
             per_user=True,
@@ -763,7 +800,7 @@ class StaffBot:
             },
             fallbacks=[
                 CommandHandler("cancel", start_handler.cancel),
-                CallbackQueryHandler(main_menu_handler, pattern="^staff_back_to_main$"),
+                CallbackQueryHandler(_exit_to_main_menu, pattern="^staff_back_to_main$"),
             ],
             per_chat=True,
             per_user=True,
@@ -803,6 +840,48 @@ class StaffBot:
         self.application.add_handler(
             CallbackQueryHandler(main_menu_handler, pattern="^staff_back_to_main$"),
             group=1
+        )
+
+        # Universal "cancel current flow" handler. Free-text-input prompts that
+        # drive a `pending_*_flow` flag (cash collection, reconciliation, COD,
+        # standalone bottle collection, tryout pickup) attach a Cancel button
+        # via `CommonKeyboards.flow_cancel`. That button clicks here, we wipe
+        # every flow flag, and return the user to the cash hub. Without this,
+        # `_handle_text_message` keeps intercepting every text update — even
+        # reply-keyboard taps — and the user has no way to escape short of
+        # typing a value the parser accepts.
+        async def _handle_flow_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            try:
+                await update.callback_query.answer()
+            except Exception:
+                logger.debug("flow_cancel callback answer failed", exc_info=True)
+            for key in (
+                'pending_delivery_cash_flow',
+                'pending_reconciliation_flow',
+                'pending_cod_collection_flow',
+                'pending_bottle_collection_flow',
+                'tryout_pickup_task_id',
+                'tryout_pickup_products',
+                'tryout_pickup_state',
+            ):
+                context.user_data.pop(key, None)
+            # C-2: clear the Redis flow marker AND deliver any pool-insertion
+            # suggestions deferred while the user was mid-flow. Importing
+            # flow_state lazily here keeps the module-level imports of
+            # bot.py minimal — flow_state is configured at startup so the
+            # call is non-blocking when Redis is reachable.
+            from staff_bot.utils import flow_state as _flow_state
+            if update and update.effective_user:
+                language = context.user_data.get('language') if context else None
+                await _flow_state.clear_and_drain(
+                    update.effective_user.id, context.bot, language=language
+                )
+            # Land on the cash hub — every current flow that uses these flags
+            # is reachable from there, so it's the least-surprising parent.
+            await status_update_handler.show_cash_hub(update, context)
+
+        self.application.add_handler(
+            CallbackQueryHandler(_handle_flow_cancel, pattern="^staff_flow_cancel$")
         )
 
         # Location handler for live location updates
@@ -997,6 +1076,15 @@ class StaffBot:
         try:
             logger.info("Cleaning up staff bot resources...")
             await webhook_server.stop()
+
+            # Close the persistent backend HTTP client. Counterpart to
+            # api_client.start() in initialize(). Closing here (and only here)
+            # is the reason `async with api_client as client:` in handlers no
+            # longer tears down the shared client on every request.
+            try:
+                await api_client.aclose()
+            except Exception:
+                logger.debug("Failed to close persistent api_client", exc_info=True)
 
             if self.token_manager:
                 await self.token_manager.close()

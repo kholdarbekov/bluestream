@@ -210,6 +210,95 @@ class TestTSPSolver:
         assert path_cost < 12.5, f"2-opt should improve over NN baseline; got {path_cost}"
         assert order[0] == 0
 
+    def test_2opt_unlocks_last_position(self):
+        # Asymmetric counterexample where greedy NN puts the wrong delivery
+        # in the last slot and the *closed-tour* 2-opt bound (the old bug)
+        # cannot reach the optimum.
+        #
+        # Real road networks are asymmetric (one-way streets, turn
+        # restrictions, traffic direction) so this is a realistic shape.
+        # Nodes 0=O, 1=A, 2=B, 3=C. Costs in matrix below.
+        # Greedy NN: O->A (1) -> B (1) -> C (100)            total 102
+        # Old 2-opt (k < len-1) reaches:  O->B->A->C          total 61
+        #   (only swap available is i=1, k=2 — never includes index 3)
+        # True optimum: O->C->B->A  cost 50 + 1 + 1 =          52
+        #   (or equivalently O->A->C->B->... — but len=4 so this is the
+        #   complete optimum). Reaching it requires reversing the segment
+        #   [1:4] (k=3=len-1), which the corrected bound now allows.
+        m = {}
+        # diagonals
+        for i in range(4):
+            m[(i, i)] = {"distance_km": 0.0, "duration_minutes": 0.0}
+        # Costs (asymmetric where the trick lives — note (2,3) vs (3,2)).
+        m[(0, 1)] = m[(1, 0)] = {"distance_km": 1.0, "duration_minutes": 1.0}
+        m[(0, 2)] = m[(2, 0)] = {"distance_km": 10.0, "duration_minutes": 10.0}
+        m[(0, 3)] = m[(3, 0)] = {"distance_km": 50.0, "duration_minutes": 50.0}
+        m[(1, 2)] = m[(2, 1)] = {"distance_km": 1.0, "duration_minutes": 1.0}
+        m[(1, 3)] = m[(3, 1)] = {"distance_km": 50.0, "duration_minutes": 50.0}
+        m[(2, 3)] = {"distance_km": 100.0, "duration_minutes": 100.0}  # B -> C: long
+        m[(3, 2)] = {"distance_km": 1.0, "duration_minutes": 1.0}  # C -> B: short
+
+        order = RouteOptimizationService._solve_tsp_heuristic(matrix=m, start_idx=0)
+        path_cost = sum(
+            m[(order[i], order[i + 1])]["duration_minutes"]
+            for i in range(len(order) - 1)
+        )
+        # Old bound would terminate at cost 61. New bound reaches 52.
+        assert path_cost <= 52.0 + 1e-9, (
+            f"corrected 2-opt should reach optimum 52; got order={order} "
+            f"cost={path_cost}"
+        )
+
+    def test_heldkarp_matches_brute_force_for_small_n(self):
+        # For N=5 deliveries the brute-force optimum is trivial to compute
+        # via permutations. Held-Karp dispatch must produce the same cost.
+        import itertools
+        import random
+
+        rng = random.Random(20260506)
+        # Spread points around Tashkent so distances are non-degenerate.
+        points = [(41.30, 69.25)] + [
+            (41.30 + rng.uniform(-0.05, 0.05), 69.25 + rng.uniform(-0.05, 0.05))
+            for _ in range(5)
+        ]
+        matrix = _matrix_from_points(points)
+
+        def path_cost(p):
+            return sum(matrix[(p[i], p[i + 1])]["duration_minutes"] for i in range(len(p) - 1))
+
+        brute_best = min(
+            (list((0,) + perm) for perm in itertools.permutations(range(1, len(points)))),
+            key=path_cost,
+        )
+        order = RouteOptimizationService._solve_tsp(matrix, start_idx=0)
+        assert order[0] == 0
+        assert sorted(order) == list(range(len(points)))
+        assert path_cost(order) == pytest.approx(path_cost(brute_best), rel=1e-9), (
+            f"Held-Karp should match brute force; got {order} cost={path_cost(order)} "
+            f"vs brute {brute_best} cost={path_cost(brute_best)}"
+        )
+
+    def test_heuristic_path_above_threshold_runs(self):
+        # n = HELDKARP_MAX_DELIVERIES + 2 (i.e. start + 13 deliveries) routes
+        # through the NN+2-opt branch. We just assert the result is a valid
+        # permutation that visits every node exactly once.
+        import random
+
+        from business_app.services.route_optimization_service import HELDKARP_MAX_DELIVERIES
+
+        rng = random.Random(20260506)
+        n_deliveries = HELDKARP_MAX_DELIVERIES + 1  # one above the threshold
+        points = [(41.30, 69.25)] + [
+            (41.30 + rng.uniform(-0.05, 0.05), 69.25 + rng.uniform(-0.05, 0.05))
+            for _ in range(n_deliveries)
+        ]
+        matrix = _matrix_from_points(points)
+
+        order = RouteOptimizationService._solve_tsp(matrix, start_idx=0)
+        assert order[0] == 0
+        assert len(order) == len(points)
+        assert sorted(order) == list(range(len(points))), "all indices visited exactly once"
+
 
 # ---------------------------------------------------------------------------
 # Start-point fallback hierarchy

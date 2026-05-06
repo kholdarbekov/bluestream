@@ -1070,6 +1070,15 @@ class StaffService:
                 reason=metadata.get("fail_reason"),
             )
             db.session.add(history)
+            # On ARRIVED / DELIVERED, stamp the destination coords onto the
+            # history row and (if the driver's live location is stale)
+            # refresh DeliveryPerson.current_location_*. Same helper is
+            # used by DeliveryService.mark_delivery_arrived; we call it via
+            # an instance because this method is a @staticmethod.
+            if new_status in ("arrived", "delivered"):
+                from business_app.services.delivery_service import DeliveryService
+
+                DeliveryService()._capture_arrival_position(delivery, history)
             db.session.flush()
             history_id = history.id
 
@@ -1157,6 +1166,23 @@ class StaffService:
                 delivery.id,
                 notify_exc,
             )
+
+        # Re-optimize the driver's remaining stops from the new origin.
+        # ARRIVED and DELIVERED both happen at the delivery destination, so
+        # the optimizer should pick up where the driver actually is now.
+        if new_status in ("arrived", "delivered") and delivery.delivery_person_id:
+            try:
+                from business_app.tasks.delivery_tasks import optimize_driver_route_task
+
+                trigger = "arrival" if new_status == "arrived" else "delivery"
+                optimize_driver_route_task.delay(delivery.delivery_person_id, trigger)
+            except Exception as exc:  # noqa: BLE001 — non-critical
+                current_app.logger.warning(
+                    "post-%s route optimization enqueue failed for driver=%s: %s",
+                    new_status,
+                    delivery.delivery_person_id,
+                    exc,
+                )
 
         # Log activity
         StaffService._log_activity(

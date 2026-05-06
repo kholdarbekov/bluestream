@@ -40,6 +40,12 @@ ACTIVE_DELIVERY_STATUSES = (
 
 LOCATION_FRESH_DEFAULT_SECONDS = 1800  # 30 min
 
+# At/below this many *deliveries* (matrix size N+1 including start), `_solve_tsp`
+# uses Held-Karp DP for a provably optimal sequence under the supplied matrix.
+# 12 deliveries -> n=13, 2^12*12 ~= 49K states, sub-second on commodity hardware.
+# Above this we fall back to the nearest-neighbor + 2-opt heuristic.
+HELDKARP_MAX_DELIVERIES = 12
+
 
 def _ensure_aware(dt: Optional[datetime]) -> Optional[datetime]:
     """Treat naive timestamps as UTC. PostgreSQL preserves tz on DateTime(timezone=True),
@@ -197,12 +203,15 @@ class RouteOptimizationService:
         best_delta_km: Optional[float] = None
         best_delta_min: Optional[float] = None
 
+        # Loop invariants — compute once. Both baselines are taken from
+        # `matrix_baseline` so the deltas are measured against a single,
+        # consistent matrix snapshot (not the cell-rounded `matrix_with`).
+        baseline_min = self._sum_path_minutes(matrix_baseline, list(range(len(baseline_route))))
         for pos in range(1, len(baseline_route) + 1):
             seq = list(range(len(baseline_route)))
             seq.insert(pos, new_idx)
             km = self._sum_path_km(matrix_with, seq)
             mins = self._sum_path_minutes(matrix_with, seq)
-            baseline_min = self._sum_path_minutes(matrix_with, list(range(len(baseline_route))))
             delta_km = km - baseline_km
             delta_min = mins - baseline_min
             if best_delta_km is None or delta_km < best_delta_km:
@@ -330,8 +339,113 @@ class RouteOptimizationService:
 
     # ----- TSP --------------------------------------------------------------
 
-    @staticmethod
+    @classmethod
     def _solve_tsp(
+        cls,
+        matrix: Dict[Tuple[int, int], Dict[str, float]],
+        *,
+        start_idx: int = 0,
+        weight: str = "duration_minutes",
+    ) -> List[int]:
+        """Optimal stop sequence for an open-ended path TSP (no return to start).
+
+        Dispatches to:
+          - `_solve_tsp_exact` (Held-Karp DP) when n-1 <= HELDKARP_MAX_DELIVERIES;
+          - `_solve_tsp_heuristic` (nearest-neighbor seed + 2-opt) otherwise.
+        Both branches return a list of indices starting with `start_idx` and
+        visiting every node in the matrix exactly once.
+        """
+        n = max(i for i, _ in matrix.keys()) + 1 if matrix else 0
+        if n <= 1:
+            return [start_idx] if n == 1 else []
+        if n - 1 <= HELDKARP_MAX_DELIVERIES:
+            return cls._solve_tsp_exact(matrix, start_idx=start_idx, weight=weight)
+        return cls._solve_tsp_heuristic(matrix, start_idx=start_idx, weight=weight)
+
+    @staticmethod
+    def _solve_tsp_exact(
+        matrix: Dict[Tuple[int, int], Dict[str, float]],
+        *,
+        start_idx: int = 0,
+        weight: str = "duration_minutes",
+    ) -> List[int]:
+        """Held-Karp DP for the open-ended path TSP.
+
+        State: (visited_mask, last_node) -> minimum cost of a path starting at
+        `start_idx`, visiting every node in `visited_mask` exactly once, and
+        ending at `last_node`. Open-ended: no return edge to `start_idx`.
+
+        Mask convention: bit `v` is set when node `v` has been visited.
+        `start_idx` is always considered visited and is NOT included in the
+        bits we iterate over (it's the implicit prefix of every path).
+        """
+        n = max(i for i, _ in matrix.keys()) + 1 if matrix else 0
+        if n <= 1:
+            return [start_idx] if n == 1 else []
+
+        others = [v for v in range(n) if v != start_idx]
+        if not others:
+            return [start_idx]
+
+        # Map node id -> bit position among `others` so masks stay compact
+        # even when start_idx != 0.
+        bit_of: Dict[int, int] = {v: i for i, v in enumerate(others)}
+
+        INF = float("inf")
+        # dp[mask][v] = best cost ending at v having visited exactly the
+        # nodes encoded in `mask` (plus the implicit start_idx prefix).
+        # parent[mask][v] = predecessor of v on the best such path.
+        size = 1 << len(others)
+        dp: List[List[float]] = [[INF] * n for _ in range(size)]
+        parent: List[List[int]] = [[-1] * n for _ in range(size)]
+
+        # Base: paths of length 1 (start_idx -> v).
+        for v in others:
+            mask = 1 << bit_of[v]
+            dp[mask][v] = matrix[(start_idx, v)][weight]
+            parent[mask][v] = start_idx
+
+        # Iterate masks in increasing popcount so subproblems are ready.
+        for mask in range(1, size):
+            for v in others:
+                vb = 1 << bit_of[v]
+                if not (mask & vb):
+                    continue
+                prev_mask = mask ^ vb
+                if prev_mask == 0:
+                    continue  # base case already filled above
+                best_cost = dp[mask][v]
+                best_prev = parent[mask][v]
+                for u in others:
+                    if u == v:
+                        continue
+                    ub = 1 << bit_of[u]
+                    if not (prev_mask & ub):
+                        continue
+                    cand = dp[prev_mask][u] + matrix[(u, v)][weight]
+                    if cand < best_cost:
+                        best_cost = cand
+                        best_prev = u
+                dp[mask][v] = best_cost
+                parent[mask][v] = best_prev
+
+        full_mask = size - 1
+        end_node = min(others, key=lambda v: dp[full_mask][v])
+
+        # Reconstruct path by walking parents back to start_idx.
+        path_rev: List[int] = []
+        mask = full_mask
+        cur = end_node
+        while cur != start_idx:
+            path_rev.append(cur)
+            prev = parent[mask][cur]
+            mask ^= 1 << bit_of[cur]
+            cur = prev
+        path_rev.append(start_idx)
+        return list(reversed(path_rev))
+
+    @staticmethod
+    def _solve_tsp_heuristic(
         matrix: Dict[Tuple[int, int], Dict[str, float]],
         *,
         start_idx: int = 0,
@@ -353,26 +467,33 @@ class RouteOptimizationService:
             unvisited.discard(nxt)
             current = nxt
 
-        # 2-opt improvement (open path: never reverse the start).
+        # 2-opt improvement (open path: never reverse the start at index 0,
+        # but every other position — including the last — is fair game).
+        # Uses *best-improvement*: each pass evaluates all candidate swaps
+        # against a frozen `best` and applies the single biggest improvement.
+        # First-improvement (apply the first improving swap found) can lock
+        # the search into a local optimum because an early small win blocks
+        # a later larger one from the same seed.
         def path_cost(p: List[int]) -> float:
             return sum(matrix[(p[i], p[i + 1])][weight] for i in range(len(p) - 1))
 
-        improved = True
         best = path
         best_cost = path_cost(best)
         max_passes = 20
-        passes = 0
-        while improved and passes < max_passes:
-            improved = False
-            passes += 1
-            for i in range(1, len(best) - 2):
-                for k in range(i + 1, len(best) - 1):
+        for _ in range(max_passes):
+            candidate: Optional[List[int]] = None
+            candidate_cost = best_cost
+            for i in range(1, len(best) - 1):
+                for k in range(i + 1, len(best)):
                     new_path = best[:i] + best[i : k + 1][::-1] + best[k + 1 :]
                     new_cost = path_cost(new_path)
-                    if new_cost + 1e-9 < best_cost:
-                        best = new_path
-                        best_cost = new_cost
-                        improved = True
+                    if new_cost + 1e-9 < candidate_cost:
+                        candidate = new_path
+                        candidate_cost = new_cost
+            if candidate is None:
+                break
+            best = candidate
+            best_cost = candidate_cost
         return best
 
     @staticmethod

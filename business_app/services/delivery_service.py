@@ -7,10 +7,14 @@ from datetime import datetime, timezone, timedelta, UTC
 from typing import List, Dict, Any, Optional, Tuple
 from flask import current_app
 
-from business_app.models.delivery import Delivery, DeliveryTimeSlot
+from business_app.models.delivery import (
+    Delivery,
+    DeliveryPerson,
+    DeliveryStatusHistory,
+    DeliveryTimeSlot,
+)
 from business_app.models.order import Order
 from business_app.models.user import User
-from business_app.models.delivery import DeliveryStatusHistory
 from business_app.utils.exceptions import ValidationError, NotFoundError, DeliveryError
 from business_app.utils.state_validators import assert_delivery_person_for_status
 from business_app.utils.constants import DeliveryType, DELIVERY_ZONES
@@ -271,6 +275,54 @@ class DeliveryService:
         self._enqueue_delivery_status_notification(history.id)
         return delivery
 
+    def _capture_arrival_position(
+        self,
+        delivery: Delivery,
+        history: DeliveryStatusHistory,
+    ) -> Optional[Tuple[float, float]]:
+        """Stamp the delivery's destination coords onto the status-history row
+        and refresh the driver's live location *if it's stale or missing*.
+
+        Called from ARRIVED/DELIVERED transitions. The delivery address is the
+        best available proxy for where the driver physically is at this
+        moment. Fresh GPS readings (within ``DRIVER_LOCATION_FRESH_SECONDS``)
+        are NOT overwritten — real GPS is more precise than an address
+        centroid.
+
+        Returns the (lat, lng) it stamped, or None if no destination coords
+        are available on the delivery's order address.
+        """
+        order = delivery.order
+        addr = order.delivery_address if order else None
+        if addr is None or addr.latitude is None or addr.longitude is None:
+            return None
+
+        lat, lng = addr.latitude, addr.longitude
+
+        # Always populate the history columns — `RouteOptimizationService.
+        # _resolve_start_point` already reads them for its `last_completed`
+        # fallback, so until now that fallback path was effectively dead.
+        history.location_lat = lat
+        history.location_lng = lng
+
+        # Refresh DeliveryPerson live location only if not already fresh.
+        if delivery.delivery_person_id is None:
+            return (lat, lng)
+        person = DeliveryPerson.query.filter_by(user_id=delivery.delivery_person_id).first()
+        if person is None:
+            return (lat, lng)
+
+        fresh_seconds = current_app.config.get("DRIVER_LOCATION_FRESH_SECONDS", 1800)
+        last_update = person.last_location_update
+        if last_update is not None and last_update.tzinfo is None:
+            last_update = last_update.replace(tzinfo=timezone.utc)
+        is_fresh = last_update is not None and last_update >= datetime.now(timezone.utc) - timedelta(
+            seconds=fresh_seconds
+        )
+        if not is_fresh:
+            person.update_location(lat, lng)
+        return (lat, lng)
+
     def mark_delivery_arrived(
         self,
         delivery_id: int,
@@ -309,10 +361,26 @@ class DeliveryService:
             automatic=automatic,
         )
         db.session.add(history)
+        # Stamp the arrival position onto the history row and (if stale) the
+        # driver's live location, before flush so it's persisted atomically.
+        self._capture_arrival_position(delivery, history)
         db.session.flush()
         db.session.commit()
 
         self._enqueue_delivery_status_notification(history.id)
+
+        # Re-optimize remaining stops from the new origin (best-effort).
+        if delivery.delivery_person_id is not None:
+            try:
+                from business_app.tasks.delivery_tasks import optimize_driver_route_task
+
+                optimize_driver_route_task.delay(delivery.delivery_person_id, "arrival")
+            except Exception as exc:  # noqa: BLE001 — non-critical
+                current_app.logger.warning(
+                    "post-arrival route optimization enqueue failed for driver=%s: %s",
+                    delivery.delivery_person_id,
+                    exc,
+                )
         return delivery
 
     def calculate_delivery_fee(self, latitude: float, longitude: float, order_total: int) -> int:

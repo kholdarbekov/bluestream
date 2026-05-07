@@ -1,7 +1,11 @@
+# Aqua Element — robots.txt
+# Last updated: 2026-05-06
+
+# Default policy: allow all well-behaved crawlers.
 User-agent: *
 Allow: /
 
-# Private/authenticated areas
+# Private/authenticated areas (apply to all crawlers, including AI bots below).
 Disallow: /api/
 Disallow: /metrics
 Disallow: /health
@@ -18,4 +22,222 @@ Disallow: /addresses
 Disallow: /profile-settings
 Disallow: /account-security
 
+# ---------------------------------------------------------------------------
+# AI / LLM crawlers — EXPLICITLY WELCOMED.
+# We want our brand, products, and water-quality content cited in answers
+# from ChatGPT, Perplexity, Claude, Gemini, Apple Intelligence, Bing/Copilot,
+# and Алиса/Yandex GPT. Each section restates the same Disallow set so the
+# user-agent-specific block doesn't accidentally re-allow private paths.
+# ---------------------------------------------------------------------------
+
+# OpenAI — GPTBot crawls for training data.
+User-agent: GPTBot
+Allow: /
+Disallow: /api/
+Disallow: /metrics
+Disallow: /health
+Disallow: /docs/api
+Disallow: /login
+Disallow: /register
+Disallow: /checkout
+Disallow: /my-account
+Disallow: /my-orders
+Disallow: /my-subscriptions
+Disallow: /my-loyalty
+Disallow: /addresses
+Disallow: /profile-settings
+Disallow: /account-security
+
+# OpenAI — OAI-SearchBot indexes content for SearchGPT / ChatGPT browse.
+User-agent: OAI-SearchBot
+Allow: /
+Disallow: /api/
+Disallow: /login
+Disallow: /register
+Disallow: /checkout
+Disallow: /my-account
+Disallow: /my-orders
+Disallow: /my-subscriptions
+Disallow: /my-loyalty
+Disallow: /addresses
+Disallow: /profile-settings
+Disallow: /account-security
+
+# OpenAI — ChatGPT-User: per-user fetch when ChatGPT browses on demand.
+User-agent: ChatGPT-User
+Allow: /
+Disallow: /api/
+Disallow: /login
+Disallow: /register
+Disallow: /checkout
+Disallow: /my-account
+Disallow: /my-orders
+Disallow: /my-subscriptions
+Disallow: /my-loyalty
+Disallow: /addresses
+Disallow: /profile-settings
+Disallow: /account-security
+
+# Anthropic — Claude.
+User-agent: ClaudeBot
+Allow: /
+Disallow: /api/
+Disallow: /login
+Disallow: /register
+Disallow: /checkout
+Disallow: /my-account
+Disallow: /my-orders
+Disallow: /my-subscriptions
+Disallow: /my-loyalty
+Disallow: /addresses
+Disallow: /profile-settings
+Disallow: /account-security
+
+User-agent: Claude-Web
+Allow: /
+Disallow: /api/
+Disallow: /login
+Disallow: /register
+Disallow: /checkout
+Disallow: /my-account
+Disallow: /my-orders
+Disallow: /my-subscriptions
+Disallow: /my-loyalty
+Disallow: /addresses
+Disallow: /profile-settings
+Disallow: /account-security
+
+User-agent: anthropic-ai
+Allow: /
+Disallow: /api/
+Disallow: /login
+Disallow: /register
+Disallow: /checkout
+Disallow: /my-account
+Disallow: /my-orders
+Disallow: /my-subscriptions
+Disallow: /my-loyalty
+Disallow: /addresses
+Disallow: /profile-settings
+Disallow: /account-security
+
+# Perplexity.
+User-agent: PerplexityBot
+Allow: /
+Disallow: /api/
+Disallow: /login
+Disallow: /register
+Disallow: /checkout
+Disallow: /my-account
+Disallow: /my-orders
+Disallow: /my-subscriptions
+Disallow: /my-loyalty
+Disallow: /addresses
+Disallow: /profile-settings
+Disallow: /account-security
+
+User-agent: Perplexity-User
+Allow: /
+Disallow: /api/
+Disallow: /login
+Disallow: /register
+Disallow: /checkout
+Disallow: /my-account
+Disallow: /my-orders
+Disallow: /my-subscriptions
+Disallow: /my-loyalty
+Disallow: /addresses
+Disallow: /profile-settings
+Disallow: /account-security
+
+# Google — Gemini / AI Overview / Vertex AI training.
+User-agent: Google-Extended
+Allow: /
+Disallow: /api/
+Disallow: /login
+Disallow: /register
+Disallow: /checkout
+Disallow: /my-account
+Disallow: /my-orders
+Disallow: /my-subscriptions
+Disallow: /my-loyalty
+Disallow: /addresses
+Disallow: /profile-settings
+Disallow: /account-security
+
+# Apple — Siri / Apple Intelligence.
+User-agent: Applebot
+Allow: /
+Disallow: /api/
+Disallow: /login
+Disallow: /register
+Disallow: /checkout
+Disallow: /my-account
+Disallow: /my-orders
+Disallow: /my-subscriptions
+Disallow: /my-loyalty
+Disallow: /addresses
+Disallow: /profile-settings
+Disallow: /account-security
+
+User-agent: Applebot-Extended
+Allow: /
+Disallow: /api/
+Disallow: /login
+Disallow: /register
+Disallow: /checkout
+Disallow: /my-account
+Disallow: /my-orders
+Disallow: /my-subscriptions
+Disallow: /my-loyalty
+Disallow: /addresses
+Disallow: /profile-settings
+Disallow: /account-security
+
+# Microsoft — Bing / Copilot. Bing's index feeds ChatGPT's web search.
+User-agent: Bingbot
+Allow: /
+Disallow: /api/
+Disallow: /login
+Disallow: /register
+Disallow: /checkout
+Disallow: /my-account
+Disallow: /my-orders
+Disallow: /my-subscriptions
+Disallow: /my-loyalty
+Disallow: /addresses
+Disallow: /profile-settings
+Disallow: /account-security
+
+# Yandex — Алиса / Yandex GPT (critical for Russian-speaking market).
+User-agent: YandexBot
+Allow: /
+Disallow: /api/
+Disallow: /login
+Disallow: /register
+Disallow: /checkout
+Disallow: /my-account
+Disallow: /my-orders
+Disallow: /my-subscriptions
+Disallow: /my-loyalty
+Disallow: /addresses
+Disallow: /profile-settings
+Disallow: /account-security
+
+# Common Crawl — feeds many open LLMs.
+User-agent: CCBot
+Allow: /
+Disallow: /api/
+Disallow: /login
+Disallow: /register
+Disallow: /checkout
+Disallow: /my-account
+Disallow: /my-orders
+Disallow: /my-subscriptions
+Disallow: /my-loyalty
+Disallow: /addresses
+Disallow: /profile-settings
+Disallow: /account-security
+
+# Sitemap (index → static / products / blog sub-sitemaps)
 Sitemap: https://aqua-element.uz/sitemap.xml

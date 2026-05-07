@@ -302,11 +302,54 @@ class BaseConfig:
 
     # Business Configuration
     COMPANY_NAME = os.environ.get("COMPANY_NAME", "Aqua Element")
+    COMPANY_LEGAL_NAME = os.environ.get("COMPANY_LEGAL_NAME", "")  # e.g. "OOO Blue Stream Group"
     COMPANY_PHONE = os.environ.get("COMPANY_PHONE", "+998901234567")
     COMPANY_EMAIL = os.environ.get("COMPANY_EMAIL", "info@aqua-element.uz")
     COMPANY_ADDRESS = os.environ.get("COMPANY_ADDRESS", "Tashkent, Uzbekistan")
     COMPANY_WEBSITE = os.environ.get("COMPANY_WEBSITE", "https://aqua-element.uz")
     COMPANY_TIN = os.environ.get("COMPANY_TIN", "")
+
+    # ---- SEO / GEO (Generative Engine Optimization) ----
+    # All values below are OPTIONAL. Empty values cause the relevant snippet to
+    # be omitted at render time so we never publish placeholder data to LLMs.
+    #
+    # Organization / LocalBusiness schema.org components (consumed by base.html
+    # JSON-LD blocks). Fill these in to maximise the probability that AI
+    # assistants (ChatGPT, Gemini, Perplexity, Claude) and Google/Yandex
+    # knowledge panels recognise the brand and surface us in answers.
+    COMPANY_FOUNDING_DATE = os.environ.get("COMPANY_FOUNDING_DATE", "")  # ISO YYYY-MM-DD
+    COMPANY_LOGO_URL = os.environ.get("COMPANY_LOGO_URL", "")  # absolute URL; defaults to site logo
+    COMPANY_STREET_ADDRESS = os.environ.get("COMPANY_STREET_ADDRESS", "")
+    COMPANY_CITY = os.environ.get("COMPANY_CITY", "Tashkent")
+    COMPANY_REGION = os.environ.get("COMPANY_REGION", "Tashkent Region")
+    COMPANY_POSTAL_CODE = os.environ.get("COMPANY_POSTAL_CODE", "")
+    COMPANY_COUNTRY_CODE = os.environ.get("COMPANY_COUNTRY_CODE", "UZ")
+    COMPANY_GEO_LATITUDE = os.environ.get("COMPANY_GEO_LATITUDE", "")  # e.g. "41.2995"
+    COMPANY_GEO_LONGITUDE = os.environ.get("COMPANY_GEO_LONGITUDE", "")  # e.g. "69.2401"
+    # Opening hours in schema.org day-time spec format. Comma-separated for
+    # multiple specs. Example: "Mo-Sa 09:00-21:00,Su 10:00-18:00".
+    COMPANY_OPENING_HOURS = os.environ.get("COMPANY_OPENING_HOURS", "")
+    # Price range hint (schema.org enum-ish). Common values: "$", "$$", "$$$".
+    COMPANY_PRICE_RANGE = os.environ.get("COMPANY_PRICE_RANGE", "$$")
+    # External brand-identity links — Wikidata is the single highest-leverage
+    # GEO signal. Fill once Milestone 3 (off-site authority) is shipped.
+    COMPANY_WIKIDATA_ID = os.environ.get("COMPANY_WIKIDATA_ID", "")  # e.g. "Q123456789"
+    COMPANY_WIKIPEDIA_URL = os.environ.get("COMPANY_WIKIPEDIA_URL", "")
+    COMPANY_FACEBOOK_URL = os.environ.get("COMPANY_FACEBOOK_URL", "")
+    COMPANY_YOUTUBE_URL = os.environ.get("COMPANY_YOUTUBE_URL", "")
+    COMPANY_GOOGLE_BUSINESS_URL = os.environ.get("COMPANY_GOOGLE_BUSINESS_URL", "")
+    COMPANY_YANDEX_BUSINESS_URL = os.environ.get("COMPANY_YANDEX_BUSINESS_URL", "")
+    COMPANY_TWOGIS_URL = os.environ.get("COMPANY_TWOGIS_URL", "")  # 2GIS Tashkent listing
+
+    # ---- Web Analytics ----
+    # GA4 and Yandex Metrica snippets in base.html only render when these are
+    # set, so leaving them empty in dev/test keeps pages clean.
+    GA4_MEASUREMENT_ID = os.environ.get("GA4_MEASUREMENT_ID", "")  # e.g. "G-XXXXXXXXXX"
+    YANDEX_METRICA_ID = os.environ.get("YANDEX_METRICA_ID", "")  # numeric counter id
+    # Search-console verification meta tags (set when verifying ownership).
+    GOOGLE_SITE_VERIFICATION = os.environ.get("GOOGLE_SITE_VERIFICATION", "")
+    YANDEX_SITE_VERIFICATION = os.environ.get("YANDEX_SITE_VERIFICATION", "")
+    BING_SITE_VERIFICATION = os.environ.get("BING_SITE_VERIFICATION", "")
 
     # Tax Committee (Asl Belgisi / xTrace) Configuration
     TAX_COMMITTEE_API_URL = os.environ.get("TAX_COMMITTEE_API_URL", "https://xtrace.aslbelgisi.uz")

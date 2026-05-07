@@ -32,6 +32,77 @@
     <meta name="twitter:title" content="{{ page_title }}">
     <meta name="twitter:description" content="{{ page_description }}">
     <meta name="twitter:image" content="{{ default_og_image }}">
+
+    {# ---- Search-console verification (rendered only when configured) ---- #}
+    {% if analytics.google_site_verification %}
+    <meta name="google-site-verification" content="{{ analytics.google_site_verification }}">
+    {% endif %}
+    {% if analytics.yandex_site_verification %}
+    <meta name="yandex-verification" content="{{ analytics.yandex_site_verification }}">
+    {% endif %}
+    {% if analytics.bing_site_verification %}
+    <meta name="msvalidate.01" content="{{ analytics.bing_site_verification }}">
+    {% endif %}
+
+    {# ---- Organization JSON-LD: brand identity for LLM grounding (ChatGPT,
+        Gemini, Perplexity, Claude). Rendered on EVERY page so identity is
+        unambiguous. sameAs[] is the single biggest signal LLMs use to merge
+        our brand with Wikidata / Wikipedia / social entities. ---- #}
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "Organization",
+        "@id": "{{ company_website|default('https://aqua-element.uz', true) }}#organization",
+        "name": {{ company_name|tojson }},
+        {% if seo.legal_name %}"legalName": {{ seo.legal_name|tojson }},{% endif %}
+        "url": "{{ company_website|default('https://aqua-element.uz', true) }}",
+        "logo": "{{ seo.logo_url }}",
+        "image": "{{ seo.logo_url }}",
+        "email": {{ company_email|tojson }},
+        "telephone": {{ company_phone|tojson }}{% if seo.founding_date %},
+        "foundingDate": "{{ seo.founding_date }}"{% endif %}{% if seo.same_as_links %},
+        "sameAs": {{ seo.same_as_links|tojson }}{% endif %}
+    }
+    </script>
+
+    {# ---- LocalBusiness JSON-LD: local intent answers ("water delivery
+        Tashkent"). Only emitted when we have at least an address line OR
+        geo coordinates — never publish placeholder identity to LLMs. ---- #}
+    {% if seo.street_address or (seo.geo_latitude and seo.geo_longitude) %}
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "Store",
+        "@id": "{{ company_website|default('https://aqua-element.uz', true) }}#localbusiness",
+        "name": {{ company_name|tojson }},
+        "url": "{{ company_website|default('https://aqua-element.uz', true) }}",
+        "image": "{{ seo.logo_url }}",
+        "telephone": {{ company_phone|tojson }},
+        "email": {{ company_email|tojson }}{% if seo.price_range %},
+        "priceRange": {{ seo.price_range|tojson }}{% endif %}{% if seo.street_address or seo.address_locality %},
+        "address": {
+            "@type": "PostalAddress"{% if seo.street_address %},
+            "streetAddress": {{ seo.street_address|tojson }}{% endif %}{% if seo.address_locality %},
+            "addressLocality": {{ seo.address_locality|tojson }}{% endif %}{% if seo.address_region %},
+            "addressRegion": {{ seo.address_region|tojson }}{% endif %}{% if seo.postal_code %},
+            "postalCode": {{ seo.postal_code|tojson }}{% endif %},
+            "addressCountry": {{ seo.country_code|tojson }}
+        }{% endif %}{% if seo.geo_latitude and seo.geo_longitude %},
+        "geo": {
+            "@type": "GeoCoordinates",
+            "latitude": {{ seo.geo_latitude|tojson }},
+            "longitude": {{ seo.geo_longitude|tojson }}
+        }{% endif %}{% if seo.opening_hours_specs %},
+        "openingHours": {{ seo.opening_hours_specs|tojson }}{% endif %},
+        "areaServed": [
+            {"@type": "City", "name": "Tashkent"},
+            {"@type": "AdministrativeArea", "name": "Tashkent Region"}
+        ]{% if seo.same_as_links %},
+        "sameAs": {{ seo.same_as_links|tojson }}{% endif %}
+    }
+    </script>
+    {% endif %}
+
     {% block extra_meta %}{% endblock %}
 
     <!-- Fav Icon -->
@@ -56,6 +127,40 @@
     <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
     <link href="{{ url_for('static', filename='css/responsive.css') }}" rel="stylesheet">
     <link href="{{ url_for('static', filename='css/custom-base.css') }}" rel="stylesheet">
+
+    {# ---- Google Analytics 4 (renders only when GA4_MEASUREMENT_ID is set) ---- #}
+    {% if analytics.ga4_measurement_id %}
+    <script async src="https://www.googletagmanager.com/gtag/js?id={{ analytics.ga4_measurement_id }}"></script>
+    <script>
+        window.dataLayer = window.dataLayer || [];
+        function gtag(){dataLayer.push(arguments);}
+        gtag('js', new Date());
+        gtag('config', '{{ analytics.ga4_measurement_id }}', {
+            'anonymize_ip': true,
+            'page_path': window.location.pathname
+        });
+    </script>
+    {% endif %}
+
+    {# ---- Yandex Metrica (mandatory for ru/uz market — feeds Yandex AI / Алиса /
+        Yandex Webmaster). Renders only when YANDEX_METRICA_ID is set. ---- #}
+    {% if analytics.yandex_metrica_id %}
+    <script type="text/javascript">
+        (function(m,e,t,r,i,k,a){m[i]=m[i]||function(){(m[i].a=m[i].a||[]).push(arguments)};
+        m[i].l=1*new Date();
+        for (var j = 0; j < document.scripts.length; j++) {if (document.scripts[j].src === r) { return; }}
+        k=e.createElement(t),a=e.getElementsByTagName(t)[0],k.async=1,k.src=r,a.parentNode.insertBefore(k,a)})
+        (window, document, "script", "https://mc.yandex.ru/metrika/tag.js", "ym");
+        ym({{ analytics.yandex_metrica_id }}, "init", {
+            clickmap: true,
+            trackLinks: true,
+            accurateTrackBounce: true,
+            webvisor: true,
+            ecommerce: "dataLayer"
+        });
+    </script>
+    <noscript><div><img src="https://mc.yandex.ru/watch/{{ analytics.yandex_metrica_id }}" style="position:absolute; left:-9999px;" alt=""/></div></noscript>
+    {% endif %}
 
     {% block extra_head %}{% endblock %}
 </head>

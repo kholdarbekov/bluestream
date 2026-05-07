@@ -1051,6 +1051,57 @@ def inject_global_vars():
         """Build external endpoint URL preserving current valid language query param."""
         return _build_external_url(endpoint, **kwargs)
 
+    # ---- SEO / GEO context (Organization + LocalBusiness JSON-LD, analytics) ----
+    # Built once per request; rendered conditionally in base.html so unset
+    # values produce no output instead of fabricating data for LLMs.
+    company_logo_url = current_app.config.get("COMPANY_LOGO_URL") or url_for(
+        "static", filename="images/logo_aqua_element.svg", _external=True
+    )
+    instagram_url = current_app.config.get("COMPANY_INSTAGRAM_URL", "https://www.instagram.com/aqua_element.uz")
+    telegram_channel_url = current_app.config.get("COMPANY_TELEGRAM_CHANNEL_URL", "https://t.me/aqua_element_uz")
+    telegram_bot_url = current_app.config.get("COMPANY_TELEGRAM_BOT_URL", "https://t.me/aqua_element_bot")
+    wikidata_id = current_app.config.get("COMPANY_WIKIDATA_ID", "")
+    same_as_links = [
+        link
+        for link in [
+            instagram_url,
+            telegram_channel_url,
+            current_app.config.get("COMPANY_FACEBOOK_URL", ""),
+            current_app.config.get("COMPANY_YOUTUBE_URL", ""),
+            current_app.config.get("COMPANY_GOOGLE_BUSINESS_URL", ""),
+            current_app.config.get("COMPANY_YANDEX_BUSINESS_URL", ""),
+            current_app.config.get("COMPANY_TWOGIS_URL", ""),
+            current_app.config.get("COMPANY_WIKIPEDIA_URL", ""),
+            f"https://www.wikidata.org/wiki/{wikidata_id}" if wikidata_id else "",
+        ]
+        if link
+    ]
+    opening_hours_raw = current_app.config.get("COMPANY_OPENING_HOURS", "") or ""
+    opening_hours_specs = [spec.strip() for spec in opening_hours_raw.split(",") if spec.strip()]
+    seo_context = {
+        "legal_name": current_app.config.get("COMPANY_LEGAL_NAME", ""),
+        "founding_date": current_app.config.get("COMPANY_FOUNDING_DATE", ""),
+        "logo_url": company_logo_url,
+        "street_address": current_app.config.get("COMPANY_STREET_ADDRESS", ""),
+        "address_locality": current_app.config.get("COMPANY_CITY", "Tashkent"),
+        "address_region": current_app.config.get("COMPANY_REGION", ""),
+        "postal_code": current_app.config.get("COMPANY_POSTAL_CODE", ""),
+        "country_code": current_app.config.get("COMPANY_COUNTRY_CODE", "UZ"),
+        "geo_latitude": current_app.config.get("COMPANY_GEO_LATITUDE", ""),
+        "geo_longitude": current_app.config.get("COMPANY_GEO_LONGITUDE", ""),
+        "opening_hours_specs": opening_hours_specs,
+        "price_range": current_app.config.get("COMPANY_PRICE_RANGE", ""),
+        "wikidata_id": wikidata_id,
+        "same_as_links": same_as_links,
+    }
+    analytics_context = {
+        "ga4_measurement_id": current_app.config.get("GA4_MEASUREMENT_ID", ""),
+        "yandex_metrica_id": current_app.config.get("YANDEX_METRICA_ID", ""),
+        "google_site_verification": current_app.config.get("GOOGLE_SITE_VERIFICATION", ""),
+        "yandex_site_verification": current_app.config.get("YANDEX_SITE_VERIFICATION", ""),
+        "bing_site_verification": current_app.config.get("BING_SITE_VERIFICATION", ""),
+    }
+
     return {
         "current_language": language,
         "supported_languages": supported_languages,
@@ -1062,21 +1113,20 @@ def inject_global_vars():
         "external_url_for_lang": external_url_for_lang,
         "nav_categories": categories,
         "current_user": user_info,
-        "company_name": "Blue Stream Group",
-        "company_phone": "+998 94 524 4680",
-        "company_email": "info@aqua-element.uz",
-        "company_instagram_url": current_app.config.get(
-            "COMPANY_INSTAGRAM_URL", "https://www.instagram.com/aqua_element.uz"
-        ),
+        "company_name": current_app.config.get("COMPANY_NAME", "Aqua Element"),
+        "company_phone": current_app.config.get("COMPANY_PHONE", "+998 94 524 4680"),
+        "company_email": current_app.config.get("COMPANY_EMAIL", "info@aqua-element.uz"),
+        "company_website": current_app.config.get("COMPANY_WEBSITE", "https://aqua-element.uz"),
+        "company_instagram_url": instagram_url,
         "company_instagram_handle": current_app.config.get("COMPANY_INSTAGRAM_HANDLE", "@aqua_element.uz"),
-        "company_telegram_channel_url": current_app.config.get(
-            "COMPANY_TELEGRAM_CHANNEL_URL", "https://t.me/aqua_element_uz"
-        ),
+        "company_telegram_channel_url": telegram_channel_url,
         "company_telegram_channel_handle": current_app.config.get(
             "COMPANY_TELEGRAM_CHANNEL_HANDLE", "@aqua_element_uz"
         ),
-        "company_telegram_bot_url": current_app.config.get("COMPANY_TELEGRAM_BOT_URL", "https://t.me/aqua_element_bot"),
+        "company_telegram_bot_url": telegram_bot_url,
         "company_telegram_bot_handle": current_app.config.get("COMPANY_TELEGRAM_BOT_HANDLE", "@aqua_element_bot"),
+        "seo": seo_context,
+        "analytics": analytics_context,
         "moment": lambda: MomentJS(),
         "min": min,
         "max": max,
@@ -1086,6 +1136,26 @@ def inject_global_vars():
         "is_cabinet_subdomain": is_cabinet_subdomain,
         "is_admin_subdomain": is_admin_subdomain,
     }
+
+
+# GEO / AI-discoverability routes
+
+
+@frontend_bp.route("/llms.txt")
+def llms_txt():
+    """Serve /llms.txt at the site root.
+
+    The llms.txt convention (https://llmstxt.org/) lets us hand AI assistants a
+    curated, markdown-formatted index of our most cite-worthy pages. Nginx in
+    production also has a `location = /llms.txt` alias for performance, but
+    this route guarantees the URL works in dev and as a fallback.
+    """
+    from flask import send_from_directory
+
+    static_dir = Path(current_app.static_folder)
+    response = send_from_directory(str(static_dir), "llms.txt", mimetype="text/markdown; charset=utf-8")
+    response.headers["Cache-Control"] = "public, max-age=3600"
+    return response
 
 
 # Sitemap routes

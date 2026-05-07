@@ -154,7 +154,7 @@ const Orders = () => {
 
   const { data: usersData } = useQuery({
     queryKey: ['users-for-order'],
-    queryFn: () => adminService.getUsers({ per_page: 100 }),
+    queryFn: () => adminService.getUsers({ per_page: 300 }),
     enabled: isCreateModalVisible,
   });
 

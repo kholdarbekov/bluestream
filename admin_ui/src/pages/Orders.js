@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Table,
   Card,
@@ -152,11 +152,46 @@ const Orders = () => {
     placeholderData: keepPreviousData,
   });
 
-  const { data: usersData } = useQuery({
-    queryKey: ['users-for-order'],
-    queryFn: () => adminService.getUsers({ per_page: 300 }),
-    enabled: isCreateModalVisible,
+  // Debounced server-side user search for the create-order picker.
+  // Mirrors the pattern used in BottleTracking.js so admins can find any user,
+  // not just the first page. See plan: docs reference per_page<=100 in PaginationMeta.
+  const [userSearchTerm, setUserSearchTerm] = useState('');
+  const userSearchDebounceRef = useRef();
+
+  const { data: usersData, isFetching: isUsersFetching } = useQuery({
+    queryKey: ['users-for-order', userSearchTerm],
+    queryFn: () => adminService.getUsers({ search: userSearchTerm, per_page: 20 }),
+    enabled: isCreateModalVisible && userSearchTerm.length >= 2,
+    placeholderData: keepPreviousData,
   });
+
+  const { data: selectedUserData } = useQuery({
+    queryKey: ['user-for-order-selected', selectedUserId],
+    queryFn: () => adminService.getUserDetails(selectedUserId),
+    enabled: Boolean(selectedUserId),
+  });
+
+  const selectedUserRecord = selectedUserData?.data?.user || selectedUserData?.data || null;
+
+  const userOptions = useMemo(() => {
+    const items = usersData?.data?.items || [];
+    const formatLabel = (u) => `${u.first_name || ''} ${u.last_name || ''}`.trim() + (u.phone ? ` - ${u.phone}` : '');
+    const options = items.map((u) => ({ value: u.id, label: formatLabel(u) }));
+    if (selectedUserRecord && !options.find((o) => o.value === selectedUserRecord.id)) {
+      options.unshift({ value: selectedUserRecord.id, label: formatLabel(selectedUserRecord) });
+    }
+    return options;
+  }, [usersData, selectedUserRecord]);
+
+  const handleUserSearch = (value) => {
+    if (userSearchDebounceRef.current) clearTimeout(userSearchDebounceRef.current);
+    userSearchDebounceRef.current = setTimeout(() => setUserSearchTerm(value.trim()), 300);
+  };
+
+  // Clean up debounce timer on unmount.
+  useEffect(() => () => {
+    if (userSearchDebounceRef.current) clearTimeout(userSearchDebounceRef.current);
+  }, []);
 
   const { data: productsData } = useQuery({
     queryKey: ['products-for-order', selectedUserId],
@@ -216,6 +251,8 @@ const Orders = () => {
       setUserAddresses([]);
       setUserPaymentMethods([]);
       setPaymentRestrictions(null);
+      if (userSearchDebounceRef.current) clearTimeout(userSearchDebounceRef.current);
+      setUserSearchTerm('');
 
       const paymentUrl = response?.data?.payment_url;
       if (paymentUrl) {
@@ -541,6 +578,8 @@ const Orders = () => {
     setUserAddresses([]);
     setUserPaymentMethods([]);
     setPaymentRestrictions(null);
+    if (userSearchDebounceRef.current) clearTimeout(userSearchDebounceRef.current);
+    setUserSearchTerm('');
   };
 
   const markingCodeRows = useMemo(() => {
@@ -1197,16 +1236,19 @@ const Orders = () => {
             <Select
               showSearch
               placeholder={t('ui.orders.search_customer', 'Search customer by name or phone')}
-              optionFilterProp="children"
+              filterOption={false}
+              onSearch={handleUserSearch}
               onChange={handleUserSelect}
-              filterOption={(input, option) => String(option.children).toLowerCase().includes(input.toLowerCase())}
-            >
-              {(usersData?.data?.items || []).map((user) => (
-                <Option key={user.id} value={user.id}>
-                  {user.first_name} {user.last_name} - {user.phone}
-                </Option>
-              ))}
-            </Select>
+              loading={isUsersFetching}
+              options={userOptions}
+              notFoundContent={
+                isUsersFetching
+                  ? t('ui.common.searching', 'Searching...')
+                  : userSearchTerm.length < 2
+                    ? t('ui.orders.search_customer_hint', 'Type at least 2 characters to search')
+                    : t('ui.orders.no_customers_found', 'No users found')
+              }
+            />
           </Form.Item>
 
           <Form.Item

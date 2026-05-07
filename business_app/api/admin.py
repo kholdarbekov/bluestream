@@ -990,7 +990,7 @@ def get_users():
     try:
         # Get query parameters
         page = int(request.args.get("page", 1))
-        per_page = int(request.args.get("per_page", 50))
+        per_page = min(int(request.args.get("per_page", 50)), 100)
         search = request.args.get("search", "").strip()
         role = request.args.get("role")
         status = request.args.get("status")

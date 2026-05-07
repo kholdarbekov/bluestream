@@ -29,6 +29,7 @@ logger = logging.getLogger(__name__)
 # card stacking on every Optimize/refresh tap, and (b) Telegram "Message is
 # not modified" errors from no-op header edits.
 _CARDS_KEY = 'active_list_card_ids'           # list[(chat_id, message_id)]
+_HEADER_KEY = 'active_list_header_id'         # tuple[int, int]: (chat_id, message_id)
 _HEADER_SIG_KEY = 'active_list_header_sig'    # str: sha256(header + buttons)
 # Per-user asyncio.Lock that serializes the read-delete-render-store cycle
 # below. PTB normally serializes updates per-user through its update queue,
@@ -86,27 +87,79 @@ class ActiveDeliveryHandler(BaseHandler):
     ):
         """Render or update the header message.
 
-        - For inline-button callbacks: edit the existing message *only* when
-          the new content actually differs (signature compare). Identical
-          content → skip the API call entirely.
-        - For fresh entries (typed command, menu tap): send a new message.
+        The header's (chat_id, message_id) is tracked in
+        ``user_data[_HEADER_KEY]`` independently from the per-delivery
+        cards in ``_CARDS_KEY``. That separation matters because
+        `view_active_delivery` edits a card *in place* into the
+        delivery-detail view without retracking — so when the driver
+        taps the detail view's ⬅️ Back button (callback
+        `staff_active_deliveries`), `update.callback_query.message` is a
+        soon-to-be-deleted card, NOT the header. The previous design
+        treated the callback's source message AS the header and broke
+        with `BadRequest: Message to edit not found` because
+        `_delete_previous_card_messages` had already removed it by the
+        time we tried to edit.
 
-        Stores the rendered signature in `user_data` for the next render.
+        Behaviour:
+
+        - Callback updates with a tracked header in this chat: edit the
+          tracked header in place. Skip the API call entirely when the
+          new signature matches the last rendered one (Telegram rejects
+          true no-op edits with `Message is not modified`). If the edit
+          fails — header was deleted, too old, chat changed, bot lost
+          permission — fall back to sending a fresh header and re-track
+          its id; the failure is an expected recovery path, logged at
+          debug only.
+
+        - Callback updates with no tracked header in this chat (first
+          callback after a context reset, or a cross-chat dispatcher
+          mistake): send a fresh header and track its id.
+
+        - Fresh entries (typed command, reply-keyboard menu tap): always
+          send a new message and overwrite the tracked header id.
         """
         new_sig = self._compute_render_signature(text, keyboard)
         old_sig = context.user_data.get(_HEADER_SIG_KEY)
+        header_loc = context.user_data.get(_HEADER_KEY)
 
         if update.callback_query:
-            if old_sig != new_sig:
-                await update.callback_query.edit_message_text(
-                    text, reply_markup=keyboard, parse_mode='HTML'
-                )
-            # else: identical to current, no API call needed.
+            src_msg = update.callback_query.message
+            chat_id = src_msg.chat.id if src_msg and src_msg.chat else None
+
+            same_chat_header = (
+                header_loc is not None
+                and chat_id is not None
+                and header_loc[0] == chat_id
+            )
+
+            if same_chat_header:
+                if old_sig == new_sig:
+                    # Tracked header already shows this exact content.
+                    return
+                try:
+                    await context.bot.edit_message_text(
+                        chat_id=header_loc[0],
+                        message_id=header_loc[1],
+                        text=text,
+                        reply_markup=keyboard,
+                        parse_mode='HTML',
+                    )
+                    context.user_data[_HEADER_SIG_KEY] = new_sig
+                    return
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug(
+                        f"Header edit failed ({exc}); sending fresh header"
+                    )
+
+            sent = await update.callback_query.message.reply_text(
+                text, reply_markup=keyboard, parse_mode='HTML'
+            )
         else:
-            await update.message.reply_text(
+            sent = await update.message.reply_text(
                 text, reply_markup=keyboard, parse_mode='HTML'
             )
 
+        context.user_data[_HEADER_KEY] = (sent.chat_id, sent.message_id)
         context.user_data[_HEADER_SIG_KEY] = new_sig
 
     @staticmethod

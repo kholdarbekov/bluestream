@@ -813,14 +813,29 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "ru": "Выписать штраф",
     },
     "staff.delivery.enter_bottle_collection_qty": {
-        "en": "Enter the number of bottles collected:",
-        "uz": "Yigilgan idishlar sonini kiriting:",
-        "ru": "Введите количество собранной тары:",
+        "en": "Tap the number of bottles you collected:",
+        "uz": "Yigilgan idishlar sonini tanlang:",
+        "ru": "Выберите количество собранной тары:",
     },
     "staff.delivery.enter_bottle_collection_note": {
-        "en": "Add a note for this collection (or type '-' to skip):",
-        "uz": "Yigish uchun izoh kiriting (yoki '-' bosing):",
-        "ru": "Добавьте примечание (или введите '-' для пропуска):",
+        "en": "Add a note for this collection, or tap Save without note:",
+        "uz": "Izoh kiriting yoki «Izohsiz saqlash»ni bosing:",
+        "ru": "Добавьте примечание или нажмите «Сохранить без примечания»:",
+    },
+    "staff.delivery.collect_all": {
+        "en": "All",
+        "uz": "Hammasi",
+        "ru": "Все",
+    },
+    "staff.delivery.save_without_note": {
+        "en": "Save without note",
+        "uz": "Izohsiz saqlash",
+        "ru": "Сохранить без примечания",
+    },
+    "staff.delivery.bottle_search_results_title": {
+        "en": "Found {count} customer(s). Tap one to view their bottle balance:",
+        "uz": "{count} ta mijoz topildi. Idish balansini korish uchun bosing:",
+        "ru": "Найдено клиентов: {count}. Нажмите для просмотра баланса тары:",
     },
     "staff.delivery.invalid_bottle_count": {
         "en": "Please enter a valid positive number.",

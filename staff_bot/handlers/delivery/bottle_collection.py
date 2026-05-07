@@ -127,10 +127,13 @@ class BottleCollectionHandler(BaseHandler):
         try:
             search_type = detect_search_type(query_text)
             async with api_client as client:
+                # Bottle collection: search all customers (don't filter by COD).
+                # The downstream per-customer summary already handles "no bottles"
+                # gracefully via 'staff.delivery.no_bottle_balance'.
                 response = await client.search_customers(
                     token, query_text,
                     search_type=search_type,
-                    only_with_bottles=True,
+                    only_with_open_cod=False,
                 )
 
             if not response.success:
@@ -146,13 +149,19 @@ class BottleCollectionHandler(BaseHandler):
                 )
                 return ConversationHandler.END
 
-            for customer in customers[:10]:
-                card = format_user_card(customer, language)
-                await update.message.reply_text(
-                    card,
-                    reply_markup=DeliveryKeyboards.bottle_customer_result(language, customer['id']),
-                    parse_mode='HTML',
-                )
+            # Single message + paginated inline keyboard instead of the old
+            # one-message-per-result approach (driver no longer scrolls past
+            # 10 separate cards just to tap one).
+            top = customers[:10]
+            title = i18n.get(
+                'staff.delivery.bottle_search_results_title', language,
+                count=len(top),
+            )
+            await update.message.reply_text(
+                title,
+                reply_markup=DeliveryKeyboards.bottle_search_results(language, top),
+                parse_mode='HTML',
+            )
 
             return ConversationHandler.END
         except Exception as exc:
@@ -182,14 +191,23 @@ class BottleCollectionHandler(BaseHandler):
                 return
 
             summary = response.data or {}
-            context.user_data['pending_bottle_collection_flow'] = {
-                'customer_id': customer_id,
-            }
+            flow = {'customer_id': customer_id}
+            context.user_data['pending_bottle_collection_flow'] = flow
 
             text = self._format_bottle_statement(summary, language)
             addresses = [a for a in (summary.get('addresses') or []) if a.get('balance', 0) > 0]
 
-            if addresses:
+            if len(addresses) == 1:
+                # Auto-skip the address picker: pre-select the single address
+                # with positive balance and jump straight to the action picker
+                # (driver still chooses Collect vs. Fine).
+                only_addr = addresses[0]
+                flow['address_id'] = only_addr.get('address_id')
+                context.user_data['pending_bottle_collection_flow'] = flow
+                keyboard = DeliveryKeyboards.bottle_statement_actions(
+                    language, customer_id, only_addr.get('address_id')
+                )
+            elif addresses:
                 keyboard = DeliveryKeyboards.bottle_address_selection(
                     language, customer_id, addresses
                 )
@@ -235,10 +253,20 @@ class BottleCollectionHandler(BaseHandler):
     @require_auth
     @require_delivery_driver
     async def start_collection(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Prompt for bottle quantity to collect."""
+        """Show the quantity picker for bottle collection at this address.
+
+        The driver no longer types a quantity — they pick from a numeric
+        inline keyboard capped at the address's current bottle balance. This
+        eliminates typo errors at the customer's door. Picking a number fires
+        :meth:`pick_collection_qty` (callback ``staff_bottle_qty_*``).
+        """
         query = update.callback_query
         await query.answer()
         language = await self._get_language(update, context)
+        token = await self._get_auth_token(update, context)
+        if not token:
+            await self._handle_auth_error(update, language)
+            return
 
         try:
             # Parse: staff_bottle_collect_{customer_id}_{address_id}
@@ -246,76 +274,130 @@ class BottleCollectionHandler(BaseHandler):
             customer_id = int(parts[3])
             address_id = int(parts[4])
 
+            # Look up the per-address bottle balance so we can size the picker.
+            balance = 0
+            async with api_client as client:
+                addr_response = await client.get_customer_bottle_addresses(token, customer_id)
+            if addr_response.success and addr_response.data:
+                for addr in addr_response.data:
+                    if addr.get('address_id') == address_id:
+                        balance = int(addr.get('balance', 0) or 0)
+                        break
+
+            if balance <= 0:
+                # Defensive: the prior screen should have filtered these out,
+                # but if balance dropped to zero we don't show a useless picker.
+                await query.edit_message_text(
+                    i18n.get('staff.delivery.no_bottle_balance', language),
+                    reply_markup=CommonKeyboards.back_button(language, "staff_cash_hub"),
+                    parse_mode='HTML',
+                )
+                return
+
             flow = context.user_data.get('pending_bottle_collection_flow') or {}
             flow['customer_id'] = customer_id
             flow['address_id'] = address_id
             flow['action'] = 'collect'
+            flow['balance'] = balance
             context.user_data['pending_bottle_collection_flow'] = flow
-            # C-2: this is the text-input entry point for the bottle collect
-            # flow — mirror the marker so a webhook-driven pool suggestion
-            # gets queued instead of interrupting the qty prompt.
+            # Mirror the flow flag in Redis so any webhook-driven prompts get
+            # queued instead of interrupting the picker / note step. Notes are
+            # the only step that still accepts text input.
             await flow_state.mark_active(
                 update.effective_user.id, 'pending_bottle_collection_flow'
             )
 
             await query.edit_message_text(
                 i18n.get('staff.delivery.enter_bottle_collection_qty', language),
-                reply_markup=CommonKeyboards.flow_cancel(language),
+                reply_markup=DeliveryKeyboards.bottle_collection_qty_picker(
+                    language, customer_id, address_id, balance
+                ),
                 parse_mode='HTML',
             )
-            return BOTTLE_COLLECTION_QTY_INPUT
         except Exception as exc:
             logger.error("Error starting bottle collection: %s", exc, exc_info=True)
             await self._handle_error(update, context)
 
     @require_auth
     @require_delivery_driver
-    async def receive_collection_quantity(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Receive bottle count, ask for notes."""
+    async def pick_collection_qty(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Store the qty selected from the inline picker and prompt for note.
+
+        Called via callback ``staff_bottle_qty_<customer_id>_<address_id>_<qty>``.
+        Once ``flow['quantity']`` is set, the global text router routes any
+        typed message to :meth:`receive_collection_note`; tapping
+        "💾 Save without note" instead invokes :meth:`save_collection_no_note`.
+        """
+        query = update.callback_query
+        await query.answer()
         language = await self._get_language(update, context)
+
         flow = context.user_data.get('pending_bottle_collection_flow') or {}
         if flow.get('action') != 'collect':
-            return ConversationHandler.END
+            return
 
         try:
-            count = int(update.message.text.strip())
-            if count <= 0:
-                raise ValueError("non-positive")
-        except (TypeError, ValueError):
-            await update.message.reply_text(
-                i18n.get('staff.delivery.invalid_bottle_count', language)
-            )
-            return BOTTLE_COLLECTION_QTY_INPUT
+            # Parse: staff_bottle_qty_{customer_id}_{address_id}_{qty}
+            parts = query.data.split('_')
+            customer_id = int(parts[3])
+            address_id = int(parts[4])
+            qty = int(parts[5])
+        except (ValueError, IndexError):
+            await self._handle_error(update, context)
+            return
 
-        flow['quantity'] = count
+        if qty <= 0:
+            return
+
+        flow['customer_id'] = customer_id
+        flow['address_id'] = address_id
+        flow['quantity'] = qty
         context.user_data['pending_bottle_collection_flow'] = flow
-        await update.message.reply_text(
+
+        await query.edit_message_text(
             i18n.get('staff.delivery.enter_bottle_collection_note', language),
-            reply_markup=CommonKeyboards.flow_cancel(language),
+            reply_markup=DeliveryKeyboards.bottle_collection_note_prompt(language),
             parse_mode='HTML',
         )
-        return BOTTLE_COLLECTION_NOTE_INPUT
 
-    @require_auth
-    @require_delivery_driver
-    async def receive_collection_note(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Finalize standalone bottle collection."""
-        language = await self._get_language(update, context)
+    async def _finalize_collection(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        language: str,
+        notes: str,
+    ):
+        """Submit the standalone bottle collection with the given (possibly empty) notes.
+
+        Shared by :meth:`receive_collection_note` (typed note) and
+        :meth:`save_collection_no_note` (button). Renders the success message
+        on whichever update channel triggered it (``message`` vs. ``callback_query``).
+        """
         token = await self._get_auth_token(update, context)
         if not token:
             await self._handle_auth_error(update, language)
-            return ConversationHandler.END
+            return
 
         flow = context.user_data.get('pending_bottle_collection_flow') or {}
         customer_id = flow.get('customer_id')
         address_id = flow.get('address_id')
         quantity = flow.get('quantity')
-        notes = update.message.text.strip()
+
+        # Pick a sensible reply target for either update kind.
+        async def _say(text: str, reply_markup=None):
+            if update.callback_query:
+                await update.callback_query.edit_message_text(
+                    text, reply_markup=reply_markup, parse_mode='HTML'
+                )
+            else:
+                await update.message.reply_text(
+                    text, reply_markup=reply_markup, parse_mode='HTML'
+                )
 
         if not all([customer_id, address_id, quantity]):
-            await update.message.reply_text(i18n.get('staff.error_occurred', language))
+            await _say(i18n.get('staff.error_occurred', language))
             await self._clear_flow(context, update)
-            return ConversationHandler.END
+            return
 
         try:
             async with api_client as client:
@@ -331,24 +413,37 @@ class BottleCollectionHandler(BaseHandler):
 
             if not response.success:
                 await self._handle_api_response_error(update, response, language)
-                return ConversationHandler.END
+                return
 
             result = response.data or {}
             await self._clear_flow(context, update)
-            await update.message.reply_text(
+            await _say(
                 i18n.get(
                     'staff.delivery.bottle_collection_recorded', language,
                     quantity=quantity,
                     remaining=int(result.get('remaining_balance', 0)),
                 ),
                 reply_markup=CommonKeyboards.back_button(language),
-                parse_mode='HTML',
             )
-            return ConversationHandler.END
         except Exception as exc:
             logger.error("Error recording bottle collection: %s", exc, exc_info=True)
             await self._handle_error(update, context)
-            return ConversationHandler.END
+
+    @require_auth
+    @require_delivery_driver
+    async def receive_collection_note(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Finalize standalone bottle collection from a typed note."""
+        language = await self._get_language(update, context)
+        notes = update.message.text.strip()
+        await self._finalize_collection(update, context, language, notes)
+        return ConversationHandler.END
+
+    @require_auth
+    @require_delivery_driver
+    async def save_collection_no_note(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Finalize collection via the 'Save without note' inline button (notes='')."""
+        language = await self._get_language(update, context)
+        await self._finalize_collection(update, context, language, '')
 
     # ------------------------------------------------------------------
     # Manual fine creation flow
@@ -841,10 +936,12 @@ class BottleCollectionHandler(BaseHandler):
             await self._handle_error(update, context)
             return ConversationHandler.END
 
-        # Fetch active drivers list
+        # Fetch list of drivers eligible to receive a transfer.
+        # Reuses the same backend endpoint as session-invite (drivers who are
+        # on shift / available); see api_client.get_drivers_available_to_invite.
         try:
             async with api_client as client:
-                drivers_response = await client.get_active_drivers(token)
+                drivers_response = await client.get_drivers_available_to_invite(token)
 
             if drivers_response.success and drivers_response.data:
                 drivers = drivers_response.data

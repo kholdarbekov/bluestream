@@ -473,6 +473,10 @@ class StaffBot:
             CallbackQueryHandler(bottle_collection_handler.select_address, pattern=r"^staff_bottle_addr_\d+_\d+$"),
             CallbackQueryHandler(bottle_collection_handler.start_collection, pattern=r"^staff_bottle_collect_\d+_\d+$"),
             CallbackQueryHandler(bottle_collection_handler.start_fine, pattern=r"^staff_bottle_fine_\d+_\d+$"),
+            # Inline qty picker — replaces the previous typed-quantity step.
+            CallbackQueryHandler(bottle_collection_handler.pick_collection_qty, pattern=r"^staff_bottle_qty_\d+_\d+_\d+$"),
+            # "Save without note" inline button — submits collection with empty notes.
+            CallbackQueryHandler(bottle_collection_handler.save_collection_no_note, pattern=r"^staff_bottle_collect_save_no_note$"),
 
             # Warehouse bottle accountability (no text input required)
             CallbackQueryHandler(bottle_collection_handler.show_my_accountability, pattern="^staff_bottle_my_accountability$"),
@@ -958,7 +962,12 @@ class StaffBot:
                     await cash_collection_handler.receive_collection_note(update, context)
             return
 
-        # Bottle collection and fine flows (standalone)
+        # Bottle collection and fine flows (standalone). Collection's qty step
+        # is now button-driven (see DeliveryKeyboards.bottle_collection_qty_picker)
+        # so text is only meaningful for the optional note step — when
+        # `flow['quantity']` is set we route to `receive_collection_note`,
+        # otherwise we swallow the text to avoid leaking it to the menu router
+        # while the picker is on-screen.
         bottle_flow = context.user_data.get('pending_bottle_collection_flow') or {}
         if bottle_flow:
             bottle_handler = self._delivery_handlers.get('bottle_collection')
@@ -966,9 +975,9 @@ class StaffBot:
                 action = bottle_flow.get('action')
                 if action == 'collect':
                     if bottle_flow.get('quantity') is None:
-                        await bottle_handler.receive_collection_quantity(update, context)
-                    else:
-                        await bottle_handler.receive_collection_note(update, context)
+                        # Picker still on screen — ignore text input.
+                        return
+                    await bottle_handler.receive_collection_note(update, context)
                     return
                 elif action == 'fine':
                     if bottle_flow.get('fine_quantity') is None:

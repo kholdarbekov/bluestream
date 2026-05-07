@@ -306,6 +306,101 @@ class DeliveryKeyboards:
         )])
         return InlineKeyboardMarkup(keyboard)
 
+    @staticmethod
+    def bottle_search_results(
+        language: str, customers: List[Dict]
+    ) -> InlineKeyboardMarkup:
+        """Inline list of customers found via bottle-collection search.
+
+        Reuses the existing ``staff_bottle_customer_<id>`` callback so tapping
+        a row behaves identically to the old per-result 'View bottle balance'
+        button — the simplification is purely visual (one message instead of
+        N reply messages).
+        """
+        keyboard = []
+        for c in customers[:10]:
+            first = c.get('first_name') or ''
+            last = c.get('last_name') or ''
+            name = f"{first} {last}".strip() or c.get('phone') or '—'
+            phone = c.get('phone') or ''
+            label = f"👤 {name} — 📞 {phone}" if phone else f"👤 {name}"
+            keyboard.append([InlineKeyboardButton(
+                label,
+                callback_data=f"staff_bottle_customer_{c['id']}"
+            )])
+        keyboard.append([InlineKeyboardButton(
+            f"⬅️ {i18n.get('staff.back', language)}",
+            callback_data="staff_cash_hub"
+        )])
+        return InlineKeyboardMarkup(keyboard)
+
+    @staticmethod
+    def bottle_collection_qty_picker(
+        language: str, customer_id: int, address_id: int, balance: int
+    ) -> InlineKeyboardMarkup:
+        """Inline numeric picker for collection quantity, capped at ``balance``.
+
+        Layout: a row of 1–5, an optional row of 6–10 when balance allows, a
+        prominent "All (N)" shortcut, and Cancel. Buttons replace the old text
+        prompt to remove human typo errors when drivers enter quantities at a
+        customer's door. The callback encodes the selected qty directly:
+        ``staff_bottle_qty_<customer_id>_<address_id>_<qty>``.
+        """
+        balance = max(0, int(balance))
+        cap = min(balance, 10)
+        keyboard: List[List[InlineKeyboardButton]] = []
+
+        if cap >= 1:
+            row1 = [
+                InlineKeyboardButton(
+                    str(n),
+                    callback_data=f"staff_bottle_qty_{customer_id}_{address_id}_{n}",
+                )
+                for n in range(1, min(cap, 5) + 1)
+            ]
+            keyboard.append(row1)
+        if cap > 5:
+            row2 = [
+                InlineKeyboardButton(
+                    str(n),
+                    callback_data=f"staff_bottle_qty_{customer_id}_{address_id}_{n}",
+                )
+                for n in range(6, cap + 1)
+            ]
+            keyboard.append(row2)
+        if balance >= 1:
+            keyboard.append([InlineKeyboardButton(
+                f"📦 {i18n.get('staff.delivery.collect_all', language)} ({balance})",
+                callback_data=f"staff_bottle_qty_{customer_id}_{address_id}_{balance}",
+            )])
+        # `staff_flow_cancel` (not `staff_back_to_main`) so the global flow-cancel
+        # handler also clears `pending_bottle_collection_flow` and stops the text
+        # router from intercepting subsequent menu taps.
+        keyboard.append([InlineKeyboardButton(
+            f"❌ {i18n.get('staff.cancel', language)}",
+            callback_data="staff_flow_cancel",
+        )])
+        return InlineKeyboardMarkup(keyboard)
+
+    @staticmethod
+    def bottle_collection_note_prompt(language: str) -> InlineKeyboardMarkup:
+        """Inline buttons for the (optional) note step.
+
+        The driver can either type a note as text or tap "Save without note"
+        to finalize with empty notes. Cancel routes via the global
+        ``staff_flow_cancel`` handler so the pending flow flag is wiped.
+        """
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton(
+                f"💾 {i18n.get('staff.delivery.save_without_note', language)}",
+                callback_data="staff_bottle_collect_save_no_note",
+            )],
+            [InlineKeyboardButton(
+                f"❌ {i18n.get('staff.cancel', language)}",
+                callback_data="staff_flow_cancel",
+            )],
+        ])
+
     # ------------------------------------------------------------------
     # Session & Transfer keyboards
     # ------------------------------------------------------------------

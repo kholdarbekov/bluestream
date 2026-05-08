@@ -213,11 +213,13 @@ def _upsert_post(article: dict[str, Any]) -> tuple[BlogPost, bool]:
             post.published_at = datetime.now(UTC)
 
     # Non-default languages go through set_translations (uz already on cols).
+    # set_translations expects {field_name: {language: value}} — see
+    # Translation.bulk_set_entity_translations — so we transpose the article's
+    # natural {language: {field: value}} authoring shape here.
     non_default_translations: dict[str, dict[str, str]] = {}
-    for lang in NON_DEFAULT_LANGUAGES:
-        non_default_translations[lang] = {
-            field: article["translations"][lang][field]
-            for field in ("title", "excerpt", "content", "meta_title", "meta_description")
+    for field in ("title", "excerpt", "content", "meta_title", "meta_description"):
+        non_default_translations[field] = {
+            lang: article["translations"][lang][field] for lang in NON_DEFAULT_LANGUAGES
         }
     post.set_translations(non_default_translations)
 

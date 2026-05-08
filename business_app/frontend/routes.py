@@ -715,6 +715,19 @@ def services():
     return render_template("frontend/services.html")
 
 
+@frontend_bp.route("/process/11-step-filtration")
+def process_filtration():
+    """Pillar page documenting the 11-stage artesian-water filtration and
+    mineralisation process. Designed as the most-cited authority page for
+    AI assistants (HowTo + FAQPage + Article + BreadcrumbList JSON-LD).
+
+    Localised body content lives in the template; meta_description is set
+    inside the template (per-language) and propagates to base.html via the
+    shared meta-block convention.
+    """
+    return render_template("frontend/process_filtration.html")
+
+
 @frontend_bp.route("/gallery")
 def gallery():
     """Gallery page"""
@@ -996,7 +1009,7 @@ def inject_global_vars():
 
     supported_languages = list(current_app.config["LANGUAGES"].keys())
     default_language = current_app.config.get("DEFAULT_LANGUAGE", "uz")
-    default_meta_description = "Blue Stream Group - Premium drinking water delivery, subscriptions, and water products."
+    default_meta_description = "Aqua Element - Premium drinking water delivery, subscriptions, and water products."
     noindex_endpoints = {
         "frontend.login",
         "frontend.register",
@@ -1206,6 +1219,7 @@ def sitemap_static():
         "/refund-policy",
         "/quality-standards",
         "/water-delivery-faq",
+        "/process/11-step-filtration",
     ]
     entries = [
         {
@@ -1274,7 +1288,7 @@ def google_products_feed():
         '<?xml version="1.0" encoding="UTF-8"?>',
         '<rss version="2.0" xmlns:g="http://base.google.com/ns/1.0">',
         "<channel>",
-        f'<title>{escape("Blue Stream Group Product Feed")}</title>',
+        f'<title>{escape("Aqua Element Product Feed")}</title>',
         f'<link>{escape(_absolute_public_url("/shop"))}</link>',
         f'<description>{escape("Blue Stream catalog for shopping discovery and product search.")}</description>',
     ]
@@ -1326,7 +1340,7 @@ def google_products_feed():
                 f"<g:price>{_format_feed_price(base_price_value)} UZS</g:price>",
                 f"<g:availability>{product_availability}</g:availability>",
                 "<g:condition>new</g:condition>",
-                f'<g:brand>{escape("Blue Stream Group")}</g:brand>',
+                f'<g:brand>{escape("Aqua Element")}</g:brand>',
                 f'<g:google_product_category>{escape("Food, Beverages & Tobacco > Beverages > Water")}</g:google_product_category>',  # noqa: E501
             ]
         )

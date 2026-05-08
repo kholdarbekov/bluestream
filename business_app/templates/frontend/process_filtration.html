@@ -1,0 +1,477 @@
+{% extends "frontend/base.html" %}
+
+{# ===========================================================================
+   Pillar page: 11-stage filtration & mineralisation process.
+
+   Designed as the single most-cited authority page for "Aqua Element water
+   process / artesian water Tashkent / 11-step filtration" queries from both
+   AI assistants (ChatGPT, Gemini, Perplexity, Claude) and traditional
+   search (Google, Yandex). Content lives in language-specific {% set i18n %}
+   blocks at the top of the file so the body markup and JSON-LD schemas
+   stay single-source.
+
+   The schema blocks (HowTo / FAQPage / Article / BreadcrumbList) are emitted
+   from the same i18n dict — never duplicate strings between visible HTML
+   and JSON-LD, or LLMs will see two slightly-different versions of the
+   same fact and discount us.
+   =========================================================================== #}
+
+{# ---------- LOCALISED CONTENT ---------- #}
+
+{% if current_language == 'ru' %}
+{% set i18n = {
+    'page_title': '11 этапов фильтрации и минерализации артезианской воды',
+    'meta_description': 'Aqua Element: артезианская вода из Куйи Чирчикского района Ташкентской области, скважина ~120 м. Полный 11-этапный процесс очистки и минерализации, минеральный состав и контроль Санитарно-эпидемиологического комитета Республики Узбекистан.',
+    'breadcrumb_home': 'Главная',
+    'breadcrumb_current': 'Процесс фильтрации',
+    'lead_p1': 'Aqua Element — это артезианская вода, добываемая из глубокой скважины глубиной около 120 метров в Куйи Чирчикском районе Ташкентской области. Перед розливом каждая капля проходит 11-этапную систему очистки, разработанную для удаления любых примесей, которые может содержать глубокий водоносный горизонт, и для восстановления природного минерального баланса, придающего питьевой воде вкус и физиологическую ценность.',
+    'lead_p2': 'На этой странице описан каждый из одиннадцати этапов, итоговый минеральный состав воды и регуляторный надзор, в рамках которого мы работаем.',
+    'source_heading': 'Источник воды',
+    'source_p1': 'Источник Aqua Element — артезианская скважина в Куйи Чирчикском районе Ташкентской области.',
+    'source_label_type': 'Тип воды',
+    'source_value_type': 'Артезианская вода из замкнутого водоносного горизонта',
+    'source_label_location': 'Местоположение',
+    'source_value_location': 'Куйи Чирчикский район, Ташкентская область, Узбекистан',
+    'source_label_depth': 'Глубина скважины',
+    'source_value_depth': 'примерно 120 метров',
+    'steps_heading': '11 этапов очистки и минерализации',
+    'steps_intro': 'Этапы расположены в технологическом порядке. Каждый имеет конкретную инженерную задачу; вместе они дают воду, безопасную с точки зрения регулятора и сбалансированную по минеральному составу.',
+    'step_label': 'Этап',
+    'steps': [
+        {'name': 'Кварцевый фильтр', 'desc': 'Кварцевый фильтр удаляет крупные взвешенные частицы — песок, ржавчину, ил и видимые загрязнения — из исходной воды. Его основная задача — снизить мутность и защитить последующие ступени фильтрации от засорения.'},
+        {'name': 'Угольный фильтр', 'desc': 'Активированный уголь поглощает хлор, неприятные запахи, посторонние привкусы и некоторые органические соединения. Эта ступень улучшает вкус и запах воды и защищает чувствительное оборудование, в частности мембрану обратного осмоса.'},
+        {'name': 'Ионообменник / умягчитель', 'desc': 'Ионообменник снижает жёсткость воды, удаляя ионы кальция и магния, которые приводят к образованию накипи. Это защищает трубы, фильтры, насосы и мембрану обратного осмоса от минеральных отложений.'},
+        {'name': 'Блок регенерации', 'desc': 'Блок регенерации работает совместно с ионообменником, восстанавливая смолу умягчителя при её насыщении. Это поддерживает эффективность процесса умягчения и стабильную работу системы во времени.'},
+        {'name': 'Полипропиленовый осадочный фильтр — 5 мкм', 'desc': '5-микронный полипропиленовый фильтр удаляет мелкие частицы, прошедшие через предыдущие ступени. Он задерживает осадок, ржавчину и механические примеси до того, как вода попадёт в более тонкие фильтры.'},
+        {'name': 'Полипропиленовый осадочный фильтр — 1 мкм', 'desc': '1-микронный полипропиленовый фильтр обеспечивает более тонкую механическую фильтрацию. Он удаляет мельчайшие частицы и подготавливает воду к обратному осмосу.'},
+        {'name': 'Обратный осмос', 'desc': 'Обратный осмос — одна из ключевых ступеней очистки, при которой вода проходит через полупроницаемую мембрану. Этот процесс снижает содержание растворённых солей, тяжёлых металлов, микроорганизмов и многих других нежелательных примесей.'},
+        {'name': 'Мембранный CIP — система самоочистки', 'desc': 'Мембранный CIP (Clean-in-Place) предназначен для очистки и обслуживания мембраны обратного осмоса. Он удаляет накипь, минеральные отложения и органические загрязнения, сохраняя эффективность мембраны и продлевая срок её службы.'},
+        {'name': 'УФ-фильтр', 'desc': 'Ультрафиолетовый фильтр обеззараживает воду, воздействуя на неё УФ-излучением, которое инактивирует бактерии, вирусы и другие микроорганизмы. Эта ступень повышает микробиологическую безопасность без добавления химических реагентов.'},
+        {'name': 'Минерализация', 'desc': 'После обратного осмоса вода обогащается полезными минералами — кальцием и магнием. Минерализация улучшает вкус воды и помогает сбалансировать уровень pH.'},
+        {'name': 'Обработка озоном', 'desc': 'Обработка озоном — заключительная ступень обеззараживания перед хранением и розливом. Она поддерживает свежесть очищенной воды, подавляя рост микроорганизмов, после чего озон естественным образом распадается на кислород.'}
+    ],
+    'profile_heading': 'Минеральный состав готового продукта',
+    'profile_intro': 'Ориентировочные диапазоны по результатам испытаний под надзором регулятора. Низкоминерализованный профиль, подходящий для ежедневного потребления.',
+    'profile_param': 'Показатель',
+    'profile_value': 'Значение',
+    'profile_rows': [
+        {'param': 'Общая минерализация (TDS)', 'value': '30–50 мг/л'},
+        {'param': 'pH', 'value': '7,5'},
+        {'param': 'Кальций (Ca²⁺)', 'value': '10–60 мг/л'},
+        {'param': 'Магний (Mg²⁺)', 'value': '7–20 мг/л'},
+        {'param': 'Натрий (Na⁺)', 'value': '5–15 мг/л'},
+        {'param': 'Калий (K⁺)', 'value': '1–4 мг/л'},
+        {'param': 'Гидрокарбонат (HCO₃⁻)', 'value': '50–120 мг/л'},
+        {'param': 'Сульфат (SO₄²⁻)', 'value': '10–30 мг/л'},
+        {'param': 'Хлорид (Cl⁻)', 'value': '5–10 мг/л'}
+    ],
+    'compare_heading': 'Чем 11-этапная система отличается от других подходов',
+    'compare_col_method': 'Метод подготовки воды',
+    'compare_col_taste': 'Вкус и минеральный баланс',
+    'compare_col_safety': 'Микробиологическая безопасность',
+    'compare_col_minerals': 'Содержание полезных минералов',
+    'compare_rows': [
+        {'method': 'Aqua Element — 11-этапная очистка с минерализацией', 'taste': 'Сбалансированный, природный', 'safety': 'УФ + озон, без хлора в готовом продукте', 'minerals': 'Восстанавливаются после ОО (Ca, Mg)'},
+        {'method': 'Только обратный осмос (без минерализации)', 'taste': 'Плоский, "пустой"', 'safety': 'Высокая, если правильно обслуживается', 'minerals': 'Минимальные'},
+        {'method': 'Бутилированная немин. вода', 'taste': 'Зависит от источника', 'safety': 'Зависит от производителя', 'minerals': 'Зависит от источника, часто низкие'},
+        {'method': 'Городской водопровод (Ташкент)', 'taste': 'Хлорированный привкус', 'safety': 'Безопасен на выходе со станции; качество может меняться по сети', 'minerals': 'Естественные, переменные'}
+    ],
+    'oversight_heading': 'Регуляторный надзор',
+    'oversight_p1': 'Производство и качество продукта находятся под надзором Комитета санитарно-эпидемиологического благополучия и общественного здоровья Республики Узбекистан — национального санитарно-эпидемиологического регулятора (Санэпид).',
+    'oversight_p2': 'Актуальные результаты лабораторных исследований доступны по запросу — пришлите письмо на support@aqua-element.uz, и мы поделимся последним отчётом из цикла надзора.',
+    'faq_heading': 'Часто задаваемые вопросы о процессе',
+    'faqs': [
+        {'q': 'Откуда поступает вода Aqua Element?', 'a': 'Из глубокой артезианской скважины в Куйи Чирчикском районе Ташкентской области, глубина — около 120 метров.'},
+        {'q': 'Какой уровень общей минерализации (TDS) у Aqua Element?', 'a': '30–50 мг/л — низкоминерализованный профиль, комфортный для ежедневного потребления.'},
+        {'q': 'Какой pH у воды Aqua Element?', 'a': 'Около 7,5 — слабощелочной.'},
+        {'q': 'Зачем одновременно использовать обратный осмос и минерализацию?', 'a': 'Обратный осмос удаляет практически все растворённые вещества, включая минералы, которые придают воде вкус и физиологическую ценность. Минерализация возвращает кальций и магний на сбалансированный уровень — мы получаем безопасность ОО и вкус природной минеральной воды.'},
+        {'q': 'Кто проверяет качество воды?', 'a': 'Производство и продукт находятся под надзором Комитета санитарно-эпидемиологического благополучия и общественного здоровья Республики Узбекистан.'},
+        {'q': 'Как обеззараживается вода?', 'a': 'Используются два физических метода последовательно: ультрафиолет, инактивирующий микроорганизмы, и обработка озоном — финальная ступень перед розливом. Хлор и другие химические дезинфектанты в готовый продукт не добавляются.'},
+        {'q': 'Чем артезианская вода отличается от водопроводной?', 'a': 'Водопроводная вода — это, как правило, поверхностные или неглубокие подземные источники, обработанные централизованно и распределяемые по сети. Артезианская вода поступает напрямую из замкнутого водоносного горизонта глубоко под землёй, минуя поверхностные загрязнения и муниципальную распределительную систему.'},
+        {'q': 'Бутыль 19 литров возвратная?', 'a': 'Да. 18,9-литровая (стандарт 19 л) бутыль возвратная — пустую забираем при следующей доставке. 10-литровая бутыль — формат меньшего объёма для домашнего использования.'},
+        {'q': 'Куда вы доставляете?', 'a': 'По Ташкенту и Ташкентской области. За пределы Узбекистана не доставляем.'},
+        {'q': 'Как получить актуальные результаты лабораторных испытаний?', 'a': 'Напишите на support@aqua-element.uz — поделимся последним отчётом из цикла надзора регулятора.'}
+    ],
+    'cta_heading': 'Заказать воду Aqua Element',
+    'cta_p': 'Доставка по Ташкенту, наличный/безналичный расчёт, подписки.',
+    'cta_btn_19': 'Бутыль 18,9 л',
+    'cta_btn_10': 'Бутыль 10 л'
+} %}
+
+{% elif current_language == 'en' %}
+{% set i18n = {
+    'page_title': '11-Stage Filtration & Mineralisation of Artesian Water',
+    'meta_description': 'Aqua Element: artesian water from a ~120 m well in the Quyi Chirchiq District of Tashkent Region, processed through an 11-stage filtration and mineralisation system. Full step-by-step technical breakdown, mineral profile, and oversight by the Sanitary-Epidemiological Committee of the Republic of Uzbekistan.',
+    'breadcrumb_home': 'Home',
+    'breadcrumb_current': 'Filtration Process',
+    'lead_p1': 'Aqua Element is artesian water drawn from a deep well, approximately 120 metres in depth, in the Quyi Chirchiq District of the Tashkent Region. Before bottling, every drop passes through an 11-stage treatment system designed to remove any impurities a deep aquifer may carry, and to restore the natural mineral balance that gives drinking water its taste and physiological value.',
+    'lead_p2': 'This page documents each of the eleven stages, the resulting mineral profile of the bottled product, and the regulatory oversight under which we operate.',
+    'source_heading': 'Source water',
+    'source_p1': 'Aqua Element is sourced from an artesian well in the Quyi Chirchiq District of the Tashkent Region, Uzbekistan.',
+    'source_label_type': 'Water type',
+    'source_value_type': 'Artesian water from a confined aquifer',
+    'source_label_location': 'Location',
+    'source_value_location': 'Quyi Chirchiq District, Tashkent Region, Uzbekistan',
+    'source_label_depth': 'Well depth',
+    'source_value_depth': 'approximately 120 metres',
+    'steps_heading': 'The 11 stages of treatment & mineralisation',
+    'steps_intro': 'The stages are listed in process order. Each has a specific engineering job; together they produce water that is safe by regulatory standards and balanced in mineral composition.',
+    'step_label': 'Stage',
+    'steps': [
+        {'name': 'Quartz filter', 'desc': 'The quartz filter removes larger suspended particles — sand, rust, mud, and visible impurities — from the raw water. Its main job is to reduce turbidity and protect the next filtration stages from clogging.'},
+        {'name': 'Activated carbon filter', 'desc': 'Activated carbon adsorbs chlorine, off-odours, off-tastes, and certain organic compounds. This step improves the smell and taste of the water and protects sensitive equipment such as the reverse-osmosis membrane.'},
+        {'name': 'Ion exchanger / softener', 'desc': 'The ion exchanger reduces water hardness by removing the calcium and magnesium ions that cause scale formation. This protects pipes, filters, pumps, and the reverse-osmosis membrane from mineral build-up.'},
+        {'name': 'Regeneration block', 'desc': 'The regeneration block works alongside the ion exchanger, restoring the softener resin once it becomes saturated. This keeps the softening process effective and ensures stable performance over time.'},
+        {'name': 'Polypropylene sediment filter — 5-micron cartridge', 'desc': 'The 5-micron polypropylene sediment filter removes fine particles that have passed through the earlier filtration stages. It captures small sediment, rust, and mechanical impurities before the water reaches more precise filters.'},
+        {'name': 'Polypropylene sediment filter — 1-micron cartridge', 'desc': 'The 1-micron polypropylene filter provides a finer level of mechanical filtration. It removes very small particles and prepares the water for reverse-osmosis treatment.'},
+        {'name': 'Reverse osmosis', 'desc': 'Reverse osmosis is one of the principal purification stages, where water passes through a semi-permeable membrane. This process reduces dissolved salts, heavy metals, microorganisms, and many other unwanted impurities.'},
+        {'name': 'Membrane CIP — Clean-in-Place system', 'desc': 'Membrane CIP is used to clean and maintain the reverse-osmosis membrane. It helps remove scale, mineral deposits, and organic build-up, keeping the membrane efficient and extending its service life.'},
+        {'name': 'UV filter', 'desc': 'The ultraviolet filter disinfects the water by exposing it to UV light, which inactivates bacteria, viruses, and other microorganisms. This step provides additional microbiological safety without adding any chemicals to the water.'},
+        {'name': 'Mineralisation', 'desc': 'After reverse osmosis, the water is enriched with beneficial minerals such as calcium and magnesium. Mineralisation improves the taste of the water and helps balance the pH level.'},
+        {'name': 'Ozone-generator treatment', 'desc': 'Ozone treatment provides a final disinfection step before storage or bottling. It keeps the purified water fresh by suppressing microbial growth, then naturally breaks down to oxygen.'}
+    ],
+    'profile_heading': 'Mineral profile of the bottled product',
+    'profile_intro': 'Approximate ranges from regulator-overseen testing. This is a low-mineralised drinking-water profile suitable for daily consumption.',
+    'profile_param': 'Parameter',
+    'profile_value': 'Value',
+    'profile_rows': [
+        {'param': 'Total dissolved solids (TDS)', 'value': '30–50 mg/L'},
+        {'param': 'pH', 'value': '7.5'},
+        {'param': 'Calcium (Ca²⁺)', 'value': '10–60 mg/L'},
+        {'param': 'Magnesium (Mg²⁺)', 'value': '7–20 mg/L'},
+        {'param': 'Sodium (Na⁺)', 'value': '5–15 mg/L'},
+        {'param': 'Potassium (K⁺)', 'value': '1–4 mg/L'},
+        {'param': 'Bicarbonate (HCO₃⁻)', 'value': '50–120 mg/L'},
+        {'param': 'Sulfate (SO₄²⁻)', 'value': '10–30 mg/L'},
+        {'param': 'Chloride (Cl⁻)', 'value': '5–10 mg/L'}
+    ],
+    'compare_heading': 'How an 11-stage system compares to the alternatives',
+    'compare_col_method': 'Treatment approach',
+    'compare_col_taste': 'Taste & mineral balance',
+    'compare_col_safety': 'Microbiological safety',
+    'compare_col_minerals': 'Beneficial mineral content',
+    'compare_rows': [
+        {'method': 'Aqua Element — 11-stage treatment with mineralisation', 'taste': 'Balanced, natural', 'safety': 'UV + ozone; no chlorine in the bottled product', 'minerals': 'Restored after RO (Ca, Mg)'},
+        {'method': 'Reverse-osmosis-only (no mineralisation)', 'taste': 'Flat, "empty"', 'safety': 'High when properly maintained', 'minerals': 'Minimal'},
+        {'method': 'Unmineralised bottled water', 'taste': 'Source-dependent', 'safety': 'Producer-dependent', 'minerals': 'Source-dependent, often low'},
+        {'method': 'Tashkent municipal tap water', 'taste': 'Chlorinated', 'safety': 'Safe at the plant; quality varies along distribution', 'minerals': 'Natural, variable'}
+    ],
+    'oversight_heading': 'Regulatory oversight',
+    'oversight_p1': 'Production and product quality are under the oversight of the Committee of the Republic of Uzbekistan for Sanitary and Epidemiological Wellbeing and Public Health — the national sanitary-epidemiological regulator (Sanepid).',
+    'oversight_p2': 'Current laboratory test results are available on request — email support@aqua-element.uz and we will share the latest report from the regulator\'s oversight cycle.',
+    'faq_heading': 'Frequently asked questions about the process',
+    'faqs': [
+        {'q': 'Where does Aqua Element water come from?', 'a': 'From a deep artesian well in the Quyi Chirchiq District of the Tashkent Region, Uzbekistan, at approximately 120 metres.'},
+        {'q': 'What is the TDS (total dissolved solids) of Aqua Element water?', 'a': '30–50 mg/L — a low-mineralised profile, comfortable for daily drinking.'},
+        {'q': 'What is the pH of Aqua Element water?', 'a': 'Approximately 7.5, slightly above neutral.'},
+        {'q': 'Why use reverse osmosis AND mineralisation together?', 'a': 'Reverse osmosis removes nearly all dissolved substances, including the minerals that give water its taste and physiological role. Mineralisation re-introduces calcium and magnesium back to balanced, drinking-water levels — combining the safety of RO with the taste of natural mineral water.'},
+        {'q': 'Who tests the water quality?', 'a': 'Production and product quality fall under the oversight of the Committee of the Republic of Uzbekistan for Sanitary and Epidemiological Wellbeing and Public Health.'},
+        {'q': 'How is the water disinfected?', 'a': 'Two physical methods are used in series: ultraviolet light, which inactivates microorganisms, and ozone treatment, which is the final disinfection step before bottling. No chlorine or chemical disinfectants are added to the bottled product.'},
+        {'q': 'What is the difference between artesian water and tap water?', 'a': 'Tap water is typically drawn from surface or shallow groundwater, treated centrally, and distributed through pipes. Artesian water is drawn directly from a confined aquifer deep underground, bypassing surface contamination and the municipal distribution system.'},
+        {'q': 'Is the 19-litre bottle returnable?', 'a': 'Yes. The 18.9-litre (19-litre standard) bottle is returnable — we collect the empty on the next delivery. The 10-litre bottle is a smaller-format option for home use.'},
+        {'q': 'Where do you deliver?', 'a': 'Tashkent and the Tashkent Region. We do not deliver outside Uzbekistan.'},
+        {'q': 'How can I request the latest lab test results?', 'a': 'Email support@aqua-element.uz and we will share the latest report from the regulator\'s oversight cycle.'}
+    ],
+    'cta_heading': 'Order Aqua Element water',
+    'cta_p': 'Delivered across Tashkent. Cash or card. Subscriptions available.',
+    'cta_btn_19': '18.9 L bottle',
+    'cta_btn_10': '10 L bottle'
+} %}
+
+{% else %}
+{# Default: Uzbek (Latin) #}
+{% set i18n = {
+    'page_title': '11 bosqichli artezian suvi filtratsiyasi va mineralizatsiyasi',
+    'meta_description': 'Aqua Element: Toshkent viloyati Quyi Chirchiq tumanidagi taxminan 120 metrli artezian quduqdan olinadigan suv. To\'liq 11 bosqichli tozalash va mineralizatsiya jarayoni, mineral tarkibi va O\'zbekiston Respublikasi Sanitariya-epidemiologik osoyishtalik va aholi salomatligi qo\'mitasi nazorati.',
+    'breadcrumb_home': 'Bosh sahifa',
+    'breadcrumb_current': 'Filtratsiya jarayoni',
+    'lead_p1': 'Aqua Element — Toshkent viloyatining Quyi Chirchiq tumanidagi taxminan 120 metr chuqurlikdagi artezian quduqdan olinadigan suvdir. Quyilishdan oldin har bir tomchi 11 bosqichli tozalash tizimidan o\'tadi. Tizim chuqur suv qatlamida bo\'lishi mumkin bo\'lgan har qanday ifloslantiruvchi moddalarni olib tashlash va ichimlik suviga ta\'m hamda fiziologik qiymat beradigan tabiiy mineral muvozanatni qayta tiklash uchun mo\'ljallangan.',
+    'lead_p2': 'Ushbu sahifada o\'n bir bosqichning har biri, tayyor mahsulotning mineral tarkibi va biz ishlaydigan tartibga soluvchi nazorat tasvirlangan.',
+    'source_heading': 'Suv manbai',
+    'source_p1': 'Aqua Element manbai — Toshkent viloyati Quyi Chirchiq tumanidagi artezian quduq.',
+    'source_label_type': 'Suv turi',
+    'source_value_type': 'Yopiq suv qatlamidan olinadigan artezian suvi',
+    'source_label_location': 'Joylashuv',
+    'source_value_location': 'Quyi Chirchiq tumani, Toshkent viloyati, O\'zbekiston',
+    'source_label_depth': 'Quduq chuqurligi',
+    'source_value_depth': 'taxminan 120 metr',
+    'steps_heading': '11 bosqichli tozalash va mineralizatsiya',
+    'steps_intro': 'Bosqichlar texnologik tartibda keltirilgan. Har birining aniq muhandislik vazifasi bor; birgalikda ular tartibga soluvchi standartlar bo\'yicha xavfsiz va mineral tarkibi muvozanatlangan suvni ishlab chiqaradi.',
+    'step_label': 'Bosqich',
+    'steps': [
+        {'name': 'Kvarts filtri', 'desc': 'Kvarts filtri xom suvdan qum, zang, loy va ko\'zga ko\'rinadigan ifloslantiruvchi moddalar kabi yirik osilgan zarrachalarni olib tashlaydi. Uning asosiy vazifasi loyqalikni kamaytirish va keyingi filtratsiya bosqichlarini tiqilishdan himoya qilish.'},
+        {'name': 'Faollashtirilgan ko\'mir filtri', 'desc': 'Faollashtirilgan ko\'mir suvdan xlor, yoqimsiz hidlar, yomon ta\'m va ayrim organik birikmalarni yutadi. Bu bosqich suvning ta\'mi va hidini yaxshilaydi, shuningdek, teskari osmos membranasi kabi sezgir uskunalarni himoya qiladi.'},
+        {'name': 'Ion almashtiruvchi / yumshatgich', 'desc': 'Ion almashtiruvchi suvning qattiqligini kalsiy va magniy ionlarini olib tashlash orqali kamaytiradi, bu esa tosh hosil bo\'lishining oldini oladi. Bu quvurlar, filtrlar, nasoslar va teskari osmos membranasini mineral cho\'kindilardan himoya qiladi.'},
+        {'name': 'Regeneratsiya bloki', 'desc': 'Regeneratsiya bloki ion almashtiruvchi bilan birga ishlaydi va yumshatgich smolasi to\'yinganida uni qayta tiklaydi. Bu yumshatish jarayonining samaradorligini va tizimning barqaror ishlashini ta\'minlaydi.'},
+        {'name': 'PP cho\'kma filtri — 5 mikron', 'desc': '5 mikronli polipropilen cho\'kma filtri oldingi bosqichlardan o\'tgan mayda zarrachalarni olib tashlaydi. U cho\'kindi, zang va mexanik ifloslarni keyingi nozik filtrlarga yetib borishidan oldin tutib oladi.'},
+        {'name': 'PP cho\'kma filtri — 1 mikron', 'desc': '1 mikronli polipropilen filtri yanada nozik mexanik filtratsiyani ta\'minlaydi. U juda mayda zarrachalarni olib tashlab, suvni teskari osmosga tayyorlaydi.'},
+        {'name': 'Teskari osmos', 'desc': 'Teskari osmos asosiy tozalash bosqichlaridan biri bo\'lib, unda suv yarim o\'tkazuvchi membranadan o\'tadi. Bu jarayon erigan tuzlar, og\'ir metallar, mikroorganizmlar va boshqa ko\'plab istalmagan ifloslarni kamaytiradi.'},
+        {'name': 'Membrana CIP — joyida tozalash tizimi', 'desc': 'Membrana CIP (Clean-in-Place) teskari osmos membranasini tozalash va parvarish qilish uchun ishlatiladi. U toshni, mineral cho\'kindilarni va organik to\'planmalarni olib tashlab, membrana samaradorligini saqlaydi va xizmat muddatini uzaytiradi.'},
+        {'name': 'UV filtri', 'desc': 'Ultrabinafsha filtri suvni UB nuriga ta\'sir qildirish orqali zararsizlantiradi, bu esa bakteriyalar, viruslar va boshqa mikroorganizmlarni faolsizlantiradi. Bu bosqich suvga kimyoviy moddalar qo\'shmasdan qo\'shimcha mikrobiologik xavfsizlikni ta\'minlaydi.'},
+        {'name': 'Mineralizatsiya', 'desc': 'Teskari osmosdan so\'ng suv kalsiy va magniy kabi foydali minerallar bilan boyitiladi. Mineralizatsiya suvning ta\'mini yaxshilaydi va pH darajasini muvozanatlashtirishga yordam beradi.'},
+        {'name': 'Ozon bilan ishlov berish', 'desc': 'Ozon bilan ishlov berish saqlash yoki quyishdan oldingi yakuniy zararsizlantirish bosqichidir. U mikrob o\'sishini kamaytirib tozalangan suvning yangiligini saqlaydi, so\'ngra tabiiy ravishda kislorodga parchalanadi.'}
+    ],
+    'profile_heading': 'Tayyor mahsulotning mineral tarkibi',
+    'profile_intro': 'Tartibga soluvchi nazorati ostida o\'tkazilgan sinov natijalariga asoslangan taxminiy diapazonlar. Bu kundalik iste\'mol uchun mos past minerallashgan ichimlik suvi profilidir.',
+    'profile_param': 'Ko\'rsatkich',
+    'profile_value': 'Qiymat',
+    'profile_rows': [
+        {'param': 'Umumiy minerallanish (TDS)', 'value': '30–50 mg/l'},
+        {'param': 'pH', 'value': '7,5'},
+        {'param': 'Kalsiy (Ca²⁺)', 'value': '10–60 mg/l'},
+        {'param': 'Magniy (Mg²⁺)', 'value': '7–20 mg/l'},
+        {'param': 'Natriy (Na⁺)', 'value': '5–15 mg/l'},
+        {'param': 'Kaliy (K⁺)', 'value': '1–4 mg/l'},
+        {'param': 'Bikarbonat (HCO₃⁻)', 'value': '50–120 mg/l'},
+        {'param': 'Sulfat (SO₄²⁻)', 'value': '10–30 mg/l'},
+        {'param': 'Xlorid (Cl⁻)', 'value': '5–10 mg/l'}
+    ],
+    'compare_heading': '11 bosqichli tizimning boshqa yondashuvlardan farqi',
+    'compare_col_method': 'Suvni tayyorlash usuli',
+    'compare_col_taste': 'Ta\'m va mineral muvozanati',
+    'compare_col_safety': 'Mikrobiologik xavfsizlik',
+    'compare_col_minerals': 'Foydali minerallar',
+    'compare_rows': [
+        {'method': 'Aqua Element — 11 bosqichli tozalash + mineralizatsiya', 'taste': 'Muvozanatlangan, tabiiy', 'safety': 'UV + ozon; tayyor mahsulotda xlor yo\'q', 'minerals': 'OO dan keyin tiklanadi (Ca, Mg)'},
+        {'method': 'Faqat teskari osmos (mineralizatsiya yo\'q)', 'taste': 'Tekis, "bo\'sh"', 'safety': 'To\'g\'ri parvarish qilinganida yuqori', 'minerals': 'Minimal'},
+        {'method': 'Mineralizatsiyalanmagan butilkali suv', 'taste': 'Manbaga bog\'liq', 'safety': 'Ishlab chiqaruvchiga bog\'liq', 'minerals': 'Manbaga bog\'liq, ko\'pincha past'},
+        {'method': 'Toshkent shahar vodoprovod suvi', 'taste': 'Xlor ta\'mi bor', 'safety': 'Stansiyada xavfsiz; tarmoq bo\'ylab sifat o\'zgarishi mumkin', 'minerals': 'Tabiiy, o\'zgaruvchan'}
+    ],
+    'oversight_heading': 'Tartibga soluvchi nazorat',
+    'oversight_p1': 'Ishlab chiqarish va mahsulot sifati O\'zbekiston Respublikasi Sanitariya-epidemiologik osoyishtalik va aholi salomatligi qo\'mitasi — milliy sanitariya-epidemiologik tartibga soluvchi (Sanepid) nazorati ostida.',
+    'oversight_p2': 'So\'nggi laboratoriya sinov natijalari talabga binoan taqdim etiladi — support@aqua-element.uz manziliga yozing va biz tartibga soluvchi nazorat sikliningi so\'nggi hisobotini ulashamiz.',
+    'faq_heading': 'Jarayon haqida tez-tez beriladigan savollar',
+    'faqs': [
+        {'q': 'Aqua Element suvi qayerdan olinadi?', 'a': 'Toshkent viloyati Quyi Chirchiq tumanidagi taxminan 120 metr chuqurlikdagi artezian quduqdan.'},
+        {'q': 'Aqua Element suvining TDS (umumiy minerallanish) darajasi qanday?', 'a': '30–50 mg/l — kundalik iste\'mol uchun qulay past minerallashgan profil.'},
+        {'q': 'Suvning pH darajasi qancha?', 'a': 'Taxminan 7,5 — neytral darajadan biroz ustun.'},
+        {'q': 'Nima uchun teskari osmos VA mineralizatsiya birga ishlatiladi?', 'a': 'Teskari osmos suvga ta\'m va fiziologik qiymat beradigan minerallar bilan birga deyarli barcha erigan moddalarni olib tashlaydi. Mineralizatsiya kalsiy va magniyni muvozanatlangan ichimlik suvi darajasiga qaytaradi — natijada OO xavfsizligi va tabiiy mineral suvining ta\'mi birlashadi.'},
+        {'q': 'Suv sifatini kim tekshiradi?', 'a': 'Ishlab chiqarish va mahsulot sifati O\'zbekiston Respublikasi Sanitariya-epidemiologik osoyishtalik va aholi salomatligi qo\'mitasi nazorati ostida.'},
+        {'q': 'Suv qanday zararsizlantiriladi?', 'a': 'Ikkita fizik usul ketma-ket qo\'llaniladi: mikroorganizmlarni faolsizlantiruvchi ultrabinafsha nuri va quyilishdan oldingi yakuniy zararsizlantirish bosqichi sifatida ozon bilan ishlov berish. Tayyor mahsulotga xlor yoki kimyoviy zararsizlantiruvchi moddalar qo\'shilmaydi.'},
+        {'q': 'Artezian suvi vodoprovod suvidan qanday farq qiladi?', 'a': 'Vodoprovod suvi odatda sirtdagi yoki yer osti yer yuzasiga yaqin manbalardan olinadi, markazlashgan tarzda tozalanadi va quvurlar orqali tarqatiladi. Artezian suvi to\'g\'ridan-to\'g\'ri yer ostidagi yopiq suv qatlamidan olinadi va shu bilan sirt ifloslanishlari va shahar tarmog\'ini chetlab o\'tadi.'},
+        {'q': '19 litrli butilka qaytariladigan?', 'a': 'Ha. 18,9 litrli (19 litr standarti) butilka qaytariladigan — keyingi yetkazib berishda bo\'sh idishni olib ketamiz. 10 litrli butilka — uy uchun kichikroq variant.'},
+        {'q': 'Qayerga yetkazib berasiz?', 'a': 'Toshkent shahri va Toshkent viloyati bo\'ylab. O\'zbekistondan tashqariga yetkazib bermaymiz.'},
+        {'q': 'Eng so\'nggi laboratoriya natijalarini qanday so\'rasam bo\'ladi?', 'a': 'support@aqua-element.uz manziliga yozing — tartibga soluvchi nazorat siklining so\'nggi hisobotini ulashamiz.'}
+    ],
+    'cta_heading': 'Aqua Element suvini buyurtma qiling',
+    'cta_p': 'Toshkent bo\'ylab yetkazib beriladi. Naqd yoki karta bilan to\'lash. Obunalar mavjud.',
+    'cta_btn_19': '18,9 l butilka',
+    'cta_btn_10': '10 l butilka'
+} %}
+{% endif %}
+
+{# ---------- META + JSON-LD ---------- #}
+
+{% set meta_description = i18n.meta_description %}
+
+{% block title %}{{ i18n.page_title }} — {{ company_name }}{% endblock %}
+
+{% block extra_meta %}
+{# HowTo schema — the 11 stages as cite-friendly structured data. LLMs and
+   Google's rich-results system can quote these directly. #}
+{% set howto_steps = [] %}
+{% for step in i18n.steps %}
+    {% set _ = howto_steps.append({
+        '@type': 'HowToStep',
+        'position': loop.index,
+        'name': step.name,
+        'text': step.desc
+    }) %}
+{% endfor %}
+{% set howto_schema = {
+    '@context': 'https://schema.org',
+    '@type': 'HowTo',
+    'name': i18n.page_title,
+    'description': i18n.meta_description,
+    'inLanguage': current_language,
+    'totalTime': 'PT11S',
+    'step': howto_steps
+} %}
+<script type="application/ld+json">{{ howto_schema | tojson }}</script>
+
+{# FAQPage schema — pulls from the same i18n.faqs list as the visible FAQ. #}
+{% set faq_entities = [] %}
+{% for faq in i18n.faqs %}
+    {% set _ = faq_entities.append({
+        '@type': 'Question',
+        'name': faq.q,
+        'acceptedAnswer': {'@type': 'Answer', 'text': faq.a}
+    }) %}
+{% endfor %}
+{% set faq_schema = {
+    '@context': 'https://schema.org',
+    '@type': 'FAQPage',
+    'inLanguage': current_language,
+    'mainEntity': faq_entities
+} %}
+<script type="application/ld+json">{{ faq_schema | tojson }}</script>
+
+{# Article schema — page-level metadata. publisher reuses the Organization
+   identity declared in base.html so LLMs see one consistent brand entity. #}
+{% set article_schema = {
+    '@context': 'https://schema.org',
+    '@type': 'Article',
+    'headline': i18n.page_title,
+    'description': i18n.meta_description,
+    'inLanguage': current_language,
+    'mainEntityOfPage': canonical_href,
+    'image': default_og_image,
+    'publisher': {
+        '@type': 'Organization',
+        '@id': (company_website|default('https://aqua-element.uz', true)) + '#organization',
+        'name': company_name,
+        'logo': {'@type': 'ImageObject', 'url': default_og_image}
+    },
+    'about': [
+        {'@type': 'Thing', 'name': 'artesian water'},
+        {'@type': 'Thing', 'name': 'water filtration'},
+        {'@type': 'Thing', 'name': 'reverse osmosis'},
+        {'@type': 'Thing', 'name': 'water mineralization'},
+        {'@type': 'Place', 'name': 'Tashkent, Uzbekistan'}
+    ]
+} %}
+<script type="application/ld+json">{{ article_schema | tojson }}</script>
+
+{# BreadcrumbList — explicit IA path for LLMs and Google. #}
+{% set breadcrumb_schema = {
+    '@context': 'https://schema.org',
+    '@type': 'BreadcrumbList',
+    'itemListElement': [
+        {'@type': 'ListItem', 'position': 1, 'name': i18n.breadcrumb_home, 'item': company_website|default('https://aqua-element.uz', true)},
+        {'@type': 'ListItem', 'position': 2, 'name': i18n.breadcrumb_current, 'item': canonical_href}
+    ]
+} %}
+<script type="application/ld+json">{{ breadcrumb_schema | tojson }}</script>
+{% endblock %}
+
+{% block extra_head %}
+<style>
+    .filtration-pillar { padding: 60px 0; }
+    .filtration-pillar h2 { margin-top: 50px; margin-bottom: 20px; font-weight: 700; }
+    .filtration-pillar h3 { margin-top: 30px; margin-bottom: 12px; font-weight: 600; }
+    .filtration-pillar p { line-height: 1.75; margin-bottom: 16px; }
+    .filtration-pillar .source-card { background: #f5fbff; border-left: 4px solid #1a8fe3; padding: 20px 28px; border-radius: 8px; margin: 24px 0; }
+    .filtration-pillar .source-card dl { margin: 0; display: grid; grid-template-columns: max-content 1fr; gap: 8px 24px; }
+    .filtration-pillar .source-card dt { font-weight: 600; color: #555; }
+    .filtration-pillar .source-card dd { margin: 0; color: #222; }
+    .filtration-pillar ol.steps-list { list-style: none; padding-left: 0; counter-reset: step-counter; }
+    .filtration-pillar ol.steps-list > li { counter-increment: step-counter; padding: 24px 0 24px 76px; border-bottom: 1px solid #eee; position: relative; }
+    .filtration-pillar ol.steps-list > li::before { content: counter(step-counter); position: absolute; left: 0; top: 24px; width: 56px; height: 56px; line-height: 56px; text-align: center; border-radius: 50%; background: #1a8fe3; color: #fff; font-weight: 700; font-size: 22px; }
+    .filtration-pillar table { width: 100%; border-collapse: collapse; margin: 16px 0 32px; }
+    .filtration-pillar table th, .filtration-pillar table td { padding: 12px 16px; border: 1px solid #e3e3e3; text-align: left; vertical-align: top; }
+    .filtration-pillar table th { background: #f5fbff; font-weight: 700; }
+    .filtration-pillar .compare-table td:first-child { font-weight: 600; }
+    .filtration-pillar .cta-box { background: #1a8fe3; color: #fff; padding: 36px; border-radius: 12px; margin-top: 48px; text-align: center; }
+    .filtration-pillar .cta-box h2 { color: #fff; margin-top: 0; }
+    .filtration-pillar .cta-box .btn { background: #fff; color: #1a8fe3; padding: 12px 28px; border-radius: 30px; font-weight: 700; margin: 6px; display: inline-block; text-decoration: none; }
+    .filtration-pillar .cta-box .btn:hover { background: #f0f0f0; }
+    .filtration-pillar .oversight-note { background: #fffbe6; border-left: 4px solid #f5a623; padding: 16px 24px; border-radius: 6px; margin: 24px 0; }
+</style>
+{% endblock %}
+
+{% block content %}
+<section class="page-title centred" style="background-image: url({{ url_for('static', filename='images/background/page-title.jpg') }});">
+    <div class="shape" style="background-image: url({{ url_for('static', filename='images/shape/banner-shap.png') }});"></div>
+    <div class="auto-container">
+        <div class="content-box">
+            <h1>{{ i18n.page_title }}</h1>
+            <ul class="bread-crumb clearfix">
+                <li><a href="{{ external_url_for_lang('frontend.index') }}">{{ i18n.breadcrumb_home }}</a></li>
+                <li>{{ i18n.breadcrumb_current }}</li>
+            </ul>
+        </div>
+    </div>
+</section>
+
+<section class="filtration-pillar">
+    <div class="auto-container">
+
+        {# ---- Lead ---- #}
+        <p>{{ i18n.lead_p1 }}</p>
+        <p>{{ i18n.lead_p2 }}</p>
+
+        {# ---- Source water ---- #}
+        <h2>{{ i18n.source_heading }}</h2>
+        <p>{{ i18n.source_p1 }}</p>
+        <div class="source-card">
+            <dl>
+                <dt>{{ i18n.source_label_type }}</dt><dd>{{ i18n.source_value_type }}</dd>
+                <dt>{{ i18n.source_label_location }}</dt><dd>{{ i18n.source_value_location }}</dd>
+                <dt>{{ i18n.source_label_depth }}</dt><dd>{{ i18n.source_value_depth }}</dd>
+            </dl>
+        </div>
+
+        {# ---- 11 stages ---- #}
+        <h2>{{ i18n.steps_heading }}</h2>
+        <p>{{ i18n.steps_intro }}</p>
+        <ol class="steps-list">
+            {% for step in i18n.steps %}
+            <li>
+                <h3>{{ step.name }}</h3>
+                <p>{{ step.desc }}</p>
+            </li>
+            {% endfor %}
+        </ol>
+
+        {# ---- Mineral profile ---- #}
+        <h2>{{ i18n.profile_heading }}</h2>
+        <p>{{ i18n.profile_intro }}</p>
+        <table>
+            <thead>
+                <tr><th>{{ i18n.profile_param }}</th><th>{{ i18n.profile_value }}</th></tr>
+            </thead>
+            <tbody>
+                {% for row in i18n.profile_rows %}
+                <tr><td>{{ row.param }}</td><td>{{ row.value }}</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+
+        {# ---- Comparison ---- #}
+        <h2>{{ i18n.compare_heading }}</h2>
+        <table class="compare-table">
+            <thead>
+                <tr>
+                    <th>{{ i18n.compare_col_method }}</th>
+                    <th>{{ i18n.compare_col_taste }}</th>
+                    <th>{{ i18n.compare_col_safety }}</th>
+                    <th>{{ i18n.compare_col_minerals }}</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in i18n.compare_rows %}
+                <tr>
+                    <td>{{ row.method }}</td>
+                    <td>{{ row.taste }}</td>
+                    <td>{{ row.safety }}</td>
+                    <td>{{ row.minerals }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+
+        {# ---- Oversight ---- #}
+        <h2>{{ i18n.oversight_heading }}</h2>
+        <p>{{ i18n.oversight_p1 }}</p>
+        <div class="oversight-note">
+            <p style="margin: 0;">{{ i18n.oversight_p2 }}</p>
+        </div>
+
+        {# ---- FAQ ---- #}
+        <h2>{{ i18n.faq_heading }}</h2>
+        {% for faq in i18n.faqs %}
+        <h3>{{ faq.q }}</h3>
+        <p>{{ faq.a }}</p>
+        {% endfor %}
+
+        {# ---- CTA ---- #}
+        <div class="cta-box">
+            <h2>{{ i18n.cta_heading }}</h2>
+            <p>{{ i18n.cta_p }}</p>
+            <a href="{{ external_url_for_lang('frontend.shop') }}" class="btn">{{ i18n.cta_btn_19 }}</a>
+            <a href="{{ external_url_for_lang('frontend.shop') }}" class="btn">{{ i18n.cta_btn_10 }}</a>
+        </div>
+
+    </div>
+</section>
+{% endblock %}

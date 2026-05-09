@@ -170,7 +170,13 @@ class PaymentHandlers(BaseHandler):
 
             if message_id and order_id:
                 try:
-                    from token_manager import token_manager
+                    # TokenManager lives on the running Application's bot_data
+                    # (see bot.py:166). Earlier code did `from token_manager
+                    # import token_manager` — but the module only exports the
+                    # *class*, no module-level instance — so the import always
+                    # failed and the message_id was never persisted, breaking
+                    # the in-place edit on payment-success.
+                    token_manager = context.bot_data.get('token_manager') if context.bot_data else None
                     if token_manager and token_manager.redis:
                         redis_key = RedisKeyspace.bot_payment_message(order_id)
                         await token_manager.redis.setex(redis_key, 3600, str(message_id))

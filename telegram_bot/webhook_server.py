@@ -108,10 +108,13 @@ async def verify_webhook_signature(request):
     if not signature:
         return False
 
-    # Get webhook secret from config (falls back to JWT secret for backward compatibility)
-    webhook_secret = config.security.webhook_secret or config.security.jwt_secret_key
+    # Use the dedicated bot-webhook secret. No cross-domain fallback to
+    # JWT_SECRET_KEY: a leaked auth-token secret must not also be able to
+    # forge internal webhooks. Startup validation in config._validate_config
+    # ensures BOT_WEBHOOK_SECRET is set, so this guard is defence-in-depth.
+    webhook_secret = config.security.webhook_secret
     if not webhook_secret:
-        logger.error("Webhook secret not configured")
+        logger.error("BOT_WEBHOOK_SECRET not configured")
         return False
 
     # Calculate expected signature
@@ -211,9 +214,16 @@ async def health_handler(_request):
         checks['database'] = {'status': 'error', 'error': str(e)}
         overall_healthy = False
 
-    # Check Redis connectivity (via token manager)
+    # Check Redis connectivity (via token manager). The TokenManager instance
+    # lives on the running Telegram Application's bot_data (see bot.py:166),
+    # not as a module-level singleton — `from token_manager import token_manager`
+    # was importing a name that never existed, so /health perpetually reported
+    # redis: not_connected.
     try:
-        from token_manager import token_manager
+        token_manager = (
+            webhook_server.bot_app.bot_data.get('token_manager')
+            if webhook_server.bot_app else None
+        )
         if token_manager and token_manager.redis:
             await token_manager.redis.ping()
             checks['redis'] = {'status': 'ok'}
@@ -313,9 +323,15 @@ class WebhookServer:
             # idempotency (e.g. payment-message Redis lookup overwrites cleanly).
             return False
 
-        # Redis path
+        # Redis path. Resolve the TokenManager from the running Application's
+        # bot_data; the prior `from token_manager import token_manager` was a
+        # broken import that silently routed every dedup check to the in-memory
+        # fallback, defeating multi-replica protection.
         try:
-            from token_manager import token_manager
+            token_manager = (
+                self.bot_app.bot_data.get('token_manager')
+                if self.bot_app else None
+            )
             if token_manager and token_manager.redis:
                 key = RedisKeyspace.bot_webhook_dedup(endpoint, request_id)
                 # SET NX returns True if key was set (we claimed it), None if it existed.
@@ -462,7 +478,15 @@ class WebhookServer:
             message_edited = False
             stored_message_id = None
 
-            from token_manager import token_manager
+            # Resolve TokenManager via bot_data — `from token_manager import
+            # token_manager` was a broken import (no module-level singleton),
+            # so before this fix payment_success_handler raised ImportError
+            # *before* hitting the Telegram edit/send path, and the customer
+            # silently received nothing.
+            token_manager = (
+                self.bot_app.bot_data.get('token_manager')
+                if self.bot_app else None
+            )
             if token_manager and token_manager.redis:
                 redis_key = RedisKeyspace.bot_payment_message(order_id)
                 try:

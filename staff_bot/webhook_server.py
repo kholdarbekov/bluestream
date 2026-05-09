@@ -78,9 +78,13 @@ async def verify_webhook_signature(request):
     if not signature:
         return False
 
-    webhook_secret = config.security.webhook_secret or config.security.jwt_secret_key
+    # Use only the dedicated webhook secret. JWT_SECRET_KEY belongs to a
+    # different trust domain (auth tokens); falling back to it here would
+    # let a JWT-secret leak forge webhooks. Mismatch with backend signer
+    # surfaces as a 401 with a clear log line — failing closed by design.
+    webhook_secret = config.security.webhook_secret
     if not webhook_secret:
-        logger.error("Webhook secret not configured")
+        logger.error("WEBHOOK_SECRET not configured")
         return False
 
     body = await request.read()

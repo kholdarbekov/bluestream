@@ -222,6 +222,20 @@ class WaterBusinessBot:
             self.application.add_handler(TypeHandler(Update, log_all_updates), group=-10)
             logger.info("Update logging middleware installed!")
 
+            # Callback-dedup middleware: acks every callback_query immediately
+            # (so the inline-button loading spinner dismisses) and raises
+            # ApplicationHandlerStop on duplicates within a short TTL. Sits
+            # between the debug logger (group=-10, sees everything including
+            # duplicates) and the conversation/main handlers (group ≥ -2,
+            # never see duplicates). Root-cause fix for the production
+            # "Message to edit/delete not found" warning pair caused by
+            # double-taps on inline buttons. See handlers.callback_dedup.
+            from handlers.callback_dedup import callback_dedup_middleware
+            self.application.add_handler(
+                TypeHandler(Update, callback_dedup_middleware), group=-5
+            )
+            logger.info("Callback dedup middleware installed!")
+
             logger.info("Bot initialization completed successfully")
 
         except Exception as e:

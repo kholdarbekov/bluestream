@@ -375,6 +375,10 @@ class StaffBotConfig:
             (self.database.url, "DATABASE_URL"),
             (self.business_api.base_url, "BUSINESS_APP_URL"),
             (self.security.jwt_secret_key, "JWT_SECRET_KEY"),
+            # WEBHOOK_SECRET is mandatory: without it staff_bot can't verify
+            # /internal/* webhooks from backend, silently dropping new-order
+            # / route-update notifications. Fail at startup, not at first hit.
+            (self.security.webhook_secret, "WEBHOOK_SECRET"),
         ]
 
         missing_fields = [field_name for field_value, field_name in required_fields if not field_value]

@@ -672,14 +672,49 @@ class OrderHandlers(BaseHandler):
                 if payment_ready_at_str:
                     payment_ready_at = datetime.fromisoformat(payment_ready_at_str.replace('Z', '+00:00'))
                     remaining = (payment_ready_at - datetime.now(timezone.utc)).total_seconds()
-                    logger.info(f"Payment for order: {order.get('order_number')} will be ready at {payment_ready_at_str}, waiting for {remaining:.2f} seconds before showing payment link to user {user_id}")
+                    order_number = order.get('order_number')
+
+                    # Three distinct cases — log each at the right level so the
+                    # ops dashboard isn't drowned in INFO noise from the fast
+                    # path and so a real clock-skew incident actually surfaces:
+                    #
+                    #   1. remaining > 0          — slow path, we'll actually wait
+                    #   2. -CLOCK_SKEW_WARN_THRESHOLD_SECONDS <= remaining <= 0
+                    #                              — fast path (proactive pool
+                    #                                covered it), normal jitter
+                    #   3. remaining < -threshold — clock skew between backend
+                    #                                and bot worth investigating
+                    CLOCK_SKEW_WARN_THRESHOLD_SECONDS = 5.0
+
                     if remaining > 0:
                         needed_wait = True
+                        logger.info(
+                            "Payment for order %s ready at %s, waiting %.2fs before showing link to user %s",
+                            order_number, payment_ready_at_str, remaining, user_id,
+                        )
                         preparing_text = i18n.get('telegram.orders.preparing_payment_message', language).format(
                             order_number=order.get('order_number', str(order['id']))
                         )
                         await query.edit_message_text(text=preparing_text)
                         await asyncio.sleep(remaining)
+                    elif remaining < -CLOCK_SKEW_WARN_THRESHOLD_SECONDS:
+                        # Negative wait of more than a few seconds isn't normal
+                        # PSP-coverage timing — it points to backend/bot clock
+                        # drift (NTP failure, container time skew, etc). Fire a
+                        # WARN so it's visible without blocking the order flow.
+                        logger.warning(
+                            "Clock skew suspected: payment_ready_at=%s is %.2fs in the past "
+                            "for order %s (user %s). Check NTP on backend and bot containers.",
+                            payment_ready_at_str, -remaining, order_number, user_id,
+                        )
+                    else:
+                        # Fast path: proactive marking-code pool covered the
+                        # order, payment_ready_at ≈ now, no wait needed. DEBUG
+                        # so it doesn't drown the log under normal traffic.
+                        logger.debug(
+                            "Payment for order %s ready immediately (proactive pool path, remaining=%.2fs) for user %s",
+                            order_number, remaining, user_id,
+                        )
 
             # Handle different payment methods
             if payment_method in ['payme', 'card', 'click']:

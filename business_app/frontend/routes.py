@@ -1290,7 +1290,7 @@ def google_products_feed():
         "<channel>",
         f'<title>{escape("Aqua Element Product Feed")}</title>',
         f'<link>{escape(_absolute_public_url("/shop"))}</link>',
-        f'<description>{escape("Blue Stream catalog for shopping discovery and product search.")}</description>',
+        f'<description>{escape("Aqua Element catalog for shopping discovery and product search.")}</description>',
     ]
 
     for product in products:

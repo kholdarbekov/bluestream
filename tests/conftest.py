@@ -17,6 +17,14 @@ import requests
 os.environ.setdefault('DB_PASSWORD', 'test_password')
 os.environ.setdefault('SECRET_KEY', 'test-secret-key-for-testing-32-chars-long')
 os.environ.setdefault('JWT_SECRET_KEY', 'test-jwt-secret-key-for-testing')
+# Bot↔backend HMAC secrets are now required at startup (no SECRET_KEY/JWT
+# fallback — see config validation in telegram_bot/config.py and
+# staff_bot/config.py). Tests that import bot modules would fail collection
+# without these, so seed distinct test values here. Each is a separate
+# trust boundary in production; using different strings in tests guards
+# against any accidental cross-domain reuse creeping back in.
+os.environ.setdefault('BOT_WEBHOOK_SECRET', 'test-bot-webhook-secret')
+os.environ.setdefault('WEBHOOK_SECRET', 'test-staff-webhook-secret')
 # Force testing mode even when docker-compose service env defaults to production.
 os.environ['FLASK_ENV'] = 'testing'
 os.environ['TESTING'] = 'true'

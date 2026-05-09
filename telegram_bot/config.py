@@ -230,7 +230,11 @@ class FeatureConfig:
 class SecurityConfig:
     """Security configuration"""
     jwt_secret_key: str
-    webhook_secret: Optional[str] = None  # Separate secret for webhook HMAC verification
+    # HMAC secret for the backend → main-bot `/internal/*` webhook contract.
+    # MUST equal the backend's BOT_WEBHOOK_SECRET. Distinct from JWT_SECRET_KEY
+    # (auth tokens) and WEBHOOK_SECRET (staff_bot trust boundary) — sharing
+    # them across boundaries collapses three trust domains into one.
+    webhook_secret: Optional[str] = None
     jwt_expiry_hours: int = 24
     jwt_refresh_expiry_days: int = 30
 
@@ -334,7 +338,12 @@ class BotConfig:
 
         self.security = SecurityConfig(
             jwt_secret_key=os.environ.get('JWT_SECRET_KEY') or os.environ.get('SECRET_KEY'),
-            webhook_secret=os.environ.get('WEBHOOK_SECRET'),
+            # Read BOT_WEBHOOK_SECRET — the backend signs with this name
+            # (business_app/config/base.py::BOT_WEBHOOK_SECRET). The previous
+            # WEBHOOK_SECRET name belonged to the staff_bot contract and was
+            # the root cause of the 401 "Invalid webhook signature" rejection
+            # of payment-success webhooks.
+            webhook_secret=os.environ.get('BOT_WEBHOOK_SECRET'),
             encryption_key=os.environ.get('ENCRYPTION_KEY'),
         )
 
@@ -357,6 +366,11 @@ class BotConfig:
             (self.database.url, "DATABASE_URL"),
             (self.business_api.base_url, "BUSINESS_APP_URL"),
             (self.security.jwt_secret_key, "JWT_SECRET_KEY"),
+            # BOT_WEBHOOK_SECRET is mandatory: without it the bot can't verify
+            # /internal/payment-success webhooks from the backend, which
+            # silently breaks customer-facing payment success notifications.
+            # Fail fast at startup instead of in-flight at webhook time.
+            (self.security.webhook_secret, "BOT_WEBHOOK_SECRET"),
         ]
 
         missing_fields = [field_name for field_value, field_name in required_fields if not field_value]

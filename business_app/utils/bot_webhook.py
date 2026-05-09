@@ -211,9 +211,12 @@ def _send_staff_bot_webhook(endpoint: str, payload: Dict[str, Any], *, timeout: 
     import requests
 
     url_base = os.environ.get("STAFF_BOT_WEBHOOK_URL", "http://staff_bot:8081")
-    secret = os.environ.get("WEBHOOK_SECRET") or os.environ.get("JWT_SECRET_KEY", "")
+    # Dedicated staff_bot HMAC secret. No JWT_SECRET_KEY fallback: that secret
+    # belongs to the auth-token domain and using it here would collapse two
+    # trust boundaries — a leaked auth secret could then forge staff webhooks.
+    secret = os.environ.get("WEBHOOK_SECRET", "")
     if not secret:
-        logger.warning("Staff bot webhook secret missing — skipping %s", endpoint)
+        logger.warning("Staff bot webhook secret (WEBHOOK_SECRET) missing — skipping %s", endpoint)
         return False
 
     body = json.dumps(payload).encode("utf-8")

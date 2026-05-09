@@ -90,6 +90,23 @@ class RedisKeyspace:
     def bot_webhook_dedup(endpoint: str, request_id: str) -> str:
         return f"bot:webhook_dedup:{endpoint}:{request_id}"
 
+    # Tier: RELIABILITY. Short-lived dedup lock for inline-button taps from a
+    # user. Without this lock, double-taps (or Telegram redelivering the same
+    # callback after a network glitch) caused our handlers to run twice
+    # against the same `query.message.message_id`: the first run delete-and-
+    # replaced the source message (the standard navigation pattern for photo-
+    # hosted buttons), and the second run then tried to edit/delete a message
+    # that no longer existed — producing the "Message to edit not found" /
+    # "Message to delete not found" warning pair seen in production logs.
+    # `data_digest` is a short (16-hex-char) sha256 of the raw callback_data,
+    # so the key length is bounded and safe regardless of callback payload.
+    # TTL is intentionally short (~2s) — long enough to swallow a double-tap
+    # or a Telegram redelivery, short enough that a deliberate second tap
+    # (e.g. "go back, do it again") still works.
+    @staticmethod
+    def bot_callback_dedup(user_id: int, data_digest: str) -> str:
+        return f"bot:callback_dedup:{user_id}:{data_digest}"
+
     # ---- Staff bot -------------------------------------------------------
 
     # Tier: CACHE.
@@ -186,6 +203,7 @@ KEYSPACE_TIERS: dict[str, RedisUsageTier] = {
     'bot_otp_rate_limit':                RedisUsageTier.TIER_SECURITY,
     'bot_payment_message':               RedisUsageTier.TIER_RELIABILITY,
     'bot_webhook_dedup':                 RedisUsageTier.TIER_RELIABILITY,
+    'bot_callback_dedup':                RedisUsageTier.TIER_RELIABILITY,
     'staff_bot_token_cache':             RedisUsageTier.TIER_CACHE,
     'staff_bot_refresh_lock':            RedisUsageTier.TIER_RELIABILITY,
     'staff_bot_webhook_event':           RedisUsageTier.TIER_RELIABILITY,

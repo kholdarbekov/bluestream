@@ -178,7 +178,13 @@ class BaseConfig:
 
     @property
     def BOT_WEBHOOK_SECRET(self):
-        return get_secret("bot_webhook_secret", "BOT_WEBHOOK_SECRET", default=self.SECRET_KEY, required=False)
+        # Dedicated HMAC secret for the backend → main-bot /internal/* contract.
+        # Previously fell back to SECRET_KEY, which collapsed three trust
+        # domains (Flask sessions, JWT auth, bot webhook) into one and made
+        # the security boundary fragile. Now strictly required: a missing
+        # secret should fail loud at first webhook send, not silently sign
+        # with the Flask session key.
+        return get_secret("bot_webhook_secret", "BOT_WEBHOOK_SECRET", required=True)
 
     # Maps Configuration
     MAPS_PROVIDER = os.environ.get("MAPS_PROVIDER", "google")  # 'google', 'yandex', 'osm'

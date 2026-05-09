@@ -38,10 +38,12 @@ def _send_staff_webhook(endpoint: str, data: dict, timeout: int = 10) -> bool:
         import json
 
         body = json.dumps(payload).encode("utf-8")
-        secret = WEBHOOK_SECRET or os.environ.get("JWT_SECRET_KEY", "")
+        # Dedicated staff_bot HMAC secret only. No JWT_SECRET_KEY fallback —
+        # that's the auth-token trust boundary, not the webhook one.
+        secret = WEBHOOK_SECRET
         if not secret:
             logger.error(
-                "Staff webhook secret is not configured; refusing to send unsigned webhook " "for endpoint %s",
+                "WEBHOOK_SECRET is not configured; refusing to send unsigned webhook for endpoint %s",
                 endpoint,
             )
             return False

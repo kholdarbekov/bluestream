@@ -728,6 +728,19 @@ def process_filtration():
     return render_template("frontend/process_filtration.html")
 
 
+@frontend_bp.route("/about/sources")
+def about_sources():
+    """Citation-target page (M4.6) — links every non-trivial brand claim
+    to its source: regulator (Sanepid), the M1 pillar page, the public
+    product feed, and external identity records (Wikidata, GBP, Yandex).
+
+    Renders entirely server-side so any LLM crawler (which may not run
+    JS) reads the full text. Localisation lives in the template via the
+    same i18n-dict pattern used by process_filtration.html.
+    """
+    return render_template("frontend/about_sources.html")
+
+
 @frontend_bp.route("/gallery")
 def gallery():
     """Gallery page"""
@@ -1220,6 +1233,7 @@ def sitemap_static():
         "/quality-standards",
         "/water-delivery-faq",
         "/process/11-step-filtration",
+        "/about/sources",
     ]
     entries = [
         {
@@ -1367,6 +1381,200 @@ def google_products_feed():
 
     lines.extend(["</channel>", "</rss>"])
     return Response("\n".join(lines), mimetype="application/xml")
+
+
+@frontend_bp.route("/api/public/products.json")
+def public_products_feed():
+    """Public, machine-readable product feed (Schema.org-flavoured JSON).
+
+    Stable URL referenced from /llms.txt so AI assistants (ChatGPT, Gemini,
+    Perplexity, Claude) can ingest the full SKU list with mineral profile
+    + brand authority context in a single request, without scraping HTML.
+
+    Differs from /feeds/google-products.xml in that:
+      - It is JSON, not RSS-shopping XML.
+      - It bundles brand authority (Wikidata Q-id, regulator) and source-water
+        / mineral-profile context alongside the products themselves, so an
+        LLM can answer "is Aqua Element water mineralised?" from this single
+        feed without follow-up fetches.
+      - All translatable fields are emitted in all three languages
+        (uz/ru/en) so an assistant can quote in the user's language.
+
+    Caching: short Cache-Control (15 min) — long enough to absorb burst
+    traffic from crawlers, short enough that price/availability changes
+    propagate quickly. Re-uses the active-product filter the rest of the
+    site uses (`is_active=True`) so deactivated SKUs are never exposed.
+    """
+    products = Product.query.filter_by(is_active=True).order_by(Product.id).all()
+
+    # Resolve site-wide identity from the same context the JSON-LD blocks
+    # use, so the feed stays consistent with what's emitted on every page.
+    company_website = current_app.config.get("COMPANY_WEBSITE", "https://aqua-element.uz")
+    wikidata_id = current_app.config.get("COMPANY_WIKIDATA_ID", "")
+    same_as = []
+    if wikidata_id:
+        same_as.append(f"https://www.wikidata.org/wiki/{wikidata_id}")
+    for env_key in ("COMPANY_GOOGLE_BUSINESS_URL", "COMPANY_YANDEX_BUSINESS_URL", "COMPANY_WIKIPEDIA_URL"):
+        val = current_app.config.get(env_key, "")
+        if val:
+            same_as.append(val)
+
+    # The 11-stage process and mineral profile are brand facts (the M1
+    # pillar page is the canonical source) — replicate them here so a
+    # single feed fetch grounds an LLM answer about water quality without
+    # a follow-up scrape of the pillar page.
+    treatment_stages = [
+        "Quartz filter",
+        "Activated carbon filter",
+        "Ion exchanger / softener",
+        "Regeneration block",
+        "Polypropylene 5-micron sediment filter",
+        "Polypropylene 1-micron sediment filter",
+        "Reverse osmosis",
+        "Membrane CIP (Clean-in-Place)",
+        "UV filter",
+        "Mineralisation",
+        "Ozone-generator treatment",
+    ]
+    mineral_profile = {
+        "tds_mg_per_l": {"min": 30, "max": 50},
+        "ph": 7.5,
+        "calcium_mg_per_l": {"min": 10, "max": 60},
+        "magnesium_mg_per_l": {"min": 7, "max": 20},
+        "sodium_mg_per_l": {"min": 5, "max": 15},
+        "potassium_mg_per_l": {"min": 1, "max": 4},
+        "bicarbonate_mg_per_l": {"min": 50, "max": 120},
+        "sulfate_mg_per_l": {"min": 10, "max": 30},
+        "chloride_mg_per_l": {"min": 5, "max": 10},
+    }
+
+    products_payload: list[dict] = []  # type: ignore[name-defined]
+    for product in products:
+        # Fetch translations across all three languages so AI assistants can
+        # quote whichever matches the user's locale.
+        i18n_name = {lang: product.get_translated("name", lang) for lang in ("uz", "ru", "en")}
+        i18n_description = {lang: product.get_translated("description", lang) for lang in ("uz", "ru", "en")}
+        i18n_short_description = {}
+        # ``short_description`` is translatable on Product per current schema;
+        # fall back gracefully if the field happens to be missing on a row.
+        for lang in ("uz", "ru", "en"):
+            try:
+                i18n_short_description[lang] = product.get_translated("short_description", lang)
+            except Exception:
+                i18n_short_description[lang] = None
+
+        product_url = (
+            _absolute_public_url(url_for("frontend.product_detail_slug", slug=product.slug))
+            if product.slug
+            else _absolute_public_url(url_for("frontend.product_detail", product_id=product.id))
+        )
+
+        product_dict = product.to_dict(language="uz")
+        images = product_dict.get("images") or []
+        absolute_images = [_as_absolute_url(img) for img in images if img]
+        absolute_images = [img for img in absolute_images if img]
+
+        base_price = float(product_dict.get("base_price") or 0)
+        discount_price_raw = product_dict.get("discount_price")
+        discount_price = float(discount_price_raw) if discount_price_raw is not None else 0.0
+        sale_price = discount_price if (0 < discount_price < base_price) else None
+
+        availability = "InStock" if (product.stock_quantity or 0) > 0 else "OutOfStock"
+
+        # Size-aware structured fields. The codebase's ProductSizeEnum carries
+        # values like "10L"/"19L"; we expose both the human label and a
+        # numeric litres value so partners don't have to parse strings.
+        size_label = getattr(product, "size", None)
+        size_litres = None
+        if size_label:
+            size_str = size_label.value if hasattr(size_label, "value") else str(size_label)
+            # Map known SKU sizes; unknown sizes pass through as the label only.
+            litres_map = {"10L": 10.0, "19L": 18.9}
+            size_litres = litres_map.get(size_str)
+        size_str = "18.9L" if size_str == "19L" else size_str  # Normalize "19L" to more standard "18.9L" for clarity
+        products_payload.append(
+            {
+                "@type": "Product",
+                "id": product.id,
+                "sku": getattr(product, "sku", None),
+                "name": i18n_name,
+                "description": i18n_description,
+                "shortDescription": i18n_short_description,
+                "size": {
+                    "label": size_str if size_label else None,
+                    "litres": size_litres,
+                },
+                "returnable": (size_str == "18.9L") if size_label else None,
+                "url": product_url,
+                "images": absolute_images,
+                "offers": {
+                    "@type": "Offer",
+                    "priceCurrency": "UZS",
+                    "price": base_price,
+                    "salePrice": sale_price,
+                    "availability": f"https://schema.org/{availability}",
+                    "url": product_url,
+                },
+                "brand": "Aqua Element",
+                "category": "Bottled artesian water",
+            }
+        )
+
+    feed = {
+        "@context": "https://schema.org",
+        "@type": "ItemList",
+        "name": "Aqua Element — public product feed",
+        "description": (
+            "Stable, machine-readable feed of all active Aqua Element SKUs "
+            "with brand authority, source-water context, mineral profile, "
+            "and per-language descriptions. Linked from /llms.txt for AI-"
+            "assistant ingestion."
+        ),
+        "url": _absolute_public_url("/api/public/products.json"),
+        "lastUpdated": datetime.now(UTC).isoformat(),
+        "brand": {
+            "@type": "Brand",
+            "name": current_app.config.get("COMPANY_NAME", "Aqua Element"),
+            "url": company_website,
+            "sameAs": same_as,
+        },
+        "regulator": {
+            "name": (
+                "Committee of the Republic of Uzbekistan for Sanitary and "
+                "Epidemiological Wellbeing and Public Health"
+            ),
+            "shortName": "Sanepid",
+            "country": "Uzbekistan",
+        },
+        "sourceWater": {
+            "type": "Artesian water from a confined aquifer",
+            "location": "Quyi Chirchiq District, Tashkent Region, Uzbekistan",
+            "wellDepthMetres": 120,
+            "treatmentStages": treatment_stages,
+        },
+        "mineralProfile": mineral_profile,
+        "serviceArea": {
+            "country": "UZ",
+            "regions": ["Tashkent", "Tashkent Region"],
+        },
+        "orderChannels": {
+            "web": company_website,
+            "telegramBot": current_app.config.get("COMPANY_TELEGRAM_BOT_URL", "https://t.me/aqua_element_bot"),
+            "phone": current_app.config.get("COMPANY_PHONE", ""),
+        },
+        "supportedLanguages": ["uz", "ru", "en"],
+        "totalProducts": len(products_payload),
+        "products": products_payload,
+    }
+
+    response = current_app.response_class(
+        response=__import__("json").dumps(feed, ensure_ascii=False, indent=2),
+        status=200,
+        mimetype="application/json; charset=utf-8",
+    )
+    response.headers["Cache-Control"] = "public, max-age=900"  # 15 min
+    response.headers["Access-Control-Allow-Origin"] = "*"  # AI bots fetch cross-origin
+    return response
 
 
 # Custom template filters

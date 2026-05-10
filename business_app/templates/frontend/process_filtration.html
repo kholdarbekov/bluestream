@@ -342,6 +342,23 @@
     ]
 } %}
 <script type="application/ld+json">{{ breadcrumb_schema | tojson }}</script>
+
+{# Speakable schema (M4.1) — voice assistants (Google Assistant, Siri,
+   Алиса) are allowed to read aloud the FAQ Q/A pairs in `.filtration-faq`
+   when a user verbally asks about Aqua Element's process. The selector
+   matches each <h3> question and the following <p> answer in order. #}
+{% set speakable_schema = {
+    '@context': 'https://schema.org',
+    '@type': 'WebPage',
+    'name': i18n.page_title,
+    'url': canonical_href,
+    'inLanguage': current_language,
+    'speakable': {
+        '@type': 'SpeakableSpecification',
+        'cssSelector': ['.filtration-faq h3', '.filtration-faq p']
+    }
+} %}
+<script type="application/ld+json">{{ speakable_schema | tojson }}</script>
 {% endblock %}
 
 {% block extra_head %}
@@ -459,10 +476,12 @@
 
         {# ---- FAQ ---- #}
         <h2>{{ i18n.faq_heading }}</h2>
-        {% for faq in i18n.faqs %}
-        <h3>{{ faq.q }}</h3>
-        <p>{{ faq.a }}</p>
-        {% endfor %}
+        <div class="filtration-faq">
+            {% for faq in i18n.faqs %}
+            <h3>{{ faq.q }}</h3>
+            <p>{{ faq.a }}</p>
+            {% endfor %}
+        </div>
 
         {# ---- CTA ---- #}
         <div class="cta-box">

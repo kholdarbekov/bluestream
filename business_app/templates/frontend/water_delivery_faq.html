@@ -64,6 +64,23 @@
     "mainEntity": faq_schema.items
 } %}
 <script type="application/ld+json">{{ faq_page_schema | tojson }}</script>
+
+{# ---- Speakable schema (M4.1) — tells voice assistants which parts of
+    this page are short and meaningful enough to read aloud. The selector
+    targets the FAQ entries inside .shop-faq-list, so Google Assistant /
+    Siri / Алиса can answer "ask Aqua Element about delivery times" by
+    reading the matched <h3>/<p> pairs verbatim. ---- #}
+{% set speakable_schema = {
+    "@context": "https://schema.org",
+    "@type": "WebPage",
+    "name": faq_page_title,
+    "url": canonical_href,
+    "speakable": {
+        "@type": "SpeakableSpecification",
+        "cssSelector": [".shop-faq-list h3", ".shop-faq-list p"]
+    }
+} %}
+<script type="application/ld+json">{{ speakable_schema | tojson }}</script>
 {% endblock %}
 
 {% block extra_head %}

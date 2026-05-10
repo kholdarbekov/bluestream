@@ -1,14 +1,21 @@
 {
   "id": null,
   "uid": "bluestream-business",
-  "title": "BlueStream — Business Critical",
+  "title": "BlueStream \u2014 Business Critical",
   "description": "Payment webhook health, idempotency hits, pending-payment latency, and DB pool saturation. All metrics defined in business_app/utils/prometheus_metrics.py and alerted on via monitoring/alert_rules.yml (PaymentWebhookFailureSpike, DBPoolSaturated, StalePaymentsPending, WebhookDuplicateFlood).",
-  "tags": ["bluestream", "payments", "business"],
+  "tags": [
+    "bluestream",
+    "payments",
+    "business"
+  ],
   "timezone": "browser",
   "schemaVersion": 39,
   "version": 1,
   "refresh": "30s",
-  "time": { "from": "now-6h", "to": "now" },
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
   "templating": {
     "list": [
       {
@@ -18,7 +25,11 @@
         "auto": true,
         "auto_min": "30s",
         "query": "30s,1m,5m,10m,30m,1h",
-        "current": { "text": "auto", "value": "$__auto_interval_interval", "selected": true },
+        "current": {
+          "text": "auto",
+          "value": "$__auto_interval_interval",
+          "selected": true
+        },
         "options": [],
         "refresh": 2
       },
@@ -26,131 +37,421 @@
         "name": "provider",
         "type": "query",
         "label": "Provider",
-        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
         "query": "label_values(payment_webhook_total, provider)",
         "multi": true,
         "includeAll": true,
-        "current": { "text": "All", "value": "$__all", "selected": true },
+        "current": {
+          "text": "All",
+          "value": "$__all",
+          "selected": true
+        },
         "refresh": 2
       }
     ]
   },
   "panels": [
     {
-      "id": 1, "type": "stat", "title": "Webhooks / min (success)",
-      "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "id": 1,
+      "type": "stat",
+      "title": "Webhooks / min (success)",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "targets": [
-        { "refId": "A",
+        {
+          "refId": "A",
           "expr": "60 * sum(rate(payment_webhook_total{outcome=\"success\", provider=~\"$provider\"}[$interval]))"
         }
       ],
-      "fieldConfig": { "defaults": { "unit": "short", "decimals": 1, "color": { "mode": "palette-classic" } } },
-      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "textMode": "auto", "graphMode": "area" }
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 1,
+          "color": {
+            "mode": "palette-classic"
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "textMode": "auto",
+        "graphMode": "area"
+      }
     },
     {
-      "id": 2, "type": "stat", "title": "Webhook failures / min",
-      "gridPos": { "x": 6, "y": 0, "w": 6, "h": 4 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "id": 2,
+      "type": "stat",
+      "title": "Webhook failures / min",
+      "gridPos": {
+        "x": 6,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "targets": [
-        { "refId": "A",
+        {
+          "refId": "A",
           "expr": "60 * sum(rate(payment_webhook_failures_total{provider=~\"$provider\"}[$interval]))"
         }
       ],
       "fieldConfig": {
-        "defaults": { "unit": "short", "decimals": 2, "color": { "mode": "thresholds" },
-          "thresholds": { "mode": "absolute", "steps": [
-            { "color": "green", "value": null }, { "color": "yellow", "value": 1 }, { "color": "red", "value": 6 }
-          ] }
+        "defaults": {
+          "unit": "short",
+          "decimals": 2,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 6
+              }
+            ]
+          }
         }
       },
-      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "textMode": "auto", "graphMode": "area" }
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "textMode": "auto",
+        "graphMode": "area"
+      }
     },
     {
-      "id": 3, "type": "stat", "title": "Duplicate ratio (last $interval)",
-      "gridPos": { "x": 12, "y": 0, "w": 6, "h": 4 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "id": 3,
+      "type": "stat",
+      "title": "Duplicate ratio (last $interval)",
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "targets": [
-        { "refId": "A",
+        {
+          "refId": "A",
           "expr": "sum(rate(payment_webhook_duplicates_total{provider=~\"$provider\"}[$interval])) / clamp_min(sum(rate(payment_webhook_total{provider=~\"$provider\"}[$interval])), 1)"
         }
       ],
       "fieldConfig": {
-        "defaults": { "unit": "percentunit", "decimals": 2, "color": { "mode": "thresholds" },
-          "thresholds": { "mode": "absolute", "steps": [
-            { "color": "green", "value": null }, { "color": "yellow", "value": 0.2 }, { "color": "red", "value": 0.5 }
-          ] }
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 2,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.2
+              },
+              {
+                "color": "red",
+                "value": 0.5
+              }
+            ]
+          }
         }
       },
-      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "textMode": "auto", "graphMode": "area" }
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "textMode": "auto",
+        "graphMode": "area"
+      }
     },
     {
-      "id": 4, "type": "stat", "title": "DB pool utilization",
-      "gridPos": { "x": 18, "y": 0, "w": 6, "h": 4 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "id": 4,
+      "type": "stat",
+      "title": "DB pool utilization",
+      "gridPos": {
+        "x": 18,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "targets": [
-        { "refId": "A",
+        {
+          "refId": "A",
           "expr": "sum(pg_pool_in_use) / clamp_min(sum(pg_pool_size), 1)"
         }
       ],
       "fieldConfig": {
-        "defaults": { "unit": "percentunit", "decimals": 2, "color": { "mode": "thresholds" },
-          "thresholds": { "mode": "absolute", "steps": [
-            { "color": "green", "value": null }, { "color": "yellow", "value": 0.7 }, { "color": "red", "value": 0.9 }
-          ] }
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 2,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.7
+              },
+              {
+                "color": "red",
+                "value": 0.9
+              }
+            ]
+          }
         }
       },
-      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "textMode": "auto", "graphMode": "area" }
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "textMode": "auto",
+        "graphMode": "area"
+      }
     },
     {
-      "id": 5, "type": "timeseries", "title": "Webhook outcomes (per provider)",
-      "gridPos": { "x": 0, "y": 4, "w": 12, "h": 8 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "id": 5,
+      "type": "timeseries",
+      "title": "Webhook outcomes (per provider)",
+      "gridPos": {
+        "x": 0,
+        "y": 4,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "targets": [
-        { "refId": "A", "legendFormat": "{{provider}} / {{outcome}}",
+        {
+          "refId": "A",
+          "legendFormat": "{{provider}} / {{outcome}}",
           "expr": "sum by (provider, outcome) (rate(payment_webhook_total{provider=~\"$provider\"}[$interval]))"
         }
       ],
-      "fieldConfig": { "defaults": { "unit": "ops", "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "fillOpacity": 10, "stacking": { "mode": "normal", "group": "A" } } } },
-      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["lastNotNull", "max"] } }
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          }
+        }
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        }
+      }
     },
     {
-      "id": 6, "type": "timeseries", "title": "Pending payment age (quantiles)",
-      "gridPos": { "x": 12, "y": 4, "w": 12, "h": 8 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "id": 6,
+      "type": "timeseries",
+      "title": "Pending payment age (quantiles)",
+      "gridPos": {
+        "x": 12,
+        "y": 4,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "targets": [
-        { "refId": "A", "legendFormat": "p50", "expr": "payments_pending_age_seconds{quantile=\"0.5\"}" },
-        { "refId": "B", "legendFormat": "p95", "expr": "payments_pending_age_seconds{quantile=\"0.95\"}" },
-        { "refId": "C", "legendFormat": "max", "expr": "payments_pending_age_seconds{quantile=\"0.99\"}" }
+        {
+          "refId": "A",
+          "legendFormat": "p50",
+          "expr": "payments_pending_age_seconds{quantile=\"0.5\"}"
+        },
+        {
+          "refId": "B",
+          "legendFormat": "p95",
+          "expr": "payments_pending_age_seconds{quantile=\"0.95\"}"
+        },
+        {
+          "refId": "C",
+          "legendFormat": "max",
+          "expr": "payments_pending_age_seconds{quantile=\"0.99\"}"
+        }
       ],
-      "fieldConfig": { "defaults": { "unit": "s", "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "fillOpacity": 5 },
-        "thresholds": { "mode": "absolute", "steps": [
-          { "color": "green", "value": null }, { "color": "yellow", "value": 600 }, { "color": "red", "value": 900 }
-        ] } } },
-      "options": { "legend": { "displayMode": "list", "placement": "bottom" } }
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "fillOpacity": 5
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 600
+              },
+              {
+                "color": "red",
+                "value": 900
+              }
+            ]
+          }
+        }
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
     },
     {
-      "id": 7, "type": "timeseries", "title": "DB pool — in use vs configured (per worker)",
-      "gridPos": { "x": 0, "y": 12, "w": 12, "h": 8 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "id": 7,
+      "type": "timeseries",
+      "title": "DB pool \u2014 in use vs configured (per worker)",
+      "gridPos": {
+        "x": 0,
+        "y": 12,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "targets": [
-        { "refId": "A", "legendFormat": "in_use {{instance}}", "expr": "pg_pool_in_use" },
-        { "refId": "B", "legendFormat": "size {{instance}}",   "expr": "pg_pool_size" }
+        {
+          "refId": "A",
+          "legendFormat": "in_use {{instance}}",
+          "expr": "pg_pool_in_use"
+        },
+        {
+          "refId": "B",
+          "legendFormat": "size {{instance}}",
+          "expr": "pg_pool_size"
+        }
       ],
-      "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "line", "lineInterpolation": "stepBefore", "fillOpacity": 5 } } },
-      "options": { "legend": { "displayMode": "list", "placement": "bottom" } }
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "stepBefore",
+            "fillOpacity": 5
+          }
+        }
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
     },
     {
-      "id": 8, "type": "timeseries", "title": "Idempotency-guard hits (duplicate webhooks)",
-      "gridPos": { "x": 12, "y": 12, "w": 12, "h": 8 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "id": 8,
+      "type": "timeseries",
+      "title": "Idempotency-guard hits (duplicate webhooks)",
+      "gridPos": {
+        "x": 12,
+        "y": 12,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "targets": [
-        { "refId": "A", "legendFormat": "{{provider}}",
+        {
+          "refId": "A",
+          "legendFormat": "{{provider}}",
           "expr": "sum by (provider) (rate(payment_webhook_duplicates_total{provider=~\"$provider\"}[$interval]))"
         }
       ],
-      "fieldConfig": { "defaults": { "unit": "ops", "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "fillOpacity": 10 } } },
-      "options": { "legend": { "displayMode": "list", "placement": "bottom" } }
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "fillOpacity": 10
+          }
+        }
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
     }
   ]
 }

@@ -1,14 +1,21 @@
 {
   "id": null,
   "uid": "bluestream-flask-app",
-  "title": "BlueStream — Flask App",
-  "description": "HTTP request rate, error rate, and latency for the Flask backend (business_app). Metrics emitted by prometheus_flask_exporter (defaults_prefix=flask) — see business_app/utils/prometheus_metrics.py.",
-  "tags": ["bluestream", "flask", "http"],
+  "title": "BlueStream \u2014 Flask App",
+  "description": "HTTP request rate, error rate, and latency for the Flask backend (business_app). Metrics emitted by prometheus_flask_exporter (defaults_prefix=flask) \u2014 see business_app/utils/prometheus_metrics.py.",
+  "tags": [
+    "bluestream",
+    "flask",
+    "http"
+  ],
   "timezone": "browser",
   "schemaVersion": 39,
   "version": 1,
   "refresh": "30s",
-  "time": { "from": "now-3h", "to": "now" },
+  "time": {
+    "from": "now-3h",
+    "to": "now"
+  },
   "templating": {
     "list": [
       {
@@ -19,7 +26,11 @@
         "auto_count": 30,
         "auto_min": "30s",
         "query": "30s,1m,5m,10m,30m,1h",
-        "current": { "text": "auto", "value": "$__auto_interval_interval", "selected": true },
+        "current": {
+          "text": "auto",
+          "value": "$__auto_interval_interval",
+          "selected": true
+        },
         "options": [],
         "refresh": 2
       },
@@ -27,160 +38,486 @@
         "name": "method",
         "type": "query",
         "label": "Method",
-        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
         "query": "label_values(flask_http_request_total, method)",
         "multi": true,
         "includeAll": true,
-        "current": { "text": "All", "value": "$__all", "selected": true },
+        "current": {
+          "text": "All",
+          "value": "$__all",
+          "selected": true
+        },
         "refresh": 2
       },
       {
         "name": "status",
         "type": "query",
         "label": "Status class",
-        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
         "query": "label_values(flask_http_request_total, status)",
         "multi": true,
         "includeAll": true,
-        "current": { "text": "All", "value": "$__all", "selected": true },
+        "current": {
+          "text": "All",
+          "value": "$__all",
+          "selected": true
+        },
         "refresh": 2
       }
     ]
   },
   "panels": [
     {
-      "id": 1, "type": "stat", "title": "Requests / sec",
-      "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "id": 1,
+      "type": "stat",
+      "title": "Requests / sec",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "targets": [
-        { "refId": "A", "expr": "sum(rate(flask_http_request_total{method=~\"$method\", status=~\"$status\"}[$interval]))" }
+        {
+          "refId": "A",
+          "expr": "sum(rate(flask_http_request_total{method=~\"$method\", status=~\"$status\"}[$interval]))"
+        }
       ],
       "fieldConfig": {
-        "defaults": { "unit": "reqps", "decimals": 2, "color": { "mode": "thresholds" },
-          "thresholds": { "mode": "absolute", "steps": [
-            { "color": "green", "value": null }, { "color": "yellow", "value": 50 }, { "color": "red", "value": 200 }
-          ] }
+        "defaults": {
+          "unit": "reqps",
+          "decimals": 2,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 50
+              },
+              {
+                "color": "red",
+                "value": 200
+              }
+            ]
+          }
         }
       },
-      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "" }, "textMode": "auto", "graphMode": "area" }
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "textMode": "auto",
+        "graphMode": "area"
+      }
     },
     {
-      "id": 2, "type": "stat", "title": "Error rate (5xx)",
-      "gridPos": { "x": 6, "y": 0, "w": 6, "h": 4 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "id": 2,
+      "type": "stat",
+      "title": "Error rate (5xx)",
+      "gridPos": {
+        "x": 6,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "targets": [
-        { "refId": "A",
+        {
+          "refId": "A",
           "expr": "sum(rate(flask_http_request_total{status=~\"5..\"}[$interval])) / clamp_min(sum(rate(flask_http_request_total[$interval])), 1)"
         }
       ],
       "fieldConfig": {
-        "defaults": { "unit": "percentunit", "decimals": 2, "color": { "mode": "thresholds" },
-          "thresholds": { "mode": "absolute", "steps": [
-            { "color": "green", "value": null }, { "color": "yellow", "value": 0.01 }, { "color": "red", "value": 0.05 }
-          ] }
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 2,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.01
+              },
+              {
+                "color": "red",
+                "value": 0.05
+              }
+            ]
+          }
         }
       },
-      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "textMode": "auto", "graphMode": "area" }
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "textMode": "auto",
+        "graphMode": "area"
+      }
     },
     {
-      "id": 3, "type": "stat", "title": "p95 latency",
-      "gridPos": { "x": 12, "y": 0, "w": 6, "h": 4 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "id": 3,
+      "type": "stat",
+      "title": "p95 latency",
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "targets": [
-        { "refId": "A",
+        {
+          "refId": "A",
           "expr": "histogram_quantile(0.95, sum by (le) (rate(flask_http_request_duration_seconds_bucket{method=~\"$method\", status=~\"$status\"}[$interval])))"
         }
       ],
       "fieldConfig": {
-        "defaults": { "unit": "s", "decimals": 3, "color": { "mode": "thresholds" },
-          "thresholds": { "mode": "absolute", "steps": [
-            { "color": "green", "value": null }, { "color": "yellow", "value": 0.5 }, { "color": "red", "value": 1.5 }
-          ] }
+        "defaults": {
+          "unit": "s",
+          "decimals": 3,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.5
+              },
+              {
+                "color": "red",
+                "value": 1.5
+              }
+            ]
+          }
         }
       },
-      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "textMode": "auto", "graphMode": "area" }
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "textMode": "auto",
+        "graphMode": "area"
+      }
     },
     {
-      "id": 4, "type": "stat", "title": "p99 latency",
-      "gridPos": { "x": 18, "y": 0, "w": 6, "h": 4 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "id": 4,
+      "type": "stat",
+      "title": "p99 latency",
+      "gridPos": {
+        "x": 18,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "targets": [
-        { "refId": "A",
+        {
+          "refId": "A",
           "expr": "histogram_quantile(0.99, sum by (le) (rate(flask_http_request_duration_seconds_bucket{method=~\"$method\", status=~\"$status\"}[$interval])))"
         }
       ],
       "fieldConfig": {
-        "defaults": { "unit": "s", "decimals": 3, "color": { "mode": "thresholds" },
-          "thresholds": { "mode": "absolute", "steps": [
-            { "color": "green", "value": null }, { "color": "yellow", "value": 1.0 }, { "color": "red", "value": 3.0 }
-          ] }
+        "defaults": {
+          "unit": "s",
+          "decimals": 3,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1.0
+              },
+              {
+                "color": "red",
+                "value": 3.0
+              }
+            ]
+          }
         }
       },
-      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "textMode": "auto", "graphMode": "area" }
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "textMode": "auto",
+        "graphMode": "area"
+      }
     },
     {
-      "id": 5, "type": "timeseries", "title": "RPS by status class",
-      "gridPos": { "x": 0, "y": 4, "w": 12, "h": 8 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "id": 5,
+      "type": "timeseries",
+      "title": "RPS by status class",
+      "gridPos": {
+        "x": 0,
+        "y": 4,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "targets": [
-        { "refId": "A", "legendFormat": "{{status}}",
+        {
+          "refId": "A",
+          "legendFormat": "{{status}}",
           "expr": "sum by (status) (rate(flask_http_request_total{method=~\"$method\", status=~\"$status\"}[$interval]))"
         }
       ],
-      "fieldConfig": { "defaults": { "unit": "reqps", "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "fillOpacity": 15, "stacking": { "mode": "normal", "group": "A" } } } },
-      "options": { "legend": { "displayMode": "list", "placement": "bottom" } }
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "fillOpacity": 15,
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          }
+        }
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
     },
     {
-      "id": 6, "type": "timeseries", "title": "Latency p50 / p95 / p99",
-      "gridPos": { "x": 12, "y": 4, "w": 12, "h": 8 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "id": 6,
+      "type": "timeseries",
+      "title": "Latency p50 / p95 / p99",
+      "gridPos": {
+        "x": 12,
+        "y": 4,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "targets": [
-        { "refId": "A", "legendFormat": "p50",
+        {
+          "refId": "A",
+          "legendFormat": "p50",
           "expr": "histogram_quantile(0.50, sum by (le) (rate(flask_http_request_duration_seconds_bucket{method=~\"$method\", status=~\"$status\"}[$interval])))"
         },
-        { "refId": "B", "legendFormat": "p95",
+        {
+          "refId": "B",
+          "legendFormat": "p95",
           "expr": "histogram_quantile(0.95, sum by (le) (rate(flask_http_request_duration_seconds_bucket{method=~\"$method\", status=~\"$status\"}[$interval])))"
         },
-        { "refId": "C", "legendFormat": "p99",
+        {
+          "refId": "C",
+          "legendFormat": "p99",
           "expr": "histogram_quantile(0.99, sum by (le) (rate(flask_http_request_duration_seconds_bucket{method=~\"$method\", status=~\"$status\"}[$interval])))"
         }
       ],
-      "fieldConfig": { "defaults": { "unit": "s", "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "fillOpacity": 5 } } },
-      "options": { "legend": { "displayMode": "list", "placement": "bottom" } }
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "fillOpacity": 5
+          }
+        }
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
     },
     {
-      "id": 7, "type": "table", "title": "Top endpoints by RPS",
-      "gridPos": { "x": 0, "y": 12, "w": 12, "h": 9 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "id": 7,
+      "type": "table",
+      "title": "Top endpoints by RPS",
+      "gridPos": {
+        "x": 0,
+        "y": 12,
+        "w": 12,
+        "h": 9
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "targets": [
-        { "refId": "A", "instant": true, "format": "table", "legendFormat": "",
+        {
+          "refId": "A",
+          "instant": true,
+          "format": "table",
+          "legendFormat": "",
           "expr": "topk(20, sum by (path, method) (rate(flask_http_request_total[$interval])))"
         }
       ],
       "transformations": [
-        { "id": "organize", "options": { "excludeByName": { "Time": true, "__name__": true, "instance": true, "job": true }, "renameByName": { "Value": "RPS" } } }
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "instance": true,
+              "job": true
+            },
+            "renameByName": {
+              "Value": "RPS"
+            }
+          }
+        }
       ],
-      "fieldConfig": { "defaults": { "custom": { "displayMode": "auto" } }, "overrides": [
-        { "matcher": { "id": "byName", "options": "RPS" },
-          "properties": [ { "id": "unit", "value": "reqps" }, { "id": "decimals", "value": 2 } ] }
-      ] }
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "displayMode": "auto"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "RPS"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "reqps"
+              },
+              {
+                "id": "decimals",
+                "value": 2
+              }
+            ]
+          }
+        ]
+      }
     },
     {
-      "id": 8, "type": "table", "title": "Top endpoints by p95 latency",
-      "gridPos": { "x": 12, "y": 12, "w": 12, "h": 9 },
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "id": 8,
+      "type": "table",
+      "title": "Top endpoints by p95 latency",
+      "gridPos": {
+        "x": 12,
+        "y": 12,
+        "w": 12,
+        "h": 9
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "targets": [
-        { "refId": "A", "instant": true, "format": "table", "legendFormat": "",
+        {
+          "refId": "A",
+          "instant": true,
+          "format": "table",
+          "legendFormat": "",
           "expr": "topk(20, histogram_quantile(0.95, sum by (le, path, method) (rate(flask_http_request_duration_seconds_bucket[$interval]))))"
         }
       ],
       "transformations": [
-        { "id": "organize", "options": { "excludeByName": { "Time": true, "__name__": true, "instance": true, "job": true, "le": true }, "renameByName": { "Value": "p95 (s)" } } }
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "instance": true,
+              "job": true,
+              "le": true
+            },
+            "renameByName": {
+              "Value": "p95 (s)"
+            }
+          }
+        }
       ],
-      "fieldConfig": { "defaults": { "custom": { "displayMode": "auto" } }, "overrides": [
-        { "matcher": { "id": "byName", "options": "p95 (s)" },
-          "properties": [ { "id": "unit", "value": "s" }, { "id": "decimals", "value": 3 } ] }
-      ] }
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "displayMode": "auto"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "p95 (s)"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "decimals",
+                "value": 3
+              }
+            ]
+          }
+        ]
+      }
     }
   ]
 }

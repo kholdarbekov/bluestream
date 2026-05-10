@@ -47,7 +47,10 @@
       "bars": true,
       "dashLength": 10,
       "dashes": false,
-      "datasource": "loki",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
       "fieldConfig": {
         "defaults": {
           "custom": {},
@@ -137,7 +140,10 @@
       }
     },
     {
-      "datasource": "loki",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
       "fieldConfig": {
         "defaults": {
           "custom": {}
@@ -182,7 +188,10 @@
       {
         "allValue": null,
         "current": {},
-        "datasource": "loki",
+        "datasource": {
+          "type": "loki",
+          "uid": "loki"
+        },
         "definition": "label_values(job)",
         "hide": 0,
         "includeAll": false,

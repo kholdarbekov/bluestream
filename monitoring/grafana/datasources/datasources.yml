@@ -8,7 +8,30 @@
 
 apiVersion: 1
 
+# Alertmanager is listed first so its UID exists in Grafana's datasource
+# registry before anything that might cross-reference it (the Prometheus
+# datasource used to declare `alertmanagerUid: alertmanager`, which races
+# the Alertmanager being provisioned and fails Grafana startup with
+# "Datasource provisioning error: data source not found"). The cross-ref
+# isn't actually needed — Grafana's Alerting UI auto-discovers any
+# alertmanager-typed datasource — so it's gone, but the order convention
+# stays as defense against future re-additions.
 datasources:
+  # Lets Grafana's Alerting → Silences UI manage silences/inhibitions on
+  # the same Alertmanager that backs alertmanager.aqua-element.uz.
+  # handleGrafanaManagedAlerts:false defers all alert ownership to
+  # Prometheus's alert_rules.yml (single source of truth for routes +
+  # receivers).
+  - name: Alertmanager
+    uid: alertmanager
+    type: alertmanager
+    access: proxy
+    url: http://alertmanager:9093
+    editable: false
+    jsonData:
+      implementation: prometheus
+      handleGrafanaManagedAlerts: false
+
   - name: Prometheus
     uid: prometheus
     type: prometheus
@@ -18,11 +41,6 @@ datasources:
     editable: false
     jsonData:
       timeInterval: 30s
-      # Surfaces alerts in the panels that read from this datasource via the
-      # Alerting tab. The Alertmanager datasource below handles silence /
-      # inhibition management; this just renders the firing-alerts list.
-      manageAlerts: true
-      alertmanagerUid: alertmanager
 
   # Loki: zero logs flowing in until the OTel migration plan lands a
   # collector / Promtail. Datasource is wired now so the dashboards in
@@ -37,26 +55,9 @@ datasources:
     jsonData:
       maxLines: 1000
       # Pulls the request_id label out of structured-log lines and turns it
-      # into a clickable cross-link. Once Tempo lands (OTel Phase 1) the
-      # datasourceUid below should be repointed to it.
+      # into a clickable filter. Once Tempo lands (OTel Phase 1), add
+      # `datasourceUid: tempo` here to make this a trace cross-link.
       derivedFields:
         - matcherRegex: 'request_id=([\w-]+)'
           name: RequestID
-          # No datasourceUid yet — this just makes the value clickable as a
-          # filtered Loki query. Add `datasourceUid: tempo` once traces flow.
           url: '$${__value.raw}'
-
-  # Alertmanager datasource — lets Grafana's Alerting → Silences UI manage
-  # silences and inhibitions on the same Alertmanager that backs nginx-
-  # exposed alertmanager.aqua-element.uz. With handleGrafanaManagedAlerts
-  # off, Grafana defers all alert ownership to Prometheus's alert_rules.yml
-  # (single source of truth for routes / receivers).
-  - name: Alertmanager
-    uid: alertmanager
-    type: alertmanager
-    access: proxy
-    url: http://alertmanager:9093
-    editable: false
-    jsonData:
-      implementation: prometheus
-      handleGrafanaManagedAlerts: false

@@ -25,13 +25,13 @@ element.uz         aqua-element.  aqua-element.   aqua-        aqua-element.
   AUTH)                              + RBAC)
 ```
 
-| Subdomain                       | Outer auth (nginx)         | Inner auth                 |
-|---------------------------------|----------------------------|----------------------------|
-| `flower.aqua-element.uz`        | passthrough                | `FLOWER_BASIC_AUTH`        |
-| `prometheus.aqua-element.uz`    | htpasswd_monitoring        | none                       |
-| `loki.aqua-element.uz`          | htpasswd_monitoring        | none                       |
-| `alertmanager.aqua-element.uz`  | htpasswd_monitoring        | none                       |
-| `grafana.aqua-element.uz`       | passthrough                | Grafana admin login + RBAC |
+| Subdomain                       | Outer auth (nginx)              | Inner auth                 |
+|---------------------------------|---------------------------------|----------------------------|
+| `flower.aqua-element.uz`        | passthrough                     | `FLOWER_BASIC_AUTH`        |
+| `prometheus.aqua-element.uz`    | basic auth — `MONITORING_BASIC_AUTH` | none                  |
+| `loki.aqua-element.uz`          | basic auth — `MONITORING_BASIC_AUTH` | none                  |
+| `alertmanager.aqua-element.uz`  | basic auth — `MONITORING_BASIC_AUTH` | none                  |
+| `grafana.aqua-element.uz`       | passthrough                     | Grafana admin login + RBAC |
 
 ## First-time setup
 
@@ -51,28 +51,31 @@ alertmanager   CNAME  aqua-element.uz   ☁ Proxied
 Cloudflare SSL/TLS mode stays at the existing setting (Flexible per
 INF-002). Origin TLS hardening is a separate audit item and not in scope here.
 
-### 2. Generate the htpasswd file (one-time)
+### 2. Set MONITORING_BASIC_AUTH in `.env`
 
 ```bash
-./scripts/manage-monitoring-auth.sh init umar
-# Prompts twice for a password, bcrypt-hashes it, writes to
-# secrets/htpasswd_monitoring (chmod 644 — nginx in container reads it).
+echo "MONITORING_BASIC_AUTH=admin:$(openssl rand -base64 24)" >> .env
 ```
 
-Add additional operators later:
+Format is `user:password` — exactly the same shape as `FLOWER_BASIC_AUTH`.
+On startup, the nginx container's
+[40-monitoring-htpasswd.sh](../nginx/docker-entrypoint.d/40-monitoring-htpasswd.sh)
+materialises an htpasswd file inside the container at
+`/etc/nginx/auth/htpasswd_monitoring`. The password is stored in `{PLAIN}`
+form — no hashing — so what you put in `.env` is what nginx checks against,
+byte-for-byte. The file lives only on the container's overlayfs; nothing
+reaches the host.
+
+To rotate, edit `.env` and recreate nginx (no downtime in the public path —
+the container is recreated in seconds and existing connections drain):
 
 ```bash
-./scripts/manage-monitoring-auth.sh add ops
-./scripts/manage-monitoring-auth.sh rotate umar
-./scripts/manage-monitoring-auth.sh remove ex_employee
-./scripts/manage-monitoring-auth.sh list
+docker compose up -d --force-recreate nginx
 ```
 
-After any change, reload nginx (no downtime):
-
-```bash
-./scripts/manage-monitoring-auth.sh reload
-```
+Single credential covers all three monitoring subdomains. If you need
+per-user accounting later, swap the entrypoint script for an htpasswd
+generator that consumes a file of `user:password` pairs.
 
 ### 3. Generate Grafana admin password
 
@@ -110,9 +113,11 @@ Re-run step (b) any time you rotate the password — the SQL is idempotent.
 ```
 
 `deploy.sh` will:
-- Create empty placeholders for `secrets/htpasswd_monitoring` and
-  `secrets/postgres_monitoring_password` if missing (so Docker bind mounts
-  don't fail), with a warning to populate them.
+- Warn if `MONITORING_BASIC_AUTH` is missing from `.env` (monitoring
+  subdomains will return 401 on every request until set).
+- Create an empty placeholder for `secrets/postgres_monitoring_password`
+  if missing, so the postgres_exporter bind mount doesn't fail (with a
+  warning to populate via [Section 4](#4-generate-the-postgres-monitoring-role-password--apply-role)).
 - `docker compose up -d --build`
 - Wait for `business_app` health
 - Restart nginx (refreshes upstream DNS for the new monitoring containers)
@@ -216,8 +221,9 @@ Routing + receivers: [monitoring/alertmanager.yml](../monitoring/alertmanager.ym
 | Symptom                                                    | Likely cause                                                      | Fix                                                                                                              |
 |------------------------------------------------------------|-------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------|
 | `flower.aqua-element.uz` → 502                             | Flower container down                                              | `docker compose ps flower`; check `FLOWER_BASIC_AUTH` is set                                                     |
-| `prometheus.*` → 500 "auth_basic_user_file: No such…"      | `secrets/htpasswd_monitoring` missing                              | `./scripts/manage-monitoring-auth.sh init <user>`                                                                |
-| `prometheus.*` → 401 with valid creds                      | htpasswd not reloaded after change                                 | `./scripts/manage-monitoring-auth.sh reload`                                                                     |
+| `prometheus.*` → 401 even with the right creds             | nginx still has the previous container's env (compose `restart` keeps env)  | `docker compose up -d --force-recreate nginx`                                                                    |
+| `prometheus.*` → 401 right after editing `.env`            | container hasn't been recreated since the edit                      | `docker compose up -d --force-recreate nginx`                                                                    |
+| All monitoring subdomains 401, never accept any creds      | `MONITORING_BASIC_AUTH` not set or malformed (must be `user:password`) | check `docker compose logs nginx \| grep monitoring-htpasswd`                                                    |
 | Grafana login screen, but `admin` / config password fails  | `GRAFANA_PASSWORD` not set or changed without container restart    | `echo GRAFANA_PASSWORD=… >> .env && docker compose up -d --force-recreate grafana`                               |
 | Postgres dashboard empty                                   | `monitoring_ro` role missing or wrong password                     | Re-run [Section 4](#4-generate-the-postgres-monitoring-role-password--apply-role)                                |
 | Loki dashboards empty                                      | Expected — log shipping is OTel Phase 1, not landed yet            | n/a                                                                                                              |

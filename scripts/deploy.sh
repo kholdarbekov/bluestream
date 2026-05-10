@@ -46,13 +46,13 @@ log "compose files: docker-compose.yml + docker-compose.production.yml"
 # scripts/manage-monitoring-auth.sh, but to keep `up -d` from blowing up we
 # create an empty placeholder. Empty htpasswd is fail-secure: nginx returns
 # 401 on every monitoring-subdomain request until a real entry is added.
-HTPASSWD_FILE="secrets/htpasswd_monitoring"
-if [[ ! -f "$HTPASSWD_FILE" ]]; then
-    warn "$HTPASSWD_FILE missing — creating empty placeholder (all monitoring subdomains will 401)."
-    warn "Run: scripts/manage-monitoring-auth.sh init <user>"
-    mkdir -p "$(dirname "$HTPASSWD_FILE")"
-    : > "$HTPASSWD_FILE"
-    chmod 644 "$HTPASSWD_FILE"
+# Monitoring subdomain auth lives in MONITORING_BASIC_AUTH (env var, in
+# .env). nginx generates the htpasswd file inside the container at start —
+# no host file to placeholder. Warn if the var is missing so the operator
+# knows the monitoring subdomains will 401 on every request.
+if ! grep -q '^MONITORING_BASIC_AUTH=' .env 2>/dev/null; then
+    warn "MONITORING_BASIC_AUTH not set in .env — prometheus/loki/alertmanager will 401 on every request."
+    warn "Add e.g.: echo 'MONITORING_BASIC_AUTH=admin:'\$\(openssl rand -base64 24\) >> .env"
 fi
 
 # Same story for the postgres_exporter monitoring role password — bind-mount

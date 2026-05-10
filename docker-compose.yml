@@ -586,6 +586,14 @@ services:
     image: nginx:1.29-alpine
     ports:
       - "81:80"
+    environment:
+      # MON-SUB: credential for prometheus/loki/alertmanager subdomains.
+      # Format: user:password (same shape as FLOWER_BASIC_AUTH). Consumed
+      # by /docker-entrypoint.d/40-monitoring-htpasswd.sh at container
+      # start, which writes a plaintext htpasswd file to a container-only
+      # path — nothing reaches the host. Update by editing .env and
+      # `docker compose up -d --force-recreate nginx`.
+      - MONITORING_BASIC_AUTH=${MONITORING_BASIC_AUTH:-}
     volumes:
       # Main nginx config
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
@@ -599,12 +607,11 @@ services:
       - nginx_cache:/var/cache/nginx
       # Logs
       - ./logs/nginx:/var/log/nginx
-      # htpasswd for monitoring subdomains (prometheus, loki, alertmanager).
-      # Generated and rotated via scripts/manage-monitoring-auth.sh.
-      # File is gitignored; if missing, all 3 monitoring subdomains return 500
-      # ("auth_basic_user_file: No such file or directory") — see
-      # docs/monitoring_subdomains.md for first-time setup.
-      - ./secrets/htpasswd_monitoring:/etc/nginx/auth/htpasswd_monitoring:ro
+      # MON-SUB: entrypoint script that materialises the htpasswd file from
+      # MONITORING_BASIC_AUTH at container start (see comment on the env
+      # var above). The official nginx-alpine entrypoint auto-runs every
+      # executable in /docker-entrypoint.d/ before launching nginx -g.
+      - ./nginx/docker-entrypoint.d/40-monitoring-htpasswd.sh:/docker-entrypoint.d/40-monitoring-htpasswd.sh:ro
     depends_on:
       business_app:
         condition: service_healthy

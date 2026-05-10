@@ -599,6 +599,12 @@ services:
       - nginx_cache:/var/cache/nginx
       # Logs
       - ./logs/nginx:/var/log/nginx
+      # htpasswd for monitoring subdomains (prometheus, loki, alertmanager).
+      # Generated and rotated via scripts/manage-monitoring-auth.sh.
+      # File is gitignored; if missing, all 3 monitoring subdomains return 500
+      # ("auth_basic_user_file: No such file or directory") — see
+      # docs/monitoring_subdomains.md for first-time setup.
+      - ./secrets/htpasswd_monitoring:/etc/nginx/auth/htpasswd_monitoring:ro
     depends_on:
       business_app:
         condition: service_healthy

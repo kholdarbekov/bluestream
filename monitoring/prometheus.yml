@@ -18,9 +18,12 @@ scrape_configs:
     metrics_path: '/metrics'
     scrape_interval: 30s
 
+  # MON-SUB-01: Scrape via postgres_exporter, not Postgres directly.
+  # Job name kept as `postgres` so the DatabaseConnectionIssues alert
+  # (`up{job="postgres"} == 0` in alert_rules.yml) keeps working.
   - job_name: 'postgres'
     static_configs:
-      - targets: ['postgres:5432']
+      - targets: ['postgres_exporter:9187']
     scrape_interval: 30s
 
   # Scrape redis_exporter (oliver006/redis_exporter), not redis directly:
@@ -39,10 +42,25 @@ scrape_configs:
       - targets: ['celery_exporter:9540']
     scrape_interval: 30s
 
-  # Docker metrics
-  - job_name: 'docker'
+  # MON-SUB-02: host-level metrics (CPU, memory, disk, network).
+  - job_name: 'node'
     static_configs:
-      - targets: ['host.docker.internal:9323']
+      - targets: ['node_exporter:9100']
+    scrape_interval: 30s
+
+  # MON-SUB-03: per-container metrics. Drops the obsolete `docker` job that
+  # tried to scrape host.docker.internal:9323 (only worked when the host
+  # daemon's experimental metrics-addr was enabled).
+  - job_name: 'cadvisor'
+    static_configs:
+      - targets: ['cadvisor:8080']
+    scrape_interval: 30s
+
+  # MON-SUB-04: nginx-prometheus-exporter scrapes /nginx_status (see
+  # nginx/conf.d/sites/00-stub-status.conf, locked to docker bridge subnet).
+  - job_name: 'nginx'
+    static_configs:
+      - targets: ['nginx_exporter:9113']
     scrape_interval: 30s
 
   - job_name: 'alertmanager'

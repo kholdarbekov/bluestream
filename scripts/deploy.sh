@@ -39,6 +39,33 @@ fail() { printf '\033[0;31m[deploy]\033[0m %s\n' "$*" >&2; exit 1; }
 
 log "compose files: docker-compose.yml + docker-compose.production.yml"
 
+# Pre-flight: ensure host-side files that nginx bind-mounts actually exist.
+# A missing source path causes Docker to fail the bind mount with a cryptic
+# error (or, on Linux, silently mount an empty directory). The htpasswd file
+# is gitignored — first-time deploys must initialize it via
+# scripts/manage-monitoring-auth.sh, but to keep `up -d` from blowing up we
+# create an empty placeholder. Empty htpasswd is fail-secure: nginx returns
+# 401 on every monitoring-subdomain request until a real entry is added.
+HTPASSWD_FILE="secrets/htpasswd_monitoring"
+if [[ ! -f "$HTPASSWD_FILE" ]]; then
+    warn "$HTPASSWD_FILE missing — creating empty placeholder (all monitoring subdomains will 401)."
+    warn "Run: scripts/manage-monitoring-auth.sh init <user>"
+    mkdir -p "$(dirname "$HTPASSWD_FILE")"
+    : > "$HTPASSWD_FILE"
+    chmod 644 "$HTPASSWD_FILE"
+fi
+
+# Same story for the postgres_exporter monitoring role password — bind-mount
+# source must exist or compose fails. Real value is set via
+# scripts/manage-secrets.sh + monitoring/postgres/init-monitoring-role.sql.
+PG_MON_PASSWORD_FILE="secrets/postgres_monitoring_password"
+if [[ ! -f "$PG_MON_PASSWORD_FILE" ]]; then
+    warn "$PG_MON_PASSWORD_FILE missing — creating empty placeholder (postgres_exporter will fail until populated)."
+    warn "See docs/monitoring_subdomains.md for the one-time SQL setup."
+    : > "$PG_MON_PASSWORD_FILE"
+    chmod 600 "$PG_MON_PASSWORD_FILE"
+fi
+
 if [[ $NO_BUILD -eq 1 ]]; then
     log "starting services (no rebuild)"
     "${COMPOSE[@]}" up -d

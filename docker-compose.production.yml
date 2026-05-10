@@ -273,10 +273,17 @@ services:
       - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards
       - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources
     environment:
-      # GRAFANA_PASSWORD defaults to `admin` for backwards compatibility —
-      # set it in .env to something real before exposing Grafana to anyone.
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
-      - GF_INSTALL_PLUGINS=grafana-clock-panel,grafana-simple-json-datasource
+      # Grafana is now public at https://grafana.aqua-element.uz so the
+      # admin password is a hard requirement (no `:-admin` default). Also
+      # disable signups + anonymous access; the only login is admin (or
+      # users created via the UI by admin).
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:?GRAFANA_PASSWORD must be set in .env}
+      - GF_SERVER_ROOT_URL=https://grafana.aqua-element.uz
+      - GF_SERVER_DOMAIN=grafana.aqua-element.uz
+      - GF_SERVER_SERVE_FROM_SUB_PATH=false
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_AUTH_ANONYMOUS_ENABLED=false
+      - GF_INSTALL_PLUGINS=grafana-clock-panel,grafana-simple-json-datasource,grafana-piechart-panel
     deploy:
       resources:
         limits:
@@ -285,6 +292,132 @@ services:
         reservations:
           memory: 128M
           cpus: '0.25'
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # MON-SUB-01: postgres_exporter. Replaces the broken `postgres:5432`
+  # direct-scrape job in monitoring/prometheus.yml (Postgres speaks RESP, not
+  # HTTP, and rejects HTTP scrapes as a "Possible SECURITY ATTACK").
+  # Connects via a dedicated `monitoring_ro` role with pg_monitor membership;
+  # password lives in secrets/postgres_monitoring_password and is read by the
+  # exporter via DATA_SOURCE_PASS_FILE (no plaintext in env).
+  postgres_exporter:
+    image: prometheuscommunity/postgres-exporter:latest
+    environment:
+      - DATA_SOURCE_URI=postgres:5432/${POSTGRES_DB:-bluestream_db}?sslmode=disable
+      - DATA_SOURCE_USER=monitoring_ro
+      - DATA_SOURCE_PASS_FILE=/run/secrets/postgres_monitoring_password
+    secrets:
+      - postgres_monitoring_password
+    depends_on:
+      postgres:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+          cpus: '0.1'
+        reservations:
+          memory: 32M
+          cpus: '0.05'
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # MON-SUB-02: node_exporter. Host-level CPU/mem/disk/network metrics.
+  # Required by Grafana dashboard 1860 (Node Exporter Full).
+  # Uses bind mounts (not network_mode: host) so we stay on the bridge with
+  # everyone else; --path.rootfs=/host points the collectors at the host fs.
+  node_exporter:
+    image: prom/node-exporter:latest
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--path.rootfs=/host'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+      - '--collector.filesystem.fs-types-exclude=^(autofs|binfmt_misc|bpf|cgroup2?|configfs|debugfs|devpts|devtmpfs|fusectl|hugetlbfs|iso9660|mqueue|nsfs|overlay|proc|procfs|pstore|rpc_pipefs|securityfs|selinuxfs|squashfs|sysfs|tracefs)$$'
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/host:ro,rslave
+    pid: host
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+          cpus: '0.1'
+        reservations:
+          memory: 32M
+          cpus: '0.05'
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # MON-SUB-03: cAdvisor. Per-container CPU/mem/network metrics. Required by
+  # Grafana dashboard 21154 (Docker overview, 2024 build).
+  # privileged: false but with cap_add + devices so it can read the cgroup
+  # data it needs without a full --privileged.
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:latest
+    command:
+      - '--housekeeping_interval=30s'
+      - '--docker_only=true'
+      - '--store_container_labels=false'
+      - '--whitelisted_container_labels=com.docker.compose.service'
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    devices:
+      - /dev/kmsg
+    cap_add:
+      - SYS_PTRACE
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.3'
+        reservations:
+          memory: 128M
+          cpus: '0.1'
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # MON-SUB-04: nginx-prometheus-exporter. Scrapes the stub_status endpoint
+  # exposed at http://nginx:80/nginx_status (see
+  # nginx/conf.d/sites/00-stub-status.conf — locked down to the docker bridge
+  # network). Required by dashboard 12708.
+  nginx_exporter:
+    image: nginx/nginx-prometheus-exporter:latest
+    command:
+      - '--nginx.scrape-uri=http://nginx:80/nginx_status'
+    depends_on:
+      nginx:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 32M
+          cpus: '0.05'
+        reservations:
+          memory: 16M
+          cpus: '0.02'
     restart: unless-stopped
     logging:
       driver: "json-file"
@@ -321,11 +454,16 @@ volumes:
   grafana_data:
   loki_data:
 
-# INF-003: Alertmanager receiver credential (Slack webhook URL).
-# File-mount secret for plain Docker Compose (non-Swarm). The file must
-# exist at the path below before `docker compose up` — see README or
-# INF-003 setup notes for how to populate it. chmod 600 recommended so
-# only the docker daemon / compose user can read it.
+# File-mount secrets for plain Docker Compose (non-Swarm). Each file must
+# exist before `docker compose up` — see docs/monitoring_subdomains.md and
+# the INF-003 setup notes for how to populate them. chmod 600 recommended.
 secrets:
+  # INF-003: Alertmanager Slack receiver credential.
   slack_webhook_url:
     file: ./secrets/slack_webhook_url.txt
+  # MON-SUB-01: postgres_exporter login for the read-only `monitoring_ro`
+  # role. Generate via `scripts/manage-secrets.sh create postgres_monitoring_password`
+  # then run monitoring/postgres/init-monitoring-role.sql to create the role
+  # in Postgres with this password.
+  postgres_monitoring_password:
+    file: ./secrets/postgres_monitoring_password

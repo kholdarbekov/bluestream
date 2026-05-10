@@ -1,0 +1,62 @@
+# Grafana datasource provisioning (https://grafana.com/docs/grafana/latest/administration/provisioning/#datasources).
+#
+# All three datasources sit on the docker bridge network — proxy access only,
+# no public exposure required from Grafana itself.
+#
+# editable: false freezes the connections so an admin can't accidentally
+# repoint them to a wrong URL via the UI; edits go through this file.
+
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    uid: prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+    jsonData:
+      timeInterval: 30s
+      # Surfaces alerts in the panels that read from this datasource via the
+      # Alerting tab. The Alertmanager datasource below handles silence /
+      # inhibition management; this just renders the firing-alerts list.
+      manageAlerts: true
+      alertmanagerUid: alertmanager
+
+  # Loki: zero logs flowing in until the OTel migration plan lands a
+  # collector / Promtail. Datasource is wired now so the dashboards in
+  # 50-logs/ load without errors and start populating the moment ingest
+  # starts (no Grafana redeploy needed).
+  - name: Loki
+    uid: loki
+    type: loki
+    access: proxy
+    url: http://loki:3100
+    editable: false
+    jsonData:
+      maxLines: 1000
+      # Pulls the request_id label out of structured-log lines and turns it
+      # into a clickable cross-link. Once Tempo lands (OTel Phase 1) the
+      # datasourceUid below should be repointed to it.
+      derivedFields:
+        - matcherRegex: 'request_id=([\w-]+)'
+          name: RequestID
+          # No datasourceUid yet — this just makes the value clickable as a
+          # filtered Loki query. Add `datasourceUid: tempo` once traces flow.
+          url: '$${__value.raw}'
+
+  # Alertmanager datasource — lets Grafana's Alerting → Silences UI manage
+  # silences and inhibitions on the same Alertmanager that backs nginx-
+  # exposed alertmanager.aqua-element.uz. With handleGrafanaManagedAlerts
+  # off, Grafana defers all alert ownership to Prometheus's alert_rules.yml
+  # (single source of truth for routes / receivers).
+  - name: Alertmanager
+    uid: alertmanager
+    type: alertmanager
+    access: proxy
+    url: http://alertmanager:9093
+    editable: false
+    jsonData:
+      implementation: prometheus
+      handleGrafanaManagedAlerts: false

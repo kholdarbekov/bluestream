@@ -10,4 +10,7 @@ providers:
     allowUiUpdates: true
     options:
       path: /etc/grafana/provisioning/dashboards
-      foldersFromFilesStructure: false
+      # MON-SUB: subdirectories under dashboards/ become folders in Grafana
+      # (00-bluestream/ → "00 Bluestream", 10-host-and-docker/ → "10 Host And Docker", ...).
+      # Numeric prefix controls sort order in the Dashboards sidebar.
+      foldersFromFilesStructure: true

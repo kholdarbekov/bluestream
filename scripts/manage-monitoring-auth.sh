@@ -34,10 +34,13 @@ SECRETS_DIR="${SECRETS_DIR:-${REPO_ROOT}/secrets}"
 HTPASSWD_FILE="${SECRETS_DIR}/htpasswd_monitoring"
 HTTPD_IMAGE="httpd:alpine"
 
-log()     { echo -e "${BLUE}[$(date +'%H:%M:%S')] $1${NC}"; }
+# All status output goes to stderr so it never contaminates a captured
+# `$(...)` result — the password-prompt path relies on stdout being
+# password-only.
+log()     { echo -e "${BLUE}[$(date +'%H:%M:%S')] $1${NC}" >&2; }
 error()   { echo -e "${RED}[ERROR] $1${NC}" >&2; }
-warn()    { echo -e "${YELLOW}[WARN]  $1${NC}"; }
-success() { echo -e "${GREEN}[OK]    $1${NC}"; }
+warn()    { echo -e "${YELLOW}[WARN]  $1${NC}" >&2; }
+success() { echo -e "${GREEN}[OK]    $1${NC}" >&2; }
 
 show_help() {
     sed -n '3,20p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
@@ -51,10 +54,16 @@ require_docker() {
 }
 
 prompt_password() {
+    # IMPORTANT: every line of user-facing output in this function MUST go
+    # to stderr. The function returns the password on stdout for capture
+    # by `$(...)`, and command substitution strips *trailing* newlines but
+    # not leading ones — a stray newline on stdout silently prepends to the
+    # captured password and the resulting bcrypt hash won't match the
+    # password the user actually typed.
     local user="$1"
     local pass1 pass2
-    read -r -s -p "Password for ${user}: " pass1; echo
-    read -r -s -p "Confirm password:    " pass2; echo
+    read -r -s -p "Password for ${user}: " pass1; echo >&2
+    read -r -s -p "Confirm password:    " pass2; echo >&2
     if [[ "${pass1}" != "${pass2}" ]]; then
         error "Passwords do not match."
         return 1

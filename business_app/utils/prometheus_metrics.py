@@ -92,22 +92,24 @@ def setup_prometheus_metrics(app) -> PrometheusMetrics:
     - A before_request hook that refreshes the pool gauges on each request so
       scrape snapshots reflect live pool state without a separate poller.
 
-    The existing JSON /metrics endpoint in business_app/utils/monitoring.py was
-    never scrape-compatible with Prometheus. It's left untouched at its legacy
-    path; the route below registers first (Flask picks the first matching rule).
+    The legacy JSON /metrics endpoint that used to live in
+    business_app/utils/monitoring.py has been removed — it had no consumers
+    (Prometheus rejected it as `application/json`, nginx blocks external
+    /metrics, no internal caller) and Flask serves first-registered matching
+    rules, so it was silently shadowing this exporter and breaking every
+    `flask_*` / `payment_webhook_*` dashboard.
     """
     global _flask_exporter
 
-    # Override the legacy route on the rule map so the Prometheus endpoint wins.
-    # We use the exporter's register_endpoint mechanism to attach /metrics.
     _flask_exporter = PrometheusMetrics(
         app,
         defaults_prefix="flask",  # flask_http_request_total etc — matches alert_rules.yml
-        path=None,  # register the endpoint manually below so we can displace the legacy route
+        path=None,  # register the endpoint manually below so we control the route
     )
 
-    # Expose /metrics. In multiproc mode, reading from MultiProcessCollector;
-    # otherwise the default process registry. The exporter handles both.
+    # Expose /metrics. In multiproc mode, reads from MultiProcessCollector
+    # (requires PROMETHEUS_MULTIPROC_DIR set before module import — see
+    # ensure_multiproc_dir below); otherwise the default process registry.
     _flask_exporter.register_endpoint(
         "/metrics",
         app=app,

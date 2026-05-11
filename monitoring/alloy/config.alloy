@@ -1,0 +1,128 @@
+// Grafana Alloy config for shipping logs to Loki.
+//
+// Pipelines:
+//   1. Every Docker container's stdout/stderr → Loki (job="docker").
+//      JSON body parsing extracts `level` as a Loki label so dashboard
+//      filters like `{level="ERROR"}` work without a regex in the query.
+//   2. Nginx access.log + error.log files       → Loki (job="nginx_access"
+//      and "nginx_error"). Stdout from nginx-the-container only carries
+//      startup chatter; the per-request log lines live in the bind-mounted
+//      files at /var/log/nginx/ (mounted into Alloy via compose).
+//
+// Label hygiene (this is the only thing that makes or breaks Loki at scale):
+//   - Labels here = `job`, `container`, `service`, `level`. All low-cardinality.
+//   - `request_id`, `user_id`, anything user-supplied stays INSIDE the log line.
+//     Query those via `|=` substring or `| json` parsing in LogQL — not labels.
+//   - `label_values(job)` is what the 50-logs/loki-logs.json dashboard
+//     templating variable resolves against; the values you'll see are
+//     `docker`, `nginx_access`, `nginx_error`.
+
+// ── 1A. Discover every running container via the local Docker socket ───────
+discovery.docker "containers" {
+  host             = "unix:///var/run/docker.sock"
+  refresh_interval = "10s"
+}
+
+// ── 1B. Turn Docker metadata into Loki labels we'll actually query on ─────
+discovery.relabel "containers" {
+  targets = discovery.docker.containers.targets
+
+  // Scope: only ship logs from THIS compose project's containers. Docker
+  // SD on the host socket enumerates everything running (e.g. other
+  // unrelated b2b_* stacks); without this `keep` rule, Alloy would ship
+  // their logs too — noisy + Loki would reject any with timestamps
+  // older than 7 days (default reject_old_samples_max_age) generating
+  // a flood of 400s during backfill. The `keep` action drops targets
+  // whose source_labels don't match the regex.
+  rule {
+    action        = "keep"
+    source_labels = ["__meta_docker_container_label_com_docker_compose_project"]
+    regex         = "bluestream"
+  }
+
+  // /bluestream-business_app-1 → bluestream-business_app-1
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(.*)"
+    target_label  = "container"
+  }
+
+  // Compose service name (e.g. "business_app", "redis"). Lower cardinality
+  // than container name when you have multiple replicas of the same service.
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label  = "service"
+  }
+
+  // All scraped containers share this single low-cardinality job value;
+  // the 50-logs dashboard's `app` variable will list it.
+  rule {
+    target_label = "job"
+    replacement  = "docker"
+  }
+}
+
+// ── 1C. Tail the discovered containers' logs ──────────────────────────────
+loki.source.docker "containers" {
+  host       = "unix:///var/run/docker.sock"
+  targets    = discovery.relabel.containers.output
+  forward_to = [loki.process.docker_json.receiver]
+}
+
+// ── 1D. Try-parse each line as JSON; promote `level` to a label ────────────
+//   Business_app logs are JSON ({"level": "INFO", ...}); other services
+//   (postgres, redis, nginx start-up) emit plain text. The `stage.json`
+//   silently skips lines that aren't valid JSON, so this is safe to apply
+//   to the merged stream.
+loki.process "docker_json" {
+  forward_to = [loki.write.default.receiver]
+
+  stage.json {
+    expressions = {
+      level = "level",
+    }
+  }
+
+  // Promote the extracted `level` into a Loki label so queries can
+  // filter cheaply: `{job="docker", level="ERROR"}`. If `level` was
+  // missing (plain-text line), the label simply isn't set on that line.
+  stage.labels {
+    values = {
+      level = "",
+    }
+  }
+}
+
+// ── 2A. Find nginx log files ──────────────────────────────────────────────
+local.file_match "nginx" {
+  path_targets = [
+    {
+      __path__ = "/var/log/nginx/access.log",
+      job      = "nginx_access",
+    },
+    {
+      __path__ = "/var/log/nginx/error.log",
+      job      = "nginx_error",
+    },
+  ]
+}
+
+// ── 2B. Tail those files; ship raw lines (no JSON parse) ──────────────────
+loki.source.file "nginx" {
+  targets    = local.file_match.nginx.targets
+  forward_to = [loki.write.default.receiver]
+}
+
+// ── 3. Single writer for both pipelines ────────────────────────────────────
+loki.write "default" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+
+  // External labels added to every pushed stream. Useful when you later
+  // run multiple environments writing to one Loki — set this to e.g.
+  // `env = "prod"` and dashboards can scope by environment.
+  external_labels = {
+    env = "prod",
+  }
+}

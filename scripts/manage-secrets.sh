@@ -200,9 +200,18 @@ create_secret() {
         log "Generated random value for $secret_name"
     fi
 
-    # Write secret to file
+    # Write secret to file.
+    # Mode 0644 (not 0600): Docker Compose v2 file-secrets bind-mount this
+    # file into containers preserving host perms. Containers running as
+    # non-root (e.g. postgres-exporter as `nobody`) need world-read access;
+    # 0600 makes the secret unreadable inside the container, crash-looping
+    # the exporter. Directory perms (0700 on secrets/) still gate host-side
+    # access. Compose's `mode:`/`uid:`/`gid:` overrides on file-secrets are
+    # Swarm-only and silently ignored in plain Compose v2 (verified v2.37.3
+    # warns: "secrets `uid`, `gid` and `mode` are not supported, they will
+    # be ignored").
     echo -n "$secret_value" > "$secret_file"
-    chmod 600 "$secret_file"
+    chmod 644 "$secret_file"
 
     success "Created secret: $secret_name"
 }
@@ -232,9 +241,9 @@ update_secret() {
     # Backup old secret
     cp "$secret_file" "$secret_file.backup.$(date +%s)"
 
-    # Write new secret to file
+    # Write new secret to file (see create_secret for chmod 644 rationale).
     echo -n "$secret_value" > "$secret_file"
-    chmod 600 "$secret_file"
+    chmod 644 "$secret_file"
 
     success "Updated secret: $secret_name"
 }
@@ -426,7 +435,7 @@ generate_all_secrets() {
             esac
 
             echo -n "$secret_value" > "$SECRETS_DIR/$secret"
-            chmod 600 "$SECRETS_DIR/$secret"
+            chmod 644 "$SECRETS_DIR/$secret"  # see create_secret for rationale
             success "Generated secret: $secret"
             ((generated++))
         else

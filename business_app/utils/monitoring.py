@@ -594,22 +594,18 @@ def setup_monitoring(app):
         status_code = 200 if overall_status == "healthy" else 503
         return jsonify(response_data), status_code
 
-    # Metrics endpoint
-    @app.route("/metrics")
-    def metrics_endpoint():
-        """Metrics endpoint for monitoring"""
-        system_data = system_metrics.collect_metrics()
-        app_data = app_metrics.get_metrics_summary()
-        performance_data = performance_logger.get_metrics()
-
-        return jsonify(
-            {
-                "timestamp": datetime.now(UTC).isoformat(),
-                "system": {name: asdict(metric) for name, metric in system_data.items()},
-                "application": app_data,
-                "performance": performance_data,
-            }
-        )
+    # INF-003: the legacy JSON `/metrics` route that used to live here has been
+    # removed. The Prometheus text-format `/metrics` endpoint is registered by
+    # business_app.utils.prometheus_metrics.setup_prometheus_metrics(), called
+    # immediately after setup_monitoring() in business_app/__init__.py. Both
+    # routes targeted the same path; because Flask serves the first-registered
+    # matching rule, the JSON one was silently winning and Prometheus was
+    # rejecting it as `unsupported Content-Type "application/json"`, leaving
+    # all `flask_*` and `payment_webhook_*` dashboards empty. The legacy JSON
+    # payload had no consumers (no Prometheus job, no nginx route, no internal
+    # caller) so it's safe to drop outright; system_metrics / app_metrics /
+    # performance_logger are still exported via the symbols below and remain
+    # available for any future in-process introspection.
 
     app.logger.info("Monitoring system initialized")
 

@@ -448,11 +448,60 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  # Grafana Alloy: log shipper that tails every Docker container's stdout
+  # plus the nginx access/error files and pushes to Loki. Picked over
+  # Promtail because the team's monitoring direction (see comment in
+  # monitoring/grafana/datasources/datasources.yml header) is OTel — Alloy
+  # is the OTel-compatible successor and lets us add traces + metrics
+  # collection later without swapping agents.
+  alloy:
+    image: grafana/alloy:latest
+    command:
+      - run
+      - /etc/alloy/config.alloy
+      - --server.http.listen-addr=0.0.0.0:12345
+      - --storage.path=/var/lib/alloy/data
+    ports:
+      # Alloy UI: shows pipeline state, component health, target lists.
+      # Bind to localhost only — same convention as prometheus/loki/etc.
+      - "127.0.0.1:12345:12345"
+    volumes:
+      # Pipeline config (see monitoring/alloy/config.alloy for the
+      # commented walk-through of each component).
+      - ./monitoring/alloy/config.alloy:/etc/alloy/config.alloy:ro
+      # Docker socket: needed by discovery.docker + loki.source.docker.
+      # Read-only — Alloy only enumerates / streams logs, never executes.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # Nginx files: bind-mounted host dir (same one nginx writes to).
+      # Read-only — Alloy is a tail-er, not a rotator.
+      - ./logs/nginx:/var/log/nginx:ro
+      # State directory (file-tail positions so we don't re-ship the whole
+      # access.log on every restart).
+      - alloy_data:/var/lib/alloy/data
+    depends_on:
+      loki:
+        condition: service_started
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.5'
+        reservations:
+          memory: 64M
+          cpus: '0.1'
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
 volumes:
   prometheus_data:
   alertmanager_data:
   grafana_data:
   loki_data:
+  alloy_data:
 
 # File-mount secrets for plain Docker Compose (non-Swarm). Each file must
 # exist before `docker compose up` — see docs/monitoring_subdomains.md and

@@ -18,6 +18,7 @@ Each file should contain only the secret value (no newlines or extra whitespace)
 - `postgres_password` - PostgreSQL database password
 - `secret_key` - Flask application secret key
 - `telegram_bot_token` - Telegram bot API token
+- `staff_bot_token` - Staff Telegram bot API token
 
 ### Optional Secrets:
 - `payme_secret_key` - PayMe payment gateway secret

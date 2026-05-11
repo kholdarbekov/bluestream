@@ -48,9 +48,18 @@ limits_config:
   retention_period: 720h
   allow_structured_metadata: true
 
+# In Loki 3.x, retention is enforced by the compactor — `retention_period`
+# under `limits_config` above is a no-op until `retention_enabled: true` is
+# set here. Without these three lines old chunks accumulate forever despite
+# the 720h policy. `retention_delete_delay` is a safety window: chunks
+# marked for deletion sit unreferenced for that long before the filesystem
+# is touched, so an accidental policy change is recoverable for 2h.
 compactor:
   working_directory: /loki/compactor
   delete_request_store: filesystem
+  retention_enabled: true
+  retention_delete_delay: 2h
+  compaction_interval: 10m
 
 ruler:
   alertmanager_url: http://localhost:9093

@@ -558,9 +558,11 @@ def create_app(config_class=None):
     setup_monitoring(app)
 
     # Setup Prometheus metrics (INF-003). Registers /metrics in Prometheus
-    # text-format; replaces the legacy JSON /metrics route defined by
-    # setup_monitoring above. prometheus-flask-exporter wins on route collision
-    # because it's registered after.
+    # text-format so Prometheus can scrape `flask_*` request metrics and the
+    # `payment_webhook_*` / DB-pool gauges that the BlueStream dashboards
+    # depend on. The legacy JSON /metrics route in monitoring.py was removed
+    # because Flask serves first-registered matching rules — the JSON one was
+    # silently winning over this exporter despite the registration order.
     from business_app.utils.prometheus_metrics import setup_prometheus_metrics, ensure_multiproc_dir
 
     ensure_multiproc_dir(app)

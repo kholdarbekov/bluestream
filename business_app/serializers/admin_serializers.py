@@ -88,6 +88,7 @@ class UserAdminSchema(BaseModel):
     is_locked: bool = Field(default=False)
     locked_until: Optional[datetime] = None
     two_factor_enabled: bool = Field(default=False)
+    cod_debt_check_exempt: bool = Field(default=False)
 
     # Statistics
     total_orders: int = Field(default=0)
@@ -596,6 +597,7 @@ def serialize_user_admin(user, include_statistics: bool = False) -> Dict[str, An
             "login_attempts": getattr(user, "failed_login_attempts", 0),
             "account_locked_until": user.account_locked_until.isoformat() if user.account_locked_until else None,
             "two_factor_enabled": getattr(user, "two_factor_enabled", False),
+            "cod_debt_check_exempt": bool(getattr(user, "cod_debt_check_exempt", False)),
             "registration_source": user.registration_source,
             "registration_method": getattr(user, "registration_method", None),
             "preferred_language": getattr(user, "preferred_language", None),

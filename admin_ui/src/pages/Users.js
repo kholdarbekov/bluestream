@@ -723,7 +723,8 @@ const Users = () => {
       user_type: user.user_type || 'individual',
       entity_subtype: user.entity_subtype || undefined,
       company_name: user.company_name || '',
-      tax_id: user.tax_id || ''
+      tax_id: user.tax_id || '',
+      cod_debt_check_exempt: !!user.cod_debt_check_exempt
     });
   };
 
@@ -1836,6 +1837,27 @@ const Users = () => {
               'Users created here are for phone orders only. They cannot login to the customer portal.'
             )}
           </div>
+
+          {editingUser && (
+            <>
+              <Divider style={{ margin: '12px 0' }} />
+              <Form.Item
+                name="cod_debt_check_exempt"
+                valuePropName="checked"
+                label={t('ui.users.cod_debt_check_exempt', 'Exempt from COD debt limit')}
+                tooltip={t(
+                  'ui.users.cod_debt_check_exempt_tooltip',
+                  'When enabled, this user can always order with cash on delivery regardless of outstanding COD debts. Use sparingly — bypasses financial safeguards. Every toggle is audited.'
+                )}
+                extra={t(
+                  'ui.users.cod_debt_check_exempt_extra',
+                  'Reserved for trusted customers (close partners, relatives).'
+                )}
+              >
+                <Switch />
+              </Form.Item>
+            </>
+          )}
         </Form>
       </Modal>
     </div>

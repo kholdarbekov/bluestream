@@ -40,6 +40,10 @@ class User(db.Model, TimestampMixin):
     )
     is_verified = Column(Boolean, default=False, index=True)
     is_premium = Column(Boolean, default=False)
+    # When True, this user bypasses the active-COD-debt cap enforced in
+    # CashCollectionService.is_customer_cod_restricted(). Reserved for trusted
+    # customers (close partners) granted a permanent exemption by an admin.
+    cod_debt_check_exempt = Column(Boolean, default=False, nullable=False, server_default="false")
     preferred_language = Column(String(5), default="en")
     preferred_currency = Column(String(3), default="UZS")
     timezone = Column(String(50), default=DISPLAY_TIMEZONE)

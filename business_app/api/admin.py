@@ -1434,6 +1434,11 @@ def update_user(user_id):
                 raw_subtype.strip() if isinstance(raw_subtype, str) and raw_subtype.strip() else None
             )
 
+        # Only forward the COD-exemption flag when the client explicitly sent
+        # it; absence means "leave unchanged" (service treats None that way).
+        if "cod_debt_check_exempt" in data:
+            update_kwargs["cod_debt_check_exempt"] = bool(data.get("cod_debt_check_exempt"))
+
         user = auth_service.update_user_by_admin(**update_kwargs)
 
         return success_response(data={"user": serialize_user_admin(user)}, message="User updated successfully")

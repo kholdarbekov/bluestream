@@ -234,6 +234,120 @@ class TestCashCollectionService:
             with pytest.raises(ValidationError):
                 service.validate_customer_can_use_cod(sample_user.id)
 
+    def test_cod_exempt_customer_bypasses_debt_limit(
+        self,
+        app,
+        db,
+        sample_user,
+        cod_order,
+    ):
+        """Trusted users flagged ``cod_debt_check_exempt`` must always pass COD
+        validation, even with the active-COD-debt count at/above the cap."""
+        with app.app_context():
+            service = CashCollectionService()
+            service.ensure_cod_payment_for_order(cod_order)
+
+            # Two more delivered COD orders -> 3 active debts, well past the cap of 2.
+            for idx in range(2):
+                extra_order = Order(
+                    user_id=sample_user.id,
+                    order_number=f"ORD-EXEMPT-{idx:03d}",
+                    status=OrderStatus.DELIVERED,
+                    subtotal=Decimal("12000.00"),
+                    delivery_fee=Decimal("2000.00"),
+                    discount_amount=Decimal("0.00"),
+                    loyalty_discount=Decimal("0.00"),
+                    total_amount=Decimal("14000.00"),
+                    payment_method=PaymentMethod.CASH,
+                    created_at=datetime.now(UTC),
+                )
+                db.session.add(extra_order)
+                db.session.flush()
+                service.ensure_cod_payment_for_order(extra_order)
+            db.session.commit()
+            user_id = sample_user.id
+
+            # Sanity: without the flag the user is restricted.
+            assert service.get_active_cod_debt_count(user_id) == 3
+            assert service.is_customer_cod_restricted(user_id) is True
+
+            # Flip the admin-granted exemption on. Use a freshly-attached
+            # instance: the sanity checks above issued their own ``User.query``
+            # calls, leaving the original ``sample_user`` reference potentially
+            # detached from the active session.
+            fresh_user = User.query.get(user_id)
+            fresh_user.cod_debt_check_exempt = True
+            db.session.commit()
+
+            assert service.is_customer_cod_restricted(user_id) is False
+            # Should NOT raise.
+            service.validate_customer_can_use_cod(user_id)
+
+    def test_cod_restriction_context_reports_exemption(
+        self,
+        app,
+        db,
+        sample_user,
+        cod_order,
+    ):
+        """get_cod_restriction_context surfaces the admin exemption as
+        cod_restricted=False with a distinct reason and cod_exempt=True,
+        while still reporting the accurate debt count."""
+        with app.app_context():
+            service = CashCollectionService()
+            service.ensure_cod_payment_for_order(cod_order)
+            second_order = Order(
+                user_id=sample_user.id,
+                order_number="ORD-EXEMPT-CTX-001",
+                status=OrderStatus.DELIVERED,
+                subtotal=Decimal("8000.00"),
+                delivery_fee=Decimal("2000.00"),
+                discount_amount=Decimal("0.00"),
+                loyalty_discount=Decimal("0.00"),
+                total_amount=Decimal("10000.00"),
+                payment_method=PaymentMethod.CASH,
+                created_at=datetime.now(UTC),
+            )
+            db.session.add(second_order)
+            db.session.flush()
+            service.ensure_cod_payment_for_order(second_order)
+            db.session.commit()
+            user_id = sample_user.id
+
+            # Fetch a session-attached instance to flip the flag. See
+            # rationale in test_cod_exempt_customer_bypasses_debt_limit.
+            fresh_user = User.query.get(user_id)
+            fresh_user.cod_debt_check_exempt = True
+            db.session.commit()
+
+            context = service.get_cod_restriction_context(user_id)
+
+            assert context["active_cod_debt_count"] == 2
+            assert context["cod_restricted"] is False
+            assert context["cod_exempt"] is True
+            assert context["cod_restriction_reason"] == "customer_is_cod_exempt"
+
+    def test_cod_exempt_flag_independent_of_grocery_store(
+        self,
+        app,
+        db,
+        sample_user,
+    ):
+        """The admin exemption works even when the user is not a grocery store
+        and short-circuits before the debt cap is evaluated."""
+        with app.app_context():
+            service = CashCollectionService()
+            # No debts at all + flag on -> not restricted, reason reflects exemption.
+            sample_user.cod_debt_check_exempt = True
+            db.session.commit()
+
+            assert sample_user.is_grocery_store is False
+            assert service.is_customer_cod_restricted(sample_user.id) is False
+            context = service.get_cod_restriction_context(sample_user.id)
+            assert context["cod_restricted"] is False
+            assert context["cod_exempt"] is True
+            assert context["cod_restriction_reason"] == "customer_is_cod_exempt"
+
     def test_cod_collection_search_includes_staff_user_with_open_cod_debt(
         self,
         app,

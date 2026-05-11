@@ -3319,6 +3319,21 @@ BACKEND_TRANSLATIONS = {
         'uz': 'Bildirishnoma sozlamalari',
         'ru': 'Настройки уведомлений'
     },
+    'ui.users.cod_debt_check_exempt': {
+        'en': 'Exempt from COD debt limit',
+        'uz': 'COD qarz cheklovidan ozod',
+        'ru': 'Освобожден от лимита долгов по наложенному платежу'
+    },
+    'ui.users.cod_debt_check_exempt_tooltip': {
+        'en': 'When enabled, this user can always order with cash on delivery regardless of outstanding COD debts. Use sparingly — bypasses financial safeguards. Every toggle is audited.',
+        'uz': 'Yoqilganda, bu foydalanuvchi to\'lanmagan COD qarzlardan qat\'i nazar har doim yetkazib berishda naqd pul bilan buyurtma bera oladi. Ehtiyot bo\'lib foydalaning — moliyaviy himoyani chetlab o\'tadi. Har bir o\'zgartirish auditga yoziladi.',
+        'ru': 'Если включено, этот пользователь всегда может оформить заказ с оплатой при доставке независимо от непогашенных долгов. Используйте осторожно — обходит финансовые ограничения. Каждое изменение фиксируется в аудите.'
+    },
+    'ui.users.cod_debt_check_exempt_extra': {
+        'en': 'Reserved for trusted customers (close partners, relatives).',
+        'uz': 'Ishonchli mijozlar uchun (yaqin hamkorlar, qarindoshlar).',
+        'ru': 'Только для доверенных клиентов (близкие партнёры, родственники).'
+    },
     'ui.users.delivery_telegram_updates_setting': {
         'en': 'Telegram delivery updates (in transit, arrived)',
         'uz': 'Telegram orqali yetkazib berish yangilanishlari (yo\'lda, yetib bordi)',

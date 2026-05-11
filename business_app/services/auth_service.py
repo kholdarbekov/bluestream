@@ -1098,8 +1098,14 @@ class AuthService:
         tax_id: str = None,
         user_type: str = None,
         entity_subtype: Any = ...,
+        cod_debt_check_exempt: Optional[bool] = None,
     ) -> User:
-        """Update a user from the admin panel using the simplified two-type business model."""
+        """Update a user from the admin panel using the simplified two-type business model.
+
+        ``cod_debt_check_exempt`` is optional: ``None`` (the default) leaves the flag
+        unchanged; passing ``True``/``False`` sets it. Toggling the flag emits a
+        high-severity audit log entry recording the admin who made the change.
+        """
         user = User.query.get(user_id)
         if not user:
             raise NotFoundError("User not found")
@@ -1222,6 +1228,18 @@ class AuthService:
             normalized_company_name = None
             normalized_tax_id = None
 
+        # Track COD-exemption flag change so we can audit-log it after the
+        # transaction commits. Treat ``None`` as "not provided" and skip the
+        # write entirely; only an actual True/False toggles + audits.
+        cod_exempt_changed = False
+        cod_exempt_old_value: Optional[bool] = None
+        if cod_debt_check_exempt is not None:
+            cod_exempt_old_value = bool(user.cod_debt_check_exempt)
+            new_cod_exempt_value = bool(cod_debt_check_exempt)
+            if new_cod_exempt_value != cod_exempt_old_value:
+                user.cod_debt_check_exempt = new_cod_exempt_value
+                cod_exempt_changed = True
+
         user.first_name = first_name.strip()
         user.last_name = last_name.strip() if last_name else None
         user.phone = formatted_phone
@@ -1241,6 +1259,30 @@ class AuthService:
             updated_by_admin_id,
             getattr(user.user_type, "value", user.user_type),
         )
+
+        # Audit the COD-exemption toggle as a sensitive admin action. This
+        # grants/revokes a permanent bypass of the active-COD-debt cap, so
+        # severity is HIGH. ``audit_logger`` captures the acting admin's
+        # user_id from JWT context automatically.
+        if cod_exempt_changed:
+            from business_app.utils.audit_logger import audit_logger
+            from business_app.models.audit import AuditEventType, AuditSeverity
+
+            new_cod_exempt_value = bool(user.cod_debt_check_exempt)
+            audit_logger.log_event(
+                event_type=AuditEventType.USER_UPDATED,
+                action="cod_debt_check_exempt_toggled",
+                severity=AuditSeverity.HIGH,
+                resource_type="user",
+                resource_id=str(user.id),
+                description=(
+                    f"COD debt-check exemption {'enabled' if new_cod_exempt_value else 'disabled'} "
+                    f"for user {user.id} by admin {updated_by_admin_id}."
+                ),
+                old_values={"cod_debt_check_exempt": cod_exempt_old_value},
+                new_values={"cod_debt_check_exempt": new_cod_exempt_value},
+                additional_data={"updated_by_admin_id": updated_by_admin_id},
+            )
 
         return user
 

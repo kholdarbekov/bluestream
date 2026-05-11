@@ -128,9 +128,13 @@ class CashCollectionService:
         return len(self.get_active_cod_payments_for_customer(customer_id))
 
     def is_customer_cod_restricted(self, customer_id: int) -> bool:
-        # Grocery stores carry money debt by design and are exempt from the
-        # active-COD-debt cap.
+        # Admin-granted exemption for trusted customers takes precedence:
+        # they may always use COD regardless of outstanding debts.
+        # Grocery stores carry money debt by design and are also exempt
+        # from the active-COD-debt cap.
         customer = User.query.get(customer_id)
+        if customer and customer.cod_debt_check_exempt:
+            return False
         if customer and customer.is_grocery_store:
             return False
         return self.get_active_cod_debt_count(customer_id) >= self.COD_ACTIVE_DEBT_LIMIT
@@ -138,17 +142,26 @@ class CashCollectionService:
     def get_cod_restriction_context(self, customer_id: int) -> Dict[str, Any]:
         active_debt_count = self.get_active_cod_debt_count(customer_id)
         customer = User.query.get(customer_id)
+        is_cod_exempt = bool(customer and customer.cod_debt_check_exempt)
         is_grocery_store = bool(customer and customer.is_grocery_store)
-        is_restricted = False if is_grocery_store else active_debt_count >= self.COD_ACTIVE_DEBT_LIMIT
+
+        # Order matches is_customer_cod_restricted(): admin exemption first,
+        # then structural grocery-store exemption, then the debt cap.
+        if is_cod_exempt:
+            is_restricted, reason = False, "customer_is_cod_exempt"
+        elif is_grocery_store:
+            is_restricted, reason = False, None
+        elif active_debt_count >= self.COD_ACTIVE_DEBT_LIMIT:
+            is_restricted, reason = True, "customer_has_max_active_cod_debts"
+        else:
+            is_restricted, reason = False, None
+
         return {
             "active_cod_debt_count": active_debt_count,
             "cod_restricted": is_restricted,
             "available_prepayment_balance": float(self.get_customer_prepaid_balance(customer_id)),
-            "cod_restriction_reason": (
-                "customer_has_max_active_cod_debts"
-                if not is_grocery_store and active_debt_count >= self.COD_ACTIVE_DEBT_LIMIT
-                else None
-            ),
+            "cod_restriction_reason": reason,
+            "cod_exempt": is_cod_exempt,
         }
 
     def get_customer_prepaid_balance(self, customer_id: int) -> Decimal:

@@ -26,6 +26,7 @@ from shared.enums import (
     DriverBottleSessionStatus,
     DriverBottleTransferStatus,
     DriverSessionMembershipStatus,
+    UserStatus,
 )
 from business_app.utils.exceptions import ConflictError, NotFoundError, ValidationError
 from business_app.utils.transactions import transactional
@@ -1041,7 +1042,7 @@ class BottleTrackingService:
         drivers = User.query.filter(
             User.role == "delivery_driver",
             User.id != owner_driver_id,
-            User.is_active.is_(True),
+            User.status == UserStatus.ACTIVE,
         ).all()
 
         eligible: List[Dict[str, Any]] = []

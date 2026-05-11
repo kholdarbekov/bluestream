@@ -16,7 +16,7 @@ from business_app.models.order import Order
 from business_app.services.subscription_service import SubscriptionService
 from business_app.services.notification_service import NotificationService
 from business_app.services.order_service import OrderService
-from shared.enums import SubscriptionStatus, OrderStatus, UserRole
+from shared.enums import SubscriptionStatus, OrderStatus, UserRole, UserStatus
 from business_app.utils.helpers import get_current_language
 from business_app import db
 
@@ -720,7 +720,7 @@ def generate_subscription_churn_prediction():
         # Send alerts for high-risk customers
         if high_risk_count > 0:
             admin_users = User.query.filter(
-                User.role.in_([UserRole.ADMIN, UserRole.MANAGER]), User.is_active == True
+                User.role.in_([UserRole.ADMIN, UserRole.MANAGER]), User.status == UserStatus.ACTIVE
             ).all()
 
             notification_service = NotificationService()

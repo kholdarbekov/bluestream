@@ -14,7 +14,7 @@ from business_app.models.order import Order
 from business_app.models.delivery import Delivery
 from business_app.services.analytics_service import AnalyticsService
 from business_app.services.notification_service import NotificationService
-from shared.enums import UserRole
+from shared.enums import UserRole, UserStatus
 from business_app import db
 
 logger = get_task_logger(__name__)
@@ -47,7 +47,9 @@ def generate_daily_analytics_report():
         db.session.commit()
 
         # Send report to management
-        admin_users = User.query.filter(User.role.in_([UserRole.ADMIN, UserRole.MANAGER]), User.is_active == True).all()
+        admin_users = User.query.filter(
+            User.role.in_([UserRole.ADMIN, UserRole.MANAGER]), User.status == UserStatus.ACTIVE
+        ).all()
 
         notification_service = NotificationService()
 
@@ -101,7 +103,9 @@ def generate_weekly_business_report():
         insights = generate_business_insights(report_data)
 
         # Send comprehensive report to management
-        admin_users = User.query.filter(User.role.in_([UserRole.ADMIN, UserRole.MANAGER]), User.is_active == True).all()
+        admin_users = User.query.filter(
+            User.role.in_([UserRole.ADMIN, UserRole.MANAGER]), User.status == UserStatus.ACTIVE
+        ).all()
 
         notification_service = NotificationService()
 
@@ -231,7 +235,7 @@ def update_customer_segments():
                 db.func.max(Order.created_at).label("last_order_date"),
             )
             .outerjoin(Order, Order.user_id == User.id)
-            .filter(User.is_active == True)
+            .filter(User.status == UserStatus.ACTIVE)
             .group_by(User.id)
             .all()
         )
@@ -320,7 +324,7 @@ def generate_churn_prediction_report():
         if high_risk_customers:
             # Send alert to management
             admin_users = User.query.filter(
-                User.role.in_([UserRole.ADMIN, UserRole.MANAGER]), User.is_active == True
+                User.role.in_([UserRole.ADMIN, UserRole.MANAGER]), User.status == UserStatus.ACTIVE
             ).all()
 
             notification_service = NotificationService()
@@ -383,7 +387,9 @@ def generate_demand_forecast():
         total_predicted_orders = sum(p["predicted_orders"] for p in forecast["predictions"])
 
         # Send forecast to operations team
-        admin_users = User.query.filter(User.role.in_([UserRole.ADMIN, UserRole.MANAGER]), User.is_active == True).all()
+        admin_users = User.query.filter(
+            User.role.in_([UserRole.ADMIN, UserRole.MANAGER]), User.status == UserStatus.ACTIVE
+        ).all()
 
         notification_service = NotificationService()
 
@@ -457,7 +463,7 @@ def calculate_customer_lifetime_value():
         clv_data = analytics_service._get_customer_lifetime_value_analysis()
 
         # Update individual customer CLV scores
-        customers = User.query.filter_by(is_active=True).all()
+        customers = User.query.filter(User.status == UserStatus.ACTIVE).all()
         updated_customers = 0
 
         for customer in customers:
@@ -608,7 +614,7 @@ def monitor_business_kpis():
         # Send alerts if any issues found
         if alerts:
             admin_users = User.query.filter(
-                User.role.in_([UserRole.ADMIN, UserRole.MANAGER]), User.is_active == True
+                User.role.in_([UserRole.ADMIN, UserRole.MANAGER]), User.status == UserStatus.ACTIVE
             ).all()
 
             notification_service = NotificationService()

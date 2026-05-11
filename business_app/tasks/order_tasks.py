@@ -17,7 +17,7 @@ from business_app.services.order_service import OrderService
 from business_app.services.notification_service import NotificationService
 from business_app.services.analytics_service import AnalyticsService
 from business_app.utils.constants import NotificationChannel
-from shared.enums import OrderStatus, PaymentStatus, UserRole
+from shared.enums import OrderStatus, PaymentStatus, UserRole, UserStatus
 from business_app.utils.helpers import get_current_language
 from business_app import db
 
@@ -288,7 +288,7 @@ def send_low_stock_alert(self, product_id: int):
 
         # Send alert to admin users
         admin_users = User.query.filter(
-            User.role.in_([UserRole.ADMIN, UserRole.MANAGER]), User.is_active.is_(True)
+            User.role.in_([UserRole.ADMIN, UserRole.MANAGER]), User.status == UserStatus.ACTIVE
         ).all()
 
         notification_service = NotificationService()
@@ -389,7 +389,7 @@ def generate_daily_order_report():
 
         # Send report to management
         admin_users = User.query.filter(
-            User.role.in_([UserRole.ADMIN, UserRole.MANAGER]), User.is_active.is_(True)
+            User.role.in_([UserRole.ADMIN, UserRole.MANAGER]), User.status == UserStatus.ACTIVE
         ).all()
 
         notification_service = NotificationService()
@@ -759,7 +759,7 @@ def monitor_order_anomalies():
 
         if high_severity_anomalies:
             admin_users = User.query.filter(
-                User.role.in_([UserRole.ADMIN, UserRole.MANAGER]), User.is_active.is_(True)
+                User.role.in_([UserRole.ADMIN, UserRole.MANAGER]), User.status == UserStatus.ACTIVE
             ).all()
 
             notification_service = NotificationService()

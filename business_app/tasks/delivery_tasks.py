@@ -8,7 +8,7 @@ from celery.utils.log import get_task_logger
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Any
 
-from business_app.models.delivery import Delivery
+from business_app.models.delivery import Delivery, DeliveryPerson
 from business_app.models.user import User
 from business_app.services.delivery_service import DeliveryService
 from business_app.services.analytics_service import AnalyticsService
@@ -37,8 +37,13 @@ def auto_assign_delivery_task(self, delivery_id: int):
             logger.info(f"Delivery {delivery_id} is no longer scheduled")
             return {"success": False, "error": "Delivery no longer scheduled"}
 
-        # Find available drivers
-        available_drivers = User.query.filter(User.role == UserRole.DELIVERY_DRIVER, User.is_active == True).all()
+        # Find available drivers via the DeliveryPerson profile (matches the
+        # pattern used by `evaluate_pool_insertion_suggestions_task`).
+        candidate_drivers = DeliveryPerson.query.filter(
+            DeliveryPerson.is_active.is_(True),
+            DeliveryPerson.is_available.is_(True),
+        ).all()
+        available_drivers = [d for d in candidate_drivers if d.is_working_now]
 
         delivery_service = DeliveryService()
 
@@ -49,7 +54,7 @@ def auto_assign_delivery_task(self, delivery_id: int):
         import random
 
         for driver in available_drivers:
-            if delivery_service._is_driver_available(driver.id):
+            if delivery_service._is_driver_available(driver.user_id):
                 # TODO: Replace with real GPS-based distance calculation when driver location tracking is implemented
                 distance = random.uniform(1.0, 10.0)
 
@@ -58,15 +63,15 @@ def auto_assign_delivery_task(self, delivery_id: int):
                     best_driver = driver
 
         if best_driver:
-            # Assign delivery
-            delivery_service.assign_delivery_driver(delivery_id, best_driver.id)
+            # Assign delivery (assign_delivery_driver expects the User id)
+            delivery_service.assign_delivery_driver(delivery_id, best_driver.user_id)
 
-            logger.info(f"Delivery {delivery_id} auto-assigned to driver {best_driver.id}")
+            logger.info(f"Delivery {delivery_id} auto-assigned to driver {best_driver.user_id}")
             return {
                 "success": True,
                 "delivery_id": delivery_id,
-                "driver_id": best_driver.id,
-                "driver_name": f"{best_driver.first_name} {best_driver.last_name}",
+                "driver_id": best_driver.user_id,
+                "driver_name": best_driver.full_name,
             }
         else:
             logger.warning(f"No available drivers found for delivery {delivery_id}")

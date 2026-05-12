@@ -516,6 +516,215 @@ class CashCollectionService:
             "items": items,
         }
 
+    def get_customer_prepayment_history(
+        self,
+        customer_id: int,
+        *,
+        include_voided: bool = True,
+        include_fully_applied: bool = True,
+        limit: int = 200,
+    ) -> Dict[str, Any]:
+        """Return a customer's full COD cash-collection ledger with allocations.
+
+        The result powers the admin "Customer Prepayments" view. It surfaces every
+        cash collection event for the customer alongside the allocations that
+        consumed (or are reserving) each event, plus aggregate totals.
+
+        Args:
+            customer_id: The customer's user id.
+            include_voided: Include voided events when True (default). The UI
+                visually mutes them.
+            include_fully_applied: Include events whose ``unapplied_amount`` is 0
+                (i.e. fully consumed) when True. Default True so admins see the
+                complete history; pass False to focus on events with credit left.
+            limit: Maximum number of events to return (clamped 1..1000).
+        """
+        customer = User.query.get(customer_id)
+        if not customer:
+            raise NotFoundError("Customer not found")
+
+        safe_limit = max(1, min(int(limit or 200), 1000))
+
+        query = CashCollectionEvent.query.options(
+            joinedload(CashCollectionEvent.allocations)
+            .joinedload(CashCollectionAllocation.payment)
+            .joinedload(Payment.order),
+            joinedload(CashCollectionEvent.order),
+        ).filter(CashCollectionEvent.customer_id == customer_id)
+
+        if not include_voided:
+            query = query.filter(CashCollectionEvent.voided_at.is_(None))
+        if not include_fully_applied:
+            query = query.filter(CashCollectionEvent.unapplied_amount > 0)
+
+        events = (
+            query.order_by(
+                CashCollectionEvent.occurred_at.desc(),
+                CashCollectionEvent.id.desc(),
+            )
+            .limit(safe_limit)
+            .all()
+        )
+
+        # Lifetime aggregates are computed without limit/filters so the headline
+        # numbers always reflect the customer's full COD history. Voided events
+        # are excluded (they did not actually collect cash).
+        lifetime_row = (
+            db.session.query(
+                func.coalesce(func.sum(CashCollectionEvent.amount), Decimal("0.00")).label("lifetime_collected"),
+                func.coalesce(func.sum(CashCollectionEvent.unapplied_amount), Decimal("0.00")).label(
+                    "lifetime_unapplied"
+                ),
+            )
+            .filter(
+                CashCollectionEvent.customer_id == customer_id,
+                CashCollectionEvent.voided_at.is_(None),
+            )
+            .one()
+        )
+        lifetime_collected = self._to_decimal(lifetime_row.lifetime_collected)
+        lifetime_unapplied = self._to_decimal(lifetime_row.lifetime_unapplied)
+        lifetime_applied = lifetime_collected - lifetime_unapplied
+        if lifetime_applied < Decimal("0.00"):
+            # Defensive: allocations cannot exceed collections, but keep the
+            # public field non-negative if a data anomaly slips through.
+            lifetime_applied = Decimal("0.00")
+
+        serialized_events: List[Dict[str, Any]] = []
+        for event in events:
+            allocations_payload: List[Dict[str, Any]] = []
+            for allocation in sorted(
+                event.allocations or [],
+                key=lambda a: (a.allocated_at or datetime.now(UTC), a.id or 0),
+            ):
+                payment = allocation.payment
+                order = payment.order if payment else None
+                allocations_payload.append(
+                    {
+                        "id": allocation.id,
+                        "payment_id": allocation.payment_id,
+                        "order_id": allocation.order_id,
+                        "order_number": order.order_number if order else None,
+                        "order_status": (
+                            order.status.value
+                            if order and hasattr(order.status, "value")
+                            else getattr(order, "status", None)
+                        ),
+                        "allocated_amount": float(allocation.allocated_amount or 0),
+                        "allocation_mode": allocation.allocation_mode,
+                        "allocated_at": (allocation.allocated_at.isoformat() if allocation.allocated_at else None),
+                        "reversed_at": (allocation.reversed_at.isoformat() if allocation.reversed_at else None),
+                        "reversal_reason": allocation.reversal_reason,
+                    }
+                )
+
+            serialized_events.append(
+                {
+                    "id": event.id,
+                    "event_id": event.event_id,
+                    "amount": float(event.amount or 0),
+                    "unapplied_amount": float(event.unapplied_amount or 0),
+                    "currency": event.currency,
+                    "source": (event.source.value if hasattr(event.source, "value") else event.source),
+                    "occurred_at": event.occurred_at.isoformat() if event.occurred_at else None,
+                    "notes": event.notes,
+                    "voided_at": event.voided_at.isoformat() if event.voided_at else None,
+                    "void_reason": event.void_reason,
+                    "collector_user_id": event.collector_user_id,
+                    "recorded_by_user_id": event.recorded_by_user_id,
+                    "order_id": event.order_id,
+                    "order_number": event.order.order_number if event.order else None,
+                    "allocations": allocations_payload,
+                }
+            )
+
+        return {
+            "customer_id": customer_id,
+            "first_name": customer.first_name,
+            "last_name": customer.last_name,
+            "phone": customer.phone,
+            "available_prepayment_balance": float(self.get_customer_prepaid_balance(customer_id)),
+            "lifetime_collected": float(lifetime_collected),
+            "lifetime_applied": float(lifetime_applied),
+            "events": serialized_events,
+        }
+
+    def list_customers_with_prepayment_balance(
+        self,
+        *,
+        limit: int = 200,
+        search: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """Return customers carrying an unapplied COD over-collection balance.
+
+        Mirrors :meth:`list_users_with_open_cod_debts` but aggregates
+        ``unapplied_amount`` from non-voided ``CashCollectionEvent`` rows.
+        """
+        safe_limit = max(1, min(int(limit or 200), 1000))
+
+        balance_expr = func.coalesce(func.sum(CashCollectionEvent.unapplied_amount), Decimal("0.00"))
+        last_collection_expr = func.max(CashCollectionEvent.occurred_at)
+
+        query = (
+            db.session.query(
+                User.id.label("user_id"),
+                User.first_name,
+                User.last_name,
+                User.phone,
+                User.role,
+                User.user_type,
+                balance_expr.label("available_prepayment_balance"),
+                last_collection_expr.label("last_collection_at"),
+            )
+            .join(CashCollectionEvent, CashCollectionEvent.customer_id == User.id)
+            .filter(
+                CashCollectionEvent.voided_at.is_(None),
+                CashCollectionEvent.unapplied_amount > 0,
+            )
+        )
+
+        if search:
+            normalized = f"%{search.strip().lower()}%"
+            query = query.filter(
+                db.or_(
+                    func.lower(User.first_name).like(normalized),
+                    func.lower(User.last_name).like(normalized),
+                    func.lower(User.phone).like(normalized),
+                )
+            )
+
+        rows = (
+            query.group_by(
+                User.id,
+                User.first_name,
+                User.last_name,
+                User.phone,
+                User.role,
+                User.user_type,
+            )
+            .order_by(balance_expr.desc(), last_collection_expr.desc(), User.id.asc())
+            .limit(safe_limit)
+            .all()
+        )
+
+        items: List[Dict[str, Any]] = []
+        for row in rows:
+            role_value = row.role.value if hasattr(row.role, "value") else row.role
+            user_type_value = row.user_type.value if hasattr(row.user_type, "value") else row.user_type
+            items.append(
+                {
+                    "id": int(row.user_id),
+                    "first_name": row.first_name,
+                    "last_name": row.last_name,
+                    "phone": row.phone,
+                    "role": role_value,
+                    "user_type": user_type_value,
+                    "available_prepayment_balance": float(row.available_prepayment_balance or 0),
+                    "last_collection_at": (row.last_collection_at.isoformat() if row.last_collection_at else None),
+                }
+            )
+        return items
+
     def get_order_payment_timeline(self, order_id: int) -> Dict[str, Any]:
         order = Order.query.options(joinedload(Order.payment)).get(order_id)
         if not order:

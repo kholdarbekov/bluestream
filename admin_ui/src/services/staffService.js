@@ -160,6 +160,29 @@ class StaffServiceClass {
     return api.get(`/admin/staff/cash-reconciliation/customers/${customerId}/statement`);
   }
 
+  /**
+   * Fetch a customer's full COD cash-collection ledger.
+   * @param {number} customerId
+   * @param {Object} [params] - { include_voided: 0|1, include_fully_applied: 0|1, limit }
+   */
+  getCustomerPrepaymentHistory(customerId, params = {}) {
+    return api.get(
+      `/admin/staff/cash-reconciliation/customers/${customerId}/prepayment-history`,
+      { params },
+    );
+  }
+
+  /**
+   * List customers carrying an unapplied COD over-collection (prepayment) balance.
+   * @param {Object} [params] - { limit, search }
+   */
+  listCustomersWithPrepaymentBalance(params = {}) {
+    return api.get(
+      '/admin/staff/cash-reconciliation/customers/with-prepayment-balance',
+      { params },
+    );
+  }
+
   getOrderPaymentTimeline(orderId) {
     return api.get(`/admin/staff/cash-reconciliation/orders/${orderId}/timeline`);
   }

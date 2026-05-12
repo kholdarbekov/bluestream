@@ -1106,11 +1106,25 @@
     "rule": "/api/v1/admin/staff/cash-reconciliation/collections"
   },
   {
+    "endpoint": "admin.get_customer_prepayment_history_admin",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/staff/cash-reconciliation/customers/<int:customer_id>/prepayment-history"
+  },
+  {
     "endpoint": "admin.get_customer_cod_statement_admin",
     "methods": [
       "GET"
     ],
     "rule": "/api/v1/admin/staff/cash-reconciliation/customers/<int:customer_id>/statement"
+  },
+  {
+    "endpoint": "admin.list_customers_with_prepayment_balance_admin",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/staff/cash-reconciliation/customers/with-prepayment-balance"
   },
   {
     "endpoint": "admin.get_order_payment_timeline_admin",

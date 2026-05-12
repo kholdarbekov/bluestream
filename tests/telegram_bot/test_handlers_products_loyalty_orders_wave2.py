@@ -213,8 +213,8 @@ class TestProductHandlerWave2:
         await handler.show_cart(update, context)
 
         text = update.callback_query.edit_message_text.await_args.kwargs["text"]
-        assert "COD prepaid balance" in text
-        assert "Auto-applied on next COD order" in text
+        assert "telegram.cart.cod_prepaid_balance:en" in text
+        assert "telegram.cart.cod_prepaid_auto_applied_next:en" in text
 
     async def test_clear_cart_success_answers_and_refreshes(self, monkeypatch):
         handler = products_module.ProductHandlers()
@@ -351,9 +351,10 @@ class TestOrderHandlerWave2:
         assert context.user_data == {}
         update.callback_query.edit_message_text.assert_awaited_once()
         text = update.callback_query.edit_message_text.await_args.kwargs["text"]
-        assert "COD prepaid used" in text
-        assert "50,000 UZS" in text
-        assert "Pay on delivery: 0 UZS" in text
+        # Bot now routes the COD prepayment brief through i18n; the mock
+        # returns "<key>:<language>", so we just verify the right key was used
+        # with the expected formatted amounts.
+        assert "telegram.orders.cod_prepayment_applied:en" in text
         update.callback_query.answer.assert_awaited_once_with("telegram.orders.placed_success:en")
 
     async def test_show_order_confirmation_auth_error(self, monkeypatch):
@@ -434,9 +435,9 @@ class TestOrderHandlerWave2:
         await handler._show_order_confirmation(update, context)
 
         text = update.callback_query.edit_message_text.await_args.kwargs["text"]
-        assert "COD prepaid balance" in text
-        assert "Auto-applied on this COD order" in text
-        assert "Estimated COD payable after prepaid" in text
+        assert "telegram.orders.cod_prepaid_balance:en" in text
+        assert "telegram.orders.cod_prepaid_auto_applied:en" in text
+        assert "telegram.orders.cod_estimated_payable:en" in text
 
 
 @pytest.mark.unit

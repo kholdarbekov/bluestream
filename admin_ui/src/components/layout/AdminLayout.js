@@ -174,6 +174,10 @@ const AdminLayout = ({ children }) => {
         {
           key: '/staff/management',
           label: t('ui.nav.staff_management')
+        },
+        {
+          key: '/staff/prepayments',
+          label: t('ui.nav.prepayments', 'Customer Prepayments')
         }
       ]
     },

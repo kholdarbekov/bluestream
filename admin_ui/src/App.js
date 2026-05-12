@@ -26,6 +26,7 @@ import TimeSlots from './pages/TimeSlots';
 import DeliveryPersons from './pages/DeliveryPersons';
 import Operators from './pages/Operators';
 import StaffManagement from './pages/StaffManagement';
+import Prepayments from './pages/Prepayments';
 import { useAuthStore } from './stores/authStore';
 import ProtectedRoute from './components/common/ProtectedRoute';
 
@@ -70,6 +71,7 @@ function App() {
                   <Route path="/staff/delivery-persons" element={<DeliveryPersons />} />
                   <Route path="/staff/operators" element={<Operators />} />
                   <Route path="/staff/management" element={<StaffManagement />} />
+                  <Route path="/staff/prepayments" element={<Prepayments />} />
                 </Routes>
               </AdminLayout>
             </ProtectedRoute>

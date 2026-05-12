@@ -10940,6 +10940,26 @@ def list_cod_collection_users_with_open_debts_admin():
         return internal_error_response("Failed to load users with open COD debts")
 
 
+@admin_bp.route("/staff/cash-reconciliation/customers/with-prepayment-balance", methods=["GET"])
+@jwt_required()
+@manager_or_higher_required
+def list_customers_with_prepayment_balance_admin():
+    """List customers carrying an unapplied COD over-collection (prepayment) balance."""
+    try:
+        from business_app.services.cash_collection_service import CashCollectionService
+
+        limit = request.args.get("limit", 200, type=int)
+        search = request.args.get("search", type=str)
+        items = CashCollectionService().list_customers_with_prepayment_balance(
+            limit=limit,
+            search=search,
+        )
+        return success_response({"items": items, "total": len(items)})
+    except Exception as e:
+        current_app.logger.error(f"Admin prepayment customers listing error: {e}")
+        return internal_error_response("Failed to load customers with prepayment balance")
+
+
 @admin_bp.route("/staff/cash-reconciliation/sessions/<int:session_id>", methods=["GET"])
 @jwt_required()
 @manager_or_higher_required
@@ -11077,6 +11097,40 @@ def get_customer_cod_statement_admin(customer_id):
     except Exception as e:
         current_app.logger.error(f"Get customer COD statement error: {e}")
         return internal_error_response("Failed to load customer COD statement")
+
+
+@admin_bp.route(
+    "/staff/cash-reconciliation/customers/<int:customer_id>/prepayment-history",
+    methods=["GET"],
+)
+@jwt_required()
+@manager_or_higher_required
+def get_customer_prepayment_history_admin(customer_id):
+    """Get a customer's COD cash-collection ledger with allocations."""
+    try:
+        from business_app.services.cash_collection_service import CashCollectionService
+
+        def _coerce_bool(value, default=True):
+            if value is None:
+                return default
+            return str(value).strip().lower() in ("1", "true", "yes", "on")
+
+        include_voided = _coerce_bool(request.args.get("include_voided"), default=True)
+        include_fully_applied = _coerce_bool(request.args.get("include_fully_applied"), default=True)
+        limit = request.args.get("limit", 200, type=int)
+
+        history = CashCollectionService().get_customer_prepayment_history(
+            customer_id,
+            include_voided=include_voided,
+            include_fully_applied=include_fully_applied,
+            limit=limit,
+        )
+        return success_response(data=history)
+    except NotFoundError:
+        return not_found_response("Customer not found")
+    except Exception as e:
+        current_app.logger.error(f"Get customer prepayment history error: {e}")
+        return internal_error_response("Failed to load customer prepayment history")
 
 
 @admin_bp.route("/staff/cash-reconciliation/orders/<int:order_id>/timeline", methods=["GET"])

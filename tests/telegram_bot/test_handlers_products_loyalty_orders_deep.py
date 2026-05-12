@@ -414,7 +414,9 @@ class TestOrderHandlerDeepFlows:
         await handler.address_handler(update, context)
 
         call_kwargs = update.callback_query.edit_message_text.call_args.kwargs
-        assert "Cash on delivery is unavailable because you already have 2 outstanding COD debts." in call_kwargs["text"]
+        # Notice text now flows through i18n; the test mock returns
+        # "<key>:<language>", so we assert on the key the bot used.
+        assert "telegram.orders.cod_restricted_has_debts:en" in call_kwargs["text"]
 
 
 @pytest.mark.unit

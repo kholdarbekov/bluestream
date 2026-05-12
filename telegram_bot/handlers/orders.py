@@ -44,17 +44,18 @@ class OrderHandlers(BaseHandler):
         return payment_methods
 
     @staticmethod
-    def _cod_restriction_notice(restrictions: Dict[str, Any]) -> str:
+    def _cod_restriction_notice(restrictions: Dict[str, Any], language: str) -> str:
         active_debt_count = restrictions.get('active_cod_debt_count') or 0
         if active_debt_count:
-            return (
-                f"Cash on delivery is unavailable because you already have "
-                f"{active_debt_count} outstanding COD debts. Please choose a card payment method."
+            return i18n.get(
+                'telegram.orders.cod_restricted_has_debts',
+                language,
+                active_debt_count=active_debt_count,
             )
-        return "Cash on delivery is temporarily unavailable. Please choose a card payment method."
+        return i18n.get('telegram.orders.cod_restricted_unavailable', language)
 
     @staticmethod
-    def _build_cod_prepayment_brief(cart: Dict[str, Any], order_total: float) -> str:
+    def _build_cod_prepayment_brief(cart: Dict[str, Any], order_total: float, language: str) -> str:
         """Build a short COD prepayment summary for post-order success message."""
         cod_prepayment = (cart or {}).get('cod_prepayment') or {}
         available_balance = float(cod_prepayment.get('available_balance') or 0)
@@ -71,9 +72,11 @@ class OrderHandlers(BaseHandler):
             return ""
 
         payable_after = max(0.0, normalized_order_total - potential_applied)
-        return (
-            f"\n🔁 COD prepaid used: {format_price(potential_applied)} UZS."
-            f" Pay on delivery: {format_price(payable_after)} UZS."
+        return i18n.get(
+            'telegram.orders.cod_prepayment_applied',
+            language,
+            potential_applied=format_price(potential_applied),
+            payable_after=format_price(payable_after),
         )
 
     async def orders_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -540,7 +543,7 @@ class OrderHandlers(BaseHandler):
             payment_text = i18n.get('telegram.orders.select_payment', language)
             restrictions = payment_payload.get('payment_restrictions') or {}
             if restrictions.get('cod_restricted'):
-                payment_text += "\n\n" + self._cod_restriction_notice(restrictions)
+                payment_text += "\n\n" + self._cod_restriction_notice(restrictions, language)
             keyboard = OrderKeyboards.payment_methods(payment_methods, language)
 
             await query.edit_message_text(
@@ -778,7 +781,8 @@ class OrderHandlers(BaseHandler):
                 success_text += "\n\n" + i18n.get('telegram.orders.cash_note', language)
                 success_text += self._build_cod_prepayment_brief(
                     cart=cart,
-                    order_total=order.get('total_amount', 0)
+                    order_total=order.get('total_amount', 0),
+                    language=language,
                 )
 
             keyboard = MenuKeyboards.main_menu(language)
@@ -893,9 +897,21 @@ class OrderHandlers(BaseHandler):
                     or max(0.0, float(cart_total_amount) - potential_applied)
                 )
                 confirmation_text += "\n\n"
-                confirmation_text += f"💳 COD prepaid balance: {format_price(available_balance)} UZS\n"
-                confirmation_text += f"🔁 Auto-applied on this COD order: {format_price(potential_applied)} UZS\n"
-                confirmation_text += f"🧾 Estimated COD payable after prepaid: {format_price(payable_after)} UZS"
+                confirmation_text += i18n.get(
+                    'telegram.orders.cod_prepaid_balance',
+                    language,
+                    available_balance=format_price(available_balance),
+                ) + "\n"
+                confirmation_text += i18n.get(
+                    'telegram.orders.cod_prepaid_auto_applied',
+                    language,
+                    potential_applied=format_price(potential_applied),
+                ) + "\n"
+                confirmation_text += i18n.get(
+                    'telegram.orders.cod_estimated_payable',
+                    language,
+                    payable_after=format_price(payable_after),
+                )
 
         # Block confirm if per-product or order-level minimum isn't met.
         # Mirror products.py / cart_service / order_service rules so the bot

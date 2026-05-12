@@ -36,6 +36,7 @@ import {
 } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
+import { useNavigate } from 'react-router-dom';
 import adminService from '../services/adminService';
 import staffService from '../services/staffService';
 import api from '../services/api';
@@ -77,6 +78,7 @@ const getUserTypeMeta = (t, userType) => {
 const Users = () => {
   // Load users namespace for ui.users.* keys
   const { t } = useTranslation('users');
+  const navigate = useNavigate();
   const [searchText, setSearchText] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [registrationMethodFilter, setRegistrationMethodFilter] = useState('');
@@ -93,6 +95,8 @@ const Users = () => {
   const [notificationSettingsError, setNotificationSettingsError] = useState('');
   const [userCodStatement, setUserCodStatement] = useState(null);
   const [userCodStatementLoading, setUserCodStatementLoading] = useState(false);
+  const [userPrepaymentHistory, setUserPrepaymentHistory] = useState(null);
+  const [userPrepaymentHistoryLoading, setUserPrepaymentHistoryLoading] = useState(false);
   const [isNotificationReasonModalVisible, setIsNotificationReasonModalVisible] = useState(false);
   const [pendingNotificationToggle, setPendingNotificationToggle] = useState(null);
   const [notificationReason, setNotificationReason] = useState('');
@@ -346,6 +350,30 @@ const Users = () => {
       setUserCodStatement(null);
     } finally {
       setUserCodStatementLoading(false);
+    }
+  };
+
+  // Fetch the customer's most recent COD prepayment events + allocations so we
+  // can preview the ledger inline in the user detail modal. The full ledger
+  // lives on /staff/prepayments?customer_id=<id>.
+  const fetchUserPrepaymentHistory = async (user) => {
+    if (!user || user.role !== 'customer') {
+      setUserPrepaymentHistory(null);
+      return;
+    }
+
+    setUserPrepaymentHistoryLoading(true);
+    try {
+      const response = await staffService.getCustomerPrepaymentHistory(user.id, {
+        include_voided: 1,
+        include_fully_applied: 1,
+        limit: 20,
+      });
+      setUserPrepaymentHistory(response?.data?.data || null);
+    } catch (_error) {
+      setUserPrepaymentHistory(null);
+    } finally {
+      setUserPrepaymentHistoryLoading(false);
     }
   };
 
@@ -707,9 +735,11 @@ const Users = () => {
     setNotificationSettings(null);
     setNotificationSettingsError('');
     setUserCodStatement(null);
+    setUserPrepaymentHistory(null);
     fetchUserAddresses(user.id);
     fetchUserNotificationSettings(user.id);
     fetchUserCodStatement(user);
+    fetchUserPrepaymentHistory(user);
   };
 
   const handleEditUser = (user) => {
@@ -1082,19 +1112,29 @@ const Users = () => {
                 ) : userCodStatement ? (
                   <>
                     <Row gutter={[16, 12]} style={{ marginBottom: 12 }}>
-                      <Col xs={24} sm={8}>
+                      <Col xs={24} sm={12} md={6}>
                         <strong>{t('ui.users.active_cod_debt_count', 'Active COD debts')}:</strong>{' '}
                         {userCodStatement.active_cod_debt_count || 0}
                       </Col>
-                      <Col xs={24} sm={8}>
+                      <Col xs={24} sm={12} md={6}>
                         <strong>{t('ui.users.total_outstanding_amount', 'Total outstanding')}:</strong>{' '}
                         {(userCodStatement.total_outstanding_amount || 0).toLocaleString()} UZS
                       </Col>
-                      <Col xs={24} sm={8}>
+                      <Col xs={24} sm={12} md={6}>
                         <strong>{t('ui.users.cod_restricted', 'COD restricted')}:</strong>{' '}
                         <Tag color={userCodStatement.cod_restricted ? 'red' : 'green'}>
                           {userCodStatement.cod_restricted ? t('ui.common.yes', 'Yes') : t('ui.common.no', 'No')}
                         </Tag>
+                      </Col>
+                      <Col xs={24} sm={12} md={6}>
+                        <strong>{t('ui.users.prepayment_balance', 'Prepayment balance')}:</strong>{' '}
+                        {(userCodStatement.available_prepayment_balance || 0) > 0 ? (
+                          <Tag color="green">
+                            {(userCodStatement.available_prepayment_balance || 0).toLocaleString()} UZS
+                          </Tag>
+                        ) : (
+                          <span>{(userCodStatement.available_prepayment_balance || 0).toLocaleString()} UZS</span>
+                        )}
                       </Col>
                     </Row>
 
@@ -1139,6 +1179,97 @@ const Users = () => {
                 ) : (
                   <div style={{ color: '#666' }}>
                     {t('ui.users.no_cod_statement', 'No COD debt found for this customer.')}
+                  </div>
+                )}
+              </Card>
+            )}
+
+            {selectedUser.role === 'customer' && (
+              <Card
+                title={t('ui.users.prepayment_history', 'Prepayment history')}
+                size="small"
+                style={{ marginBottom: 12 }}
+                extra={(
+                  <Button
+                    type="link"
+                    size="small"
+                    onClick={() => navigate(`/staff/prepayments?customer_id=${selectedUser.id}`)}
+                  >
+                    {t('ui.users.view_full_ledger', 'View full ledger')} →
+                  </Button>
+                )}
+              >
+                {userPrepaymentHistoryLoading ? (
+                  <div style={{ textAlign: 'center', padding: '12px 0' }}>
+                    {t('ui.common.loading', 'Loading...')}
+                  </div>
+                ) : userPrepaymentHistory && (userPrepaymentHistory.events || []).length > 0 ? (
+                  <Table
+                    dataSource={userPrepaymentHistory.events || []}
+                    rowKey="id"
+                    pagination={false}
+                    size="small"
+                    rowClassName={(row) => (row.voided_at ? 'prepayment-voided-row' : '')}
+                    columns={[
+                      {
+                        title: t('ui.prepayments.occurred_at', 'When'),
+                        dataIndex: 'occurred_at',
+                        key: 'occurred_at',
+                        render: (value, row) => (
+                          <Space direction="vertical" size={0}>
+                            <span>{value ? formatLocaleDateTime(value) : '—'}</span>
+                            {row.voided_at && (
+                              <Tag color="red" style={{ marginTop: 2 }}>
+                                {t('ui.prepayments.voided', 'Voided')}
+                              </Tag>
+                            )}
+                          </Space>
+                        ),
+                      },
+                      {
+                        title: t('ui.prepayments.source', 'Source'),
+                        dataIndex: 'source',
+                        key: 'source',
+                        render: (value) => (
+                          <Tag style={{ textTransform: 'capitalize' }}>
+                            {String(value || '').replace(/_/g, ' ')}
+                          </Tag>
+                        ),
+                      },
+                      {
+                        title: t('ui.prepayments.collected_amount', 'Collected'),
+                        dataIndex: 'amount',
+                        key: 'amount',
+                        render: (value, row) => (
+                          <span style={row.voided_at ? { textDecoration: 'line-through', color: '#999' } : undefined}>
+                            {`${(value || 0).toLocaleString()} UZS`}
+                          </span>
+                        ),
+                      },
+                      {
+                        title: t('ui.prepayments.unapplied_amount', 'Unapplied'),
+                        dataIndex: 'unapplied_amount',
+                        key: 'unapplied_amount',
+                        render: (value, row) => (
+                          <span
+                            style={row.voided_at
+                              ? { color: '#999' }
+                              : (Number(value) > 0 ? { color: '#389e0d', fontWeight: 600 } : undefined)}
+                          >
+                            {`${(value || 0).toLocaleString()} UZS`}
+                          </span>
+                        ),
+                      },
+                      {
+                        title: t('ui.prepayments.origin_order', 'Origin order'),
+                        key: 'origin_order',
+                        render: (_, row) => row.order_number || '—',
+                      },
+                    ]}
+                  />
+                ) : (
+                  <div style={{ color: '#666' }}>
+                    {t('ui.users.no_prepayment_history', 'No prepayment activity for this customer.')}
                   </div>
                 )}
               </Card>

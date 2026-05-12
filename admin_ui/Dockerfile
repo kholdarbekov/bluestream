@@ -13,6 +13,15 @@ RUN npm ci
 # Copy source code
 COPY . .
 
+# Bake the API base URL into the Vite bundle. Default is the relative path
+# `/api/v1`, which keeps the admin SPA same-origin: served from
+# admin.aqua-element.uz, requests go to admin.aqua-element.uz/api/v1 and
+# hit the relaxed `admin_api_limit` nginx zone (40 r/s, burst 120) instead
+# of the strict public `api_limit` (10 r/s, burst 20). The value flows in
+# via docker-compose's `build.args` so each environment can override it.
+ARG VITE_API_URL=/api/v1
+ENV VITE_API_URL=${VITE_API_URL}
+
 # Build the application
 RUN npm run build
 

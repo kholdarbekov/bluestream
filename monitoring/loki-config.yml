@@ -61,8 +61,26 @@ compactor:
   retention_delete_delay: 2h
   compaction_interval: 10m
 
+# Loki ruler — evaluates alert / recording rules against ingested logs and
+# pushes firing alerts to Alertmanager. `alertmanager_url` uses the Compose
+# service DNS name (single-host bridge network); `localhost` would be the
+# Loki container itself.
+#
+# Rule files live on a read-only bind mount at /etc/loki/rules (see
+# docker-compose.production.yml). With `auth_enabled: false`, the implicit
+# tenant ID is `fake`, so rules go under /etc/loki/rules/fake/*.yml.
 ruler:
-  alertmanager_url: http://localhost:9093
+  alertmanager_url: http://alertmanager:9093
+  enable_alertmanager_v2: true
+  enable_api: true
+  storage:
+    type: local
+    local:
+      directory: /etc/loki/rules
+  rule_path: /tmp/loki/rule-temp
+  ring:
+    kvstore:
+      store: inmemory
 
 # By default, Loki will send anonymous, but uniquely-identifiable usage and configuration
 # analytics to Grafana Labs. These statistics are sent to https://stats.grafana.org/

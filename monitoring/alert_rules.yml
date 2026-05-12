@@ -51,15 +51,23 @@ groups:
           summary: "Business application is down"
           description: "Main business application is not responding to health checks"
 
-      # High error rate
-      - alert: HighErrorRate
-        expr: rate(http_requests_total{status=~"5.."}[5m]) > 0.1
+      # Flask 5xx error ratio. Replaces an earlier alert that referenced a
+      # nonexistent `http_requests_total` metric (silent for the lifetime of
+      # the project). The real series comes from prometheus_flask_exporter
+      # with prefix `flask` — see business_app/utils/prometheus_metrics.py.
+      # Note: nginx-level 5xx (e.g. rate-limit 503s) never reach Flask, so
+      # those are covered separately by the Loki ruler in monitoring/loki/rules.
+      - alert: FlaskHighErrorRate
+        expr: |
+          sum(rate(flask_http_request_total{status=~"5.."}[5m]))
+            / clamp_min(sum(rate(flask_http_request_total[5m])), 1) > 0.05
         for: 5m
         labels:
           severity: warning
+          area: backend
         annotations:
-          summary: "High error rate detected"
-          description: "HTTP 5xx error rate is above 10% for more than 5 minutes"
+          summary: "Flask 5xx rate > 5% (5m)"
+          description: "Flask error ratio sustained above 5% over the last 5 minutes — investigate worker logs and recent deploys."
 
       # Disk space usage
       - alert: DiskSpaceUsage

@@ -32,6 +32,13 @@ max_requests = int(os.environ.get("GUNICORN_MAX_REQUESTS", 1000))
 max_requests_jitter = int(os.environ.get("GUNICORN_MAX_REQUESTS_JITTER", 100))
 timeout = int(os.environ.get("GUNICORN_TIMEOUT", 30))
 keepalive = int(os.environ.get("GUNICORN_KEEPALIVE", 5))
+# Time the master waits between SIGTERM and SIGKILL when recycling a worker
+# (max_requests hit, deploy SIGHUP, etc.). The default 30s was shorter than
+# our worker timeout, so a long request being recycled could be killed
+# mid-response — the client then sees `Connection reset by peer` and nginx
+# returns a 502. Aligning this with GUNICORN_TIMEOUT lets in-flight
+# requests finish cleanly during recycle.
+graceful_timeout = int(os.environ.get("GUNICORN_GRACEFUL_TIMEOUT", 30))
 
 # Preload app for faster worker startup and memory sharing
 preload_app = True

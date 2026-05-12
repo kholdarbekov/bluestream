@@ -162,6 +162,7 @@ services:
       - GUNICORN_WORKER_CONNECTIONS=${GUNICORN_WORKER_CONNECTIONS:-1000}
       - GUNICORN_MAX_REQUESTS=${GUNICORN_MAX_REQUESTS:-1000}
       - GUNICORN_MAX_REQUESTS_JITTER=${GUNICORN_MAX_REQUESTS_JITTER:-100}
+      - GUNICORN_GRACEFUL_TIMEOUT=${GUNICORN_GRACEFUL_TIMEOUT:-30}
     env_file:
       - .env
     volumes:
@@ -553,13 +554,20 @@ services:
     build:
       context: ./admin_ui
       dockerfile: Dockerfile
+      args:
+        # Same-origin API path. Override per-environment by exporting
+        # VITE_API_URL before `docker compose build admin_ui` (e.g. for
+        # staging that hits a different host). See admin_ui/Dockerfile for
+        # the rationale.
+        VITE_API_URL: ${VITE_API_URL:-/api/v1}
     ports:
       - "127.0.0.1:3000:80"
     environment:
-      - REACT_APP_API_URL=${REACT_APP_API_URL:-http://localhost:81/api/v1}
+      # `REACT_APP_*` env vars were a Create-React-App leftover and are
+      # never read by the Vite bundle; the only build-time value that
+      # actually reaches the JS is `VITE_API_URL` above. Runtime vars below
+      # are kept for any future server-side use by the admin_ui nginx.
       - REACT_APP_ENVIRONMENT=${ENVIRONMENT:-development}
-      - REACT_APP_APP_NAME=Aqua Element Admin
-      - REACT_APP_VERSION=1.0.0
       - REACT_APP_TIMEZONE_OFFSET=${DISPLAY_TIMEZONE_OFFSET:-+05:00}
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:80/health" ]

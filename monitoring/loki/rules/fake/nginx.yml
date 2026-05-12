@@ -1,0 +1,46 @@
+# Loki alert rules for the nginx edge. Evaluated by the Loki ruler against
+# the access / error logs shipped by Alloy. Fires through Alertmanager into
+# #alerts-prod (see monitoring/alertmanager.yml).
+#
+# The `fake` tenant prefix on the directory path is required because Loki is
+# running with `auth_enabled: false` — the implicit tenant ID is `fake`.
+groups:
+  - name: nginx-edge
+    interval: 1m
+    rules:
+      # Rate-limit rejections. nginx-prometheus-exporter exposes connection
+      # counters only, no per-status request totals — these 503s would
+      # otherwise be invisible to Alertmanager. The regex captures the zone
+      # name for routing/diagnosis.
+      - alert: NginxRateLimitSpike
+        expr: |
+          sum by (zone) (
+            count_over_time(
+              {service_name="nginx_error"}
+                |~ `limiting requests, excess: [0-9.]+ by zone "(?P<zone>[^"]+)"`
+              [5m]
+            )
+          ) > 50
+        for: 5m
+        labels:
+          severity: warning
+          area: edge
+        annotations:
+          summary: "nginx limit_req rejections > 50 / 5m (zone={{ $labels.zone }})"
+          description: "More than 50 limit_req rejections in 5m on zone {{ $labels.zone }} — likely a frontend fan-out (cold-load translation storm) or an abusive client. Check Loki `{service_name=\"nginx_access\"} |~ \" 503 \"` to see who's getting hit."
+
+      # Upstream 5xx — anything served as 5xx to a real client, regardless of
+      # whether nginx synthesised it (rate-limit, upstream connect failure)
+      # or the upstream produced it. Threshold tuned to the existing
+      # baseline (zeros on a healthy day) with headroom for normal Grafana
+      # restarts which produce a small 502 burst.
+      - alert: NginxUpstream5xxSpike
+        expr: |
+          sum(count_over_time({service_name="nginx_access"} |~ " 5\\d{2} " [5m])) > 20
+        for: 5m
+        labels:
+          severity: warning
+          area: edge
+        annotations:
+          summary: "nginx access log shows > 20 5xx in 5m"
+          description: "Investigate which upstream is failing — query Loki `{service_name=\"nginx_access\"} |~ \" 5\\\\d{2} \"` to identify the offending path and status code."

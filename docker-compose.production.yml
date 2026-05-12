@@ -103,6 +103,11 @@ services:
       - GUNICORN_WORKER_CONNECTIONS=1000
       - GUNICORN_TIMEOUT=60
       - GUNICORN_KEEPALIVE=10
+      # Aligned with GUNICORN_TIMEOUT so a worker being recycled by
+      # max_requests has the full request window to finish in-flight work
+      # before the master sends SIGKILL — avoids the rare 502s caused by
+      # `recv() failed (104: Connection reset by peer)` during handoff.
+      - GUNICORN_GRACEFUL_TIMEOUT=60
       # INF-003: prometheus_client multiprocess shared dir (must be writable
       # by every worker; ephemeral tmpfs is ideal — counters are re-derived
       # on boot).
@@ -189,8 +194,12 @@ services:
           cpus: '0.1'
 
   admin_ui:
+    # API base URL is baked into the Vite bundle at build time via the
+    # `VITE_API_URL` build arg in docker-compose.yml. The default `/api/v1`
+    # is correct for production (relative, same-origin → routes through the
+    # admin.aqua-element.uz nginx server block on the relaxed admin_api_limit
+    # zone). Override only if pointing the admin UI at a different host.
     environment:
-      - REACT_APP_API_URL=${REACT_APP_API_URL:-https://aqua-element.uz/api/v1}
       - REACT_APP_ENVIRONMENT=${ENVIRONMENT:-production}
     deploy:
       resources:
@@ -431,6 +440,10 @@ services:
       - "127.0.0.1:3100:3100"
     volumes:
       - ./monitoring/loki-config.yml:/etc/loki/local-config.yaml
+      # Loki ruler reads alert/recording rules from this path. Rules live
+      # under monitoring/loki/rules/<tenant>/*.yml; with auth_enabled=false
+      # the tenant is `fake`.
+      - ./monitoring/loki/rules:/etc/loki/rules:ro
       - loki_data:/loki
     command: -config.file=/etc/loki/local-config.yaml
     deploy:

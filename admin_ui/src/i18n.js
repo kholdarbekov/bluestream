@@ -25,9 +25,18 @@ i18n
       lookupLocalStorage: 'i18nextLng',
     },
 
-    // Backend options - Load from database via API
+    // Backend options - Load from database via API.
+    //
+    // `allowMultiLoading: true` makes i18next-http-backend join all pending
+    // namespaces with `+` into a single HTTP request, e.g.
+    //   GET /api/v1/translations/uz/common+navigation+dashboard+...
+    // Backend (business_app/api/translations.py) returns the expected
+    // `{lng: {ns: {...}}}` envelope. Without this, i18next would fire 14
+    // parallel requests on every cold load and bust the nginx api_limit
+    // burst window — exactly the bug this change is fixing.
     backend: {
       loadPath: `${API_BASE_URL}/translations/{{lng}}/{{ns}}`,
+      allowMultiLoading: true,
       crossDomain: false,
       withCredentials: true, // Include cookies for authentication
     },

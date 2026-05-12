@@ -109,7 +109,11 @@ const Prepayments = () => {
     }
   }, [historyQuery.error, t]);
 
-  const customersResponse = customersQuery.data?.data ?? customersQuery.data ?? {};
+  // success_response wraps the payload as {success, data: {items, total}} and
+  // axios then nests that under response.data, so the list lives at
+  // ...data.data.data.items. Matches the unwrap pattern in DeliveryReports.js
+  // and Users.js.
+  const customersResponse = customersQuery.data?.data?.data ?? {};
   const customers = useMemo(
     () => customersResponse.items || [],
     [customersResponse.items],
@@ -122,7 +126,7 @@ const Prepayments = () => {
     return { totalCustomers: customers.length, totalBalance };
   }, [customers]);
 
-  const historyResponse = historyQuery.data?.data ?? historyQuery.data ?? null;
+  const historyResponse = historyQuery.data?.data?.data ?? null;
   const selectedRow = customers.find((row) => row.id === selectedCustomerId) || null;
   const drawerName = historyResponse
     ? `${historyResponse.first_name || ''} ${historyResponse.last_name || ''}`.trim()

@@ -361,7 +361,7 @@ def retry_failed_payments():
 
 @shared_task(bind=True, max_retries=2, default_retry_delay=300, time_limit=300, soft_time_limit=270)
 def mark_overdue_cod_reconciliation_sessions(self):
-    """Mark prior-day driver COD reconciliation sessions as overdue."""
+    """Mark active driver COD sessions past the warning window for manager visibility."""
     try:
         from business_app.services.driver_reconciliation_service import DriverReconciliationService
 
@@ -369,7 +369,7 @@ def mark_overdue_cod_reconciliation_sessions(self):
         updated = service.mark_overdue_sessions()
         manager_notifications = service.notify_managers_about_exception_sessions()
         logger.info(
-            "Marked %s driver COD reconciliation sessions as overdue (manager notifications=%s)",
+            "Marked %s driver COD reconciliation sessions as warning-due (manager notifications=%s)",
             updated,
             manager_notifications,
         )

@@ -122,7 +122,7 @@ class StaffServiceClass {
 
   /**
    * Get cash reconciliation report
-   * @param {Object} params - { period: 'day'|'week'|'month', driver_id? }
+   * @param {Object} params - { period: 'day'|'week'|'month', driver_id?, status?, warning_only? }
    */
   getCashReconciliation(params = {}) {
     return api.get('/admin/staff/cash-reconciliation', { params });

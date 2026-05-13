@@ -4,7 +4,7 @@ from datetime import datetime, UTC
 from decimal import Decimal
 from typing import Any, Dict
 
-from sqlalchemy import desc, func
+from sqlalchemy import desc, func, or_
 
 from business_app import db
 from business_app.models.audit import AuditEventType, AuditLog
@@ -457,12 +457,20 @@ class AdminReportService:
             db.session.query(
                 func.count(DriverCashSession.id),
                 func.coalesce(func.sum(DriverCashSession.expected_cash), 0),
+                func.count().filter(DriverCashSession.status == DriverCashSessionStatus.SUBMITTED),
                 func.count().filter(DriverCashSession.status == DriverCashSessionStatus.MISMATCH),
                 func.count().filter(DriverCashSession.status == DriverCashSessionStatus.OVERDUE),
+                func.count().filter(
+                    DriverCashSession.status == DriverCashSessionStatus.OVERDUE,
+                    DriverCashSession.blocked_from_cod.is_(False),
+                ),
             )
             .filter(
-                DriverCashSession.business_date >= start_dt.date(),
                 DriverCashSession.business_date <= end_dt.date(),
+                or_(
+                    DriverCashSession.session_ended_at.is_(None),
+                    func.date(DriverCashSession.session_ended_at) >= start_dt.date(),
+                ),
             )
             .one()
         )
@@ -529,8 +537,10 @@ class AdminReportService:
             "reconciliation_summary": {
                 "session_count": int(reconciliation_summary[0] or 0),
                 "expected_cash_total": float(reconciliation_summary[1] or 0),
-                "mismatch_session_count": int(reconciliation_summary[2] or 0),
-                "overdue_session_count": int(reconciliation_summary[3] or 0),
+                "submitted_session_count": int(reconciliation_summary[2] or 0),
+                "mismatch_session_count": int(reconciliation_summary[3] or 0),
+                "overdue_session_count": int(reconciliation_summary[4] or 0),
+                "warning_session_count": int(reconciliation_summary[5] or 0),
             },
         }
 

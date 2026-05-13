@@ -540,7 +540,7 @@ def record_cash_collection():
 @jwt_required()
 @require_staff_roles("delivery_driver")
 def get_reconciliation_session():
-    """Get the driver's open reconciliation session for a business date."""
+    """Get the driver's active cash custody reconciliation session."""
     current_user_id = get_jwt_identity()
     business_date = request.args.get("business_date")
 
@@ -559,20 +559,25 @@ def get_reconciliation_session():
 @jwt_required()
 @require_staff_roles("delivery_driver")
 def submit_reconciliation_session():
-    """Submit end-of-day driver reconciliation."""
+    """Submit the active driver reconciliation and open the next empty session."""
     current_user_id = get_jwt_identity()
     data = request.get_json() or {}
 
     from business_app.services.driver_reconciliation_service import DriverReconciliationService
 
-    session = DriverReconciliationService().submit_session(
+    reconciliation_service = DriverReconciliationService()
+    session = reconciliation_service.submit_session(
         driver_user_id=current_user_id,
         declared_cash=data.get("declared_cash"),
         notes=data.get("notes"),
         business_date=data.get("business_date"),
         submitted_by_user_id=current_user_id,
     )
-    payload = DriverReconciliationService().get_session_detail(session.id)
+    payload = reconciliation_service.get_session_detail(session.id)
+    next_session = getattr(session, "_next_active_session", None)
+    payload["next_active_session"] = (
+        reconciliation_service.get_session_detail(next_session.id) if next_session else None
+    )
     return success_response(payload)
 
 

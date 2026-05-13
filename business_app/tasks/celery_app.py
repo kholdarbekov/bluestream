@@ -92,7 +92,7 @@ def make_celery(app=None):
             "task": "business_app.tasks.payment_tasks.reconcile_pending_payments",
             "schedule": crontab(minute="*/15"),
         },
-        # Mark prior-day COD reconciliation sessions as overdue every hour.
+        # Mark active COD reconciliation sessions past the warning window every hour.
         "mark-overdue-cod-reconciliation-sessions": {
             "task": "business_app.tasks.payment_tasks.mark_overdue_cod_reconciliation_sessions",
             "schedule": crontab(minute=15),

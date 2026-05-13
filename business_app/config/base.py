@@ -525,6 +525,7 @@ For complete documentation, examples, and SDKs visit: [API Documentation](/docs/
     COD_CASH_ESCALATION_THRESHOLD_UZS = int(os.environ.get("COD_CASH_ESCALATION_THRESHOLD_UZS", 400000))
     COD_RECONCILIATION_CUTOFF_LOCAL = os.environ.get("COD_RECONCILIATION_CUTOFF_LOCAL", "23:00")
     COD_REMINDER_INTERVAL_MINUTES = int(os.environ.get("COD_REMINDER_INTERVAL_MINUTES", 60))
+    COD_RECONCILIATION_WARNING_DAYS = int(os.environ.get("COD_RECONCILIATION_WARNING_DAYS", 7))
 
     # Health Check Configuration
     HEALTH_CHECK_ENABLED = True

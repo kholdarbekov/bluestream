@@ -185,7 +185,11 @@ class DeliveryKeyboards:
         keyboard = []
         if can_submit:
             keyboard.append([InlineKeyboardButton(
-                f"💵 {i18n.get('staff.delivery.submit_reconciliation', language)}",
+                f"💵 {i18n.get('staff.delivery.handoff_expected_cash', language)}",
+                callback_data="staff_reconcile_submit_all"
+            )])
+            keyboard.append([InlineKeyboardButton(
+                f"✏️ {i18n.get('staff.delivery.edit_reconciliation_cash', language)}",
                 callback_data="staff_reconcile_submit"
             )])
         if can_handoff:

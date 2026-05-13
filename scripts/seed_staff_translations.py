@@ -395,10 +395,20 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "uz": "Yarashtiruvni yuborish",
         "ru": "Отправить сверку",
     },
+    "staff.delivery.handoff_expected_cash": {
+        "en": "Handoff all expected cash",
+        "uz": "Kutilgan naqdning hammasini topshirish",
+        "ru": "Сдать всю ожидаемую наличность",
+    },
+    "staff.delivery.edit_reconciliation_cash": {
+        "en": "Enter different amount",
+        "uz": "Boshqa summani kiritish",
+        "ru": "Ввести другую сумму",
+    },
     "staff.delivery.enter_declared_cash": {
-        "en": "Enter the cash amount you counted for reconciliation.",
-        "uz": "Yarashtiruv uchun sanagan naqd pul summasini kiriting.",
-        "ru": "Введите сумму наличных, которую вы пересчитали для сверки.",
+        "en": "Enter the counted cash amount only if it differs from expected cash.",
+        "uz": "Faqat kutilgan naqd puldan farq qilsa, sanalgan summani kiriting.",
+        "ru": "Введите пересчитанную сумму только если она отличается от ожидаемой.",
     },
     "staff.delivery.reconciliation_submitted": {
         "en": "Reconciliation submitted.",
@@ -419,6 +429,16 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "en": "Variance",
         "uz": "Farq",
         "ru": "Расхождение",
+    },
+    "staff.delivery.session_age_days": {
+        "en": "Session age: {days} day(s)",
+        "uz": "Sessiya yoshi: {days} kun",
+        "ru": "Возраст сессии: {days} дн.",
+    },
+    "staff.delivery.reconciliation_warning_due": {
+        "en": "This cash session is 7+ days old. Please hand off cash when possible.",
+        "uz": "Bu naqd sessiya 7 kundan oshdi. Imkon bo'lsa naqdni topshiring.",
+        "ru": "Этой сессии наличных 7+ дней. По возможности сдайте наличные.",
     },
     "staff.command.start": {
         "en": "Start bot and authenticate",
@@ -1389,14 +1409,14 @@ EXTRA_TRANSLATIONS = {
         "ru": "🔔 Напоминание: сверка наличных за {date} ещё не сдана. Ожидаемый остаток: {expected_cash} сум.",
     },
     "staff.notification.reconciliation_reminder_overdue": {
-        "en": "⚠️ Overdue: cash reconciliation for {date} is past due. Expected on-hand cash: {expected_cash} UZS.",
-        "uz": "⚠️ Muddati oʻtdi: {date} sanasidagi naqd hisoboti hali topshirilmagan. Kutilayotgan naqd: {expected_cash} soʻm.",
-        "ru": "⚠️ Просрочено: сверка наличных за {date} не сдана вовремя. Ожидаемый остаток: {expected_cash} сум.",
+        "en": "⚠️ Cash session warning: session started {date} is 7+ days old. Expected on-hand cash: {expected_cash} UZS.",
+        "uz": "⚠️ Naqd sessiya ogohlantirishi: {date} boshlangan sessiya 7 kundan oshdi. Kutilayotgan naqd: {expected_cash} soʻm.",
+        "ru": "⚠️ Предупреждение по наличным: сессии от {date} уже 7+ дней. Ожидаемый остаток: {expected_cash} сум.",
     },
     "staff.notification.manager_exception_summary": {
-        "en": "There are {count} unresolved driver cash sessions (mismatch/overdue) requiring review.",
-        "uz": "{count} ta hal qilinmagan haydovchi naqd sessiyasi (mos kelmagan/muddati oʻtgan) koʻrib chiqishni talab qiladi.",
-        "ru": "Есть {count} незакрытых сессий наличных у курьеров (расхождение/просрочка), требуют проверки.",
+        "en": "There are {count} driver cash sessions with mismatch or 7+ day warning status requiring review.",
+        "uz": "{count} ta haydovchi naqd sessiyasida farq yoki 7+ kunlik ogohlantirish bor, ko'rib chiqish kerak.",
+        "ru": "Есть {count} сессий наличных курьеров с расхождением или предупреждением 7+ дней.",
     },
     "staff.notification.subject.driver_cash_reconciliation": {
         "en": "Driver cash reconciliation",

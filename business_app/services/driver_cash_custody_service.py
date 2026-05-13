@@ -27,9 +27,7 @@ class DriverCashCustodyService:
         status = session.status.value if hasattr(session.status, "value") else str(session.status)
         if status not in {
             DriverCashSessionStatus.OPEN.value,
-            DriverCashSessionStatus.SUBMITTED.value,
             DriverCashSessionStatus.OVERDUE.value,
-            DriverCashSessionStatus.MISMATCH.value,
         }:
             raise ValidationError("Cannot create custody transfer for a closed reconciliation session")
 

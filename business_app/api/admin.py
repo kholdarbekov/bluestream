@@ -10822,6 +10822,10 @@ def get_cash_reconciliation_report():
         driver_id = request.args.get("driver_id", type=int)
         status = request.args.get("status")
         blocked_only = request.args.get("blocked_only", "false").lower() == "true"
+        warning_only = request.args.get("warning_only", "false").lower() == "true"
+        start_date = request.args.get("start_date")
+        end_date = request.args.get("end_date")
+        min_session_age_days = request.args.get("min_session_age_days", type=int)
         page = request.args.get("page", 1, type=int)
         per_page = request.args.get("per_page", 20, type=int)
 
@@ -10834,6 +10838,10 @@ def get_cash_reconciliation_report():
             per_page=per_page,
             status=status,
             blocked_only=blocked_only,
+            warning_only=warning_only,
+            start_date=start_date,
+            end_date=end_date,
+            min_session_age_days=min_session_age_days,
         )
         report["period"] = period
 

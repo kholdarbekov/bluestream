@@ -14,6 +14,7 @@ from business_app.models.order import Order
 from business_app.models.payment import (
     CashCollectionAllocation,
     CashCollectionEvent,
+    DriverCashSession,
     Payment,
 )
 from business_app.models.user import User
@@ -902,7 +903,6 @@ class CashCollectionService:
 
             session = DriverReconciliationService().get_or_create_session(
                 driver_user_id=collector_user_id,
-                business_date=occurred_at.date(),
             )
             event.driver_cash_session_id = session.id
 
@@ -946,16 +946,8 @@ class CashCollectionService:
 
         if event.driver_cash_session_id:
             from business_app.services.driver_reconciliation_service import DriverReconciliationService
-            from business_app.models.payment import DriverCashSession
 
-            if event.collector_user_id:
-                session = DriverReconciliationService().get_or_create_session(
-                    driver_user_id=event.collector_user_id,
-                    business_date=event.occurred_at.date(),
-                )
-                event.driver_cash_session_id = session.id
-            else:
-                session = DriverCashSession.query.get(event.driver_cash_session_id)
+            session = DriverCashSession.query.get(event.driver_cash_session_id)
 
             if session:
                 DriverReconciliationService().refresh_expected_cash(session)
@@ -1038,6 +1030,18 @@ class CashCollectionService:
                 raise ValidationError("driver_cash_session_id is not allowed for personal card transfer collections")
             if manual_allocations:
                 raise ValidationError("manual_allocations are not allowed for personal card transfer collections")
+        elif source == CashCollectionSource.BACKFILL and collector_user_id and driver_cash_session_id is None:
+            raise ValidationError("driver_cash_session_id is required for driver cash backfill collections")
+        if source == CashCollectionSource.BACKFILL and not notes:
+            raise ValidationError("Notes are required for backfill collections")
+
+        target_session = None
+        if driver_cash_session_id is not None:
+            target_session = DriverCashSession.query.get(driver_cash_session_id)
+            if not target_session:
+                raise NotFoundError("Driver cash session not found")
+            if collector_user_id and target_session.driver_user_id != collector_user_id:
+                raise ValidationError("driver_cash_session_id does not belong to the selected collector")
 
         if source == CashCollectionSource.DELIVERY_COMPLETION and not delivery_id:
             raise ValidationError("delivery_id is required for delivery completion collections")

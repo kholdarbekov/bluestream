@@ -76,6 +76,7 @@ const DeliveryReports = () => {
   const [period, setPeriod] = useState('day');
   const [statusFilter, setStatusFilter] = useState('all');
   const [blockedOnly, setBlockedOnly] = useState(false);
+  const [warningOnly, setWarningOnly] = useState(false);
   const [selectedSessionId, setSelectedSessionId] = useState(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [verifyOpen, setVerifyOpen] = useState(false);
@@ -93,8 +94,9 @@ const DeliveryReports = () => {
   const [recordCollectionForm] = Form.useForm();
   const collectionSource = Form.useWatch('source', recordCollectionForm) || 'standalone_meeting';
   const isPersonalCardTransfer = collectionSource === 'personal_card_transfer';
+  const isBackfillCollection = collectionSource === 'backfill';
 
-  const reportQueryKey = ['deliveryReports', period, statusFilter, blockedOnly];
+  const reportQueryKey = ['deliveryReports', period, statusFilter, blockedOnly, warningOnly];
   const { data, isLoading, refetch } = useQuery({
     queryKey: reportQueryKey,
 
@@ -103,6 +105,7 @@ const DeliveryReports = () => {
         period,
         ...(statusFilter !== 'all' ? { status: statusFilter } : {}),
         ...(blockedOnly ? { blocked_only: true } : {}),
+        ...(warningOnly ? { warning_only: true } : {}),
       }),
 
     placeholderData: keepPreviousData,
@@ -139,10 +142,10 @@ const DeliveryReports = () => {
   });
 
   const codDebtUsersQuery = useQuery({
-    queryKey: ['deliveryReportCodDebtUsers', isPersonalCardTransfer],
+    queryKey: ['deliveryReportCodDebtUsers', isPersonalCardTransfer, isBackfillCollection],
 
     queryFn: () => (
-      isPersonalCardTransfer
+      isPersonalCardTransfer || isBackfillCollection
         ? staffService.searchCodCollectionUsers({
           q: '',
           type: 'phone',
@@ -252,8 +255,8 @@ const DeliveryReports = () => {
     [sessionDetail, sessions, selectedSessionId]
   );
 
-  const canReviewSession = (session) => ['open', 'submitted', 'overdue'].includes(session.status);
-  const canResolveSession = (session) => ['mismatch', 'overdue'].includes(session.status);
+  const canReviewSession = (session) => session.status === 'submitted';
+  const canResolveSession = (session) => session.status === 'mismatch' || session.blocked_from_cod;
 
   const openSessionDetail = (sessionId) => {
     setSelectedSessionId(sessionId);
@@ -322,9 +325,14 @@ const DeliveryReports = () => {
       key: 'mismatch_session_count',
     },
     {
-      title: t('staff:overdue_sessions', 'Overdue'),
-      dataIndex: 'overdue_session_count',
-      key: 'overdue_session_count',
+      title: t('staff:warning_sessions', '7+ Day Warnings'),
+      dataIndex: 'warning_session_count',
+      key: 'warning_session_count',
+    },
+    {
+      title: t('staff:submitted_sessions', 'Awaiting Count'),
+      dataIndex: 'submitted_session_count',
+      key: 'submitted_session_count',
     },
   ];
 
@@ -335,9 +343,15 @@ const DeliveryReports = () => {
       key: 'driver_name',
     },
     {
-      title: t('staff:business_date', 'Business Date'),
-      dataIndex: 'business_date',
-      key: 'business_date',
+      title: t('staff:session_started_at', 'Started'),
+      dataIndex: 'session_started_at',
+      key: 'session_started_at',
+    },
+    {
+      title: t('staff:session_age_days', 'Age'),
+      dataIndex: 'session_age_days',
+      key: 'session_age_days',
+      render: (value) => `${value || 0}d`,
     },
     {
       title: t('staff:status', 'Status'),
@@ -364,9 +378,15 @@ const DeliveryReports = () => {
     },
     {
       title: t('staff:expected_cash', 'Expected Cash'),
-      dataIndex: 'expected_cash',
-      key: 'expected_cash',
+      dataIndex: 'expected_cash_on_hand',
+      key: 'expected_cash_on_hand',
       render: money,
+    },
+    {
+      title: t('staff:warning_due_at', 'Warning Due'),
+      dataIndex: 'warning_due_at',
+      key: 'warning_due_at',
+      render: (value, record) => (record.last_cash_activity_at ? (value || '—') : '—'),
     },
     {
       title: t('staff:declared_cash', 'Declared Cash'),
@@ -599,11 +619,26 @@ const DeliveryReports = () => {
             <Button
               type={blockedOnly ? 'primary' : 'default'}
               icon={<WarningOutlined />}
-              onClick={() => setBlockedOnly((value) => !value)}
+              onClick={() => {
+                setBlockedOnly((value) => !value);
+                setWarningOnly(false);
+              }}
             >
               {blockedOnly
                 ? t('staff:showing_blocked_only', 'Blocked only')
                 : t('staff:filter_blocked', 'Filter blocked')}
+            </Button>
+            <Button
+              type={warningOnly ? 'primary' : 'default'}
+              icon={<ClockCircleOutlined />}
+              onClick={() => {
+                setWarningOnly((value) => !value);
+                setBlockedOnly(false);
+              }}
+            >
+              {warningOnly
+                ? t('staff:showing_warning_only', '7+ day warnings')
+                : t('staff:filter_warning', 'Filter warnings')}
             </Button>
             <Button icon={<ReloadOutlined />} onClick={() => refetch()}>
               {t('common:refresh')}
@@ -624,7 +659,7 @@ const DeliveryReports = () => {
       </Row>
 
       <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
-        <Col xs={24} sm={12} md={6}>
+        <Col xs={24} sm={12} md={4}>
           <Card>
             <Statistic
               title={t('staff:grand_total')}
@@ -634,17 +669,36 @@ const DeliveryReports = () => {
             />
           </Card>
         </Col>
-        <Col xs={24} sm={12} md={6}>
+        <Col xs={24} sm={12} md={4}>
           <Card>
             <Statistic
-              title={t('staff:blocked_sessions', 'Blocked Sessions')}
-              value={summary.blocked_session_count || 0}
-              prefix={<WarningOutlined />}
-              valueStyle={{ color: '#ff4d4f' }}
+              title={t('staff:active_sessions', 'Active')}
+              value={summary.open_session_count || 0}
+              prefix={<ClockCircleOutlined />}
             />
           </Card>
         </Col>
-        <Col xs={24} sm={12} md={6}>
+        <Col xs={24} sm={12} md={4}>
+          <Card>
+            <Statistic
+              title={t('staff:submitted_sessions', 'Awaiting Count')}
+              value={summary.submitted_session_count || 0}
+              prefix={<CheckOutlined />}
+              valueStyle={{ color: '#1677ff' }}
+            />
+          </Card>
+        </Col>
+        <Col xs={24} sm={12} md={4}>
+          <Card>
+            <Statistic
+              title={t('staff:warning_sessions', '7+ Day Warnings')}
+              value={summary.warning_session_count || 0}
+              prefix={<ClockCircleOutlined />}
+              valueStyle={{ color: '#fa8c16' }}
+            />
+          </Card>
+        </Col>
+        <Col xs={24} sm={12} md={4}>
           <Card>
             <Statistic
               title={t('staff:mismatch_sessions', 'Mismatches')}
@@ -654,13 +708,23 @@ const DeliveryReports = () => {
             />
           </Card>
         </Col>
-        <Col xs={24} sm={12} md={6}>
+        <Col xs={24} sm={12} md={4}>
           <Card>
             <Statistic
-              title={t('staff:overdue_sessions', 'Overdue')}
-              value={summary.overdue_session_count || 0}
-              prefix={<ClockCircleOutlined />}
-              valueStyle={{ color: '#cf1322' }}
+              title={t('staff:blocked_sessions', 'Blocked Sessions')}
+              value={summary.blocked_session_count || 0}
+              prefix={<WarningOutlined />}
+              valueStyle={{ color: '#ff4d4f' }}
+            />
+          </Card>
+        </Col>
+        <Col xs={24} sm={12} md={4}>
+          <Card>
+            <Statistic
+              title={t('staff:resolved_verified_sessions', 'Resolved / Verified')}
+              value={(summary.verified_session_count || 0) + (summary.resolved_session_count || 0)}
+              prefix={<CheckOutlined />}
+              valueStyle={{ color: '#389e0d' }}
             />
           </Card>
         </Col>
@@ -684,7 +748,7 @@ const DeliveryReports = () => {
           style={{ marginBottom: 16 }}
           message={t(
             'staff:delivery_reports_admin_hint',
-            'Approve accepts the reconciliation, Reject marks it as a mismatch and blocks COD work, and Resolve clears a previously mismatched or overdue session with audited notes.'
+            'Submitted sessions are ready for cashier/admin verification. 7+ day sessions are warnings only; mismatch sessions still block COD until resolved.'
           )}
         />
         <Table
@@ -715,7 +779,16 @@ const DeliveryReports = () => {
                   {selectedSession.status}
                 </Tag>
               </Descriptions.Item>
-              <Descriptions.Item label={t('staff:business_date', 'Business Date')}>{selectedSession.business_date}</Descriptions.Item>
+              <Descriptions.Item label={t('staff:business_date', 'Start Date')}>{selectedSession.business_date}</Descriptions.Item>
+              <Descriptions.Item label={t('staff:session_started_at', 'Started')}>
+                {selectedSession.session_started_at || '—'}
+              </Descriptions.Item>
+              <Descriptions.Item label={t('staff:session_ended_at', 'Ended')}>
+                {selectedSession.session_ended_at || '—'}
+              </Descriptions.Item>
+              <Descriptions.Item label={t('staff:session_age_days', 'Session Age')}>
+                {selectedSession.session_age_days == null ? '—' : `${selectedSession.session_age_days}d`}
+              </Descriptions.Item>
               <Descriptions.Item label={t('staff:expected_cash', 'Expected Cash')}>{money(selectedSession.expected_cash)}</Descriptions.Item>
               <Descriptions.Item label={t('staff:transferred_cash_total', 'Transferred Cash')}>
                 {money(selectedSession.transferred_cash_total)}
@@ -733,8 +806,11 @@ const DeliveryReports = () => {
               <Descriptions.Item label={t('staff:verified_variance', 'Verified Variance')}>{money(selectedSession.verified_variance)}</Descriptions.Item>
               <Descriptions.Item label={t('staff:block_reason', 'Block Reason')}>{selectedSession.block_reason || '—'}</Descriptions.Item>
               <Descriptions.Item label={t('staff:event_count', 'Collection Events')}>{selectedSession.event_count || 0}</Descriptions.Item>
-              <Descriptions.Item label={t('staff:submission_due_at', 'Submission Due')}>
-                {selectedSession.submission_due_at || '—'}
+              <Descriptions.Item label={t('staff:warning_due_at', 'Warning Due')}>
+                {selectedSession.last_cash_activity_at ? (selectedSession.warning_due_at || '—') : '—'}
+              </Descriptions.Item>
+              <Descriptions.Item label={t('staff:last_cash_activity_at', 'Last Cash Activity')}>
+                {selectedSession.last_cash_activity_at || '—'}
               </Descriptions.Item>
               <Descriptions.Item label={t('staff:risk_flags', 'Risk Flags')}>
                 <Space wrap>
@@ -809,17 +885,28 @@ const DeliveryReports = () => {
           form={verifyForm}
           layout="vertical"
           onFinish={(values) => {
+            const expectedCash = Number(
+              selectedSession?.expected_cash_on_hand ?? selectedSession?.expected_cash ?? 0
+            );
+            const verifiedCash = Number(values.verified_cash ?? 0);
             if (
               verifyMode === 'reject' &&
               selectedSession &&
-              Number(values.verified_cash) === Number(
-                selectedSession.expected_cash_on_hand ?? selectedSession.expected_cash ?? 0
-              )
+              verifiedCash === expectedCash
             ) {
               message.error(
                 t(
                   'staff:reject_requires_difference',
                   'Rejected reconciliations must use a verified cash amount that differs from expected cash.'
+                )
+              );
+              return;
+            }
+            if (verifiedCash !== expectedCash && !values.notes) {
+              message.error(
+                t(
+                  'staff:variance_notes_required',
+                  'Notes are required when verified cash differs from expected cash.'
                 )
               );
               return;
@@ -1035,6 +1122,7 @@ const DeliveryReports = () => {
           onFinish={(values) => {
             if (
               values.source !== 'admin_adjustment' &&
+              values.source !== 'backfill' &&
               values.source !== 'personal_card_transfer' &&
               recordCollectionStatement &&
               Number(recordCollectionStatement.active_cod_debt_count || 0) <= 0
@@ -1052,6 +1140,7 @@ const DeliveryReports = () => {
               ...values,
               customer_id: values.customer_id,
               collector_user_id: values.collector_user_id || null,
+              driver_cash_session_id: values.driver_cash_session_id || null,
               order_id: values.order_id || null,
               proof_data: { channel: 'admin_ui_delivery_reports' },
             });
@@ -1070,7 +1159,11 @@ const DeliveryReports = () => {
               onChange={(value) => setRecordCollectionCustomerId(value)}
               placeholder={isPersonalCardTransfer
                 ? t('staff:search_customer_any', 'Select customer')
-                : t('staff:search_customer', 'Select user with COD debt')}
+                : (
+                  isBackfillCollection
+                    ? t('staff:search_customer_any', 'Select customer')
+                    : t('staff:search_customer', 'Select user with COD debt')
+                )}
             >
               {codDebtUsers.map((customer) => (
                 <Option key={customer.id} value={customer.id}>
@@ -1122,6 +1215,7 @@ const DeliveryReports = () => {
             >
               <Option value="standalone_meeting">{t('staff:standalone_office_collection', 'Standalone / office collection')}</Option>
               <Option value="admin_adjustment">{t('staff:admin_correction', 'Admin correction')}</Option>
+              <Option value="backfill">{t('staff:backfill_collection', 'Backfill to existing session')}</Option>
               <Option value="personal_card_transfer">{t('staff:personal_card_transfer', 'Personal card transfer')}</Option>
             </Select>
           </Form.Item>
@@ -1141,6 +1235,19 @@ const DeliveryReports = () => {
               ))}
             </Select>
           </Form.Item>
+
+          {collectionSource === 'backfill' ? (
+            <Form.Item
+              name="driver_cash_session_id"
+              label={t('staff:driver_cash_session_id', 'Driver Cash Session ID')}
+              rules={[{
+                required: true,
+                message: t('staff:driver_cash_session_id_required', 'Driver cash session is required for backfill'),
+              }]}
+            >
+              <InputNumber min={1} style={{ width: '100%' }} />
+            </Form.Item>
+          ) : null}
 
           <Form.Item
             name="order_id"

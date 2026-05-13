@@ -14,6 +14,7 @@ from sqlalchemy import (
     Index,
     Numeric,
     UniqueConstraint,
+    text as sa_text,
 )
 from sqlalchemy.orm import relationship, backref
 import uuid
@@ -382,13 +383,24 @@ class TaxCommitteeApiToken(db.Model, TimestampMixin):
 
 
 class DriverCashSession(db.Model, TimestampMixin):
-    """End-of-day or shift-level driver COD reconciliation session."""
+    """Driver COD cash custody session, closed when the driver reconciles cash."""
 
     __tablename__ = "driver_cash_sessions"
     __table_args__ = (
         Index("idx_driver_cash_sessions_driver_date", "driver_user_id", "business_date"),
         Index("idx_driver_cash_sessions_status_date", "status", "business_date"),
-        UniqueConstraint("driver_user_id", "business_date", name="uq_driver_cash_sessions_driver_date"),
+        Index("idx_driver_cash_sessions_driver_started", "driver_user_id", "session_started_at"),
+        Index("idx_driver_cash_sessions_status_started", "status", "session_started_at"),
+        Index("idx_driver_cash_sessions_warning_due", "warning_due_at"),
+        Index("idx_driver_cash_sessions_status_warning", "status", "warning_due_at"),
+        Index("idx_driver_cash_sessions_session_ended", "session_ended_at"),
+        Index(
+            "uq_driver_cash_sessions_driver_active",
+            "driver_user_id",
+            unique=True,
+            postgresql_where=sa_text("status IN ('open', 'overdue')"),
+            sqlite_where=sa_text("status IN ('open', 'overdue')"),
+        ),
     )
 
     id = Column(Integer, primary_key=True)
@@ -416,6 +428,8 @@ class DriverCashSession(db.Model, TimestampMixin):
     declared_variance = Column(Numeric(precision=12, scale=2), nullable=False, default=Decimal("0.00"))
     verified_variance = Column(Numeric(precision=12, scale=2), nullable=False, default=Decimal("0.00"))
     submission_due_at = Column(DateTime(timezone=True), nullable=True)
+    warning_due_at = Column(DateTime(timezone=True), nullable=True)
+    last_cash_activity_at = Column(DateTime(timezone=True), nullable=True)
     last_reminder_at = Column(DateTime(timezone=True), nullable=True)
     reminder_stage = Column(String(32), nullable=False, default="none")
     submitted_at = Column(DateTime(timezone=True), nullable=True)
@@ -468,6 +482,8 @@ class DriverCashSession(db.Model, TimestampMixin):
             "declared_variance": float(self.declared_variance or 0),
             "verified_variance": float(self.verified_variance or 0),
             "submission_due_at": self.submission_due_at.isoformat() if self.submission_due_at else None,
+            "warning_due_at": self.warning_due_at.isoformat() if self.warning_due_at else None,
+            "last_cash_activity_at": (self.last_cash_activity_at.isoformat() if self.last_cash_activity_at else None),
             "last_reminder_at": self.last_reminder_at.isoformat() if self.last_reminder_at else None,
             "reminder_stage": self.reminder_stage,
             "submitted_at": self.submitted_at.isoformat() if self.submitted_at else None,
@@ -548,6 +564,7 @@ class CashCollectionEvent(db.Model, TimestampMixin):
     __table_args__ = (
         Index("idx_cash_collection_events_customer_created", "customer_id", "created_at"),
         Index("idx_cash_collection_events_collector_occurred", "collector_user_id", "occurred_at"),
+        Index("idx_cash_collection_events_session_occurred", "driver_cash_session_id", "occurred_at"),
         Index("idx_cash_collection_events_source_occurred", "source", "occurred_at"),
         UniqueConstraint("idempotency_key", name="uq_cash_collection_events_idempotency_key"),
     )

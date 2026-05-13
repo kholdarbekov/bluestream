@@ -9,7 +9,7 @@ from sqlalchemy.dialects import postgresql
 
 from business_app.models.delivery import Delivery, DeliveryPerson
 from business_app.models.order import Order
-from business_app.models.payment import DriverCashSession, Payment
+from business_app.models.payment import CashCollectionEvent, DriverCashSession, Payment
 from business_app.models.user import User
 from business_app.services.cash_collection_service import CashCollectionService
 from business_app.services.driver_cash_custody_service import DriverCashCustodyService
@@ -756,6 +756,99 @@ class TestCashCollectionService:
                     notes="Attempted late collection while blocked.",
                 )
 
+    def test_multi_day_cash_collections_remain_in_one_active_driver_session(
+        self,
+        app,
+        db,
+        sample_user,
+        delivery_driver,
+        delivery_driver_profile,
+        cod_order,
+        cod_delivery,
+    ):
+        with app.app_context():
+            service = CashCollectionService()
+            service.ensure_cod_payment_for_order(cod_order)
+            db.session.commit()
+
+            first_event = service.post_collection(
+                customer_id=sample_user.id,
+                amount=Decimal("5000.00"),
+                source="delivery_completion",
+                collector_user_id=delivery_driver.id,
+                recorded_by_user_id=delivery_driver.id,
+                order_id=cod_order.id,
+                delivery_id=cod_delivery.id,
+                notes="Collected on delivery two days ago.",
+                occurred_at=datetime.now(UTC) - timedelta(days=2),
+            )
+            second_event = service.post_collection(
+                customer_id=sample_user.id,
+                amount=Decimal("4000.00"),
+                source="standalone_meeting",
+                collector_user_id=delivery_driver.id,
+                recorded_by_user_id=delivery_driver.id,
+                notes="Collected remaining cash later.",
+                occurred_at=datetime.now(UTC),
+            )
+
+            assert first_event.driver_cash_session_id == second_event.driver_cash_session_id
+            session = DriverCashSession.query.get(first_event.driver_cash_session_id)
+            assert session.status == DriverCashSessionStatus.OPEN
+            assert session.expected_cash == Decimal("9000.00")
+
+    def test_admin_backfill_targets_explicit_historical_cash_session(
+        self,
+        app,
+        db,
+        sample_user,
+        delivery_driver,
+        delivery_driver_profile,
+        cod_order,
+        cod_delivery,
+        admin_user,
+    ):
+        with app.app_context():
+            cash_service = CashCollectionService()
+            cash_service.ensure_cod_payment_for_order(cod_order)
+            db.session.commit()
+
+            cash_service.post_collection(
+                customer_id=sample_user.id,
+                amount=Decimal("5000.00"),
+                source="delivery_completion",
+                collector_user_id=delivery_driver.id,
+                recorded_by_user_id=delivery_driver.id,
+                order_id=cod_order.id,
+                delivery_id=cod_delivery.id,
+                notes="Original collection for old session.",
+            )
+            recon_service = DriverReconciliationService()
+            old_session = recon_service.submit_session(
+                driver_user_id=delivery_driver.id,
+                declared_cash=Decimal("5000.00"),
+                submitted_by_user_id=delivery_driver.id,
+            )
+            next_session = getattr(old_session, "_next_active_session", None)
+            assert next_session is not None
+            assert next_session.id != old_session.id
+
+            backfill_event = cash_service.post_collection(
+                customer_id=sample_user.id,
+                amount=Decimal("1000.00"),
+                source="backfill",
+                collector_user_id=delivery_driver.id,
+                recorded_by_user_id=admin_user.id,
+                driver_cash_session_id=old_session.id,
+                notes="Historical backfill after cashier audit.",
+            )
+
+            assert backfill_event.driver_cash_session_id == old_session.id
+            db.session.refresh(old_session)
+            db.session.refresh(next_session)
+            assert old_session.expected_cash == Decimal("6000.00")
+            assert next_session.expected_cash == Decimal("0.00")
+
     def test_personal_card_transfer_can_settle_pending_cod_order_before_delivery(
         self,
         app,
@@ -1052,6 +1145,12 @@ class TestDriverReconciliationService:
             assert submitted.expected_cash_on_hand == Decimal("4000.00")
             assert submitted.declared_cash == Decimal("4000.00")
             assert submitted.declared_variance == Decimal("0.00")
+            next_session = getattr(submitted, "_next_active_session", None)
+            assert next_session is not None
+            assert next_session.id != submitted.id
+            assert next_session.driver_user_id == delivery_driver.id
+            assert next_session.status == DriverCashSessionStatus.OPEN
+            assert next_session.expected_cash_on_hand == Decimal("0.00")
 
     def test_verify_requires_reason_code(
         self,
@@ -1092,17 +1191,31 @@ class TestDriverReconciliationService:
                     reason_code='invalid_reason',
                 )
 
-    def test_mark_overdue_uses_submission_due_at(
+    def test_warning_due_session_is_visible_without_blocking_cod(
         self,
         app,
         db,
+        sample_user,
         delivery_driver,
         delivery_driver_profile,
     ):
         with app.app_context():
             recon_service = DriverReconciliationService()
             session = recon_service.get_open_session_for_driver(delivery_driver.id)
-            session.submission_due_at = datetime.now(UTC) - timedelta(minutes=5)
+            session.session_started_at = datetime.now(UTC) - timedelta(days=8)
+            session.warning_due_at = datetime.now(UTC) - timedelta(minutes=5)
+            session.submission_due_at = session.warning_due_at
+            session.last_cash_activity_at = datetime.now(UTC) - timedelta(days=8)
+            db.session.add(CashCollectionEvent(
+                customer_id=sample_user.id,
+                collector_user_id=delivery_driver.id,
+                recorded_by_user_id=delivery_driver.id,
+                driver_cash_session_id=session.id,
+                amount=Decimal("15000.00"),
+                source="standalone_meeting",
+                occurred_at=datetime.now(UTC) - timedelta(days=8),
+                notes="Old cash activity for warning-only test.",
+            ))
             db.session.commit()
 
             updated = recon_service.mark_overdue_sessions(reference_time=datetime.now(UTC))
@@ -1110,7 +1223,9 @@ class TestDriverReconciliationService:
 
             assert updated >= 1
             assert session.status == DriverCashSessionStatus.OVERDUE
-            assert session.blocked_from_cod is True
+            assert session.blocked_from_cod is False
+            assert recon_service.is_driver_blocked_from_cod(delivery_driver.id) is False
+            assert "reconciliation_warning_due" in session.risk_flags
 
     def test_reconciliation_reminder_uses_staff_bot_and_keeps_customer_telegram_channel_off(
         self,

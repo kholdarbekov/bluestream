@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
 from flask import current_app
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import joinedload
 
 from business_app import db
@@ -45,6 +45,10 @@ class DriverReconciliationService:
     }
     RESOLUTION_ALLOWED_STATUSES = {
         DriverCashSessionStatus.MISMATCH.value,
+        DriverCashSessionStatus.OVERDUE.value,
+    }
+    ACTIVE_STATUSES = {
+        DriverCashSessionStatus.OPEN.value,
         DriverCashSessionStatus.OVERDUE.value,
     }
 
@@ -111,6 +115,44 @@ class DriverReconciliationService:
         )
         return local_dt.astimezone(UTC)
 
+    def _warning_days(self) -> int:
+        days = int(current_app.config.get("COD_RECONCILIATION_WARNING_DAYS", 7) or 7)
+        return max(days, 1)
+
+    def _build_warning_due_at(self, session_started_at: Optional[datetime]) -> datetime:
+        started_at = self._as_aware_utc(session_started_at) or self._now_utc()
+        return started_at + timedelta(days=self._warning_days())
+
+    def _session_has_cash_activity(self, session: DriverCashSession) -> bool:
+        return self._to_decimal(session.gross_cash_collected) > Decimal("0.00")
+
+    def _session_age_days(
+        self,
+        session: DriverCashSession,
+        *,
+        reference_time: Optional[datetime] = None,
+    ) -> int:
+        started_at = self._as_aware_utc(session.session_started_at or session.created_at)
+        if not started_at:
+            return 0
+        reference = self._as_aware_utc(reference_time) or self._now_utc()
+        return max(0, (reference - started_at).days)
+
+    def _is_warning_due(
+        self,
+        session: DriverCashSession,
+        *,
+        reference_time: Optional[datetime] = None,
+    ) -> bool:
+        if not self._session_has_cash_activity(session):
+            return False
+        due_at = self._as_aware_utc(session.warning_due_at)
+        if not due_at:
+            due_at = self._build_warning_due_at(session.session_started_at)
+            session.warning_due_at = due_at
+        reference = self._as_aware_utc(reference_time) or self._now_utc()
+        return reference >= due_at and not session.submitted_at
+
     def _compute_transferred_cash_total(self, session_id: int) -> Decimal:
         transferred = (
             db.session.query(
@@ -168,12 +210,12 @@ class DriverReconciliationService:
         if disputed_transfer_count > 0:
             flags.append("transfer_variance_detected")
 
-        rolling_window_start = self._now_utc().date() - timedelta(days=7)
+        rolling_window_start = self._now_utc() - timedelta(days=7)
         mismatch_count = (
             db.session.query(func.count(DriverCashSession.id))
             .filter(
                 DriverCashSession.driver_user_id == session.driver_user_id,
-                DriverCashSession.business_date >= rolling_window_start,
+                DriverCashSession.session_started_at >= rolling_window_start,
                 DriverCashSession.status == DriverCashSessionStatus.MISMATCH,
             )
             .scalar()
@@ -185,9 +227,8 @@ class DriverReconciliationService:
         if self._status_value(session.status) == DriverCashSessionStatus.OVERDUE.value:
             flags.append("submission_overdue")
 
-        due_at = self._as_aware_utc(session.submission_due_at)
-        if due_at and self._now_utc() > due_at and not session.submitted_at:
-            flags.append("missed_cutoff")
+        if self._is_warning_due(session):
+            flags.append("reconciliation_warning_due")
 
         return sorted(set(flags))
 
@@ -209,23 +250,29 @@ class DriverReconciliationService:
         *,
         include_events: bool = False,
         include_transfers: bool = False,
+        event_stats: Optional[Dict[str, Any]] = None,
+        transfer_count: Optional[int] = None,
     ) -> Dict[str, Any]:
         payload = session.to_dict()
         driver = session.driver_user
-        events = list(session.cash_collection_events or [])
-        transfers = list(session.cash_transfers or [])
-        delivery_ids = {event.delivery_id for event in events if event.delivery_id}
+        events = list(session.cash_collection_events or []) if include_events else []
+        transfers = list(session.cash_transfers or []) if include_transfers else []
+        stats = event_stats or {}
         payload.update(
             {
                 "driver_name": driver.full_name if driver else None,
                 "driver_phone": driver.phone if driver else None,
-                "event_count": len(events),
-                "transfer_count": len(transfers),
-                "delivery_count": len(delivery_ids),
+                "event_count": int(stats.get("event_count", len(events))),
+                "transfer_count": int(transfer_count if transfer_count is not None else len(transfers)),
+                "delivery_count": int(stats.get("delivery_count", 0)),
                 "total_cash_collected": float(session.gross_cash_collected or 0),
+                "session_age_days": self._session_age_days(session),
+                "is_warning_due": self._is_warning_due(session),
                 "next_actions": self._build_next_actions(session),
             }
         )
+        if include_events and "delivery_count" not in stats:
+            payload["delivery_count"] = len({event.delivery_id for event in events if event.delivery_id})
         if include_events:
             payload["events"] = [event.to_dict() for event in events]
         if include_transfers:
@@ -261,17 +308,28 @@ class DriverReconciliationService:
         if not driver:
             raise NotFoundError("Driver not found")
 
-        normalized_date = self._normalize_business_date(business_date)
-        session = DriverCashSession.query.filter_by(
-            driver_user_id=driver_user_id,
-            business_date=normalized_date,
-        ).first()
+        session = (
+            DriverCashSession.query.filter(
+                DriverCashSession.driver_user_id == driver_user_id,
+                DriverCashSession.status.in_([DriverCashSessionStatus.OPEN, DriverCashSessionStatus.OVERDUE]),
+            )
+            .order_by(DriverCashSession.session_started_at.desc(), DriverCashSession.id.desc())
+            .first()
+        )
         if not session:
+            # ``business_date`` is now a legacy/start-date projection. Staff
+            # callers may still pass it, but active custody is no longer
+            # partitioned by calendar day.
+            start_date = self._normalize_business_date(None)
+            started_at = self._now_utc()
+            warning_due_at = self._build_warning_due_at(started_at)
             session = DriverCashSession(
                 driver_user_id=driver_user_id,
-                business_date=normalized_date,
+                business_date=start_date,
                 status=DriverCashSessionStatus.OPEN,
-                submission_due_at=self._build_submission_due_at(normalized_date),
+                session_started_at=started_at,
+                submission_due_at=warning_due_at,
+                warning_due_at=warning_due_at,
                 reminder_stage="none",
             )
             db.session.add(session)
@@ -292,12 +350,23 @@ class DriverReconciliationService:
         gross = self._to_decimal(gross_cash_collected)
         transferred_total = self._compute_transferred_cash_total(session.id)
         expected_on_hand = gross - transferred_total
+        last_cash_activity_at = (
+            db.session.query(func.max(CashCollectionEvent.occurred_at))
+            .filter(
+                CashCollectionEvent.driver_cash_session_id == session.id,
+                CashCollectionEvent.voided_at.is_(None),
+                CashCollectionEvent.amount > 0,
+            )
+            .scalar()
+        )
 
         session.expected_cash = gross
         session.gross_cash_collected = gross
         session.transferred_cash_total = transferred_total
         session.expected_cash_on_hand = expected_on_hand
-        session.submission_due_at = session.submission_due_at or self._build_submission_due_at(session.business_date)
+        session.last_cash_activity_at = last_cash_activity_at
+        session.warning_due_at = session.warning_due_at or self._build_warning_due_at(session.session_started_at)
+        session.submission_due_at = session.submission_due_at or session.warning_due_at
 
         if session.declared_cash is not None:
             session.declared_variance = self._to_decimal(session.declared_cash) - expected_on_hand
@@ -349,6 +418,10 @@ class DriverReconciliationService:
             session.block_reason = "declared_cash_mismatch"
 
         session.risk_flags = self._build_risk_flags(session)
+        db.session.flush()
+
+        next_session = self.get_or_create_session(driver_user_id=driver_user_id)
+        session._next_active_session = next_session
 
         audit_logger.log_event(
             event_type=AuditEventType.PAYMENT_PROCESSED,
@@ -364,6 +437,7 @@ class DriverReconciliationService:
                 "declared_cash": float(session.declared_cash or 0),
                 "declared_variance": float(session.declared_variance or 0),
                 "blocked_from_cod": session.blocked_from_cod,
+                "next_driver_cash_session_id": next_session.id,
             },
         )
 
@@ -398,6 +472,8 @@ class DriverReconciliationService:
         session.verified_variance = self._to_decimal(session.verified_cash) - self._to_decimal(
             session.expected_cash_on_hand
         )
+        if session.verified_variance != Decimal("0.00") and not notes:
+            raise ValidationError("Verification notes are required when verified cash differs from expected cash")
 
         if session.verified_variance == Decimal("0.00"):
             session.status = DriverCashSessionStatus.VERIFIED
@@ -492,25 +568,18 @@ class DriverReconciliationService:
         reference_time = self._as_aware_utc(reference_time) or self._now_utc()
         updated = 0
         sessions = DriverCashSession.query.filter(
-            DriverCashSession.status.in_(
-                [
-                    DriverCashSessionStatus.OPEN,
-                    DriverCashSessionStatus.SUBMITTED,
-                ]
-            ),
+            DriverCashSession.status == DriverCashSessionStatus.OPEN,
         ).all()
 
         for session in sessions:
             self.refresh_expected_cash(session)
             if session.submitted_at:
                 continue
-            due_at = self._as_aware_utc(session.submission_due_at) or self._build_submission_due_at(
-                session.business_date
-            )
-            if due_at <= reference_time:
+            if self._is_warning_due(session, reference_time=reference_time):
                 session.status = DriverCashSessionStatus.OVERDUE
-                session.blocked_from_cod = True
-                session.block_reason = "reconciliation_overdue"
+                session.blocked_from_cod = False
+                if session.block_reason == "reconciliation_overdue":
+                    session.block_reason = None
                 session.risk_flags = self._build_risk_flags(session)
                 updated += 1
 
@@ -533,7 +602,6 @@ class DriverReconciliationService:
                 DriverCashSession.status.in_(
                     [
                         DriverCashSessionStatus.OPEN,
-                        DriverCashSessionStatus.SUBMITTED,
                         DriverCashSessionStatus.OVERDUE,
                     ]
                 ),
@@ -552,9 +620,14 @@ class DriverReconciliationService:
                 if elapsed < timedelta(minutes=interval_minutes):
                     continue
 
-            due_at = self._as_aware_utc(session.submission_due_at)
-            stage = "overdue" if due_at and reference_time >= due_at else "pre_cutoff"
-            due_sessions.append((session, stage))
+            if self._is_warning_due(session, reference_time=reference_time):
+                if self._status_value(session.status) == DriverCashSessionStatus.OPEN.value:
+                    session.status = DriverCashSessionStatus.OVERDUE
+                    session.blocked_from_cod = False
+                    if session.block_reason == "reconciliation_overdue":
+                        session.block_reason = None
+                    session.risk_flags = self._build_risk_flags(session)
+                due_sessions.append((session, "overdue"))
 
         return due_sessions
 
@@ -604,7 +677,11 @@ class DriverReconciliationService:
         body = get_translation(
             body_key,
             language=driver_language,
-            date=session.business_date.isoformat(),
+            date=(
+                session.session_started_at.date().isoformat()
+                if session.session_started_at
+                else session.business_date.isoformat()
+            ),
             expected_cash=f"{float(session.expected_cash_on_hand or 0):,.0f}",
         )
         subject = get_translation(
@@ -626,7 +703,11 @@ class DriverReconciliationService:
             return get_translation(
                 body_key,
                 language=target_lang,
-                date=session.business_date.isoformat(),
+                date=(
+                    session.session_started_at.date().isoformat()
+                    if session.session_started_at
+                    else session.business_date.isoformat()
+                ),
                 expected_cash=f"{float(session.expected_cash_on_hand or 0):,.0f}",
             )
 
@@ -730,12 +811,6 @@ class DriverReconciliationService:
         blocked_session = DriverCashSession.query.filter(
             DriverCashSession.driver_user_id == driver_user_id,
             DriverCashSession.blocked_from_cod.is_(True),
-            DriverCashSession.status.in_(
-                [
-                    DriverCashSessionStatus.MISMATCH,
-                    DriverCashSessionStatus.OVERDUE,
-                ]
-            ),
         ).first()
         return blocked_session is not None
 
@@ -761,6 +836,75 @@ class DriverReconciliationService:
         self.refresh_expected_cash(session)
         return self._serialize_session(session, include_events=True, include_transfers=True)
 
+    def _event_stats_for_sessions(self, session_ids: List[int]) -> Dict[int, Dict[str, int]]:
+        if not session_ids:
+            return {}
+        rows = (
+            db.session.query(
+                CashCollectionEvent.driver_cash_session_id,
+                func.count(CashCollectionEvent.id),
+                func.count(func.distinct(CashCollectionEvent.delivery_id)),
+            )
+            .filter(
+                CashCollectionEvent.driver_cash_session_id.in_(session_ids),
+                CashCollectionEvent.voided_at.is_(None),
+            )
+            .group_by(CashCollectionEvent.driver_cash_session_id)
+            .all()
+        )
+        return {
+            session_id: {
+                "event_count": int(event_count or 0),
+                "delivery_count": int(delivery_count or 0),
+            }
+            for session_id, event_count, delivery_count in rows
+        }
+
+    def _transfer_counts_for_sessions(self, session_ids: List[int]) -> Dict[int, int]:
+        if not session_ids:
+            return {}
+        rows = (
+            db.session.query(DriverCashTransfer.driver_cash_session_id, func.count(DriverCashTransfer.id))
+            .filter(DriverCashTransfer.driver_cash_session_id.in_(session_ids))
+            .group_by(DriverCashTransfer.driver_cash_session_id)
+            .all()
+        )
+        return {session_id: int(count or 0) for session_id, count in rows}
+
+    def _apply_session_window_filters(self, query, *, start_date: Optional[Any], end_date: Optional[Any]):
+        if start_date:
+            normalized_start = self._normalize_business_date(start_date)
+            query = query.filter(
+                or_(
+                    DriverCashSession.session_ended_at.is_(None),
+                    func.date(DriverCashSession.session_ended_at) >= normalized_start,
+                )
+            )
+        if end_date:
+            normalized_end = self._normalize_business_date(end_date)
+            query = query.filter(DriverCashSession.business_date <= normalized_end)
+        return query
+
+    def _apply_warning_only_filter(self, query):
+        now = self._now_utc()
+        cutoff_started_at = now - timedelta(days=self._warning_days())
+        return query.filter(
+            DriverCashSession.status.in_(
+                [
+                    DriverCashSessionStatus.OPEN,
+                    DriverCashSessionStatus.OVERDUE,
+                ]
+            ),
+            DriverCashSession.blocked_from_cod.is_(False),
+            DriverCashSession.submitted_at.is_(None),
+            DriverCashSession.gross_cash_collected > 0,
+            or_(
+                DriverCashSession.warning_due_at <= now,
+                DriverCashSession.warning_due_at.is_(None)
+                & (DriverCashSession.session_started_at <= cutoff_started_at),
+            ),
+        )
+
     def list_sessions(
         self,
         *,
@@ -772,11 +916,11 @@ class DriverReconciliationService:
         start_date: Optional[Any] = None,
         end_date: Optional[Any] = None,
         blocked_only: bool = False,
+        warning_only: bool = False,
+        min_session_age_days: Optional[int] = None,
     ) -> Dict[str, Any]:
         query = DriverCashSession.query.options(
             joinedload(DriverCashSession.driver_user),
-            joinedload(DriverCashSession.cash_collection_events),
-            joinedload(DriverCashSession.cash_transfers),
         )
 
         if status:
@@ -789,22 +933,36 @@ class DriverReconciliationService:
             query = query.filter(DriverCashSession.driver_user_id == driver_user_id)
         if business_date:
             query = query.filter(DriverCashSession.business_date == self._normalize_business_date(business_date))
-        if start_date:
-            query = query.filter(DriverCashSession.business_date >= self._normalize_business_date(start_date))
-        if end_date:
-            query = query.filter(DriverCashSession.business_date <= self._normalize_business_date(end_date))
+        query = self._apply_session_window_filters(query, start_date=start_date, end_date=end_date)
         if blocked_only:
             query = query.filter(DriverCashSession.blocked_from_cod.is_(True))
+        if warning_only:
+            query = self._apply_warning_only_filter(query)
+        if min_session_age_days is not None:
+            try:
+                min_days = max(0, int(min_session_age_days))
+            except (TypeError, ValueError) as exc:
+                raise ValidationError("min_session_age_days must be an integer") from exc
+            cutoff = self._now_utc() - timedelta(days=min_days)
+            query = query.filter(DriverCashSession.session_started_at <= cutoff)
 
         pagination = query.order_by(
-            DriverCashSession.business_date.desc(),
-            DriverCashSession.created_at.desc(),
+            DriverCashSession.session_started_at.desc(),
+            DriverCashSession.id.desc(),
         ).paginate(page=page, per_page=min(per_page, 100), error_out=False)
 
+        session_ids = [session.id for session in pagination.items]
+        event_stats = self._event_stats_for_sessions(session_ids)
+        transfer_counts = self._transfer_counts_for_sessions(session_ids)
         items = []
         for session in pagination.items:
-            self.refresh_expected_cash(session)
-            items.append(self._serialize_session(session))
+            items.append(
+                self._serialize_session(
+                    session,
+                    event_stats=event_stats.get(session.id),
+                    transfer_count=transfer_counts.get(session.id, 0),
+                )
+            )
 
         return {
             "items": items,
@@ -822,8 +980,14 @@ class DriverReconciliationService:
         per_page: int = 20,
         status: Optional[str] = None,
         blocked_only: bool = False,
+        start_date: Optional[Any] = None,
+        end_date: Optional[Any] = None,
+        warning_only: bool = False,
+        min_session_age_days: Optional[int] = None,
     ) -> Dict[str, Any]:
-        start_date, end_date = self._normalize_period_window(period)
+        default_start_date, default_end_date = self._normalize_period_window(period)
+        start_date = self._normalize_business_date(start_date) if start_date else default_start_date
+        end_date = self._normalize_business_date(end_date) if end_date else default_end_date
         sessions_result = self.list_sessions(
             page=page,
             per_page=per_page,
@@ -832,16 +996,14 @@ class DriverReconciliationService:
             start_date=start_date,
             end_date=end_date,
             blocked_only=blocked_only,
+            warning_only=warning_only,
+            min_session_age_days=min_session_age_days,
         )
 
         report_query = DriverCashSession.query.options(
             joinedload(DriverCashSession.driver_user),
-            joinedload(DriverCashSession.cash_collection_events),
-            joinedload(DriverCashSession.cash_transfers),
-        ).filter(
-            DriverCashSession.business_date >= start_date,
-            DriverCashSession.business_date <= end_date,
         )
+        report_query = self._apply_session_window_filters(report_query, start_date=start_date, end_date=end_date)
         if status:
             try:
                 status_enum = DriverCashSessionStatus(status)
@@ -852,10 +1014,20 @@ class DriverReconciliationService:
             report_query = report_query.filter(DriverCashSession.driver_user_id == driver_user_id)
         if blocked_only:
             report_query = report_query.filter(DriverCashSession.blocked_from_cod.is_(True))
+        if warning_only:
+            report_query = self._apply_warning_only_filter(report_query)
+        if min_session_age_days is not None:
+            try:
+                min_days = max(0, int(min_session_age_days))
+            except (TypeError, ValueError) as exc:
+                raise ValidationError("min_session_age_days must be an integer") from exc
+            report_query = report_query.filter(
+                DriverCashSession.session_started_at <= self._now_utc() - timedelta(days=min_days)
+            )
 
         sessions = report_query.order_by(
-            DriverCashSession.business_date.desc(),
-            DriverCashSession.created_at.desc(),
+            DriverCashSession.session_started_at.desc(),
+            DriverCashSession.id.desc(),
         ).all()
 
         driver_rows: Dict[int, Dict[str, Any]] = defaultdict(
@@ -872,8 +1044,12 @@ class DriverReconciliationService:
                 "declared_variance": 0.0,
                 "verified_variance": 0.0,
                 "open_session_count": 0,
+                "submitted_session_count": 0,
+                "verified_session_count": 0,
+                "resolved_session_count": 0,
                 "mismatch_session_count": 0,
                 "overdue_session_count": 0,
+                "warning_session_count": 0,
                 "blocked_session_count": 0,
                 "session_count": 0,
             }
@@ -881,8 +1057,12 @@ class DriverReconciliationService:
         summary = {
             "session_count": 0,
             "open_session_count": 0,
+            "submitted_session_count": 0,
+            "verified_session_count": 0,
+            "resolved_session_count": 0,
             "mismatch_session_count": 0,
             "overdue_session_count": 0,
+            "warning_session_count": 0,
             "blocked_session_count": 0,
             "expected_cash_total": 0.0,
             "expected_cash_on_hand_total": 0.0,
@@ -893,8 +1073,8 @@ class DriverReconciliationService:
             "driver_count": 0,
         }
 
+        event_stats = self._event_stats_for_sessions([session.id for session in sessions])
         for session in sessions:
-            self.refresh_expected_cash(session)
             driver = session.driver_user
             row = driver_rows[session.driver_user_id]
             if row["driver_id"] is None:
@@ -910,18 +1090,34 @@ class DriverReconciliationService:
             row["verified_cash"] += float(session.verified_cash or 0)
             row["declared_variance"] += float(session.declared_variance or 0)
             row["verified_variance"] += float(session.verified_variance or 0)
-            row["delivery_count"] += len(
-                {event.delivery_id for event in session.cash_collection_events or [] if event.delivery_id}
-            )
+            row["delivery_count"] += int(event_stats.get(session.id, {}).get("delivery_count", 0))
             if session.status == DriverCashSessionStatus.OPEN:
                 row["open_session_count"] += 1
                 summary["open_session_count"] += 1
+            if session.status == DriverCashSessionStatus.SUBMITTED:
+                row["submitted_session_count"] += 1
+                summary["submitted_session_count"] += 1
+            if session.status == DriverCashSessionStatus.VERIFIED:
+                row["verified_session_count"] += 1
+                summary["verified_session_count"] += 1
+            if session.status == DriverCashSessionStatus.RESOLVED:
+                row["resolved_session_count"] += 1
+                summary["resolved_session_count"] += 1
             if session.status == DriverCashSessionStatus.MISMATCH:
                 row["mismatch_session_count"] += 1
                 summary["mismatch_session_count"] += 1
+            is_warning_session = (
+                not session.blocked_from_cod
+                and self._status_value(session.status)
+                in {DriverCashSessionStatus.OPEN.value, DriverCashSessionStatus.OVERDUE.value}
+                and self._is_warning_due(session)
+            )
             if session.status == DriverCashSessionStatus.OVERDUE:
                 row["overdue_session_count"] += 1
                 summary["overdue_session_count"] += 1
+            if is_warning_session:
+                row["warning_session_count"] += 1
+                summary["warning_session_count"] += 1
             if session.blocked_from_cod:
                 row["blocked_session_count"] += 1
                 summary["blocked_session_count"] += 1

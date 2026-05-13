@@ -93,6 +93,7 @@ class StatusUpdateHandler(BaseHandler):
         transferred_cash_total = format_currency(session.get('transferred_cash_total'), language=language)
         declared_cash = session.get('declared_cash')
         declared_variance = format_currency(session.get('declared_variance'), language=language)
+        session_age_days = session.get('session_age_days')
         lines = [
             f"\U0001f9fe <b>{i18n.get('staff.menu.cash_reconciliation', language)}</b>",
             f"{i18n.get('staff.delivery.current_status', language)}: {status}",
@@ -100,6 +101,16 @@ class StatusUpdateHandler(BaseHandler):
             f"\U0001f4e5 {i18n.get('staff.delivery.transferred_cash_label', language)}: {transferred_cash_total}",
             f"\U0001f45b {i18n.get('staff.delivery.expected_cash_on_hand_label', language)}: {expected_on_hand}",
         ]
+        if session_age_days is not None:
+            lines.append(
+                i18n.get(
+                    'staff.delivery.session_age_days',
+                    language,
+                    days=int(session_age_days or 0),
+                )
+            )
+        if session.get('is_warning_due'):
+            lines.append(i18n.get('staff.delivery.reconciliation_warning_due', language))
         if declared_cash is not None:
             lines.append(
                 f"\U0001f4b5 {i18n.get('staff.delivery.declared_cash_label', language)}: "
@@ -571,7 +582,7 @@ class StatusUpdateHandler(BaseHandler):
             keyboard = DeliveryKeyboards.reconciliation_actions(
                 language,
                 can_submit=session.get('status') in {'open', 'overdue'},
-                can_handoff=session.get('status') in {'open', 'submitted', 'overdue', 'mismatch'},
+                can_handoff=session.get('status') in {'open', 'overdue'},
             )
 
             if update.callback_query:
@@ -602,6 +613,41 @@ class StatusUpdateHandler(BaseHandler):
             parse_mode='HTML',
         )
         return RECONCILIATION_INPUT
+
+    @require_auth
+    @require_delivery_driver
+    async def submit_reconciliation_all(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Submit the current session using the expected cash-on-hand amount."""
+        query = update.callback_query
+        await query.answer()
+        language = await self._get_language(update, context)
+        token = await self._get_auth_token(update, context)
+        if not token:
+            await self._handle_auth_error(update, language)
+            return
+
+        try:
+            async with api_client as client:
+                response = await client.submit_reconciliation_session(token, {})
+
+            if not response.success:
+                await self._handle_api_response_error(update, response, language)
+                return
+
+            await self._clear_delivery_cash_flow(context, update)
+            session = response.data or {}
+            message = (
+                f"\u2705 {i18n.get('staff.delivery.reconciliation_submitted', language)}"
+                f"\n\n{self._format_session_summary(session, language)}"
+            )
+            await query.edit_message_text(
+                message,
+                reply_markup=CommonKeyboards.back_button(language, "staff_back_to_main"),
+                parse_mode='HTML',
+            )
+        except Exception as e:
+            logger.error(f"Error submitting full reconciliation session: {e}", exc_info=True)
+            await self._handle_error(update, context)
 
     @require_auth
     @require_delivery_driver

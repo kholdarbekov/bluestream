@@ -1291,3 +1291,383 @@ class TestDriverReconciliationService:
             # to the customer-bot's language settings.
             staff_kwargs = notification_instance.send_staff_telegram_message.call_args.kwargs
             assert staff_kwargs.get('language') == 'en'
+
+
+@pytest.mark.unit
+class TestCashCollectionGroceryUnitsMirror:
+    """Regression suite for grocery stores on legacy UNITS-mode contracts.
+
+    Cash collected at delivery for these contracts must auto-post TOPUP ledger
+    entries matching the CONSUME entries already written. AMOUNT-mode grocery
+    contracts continue to produce a single COLLECT entry (and no TOPUPs).
+    """
+
+    @staticmethod
+    def _seed_units_grocery_state(db, sample_user, sample_product, contract_currency="UZS"):
+        from uuid import uuid4
+
+        from business_app.models.corporate import (
+            CorporateContract,
+            CorporateContractProductPrice,
+            CorporateContractStatus,
+            CorporatePrepaymentAccount,
+        )
+        from business_app.models.order import OrderItem
+        from shared.enums import CorporateContractTrackingMode, EntitySubtype
+
+        sample_user.user_type = UserType.ENTITY
+        sample_user.entity_subtype = EntitySubtype.GROCERY_STORE
+        db.session.commit()
+
+        # Direct-write a UNITS-mode contract for the grocery store, bypassing the
+        # service-level forced-AMOUNT enforcement to reproduce the legacy state.
+        contract = CorporateContract(
+            user_id=sample_user.id,
+            contract_number=f"GS-UNITS-{uuid4().hex[:10]}",
+            name="Legacy Units Grocery Contract",
+            status=CorporateContractStatus.ACTIVE,
+            start_date=datetime.now(UTC) - timedelta(days=1),
+            currency=contract_currency,
+            is_active=True,
+            tracking_mode=CorporateContractTrackingMode.UNITS,
+        )
+        db.session.add(contract)
+        db.session.flush()
+        account = CorporatePrepaymentAccount(contract_id=contract.id, is_active=True)
+        db.session.add(account)
+        price_row = CorporateContractProductPrice(
+            contract_id=contract.id,
+            product_id=sample_product.id,
+            unit_price=Decimal("12000.00"),
+            is_prepayment_eligible=True,
+            is_active=True,
+        )
+        db.session.add(price_row)
+        db.session.commit()
+        return contract, account, price_row
+
+    @staticmethod
+    def _build_units_order(db, sample_user, sample_product, price_row, *, quantity=2):
+        from uuid import uuid4
+
+        from business_app.models.order import OrderItem
+
+        unit_price = Decimal(str(price_row.unit_price))
+        total = unit_price * Decimal(str(quantity))
+        order = Order(
+            order_number=f"AD-UNITS-{uuid4().hex[:8]}",
+            user_id=sample_user.id,
+            status=OrderStatus.PENDING,
+            subtotal=total,
+            delivery_fee=Decimal("0.00"),
+            total_amount=total,
+            payment_method=PaymentMethod.CASH,
+            order_source="admin",
+        )
+        db.session.add(order)
+        db.session.flush()
+        db.session.add(
+            OrderItem(
+                order_id=order.id,
+                product_id=sample_product.id,
+                contract_id=price_row.contract_id,
+                contract_product_price_id=price_row.id,
+                quantity=quantity,
+                unit_price=unit_price,
+                total_price=total,
+            )
+        )
+        db.session.commit()
+        return order
+
+    @staticmethod
+    def _attach_delivery(db, order, delivery_driver, *, status=DeliveryStatus.DELIVERED):
+        delivery = Delivery(
+            order_id=order.id,
+            delivery_person_id=delivery_driver.id,
+            status=status,
+            scheduled_date=datetime.now(UTC),
+            scheduled_time_slot="09:00-12:00",
+            actual_delivery_time=datetime.now(UTC),
+            delivered_at=datetime.now(UTC) if status == DeliveryStatus.DELIVERED else None,
+        )
+        db.session.add(delivery)
+        db.session.commit()
+        return delivery
+
+    def test_post_collection_creates_auto_topup_for_units_mode_grocery_contract(
+        self,
+        app,
+        db,
+        sample_user,
+        sample_product,
+        delivery_driver,
+        delivery_driver_profile,
+    ):
+        from business_app.models.corporate import (
+            CorporatePrepaymentBalance,
+            CorporatePrepaymentEventType,
+            CorporatePrepaymentLedger,
+        )
+        from business_app.services.corporate_contract_service import CorporateContractService
+
+        with app.app_context():
+            contract, account, price_row = self._seed_units_grocery_state(
+                db, sample_user, sample_product
+            )
+            order = self._build_units_order(
+                db, sample_user, sample_product, price_row, quantity=3
+            )
+
+            corporate_service = CorporateContractService()
+            corporate_service.reserve_for_order(order.id)
+            corporate_service.consume_for_order(order.id)
+            db.session.commit()
+
+            delivery = self._attach_delivery(db, order, delivery_driver)
+            order.status = OrderStatus.DELIVERED
+            order.delivered_at = datetime.now(UTC)
+            db.session.commit()
+
+            service = CashCollectionService()
+            service.ensure_cod_payment_for_order(order)
+            db.session.commit()
+
+            event = service.post_collection(
+                customer_id=sample_user.id,
+                amount=Decimal(str(order.total_amount)),
+                source="delivery_completion",
+                collector_user_id=delivery_driver.id,
+                recorded_by_user_id=delivery_driver.id,
+                order_id=order.id,
+                delivery_id=delivery.id,
+                notes="Cash collected at delivery for legacy UNITS grocery",
+            )
+
+            topups = (
+                CorporatePrepaymentLedger.query.filter_by(
+                    order_id=order.id,
+                    event_type=CorporatePrepaymentEventType.TOPUP,
+                )
+                .all()
+            )
+            assert len(topups) == 1
+            topup = topups[0]
+            assert topup.contract_id == contract.id
+            assert topup.product_id == sample_product.id
+            assert Decimal(str(topup.units)) == Decimal("3.00")
+            assert topup.idempotency_key == f"topup:cash_event:{event.id}:consume:{topup.entry_metadata['source_consume_entry_id']}"
+            assert topup.entry_metadata.get("auto_topup") is True
+            assert topup.entry_metadata.get("source") == "delivery_completion"
+
+            balance = CorporatePrepaymentBalance.query.filter_by(
+                account_id=account.id, product_id=sample_product.id
+            ).first()
+            db.session.refresh(balance)
+            assert Decimal(str(balance.prepaid_units)) == Decimal("3.00")
+            assert Decimal(str(balance.consumed_units)) == Decimal("3.00")
+            # Topup matched consumption; available balance is non-negative again.
+            assert balance.available_units == Decimal("0.00")
+
+            # No COLLECT entries should be posted for a UNITS-mode contract.
+            assert (
+                CorporatePrepaymentLedger.query.filter_by(
+                    order_id=order.id,
+                    event_type=CorporatePrepaymentEventType.COLLECT,
+                ).count()
+                == 0
+            )
+
+    def test_post_collection_skips_units_topup_when_no_order_id(
+        self,
+        app,
+        db,
+        sample_user,
+        sample_product,
+        delivery_driver,
+        delivery_driver_profile,
+    ):
+        from business_app.models.corporate import (
+            CorporatePrepaymentEventType,
+            CorporatePrepaymentLedger,
+        )
+
+        with app.app_context():
+            self._seed_units_grocery_state(db, sample_user, sample_product)
+
+            service = CashCollectionService()
+            # Standalone collection: no order_id, no delivery_id.
+            event = service.post_collection(
+                customer_id=sample_user.id,
+                amount=Decimal("5000.00"),
+                source="standalone_meeting",
+                collector_user_id=delivery_driver.id,
+                recorded_by_user_id=delivery_driver.id,
+                order_id=None,
+                delivery_id=None,
+                notes="Walked-in payment",
+            )
+
+            assert event is not None
+            assert (
+                CorporatePrepaymentLedger.query.filter_by(
+                    event_type=CorporatePrepaymentEventType.TOPUP
+                ).count()
+                == 0
+            )
+
+    def test_post_collection_skips_units_topup_when_consume_not_yet_posted(
+        self,
+        app,
+        db,
+        sample_user,
+        sample_product,
+        delivery_driver,
+        delivery_driver_profile,
+    ):
+        from business_app.models.corporate import (
+            CorporatePrepaymentEventType,
+            CorporatePrepaymentLedger,
+        )
+        from business_app.services.corporate_contract_service import CorporateContractService
+
+        with app.app_context():
+            _contract, _account, price_row = self._seed_units_grocery_state(
+                db, sample_user, sample_product
+            )
+            order = self._build_units_order(
+                db, sample_user, sample_product, price_row, quantity=1
+            )
+
+            # Reserve but do NOT consume yet — defensive path: cash collected
+            # while CONSUME ledger entries are still missing (skew / replay /
+            # manual data fix). Order is DELIVERED so the collection validator
+            # accepts it; the missing CONSUME entries are the focus here.
+            CorporateContractService().reserve_for_order(order.id)
+            db.session.commit()
+
+            delivery = self._attach_delivery(db, order, delivery_driver)
+            order.status = OrderStatus.DELIVERED
+            order.delivered_at = datetime.now(UTC)
+            db.session.commit()
+
+            service = CashCollectionService()
+            service.ensure_cod_payment_for_order(order)
+            db.session.commit()
+
+            service.post_collection(
+                customer_id=sample_user.id,
+                amount=Decimal(str(order.total_amount)),
+                source="delivery_completion",
+                collector_user_id=delivery_driver.id,
+                recorded_by_user_id=delivery_driver.id,
+                order_id=order.id,
+                delivery_id=delivery.id,
+            )
+
+            assert (
+                CorporatePrepaymentLedger.query.filter_by(
+                    order_id=order.id,
+                    event_type=CorporatePrepaymentEventType.TOPUP,
+                ).count()
+                == 0
+            )
+
+    def test_post_collection_amount_mode_path_unchanged(
+        self,
+        app,
+        db,
+        sample_user,
+        sample_product,
+        delivery_driver,
+        delivery_driver_profile,
+    ):
+        from uuid import uuid4
+
+        from business_app.models.corporate import (
+            CorporateContract,
+            CorporateContractStatus,
+            CorporatePrepaymentAccount,
+            CorporatePrepaymentEventType,
+            CorporatePrepaymentLedger,
+        )
+        from business_app.models.order import OrderItem
+        from shared.enums import CorporateContractTrackingMode, EntitySubtype
+
+        with app.app_context():
+            sample_user.user_type = UserType.ENTITY
+            sample_user.entity_subtype = EntitySubtype.GROCERY_STORE
+            db.session.commit()
+
+            contract = CorporateContract(
+                user_id=sample_user.id,
+                contract_number=f"GS-AMT-{uuid4().hex[:10]}",
+                name="Grocery Store AMOUNT Contract",
+                status=CorporateContractStatus.ACTIVE,
+                start_date=datetime.now(UTC) - timedelta(days=1),
+                currency="UZS",
+                is_active=True,
+                tracking_mode=CorporateContractTrackingMode.AMOUNT,
+            )
+            db.session.add(contract)
+            db.session.flush()
+            db.session.add(CorporatePrepaymentAccount(contract_id=contract.id, is_active=True))
+            db.session.commit()
+
+            order = Order(
+                order_number=f"AD-AMT-{uuid4().hex[:8]}",
+                user_id=sample_user.id,
+                status=OrderStatus.PENDING,
+                subtotal=Decimal("36000.00"),
+                delivery_fee=Decimal("0.00"),
+                total_amount=Decimal("36000.00"),
+                payment_method=PaymentMethod.CASH,
+                order_source="admin",
+            )
+            db.session.add(order)
+            db.session.flush()
+            db.session.add(
+                OrderItem(
+                    order_id=order.id,
+                    product_id=sample_product.id,
+                    quantity=3,
+                    unit_price=Decimal("12000.00"),
+                    total_price=Decimal("36000.00"),
+                )
+            )
+            db.session.commit()
+
+            delivery = self._attach_delivery(db, order, delivery_driver)
+            order.status = OrderStatus.DELIVERED
+            order.delivered_at = datetime.now(UTC)
+            db.session.commit()
+
+            service = CashCollectionService()
+            service.ensure_cod_payment_for_order(order)
+            db.session.commit()
+
+            service.post_collection(
+                customer_id=sample_user.id,
+                amount=Decimal("36000.00"),
+                source="delivery_completion",
+                collector_user_id=delivery_driver.id,
+                recorded_by_user_id=delivery_driver.id,
+                order_id=order.id,
+                delivery_id=delivery.id,
+            )
+
+            # Existing AMOUNT-mode path: exactly one COLLECT, zero TOPUP entries.
+            assert (
+                CorporatePrepaymentLedger.query.filter_by(
+                    contract_id=contract.id,
+                    event_type=CorporatePrepaymentEventType.COLLECT,
+                ).count()
+                == 1
+            )
+            assert (
+                CorporatePrepaymentLedger.query.filter_by(
+                    contract_id=contract.id,
+                    event_type=CorporatePrepaymentEventType.TOPUP,
+                ).count()
+                == 0
+            )

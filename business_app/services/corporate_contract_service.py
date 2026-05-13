@@ -1435,6 +1435,137 @@ class CorporateContractService:
         )
         return ledger_entry
 
+    def _require_units_contract(self, contract: CorporateContract) -> None:
+        if contract.tracking_mode != CorporateContractTrackingMode.UNITS:
+            raise ValidationError(f"Contract {contract.id} is not configured for units-mode tracking.")
+
+    def topup_from_cash_collection(
+        self,
+        contract: CorporateContract,
+        *,
+        order_id: int,
+        cash_event_id: int,
+        delivery_id: Optional[int] = None,
+        actor_user_id: Optional[int] = None,
+        source: Optional[str] = None,
+        notes: Optional[str] = None,
+    ) -> List[CorporatePrepaymentLedger]:
+        """Mirror cash collected at delivery onto a UNITS-mode contract.
+
+        Posts one TOPUP ledger entry per CONSUME entry written at delivery for
+        ``order_id`` on ``contract``. Bridges the legacy gap where grocery-store
+        users remain on a UNITS-mode contract (current code forces AMOUNT-mode
+        for new grocery stores, but legacy contracts still hit
+        ``reserve_for_order`` -> ``consume_for_order``). Without this mirror,
+        cash collected at delivery would leave ``prepaid_units`` untouched while
+        ``consumed_units`` grows, producing a perpetually negative available
+        balance.
+
+        Idempotent via
+        ``topup:cash_event:{cash_event_id}:consume:{consume_entry.id}``.
+        Returns existing entries on repost and an empty list when no CONSUME
+        entries exist yet (cash collected before delivery; defer).
+        """
+        self._require_units_contract(contract)
+
+        consume_entries = (
+            CorporatePrepaymentLedger.query.filter(
+                CorporatePrepaymentLedger.order_id == order_id,
+                CorporatePrepaymentLedger.contract_id == contract.id,
+                CorporatePrepaymentLedger.event_type == CorporatePrepaymentEventType.CONSUME,
+            )
+            .order_by(CorporatePrepaymentLedger.id.asc())
+            .all()
+        )
+        if not consume_entries:
+            return []
+
+        account = self._get_or_create_locked_account(contract.id)
+        now = datetime.now(timezone.utc)
+        ledger_entries: List[CorporatePrepaymentLedger] = []
+        total_topped_up_units = Decimal("0.00")
+        new_entry_count = 0
+
+        for consume_entry in consume_entries:
+            idempotency_key = f"topup:cash_event:{cash_event_id}:consume:{consume_entry.id}"
+            existing = CorporatePrepaymentLedger.query.filter_by(idempotency_key=idempotency_key).first()
+            if existing:
+                ledger_entries.append(existing)
+                continue
+
+            units = Decimal(str(consume_entry.units or 0))
+            if units <= 0:
+                continue
+
+            balance = (
+                CorporatePrepaymentBalance.query.filter_by(id=consume_entry.balance_id)
+                .with_for_update()
+                .first()
+            )
+            if not balance:
+                raise NotFoundError("Corporate prepayment balance not found")
+
+            balance.prepaid_units = Decimal(str(balance.prepaid_units or 0)) + units
+            balance.last_topup_at = now
+
+            unit_price = (
+                Decimal(str(consume_entry.unit_price_snapshot))
+                if consume_entry.unit_price_snapshot is not None
+                else None
+            )
+            amount = (units * unit_price) if unit_price is not None else None
+
+            ledger_entry = CorporatePrepaymentLedger(
+                contract_id=contract.id,
+                account_id=account.id,
+                balance_id=consume_entry.balance_id,
+                product_id=consume_entry.product_id,
+                order_id=order_id,
+                order_item_id=consume_entry.order_item_id,
+                delivery_id=delivery_id,
+                actor_user_id=actor_user_id,
+                event_type=CorporatePrepaymentEventType.TOPUP,
+                units=units,
+                unit_price_snapshot=unit_price,
+                amount=amount,
+                currency=consume_entry.currency,
+                notes=notes or "Auto topup from cash collection (legacy UNITS-mode grocery)",
+                idempotency_key=idempotency_key,
+                entry_metadata={
+                    "auto_topup": True,
+                    "source": source,
+                    "cash_event_id": cash_event_id,
+                    "source_consume_entry_id": consume_entry.id,
+                },
+            )
+            db.session.add(ledger_entry)
+            ledger_entries.append(ledger_entry)
+            total_topped_up_units += units
+            new_entry_count += 1
+
+        if new_entry_count:
+            account.last_topup_at = now
+        db.session.flush()
+
+        if new_entry_count:
+            audit_logger.log_event(
+                event_type=AuditEventType.PAYMENT_PROCESSED,
+                action="corporate_units_auto_topup_from_cash",
+                severity=AuditSeverity.MEDIUM,
+                resource_type="corporate_contract",
+                resource_id=str(contract.id),
+                additional_data={
+                    "order_id": order_id,
+                    "delivery_id": delivery_id,
+                    "cash_event_id": cash_event_id,
+                    "source": source,
+                    "topup_entry_count": new_entry_count,
+                    "total_units": float(total_topped_up_units),
+                },
+            )
+
+        return ledger_entries
+
     def post_money_adjustment(
         self,
         contract: CorporateContract,

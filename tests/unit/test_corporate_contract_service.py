@@ -836,3 +836,203 @@ def test_reserve_for_order_uses_stored_order_item_contract_linkage(db, sample_us
     balance_b = _get_product_balance(account_two.id, product_b.id)
     assert Decimal(str(balance_a.reserved_units)) == Decimal("2.00")
     assert Decimal(str(balance_b.reserved_units)) == Decimal("1.00")
+
+
+def _setup_units_grocery_order_with_consume(
+    db,
+    user,
+    *,
+    product_count: int = 2,
+):
+    """Build a UNITS-mode contract for a grocery user, place a multi-item order,
+    reserve and consume it. Returns ``(service, contract, account, products, order)``.
+
+    Mirrors the legacy state where a grocery-store user still has a UNITS-mode
+    contract: ``_create_contract_and_account`` writes the contract directly to
+    the DB (default tracking_mode == UNITS), bypassing the service-level
+    enforcement that forces AMOUNT-mode for new grocery stores.
+    """
+    user.user_type = "entity"
+    user.entity_subtype = EntitySubtype.GROCERY_STORE
+    db.session.commit()
+
+    service = CorporateContractService()
+    contract, account = _create_contract_and_account(user.id)
+
+    products = []
+    order = Order(
+        order_number=f"ORD-{uuid4().hex[:8]}",
+        user_id=user.id,
+        status=OrderStatus.PENDING,
+        subtotal=Decimal("0.00"),
+        delivery_fee=Decimal("0.00"),
+        total_amount=Decimal("0.00"),
+        order_source="admin",
+    )
+    db.session.add(order)
+    db.session.flush()
+
+    total = Decimal("0.00")
+    for idx in range(product_count):
+        product = _create_product(f"Grocery Units Water {idx}", Decimal("15000.00"))
+        unit_price = Decimal("14000.00") + Decimal(str(idx * 500))
+        price_row = _create_contract_price(contract.id, product.id, unit_price)
+        quantity = idx + 1
+        line_total = unit_price * Decimal(str(quantity))
+        db.session.add(
+            OrderItem(
+                order_id=order.id,
+                product_id=product.id,
+                contract_id=contract.id,
+                contract_product_price_id=price_row.id,
+                quantity=quantity,
+                unit_price=unit_price,
+                total_price=line_total,
+            )
+        )
+        total += line_total
+        products.append((product, unit_price, quantity))
+
+    order.subtotal = total
+    order.total_amount = total
+    db.session.commit()
+
+    service.reserve_for_order(order.id)
+    service.consume_for_order(order.id)
+    db.session.commit()
+
+    return service, contract, account, products, order
+
+
+def test_topup_from_cash_collection_mirrors_consume_entries(db, sample_user):
+    service, contract, account, products, order = _setup_units_grocery_order_with_consume(
+        db, sample_user, product_count=2
+    )
+
+    entries = service.topup_from_cash_collection(
+        contract=contract,
+        order_id=order.id,
+        cash_event_id=4242,
+        delivery_id=None,
+        actor_user_id=sample_user.id,
+        source="delivery_completion",
+    )
+    db.session.commit()
+
+    assert len(entries) == 2
+    for entry, (product, unit_price, quantity) in zip(
+        sorted(entries, key=lambda e: e.product_id),
+        sorted(products, key=lambda p: p[0].id),
+    ):
+        assert entry.event_type == CorporatePrepaymentEventType.TOPUP
+        assert entry.contract_id == contract.id
+        assert entry.product_id == product.id
+        assert entry.order_id == order.id
+        assert Decimal(str(entry.units)) == Decimal(str(quantity))
+        assert Decimal(str(entry.unit_price_snapshot)) == unit_price
+        assert Decimal(str(entry.amount)) == unit_price * Decimal(str(quantity))
+        assert entry.idempotency_key.startswith("topup:cash_event:4242:consume:")
+        assert entry.entry_metadata["auto_topup"] is True
+        assert entry.entry_metadata["cash_event_id"] == 4242
+        assert entry.entry_metadata["source"] == "delivery_completion"
+
+        balance = _get_product_balance(account.id, product.id)
+        assert Decimal(str(balance.prepaid_units)) == Decimal(str(quantity))
+        # Topup matched consumption exactly; available balance is back to zero.
+        assert balance.available_units == Decimal("0.00")
+        assert balance.last_topup_at is not None
+
+    db.session.refresh(account)
+    assert account.last_topup_at is not None
+
+
+def test_topup_from_cash_collection_is_idempotent(db, sample_user):
+    service, contract, account, products, order = _setup_units_grocery_order_with_consume(
+        db, sample_user, product_count=2
+    )
+
+    first = service.topup_from_cash_collection(
+        contract=contract, order_id=order.id, cash_event_id=99, actor_user_id=sample_user.id
+    )
+    db.session.commit()
+    second = service.topup_from_cash_collection(
+        contract=contract, order_id=order.id, cash_event_id=99, actor_user_id=sample_user.id
+    )
+    db.session.commit()
+
+    assert len(first) == len(second) == 2
+    assert {e.id for e in first} == {e.id for e in second}
+
+    topup_count = CorporatePrepaymentLedger.query.filter_by(
+        order_id=order.id,
+        event_type=CorporatePrepaymentEventType.TOPUP,
+    ).count()
+    assert topup_count == 2
+
+    for product, _unit_price, quantity in products:
+        balance = _get_product_balance(account.id, product.id)
+        assert Decimal(str(balance.prepaid_units)) == Decimal(str(quantity))
+
+
+def test_topup_from_cash_collection_noop_without_consume_entries(db, sample_user):
+    sample_user.user_type = "entity"
+    sample_user.entity_subtype = EntitySubtype.GROCERY_STORE
+    db.session.commit()
+
+    service = CorporateContractService()
+    contract, _account = _create_contract_and_account(sample_user.id)
+    product = _create_product("No-consume Water", Decimal("15000.00"))
+    price_row = _create_contract_price(contract.id, product.id, Decimal("14000.00"))
+    order = _create_order_with_item(
+        user_id=sample_user.id,
+        product_id=product.id,
+        quantity=2,
+        unit_price=Decimal("14000.00"),
+        contract_id=contract.id,
+        contract_product_price_id=price_row.id,
+    )
+    # No reserve, no consume -> no CONSUME entries exist for this order.
+
+    entries = service.topup_from_cash_collection(
+        contract=contract, order_id=order.id, cash_event_id=1
+    )
+    db.session.commit()
+
+    assert entries == []
+    assert (
+        CorporatePrepaymentLedger.query.filter_by(
+            order_id=order.id,
+            event_type=CorporatePrepaymentEventType.TOPUP,
+        ).count()
+        == 0
+    )
+
+
+def test_topup_from_cash_collection_rejects_amount_mode_contract(db, sample_user):
+    sample_user.user_type = "entity"
+    sample_user.entity_subtype = EntitySubtype.GROCERY_STORE
+    db.session.commit()
+
+    # Bypass the service-level forced UNITS default and write an AMOUNT contract.
+    contract = CorporateContract(
+        user_id=sample_user.id,
+        contract_number=f"CTR-{uuid4().hex[:10]}",
+        name="Money Contract",
+        status=CorporateContractStatus.ACTIVE,
+        start_date=datetime.now(UTC) - timedelta(days=1),
+        currency="UZS",
+        is_active=True,
+    )
+    from shared.enums import CorporateContractTrackingMode
+
+    contract.tracking_mode = CorporateContractTrackingMode.AMOUNT
+    db.session.add(contract)
+    db.session.flush()
+    db.session.add(CorporatePrepaymentAccount(contract_id=contract.id, is_active=True))
+    db.session.commit()
+
+    service = CorporateContractService()
+    import pytest
+
+    with pytest.raises(ValidationError):
+        service.topup_from_cash_collection(contract=contract, order_id=1, cash_event_id=1)

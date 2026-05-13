@@ -966,10 +966,10 @@ class CashCollectionService:
             from business_app.services.corporate_contract_service import CorporateContractService
 
             corporate_service = CorporateContractService()
-            contract = corporate_service.get_active_amount_contract_for_user(customer.id)
-            if contract:
+            amount_contract = corporate_service.get_active_amount_contract_for_user(customer.id)
+            if amount_contract:
                 corporate_service.record_money_collection(
-                    contract=contract,
+                    contract=amount_contract,
                     amount=normalized_amount,
                     source=source_enum.value,
                     order_id=order_id,
@@ -978,6 +978,39 @@ class CashCollectionService:
                     actor_user_id=recorded_by_user_id or collector_user_id,
                     notes=notes,
                 )
+            elif order_id is not None:
+                # Legacy grocery-store users on a UNITS-mode contract: mirror the
+                # cash as TOPUP entries matching the CONSUME entries written at
+                # delivery. Standalone collections (no order_id) deliberately
+                # skip this path; TOPUP requires per-product CONSUME context.
+                from business_app.models.corporate import CorporateContract
+                from business_app.models.order import OrderItem
+                from shared.enums import CorporateContractTrackingMode
+
+                contract_ids = {
+                    row.contract_id
+                    for row in OrderItem.query.filter(
+                        OrderItem.order_id == order_id,
+                        OrderItem.contract_id.isnot(None),
+                    ).all()
+                }
+                if contract_ids:
+                    units_contracts = (
+                        CorporateContract.query.filter(
+                            CorporateContract.id.in_(contract_ids),
+                            CorporateContract.tracking_mode == CorporateContractTrackingMode.UNITS,
+                        ).all()
+                    )
+                    for units_contract in units_contracts:
+                        corporate_service.topup_from_cash_collection(
+                            contract=units_contract,
+                            order_id=order_id,
+                            cash_event_id=event.id,
+                            delivery_id=delivery_id,
+                            actor_user_id=recorded_by_user_id or collector_user_id,
+                            source=source_enum.value,
+                            notes=notes,
+                        )
 
         audit_logger.log_event(
             event_type=AuditEventType.PAYMENT_PROCESSED,

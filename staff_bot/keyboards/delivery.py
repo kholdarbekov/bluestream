@@ -179,7 +179,6 @@ class DeliveryKeyboards:
     def reconciliation_actions(
         language: str,
         can_submit: bool = True,
-        can_handoff: bool = True,
     ) -> InlineKeyboardMarkup:
         """Actions for the driver's reconciliation session view."""
         keyboard = []
@@ -191,11 +190,6 @@ class DeliveryKeyboards:
             keyboard.append([InlineKeyboardButton(
                 f"✏️ {i18n.get('staff.delivery.edit_reconciliation_cash', language)}",
                 callback_data="staff_reconcile_submit"
-            )])
-        if can_handoff:
-            keyboard.append([InlineKeyboardButton(
-                f"📦 {i18n.get('staff.delivery.checkpoint_handoff', language)}",
-                callback_data="staff_reconcile_transfer"
             )])
         keyboard.append([InlineKeyboardButton(
             f"⬅️ {i18n.get('staff.back', language)}",

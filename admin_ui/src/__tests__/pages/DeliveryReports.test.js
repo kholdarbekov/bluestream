@@ -108,7 +108,7 @@ const reconciliationPayload = {
         {
           id: 101,
           driver_name: 'Driver One',
-          business_date: '2026-03-06',
+          session_started_at: '2026-03-06T08:00:00Z',
           status: 'submitted',
           expected_cash: 100000,
           expected_cash_on_hand: 100000,
@@ -121,7 +121,7 @@ const reconciliationPayload = {
         {
           id: 102,
           driver_name: 'Driver Two',
-          business_date: '2026-03-06',
+          session_started_at: '2026-03-06T09:00:00Z',
           status: 'mismatch',
           expected_cash: 200000,
           expected_cash_on_hand: 200000,
@@ -147,7 +147,7 @@ describe('DeliveryReports page', () => {
           id: 101,
           driver_name: 'Driver One',
           status: 'submitted',
-          business_date: '2026-03-06',
+          session_started_at: '2026-03-06T08:00:00Z',
           expected_cash: 100000,
           expected_cash_on_hand: 100000,
           declared_cash: 100000,

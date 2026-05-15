@@ -1155,13 +1155,6 @@
     "rule": "/api/v1/admin/staff/cash-reconciliation/sessions/<int:session_id>/verify"
   },
   {
-    "endpoint": "admin.confirm_cash_reconciliation_transfer",
-    "methods": [
-      "POST"
-    ],
-    "rule": "/api/v1/admin/staff/cash-reconciliation/transfers/<int:transfer_id>/confirm"
-  },
-  {
     "endpoint": "admin.search_cod_collection_users_admin",
     "methods": [
       "GET"
@@ -3261,13 +3254,6 @@
       "POST"
     ],
     "rule": "/api/v1/staff/reconciliation/session/submit"
-  },
-  {
-    "endpoint": "staff.create_reconciliation_transfer",
-    "methods": [
-      "POST"
-    ],
-    "rule": "/api/v1/staff/reconciliation/transfers"
   },
   {
     "endpoint": "staff_tryouts.accept_tryout_task",

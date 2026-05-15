@@ -228,9 +228,9 @@ const StaffManagement = () => {
             key: 'driver_name',
         },
         {
-            title: t('staff:business_date', 'Business Date'),
-            dataIndex: 'business_date',
-            key: 'business_date',
+            title: t('staff:session_started_at', 'Started'),
+            dataIndex: 'session_started_at',
+            key: 'session_started_at',
         },
         {
             title: t('staff:status', 'Status'),

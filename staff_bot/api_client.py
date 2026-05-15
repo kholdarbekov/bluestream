@@ -549,20 +549,12 @@ class StaffAPIClient:
             data=payload,
         )
 
-    async def get_reconciliation_session(
-        self,
-        token: str,
-        business_date: Optional[str] = None,
-    ) -> APIResponse:
+    async def get_reconciliation_session(self, token: str) -> APIResponse:
         """Get the driver's open reconciliation session."""
-        params = {}
-        if business_date:
-            params['business_date'] = business_date
         return await self._make_request(
             'GET',
             '/api/v1/staff/reconciliation/session',
             token=token,
-            params=params or None,
         )
 
     async def submit_reconciliation_session(self, token: str, payload: Dict) -> APIResponse:
@@ -570,15 +562,6 @@ class StaffAPIClient:
         return await self._make_request(
             'POST',
             '/api/v1/staff/reconciliation/session/submit',
-            token=token,
-            data=payload,
-        )
-
-    async def create_reconciliation_transfer(self, token: str, payload: Dict) -> APIResponse:
-        """Create a driver checkpoint custody transfer."""
-        return await self._make_request(
-            'POST',
-            '/api/v1/staff/reconciliation/transfers',
             token=token,
             data=payload,
         )

@@ -12,7 +12,6 @@ from business_app.models.order import Order
 from business_app.models.payment import CashCollectionEvent, DriverCashSession, Payment
 from business_app.models.user import User
 from business_app.services.cash_collection_service import CashCollectionService
-from business_app.services.driver_cash_custody_service import DriverCashCustodyService
 from business_app.services.driver_reconciliation_service import DriverReconciliationService
 from business_app.services.staff_service import StaffService
 from business_app.utils.constants import (
@@ -1090,12 +1089,11 @@ class TestDriverReconciliationService:
             assert resolved.blocked_from_cod is False
             assert recon_service.is_driver_blocked_from_cod(delivery_driver.id) is False
 
-    def test_submit_defaults_to_expected_on_hand_after_checkpoint_transfer(
+    def test_submit_defaults_to_expected_cash_on_hand(
         self,
         app,
         db,
         sample_user,
-        admin_user,
         delivery_driver,
         delivery_driver_profile,
         cod_order,
@@ -1114,26 +1112,10 @@ class TestDriverReconciliationService:
                 recorded_by_user_id=delivery_driver.id,
                 order_id=cod_order.id,
                 delivery_id=cod_delivery.id,
-                notes="Collected and moved cash to checkpoint.",
+                notes="Collected at delivery.",
             )
 
             recon_service = DriverReconciliationService()
-            session = recon_service.get_open_session_for_driver(delivery_driver.id)
-
-            custody_service = DriverCashCustodyService()
-            transfer = custody_service.create_transfer(
-                session_id=session.id,
-                driver_user_id=delivery_driver.id,
-                declared_transfer_cash=Decimal("6000.00"),
-                notes="Handoff before end of shift",
-            )
-            custody_service.confirm_transfer(
-                transfer_id=transfer.id,
-                actor_user_id=admin_user.id,
-                counted_transfer_cash=Decimal("6000.00"),
-                reason_code='cash_count_matched',
-            )
-
             submitted = recon_service.submit_session(
                 driver_user_id=delivery_driver.id,
                 declared_cash=None,
@@ -1141,9 +1123,8 @@ class TestDriverReconciliationService:
             )
 
             assert submitted.expected_cash == Decimal("10000.00")
-            assert submitted.transferred_cash_total == Decimal("6000.00")
-            assert submitted.expected_cash_on_hand == Decimal("4000.00")
-            assert submitted.declared_cash == Decimal("4000.00")
+            assert submitted.expected_cash_on_hand == Decimal("10000.00")
+            assert submitted.declared_cash == Decimal("10000.00")
             assert submitted.declared_variance == Decimal("0.00")
             next_session = getattr(submitted, "_next_active_session", None)
             assert next_session is not None

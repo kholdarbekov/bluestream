@@ -152,10 +152,6 @@ class StaffServiceClass {
     return api.post(`/admin/staff/cash-reconciliation/sessions/${sessionId}/resolve`, payload);
   }
 
-  confirmCashReconciliationTransfer(transferId, payload) {
-    return api.post(`/admin/staff/cash-reconciliation/transfers/${transferId}/confirm`, payload);
-  }
-
   getCustomerCodStatement(customerId) {
     return api.get(`/admin/staff/cash-reconciliation/customers/${customerId}/statement`);
   }

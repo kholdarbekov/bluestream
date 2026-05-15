@@ -466,7 +466,7 @@ class AdminReportService:
                 ),
             )
             .filter(
-                DriverCashSession.business_date <= end_dt.date(),
+                func.date(DriverCashSession.session_started_at) <= end_dt.date(),
                 or_(
                     DriverCashSession.session_ended_at.is_(None),
                     func.date(DriverCashSession.session_ended_at) >= start_dt.date(),

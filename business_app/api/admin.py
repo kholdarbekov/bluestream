@@ -11053,43 +11053,6 @@ def resolve_cash_reconciliation_session(session_id):
         return internal_error_response("Failed to resolve reconciliation session")
 
 
-@admin_bp.route("/staff/cash-reconciliation/transfers/<int:transfer_id>/confirm", methods=["POST"])
-@jwt_required()
-@manager_or_higher_required
-def confirm_cash_reconciliation_transfer(transfer_id):
-    """Confirm a driver checkpoint custody transfer with counted cash."""
-    try:
-        actor_user_id = int(get_jwt_identity())
-        data = request.get_json() or {}
-        if data.get("counted_transfer_cash") is None:
-            return validation_error_response("counted_transfer_cash is required")
-
-        from business_app.services.driver_cash_custody_service import DriverCashCustodyService
-        from business_app.services.driver_reconciliation_service import DriverReconciliationService
-
-        transfer = DriverCashCustodyService().confirm_transfer(
-            transfer_id=transfer_id,
-            actor_user_id=actor_user_id,
-            counted_transfer_cash=data.get("counted_transfer_cash"),
-            notes=data.get("notes"),
-            reason_code=data.get("reason_code"),
-        )
-        session_payload = DriverReconciliationService().get_session_detail(transfer.driver_cash_session_id)
-        return success_response(
-            data={
-                "transfer": transfer.to_dict(),
-                "session": session_payload,
-            }
-        )
-    except NotFoundError:
-        return not_found_response("Driver cash transfer not found")
-    except ValidationError as e:
-        return validation_error_response(e.message)
-    except Exception as e:
-        current_app.logger.error(f"Confirm cash reconciliation transfer error: {e}")
-        return internal_error_response("Failed to confirm cash reconciliation transfer")
-
-
 @admin_bp.route("/staff/cash-reconciliation/customers/<int:customer_id>/statement", methods=["GET"])
 @jwt_required()
 @manager_or_higher_required

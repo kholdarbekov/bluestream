@@ -542,14 +542,10 @@ def record_cash_collection():
 def get_reconciliation_session():
     """Get the driver's active cash custody reconciliation session."""
     current_user_id = get_jwt_identity()
-    business_date = request.args.get("business_date")
 
     from business_app.services.driver_reconciliation_service import DriverReconciliationService
 
-    session = DriverReconciliationService().get_open_session_for_driver(
-        current_user_id,
-        business_date=business_date,
-    )
+    session = DriverReconciliationService().get_open_session_for_driver(current_user_id)
     payload = DriverReconciliationService().get_session_detail(session.id)
     return success_response(payload)
 
@@ -570,7 +566,6 @@ def submit_reconciliation_session():
         driver_user_id=current_user_id,
         declared_cash=data.get("declared_cash"),
         notes=data.get("notes"),
-        business_date=data.get("business_date"),
         submitted_by_user_id=current_user_id,
     )
     payload = reconciliation_service.get_session_detail(session.id)
@@ -579,41 +574,6 @@ def submit_reconciliation_session():
         reconciliation_service.get_session_detail(next_session.id) if next_session else None
     )
     return success_response(payload)
-
-
-@staff_bp.route("/reconciliation/transfers", methods=["POST"])
-@handle_api_exception
-@jwt_required()
-@require_staff_roles("delivery_driver")
-def create_reconciliation_transfer():
-    """Create a checkpoint custody transfer for the driver's reconciliation session."""
-    current_user_id = int(get_jwt_identity())
-    data = request.get_json() or {}
-    declared_transfer_cash = data.get("declared_transfer_cash")
-    if declared_transfer_cash is None:
-        raise ValidationError(
-            "declared_transfer_cash is required",
-            error_code="STAFF_DECLARED_TRANSFER_CASH_REQUIRED",
-        )
-
-    from business_app.services.driver_reconciliation_service import DriverReconciliationService
-    from business_app.services.driver_cash_custody_service import DriverCashCustodyService
-
-    business_date = data.get("business_date")
-    session = DriverReconciliationService().get_open_session_for_driver(
-        current_user_id,
-        business_date=business_date,
-    )
-    transfer = DriverCashCustodyService().create_transfer(
-        session_id=session.id,
-        driver_user_id=current_user_id,
-        declared_transfer_cash=declared_transfer_cash,
-        notes=data.get("notes"),
-        transfer_metadata=data.get("transfer_metadata") or {},
-    )
-    payload = DriverReconciliationService().get_session_detail(session.id)
-    payload["created_transfer"] = transfer.to_dict()
-    return success_response(payload, status_code=201)
 
 
 @staff_bp.route("/customers/<int:customer_id>/cod-statement", methods=["GET"])

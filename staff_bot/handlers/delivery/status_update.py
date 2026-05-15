@@ -90,7 +90,6 @@ class StatusUpdateHandler(BaseHandler):
         status = session.get('status') or i18n.get('staff.common.not_available', language)
         expected_cash = format_currency(session.get('expected_cash'), language=language)
         expected_on_hand = format_currency(session.get('expected_cash_on_hand'), language=language)
-        transferred_cash_total = format_currency(session.get('transferred_cash_total'), language=language)
         declared_cash = session.get('declared_cash')
         declared_variance = format_currency(session.get('declared_variance'), language=language)
         session_age_days = session.get('session_age_days')
@@ -98,7 +97,6 @@ class StatusUpdateHandler(BaseHandler):
             f"\U0001f9fe <b>{i18n.get('staff.menu.cash_reconciliation', language)}</b>",
             f"{i18n.get('staff.delivery.current_status', language)}: {status}",
             f"\U0001f4b0 {i18n.get('staff.delivery.expected_cash_label', language)}: {expected_cash}",
-            f"\U0001f4e5 {i18n.get('staff.delivery.transferred_cash_label', language)}: {transferred_cash_total}",
             f"\U0001f45b {i18n.get('staff.delivery.expected_cash_on_hand_label', language)}: {expected_on_hand}",
         ]
         if session_age_days is not None:
@@ -582,7 +580,6 @@ class StatusUpdateHandler(BaseHandler):
             keyboard = DeliveryKeyboards.reconciliation_actions(
                 language,
                 can_submit=session.get('status') in {'open', 'overdue'},
-                can_handoff=session.get('status') in {'open', 'overdue'},
             )
 
             if update.callback_query:
@@ -651,25 +648,6 @@ class StatusUpdateHandler(BaseHandler):
 
     @require_auth
     @require_delivery_driver
-    async def start_reconciliation_transfer(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Prompt the driver to enter checkpoint handoff amount."""
-        query = update.callback_query
-        await query.answer()
-        language = await self._get_language(update, context)
-
-        context.user_data['pending_reconciliation_flow'] = {'action': 'transfer'}
-        await flow_state.mark_active(
-            update.effective_user.id, 'pending_reconciliation_flow'
-        )
-        await query.edit_message_text(
-            i18n.get('staff.delivery.enter_transfer_cash', language),
-            reply_markup=CommonKeyboards.flow_cancel(language),
-            parse_mode='HTML',
-        )
-        return RECONCILIATION_INPUT
-
-    @require_auth
-    @require_delivery_driver
     async def receive_reconciliation_declared_cash(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Submit the declared driver cash amount for reconciliation."""
         language = await self._get_language(update, context)
@@ -690,19 +668,11 @@ class StatusUpdateHandler(BaseHandler):
                 )
                 return RECONCILIATION_INPUT
 
-            flow = context.user_data.get('pending_reconciliation_flow') or {}
-            flow_action = flow.get('action', 'submit')
             async with api_client as client:
-                if flow_action == 'transfer':
-                    response = await client.create_reconciliation_transfer(
-                        token,
-                        {'declared_transfer_cash': declared_cash},
-                    )
-                else:
-                    response = await client.submit_reconciliation_session(
-                        token,
-                        {'declared_cash': declared_cash},
-                    )
+                response = await client.submit_reconciliation_session(
+                    token,
+                    {'declared_cash': declared_cash},
+                )
 
             if not response.success:
                 await self._handle_api_response_error(update, response, language)
@@ -710,10 +680,7 @@ class StatusUpdateHandler(BaseHandler):
 
             await self._clear_delivery_cash_flow(context, update)
             session = response.data or {}
-            if flow_action == 'transfer':
-                success_title = i18n.get('staff.delivery.transfer_created', language)
-            else:
-                success_title = i18n.get('staff.delivery.reconciliation_submitted', language)
+            success_title = i18n.get('staff.delivery.reconciliation_submitted', language)
             message = f"\u2705 {success_title}\n\n{self._format_session_summary(session, language)}"
             await update.message.reply_text(
                 message,

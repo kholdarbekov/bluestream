@@ -448,12 +448,23 @@ class BusinessAPIClient:
         finally:
             logger.info(f"=== API CLIENT AUTH DEBUG END for user {telegram_id} ===")
 
-    async def refresh_token(self, refresh_token: str) -> Optional[Dict[str, Any]]:
+    async def refresh_token(
+        self,
+        refresh_token: str,
+        telegram_id: Optional[int] = None,
+        token_manager=None,
+    ) -> Optional[Dict[str, Any]]:
         """
         Refresh access token using refresh token.
 
         Args:
             refresh_token: Valid refresh token
+            telegram_id: Telegram user ID.
+            token_manager: TokenManager instance. When both this and telegram_id
+                are provided, a 401 from /auth/refresh triggers cached-token
+                invalidation in `_make_request`, so a stale refresh token
+                (e.g. for a merged/deleted user) is cleared instead of being
+                retried on every call.
 
         Returns:
             Dict with new access_token and expires_in, or None if failed
@@ -463,7 +474,9 @@ class BusinessAPIClient:
             response = await self._make_request(
                 'POST',
                 '/api/v1/auth/refresh',
-                data={'refresh_token': refresh_token}
+                data={'refresh_token': refresh_token},
+                telegram_id=telegram_id,
+                token_manager=token_manager,
             )
 
             if response.success:

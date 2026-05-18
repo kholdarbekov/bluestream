@@ -26,6 +26,7 @@ from shared.enums import (  # noqa: E402
     SubscriptionFrequency,
     UserRole,
 )
+from shared.status_transitions import is_valid_order_transition  # noqa: E402
 from business_app.models.order import OrderStatusHistory  # noqa: E402
 from business_app.utils.audit_logger import audit_logger, AuditEventType, AuditSeverity  # noqa: E402
 from business_app.utils.state_validators import (  # noqa: E402
@@ -1266,18 +1267,8 @@ class OrderService:
         return processed_items, subtotal
 
     def _is_valid_status_transition(self, current_status: OrderStatus, new_status: OrderStatus) -> bool:
-        """Check if status transition is valid"""
-        valid_transitions = {
-            OrderStatus.PENDING: [OrderStatus.CONFIRMED, OrderStatus.CANCELLED],
-            OrderStatus.CONFIRMED: [OrderStatus.PREPARING, OrderStatus.DELIVERED, OrderStatus.CANCELLED],
-            OrderStatus.PREPARING: [OrderStatus.OUT_FOR_DELIVERY, OrderStatus.CANCELLED],
-            OrderStatus.OUT_FOR_DELIVERY: [OrderStatus.DELIVERED, OrderStatus.RETURNED],
-            OrderStatus.DELIVERED: [],
-            OrderStatus.CANCELLED: [],
-            OrderStatus.RETURNED: [],
-        }
-
-        return new_status in valid_transitions.get(current_status, [])
+        """Check if status transition is valid (delegates to shared.status_transitions)."""
+        return is_valid_order_transition(current_status, new_status)
 
     def _update_status_fields(self, order: Order, new_status: OrderStatus):
         """Update status-specific fields"""

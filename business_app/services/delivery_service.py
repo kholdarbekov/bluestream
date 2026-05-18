@@ -19,6 +19,7 @@ from business_app.utils.exceptions import ValidationError, NotFoundError, Delive
 from business_app.utils.state_validators import assert_delivery_person_for_status
 from business_app.utils.constants import DeliveryType, DELIVERY_ZONES
 from shared.enums import DeliveryStatus, OrderStatus
+from shared.status_transitions import is_valid_delivery_transition
 from business_app.utils.helpers import (
     calculate_distance,
     get_time_slots,
@@ -728,29 +729,8 @@ class DeliveryService:
         return True
 
     def _is_valid_delivery_status_transition(self, current: DeliveryStatus, new: DeliveryStatus) -> bool:
-        """Check if delivery status transition is valid"""
-        valid_transitions = {
-            DeliveryStatus.PENDING: [DeliveryStatus.ASSIGNED, DeliveryStatus.FAILED, DeliveryStatus.CANCELLED],
-            DeliveryStatus.SCHEDULED: [
-                DeliveryStatus.ASSIGNED,
-                DeliveryStatus.PICKED_UP,
-                DeliveryStatus.IN_TRANSIT,
-                DeliveryStatus.ARRIVED,
-                DeliveryStatus.DELIVERED,
-                DeliveryStatus.FAILED,
-                DeliveryStatus.CANCELLED,
-            ],
-            DeliveryStatus.ASSIGNED: [DeliveryStatus.PICKED_UP, DeliveryStatus.FAILED, DeliveryStatus.CANCELLED],
-            DeliveryStatus.PICKED_UP: [DeliveryStatus.IN_TRANSIT, DeliveryStatus.FAILED],
-            DeliveryStatus.IN_TRANSIT: [DeliveryStatus.ARRIVED, DeliveryStatus.FAILED],
-            DeliveryStatus.ARRIVED: [DeliveryStatus.DELIVERED, DeliveryStatus.FAILED],
-            DeliveryStatus.DELIVERED: [],
-            DeliveryStatus.FAILED: [],
-            DeliveryStatus.CANCELLED: [],
-            DeliveryStatus.RETURNED: [],
-        }
-
-        return new in valid_transitions.get(current, [])
+        """Check if delivery status transition is valid (delegates to shared.status_transitions)."""
+        return is_valid_delivery_transition(current, new)
 
     def _update_delivery_status_fields(
         self, delivery: Delivery, new_status: DeliveryStatus, current_location: Tuple[float, float] = None

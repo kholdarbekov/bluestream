@@ -20,7 +20,10 @@ class TestHelpersCore:
         assert len(value) == 24
         assert tracking.startswith("TR")
         assert len(referral) == 8
-        assert referral.isupper()
+        # generate_referral_code returns md5 hex .upper() — the result can be
+        # all digits (~3% of the time), and str.isupper() is False without any
+        # cased character. The semantic invariant is "no lowercase letters".
+        assert referral == referral.upper()
         assert otp.isdigit() and len(otp) == 6
         assert invoice.startswith("INV")
 

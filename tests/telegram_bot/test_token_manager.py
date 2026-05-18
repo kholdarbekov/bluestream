@@ -107,7 +107,9 @@ class TestTokenManager:
         token = await manager.get_valid_token(telegram_id=2020, api_client=api_client)
 
         assert token == "new-access"
-        api_client.refresh_token.assert_awaited_once_with("good-refresh")
+        api_client.refresh_token.assert_awaited_once_with(
+            "good-refresh", telegram_id=2020, token_manager=manager
+        )
         manager.store_tokens.assert_awaited_once_with(2020, "new-access", "good-refresh", 3600)
 
     async def test_get_valid_token_invalidates_when_both_tokens_expired(self):

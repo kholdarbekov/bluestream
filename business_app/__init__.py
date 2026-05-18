@@ -397,27 +397,50 @@ def setup_jwt_handlers(app):
 
     @jwt.invalid_token_loader
     def invalid_token_callback(error):
-        app.logger.error(f"JWT Invalid Token Error: {error}")
-        app.logger.error(f"Error type: {type(error)}")
+        app.logger.warning(f"JWT Invalid Token Error: {error} (type={type(error).__name__})")
         return jsonify({"error": "Invalid Token", "message": "The token is invalid."}), 401
 
     @jwt.unauthorized_loader
     def missing_token_callback(error):
-        # Enhanced logging to debug CSRF issues
         from flask import request
 
-        app.logger.error(f"JWT Missing Token Error: {error}")
-        app.logger.error(f"Request cookies: {list(request.cookies.keys())}")
-        app.logger.error(
-            f'Request headers: Authorization={request.headers.get("Authorization")}, X-CSRF-TOKEN={request.headers.get("X-CSRF-TOKEN")}'  # noqa: E501
+        app.logger.warning(
+            "JWT Missing Token: %s | cookies=%s, has_auth_header=%s, has_csrf_header=%s, has_csrf_cookie=%s",
+            error,
+            list(request.cookies.keys()),
+            bool(request.headers.get("Authorization")),
+            bool(request.headers.get("X-CSRF-TOKEN")),
+            bool(request.cookies.get("csrf_access_token")),
         )
-        app.logger.error(f'CSRF token cookie: {request.cookies.get("csrf_access_token")}')
         return jsonify({"error": "Authorization Required", "message": "Request does not contain an access token."}), 401
 
     @jwt.revoked_token_loader
     def revoked_token_callback(jwt_header, jwt_payload):
-        app.logger.error(f"JWT Revoked Token: header={jwt_header}, payload={jwt_payload}")
+        app.logger.warning(f"JWT Revoked Token: jti={jwt_payload.get('jti')}, sub={jwt_payload.get('sub')}")
         return jsonify({"error": "Token Revoked", "message": "The token has been revoked."}), 401
+
+    @jwt.user_lookup_loader
+    def user_lookup_callback(_jwt_header, jwt_payload):
+        """
+        Resolve the JWT `sub` claim to a User row. Returning None makes
+        flask-jwt-extended invoke `user_lookup_error_loader` below, which
+        returns 401 — so stale tokens for deleted/merged users trigger
+        client-side re-auth instead of leaking through as 404s from each
+        endpoint's own `User.query.get(...)`.
+        """
+        from business_app.models.user import User
+
+        identity = jwt_payload.get("sub")
+        try:
+            user_id = int(identity)
+        except (TypeError, ValueError):
+            return None
+        return User.query.get(user_id)
+
+    @jwt.user_lookup_error_loader
+    def user_lookup_error_callback(_jwt_header, jwt_payload):
+        app.logger.warning(f"JWT identity does not resolve to a user: sub={jwt_payload.get('sub')}")
+        return jsonify({"error": "User Not Found", "message": "Token identity is no longer valid."}), 401
 
     @jwt.token_in_blocklist_loader
     def check_if_token_revoked(jwt_header, jwt_payload):

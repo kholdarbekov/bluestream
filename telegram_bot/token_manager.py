@@ -340,7 +340,11 @@ class TokenManager:
 
             logger.info(f"TokenManager: Refreshing token for user {telegram_id}")
             try:
-                new_tokens = await api_client.refresh_token(tokens['refresh_token'])
+                new_tokens = await api_client.refresh_token(
+                    tokens['refresh_token'],
+                    telegram_id=telegram_id,
+                    token_manager=self,
+                )
                 if new_tokens and 'access_token' in new_tokens:
                     # Store refreshed tokens
                     await self.store_tokens(

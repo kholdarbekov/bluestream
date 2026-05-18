@@ -371,12 +371,12 @@ class WaterBusinessBot:
         # Add logging callback handler to catch all callbacks for debugging
         async def debug_callback_handler(update, context):
             if update.callback_query:
-                logger.error(f"========================================")
-                logger.error(f"=== CALLBACK QUERY RECEIVED ===")
-                logger.error(f"User: {update.effective_user.id}")
-                logger.error(f"Callback data: {update.callback_query.data}")
-                logger.error(f"Message ID: {update.callback_query.message.message_id}")
-                logger.error(f"========================================")
+                logger.debug(
+                    "Callback received: user=%s, data=%s, message_id=%s",
+                    update.effective_user.id,
+                    update.callback_query.data,
+                    update.callback_query.message.message_id,
+                )
                 # Don't process, just log and let other handlers handle it
 
         # Add debug handler that catches all callbacks but doesn't interfere

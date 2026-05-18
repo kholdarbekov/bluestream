@@ -217,6 +217,10 @@ const Orders = () => {
     staleTime: 1000 * 60 * 60 * 24,
   });
   const orderStatuses = statusesData?.data?.statuses || [];
+  const statusTransitions = statusesData?.data?.transitions || {};
+  const allowedNextStatuses = selectedOrder?.status
+    ? new Set(statusTransitions[selectedOrder.status] || [])
+    : null;
 
   const updateOrderMutation = useMutation({
     mutationFn: ({ orderId, status, notes, bottles_returned }) => adminService.updateOrderStatus(orderId, status, notes, { bottles_returned }),
@@ -558,7 +562,7 @@ const Orders = () => {
                 key: 'cancel',
                 label: t('ui.orders.cancel_order', 'Cancel Order'),
                 danger: true,
-                disabled: ['delivered', 'cancelled'].includes(record.status),
+                disabled: !(statusTransitions[record.status] || []).includes('cancelled'),
                 onClick: () => handleCancelOrder(record),
               },
             ],
@@ -1172,13 +1176,23 @@ const Orders = () => {
             name="status"
             label={t('ui.orders.new_status', 'New Status')}
             rules={[{ required: true, message: t('ui.orders.select_status_required', 'Please select a status') }]}
+            extra={
+              allowedNextStatuses && allowedNextStatuses.size === 0
+                ? t('ui.orders.no_valid_transitions', 'This order is in a terminal state and cannot be updated.')
+                : undefined
+            }
           >
-            <Select>
-              {orderStatuses.map((status) => (
-                <Option key={status.value} value={status.value}>
-                  {t(`ui.orders.status_${status.value}`, status.label)}
-                </Option>
-              ))}
+            <Select
+              disabled={allowedNextStatuses ? allowedNextStatuses.size === 0 : false}
+              notFoundContent={t('ui.orders.no_valid_transitions', 'No valid transitions available.')}
+            >
+              {orderStatuses
+                .filter((status) => (allowedNextStatuses ? allowedNextStatuses.has(status.value) : true))
+                .map((status) => (
+                  <Option key={status.value} value={status.value}>
+                    {t(`ui.orders.status_${status.value}`, status.label)}
+                  </Option>
+                ))}
             </Select>
           </Form.Item>
           {watchedStatusValue === 'delivered' && (

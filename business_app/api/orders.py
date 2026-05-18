@@ -28,6 +28,7 @@ from business_app.serializers.order_serializers import (
 from business_app.utils.decorators import validate_json, rate_limit, require_verification
 from business_app.utils.constants import NotificationType
 from shared.enums import OrderStatus, PaymentMethod
+from shared.status_transitions import order_transitions_as_strings
 from business_app.utils.validation_helpers import validate_list_request_params
 from business_app.utils.error_handlers import handle_api_exception
 from business_app.utils.exceptions import (
@@ -929,18 +930,25 @@ def schedule_order():
 @orders_bp.route("/statuses", methods=["GET"])
 def get_order_statuses():
     """
-    Get all available order statuses.
+    Get all available order statuses and the allowed transitions between them.
 
-    This endpoint provides the single source of truth for order statuses,
-    ensuring UI and backend remain synchronized.
+    Single source of truth for the admin UI dropdown — sourced from
+    `shared.status_transitions` so backend, bots, and UI stay in lockstep.
+
+    Response shape:
+        {
+          "statuses": [{"value": "pending", "label": "Pending"}, ...],
+          "transitions": {"pending": ["confirmed", "cancelled"], ...}
+        }
     """
-    statuses = []
-    for status in OrderStatus:
-        # Convert enum value to human-readable label
-        label = status.value.replace("_", " ").title()
-        statuses.append({"value": status.value, "label": label})
-
-    return success_response(data={"statuses": statuses}, message=get_translation("api.orders.statuses_retrieved"))
+    statuses = [{"value": status.value, "label": status.value.replace("_", " ").title()} for status in OrderStatus]
+    return success_response(
+        data={
+            "statuses": statuses,
+            "transitions": order_transitions_as_strings(),
+        },
+        message=get_translation("api.orders.statuses_retrieved"),
+    )
 
 
 # ------------------------------------------------------------------

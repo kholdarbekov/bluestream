@@ -118,6 +118,13 @@ class BaseConfig:
     JINJA_DISABLE_CACHE = os.environ.get("JINJA_DISABLE_CACHE", "False").lower() == "true"
     LANGUAGE_DEBUG_HEADERS = os.environ.get("LANGUAGE_DEBUG_HEADERS", "False").lower() == "true"
 
+    # Bottle session enforcement. When False (PR 1 default), the guards
+    # in BottleTrackingService.assert_driver_can_progress_delivery and
+    # OrderService._handle_missing_bottle_session_on_delivery only log a
+    # warning so we can measure the at-risk population without breaking
+    # in-flight deliveries. Flip to True in PR 2 to enforce.
+    BOTTLE_SESSION_ENFORCEMENT_STRICT = os.environ.get("BOTTLE_SESSION_ENFORCEMENT_STRICT", "False").lower() == "true"
+
     # Database Configuration
     @property
     def SQLALCHEMY_DATABASE_URI(self):

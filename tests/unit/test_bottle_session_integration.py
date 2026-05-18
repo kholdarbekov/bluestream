@@ -258,13 +258,13 @@ def test_bind_order_to_session_is_idempotent(db, sample_user):
 # ---------------------------------------------------------------------------
 
 @pytest.mark.unit
-def test_staff_service_delivery_uses_session_tally_not_deprecated_load(
+def test_staff_service_delivery_tallies_bound_session(
     db, sample_user, sample_product, monkeypatch
 ):
     """
-    When a delivery is marked 'delivered', StaffService must:
-      1. Call BottleTrackingService.update_session_delivery_tally (not the removed update_driver_delivery_counts)
-      2. Call bind_order_to_session with accepted_by_driver_id = actual driver (not the actor)
+    When a delivery is marked 'delivered', OrderService must credit the
+    session the order was bound to at accept time (session continuity).
+    The binding is now created in accept_order, not the DELIVERED handler.
     """
     from datetime import datetime, UTC, timedelta
     from business_app.models.delivery import Delivery
@@ -272,6 +272,7 @@ def test_staff_service_delivery_uses_session_tally_not_deprecated_load(
     from business_app.models.user import UserAddress
     from business_app.services.staff_service import StaffService
     from shared.enums import OrderStatus
+
     sample_product.tracks_returnable_bottles = True
     sample_product.returnable_bottles_per_unit = Decimal("1.00")
     db.session.flush()
@@ -282,7 +283,6 @@ def test_staff_service_delivery_uses_session_tally_not_deprecated_load(
     session.bottles_loaded = 10
     db.session.flush()
 
-    # Create customer address
     address = UserAddress(
         user_id=sample_user.id,
         title="Home",
@@ -324,37 +324,24 @@ def test_staff_service_delivery_uses_session_tally_not_deprecated_load(
     )
     db.session.add(delivery)
     db.session.flush()
+
+    # Simulate accept: bind the order to the session up front (this is now
+    # what accept_order does — the DELIVERED handler relies on this binding).
+    BottleTrackingService().bind_order_to_session(
+        session.id, order.id, accepted_by_driver_id=driver.id
+    )
     db.session.commit()
 
-    # Capture calls to the two critical service methods
-    tally_calls = []
-    bind_calls = []
+    # Skip the customer-ledger side effects to keep the test focused on
+    # the session-tally invariant.
+    def _noop_delivered(self, order_id, user_id, address_id, quantity, actor_user_id):
+        return None
 
-    original_tally = BottleTrackingService.update_session_delivery_tally
-    original_bind = BottleTrackingService.bind_order_to_session
+    def _noop_returned(self, **_kwargs):
+        return None
 
-    def patched_tally(self, driver_id, *, bottles_delivered=0, bottles_collected=0):
-        tally_calls.append({
-            "driver_id": driver_id,
-            "bottles_delivered": bottles_delivered,
-            "bottles_collected": bottles_collected,
-        })
-        return original_tally(self, driver_id, bottles_delivered=bottles_delivered, bottles_collected=bottles_collected)
-
-    def patched_bind(self, session_id, order_id, *, accepted_by_driver_id=None):
-        bind_calls.append({
-            "session_id": session_id,
-            "order_id": order_id,
-            "accepted_by_driver_id": accepted_by_driver_id,
-        })
-        return original_bind(self, session_id, order_id, accepted_by_driver_id=accepted_by_driver_id)
-
-    def patched_record_delivered(self, order_id, user_id, address_id, quantity, actor_user_id):
-        pass  # skip ledger entry side-effects to keep test focused
-
-    monkeypatch.setattr(BottleTrackingService, "update_session_delivery_tally", patched_tally)
-    monkeypatch.setattr(BottleTrackingService, "bind_order_to_session", patched_bind)
-    monkeypatch.setattr(BottleTrackingService, "record_bottles_delivered", patched_record_delivered)
+    monkeypatch.setattr(BottleTrackingService, "record_bottles_delivered", _noop_delivered)
+    monkeypatch.setattr(BottleTrackingService, "record_bottles_returned", _noop_returned)
 
     StaffService.update_delivery_status(
         delivery.id,
@@ -363,14 +350,11 @@ def test_staff_service_delivery_uses_session_tally_not_deprecated_load(
         metadata={"bottles_returned": 1},
     )
 
-    assert len(tally_calls) == 1, "update_session_delivery_tally must be called exactly once"
-    assert tally_calls[0]["driver_id"] == driver.id
-    assert tally_calls[0]["bottles_delivered"] == 2  # 2 units × 1 bottle each
-    assert tally_calls[0]["bottles_collected"] == 1
-
-    assert len(bind_calls) == 1, "bind_order_to_session must be called exactly once"
-    assert bind_calls[0]["order_id"] == order.id
-    assert bind_calls[0]["accepted_by_driver_id"] == driver.id  # actual driver, not admin
+    db.session.refresh(session)
+    # Tally credited to the bound session, not whichever session is open
+    # at delivery time. 2 units × 1 bottle = 2 delivered, 1 returned.
+    assert session.bottles_delivered == 2
+    assert session.bottles_collected_from_customers == 1
 
 
 # ---------------------------------------------------------------------------
@@ -606,3 +590,361 @@ def test_codriver_membership_revoked_when_owner_closes_session(db):
     # Co-driver no longer has an effective session
     effective = svc.get_effective_session(codriver.id)
     assert effective is None
+
+
+# ---------------------------------------------------------------------------
+# assert_driver_can_progress_delivery — the new transition-guard
+# ---------------------------------------------------------------------------
+
+def _make_order_with_bottles(db, customer, product, *, quantity=2):
+    """Create an order + order item that requires `quantity` returnable bottles."""
+    from business_app.models.order import Order, OrderItem
+    from business_app.models.user import UserAddress
+    from shared.enums import OrderStatus
+
+    product.tracks_returnable_bottles = True
+    product.returnable_bottles_per_unit = Decimal("1.00")
+    db.session.flush()
+
+    address = UserAddress(
+        user_id=customer.id,
+        title="Home",
+        full_address="123 Test St",
+        city="Tashkent",
+    )
+    db.session.add(address)
+    db.session.flush()
+
+    order = Order(
+        user_id=customer.id,
+        status=OrderStatus.OUT_FOR_DELIVERY,
+        subtotal=Decimal("10000"),
+        total_amount=Decimal("10000"),
+        order_source="phone",
+        delivery_address_id=address.id,
+    )
+    db.session.add(order)
+    db.session.flush()
+
+    db.session.add(
+        OrderItem(
+            order_id=order.id,
+            product_id=product.id,
+            quantity=quantity,
+            unit_price=Decimal("5000"),
+            total_price=Decimal("5000") * quantity,
+        )
+    )
+    db.session.flush()
+    return order
+
+
+def _make_delivery(db, order, driver):
+    from datetime import datetime, UTC, timedelta
+    from business_app.models.delivery import Delivery
+    from shared.enums import DeliveryStatus
+
+    delivery = Delivery(
+        order_id=order.id,
+        status=DeliveryStatus.ASSIGNED,
+        delivery_person_id=driver.id,
+        scheduled_date=datetime.now(UTC) + timedelta(hours=1),
+        scheduled_time_slot="09:00-12:00",
+    )
+    db.session.add(delivery)
+    db.session.flush()
+    return delivery
+
+
+@pytest.mark.unit
+def test_assert_progress_returns_none_for_order_without_bottles(db, sample_user, sample_product):
+    """Orders with no returnable bottles bypass session checks entirely."""
+    from business_app.models.order import Order, OrderItem
+    from shared.enums import OrderStatus
+
+    sample_product.tracks_returnable_bottles = False
+    db.session.flush()
+
+    driver = _make_driver(db, "+998901000100", "NoBottles")
+    order = Order(
+        user_id=sample_user.id,
+        status=OrderStatus.OUT_FOR_DELIVERY,
+        subtotal=Decimal("10000"),
+        total_amount=Decimal("10000"),
+        order_source="phone",
+    )
+    db.session.add(order)
+    db.session.flush()
+    db.session.add(
+        OrderItem(
+            order_id=order.id,
+            product_id=sample_product.id,
+            quantity=1,
+            unit_price=Decimal("10000"),
+            total_price=Decimal("10000"),
+        )
+    )
+    db.session.flush()
+
+    delivery = _make_delivery(db, order, driver)
+
+    svc = BottleTrackingService()
+    assert svc.assert_driver_can_progress_delivery(delivery) is None
+
+
+@pytest.mark.unit
+def test_assert_progress_strict_raises_when_no_binding(db, app, sample_user, sample_product):
+    """Strict mode: missing binding → BOTTLE_SESSION_REQUIRED."""
+    driver = _make_driver(db, "+998901000101", "Strict1")
+    _open_session(db, driver)
+    order = _make_order_with_bottles(db, sample_user, sample_product, quantity=2)
+    delivery = _make_delivery(db, order, driver)
+
+    svc = BottleTrackingService()
+    with app.test_request_context():
+        app.config["BOTTLE_SESSION_ENFORCEMENT_STRICT"] = True
+        try:
+            with pytest.raises(ValidationError) as exc:
+                svc.assert_driver_can_progress_delivery(delivery)
+            assert exc.value.error_code == "BOTTLE_SESSION_REQUIRED"
+        finally:
+            app.config["BOTTLE_SESSION_ENFORCEMENT_STRICT"] = False
+
+
+@pytest.mark.unit
+def test_assert_progress_legacy_does_not_raise_when_no_binding(db, app, sample_user, sample_product):
+    """Legacy mode: missing binding → return None, no raise (regression on bug-AD_000205_26)."""
+    driver = _make_driver(db, "+998901000102", "Legacy1")
+    _open_session(db, driver)
+    order = _make_order_with_bottles(db, sample_user, sample_product, quantity=2)
+    delivery = _make_delivery(db, order, driver)
+
+    svc = BottleTrackingService()
+    with app.test_request_context():
+        app.config["BOTTLE_SESSION_ENFORCEMENT_STRICT"] = False
+        # Must not raise — keeps in-flight orders unblocked during PR 1 measurement.
+        result = svc.assert_driver_can_progress_delivery(delivery)
+        assert result is None
+
+
+@pytest.mark.unit
+def test_assert_progress_strict_raises_when_bound_session_closed(
+    db, app, sample_user, sample_product
+):
+    """Strict mode: bound session has been closed → BOTTLE_SESSION_CLOSED."""
+    driver = _make_driver(db, "+998901000103", "Strict2")
+    session = _open_session(db, driver)
+    order = _make_order_with_bottles(db, sample_user, sample_product, quantity=2)
+    delivery = _make_delivery(db, order, driver)
+
+    svc = BottleTrackingService()
+    svc.bind_order_to_session(session.id, order.id, accepted_by_driver_id=driver.id)
+
+    # Close the session out from under the bound order.
+    session.status = DriverBottleSessionStatus.CLOSED
+    db.session.flush()
+
+    with app.test_request_context():
+        app.config["BOTTLE_SESSION_ENFORCEMENT_STRICT"] = True
+        try:
+            with pytest.raises(ValidationError) as exc:
+                svc.assert_driver_can_progress_delivery(delivery)
+            assert exc.value.error_code == "BOTTLE_SESSION_CLOSED"
+        finally:
+            app.config["BOTTLE_SESSION_ENFORCEMENT_STRICT"] = False
+
+
+@pytest.mark.unit
+def test_assert_progress_strict_raises_when_session_mismatch(
+    db, app, sample_user, sample_product
+):
+    """Strict mode: driver's current effective session differs from bound session.
+
+    Simulates a co-driver scenario where the order was bound under another
+    driver's session while the delivery driver has their own separate session.
+    """
+    driver_a = _make_driver(db, "+998901000104", "DriverA")
+    driver_b = _make_driver(db, "+998901000114", "DriverB")
+    session_a = _open_session(db, driver_a)
+    session_b = _open_session(db, driver_b)
+
+    order = _make_order_with_bottles(db, sample_user, sample_product, quantity=2)
+    delivery = _make_delivery(db, order, driver_a)
+
+    svc = BottleTrackingService()
+    # Order is bound to driver B's session even though delivery is assigned
+    # to driver A — this is the mismatch we want to catch.
+    svc.bind_order_to_session(session_b.id, order.id, accepted_by_driver_id=driver_b.id)
+    db.session.flush()
+
+    with app.test_request_context():
+        app.config["BOTTLE_SESSION_ENFORCEMENT_STRICT"] = True
+        try:
+            with pytest.raises(ValidationError) as exc:
+                svc.assert_driver_can_progress_delivery(delivery)
+            assert exc.value.error_code == "BOTTLE_SESSION_MISMATCH"
+        finally:
+            app.config["BOTTLE_SESSION_ENFORCEMENT_STRICT"] = False
+    # session_a is referenced for symmetry / clarity above; mark used for linters.
+    assert session_a is not None
+
+
+@pytest.mark.unit
+def test_assert_progress_happy_path_returns_bound_session(
+    db, app, sample_user, sample_product
+):
+    """Happy path: returns the bound session when everything lines up."""
+    driver = _make_driver(db, "+998901000105", "Happy")
+    session = _open_session(db, driver)
+    order = _make_order_with_bottles(db, sample_user, sample_product, quantity=2)
+    delivery = _make_delivery(db, order, driver)
+
+    svc = BottleTrackingService()
+    svc.bind_order_to_session(session.id, order.id, accepted_by_driver_id=driver.id)
+
+    with app.test_request_context():
+        app.config["BOTTLE_SESSION_ENFORCEMENT_STRICT"] = True
+        try:
+            got = svc.assert_driver_can_progress_delivery(delivery)
+        finally:
+            app.config["BOTTLE_SESSION_ENFORCEMENT_STRICT"] = False
+    assert got is not None
+    assert got.id == session.id
+
+
+# ---------------------------------------------------------------------------
+# close_bottle_session — refuses to close when bound undelivered orders exist
+# ---------------------------------------------------------------------------
+
+@pytest.mark.unit
+def test_close_session_blocked_when_undelivered_orders_bound(
+    db, sample_user, sample_product
+):
+    """close_bottle_session raises BOTTLE_SESSION_HAS_OPEN_ORDERS when bindings exist."""
+    driver = _make_driver(db, "+998901000200", "CloseBlocked")
+    session = _open_session(db, driver)
+    order = _make_order_with_bottles(db, sample_user, sample_product, quantity=2)
+
+    svc = BottleTrackingService()
+    svc.bind_order_to_session(session.id, order.id, accepted_by_driver_id=driver.id)
+    db.session.commit()
+
+    with pytest.raises(ValidationError) as exc:
+        svc.close_bottle_session(driver.id, bottles_returned_to_warehouse=session.bottles_loaded)
+    assert exc.value.error_code == "BOTTLE_SESSION_HAS_OPEN_ORDERS"
+
+
+@pytest.mark.unit
+def test_close_session_allowed_when_all_orders_delivered(
+    db, sample_user, sample_product
+):
+    """Once bound orders reach a terminal status, close is allowed."""
+    from shared.enums import OrderStatus
+
+    driver = _make_driver(db, "+998901000201", "CloseOK")
+    session = _open_session(db, driver)
+    order = _make_order_with_bottles(db, sample_user, sample_product, quantity=2)
+
+    svc = BottleTrackingService()
+    svc.bind_order_to_session(session.id, order.id, accepted_by_driver_id=driver.id)
+    order.status = OrderStatus.DELIVERED
+    db.session.commit()
+
+    closed = svc.close_bottle_session(driver.id, bottles_returned_to_warehouse=session.bottles_loaded)
+    assert closed.status == DriverBottleSessionStatus.CLOSED
+
+
+@pytest.mark.unit
+def test_close_session_allowed_when_orders_cancelled(
+    db, sample_user, sample_product
+):
+    """Cancelled orders don't block close — predicate uses Order.status, not binding existence."""
+    from shared.enums import OrderStatus
+
+    driver = _make_driver(db, "+998901000202", "CloseCancelled")
+    session = _open_session(db, driver)
+    order = _make_order_with_bottles(db, sample_user, sample_product, quantity=2)
+
+    svc = BottleTrackingService()
+    svc.bind_order_to_session(session.id, order.id, accepted_by_driver_id=driver.id)
+    order.status = OrderStatus.CANCELLED
+    db.session.commit()
+
+    closed = svc.close_bottle_session(driver.id, bottles_returned_to_warehouse=session.bottles_loaded)
+    assert closed.status == DriverBottleSessionStatus.CLOSED
+
+
+@pytest.mark.unit
+def test_admin_force_close_bypasses_open_bindings(db, sample_user, sample_product):
+    """admin_force_close_session ignores the open-binding precondition."""
+    driver = _make_driver(db, "+998901000203", "ForceCloseDriver")
+    admin = _make_driver(db, "+998901000204", "AdminUser")
+    session = _open_session(db, driver)
+    order = _make_order_with_bottles(db, sample_user, sample_product, quantity=2)
+
+    svc = BottleTrackingService()
+    svc.bind_order_to_session(session.id, order.id, accepted_by_driver_id=driver.id)
+    db.session.commit()
+
+    closed = svc.admin_force_close_session(
+        session.id,
+        actor_user_id=admin.id,
+        bottles_returned_to_warehouse=0,
+        reason="Driver went home with bottles",
+    )
+    assert closed.status == DriverBottleSessionStatus.FORCE_CLOSED
+
+
+# ---------------------------------------------------------------------------
+# AD_000205_26 regression — accept under open session, close session, then
+# attempting any further transition must fail (under strict enforcement).
+# ---------------------------------------------------------------------------
+
+@pytest.mark.unit
+def test_regression_AD_000205_26_picked_up_blocked_after_session_close(
+    db, app, sample_user, sample_product
+):
+    """
+    Exact reproduction of the incident shape:
+    1. Driver opens session S.
+    2. Driver accepts order (binding S↔order created at accept).
+    3. Session S is closed before the driver starts transit.
+    4. Driver attempts to mark picked_up. Strict mode must raise.
+    """
+    from business_app.services.staff_service import StaffService
+
+    driver = _make_driver(db, "+998901000300", "RegressionDriver")
+    session = _open_session(db, driver)
+    session.bottles_loaded = 10
+    db.session.flush()
+
+    order = _make_order_with_bottles(db, sample_user, sample_product, quantity=5)
+    delivery = _make_delivery(db, order, driver)
+
+    # Step 2: bind at accept (the new behaviour we just implemented).
+    BottleTrackingService().bind_order_to_session(
+        session.id, order.id, accepted_by_driver_id=driver.id
+    )
+
+    # Step 3: close the session under the driver's feet. Skip the close-precondition
+    # because we want to simulate the pre-fix world where the driver could have
+    # walked off and admin had no warning — equivalent to admin_force_close from
+    # the binding's perspective.
+    session.status = DriverBottleSessionStatus.CLOSED
+    db.session.flush()
+    db.session.commit()
+
+    # Step 4: attempting picked_up must now fail under strict mode. Pre-fix,
+    # this transition went through silently and the bottles tally was lost.
+    with app.test_request_context():
+        app.config["BOTTLE_SESSION_ENFORCEMENT_STRICT"] = True
+        try:
+            with pytest.raises(ValidationError) as exc:
+                StaffService.update_delivery_status(
+                    delivery.id,
+                    new_status="picked_up",
+                    staff_user_id=driver.id,
+                )
+            assert exc.value.error_code == "BOTTLE_SESSION_CLOSED"
+        finally:
+            app.config["BOTTLE_SESSION_ENFORCEMENT_STRICT"] = False

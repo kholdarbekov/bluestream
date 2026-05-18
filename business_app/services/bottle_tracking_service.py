@@ -3,8 +3,9 @@
 import logging
 from datetime import date, datetime, timezone
 from decimal import Decimal
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
+from flask import current_app
 from sqlalchemy import func, or_
 from sqlalchemy.orm import joinedload
 
@@ -26,10 +27,14 @@ from shared.enums import (
     DriverBottleSessionStatus,
     DriverBottleTransferStatus,
     DriverSessionMembershipStatus,
+    OrderStatus,
     UserStatus,
 )
 from business_app.utils.exceptions import ConflictError, NotFoundError, ValidationError
 from business_app.utils.transactions import transactional
+
+if TYPE_CHECKING:
+    from business_app.models.delivery import Delivery
 
 logger = logging.getLogger(__name__)
 
@@ -798,11 +803,22 @@ class BottleTrackingService:
 
         Computes and persists the discrepancy.
         Raises NotFoundError if no open session exists.
+        Raises ValidationError if undelivered orders are still bound to the
+        session — admins must force-close in that case.
         """
         session = self._get_open_session_or_raise(driver_user_id)
 
         if bottles_returned_to_warehouse < 0:
             raise ValidationError("bottles_returned_to_warehouse cannot be negative")
+
+        open_bindings = self._open_bindings_count_for_session(session.id)
+        if open_bindings > 0:
+            raise ValidationError(
+                f"Cannot close session {session.id}: {open_bindings} undelivered "
+                "order(s) still bound. Deliver or cancel them first, or use the "
+                "admin force-close path.",
+                error_code="BOTTLE_SESSION_HAS_OPEN_ORDERS",
+            )
 
         session.bottles_returned_to_warehouse = bottles_returned_to_warehouse
         session.status = DriverBottleSessionStatus.CLOSED
@@ -1111,6 +1127,91 @@ class BottleTrackingService:
                 f"cannot deliver {bottles_to_deliver}.",
                 error_code="BOTTLE_SESSION_CAPACITY_EXCEEDED",
             )
+
+    @staticmethod
+    def _strict_enforcement_enabled() -> bool:
+        """Whether session-invariant violations should raise (strict) or warn (legacy)."""
+        try:
+            return bool(current_app.config.get("BOTTLE_SESSION_ENFORCEMENT_STRICT", False))
+        except RuntimeError:
+            return False
+
+    def assert_driver_can_progress_delivery(self, delivery: "Delivery") -> Optional[DriverBottleSession]:
+        """Guard called before any post-assignment delivery transition.
+
+        Returns the bound session if everything is consistent, raises
+        ``ValidationError`` when strict enforcement is on, or logs and returns
+        ``None`` when it is off. Returns ``None`` (and never raises) for orders
+        with no returnable bottles — those orders don't need a session.
+
+        Strict mode is controlled by ``BOTTLE_SESSION_ENFORCEMENT_STRICT``
+        (Flask config). PR 1 ships with the flag off so we measure the
+        at-risk population before flipping enforcement on in PR 2.
+        """
+        order = getattr(delivery, "order", None)
+        if not order:
+            return None
+        bottles_needed = self.calculate_bottles_for_order(order)
+        if bottles_needed <= 0:
+            return None
+
+        strict = self._strict_enforcement_enabled()
+
+        def _violation(message: str, error_code: str) -> None:
+            if strict:
+                raise ValidationError(message, error_code=error_code)
+            logger.warning(
+                "[BOTTLE] (legacy) %s order=%s delivery=%s code=%s",
+                message,
+                order.id,
+                delivery.id,
+                error_code,
+            )
+
+        binding = DriverBottleSessionOrder.query.filter_by(order_id=order.id).first()
+        if not binding:
+            _violation(
+                f"Order {order.id} has no bottle-session binding; " "cannot progress delivery.",
+                "BOTTLE_SESSION_REQUIRED",
+            )
+            return None
+
+        session = DriverBottleSession.query.get(binding.session_id)
+        if not session or session.status != DriverBottleSessionStatus.OPEN:
+            _violation(
+                f"Bound session {binding.session_id} for order {order.id} " "is not OPEN.",
+                "BOTTLE_SESSION_CLOSED",
+            )
+            return None
+
+        if delivery.delivery_person_id is None:
+            _violation(
+                f"Delivery {delivery.id} has no driver assigned; " "cannot validate bottle session.",
+                "BOTTLE_SESSION_REQUIRED",
+            )
+            return None
+
+        effective = self.get_effective_session(delivery.delivery_person_id)
+        if not effective or effective.id != session.id:
+            _violation(
+                f"Driver {delivery.delivery_person_id}'s current session "
+                f"(id={effective.id if effective else None}) does not match "
+                f"order {order.id}'s bound session (id={session.id}).",
+                "BOTTLE_SESSION_MISMATCH",
+            )
+            return None
+
+        return session
+
+    @staticmethod
+    def _open_bindings_count_for_session(session_id: int) -> int:
+        """Count bindings on this session whose order is not in a terminal status."""
+        return (
+            DriverBottleSessionOrder.query.join(Order, DriverBottleSessionOrder.order_id == Order.id)
+            .filter(DriverBottleSessionOrder.session_id == session_id)
+            .filter(Order.status.notin_([OrderStatus.DELIVERED, OrderStatus.CANCELLED, OrderStatus.RETURNED]))
+            .count()
+        )
 
     def update_session_delivery_tally(
         self,

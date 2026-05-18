@@ -899,6 +899,9 @@ class StaffService:
 
         # Check bottle session — driver must have an effective session (own or joined)
         # if the order contains returnable bottles; also validates capacity.
+        # Bind the order to that session immediately so every downstream
+        # transition (picked_up → delivered) can verify session continuity
+        # against a stable reference rather than a re-derived effective session.
         if delivery.order:
             from business_app.services.bottle_tracking_service import BottleTrackingService
 
@@ -913,6 +916,18 @@ class StaffService:
                         error_code="BOTTLE_SESSION_REQUIRED",
                     )
                 _bottle_svc.assert_delivery_within_session_capacity(_effective_session, int(_bottles_needed))
+                _binding = _bottle_svc.bind_order_to_session(
+                    _effective_session.id,
+                    delivery.order.id,
+                    accepted_by_driver_id=delivery_person_id,
+                )
+                current_app.logger.info(
+                    "[BOTTLE] accept_order bound order=%s → session=%s binding=%s driver=%s",
+                    delivery.order.id,
+                    _effective_session.id,
+                    _binding.id,
+                    delivery_person_id,
+                )
 
         # ARCH-006: enforce that delivery_person_id is set before status leaves SCHEDULED.
         assert_delivery_person_for_status(
@@ -1026,6 +1041,15 @@ class StaffService:
         # Map string to enum
         new_status_enum = DeliveryStatus(new_status)
         old_status_enum = delivery.status
+
+        # Bottle-session continuity guard. For any post-assignment transition
+        # on an order that carries returnable bottles, the driver's effective
+        # session must still match the session the order was bound to at
+        # accept time. Strict mode raises; legacy mode logs a warning.
+        if new_status in ("picked_up", "in_transit", "arrived", "delivered", "failed"):
+            from business_app.services.bottle_tracking_service import BottleTrackingService
+
+            BottleTrackingService().assert_driver_can_progress_delivery(delivery)
 
         cod_debt_limit_breached = False
 

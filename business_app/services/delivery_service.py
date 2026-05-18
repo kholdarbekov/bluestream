@@ -205,6 +205,20 @@ class DeliveryService:
         # ARCH-006: any state from ASSIGNED onward needs a delivery person on file.
         assert_delivery_person_for_status(delivery, new_status)
 
+        # Bottle-session continuity guard. Mirrors the check in
+        # StaffService.update_delivery_status — covers the driver-app and any
+        # other callers that reach this path directly.
+        if new_status in (
+            DeliveryStatus.PICKED_UP,
+            DeliveryStatus.IN_TRANSIT,
+            DeliveryStatus.ARRIVED,
+            DeliveryStatus.DELIVERED,
+            DeliveryStatus.FAILED,
+        ):
+            from .bottle_tracking_service import BottleTrackingService
+
+            BottleTrackingService().assert_driver_can_progress_delivery(delivery)
+
         # Update delivery
         old_status = delivery.status
         delivery.status = new_status
@@ -252,6 +266,10 @@ class DeliveryService:
 
         if delivery.status != DeliveryStatus.ASSIGNED:
             raise ValidationError("Cannot start delivery at the current stage")
+
+        from .bottle_tracking_service import BottleTrackingService
+
+        BottleTrackingService().assert_driver_can_progress_delivery(delivery)
 
         now = datetime.now(timezone.utc)
         delivery.status = DeliveryStatus.IN_TRANSIT
@@ -344,6 +362,10 @@ class DeliveryService:
 
         if delivery.status != DeliveryStatus.IN_TRANSIT:
             raise ValidationError("Delivery must be in transit to mark as arrived")
+
+        from .bottle_tracking_service import BottleTrackingService
+
+        BottleTrackingService().assert_driver_can_progress_delivery(delivery)
 
         now = datetime.now(timezone.utc)
         delivery.status = DeliveryStatus.ARRIVED

@@ -1471,45 +1471,49 @@ class OrderService:
                         )
                         logger.info(f"[BOTTLE] order={order.id} record_bottles_returned OK", order.id)
 
-                    # Use the assigned delivery driver to look up the effective session.
-                    # `updated_by` may be an admin user (e.g. admin panel force-completes a
-                    # delivery), in which case get_effective_session(updated_by) returns None
-                    # and the tally would be silently skipped.  The delivery_person_id always
-                    # points to the actual driver whose session should be credited.
-                    tally_driver_id = (
-                        order.delivery.delivery_person_id
-                        if order.delivery and order.delivery.delivery_person_id
-                        else updated_by
-                    )
-                    if tally_driver_id:
-                        effective_session = bottle_service.get_effective_session(tally_driver_id)
-                        logger.info(
-                            f"[BOTTLE] order={order.id} get_effective_session(driver={tally_driver_id}) → {f'session_id={effective_session.id} status={effective_session.status}' if effective_session else 'None'}",  # noqa: E501
-                        )
-                        if effective_session:
-                            bottle_service.bind_order_to_session(
-                                effective_session.id,
+                    # Credit the session the order was bound to at accept time
+                    # (session continuity), NOT the driver's current effective
+                    # session. The two can differ when a session was closed
+                    # and a new one opened between accept and deliver —
+                    # crediting the new session would desync the truck-side
+                    # ledger from the actual load the bottles came from.
+                    from business_app.models.bottle import DriverBottleSession, DriverBottleSessionOrder
+
+                    binding = DriverBottleSessionOrder.query.filter_by(order_id=order.id).first()
+                    if binding:
+                        bottle_session = DriverBottleSession.query.get(binding.session_id)
+                        if bottle_session:
+                            prev_delivered = bottle_session.bottles_delivered or 0
+                            prev_collected = bottle_session.bottles_collected_from_customers or 0
+                            bottle_session.bottles_delivered = prev_delivered + int(bottles_in_order)
+                            bottle_session.bottles_collected_from_customers = prev_collected + int(bottles_returned_qty)
+                            db.session.flush()
+                            logger.info(
+                                "[BOTTLE] order=%s tallied to bound session=%s " "delivered=%s→%s collected=%s→%s",
                                 order.id,
-                                accepted_by_driver_id=tally_driver_id,
-                            )
-                            logger.info(
-                                f"[BOTTLE] order={order.id} bound to session={effective_session.id} by driver={tally_driver_id}"  # noqa: E501
-                            )
-                            bottle_service.update_session_delivery_tally(
-                                tally_driver_id,
-                                bottles_delivered=int(bottles_in_order),
-                                bottles_collected=int(bottles_returned_qty),
-                            )
-                            logger.info(
-                                f"[BOTTLE] order={order.id} session tally updated: delivered={int(bottles_in_order)} collected={int(bottles_returned_qty)}",  # noqa: E501
+                                bottle_session.id,
+                                prev_delivered,
+                                bottle_session.bottles_delivered,
+                                prev_collected,
+                                bottle_session.bottles_collected_from_customers,
                             )
                         else:
-                            logger.info(
-                                f"[BOTTLE] order={order.id} no effective session for driver={tally_driver_id} — skipping tally",  # noqa: E501
+                            self._handle_missing_bottle_session_on_delivery(
+                                order,
+                                f"binding {binding.id} references missing session {binding.session_id}",
                             )
                     else:
-                        logger.info(f"[BOTTLE] order={order.id} no driver id available — skipping session tally")
+                        self._handle_missing_bottle_session_on_delivery(
+                            order,
+                            "no DriverBottleSessionOrder binding exists " "(should have been created at accept time)",
+                        )
 
+            except ValidationError:
+                # Bottle-session invariant violations must abort the
+                # delivery transition rather than be swallowed (that's
+                # the bug we're fixing). Let the outer transaction
+                # roll back.
+                raise
             except Exception as bottle_exc:
                 logger.error(
                     "[BOTTLE] FAILED for order=%s: %s",
@@ -1564,6 +1568,28 @@ class OrderService:
         order.is_paid = False
         order.paid_at = None
         return True
+
+    def _handle_missing_bottle_session_on_delivery(self, order: Order, detail: str) -> None:
+        """Handle a delivered order whose bottle-session binding is missing or broken.
+
+        With ``BOTTLE_SESSION_ENFORCEMENT_STRICT`` on, this raises so the
+        outer transaction rolls back rather than silently committing a
+        desynced truck-side ledger. With the flag off (legacy default for
+        PR 1) it logs at WARN so we can measure the at-risk population
+        without breaking in-flight deliveries.
+        """
+        from flask import current_app
+
+        msg = f"order={order.id} reached DELIVERED but bottle-session binding is " f"unusable: {detail}"
+        strict = False
+        try:
+            strict = bool(current_app.config.get("BOTTLE_SESSION_ENFORCEMENT_STRICT", False))
+        except RuntimeError:
+            strict = False
+
+        if strict:
+            raise ValidationError(msg, error_code="BOTTLE_SESSION_REQUIRED")
+        logger.warning("[BOTTLE] (legacy) %s — skipping session tally", msg)
 
     def _process_loyalty_points_for_order(self, order: Order, commit: bool = True):
         """

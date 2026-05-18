@@ -543,6 +543,20 @@ def complete_delivery(delivery_id):
         if delivery.status != DeliveryStatus.ARRIVED:
             return jsonify({"error": get_translation("api.delivery.error.must_be_arrived_before_completion")}), 400
 
+        # Bottle-session continuity check — fail synchronously so the driver
+        # mobile app surfaces the error immediately rather than discovering
+        # it via a delayed Celery task. The same guard runs again inside
+        # the task and the service layer as a safety net.
+        from business_app.services.bottle_tracking_service import BottleTrackingService
+
+        try:
+            BottleTrackingService().assert_driver_can_progress_delivery(delivery)
+        except ValidationError as ve:
+            return (
+                jsonify({"error": str(ve), "error_code": getattr(ve, "error_code", None)}),
+                400,
+            )
+
         data = request.get_json()
 
         # Process confirmation data

@@ -16,6 +16,7 @@ from business_app.services.notification_service import NotificationService
 from business_app.services.maps_service import MapsService
 from shared.enums import DeliveryStatus, UserRole, OrderStatus
 from business_app import db
+from business_app.utils.exceptions import ValidationError
 
 logger = get_task_logger(__name__)
 
@@ -912,6 +913,14 @@ def process_delivery_confirmation_task(self, delivery_id: int, confirmation_data
         notes = confirmation_data.get("notes")
         customer_present = confirmation_data.get("customer_present", True)
 
+        # Verify bottle-session continuity early so we fail fast instead of
+        # retrying through the full OrderService path. Strict mode raises;
+        # legacy mode logs a warning. Same guard runs again inside
+        # delivery_service.update_delivery_status as a safety net.
+        from business_app.services.bottle_tracking_service import BottleTrackingService
+
+        BottleTrackingService().assert_driver_can_progress_delivery(delivery)
+
         # Always transition through OrderService so cash-order inventory deduction
         # and status history run consistently.
         order_status = delivery.order.status.value if hasattr(delivery.order.status, "value") else delivery.order.status
@@ -954,6 +963,15 @@ def process_delivery_confirmation_task(self, delivery_id: int, confirmation_data
         logger.info(f"Delivery {delivery_id} marked as completed")
         return {"success": True, "delivery_id": delivery_id, "completed_at": delivery.delivered_at.isoformat()}
 
+    except ValidationError as exc:
+        # Invariant violation (e.g. bottle-session mismatch) — retrying
+        # won't fix it. Fail the task so the caller / operator sees it.
+        logger.error(
+            "Validation error processing delivery confirmation %s: %s",
+            delivery_id,
+            exc,
+        )
+        return {"success": False, "delivery_id": delivery_id, "error": str(exc)}
     except Exception as exc:
         logger.error(f"Failed to process delivery confirmation: {exc}")
         raise self.retry(exc=exc)

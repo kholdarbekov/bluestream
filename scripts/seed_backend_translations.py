@@ -5899,6 +5899,72 @@ BACKEND_TRANSLATIONS.update(ADMIN_UI_ORDER_TRANSLATIONS)
 BACKEND_TRANSLATIONS.update(ADMIN_UI_PRODUCT_TRANSLATIONS)
 # END AUTO-GENERATED ADMIN UI ORDER/PRODUCT TRANSLATIONS
 
+
+# ===========================================================================
+# Admin UI — Marking Code Operations page
+# ===========================================================================
+
+ADMIN_UI_MARKING_CODE_TRANSLATIONS = {
+    'ui.nav.marking_codes': _ui_tr('Marking Codes', 'Markirovka kodlari', 'Маркировочные коды'),
+
+    'ui.marking_codes.title': _ui_tr(
+        'Marking Code Operations',
+        'Markirovka kodlari operatsiyalari',
+        'Операции с маркировочными кодами',
+    ),
+    'ui.marking_codes.tabs.schedule': _ui_tr('Schedule & Config', 'Jadval va sozlamalar', 'Расписание и настройки'),
+    'ui.marking_codes.tabs.runs': _ui_tr('Task Runs', 'Vazifa ishga tushishlari', 'Запуски задач'),
+    'ui.marking_codes.tabs.pool': _ui_tr('Pool Status', 'Hovuz holati', 'Состояние пула'),
+
+    'ui.marking_codes.section.schedule': _ui_tr('Schedule', 'Jadval', 'Расписание'),
+    'ui.marking_codes.section.target_sizing': _ui_tr('Target sizing', 'Maqsadli hajm', 'Целевой размер'),
+    'ui.marking_codes.section.thresholds': _ui_tr('Thresholds', "Bo'sag'alar", 'Пороги'),
+    'ui.marking_codes.section.tc_behavior': _ui_tr(
+        'Tax Committee behavior',
+        'Soliq qo‘mitasi xulq-atvori',
+        'Поведение налогового комитета',
+    ),
+
+    'ui.marking_codes.schedule.daily': _ui_tr('Daily', 'Har kuni', 'Ежедневно'),
+    'ui.marking_codes.schedule.weekly': _ui_tr('Weekly', 'Haftalik', 'Еженедельно'),
+    'ui.marking_codes.schedule.interval': _ui_tr(
+        'Every N days', 'Har N kunda', 'Каждые N дней',
+    ),
+
+    'ui.marking_codes.fields.schedule_type': _ui_tr('Frequency', 'Davriylik', 'Частота'),
+    'ui.marking_codes.fields.day_of_week': _ui_tr('Day of week', 'Hafta kuni', 'День недели'),
+    'ui.marking_codes.fields.interval_days': _ui_tr(
+        'Run every N days', 'Har N kunda ishga tushirish', 'Запускать каждые N дней',
+    ),
+    'ui.marking_codes.fields.execution_time': _ui_tr(
+        'Execution time (UTC)', "Bajarilish vaqti (UTC)", 'Время выполнения (UTC)',
+    ),
+
+    'ui.marking_codes.actions.save': _ui_tr('Save', 'Saqlash', 'Сохранить'),
+    'ui.marking_codes.actions.save_success': _ui_tr(
+        'Saved. The beat container will reload within ~1 minute.',
+        'Saqlandi. Beat konteyneri ~1 daqiqada qayta yuklanadi.',
+        'Сохранено. Контейнер beat перезагрузится в течение ~1 минуты.',
+    ),
+    'ui.marking_codes.actions.run_all': _ui_tr(
+        'Run for all products', 'Barcha mahsulotlar uchun ishga tushirish', 'Запустить для всех товаров',
+    ),
+    'ui.marking_codes.actions.run_product': _ui_tr(
+        'Run for this product', 'Bu mahsulot uchun ishga tushirish', 'Запустить для этого товара',
+    ),
+    'ui.marking_codes.actions.edit_overrides': _ui_tr(
+        'Edit overrides', "O'zgartirishlarni tahrirlash", 'Изменить переопределения',
+    ),
+    'ui.marking_codes.actions.run_enqueued': _ui_tr(
+        'Run enqueued', 'Ishga tushirish navbatga qo‘shildi', 'Запуск поставлен в очередь',
+    ),
+    'ui.marking_codes.actions.overrides_saved': _ui_tr(
+        'Overrides saved', "O'zgartirishlar saqlandi", 'Переопределения сохранены',
+    ),
+}
+
+BACKEND_TRANSLATIONS.update(ADMIN_UI_MARKING_CODE_TRANSLATIONS)
+
 def main():
     """Seed backend translation keys"""
     app = create_app()

@@ -187,6 +187,16 @@ class ProductFiscalProfile(db.Model, TimestampMixin):
     requires_marking_codes = Column(Boolean, nullable=False, default=False)
     extra_data = Column(JSON, nullable=False, default=dict)
 
+    # Per-product overrides for marking-code task tuning. Each NULL means
+    # "fall back to the global MarkingCodeTaskConfig value".
+    override_target_min = Column(Integer, nullable=True)
+    override_target_max = Column(Integer, nullable=True)
+    override_trend_window_days = Column(Integer, nullable=True)
+    override_runway_days = Column(Integer, nullable=True)
+    override_safety_multiplier = Column(Numeric(precision=5, scale=2), nullable=True)
+    override_low_water_ratio = Column(Numeric(precision=4, scale=3), nullable=True)
+    override_asl_belgisi_utilisation_api_chunk_size = Column(Integer, nullable=True)
+
     product = relationship("Product", back_populates="fiscal_profile")
 
     def to_dict(self):
@@ -200,6 +210,17 @@ class ProductFiscalProfile(db.Model, TimestampMixin):
             "fiscalization_enabled": bool(self.fiscalization_enabled),
             "requires_marking_codes": bool(self.requires_marking_codes),
             "extra_data": self.extra_data or {},
+            "override_target_min": self.override_target_min,
+            "override_target_max": self.override_target_max,
+            "override_trend_window_days": self.override_trend_window_days,
+            "override_runway_days": self.override_runway_days,
+            "override_safety_multiplier": (
+                float(self.override_safety_multiplier) if self.override_safety_multiplier is not None else None
+            ),
+            "override_low_water_ratio": (
+                float(self.override_low_water_ratio) if self.override_low_water_ratio is not None else None
+            ),
+            "override_asl_belgisi_utilisation_api_chunk_size": (self.override_asl_belgisi_utilisation_api_chunk_size),
         }
 
 

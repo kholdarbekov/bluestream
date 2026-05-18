@@ -27,6 +27,7 @@ import DeliveryPersons from './pages/DeliveryPersons';
 import Operators from './pages/Operators';
 import StaffManagement from './pages/StaffManagement';
 import Prepayments from './pages/Prepayments';
+import MarkingCodeOperations from './pages/MarkingCodeOperations';
 import { useAuthStore } from './stores/authStore';
 import ProtectedRoute from './components/common/ProtectedRoute';
 
@@ -72,6 +73,7 @@ function App() {
                   <Route path="/staff/operators" element={<Operators />} />
                   <Route path="/staff/management" element={<StaffManagement />} />
                   <Route path="/staff/prepayments" element={<Prepayments />} />
+                  <Route path="/marking-codes" element={<MarkingCodeOperations />} />
                 </Routes>
               </AdminLayout>
             </ProtectedRoute>

@@ -11197,3 +11197,366 @@ def generate_staff_invite_link():
     except Exception as e:
         current_app.logger.error(f"Generate invite link error: {e}")
         return internal_error_response("Failed to generate invite link")
+
+
+# =====================================================================
+# Marking-code utilisation task: schedule, config, runs, pool status
+# =====================================================================
+
+from pydantic import ValidationError as PydanticValidationError  # noqa: E402
+
+from business_app.models.marking_code_task_run import (  # noqa: E402
+    MarkingCodeRunStatus,
+    MarkingCodeTaskRun,
+)
+from business_app.models.product import ProductFiscalProfile  # noqa: E402
+from business_app.serializers.marking_code_admin import (  # noqa: E402
+    MarkingCodeTaskConfigUpdate,
+    MarkingCodeTaskRunTrigger,
+    ProductMarkingCodeOverridesUpdate,
+)
+from business_app.services.marking_code_config_service import (  # noqa: E402
+    MarkingCodeConfigService,
+)
+from business_app.services.marking_code_pool_service import (  # noqa: E402
+    MarkingCodePoolService,
+)
+
+
+def _serialize_pool_product(product, profile, metrics, effective):
+    """Compact row for the Pool Status UI tab."""
+    overrides_present = any(
+        getattr(profile, attr, None) is not None
+        for attr in (
+            "override_target_min",
+            "override_target_max",
+            "override_trend_window_days",
+            "override_runway_days",
+            "override_safety_multiplier",
+            "override_low_water_ratio",
+            "override_asl_belgisi_utilisation_api_chunk_size",
+        )
+    )
+    return {
+        "product_id": product.id,
+        "product_name": getattr(product, "name", None),
+        "pre_utilised": metrics["pre_utilised"],
+        "un_utilised": metrics["un_utilised"],
+        "reserved": metrics["reserved"],
+        "target": metrics["target"],
+        "deficit": metrics["deficit"],
+        "has_overrides": overrides_present,
+        "effective_config": effective,
+        "overrides": {
+            "target_min": profile.override_target_min,
+            "target_max": profile.override_target_max,
+            "trend_window_days": profile.override_trend_window_days,
+            "runway_days": profile.override_runway_days,
+            "safety_multiplier": (
+                float(profile.override_safety_multiplier) if profile.override_safety_multiplier is not None else None
+            ),
+            "low_water_ratio": (
+                float(profile.override_low_water_ratio) if profile.override_low_water_ratio is not None else None
+            ),
+            "asl_belgisi_utilisation_api_chunk_size": (profile.override_asl_belgisi_utilisation_api_chunk_size),
+        },
+    }
+
+
+@admin_bp.route("/marking-code-task/config", methods=["GET"])
+@jwt_required()
+@admin_required
+def get_marking_code_task_config():
+    """Return the global config row + every fiscalisable product's overrides."""
+    try:
+        cfg = MarkingCodeConfigService().get_config()
+        profiles = (
+            db.session.query(ProductFiscalProfile, Product)
+            .join(Product, Product.id == ProductFiscalProfile.product_id)
+            .filter(ProductFiscalProfile.requires_marking_codes.is_(True))
+            .order_by(Product.name.asc())
+            .all()
+        )
+        products = []
+        for profile, product in profiles:
+            payload = profile.to_dict()
+            payload["product_name"] = getattr(product, "name", None)
+            products.append(payload)
+        return success_response(
+            data={
+                "global": cfg.to_dict(),
+                "products": products,
+            }
+        )
+    except Exception as e:
+        current_app.logger.error(f"Get marking-code task config error: {e}")
+        return internal_error_response("Failed to load marking-code task config")
+
+
+@admin_bp.route("/marking-code-task/config", methods=["PUT"])
+@jwt_required()
+@admin_required
+def update_marking_code_task_config():
+    """Partial update of the global config row. Bumps schedule_version if any
+    schedule field changes, which triggers the beat container to reload."""
+    try:
+        payload = request.get_json() or {}
+        try:
+            parsed = MarkingCodeTaskConfigUpdate(**payload).model_dump(exclude_none=True)
+        except PydanticValidationError as exc:
+            return validation_error_response(exc.errors())
+
+        cfg = MarkingCodeConfigService().update_config(parsed, actor_user_id=get_jwt_identity())
+        return success_response(
+            data={"global": cfg.to_dict()},
+            message="Marking-code task config updated",
+        )
+    except ValidationError as e:
+        db.session.rollback()
+        return validation_error_response(str(e))
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(f"Update marking-code task config error: {e}")
+        return internal_error_response("Failed to update marking-code task config")
+
+
+@admin_bp.route("/marking-code-task/config/products/<int:product_id>", methods=["PUT"])
+@jwt_required()
+@admin_required
+def update_marking_code_product_overrides(product_id):
+    """Set or clear per-product override columns on ProductFiscalProfile."""
+    try:
+        payload = request.get_json() or {}
+        try:
+            # ``model_dump`` with exclude_unset preserves explicit ``null`` values
+            # in the JSON body (used to clear an override), while skipping keys
+            # the client didn't send.
+            parsed = ProductMarkingCodeOverridesUpdate(**payload).model_dump(exclude_unset=True)
+        except PydanticValidationError as exc:
+            return validation_error_response(exc.errors())
+
+        profile = MarkingCodeConfigService().update_product_overrides(
+            product_id,
+            parsed,
+            actor_user_id=get_jwt_identity(),
+        )
+        return success_response(
+            data={"profile": profile.to_dict()},
+            message="Product marking-code overrides updated",
+        )
+    except ValidationError as e:
+        db.session.rollback()
+        return validation_error_response(str(e))
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(f"Update marking-code product overrides error: {e}")
+        return internal_error_response("Failed to update product overrides")
+
+
+@admin_bp.route("/marking-code-task/runs", methods=["GET"])
+@jwt_required()
+@admin_required
+def list_marking_code_task_runs():
+    """Paginated execution ledger with optional filters."""
+    try:
+        page = max(1, request.args.get("page", 1, type=int) or 1)
+        per_page = min(200, max(1, request.args.get("per_page", 25, type=int) or 25))
+
+        query = MarkingCodeTaskRun.query
+        task_name = request.args.get("task_name")
+        if task_name:
+            query = query.filter(MarkingCodeTaskRun.task_name == task_name)
+        status = request.args.get("status")
+        if status:
+            try:
+                query = query.filter(MarkingCodeTaskRun.status == MarkingCodeRunStatus(status))
+            except ValueError:
+                return validation_error_response(f"Invalid status: {status!r}")
+        run_kind = request.args.get("run_kind")
+        if run_kind:
+            query = query.filter(MarkingCodeTaskRun.run_kind == run_kind)
+        product_id = request.args.get("product_id", type=int)
+        if product_id:
+            query = query.filter(MarkingCodeTaskRun.product_id == product_id)
+        started_after = request.args.get("started_after")
+        if started_after:
+            try:
+                query = query.filter(MarkingCodeTaskRun.started_at >= datetime.fromisoformat(started_after))
+            except ValueError:
+                return validation_error_response("Invalid started_after (use ISO-8601)")
+        started_before = request.args.get("started_before")
+        if started_before:
+            try:
+                query = query.filter(MarkingCodeTaskRun.started_at <= datetime.fromisoformat(started_before))
+            except ValueError:
+                return validation_error_response("Invalid started_before (use ISO-8601)")
+
+        total = query.count()
+        rows = query.order_by(MarkingCodeTaskRun.started_at.desc()).offset((page - 1) * per_page).limit(per_page).all()
+        return paginated_response(
+            items=[r.to_dict() for r in rows],
+            page=page,
+            per_page=per_page,
+            total=total,
+        )
+    except Exception as e:
+        current_app.logger.error(f"List marking-code task runs error: {e}")
+        return internal_error_response("Failed to list marking-code task runs")
+
+
+@admin_bp.route("/marking-code-task/runs/<int:run_id>", methods=["GET"])
+@jwt_required()
+@admin_required
+def get_marking_code_task_run(run_id):
+    """Single run with its children (when it's a parent fan-out row)."""
+    try:
+        row = MarkingCodeTaskRun.query.get(run_id)
+        if row is None:
+            return not_found_response(message="Run not found")
+        return success_response(data={"run": row.to_dict(include_children=True)})
+    except Exception as e:
+        current_app.logger.error(f"Get marking-code task run error: {e}")
+        return internal_error_response("Failed to fetch run")
+
+
+@admin_bp.route("/marking-code-task/stats", methods=["GET"])
+@jwt_required()
+@admin_required
+def get_marking_code_task_stats():
+    """Aggregate run statistics over the last N days (default 7)."""
+    try:
+        days = max(1, min(90, request.args.get("days", 7, type=int) or 7))
+        cutoff = datetime.now(UTC) - timedelta(days=days)
+
+        base = MarkingCodeTaskRun.query.filter(MarkingCodeTaskRun.started_at >= cutoff)
+        total = base.count()
+        success = base.filter(MarkingCodeTaskRun.status == MarkingCodeRunStatus.SUCCESS).count()
+        failed = base.filter(MarkingCodeTaskRun.status == MarkingCodeRunStatus.FAILED).count()
+        skipped = base.filter(MarkingCodeTaskRun.status == MarkingCodeRunStatus.SKIPPED).count()
+        running = base.filter(MarkingCodeTaskRun.status == MarkingCodeRunStatus.RUNNING).count()
+
+        sums = base.with_entities(
+            func.coalesce(func.sum(MarkingCodeTaskRun.requested), 0),
+            func.coalesce(func.sum(MarkingCodeTaskRun.utilised), 0),
+            func.coalesce(func.sum(MarkingCodeTaskRun.skipped_invalid), 0),
+            func.coalesce(func.sum(MarkingCodeTaskRun.errors), 0),
+        ).one()
+
+        last_parent = (
+            MarkingCodeTaskRun.query.filter(MarkingCodeTaskRun.task_name == "pre_register_marking_codes_daily")
+            .order_by(MarkingCodeTaskRun.started_at.desc())
+            .first()
+        )
+
+        return success_response(
+            data={
+                "window_days": days,
+                "total_runs": total,
+                "success": success,
+                "failed": failed,
+                "skipped": skipped,
+                "running": running,
+                "success_rate": (float(success) / total) if total > 0 else None,
+                "totals": {
+                    "requested": int(sums[0] or 0),
+                    "utilised": int(sums[1] or 0),
+                    "skipped_invalid": int(sums[2] or 0),
+                    "errors": int(sums[3] or 0),
+                },
+                "last_daily_run": last_parent.to_dict() if last_parent else None,
+            }
+        )
+    except Exception as e:
+        current_app.logger.error(f"Get marking-code task stats error: {e}")
+        return internal_error_response("Failed to load marking-code task stats")
+
+
+@admin_bp.route("/marking-code-task/pool-status", methods=["GET"])
+@jwt_required()
+@admin_required
+def get_marking_code_pool_status():
+    """Per-product pool snapshot (capped at 200 products for safety)."""
+    try:
+        rows = (
+            db.session.query(Product, ProductFiscalProfile)
+            .join(ProductFiscalProfile, ProductFiscalProfile.product_id == Product.id)
+            .filter(
+                ProductFiscalProfile.requires_marking_codes.is_(True),
+                ProductFiscalProfile.fiscalization_enabled.is_(True),
+            )
+            .order_by(Product.name.asc())
+            .limit(200)
+            .all()
+        )
+        pool_service = MarkingCodePoolService()
+        config_service = MarkingCodeConfigService()
+        items = []
+        for product, profile in rows:
+            try:
+                metrics = pool_service.get_pool_metrics(product)
+                effective = config_service.get_effective_for_product(product)
+                items.append(_serialize_pool_product(product, profile, metrics, effective))
+            except Exception:
+                current_app.logger.exception(
+                    "marking_code_pool_status: skipping product %s due to error",
+                    product.id,
+                )
+        return success_response(data={"items": items})
+    except Exception as e:
+        current_app.logger.error(f"Get marking-code pool status error: {e}")
+        return internal_error_response("Failed to load pool status")
+
+
+@admin_bp.route("/marking-code-task/run", methods=["POST"])
+@jwt_required()
+@admin_required
+def trigger_marking_code_task_run():
+    """Manual trigger: fan-out for all products, or replenish one product."""
+    try:
+        payload = request.get_json() or {}
+        try:
+            parsed = MarkingCodeTaskRunTrigger(**payload)
+        except PydanticValidationError as exc:
+            return validation_error_response(exc.errors())
+
+        actor = get_jwt_identity()
+
+        # Late import to avoid Celery <-> Flask boot cycle.
+        from business_app.tasks.marking_code_tasks import (
+            pre_register_marking_codes_daily,
+            replenish_marking_codes_for_product,
+        )
+
+        if parsed.scope == "all":
+            async_result = pre_register_marking_codes_daily.delay(
+                triggered_by_user_id=actor,
+                run_kind="manual",
+            )
+            return created_response(
+                data={
+                    "task_id": async_result.id,
+                    "scope": "all",
+                },
+                message="Daily fan-out enqueued",
+            )
+
+        if parsed.product_id is None:
+            return validation_error_response("product_id is required when scope='product'")
+
+        async_result = replenish_marking_codes_for_product.delay(
+            int(parsed.product_id),
+            "manual",
+            None,
+            actor,
+        )
+        return created_response(
+            data={
+                "task_id": async_result.id,
+                "scope": "product",
+                "product_id": parsed.product_id,
+            },
+            message="Per-product replenish enqueued",
+        )
+    except Exception as e:
+        current_app.logger.error(f"Trigger marking-code task run error: {e}")
+        return internal_error_response("Failed to enqueue marking-code task")

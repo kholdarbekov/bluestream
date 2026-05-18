@@ -1121,6 +1121,53 @@ class AdminService {
     const response = await api.post(`/admin/bottles/transfers/${transferId}/resolve`, data);
     return response.data;
   }
+
+  // --- Marking-code utilisation task ---
+
+  async getMarkingCodeTaskConfig() {
+    const response = await api.get('/admin/marking-code-task/config');
+    return response.data;
+  }
+
+  async updateMarkingCodeTaskConfig(payload) {
+    const response = await api.put('/admin/marking-code-task/config', payload);
+    return response.data;
+  }
+
+  async updateProductMarkingCodeOverrides(productId, payload) {
+    const response = await api.put(
+      `/admin/marking-code-task/config/products/${productId}`,
+      payload,
+    );
+    return response.data;
+  }
+
+  async listMarkingCodeTaskRuns(params = {}) {
+    const response = await api.get('/admin/marking-code-task/runs', { params });
+    return response.data;
+  }
+
+  async getMarkingCodeTaskRun(runId) {
+    const response = await api.get(`/admin/marking-code-task/runs/${runId}`);
+    return response.data;
+  }
+
+  async getMarkingCodeTaskStats(days = 7) {
+    const response = await api.get('/admin/marking-code-task/stats', {
+      params: { days },
+    });
+    return response.data;
+  }
+
+  async getMarkingCodePoolStatus() {
+    const response = await api.get('/admin/marking-code-task/pool-status');
+    return response.data;
+  }
+
+  async triggerMarkingCodeTaskRun(payload) {
+    const response = await api.post('/admin/marking-code-task/run', payload);
+    return response.data;
+  }
 }
 
 const adminService = new AdminService();

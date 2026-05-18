@@ -61,16 +61,17 @@ class MarkingCodePoolService:
                         TREND_WINDOW_DAYS) / TREND_WINDOW_DAYS
             target    = ceil(avg_daily * RUNWAY_DAYS * SAFETY_MULTIPLIER)
 
-        Clamped to [MARKING_CODE_TARGET_MIN, MARKING_CODE_TARGET_MAX] so both
-        cold-start (no sales yet) and runaway (one viral product) cases stay
-        bounded.
+        Reads tuning knobs from the global ``MarkingCodeTaskConfig`` row,
+        overlaid with any per-product overrides on ``ProductFiscalProfile``,
+        and clamps to the resulting min/max so cold-start (no sales) and
+        runaway (one viral product) cases stay bounded.
         """
-        cfg = current_app.config
-        window_days = int(cfg.get("MARKING_CODE_TREND_WINDOW_DAYS", 7) or 7)
-        runway_days = int(cfg.get("MARKING_CODE_RUNWAY_DAYS", 1) or 1)
-        safety = float(cfg.get("MARKING_CODE_SAFETY_MULTIPLIER", 1.5) or 1.5)
-        floor_n = int(cfg.get("MARKING_CODE_TARGET_MIN", 5) or 5)
-        cap_n = int(cfg.get("MARKING_CODE_TARGET_MAX", 500) or 500)
+        effective = _effective_config_for(product)
+        window_days = int(effective["trend_window_days"])
+        runway_days = int(effective["runway_days"])
+        safety = float(effective["safety_multiplier"])
+        floor_n = int(effective["target_min"])
+        cap_n = int(effective["target_max"])
 
         cutoff = datetime.now(timezone.utc) - _timedelta_days(window_days)
 
@@ -145,11 +146,10 @@ class MarkingCodePoolService:
     def is_below_low_water(self, product_id: int) -> bool:
         """Cheap check used after a customer reservation — true when the pool
         for ``product_id`` has fallen under the configured low-water ratio."""
-        cfg = current_app.config
-        ratio = float(cfg.get("MARKING_CODE_LOW_WATER_RATIO", 0.25) or 0.25)
         product = Product.query.get(product_id)
         if not product:
             return False
+        ratio = float(_effective_config_for(product)["low_water_ratio"])
         metrics = self.get_pool_metrics(product)
         threshold = max(1, int(metrics["target"] * ratio))
         return metrics["pre_utilised"] < threshold
@@ -216,7 +216,7 @@ class MarkingCodePoolService:
         if not product or not product.requires_marking_codes:
             return _empty_summary(run_kind, target=target or 0, reason="not_fiscalisable")
 
-        if not current_app.config.get("TAX_COMMITTEE_UTILISATION_ENABLED", True):
+        if not bool(_effective_config_for(product)["tc_utilisation_enabled"]):
             return _empty_summary(run_kind, target=target or 0, reason="utilisation_disabled")
 
         lock_key = f"marking_code:replenish_lock:{int(product.id)}"
@@ -327,7 +327,7 @@ class MarkingCodePoolService:
             db.session.commit()
             return summary
 
-        batch_size = int(current_app.config.get("MARKING_CODE_UTILISATION_BATCH_SIZE", 200) or 200)
+        batch_size = int(_effective_config_for(product)["asl_belgisi_utilisation_api_chunk_size"])
         batch_size = max(1, batch_size)
 
         for batch in _chunked(candidates, batch_size):
@@ -455,6 +455,13 @@ def _identification_part(full_code: str) -> str:
     gs_char = "\x1d"  # ASCII 29 (Group Separator)
     idx = full_code.find(gs_char)
     return full_code if idx == -1 else full_code[:idx]
+
+
+def _effective_config_for(product: Product) -> Dict[str, Any]:
+    """Lazy import of the config service to avoid circular imports at boot."""
+    from business_app.services.marking_code_config_service import MarkingCodeConfigService
+
+    return MarkingCodeConfigService().get_effective_for_product(product)
 
 
 def _chunked(items: Iterable, size: int):

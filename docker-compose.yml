@@ -408,7 +408,7 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
-    command: celery -A business_app.tasks.celery_app beat --loglevel=info --schedule=/app/celerybeat/celerybeat-schedule
+    command: celery -A business_app.tasks.celery_app beat --loglevel=info --schedule=/app/celerybeat/celerybeat-schedule -S business_app.tasks.db_scheduler:DBBackedScheduler
     healthcheck:
       # test: [ "CMD", "sh", "-c", "ps aux | grep 'celery.*beat' | grep -v grep || exit 1" ]
       test: ["CMD-SHELL", "find /app/celerybeat/celerybeat-schedule* -mmin -10 | grep -q ."]

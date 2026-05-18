@@ -27,7 +27,8 @@ import {
   FileTextOutlined,
   TagsOutlined,
   TeamOutlined,
-  BankOutlined
+  BankOutlined,
+  BarcodeOutlined
 } from '@ant-design/icons';
 import { useAuthStore } from '../../stores/authStore';
 import { useRealTimeWithFallback } from '../../hooks/useRealTimeUpdates';
@@ -85,6 +86,11 @@ const AdminLayout = ({ children }) => {
       key: '/products',
       icon: <ProductOutlined />,
       label: t('ui.nav.products')
+    },
+    {
+      key: '/marking-codes',
+      icon: <BarcodeOutlined />,
+      label: t('ui.nav.marking_codes', 'Marking Codes')
     },
     {
       key: '/product-categories',

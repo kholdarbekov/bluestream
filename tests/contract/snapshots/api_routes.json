@@ -707,6 +707,62 @@
     "rule": "/api/v1/admin/loyalty/tiers/<int:tier_id>"
   },
   {
+    "endpoint": "admin.get_marking_code_task_config",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/marking-code-task/config"
+  },
+  {
+    "endpoint": "admin.update_marking_code_task_config",
+    "methods": [
+      "PUT"
+    ],
+    "rule": "/api/v1/admin/marking-code-task/config"
+  },
+  {
+    "endpoint": "admin.update_marking_code_product_overrides",
+    "methods": [
+      "PUT"
+    ],
+    "rule": "/api/v1/admin/marking-code-task/config/products/<int:product_id>"
+  },
+  {
+    "endpoint": "admin.get_marking_code_pool_status",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/marking-code-task/pool-status"
+  },
+  {
+    "endpoint": "admin.trigger_marking_code_task_run",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/marking-code-task/run"
+  },
+  {
+    "endpoint": "admin.list_marking_code_task_runs",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/marking-code-task/runs"
+  },
+  {
+    "endpoint": "admin.get_marking_code_task_run",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/marking-code-task/runs/<int:run_id>"
+  },
+  {
+    "endpoint": "admin.get_marking_code_task_stats",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/marking-code-task/stats"
+  },
+  {
     "endpoint": "admin.get_notification_campaign_segments",
     "methods": [
       "GET"

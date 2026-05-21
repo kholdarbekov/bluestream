@@ -757,12 +757,26 @@ class DriverReconciliationService:
         }
 
     def _apply_session_window_filters(self, query, *, start_date: Optional[Any], end_date: Optional[Any]):
+        # Only genuinely active (open/overdue) sessions count as "ongoing" and stay
+        # visible in every window. Closed sessions use their real end date — note
+        # session_ended_at is NULL for sessions verified/resolved without a driver
+        # submission, so fall back through other close timestamps.
+        is_active = DriverCashSession.status.in_(
+            [DriverCashSessionStatus.OPEN, DriverCashSessionStatus.OVERDUE]
+        )
+        effective_end = func.coalesce(
+            DriverCashSession.session_ended_at,
+            DriverCashSession.submitted_at,
+            DriverCashSession.verified_at,
+            DriverCashSession.last_cash_activity_at,
+            DriverCashSession.updated_at,
+        )
         if start_date:
             normalized_start = self._coerce_date(start_date)
             query = query.filter(
                 or_(
-                    DriverCashSession.session_ended_at.is_(None),
-                    func.date(DriverCashSession.session_ended_at) >= normalized_start,
+                    is_active,
+                    func.date(effective_end) >= normalized_start,
                 )
             )
         if end_date:

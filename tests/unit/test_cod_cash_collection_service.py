@@ -1208,6 +1208,89 @@ class TestDriverReconciliationService:
             assert recon_service.is_driver_blocked_from_cod(delivery_driver.id) is False
             assert "reconciliation_warning_due" in session.risk_flags
 
+    def test_period_window_excludes_closed_session_with_null_session_ended_at(
+        self,
+        app,
+        db,
+        delivery_driver,
+        delivery_driver_profile,
+    ):
+        """A session verified directly (so session_ended_at stays NULL) must not
+        leak into the current-day window once it was closed weeks ago.
+
+        Regression: _apply_session_window_filters used to treat a NULL
+        session_ended_at as "still ongoing", which surfaced every old
+        verified/resolved session in the "today" cash-reconciliation filter.
+        """
+        with app.app_context():
+            recon_service = DriverReconciliationService()
+            session = recon_service.get_open_session_for_driver(delivery_driver.id)
+            old_day = datetime.now(UTC) - timedelta(days=21)
+            session.session_started_at = old_day
+            session.status = DriverCashSessionStatus.VERIFIED
+            session.verified_at = old_day
+            session.verified_cash = Decimal("0.00")
+            session.session_ended_at = None
+            db.session.commit()
+
+            today = datetime.now(UTC).date()
+            listed = recon_service.list_sessions(
+                start_date=today,
+                end_date=today,
+                driver_user_id=delivery_driver.id,
+            )
+            assert session.id not in {item["id"] for item in listed["items"]}
+
+            report = recon_service.get_report(
+                period="day", driver_user_id=delivery_driver.id
+            )
+            assert session.id not in {item["id"] for item in report["sessions"]}
+            assert report["summary"]["session_count"] == 0
+
+    def test_period_window_keeps_open_session_started_in_the_past(
+        self,
+        app,
+        db,
+        delivery_driver,
+        delivery_driver_profile,
+    ):
+        """A still-open session stays visible in the current-day window even
+        when it was started — and last touched — days ago.
+
+        Raw SQL pushes every timestamp into the past so the ORM onupdate hook
+        does not bump updated_at back to now: this proves visibility comes from
+        the session's active status, not from a close/activity timestamp
+        landing inside the window.
+        """
+        with app.app_context():
+            from sqlalchemy import text
+
+            recon_service = DriverReconciliationService()
+            session = recon_service.get_open_session_for_driver(delivery_driver.id)
+            assert session.status == DriverCashSessionStatus.OPEN
+            session_id = session.id
+
+            old_day = (datetime.now(UTC) - timedelta(days=15)).isoformat()
+            db.session.execute(
+                text(
+                    "UPDATE driver_cash_sessions "
+                    "SET session_started_at = :d, updated_at = :d, "
+                    "last_cash_activity_at = NULL, session_ended_at = NULL, "
+                    "submitted_at = NULL, verified_at = NULL "
+                    "WHERE id = :id"
+                ),
+                {"d": old_day, "id": session_id},
+            )
+            db.session.commit()
+
+            today = datetime.now(UTC).date()
+            listed = recon_service.list_sessions(
+                start_date=today,
+                end_date=today,
+                driver_user_id=delivery_driver.id,
+            )
+            assert session_id in {item["id"] for item in listed["items"]}
+
     def test_reconciliation_reminder_uses_staff_bot_and_keeps_customer_telegram_channel_off(
         self,
         app,

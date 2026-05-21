@@ -549,6 +549,53 @@ def serialize_cart_estimate(estimate_data: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+# ============================================================================
+# Order Edit (admin) request / response schemas
+# ============================================================================
+
+
+class OrderEditItemSpec(BaseModel):
+    """One desired final-state line in an admin order-edit payload."""
+
+    model_config = ConfigDict(from_attributes=True, alias_generator=to_camel, populate_by_name=True)
+
+    # None means "insert a new line item for this product". For an existing
+    # line, pass the OrderItem id explicitly so the server can detect mismatches.
+    order_item_id: Optional[int] = None
+    product_id: int
+    # Final desired quantity. 0 ⇒ remove the existing line item. Negative is rejected.
+    quantity: int = Field(ge=0)
+
+
+class OrderEditRequest(BaseModel):
+    """Request body for POST /admin/orders/<id>/edit and /edit-preview."""
+
+    model_config = ConfigDict(from_attributes=True, alias_generator=to_camel, populate_by_name=True)
+
+    items: List[OrderEditItemSpec] = Field(min_length=1)
+    reason: str = Field(min_length=3, max_length=1000)
+
+
+class OrderEditPreviewResponse(BaseModel):
+    """Response body for the preview endpoint."""
+
+    model_config = ConfigDict(from_attributes=True, alias_generator=to_camel, populate_by_name=True)
+
+    blocking_reasons: List[str]
+    warnings: List[str]
+    items_before: List[Dict[str, Any]]
+    items_after: List[Dict[str, Any]]
+    totals_before: Dict[str, Any]
+    totals_after: Dict[str, Any]
+    cascade_summary: Dict[str, Any]
+    is_post_delivery: bool
+
+
+def serialize_order_edit_history(entry) -> Dict[str, Any]:
+    """Serialize an OrderEditHistory row for the admin UI."""
+    return entry.to_dict()
+
+
 def serialize_delivery_slot(slot, target_date=None) -> Dict[str, Any]:
     """Serialize delivery slot"""
     try:

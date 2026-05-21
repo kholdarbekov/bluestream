@@ -1428,6 +1428,11 @@ EXTRA_TRANSLATIONS = {
         "uz": "Haydovchi naqd istisnolari",
         "ru": "Расхождения наличных курьеров",
     },
+    "staff.notification.bottle_session_reopened": {
+        "en": "🔓 Your bottle session #{session_id} was reopened by admin because order #{order_id} was edited after delivery. Please re-close the session when you're ready so admin can verify it.",
+        "uz": "🔓 Sizning #{session_id} idishlar sessiyangiz admin tomonidan qayta ochildi (buyurtma #{order_id} yetkazib berilgandan keyin tahrirlandi). Iltimos, tayyor bo'lsangiz sessiyani qayta yoping.",
+        "ru": "🔓 Ваша сессия по таре #{session_id} была переоткрыта администратором (заказ #{order_id} изменён после доставки). Пожалуйста, закройте сессию заново для проверки.",
+    },
 }
 
 DELIVERY_TEXT_TRANSLATIONS = {

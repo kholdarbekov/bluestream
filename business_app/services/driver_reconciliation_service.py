@@ -23,7 +23,7 @@ from shared.enums import (
     DriverCashSessionStatus,
     UserRole,
 )
-from business_app.utils.exceptions import NotFoundError, ValidationError
+from business_app.utils.exceptions import ConflictError, NotFoundError, ValidationError
 
 
 class DriverReconciliationService:
@@ -48,6 +48,13 @@ class DriverReconciliationService:
     }
     ACTIVE_STATUSES = {
         DriverCashSessionStatus.OPEN.value,
+        DriverCashSessionStatus.OVERDUE.value,
+    }
+    REOPEN_ALLOWED_STATUSES = {
+        DriverCashSessionStatus.SUBMITTED.value,
+        DriverCashSessionStatus.VERIFIED.value,
+        DriverCashSessionStatus.MISMATCH.value,
+        DriverCashSessionStatus.RESOLVED.value,
         DriverCashSessionStatus.OVERDUE.value,
     }
 
@@ -473,6 +480,98 @@ class DriverReconciliationService:
         db.session.commit()
         return session
 
+    def reopen_session(
+        self,
+        *,
+        session_id: int,
+        actor_user_id: int,
+        reason: str,
+        commit: bool = True,
+    ) -> DriverCashSession:
+        """Reopen a closed cash session so order-edit cascades can re-tally.
+
+        Used when an admin retroactively edits a delivered order whose cash
+        session has already been submitted/verified/resolved. The session
+        returns to OPEN; the driver re-submits and an admin re-verifies via
+        the usual submit/verify flow. Verification fields are cleared so the
+        re-verification starts from a clean slate.
+        """
+        if not reason or not reason.strip():
+            raise ValidationError("A reason is required to reopen a cash session")
+
+        session = DriverCashSession.query.get(session_id)
+        if not session:
+            raise NotFoundError("Driver cash session not found")
+
+        status = self._status_value(session.status)
+        if status not in self.REOPEN_ALLOWED_STATUSES:
+            raise ValidationError(
+                f"Cannot reopen session with current status '{status}'",
+            )
+
+        # Partial unique index uq_driver_cash_sessions_driver_active permits at
+        # most one session per driver in {open, overdue}. If a newer one exists,
+        # the admin must first resolve it (verify/resolve) so re-opening this
+        # older session does not collide.
+        active_conflict = (
+            DriverCashSession.query.filter(
+                DriverCashSession.driver_user_id == session.driver_user_id,
+                DriverCashSession.id != session.id,
+                DriverCashSession.status.in_([DriverCashSessionStatus.OPEN, DriverCashSessionStatus.OVERDUE]),
+            )
+            .order_by(DriverCashSession.session_started_at.desc())
+            .first()
+        )
+        if active_conflict:
+            raise ConflictError(
+                f"Cannot reopen session {session.id}: driver has another active "
+                f"session (id={active_conflict.id}, status={self._status_value(active_conflict.status)}). "
+                "Submit and verify the active session first.",
+                error_code="CASH_SESSION_ACTIVE_CONFLICT",
+            )
+
+        session.status = DriverCashSessionStatus.OPEN
+        session.reopened_at = self._now_utc()
+        session.reopened_by_user_id = actor_user_id
+        session.reopened_reason = reason.strip()
+        session.reopen_count = (session.reopen_count or 0) + 1
+        # Clear verification trail so the re-verification cycle is unambiguous.
+        session.submitted_at = None
+        session.submitted_by_user_id = None
+        session.verified_at = None
+        session.verified_by_user_id = None
+        session.verification_notes = None
+        session.verification_reason_code = None
+        # Unblock driver: the prior block was tied to the now-stale variance.
+        if session.blocked_from_cod:
+            session.blocked_from_cod = False
+            session.block_reason = None
+        # session_ended_at must clear too, otherwise the session looks closed
+        # to listings that filter on it.
+        session.session_ended_at = None
+        self.refresh_expected_cash(session)
+
+        audit_logger.log_event(
+            event_type=AuditEventType.SESSION_REOPENED,
+            action="driver_cash_session_reopened",
+            severity=AuditSeverity.HIGH,
+            resource_type="driver_cash_session",
+            resource_id=str(session.id),
+            additional_data={
+                "driver_user_id": session.driver_user_id,
+                "actor_user_id": actor_user_id,
+                "previous_status": status,
+                "reopen_count": session.reopen_count,
+                "reason": session.reopened_reason,
+            },
+        )
+
+        if commit:
+            db.session.commit()
+        else:
+            db.session.flush()
+        return session
+
     def mark_overdue_sessions(
         self,
         *,
@@ -761,9 +860,7 @@ class DriverReconciliationService:
         # visible in every window. Closed sessions use their real end date — note
         # session_ended_at is NULL for sessions verified/resolved without a driver
         # submission, so fall back through other close timestamps.
-        is_active = DriverCashSession.status.in_(
-            [DriverCashSessionStatus.OPEN, DriverCashSessionStatus.OVERDUE]
-        )
+        is_active = DriverCashSession.status.in_([DriverCashSessionStatus.OPEN, DriverCashSessionStatus.OVERDUE])
         effective_end = func.coalesce(
             DriverCashSession.session_ended_at,
             DriverCashSession.submitted_at,

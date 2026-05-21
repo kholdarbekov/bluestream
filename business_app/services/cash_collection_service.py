@@ -995,12 +995,10 @@ class CashCollectionService:
                     ).all()
                 }
                 if contract_ids:
-                    units_contracts = (
-                        CorporateContract.query.filter(
-                            CorporateContract.id.in_(contract_ids),
-                            CorporateContract.tracking_mode == CorporateContractTrackingMode.UNITS,
-                        ).all()
-                    )
+                    units_contracts = CorporateContract.query.filter(
+                        CorporateContract.id.in_(contract_ids),
+                        CorporateContract.tracking_mode == CorporateContractTrackingMode.UNITS,
+                    ).all()
                     for units_contract in units_contracts:
                         corporate_service.topup_from_cash_collection(
                             contract=units_contract,
@@ -1113,9 +1111,18 @@ class CashCollectionService:
                 raise ValidationError("Order does not belong to the selected customer")
             _electronic_methods = {PaymentMethod.CLICK, PaymentMethod.PAYME, PaymentMethod.CARD}
             if order.payment_method != PaymentMethod.CASH:
-                if not (
-                    source == CashCollectionSource.PERSONAL_CARD_TRANSFER
-                    and order.payment_method in _electronic_methods
+                # PERSONAL_CARD_TRANSFER and ADMIN_ADJUSTMENT may target a
+                # non-CASH order. The former records a card→owner transfer;
+                # the latter records a customer-credit prepayment that the
+                # order-edit cascade creates when an admin reduces a card-
+                # paid order (the card is never refunded — the value lives
+                # as cash-only-usable customer credit).
+                if (
+                    not (
+                        source == CashCollectionSource.PERSONAL_CARD_TRANSFER
+                        and order.payment_method in _electronic_methods
+                    )
+                    and source != CashCollectionSource.ADMIN_ADJUSTMENT
                 ):
                     raise ValidationError("Only COD orders can be targeted for COD collections")
             order_status = order.status.value if hasattr(order.status, "value") else str(order.status or "")
@@ -1124,6 +1131,10 @@ class CashCollectionService:
                     raise ValidationError(
                         "Cancelled or returned COD orders cannot be targeted for personal card transfer collection"
                     )
+            elif source == CashCollectionSource.ADMIN_ADJUSTMENT:
+                # Admin adjustments may target any order — they're already
+                # gated by admin permission and an OrderEditHistory audit row.
+                pass
             elif order_status != OrderStatus.DELIVERED.value:
                 raise ValidationError("Only delivered COD orders can be targeted for collection")
 

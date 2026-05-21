@@ -1933,6 +1933,195 @@ def update_order_status(order_id):
         return internal_error_response("Failed to update order status")
 
 
+@admin_bp.route("/orders/<int:order_id>/edit-preview", methods=["POST"])
+@jwt_required()
+@validate_admin_action(["manage_orders", "edit_orders"])
+def preview_order_edit(order_id):
+    """Dry-run an order edit: returns the cascade plan + impacts.
+
+    Body: { items: [{order_item_id?, product_id, quantity}], reason: str }
+    Response: { blocking_reasons, warnings, items_before, items_after,
+                totals_before, totals_after, cascade_summary, is_post_delivery }
+    """
+    try:
+        from business_app.serializers.order_serializers import OrderEditRequest
+        from business_app.services.order_edit_service import (
+            OrderEditItemSpec as _OrderEditItemSpec,
+            OrderEditService,
+        )
+        from pydantic import ValidationError as PydanticValidationError
+
+        payload = request.get_json(silent=True) or {}
+        try:
+            req = OrderEditRequest.model_validate(payload)
+        except PydanticValidationError as exc:
+            return validation_error_response(exc.errors())
+
+        service = OrderEditService()
+        plan = service.preview(
+            order_id=order_id,
+            items=[
+                _OrderEditItemSpec(
+                    order_item_id=item.order_item_id,
+                    product_id=item.product_id,
+                    quantity=item.quantity,
+                )
+                for item in req.items
+            ],
+        )
+        return success_response(
+            data={
+                "blocking_reasons": plan.blocking_reasons,
+                "warnings": plan.warnings,
+                "items_before": plan.items_before,
+                "items_after": plan.items_after,
+                "totals_before": plan.totals_before,
+                "totals_after": plan.totals_after,
+                "cascade_summary": plan.cascade_summary,
+                "is_post_delivery": plan.is_post_delivery,
+            }
+        )
+    except NotFoundError as e:
+        return not_found_response(resource_type="Order", message=str(e))
+    except ValidationError as e:
+        return validation_error_response(str(e))
+    except Exception as e:
+        current_app.logger.error(f"Order edit preview error: {e}", exc_info=True)
+        return internal_error_response("Failed to preview order edit")
+
+
+@admin_bp.route("/orders/<int:order_id>/edit", methods=["POST"])
+@jwt_required()
+@validate_admin_action(["manage_orders", "edit_orders"])
+def apply_order_edit(order_id):
+    """Apply an admin order edit and cascade side-effects atomically.
+
+    On success, dispatches the ORDER_EDITED notification post-commit.
+    """
+    try:
+        from business_app.serializers.order_serializers import OrderEditRequest
+        from business_app.services.order_edit_service import (
+            OrderEditItemSpec as _OrderEditItemSpec,
+            OrderEditService,
+        )
+        from business_app.utils.audit_logger import (
+            AuditEventType as _AuditEventType,
+            AuditSeverity as _AuditSeverity,
+            audit_logger as _audit_logger,
+        )
+        from pydantic import ValidationError as PydanticValidationError
+
+        current_user_id = get_jwt_identity()
+        payload = request.get_json(silent=True) or {}
+        try:
+            req = OrderEditRequest.model_validate(payload)
+        except PydanticValidationError as exc:
+            return validation_error_response(exc.errors())
+
+        service = OrderEditService()
+        result = service.apply_edit(
+            order_id=order_id,
+            items=[
+                _OrderEditItemSpec(
+                    order_item_id=item.order_item_id,
+                    product_id=item.product_id,
+                    quantity=item.quantity,
+                )
+                for item in req.items
+            ],
+            reason=req.reason,
+            actor_user_id=int(current_user_id),
+        )
+
+        # Post-commit dispatch: audit log + customer telegram notification.
+        # These run only after the apply_edit transaction commits successfully.
+        _audit_logger.log_event(
+            event_type=_AuditEventType.ORDER_EDITED,
+            action="admin_order_edit_applied",
+            severity=_AuditSeverity.HIGH,
+            resource_type="order",
+            resource_id=str(order_id),
+            additional_data={
+                "actor_user_id": current_user_id,
+                "history_id": result.history_id,
+                "cascade_summary": result.cascade_summary,
+                "warnings": result.warnings,
+            },
+        )
+        for task_name, args, kwargs in result.post_commit_dispatch:
+            if task_name == "send_order_notification_task":
+                from business_app.tasks.notification_tasks import (
+                    send_order_notification_task,
+                )
+
+                send_order_notification_task.delay(*args, **kwargs)
+            elif task_name == "notify_driver_session_reopened":
+                # Best-effort driver Telegram message — failures must not
+                # roll back the (already-committed) edit.
+                try:
+                    from business_app.models.user import User as _User
+                    from business_app.services.notification_service import (
+                        NotificationService as _NotificationService,
+                    )
+                    from business_app.utils.translations import get_translation as _gt
+
+                    driver_user_id, session_id, edited_order_id = args
+                    driver = _User.query.get(driver_user_id)
+                    if driver is not None:
+                        lang = getattr(driver, "preferred_language", None) or "en"
+                        body = _gt(
+                            "staff.notification.bottle_session_reopened",
+                            language=lang,
+                            session_id=session_id,
+                            order_id=edited_order_id,
+                        )
+                        if body and body != "staff.notification.bottle_session_reopened":
+                            fallback_body = body
+                        else:
+                            fallback_body = (
+                                f"Your bottle session #{session_id} was reopened by "
+                                f"admin because order #{edited_order_id} was edited "
+                                "after delivery. Please re-close the session when ready."
+                            )
+                        _NotificationService().send_staff_telegram_message(driver, fallback_body, language=lang)
+                except Exception as notify_exc:  # noqa: BLE001
+                    current_app.logger.warning("Driver reopen-notification skipped: %s", notify_exc)
+
+        return success_response(
+            data={
+                "order_id": result.order_id,
+                "history_id": result.history_id,
+                "cascade_summary": result.cascade_summary,
+                "warnings": result.warnings,
+            },
+            message="Order edit applied successfully",
+        )
+    except NotFoundError as e:
+        return not_found_response(resource_type="Order", message=str(e))
+    except ValidationError as e:
+        return validation_error_response(str(e))
+    except Exception as e:
+        current_app.logger.error(f"Order edit apply error: {e}", exc_info=True)
+        return internal_error_response("Failed to apply order edit")
+
+
+@admin_bp.route("/orders/<int:order_id>/edit-history", methods=["GET"])
+@jwt_required()
+@validate_admin_action(["view_orders", "manage_orders"])
+def list_order_edit_history(order_id):
+    """List all admin edits applied to a given order."""
+    try:
+        from business_app.services.order_edit_service import OrderEditService
+
+        data = OrderEditService().get_edit_history(order_id)
+        return success_response(data=data)
+    except NotFoundError as e:
+        return not_found_response(resource_type="Order", message=str(e))
+    except Exception as e:
+        current_app.logger.error(f"Order edit history error: {e}")
+        return internal_error_response("Failed to fetch order edit history")
+
+
 @admin_bp.route("/orders/<int:order_id>", methods=["GET"])
 @jwt_required()
 @validate_admin_action(["view_orders", "manage_orders"])
@@ -2124,6 +2313,13 @@ def get_order_details(order_id):
                 reverse=True,
             )
         ]
+
+        # Order edit feature: surface whether the order is editable right now,
+        # the remaining window for delivered orders, and a count of past edits
+        # so the admin UI can decide whether to render the "Edit Items" CTA.
+        from business_app.services.order_edit_service import OrderEditService
+
+        order_data.update(OrderEditService().get_edit_metadata(order))
 
         return success_response(data={"order": order_data})
 

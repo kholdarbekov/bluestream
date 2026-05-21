@@ -910,6 +910,27 @@
     "rule": "/api/v1/admin/orders/<int:order_id>"
   },
   {
+    "endpoint": "admin.apply_order_edit",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/orders/<int:order_id>/edit"
+  },
+  {
+    "endpoint": "admin.list_order_edit_history",
+    "methods": [
+      "GET"
+    ],
+    "rule": "/api/v1/admin/orders/<int:order_id>/edit-history"
+  },
+  {
+    "endpoint": "admin.preview_order_edit",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/admin/orders/<int:order_id>/edit-preview"
+  },
+  {
     "endpoint": "admin.update_order_status",
     "methods": [
       "PUT"

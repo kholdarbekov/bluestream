@@ -129,10 +129,23 @@ const Orders = () => {
   const [orderDetailsLoading, setOrderDetailsLoading] = useState(false);
   const [createOrderErrors, setCreateOrderErrors] = useState([]);
   const [isPersonalCardModalVisible, setIsPersonalCardModalVisible] = useState(false);
+  // Order-edit modal (2-step flow): step 1 = form, step 2 = preview/confirm.
+  const [isEditItemsModalVisible, setIsEditItemsModalVisible] = useState(false);
+  const [editItemsStep, setEditItemsStep] = useState(1);
+  const [editPreviewData, setEditPreviewData] = useState(null);
+  const [editPreviewLoading, setEditPreviewLoading] = useState(false);
+  // Snapshot the validated payload at step 1 → 2 transition. The Form
+  // component unmounts when step 2 renders (preview view replaces it), so
+  // we cannot rely on editItemsForm.getFieldsValue() in handleEditConfirm.
+  const [pendingEditPayload, setPendingEditPayload] = useState(null);
+  // Per-order edit history fetched into the detail modal.
+  const [editHistoryEntries, setEditHistoryEntries] = useState([]);
+  const [editHistoryLoading, setEditHistoryLoading] = useState(false);
 
   const [statusForm] = Form.useForm();
   const [createOrderForm] = Form.useForm();
   const [personalCardForm] = Form.useForm();
+  const [editItemsForm] = Form.useForm();
   const watchedPaymentMethod = Form.useWatch('payment_method', createOrderForm);
   const watchedStatusValue = Form.useWatch('status', statusForm);
 
@@ -203,7 +216,7 @@ const Orders = () => {
         ...(selectedUserId ? { pricing_user_id: selectedUserId } : {}),
       }),
 
-    enabled: isCreateModalVisible,
+    enabled: isCreateModalVisible || isEditItemsModalVisible,
   });
 
   const { data: statusesData } = useQuery({
@@ -313,6 +326,72 @@ const Orders = () => {
     },
   });
 
+  const submitOrderEditMutation = useMutation({
+    mutationFn: ({ orderId, payload }) => adminService.submitOrderEdit(orderId, payload),
+    onSuccess: async (response) => {
+      const summary = response?.data?.cascade_summary || {};
+      const warnings = response?.data?.warnings || [];
+      message.success(t('ui.orders.edit_applied_success', 'Order updated successfully'));
+      if (warnings.length) {
+        Modal.warning({
+          title: t('ui.orders.edit_warnings_title', 'Order updated with warnings'),
+          content: (
+            <ul style={{ margin: 0, paddingLeft: 18 }}>
+              {warnings.map((warning) => (
+                <li key={warning}>{warning}</li>
+              ))}
+            </ul>
+          ),
+        });
+      }
+      queryClient.invalidateQueries({ queryKey: ['orders'] });
+      // Refresh the detail modal payload + history.
+      if (selectedOrder?.id) {
+        try {
+          const refreshed = await adminService.getOrderDetails(selectedOrder.id);
+          if (refreshed.success && refreshed.data?.order) {
+            setSelectedOrder(refreshed.data.order);
+          }
+          const history = await adminService.getOrderEditHistory(selectedOrder.id);
+          if (history.success) {
+            setEditHistoryEntries(history.data?.entries || []);
+          }
+        } catch (_err) {
+          // best-effort refresh
+        }
+      }
+      setIsEditItemsModalVisible(false);
+      setEditItemsStep(1);
+      setEditPreviewData(null);
+      setPendingEditPayload(null);
+      editItemsForm.resetFields();
+      // Surface cascade impact so admin sees what happened at a glance.
+      const cashAction = summary?.cash?.action;
+      if (cashAction === 'prepayment_created') {
+        message.info(
+          t(
+            'ui.orders.edit_prepayment_created',
+            `Prepayment credit of ${Number(summary.cash.amount || 0).toLocaleString()} UZS recorded for the customer.`,
+          ),
+        );
+      } else if (cashAction === 'additional_cash_collection_required') {
+        message.info(
+          t(
+            'ui.orders.edit_collect_extra_cash',
+            `Collect ${Number(summary.cash.amount || 0).toLocaleString()} UZS extra via Personal Card Payment.`,
+          ),
+        );
+      }
+    },
+    onError: (error) => {
+      const errors = extractApiErrorMessages(
+        error,
+        t('ui.orders.edit_failed', 'Failed to apply order edit'),
+      );
+      message.error(errors[0]);
+    },
+  });
+
   const retryFiscalizationMutation = useMutation({
     mutationFn: (paymentId) => adminService.retryPaymentFiscalization(paymentId),
 
@@ -401,6 +480,8 @@ const Orders = () => {
     setSelectedOrder(order);
     setIsDetailModalVisible(true);
     setOrderDetailsLoading(true);
+    setEditHistoryEntries([]);
+    setEditHistoryLoading(true);
 
     try {
       const response = await adminService.getOrderDetails(order.id);
@@ -412,6 +493,85 @@ const Orders = () => {
     } finally {
       setOrderDetailsLoading(false);
     }
+
+    try {
+      const historyResponse = await adminService.getOrderEditHistory(order.id);
+      if (historyResponse.success) {
+        setEditHistoryEntries(historyResponse.data?.entries || []);
+      }
+    } catch (_error) {
+      // Order edit history is supplementary — fail soft.
+    } finally {
+      setEditHistoryLoading(false);
+    }
+  };
+
+  const handleOpenEditItems = () => {
+    if (!selectedOrder) return;
+    const currentItems = (selectedOrder.items || []).map((item) => ({
+      order_item_id: item.id,
+      product_id: item.product_id,
+      quantity: item.quantity,
+    }));
+    editItemsForm.resetFields();
+    editItemsForm.setFieldsValue({ items: currentItems, reason: '' });
+    setEditPreviewData(null);
+    setEditItemsStep(1);
+    setIsEditItemsModalVisible(true);
+  };
+
+  const handleCloseEditItems = () => {
+    setIsEditItemsModalVisible(false);
+    setEditItemsStep(1);
+    setEditPreviewData(null);
+    setPendingEditPayload(null);
+    editItemsForm.resetFields();
+  };
+
+  const handleEditPreview = async () => {
+    if (!selectedOrder?.id) return;
+    try {
+      const values = await editItemsForm.validateFields();
+      setEditPreviewLoading(true);
+      const payload = {
+        items: (values.items || []).map((entry) => ({
+          orderItemId: entry.order_item_id || null,
+          productId: entry.product_id,
+          quantity: Number(entry.quantity || 0),
+        })),
+        reason: values.reason,
+      };
+      const response = await adminService.previewOrderEdit(selectedOrder.id, payload);
+      setEditPreviewData(response?.data || null);
+      // Cache the validated payload so handleEditConfirm doesn't depend on
+      // the Form component (which unmounts when step 2 renders).
+      setPendingEditPayload(payload);
+      setEditItemsStep(2);
+    } catch (error) {
+      if (error?.errorFields) {
+        // antd Form validation — let the form surface the issue.
+        return;
+      }
+      const errors = extractApiErrorMessages(
+        error,
+        t('ui.orders.edit_preview_failed', 'Failed to preview order edit'),
+      );
+      message.error(errors[0]);
+    } finally {
+      setEditPreviewLoading(false);
+    }
+  };
+
+  const handleEditConfirm = () => {
+    if (!pendingEditPayload) {
+      message.error(t('ui.orders.edit_preview_missing', 'Preview the change before applying.'));
+      setEditItemsStep(1);
+      return;
+    }
+    submitOrderEditMutation.mutate({
+      orderId: selectedOrder.id,
+      payload: pendingEditPayload,
+    });
   };
 
   const handleUpdateStatus = (order) => {
@@ -1081,6 +1241,94 @@ const Orders = () => {
               />
             </Spin>
 
+            <Divider>{t('ui.orders.order_changes', 'Order Changes')}</Divider>
+            {editHistoryLoading ? (
+              <Spin />
+            ) : editHistoryEntries.length ? (
+              <Table
+                dataSource={editHistoryEntries}
+                rowKey="id"
+                pagination={false}
+                size="small"
+                expandable={{
+                  expandedRowRender: (record) => (
+                    <div style={{ padding: 8 }}>
+                      <Descriptions size="small" column={2} bordered>
+                        <Descriptions.Item label={t('ui.orders.totals_before', 'Totals before')}>
+                          {Number(record.diff?.totals_before?.total_amount || 0).toLocaleString()} UZS
+                        </Descriptions.Item>
+                        <Descriptions.Item label={t('ui.orders.totals_after', 'Totals after')}>
+                          {Number(record.diff?.totals_after?.total_amount || 0).toLocaleString()} UZS
+                        </Descriptions.Item>
+                      </Descriptions>
+                      <div style={{ marginTop: 8 }}>
+                        <strong>{t('ui.orders.items_before', 'Items before')}:</strong>
+                        <ul style={{ margin: '4px 0 8px 16px' }}>
+                          {(record.diff?.items_before || []).map((it, idx) => (
+                            <li key={`b-${idx}`}>
+                              {it.product_name || it.product?.name || `#${it.product_id}`} × {it.quantity}
+                            </li>
+                          ))}
+                        </ul>
+                        <strong>{t('ui.orders.items_after', 'Items after')}:</strong>
+                        <ul style={{ margin: '4px 0 8px 16px' }}>
+                          {(record.diff?.items_after || []).map((it, idx) => (
+                            <li key={`a-${idx}`}>
+                              {it.product_name || it.product?.name || `#${it.product_id}`} × {it.quantity}
+                            </li>
+                          ))}
+                        </ul>
+                        {(record.diff?.warnings || []).length ? (
+                          <Alert
+                            type="warning"
+                            showIcon
+                            message={t('ui.orders.edit_warnings', 'Warnings')}
+                            description={
+                              <ul style={{ margin: 0, paddingLeft: 18 }}>
+                                {(record.diff.warnings || []).map((warning) => (
+                                  <li key={warning}>{warning}</li>
+                                ))}
+                              </ul>
+                            }
+                          />
+                        ) : null}
+                      </div>
+                    </div>
+                  ),
+                }}
+                columns={[
+                  {
+                    title: t('ui.orders.edited_at', 'When'),
+                    dataIndex: 'edited_at',
+                    key: 'edited_at',
+                    render: (value) => formatDateTimeShort(value),
+                  },
+                  {
+                    title: t('ui.orders.edited_by', 'By'),
+                    key: 'edited_by',
+                    render: (_, record) => record.edited_by_user?.name || record.edited_by_user_id,
+                  },
+                  {
+                    title: t('ui.orders.edit_reason', 'Reason'),
+                    dataIndex: 'reason',
+                    key: 'reason',
+                  },
+                  {
+                    title: t('ui.orders.edit_post_delivery', 'Post-delivery'),
+                    dataIndex: 'is_post_delivery',
+                    key: 'is_post_delivery',
+                    render: (value) => (
+                      <Tag color={value ? 'orange' : 'default'}>
+                        {value ? t('ui.common.yes', 'Yes') : t('ui.common.no', 'No')}
+                      </Tag>
+                    ),
+                  },
+                ]}
+              />
+            ) : (
+              <Alert type="info" showIcon message={t('ui.orders.no_edit_history', 'No admin edits recorded for this order')} />
+            )}
+
             {selectedOrder.payment_timeline?.timeline?.length ? (
               <>
                 <Divider>{t('ui.orders.payment_timeline', 'Payment Timeline')}</Divider>
@@ -1138,6 +1386,17 @@ const Orders = () => {
                     }}
                   >
                     {t('ui.orders.record_personal_card_payment', 'Record Personal Card Payment')}
+                  </Button>
+                ) : null}
+                {selectedOrder.is_editable ? (
+                  <Button
+                    icon={<EditOutlined />}
+                    onClick={handleOpenEditItems}
+                  >
+                    {t('ui.orders.edit_items', 'Edit Items')}
+                    {selectedOrder.edit_window_remaining_hours != null
+                      ? ` (${selectedOrder.edit_window_remaining_hours.toFixed(1)}h left)`
+                      : ''}
                   </Button>
                 ) : null}
                 <Button
@@ -1470,6 +1729,259 @@ const Orders = () => {
             <Input.TextArea rows={3} placeholder={t('ui.orders.personal_card_notes_placeholder', 'Example: Customer transferred to owner personal card')} />
           </Form.Item>
         </Form>
+      </Modal>
+
+      <Modal
+        title={
+          editItemsStep === 1
+            ? `${t('ui.orders.edit_items', 'Edit Items')} — ${selectedOrder?.order_number || ''}`
+            : `${t('ui.orders.edit_preview_title', 'Confirm Order Edit')} — ${selectedOrder?.order_number || ''}`
+        }
+        open={isEditItemsModalVisible}
+        onCancel={handleCloseEditItems}
+        footer={null}
+        width={820}
+        destroyOnClose
+      >
+        {editItemsStep === 1 ? (
+          <Form form={editItemsForm} layout="vertical">
+            <Alert
+              type="info"
+              showIcon
+              style={{ marginBottom: 16 }}
+              message={t(
+                'ui.orders.edit_items_hint',
+                'Set the FINAL desired quantity per line. 0 removes a line. Add new rows to insert new line items.',
+              )}
+            />
+            <Form.List name="items">
+              {(fields, { add, remove }) => (
+                <>
+                  {fields.map(({ key, name, ...restField }) => (
+                    <Row key={key} gutter={16} align="middle">
+                      <Col span={2} style={{ textAlign: 'right', color: '#999' }}>#{name + 1}</Col>
+                      <Col span={12}>
+                        <Form.Item
+                          {...restField}
+                          name={[name, 'product_id']}
+                          rules={[{ required: true, message: t('ui.orders.product_required', 'Select product') }]}
+                        >
+                          <Select
+                            showSearch
+                            placeholder={t('ui.orders.select_product', 'Select product')}
+                            optionFilterProp="children"
+                            filterOption={(input, option) => String(option.children).toLowerCase().includes(input.toLowerCase())}
+                          >
+                            {(productsData?.data?.items || []).map((product) => {
+                              const effectivePrice = getEffectiveProductPrice(product);
+                              return (
+                                <Option key={product.id} value={product.id}>
+                                  {product.name} - {Number(effectivePrice || 0).toLocaleString()} UZS
+                                </Option>
+                              );
+                            })}
+                          </Select>
+                        </Form.Item>
+                      </Col>
+                      <Col span={6}>
+                        <Form.Item
+                          {...restField}
+                          name={[name, 'quantity']}
+                          rules={[{ required: true, message: t('ui.orders.quantity_required', 'Qty') }]}
+                        >
+                          <InputNumber
+                            min={0}
+                            style={{ width: '100%' }}
+                            placeholder={t('ui.orders.quantity', 'Qty')}
+                          />
+                        </Form.Item>
+                      </Col>
+                      <Col span={2}>
+                        <Form.Item {...restField} name={[name, 'order_item_id']} hidden>
+                          <Input />
+                        </Form.Item>
+                        <Button type="text" danger icon={<MinusCircleOutlined />} onClick={() => remove(name)} />
+                      </Col>
+                    </Row>
+                  ))}
+                  <Form.Item>
+                    <Button type="dashed" onClick={() => add({ order_item_id: null })} block icon={<PlusOutlined />}>
+                      {t('ui.orders.add_item', 'Add Item')}
+                    </Button>
+                  </Form.Item>
+                </>
+              )}
+            </Form.List>
+
+            <Form.Item
+              name="reason"
+              label={t('ui.orders.edit_reason', 'Reason')}
+              rules={[
+                { required: true, message: t('ui.orders.reason_required', 'Reason is required') },
+                { min: 3, message: t('ui.orders.reason_min_length', 'Reason must be at least 3 characters') },
+              ]}
+            >
+              <Input.TextArea
+                rows={2}
+                placeholder={t(
+                  'ui.orders.reason_placeholder',
+                  'Example: customer asked for 2 extra bottles on arrival',
+                )}
+              />
+            </Form.Item>
+
+            <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
+              <Space>
+                <Button onClick={handleCloseEditItems}>{t('ui.common.cancel', 'Cancel')}</Button>
+                <AsyncButton type="primary" loading={editPreviewLoading} onClick={handleEditPreview}>
+                  {t('ui.orders.preview_impacts', 'Preview impacts')}
+                </AsyncButton>
+              </Space>
+            </Form.Item>
+          </Form>
+        ) : (
+          <div>
+            {(editPreviewData?.blocking_reasons || []).length ? (
+              <Alert
+                type="error"
+                showIcon
+                style={{ marginBottom: 16 }}
+                message={t('ui.orders.edit_blocked', 'This edit cannot proceed')}
+                description={
+                  <ul style={{ margin: 0, paddingLeft: 18 }}>
+                    {editPreviewData.blocking_reasons.map((reason) => (
+                      <li key={reason}>{reason}</li>
+                    ))}
+                  </ul>
+                }
+              />
+            ) : null}
+
+            {(editPreviewData?.warnings || []).length ? (
+              <Alert
+                type="warning"
+                showIcon
+                style={{ marginBottom: 16 }}
+                message={t('ui.orders.edit_warnings', 'Warnings')}
+                description={
+                  <ul style={{ margin: 0, paddingLeft: 18 }}>
+                    {editPreviewData.warnings.map((warning) => (
+                      <li key={warning}>{warning}</li>
+                    ))}
+                  </ul>
+                }
+              />
+            ) : null}
+
+            <Descriptions column={2} bordered size="small" style={{ marginBottom: 16 }}>
+              <Descriptions.Item label={t('ui.orders.total_before', 'Total before')}>
+                {Number(editPreviewData?.totals_before?.total_amount || 0).toLocaleString()} UZS
+              </Descriptions.Item>
+              <Descriptions.Item label={t('ui.orders.total_after', 'Total after')}>
+                <strong>
+                  {Number(editPreviewData?.totals_after?.total_amount || 0).toLocaleString()} UZS
+                </strong>
+              </Descriptions.Item>
+              <Descriptions.Item label={t('ui.orders.subtotal_before', 'Subtotal before')}>
+                {Number(editPreviewData?.totals_before?.subtotal || 0).toLocaleString()} UZS
+              </Descriptions.Item>
+              <Descriptions.Item label={t('ui.orders.subtotal_after', 'Subtotal after')}>
+                {Number(editPreviewData?.totals_after?.subtotal || 0).toLocaleString()} UZS
+              </Descriptions.Item>
+            </Descriptions>
+
+            <Divider>{t('ui.orders.cascade_impact', 'Cascade Impact')}</Divider>
+            <Descriptions column={1} bordered size="small">
+              <Descriptions.Item label={t('ui.orders.payment_impact', 'Payment')}>
+                {(() => {
+                  const summary = editPreviewData?.cascade_summary?.payment;
+                  const action = summary?.action;
+                  const originalMethod = summary?.payment_method_original;
+                  const amount = summary?.prepayment_amount ?? summary?.additional_charge;
+                  if (action === 'create_prepayment_credit') {
+                    const cardSuffix =
+                      originalMethod && originalMethod !== 'cash'
+                        ? ` (card payment will NOT be refunded — credit is cash-only-usable)`
+                        : '';
+                    return t(
+                      'ui.orders.payment_prepayment',
+                      `Prepayment credit of ${Number(amount || 0).toLocaleString()} UZS will be recorded${cardSuffix}`,
+                    );
+                  }
+                  if (action === 'manual_cash_collection_required') {
+                    return t(
+                      'ui.orders.payment_extra_cash',
+                      `Collect ${Number(amount || 0).toLocaleString()} UZS extra in CASH via Personal Card Payment (card will not be re-charged)`,
+                    );
+                  }
+                  if (action === 'totals_only') {
+                    return t('ui.orders.payment_totals_only', 'Totals updated; no payment change');
+                  }
+                  return action || '—';
+                })()}
+              </Descriptions.Item>
+              <Descriptions.Item label={t('ui.orders.loyalty_impact', 'Loyalty')}>
+                {(() => {
+                  const loy = editPreviewData?.cascade_summary?.loyalty;
+                  if (!loy) return '—';
+                  return t(
+                    'ui.orders.loyalty_change',
+                    `${loy.old_points_earned || 0} pts → ${loy.new_points_earned || 0} pts`,
+                  );
+                })()}
+              </Descriptions.Item>
+              <Descriptions.Item label={t('ui.orders.bottle_impact', 'Bottle balance')}>
+                {(() => {
+                  const bottle = editPreviewData?.cascade_summary?.bottle_balance;
+                  if (!bottle || !(bottle.changes || []).length) {
+                    return t('ui.orders.no_bottle_change', 'No bottle balance change');
+                  }
+                  return (
+                    <div>
+                      {(bottle.changes || []).map((change, idx) => (
+                        <div key={idx}>
+                          Product {change.product_id}: {change.delta_bottles > 0 ? '+' : ''}
+                          {change.delta_bottles} {t('ui.orders.bottles', 'bottles')}
+                        </div>
+                      ))}
+                      {bottle.affected_session_id ? (
+                        <div style={{ color: '#fa8c16' }}>
+                          {t(
+                            'ui.orders.session_will_reopen',
+                            `Driver bottle session #${bottle.affected_session_id} will be reopened`,
+                          )}
+                        </div>
+                      ) : null}
+                    </div>
+                  );
+                })()}
+              </Descriptions.Item>
+              <Descriptions.Item label={t('ui.orders.corporate_impact', 'Corporate contract')}>
+                {editPreviewData?.cascade_summary?.corporate?.manual_reconciliation_required
+                  ? t('ui.orders.corporate_manual', 'Finance must reconcile contract ledger manually')
+                  : editPreviewData?.cascade_summary?.corporate?.adjusted
+                    ? t('ui.orders.corporate_adjusted', 'Contract reserve ledger will be adjusted')
+                    : t('ui.orders.no_corporate_change', 'No corporate ledger change')}
+              </Descriptions.Item>
+            </Descriptions>
+
+            <div style={{ marginTop: 16, textAlign: 'right' }}>
+              <Space>
+                <Button onClick={() => setEditItemsStep(1)}>
+                  {t('ui.orders.back_to_edit', 'Back to edit')}
+                </Button>
+                <AsyncButton
+                  type="primary"
+                  loading={submitOrderEditMutation.isPending}
+                  disabled={(editPreviewData?.blocking_reasons || []).length > 0}
+                  onClick={handleEditConfirm}
+                >
+                  {t('ui.orders.confirm_apply', 'Confirm and apply')}
+                </AsyncButton>
+              </Space>
+            </div>
+          </div>
+        )}
       </Modal>
     </div>
   );

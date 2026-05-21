@@ -370,6 +370,22 @@ class AdminService {
     return response.data;
   }
 
+  // Order edit (admin)
+  async previewOrderEdit(orderId, payload) {
+    const response = await api.post(`/admin/orders/${orderId}/edit-preview`, payload);
+    return response.data;
+  }
+
+  async submitOrderEdit(orderId, payload) {
+    const response = await api.post(`/admin/orders/${orderId}/edit`, payload);
+    return response.data;
+  }
+
+  async getOrderEditHistory(orderId) {
+    const response = await api.get(`/admin/orders/${orderId}/edit-history`);
+    return response.data;
+  }
+
   // Corporate contract management
   async getCorporateContracts(params = {}) {
     const response = await api.get('/admin/corporate/contracts', { params });

@@ -30,6 +30,7 @@ from shared.enums import (
     OrderStatus,
     UserStatus,
 )
+from business_app.utils.audit_logger import AuditEventType, AuditSeverity, audit_logger
 from business_app.utils.exceptions import ConflictError, NotFoundError, ValidationError
 from business_app.utils.transactions import transactional
 
@@ -872,6 +873,99 @@ class BottleTrackingService:
                 session.id,
             )
         db.session.flush()
+        return session
+
+    def reopen_session(
+        self,
+        session_id: int,
+        actor_user_id: int,
+        *,
+        reason: str,
+        commit: bool = True,
+    ) -> DriverBottleSession:
+        """Reopen a CLOSED / FORCE_CLOSED bottle session for retroactive adjustment.
+
+        Used when an admin edits a delivered order whose driver session has
+        already been closed. The session transitions back to OPEN so the
+        order-edit cascade can write balancing ledger entries that re-tally
+        cleanly. The driver re-closes the session afterward (compute_discrepancy
+        is reset so close-time math runs from the updated tallies).
+
+        Raises:
+            ValidationError: reason is empty, or status is not CLOSED/FORCE_CLOSED.
+            ConflictError: driver already has another OPEN session (partial
+                unique index `uq_dbs_driver_open` would otherwise be violated).
+        """
+        if not reason or not reason.strip():
+            raise ValidationError("A reason is required to reopen a bottle session")
+
+        session = DriverBottleSession.query.get(session_id)
+        if not session:
+            raise NotFoundError("Bottle session not found")
+
+        if session.status not in {
+            DriverBottleSessionStatus.CLOSED,
+            DriverBottleSessionStatus.FORCE_CLOSED,
+        }:
+            raise ValidationError(
+                f"Cannot reopen session {session.id}: status is "
+                f"{session.status.value if hasattr(session.status, 'value') else session.status}; "
+                "only CLOSED or FORCE_CLOSED sessions can be reopened.",
+                error_code="BOTTLE_SESSION_NOT_REOPENABLE",
+            )
+
+        active_conflict = (
+            DriverBottleSession.query.filter(
+                DriverBottleSession.driver_user_id == session.driver_user_id,
+                DriverBottleSession.id != session.id,
+                DriverBottleSession.status == DriverBottleSessionStatus.OPEN,
+            )
+            .order_by(DriverBottleSession.started_at.desc())
+            .first()
+        )
+        if active_conflict:
+            raise ConflictError(
+                f"Cannot reopen session {session.id}: driver already has an "
+                f"OPEN session (id={active_conflict.id}). Close the active "
+                "session before reopening this one.",
+                error_code="BOTTLE_SESSION_ACTIVE_CONFLICT",
+            )
+
+        previous_status = session.status.value if hasattr(session.status, "value") else session.status
+        session.status = DriverBottleSessionStatus.OPEN
+        session.reopened_at = self._utc_now()
+        session.reopened_by_user_id = actor_user_id
+        session.reopened_reason = reason.strip()
+        session.reopen_count = (session.reopen_count or 0) + 1
+        # Reset close-side state so the post-adjustment re-close recomputes
+        # discrepancy from the updated tallies.
+        session.bottles_returned_to_warehouse = None
+        session.closed_at = None
+        session.closed_by_user_id = None
+        session.discrepancy = None
+        # The session was force-closed by admin previously? Drop the flag so the
+        # next normal close treats it as a clean trip.
+        session.force_closed = False
+
+        audit_logger.log_event(
+            event_type=AuditEventType.SESSION_REOPENED,
+            action="driver_bottle_session_reopened",
+            severity=AuditSeverity.HIGH,
+            resource_type="driver_bottle_session",
+            resource_id=str(session.id),
+            additional_data={
+                "driver_user_id": session.driver_user_id,
+                "actor_user_id": actor_user_id,
+                "previous_status": previous_status,
+                "reopen_count": session.reopen_count,
+                "reason": session.reopened_reason,
+            },
+        )
+
+        if commit:
+            db.session.commit()
+        else:
+            db.session.flush()
         return session
 
     def get_open_session(self, driver_user_id: int) -> Optional[DriverBottleSession]:

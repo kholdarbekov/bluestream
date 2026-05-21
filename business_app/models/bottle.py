@@ -218,11 +218,16 @@ class DriverBottleSession(db.Model, TimestampMixin):
         Index("idx_dbs_status_started", "status", "started_at"),
         # Partial unique index: at most one OPEN session per driver.
         # The DB-level constraint prevents race conditions on concurrent opens.
+        # ``sqlite_where`` mirrors postgresql_where so test SQLite honours the
+        # partial filter — otherwise SQLite drops the WHERE clause and the
+        # index becomes a FULL unique on driver_user_id, blocking the seed
+        # of any second session per driver (even when one is closed).
         Index(
             "uq_dbs_driver_open",
             "driver_user_id",
             unique=True,
             postgresql_where=sa_text("status = 'open'"),
+            sqlite_where=sa_text("status = 'open'"),
         ),
     )
 
@@ -269,12 +274,22 @@ class DriverBottleSession(db.Model, TimestampMixin):
     force_closed = Column(Boolean, nullable=False, default=False)
     force_close_reason = Column(Text, nullable=True)
 
+    # --- Reopen audit (admin retroactively edits a delivered order) ---
+    # When a closed session must be adjusted, status transitions CLOSED/FORCE_CLOSED → OPEN
+    # so ledger writes for the order edit re-tally cleanly. The driver re-closes
+    # the session afterward; reopen_count tracks how many times this has happened.
+    reopened_at = Column(DateTime(timezone=True), nullable=True)
+    reopened_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    reopened_reason = Column(Text, nullable=True)
+    reopen_count = Column(Integer, nullable=False, default=0, server_default=sa_text("0"))
+
     notes = Column(Text, nullable=True)
     session_metadata = Column(JSON, nullable=False, default=dict)
 
     driver = relationship("User", foreign_keys=[driver_user_id], backref="bottle_sessions")
     loaded_by = relationship("User", foreign_keys=[loaded_by_user_id])
     closed_by = relationship("User", foreign_keys=[closed_by_user_id])
+    reopened_by = relationship("User", foreign_keys=[reopened_by_user_id])
 
     session_orders = relationship(
         "DriverBottleSessionOrder",
@@ -342,6 +357,10 @@ class DriverBottleSession(db.Model, TimestampMixin):
             "discrepancy": self.discrepancy,
             "force_closed": self.force_closed,
             "force_close_reason": self.force_close_reason,
+            "reopened_at": self.reopened_at.isoformat() if self.reopened_at else None,
+            "reopened_by_user_id": self.reopened_by_user_id,
+            "reopened_reason": self.reopened_reason,
+            "reopen_count": self.reopen_count or 0,
             "started_at": self.started_at.isoformat() if self.started_at else None,
             "closed_at": self.closed_at.isoformat() if self.closed_at else None,
             "notes": self.notes,

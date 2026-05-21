@@ -724,6 +724,109 @@ class LoyaltyService:
 
         return transaction
 
+    def reverse_earnings(
+        self,
+        user_id: int,
+        order_id: int,
+        old_points_earned: int,
+        new_points_earned: int,
+        *,
+        clamp: bool = True,
+        description: Optional[str] = None,
+        commit: bool = True,
+    ) -> Dict[str, Any]:
+        """Adjust a previous order's loyalty earnings after an order edit.
+
+        Called when an admin edits an order whose loyalty points were already
+        awarded (e.g. quantity decreased post-delivery). The difference
+        between old and new earnings is clawed back from the user's current
+        balance.
+
+        ``clamp=True`` (the policy chosen during brainstorming) never lets the
+        balance go negative: if the user has already spent some of the
+        previously-earned points, we claw back only what's available and
+        return the uncollectible delta so the caller can record it in the
+        audit log. ``clamp=False`` clawbacks the full diff (may go negative).
+        ``diff < 0`` (new earnings higher than old, e.g. quantity increased)
+        produces a positive adjustment instead, awarding the extra points.
+        Result keys are always present so callers can render a uniform
+        cascade summary.
+        """
+        if old_points_earned < 0 or new_points_earned < 0:
+            raise ValidationError("Loyalty point totals must be non-negative")
+
+        account = self.get_or_create_loyalty_account(user_id)
+        result: Dict[str, Any] = {
+            "diff": old_points_earned - new_points_earned,
+            "clawback": 0,
+            "uncollectible": 0,
+            "award": 0,
+            "transaction_id": None,
+        }
+
+        diff = old_points_earned - new_points_earned
+        if diff == 0:
+            return result
+
+        if diff > 0:
+            # We need to claw back `diff` points.
+            available_balance = max(0, int(account.current_balance or 0))
+            if clamp:
+                clawback = min(diff, available_balance)
+            else:
+                clawback = diff
+            uncollectible = diff - clawback
+            result["clawback"] = clawback
+            result["uncollectible"] = uncollectible
+
+            if clawback > 0:
+                # Use ADJUSTMENT transaction type with negative points (mirrors
+                # the EXPIRED reversal pattern in expire_points()).
+                txn = LoyaltyTransaction(
+                    user_id=user_id,
+                    transaction_type=LoyaltyTransactionType.ADJUSTMENT,
+                    points=-clawback,
+                    description=description or f"Order #{order_id} edit clawback",
+                    order_id=order_id,
+                    extra_data={
+                        "action_type": "order_edit_reversal",
+                        "old_points_earned": old_points_earned,
+                        "new_points_earned": new_points_earned,
+                        "uncollectible": uncollectible,
+                        "clamped": bool(clamp),
+                    },
+                )
+                db.session.add(txn)
+                account.current_balance = available_balance - clawback
+                account.total_redeemed = (account.total_redeemed or 0) + clawback
+                db.session.flush()
+                result["transaction_id"] = txn.id
+        else:
+            # diff < 0: new earnings exceed old, award the extra.
+            award = -diff
+            txn = LoyaltyTransaction(
+                user_id=user_id,
+                transaction_type=LoyaltyTransactionType.ADJUSTMENT,
+                points=award,
+                description=description or f"Order #{order_id} edit award",
+                order_id=order_id,
+                extra_data={
+                    "action_type": "order_edit_award",
+                    "old_points_earned": old_points_earned,
+                    "new_points_earned": new_points_earned,
+                },
+            )
+            db.session.add(txn)
+            account.current_balance = int(account.current_balance or 0) + award
+            account.total_earned = (account.total_earned or 0) + award
+            db.session.flush()
+            result["award"] = award
+            result["transaction_id"] = txn.id
+
+        if commit:
+            db.session.commit()
+        return result
+
     def deduct_points(
         self,
         user_id: int,

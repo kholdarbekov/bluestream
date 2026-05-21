@@ -440,8 +440,16 @@ class DriverCashSession(db.Model, TimestampMixin):
     resolution_reason_code = Column(String(64), nullable=True)
     risk_flags = Column(JSON, nullable=False, default=list)
     resolution_metadata = Column(JSON, nullable=True, default=dict)
+    # Reopen audit fields: admin can reopen a SUBMITTED/VERIFIED/RESOLVED/MISMATCH
+    # session when an order edit retroactively changes cash collected. The
+    # session goes back to OPEN; the driver re-submits and an admin re-verifies.
+    reopened_at = Column(DateTime(timezone=True), nullable=True)
+    reopened_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    reopened_reason = Column(String(255), nullable=True)
+    reopen_count = Column(Integer, nullable=False, default=0, server_default=sa_text("0"))
 
     driver_user = relationship("User", foreign_keys=[driver_user_id], backref="driver_cash_sessions")
+    reopened_by_user = relationship("User", foreign_keys=[reopened_by_user_id])
     submitted_by_user = relationship("User", foreign_keys=[submitted_by_user_id])
     verified_by_user = relationship("User", foreign_keys=[verified_by_user_id])
     cash_collection_events = relationship(
@@ -485,6 +493,10 @@ class DriverCashSession(db.Model, TimestampMixin):
             "resolution_reason_code": self.resolution_reason_code,
             "risk_flags": list(self.risk_flags or []),
             "resolution_metadata": self.resolution_metadata or {},
+            "reopened_at": self.reopened_at.isoformat() if self.reopened_at else None,
+            "reopened_by_user_id": self.reopened_by_user_id,
+            "reopened_reason": self.reopened_reason,
+            "reopen_count": self.reopen_count or 0,
         }
 
 

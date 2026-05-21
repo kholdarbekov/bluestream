@@ -320,6 +320,42 @@ BACKEND_TRANSLATIONS = {
         'uz': 'Buyurtma so\'rovi ma\'lumotlari noto\'g\'ri',
         'ru': 'Некорректные данные запроса заказа'
     },
+    # ---- Admin order edit (ORDER_EDITED notification) ----
+    'api.orders.edited.subject': {
+        'en': 'Your order was updated',
+        'uz': 'Buyurtmangiz yangilandi',
+        'ru': 'Ваш заказ обновлён'
+    },
+    'api.orders.edited.body': {
+        'en': 'Order {order_number} was updated by our team. New total: {order_total} UZS.',
+        'uz': 'Buyurtma {order_number} bizning jamoamiz tomonidan yangilandi. Yangi jami: {order_total} so\'m.',
+        'ru': 'Заказ {order_number} был обновлён нашей командой. Новая сумма: {order_total} сум.'
+    },
+    'api.orders.edited.body_with_reason': {
+        'en': 'Order {order_number} was updated. Reason: {reason}. New total: {order_total} UZS.',
+        'uz': 'Buyurtma {order_number} yangilandi. Sabab: {reason}. Yangi jami: {order_total} so\'m.',
+        'ru': 'Заказ {order_number} был обновлён. Причина: {reason}. Новая сумма: {order_total} сум.'
+    },
+    'api.orders.edit_window_expired': {
+        'en': 'Order edit window has expired',
+        'uz': 'Buyurtmani tahrirlash muddati tugagan',
+        'ru': 'Срок редактирования заказа истёк'
+    },
+    'api.orders.card_paid_decrease_creates_prepayment': {
+        'en': 'Card-paid order decrease: card will NOT be refunded; the reduced amount becomes customer prepayment credit (usable on future cash orders only)',
+        'uz': 'Karta bilan to\'langan buyurtmani kamaytirish: karta qaytarilmaydi; kamaytirilgan miqdor mijozning oldindan to\'lov kreditiga aylanadi (faqat keyingi naqd buyurtmalar uchun)',
+        'ru': 'Уменьшение заказа, оплаченного картой: возврат на карту НЕ производится; сумма становится предоплатой клиента (можно использовать только на будущих заказах с наличной оплатой)'
+    },
+    'api.orders.card_paid_increase_requires_cash': {
+        'en': 'Card-paid order increase: the additional amount must be collected in CASH via Personal Card Payment (card will not be re-charged)',
+        'uz': 'Karta bilan to\'langan buyurtmani oshirish: qo\'shimcha miqdor NAQD pulda yig\'ilishi kerak (karta qayta yechilmaydi)',
+        'ru': 'Увеличение заказа, оплаченного картой: дополнительная сумма должна быть собрана НАЛИЧНЫМИ (карта повторно не списывается)'
+    },
+    'api.orders.marking_codes_preserved': {
+        'en': 'Marking codes will be preserved; the value of the removed quantity goes to customer prepayment',
+        'uz': 'Markirovka kodlari saqlanib qoladi; olib tashlangan miqdorning qiymati mijozning oldindan to\'lov hisobiga o\'tadi',
+        'ru': 'Маркировочные коды сохраняются; стоимость убранного количества зачисляется в предоплату клиента'
+    },
     'api.orders.confirmed': {
         'en': 'Order confirmed',
         'uz': 'Buyurtma tasdiqlandi',
@@ -5738,6 +5774,95 @@ ADMIN_UI_ORDER_TRANSLATIONS = {
     'ui.orders.update_order_status': _ui_tr('Update Order Status', 'Buyurtma holatini yangilash', 'Обновить статус заказа'),
     'ui.orders.update_status': _ui_tr('Update Status', 'Holatni yangilash', 'Обновить статус'),
     'ui.orders.view_details': _ui_tr('View Details', "Batafsil ko'rish", 'Посмотреть детали'),
+    # ---- Admin order-edit feature (Edit Items modal + Order Changes history) ----
+    'ui.orders.edit_items': _ui_tr('Edit Items', 'Mahsulotlarni tahrirlash', 'Редактировать товары'),
+    'ui.orders.edit_items_hint': _ui_tr(
+        'Set the FINAL desired quantity per line. 0 removes a line. Add new rows to insert new line items.',
+        'Har bir qator uchun YAKUNIY istalgan miqdorni belgilang. 0 qatorni olib tashlaydi. Yangi qatorlar qo\'shish uchun "Mahsulot qo\'shish" tugmasini bosing.',
+        'Укажите ОКОНЧАТЕЛЬНОЕ желаемое количество для каждой позиции. 0 удаляет позицию. Добавьте новые строки, чтобы вставить новые товары.',
+    ),
+    'ui.orders.edit_reason': _ui_tr('Reason', 'Sabab', 'Причина'),
+    'ui.orders.reason_required': _ui_tr('Reason is required', 'Sabab kerak', 'Причина обязательна'),
+    'ui.orders.reason_min_length': _ui_tr('Reason must be at least 3 characters', 'Sabab kamida 3 ta belgi bo\'lishi kerak', 'Причина должна быть не менее 3 символов'),
+    'ui.orders.reason_placeholder': _ui_tr(
+        'Example: customer asked for 2 extra bottles on arrival',
+        'Misol: mijoz yetkazib berishda yana 2 ta idish so\'radi',
+        'Например: клиент попросил ещё 2 бутыли при доставке',
+    ),
+    'ui.orders.preview_impacts': _ui_tr('Preview impacts', 'Ta\'sirini ko\'rib chiqish', 'Предпросмотр последствий'),
+    'ui.orders.edit_preview_title': _ui_tr('Confirm Order Edit', 'Buyurtma tahririni tasdiqlash', 'Подтвердите редактирование заказа'),
+    'ui.orders.edit_preview_failed': _ui_tr('Failed to preview order edit', 'Tahririni oldindan ko\'rishda xatolik', 'Не удалось сформировать предпросмотр'),
+    'ui.orders.edit_preview_missing': _ui_tr('Preview the change before applying.', 'Qo\'llashdan oldin o\'zgarishni ko\'rib chiqing.', 'Перед применением посмотрите предпросмотр.'),
+    'ui.orders.edit_failed': _ui_tr('Failed to apply order edit', 'Tahririni qo\'llashda xatolik', 'Не удалось применить редактирование'),
+    'ui.orders.edit_applied_success': _ui_tr('Order updated successfully', 'Buyurtma muvaffaqiyatli yangilandi', 'Заказ успешно обновлён'),
+    'ui.orders.edit_warnings_title': _ui_tr('Order updated with warnings', 'Buyurtma ogohlantirishlar bilan yangilandi', 'Заказ обновлён с предупреждениями'),
+    'ui.orders.edit_warnings': _ui_tr('Warnings', 'Ogohlantirishlar', 'Предупреждения'),
+    'ui.orders.edit_blocked': _ui_tr('This edit cannot proceed', 'Ushbu tahrir davom etolmaydi', 'Это редактирование невозможно'),
+    'ui.orders.edit_prepayment_created': _ui_tr(
+        'Prepayment credit recorded for the customer.',
+        'Mijoz uchun oldindan to\'lov krediti qayd etildi.',
+        'Кредит предоплаты зачислен клиенту.',
+    ),
+    'ui.orders.edit_collect_extra_cash': _ui_tr(
+        'Collect extra cash via Personal Card Payment.',
+        'Shaxsiy karta to\'lovi orqali qo\'shimcha naqd yig\'ing.',
+        'Соберите доплату наличными через «Оплата на личную карту».',
+    ),
+    'ui.orders.back_to_edit': _ui_tr('Back to edit', 'Tahrirga qaytish', 'Назад к редактированию'),
+    'ui.orders.confirm_apply': _ui_tr('Confirm and apply', 'Tasdiqlash va qo\'llash', 'Подтвердить и применить'),
+    'ui.orders.total_before': _ui_tr('Total before', 'Eski jami', 'Сумма до'),
+    'ui.orders.total_after': _ui_tr('Total after', 'Yangi jami', 'Сумма после'),
+    'ui.orders.subtotal_before': _ui_tr('Subtotal before', 'Eski oraliq jami', 'Промежуточная сумма до'),
+    'ui.orders.subtotal_after': _ui_tr('Subtotal after', 'Yangi oraliq jami', 'Промежуточная сумма после'),
+    'ui.orders.cascade_impact': _ui_tr('Cascade Impact', 'Kaskad ta\'siri', 'Каскадный эффект'),
+    'ui.orders.payment_impact': _ui_tr('Payment', 'To\'lov', 'Оплата'),
+    'ui.orders.loyalty_impact': _ui_tr('Loyalty', 'Sodiqlik', 'Лояльность'),
+    'ui.orders.bottle_impact': _ui_tr('Bottle balance', 'Idish qoldig\'i', 'Баланс тары'),
+    'ui.orders.corporate_impact': _ui_tr('Corporate contract', 'Korporativ shartnoma', 'Корпоративный договор'),
+    'ui.orders.payment_prepayment': _ui_tr(
+        'Prepayment credit will be recorded',
+        'Oldindan to\'lov krediti qayd etiladi',
+        'Будет записан кредит предоплаты',
+    ),
+    'ui.orders.payment_extra_cash': _ui_tr(
+        'Collect extra in CASH via Personal Card Payment (card will not be re-charged)',
+        'Shaxsiy karta to\'lovi orqali NAQD yig\'ing (karta qayta yechilmaydi)',
+        'Соберите доплату НАЛИЧНЫМИ через «Оплата на личную карту» (карта повторно не списывается)',
+    ),
+    'ui.orders.payment_totals_only': _ui_tr('Totals updated; no payment change', 'Jami yangilandi; to\'lov o\'zgarmadi', 'Итоги обновлены; оплата не изменилась'),
+    'ui.orders.loyalty_change': _ui_tr('Loyalty points change', 'Sodiqlik balli o\'zgarishi', 'Изменение баллов лояльности'),
+    'ui.orders.no_bottle_change': _ui_tr('No bottle balance change', 'Idish qoldig\'i o\'zgarmaydi', 'Баланс тары не изменяется'),
+    'ui.orders.no_corporate_change': _ui_tr('No corporate ledger change', 'Korporativ buxgalteriya o\'zgarmaydi', 'Корпоративная книга не изменяется'),
+    'ui.orders.corporate_manual': _ui_tr(
+        'Finance must reconcile contract ledger manually',
+        'Moliya korporativ buxgalteriyani qo\'lda solishtirishi kerak',
+        'Финансы должны вручную сверить корпоративную книгу',
+    ),
+    'ui.orders.corporate_adjusted': _ui_tr(
+        'Contract reserve ledger will be adjusted',
+        'Shartnoma rezerv buxgalteriyasi tuzatiladi',
+        'Резервная книга договора будет скорректирована',
+    ),
+    'ui.orders.session_will_reopen': _ui_tr(
+        'Driver bottle session will be reopened',
+        'Haydovchining idish sessiyasi qayta ochiladi',
+        'Сессия по таре курьера будет переоткрыта',
+    ),
+    'ui.orders.bottles': _ui_tr('bottles', 'idishlar', 'бутыли'),
+    # Order Changes (history) section
+    'ui.orders.order_changes': _ui_tr('Order Changes', 'Buyurtma o\'zgarishlari', 'Изменения заказа'),
+    'ui.orders.no_edit_history': _ui_tr(
+        'No admin edits recorded for this order',
+        'Ushbu buyurtma uchun admin tahrirlari yo\'q',
+        'Для этого заказа нет правок администратора',
+    ),
+    'ui.orders.edited_at': _ui_tr('When', 'Vaqti', 'Когда'),
+    'ui.orders.edited_by': _ui_tr('By', 'Kim tomonidan', 'Кем'),
+    'ui.orders.edit_post_delivery': _ui_tr('Post-delivery', 'Yetkazib berilgandan keyin', 'После доставки'),
+    'ui.orders.items_before': _ui_tr('Items before', 'Oldingi mahsulotlar', 'Товары до'),
+    'ui.orders.items_after': _ui_tr('Items after', 'Yangi mahsulotlar', 'Товары после'),
+    'ui.orders.totals_before': _ui_tr('Totals before', 'Eski jami', 'Итоги до'),
+    'ui.orders.totals_after': _ui_tr('Totals after', 'Yangi jami', 'Итоги после'),
 }
 
 ADMIN_UI_PRODUCT_TRANSLATIONS = {

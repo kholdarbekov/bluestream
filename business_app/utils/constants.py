@@ -24,6 +24,7 @@ class NotificationType(Enum):
     ORDER_CONFIRMATION = "order_confirmation"
     ORDER_STATUS_UPDATE = "order_status_update"
     ORDER_UPDATE = "order_update"
+    ORDER_EDITED = "order_edited"
 
     # Delivery notification types
     DELIVERY_UPDATE = "delivery_update"

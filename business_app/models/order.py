@@ -335,6 +335,60 @@ class OrderItemMarkingCodeAllocation(db.Model, TimestampMixin):
         }
 
 
+class OrderEditHistory(db.Model, TimestampMixin):
+    """Records each admin edit applied to a placed order.
+
+    One row per edit operation. ``diff`` holds the structured before/after
+    snapshot of order items plus the totals delta and a summary of each
+    cascade (payment, loyalty, marking codes, sessions, corporate ledger).
+    The row is the audit trail surfaced in the admin "Order changes" tab.
+    """
+
+    __tablename__ = "order_edit_history"
+    __table_args__ = (
+        Index("idx_order_edit_history_order_created", "order_id", "created_at"),
+        Index("idx_order_edit_history_editor_created", "edited_by_user_id", "created_at"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    order_id = Column(Integer, ForeignKey("orders.id"), nullable=False, index=True)
+    edited_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    edited_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    reason = Column(Text, nullable=False)
+    diff = Column(JSON, nullable=False, default=dict)
+    # Denormalised flag so the admin UI / analytics can quickly filter
+    # post-delivery edits, which are the riskier ones to review.
+    is_post_delivery = Column(Boolean, nullable=False, default=False, index=True)
+
+    order = relationship("Order", backref="edit_history")
+    edited_by_user = relationship("User", foreign_keys=[edited_by_user_id])
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "order_id": self.order_id,
+            "edited_by_user_id": self.edited_by_user_id,
+            "edited_at": self.edited_at.isoformat() if self.edited_at else None,
+            "reason": self.reason,
+            "diff": self.diff or {},
+            "is_post_delivery": self.is_post_delivery,
+            "edited_by_user": (
+                {
+                    "id": self.edited_by_user.id,
+                    "name": f"{self.edited_by_user.first_name} {self.edited_by_user.last_name}",
+                    "role": (
+                        self.edited_by_user.role.value
+                        if hasattr(self.edited_by_user.role, "value")
+                        else self.edited_by_user.role
+                    ),
+                }
+                if self.edited_by_user
+                else None
+            ),
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
 # Ensure related corporate models are registered before SQLAlchemy configures
 # OrderItem relationship targets in app startup paths that import order models first.
 from business_app.models.corporate import CorporateContract, CorporateContractProductPrice  # noqa: E402,F401

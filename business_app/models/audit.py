@@ -30,6 +30,8 @@ class AuditEventType(Enum):
     ORDER_CANCELLED = "order_cancelled"
     ORDER_PROCESSED = "order_processed"
     ORDER_DELIVERED = "order_delivered"
+    ORDER_EDITED = "order_edited"
+    SESSION_REOPENED = "session_reopened"
 
     # Payment events
     PAYMENT_VERIFICATION_CODE_VERIFED = "payment_verification_code_verified"

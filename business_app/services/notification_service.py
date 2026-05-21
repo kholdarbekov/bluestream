@@ -348,6 +348,7 @@ class NotificationService:
             "status_changed_out_for_delivery": NotificationType.DELIVERY_UPDATE,
             "status_changed_delivered": NotificationType.DELIVERY_UPDATE,
             "status_changed_cancelled": NotificationType.ORDER_STATUS_UPDATE,
+            "order_edited": NotificationType.ORDER_EDITED,
         }
 
         notification_type = event_mapping.get(event_type, NotificationType.ORDER_STATUS_UPDATE)
@@ -2526,6 +2527,7 @@ class NotificationService:
             NotificationType.ORDER_CONFIRMATION.value: [NotificationChannel.EMAIL, NotificationChannel.SMS],
             NotificationType.ORDER_STATUS_UPDATE.value: [NotificationChannel.SMS, NotificationChannel.TELEGRAM],
             NotificationType.ORDER_UPDATE.value: [NotificationChannel.SMS, NotificationChannel.TELEGRAM],
+            NotificationType.ORDER_EDITED.value: [NotificationChannel.TELEGRAM],
             NotificationType.DELIVERY_UPDATE.value: [NotificationChannel.SMS, NotificationChannel.TELEGRAM],
             NotificationType.DELIVERY_REMINDER.value: [NotificationChannel.SMS, NotificationChannel.TELEGRAM],
             NotificationType.PAYMENT_CONFIRMATION.value: [NotificationChannel.EMAIL],
@@ -3245,6 +3247,7 @@ class NotificationService:
         default_channels = {
             NotificationType.ORDER_CONFIRMATION: [NotificationChannel.EMAIL, NotificationChannel.SMS],
             NotificationType.ORDER_STATUS_UPDATE: [NotificationChannel.SMS, NotificationChannel.TELEGRAM],
+            NotificationType.ORDER_EDITED: [NotificationChannel.TELEGRAM],
             NotificationType.DELIVERY_UPDATE: [NotificationChannel.SMS, NotificationChannel.TELEGRAM],
             NotificationType.PAYMENT_CONFIRMATION: [NotificationChannel.EMAIL],
             NotificationType.SUBSCRIPTION_REMINDER: [NotificationChannel.EMAIL],

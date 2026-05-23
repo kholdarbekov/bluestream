@@ -2640,6 +2640,13 @@
     "rule": "/api/v1/orders/<int:order_id>/retry-payment"
   },
   {
+    "endpoint": "orders.retry_order_with_cash",
+    "methods": [
+      "POST"
+    ],
+    "rule": "/api/v1/orders/<int:order_id>/retry-with-cash"
+  },
+  {
     "endpoint": "orders.track_order",
     "methods": [
       "GET"

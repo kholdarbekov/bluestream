@@ -355,12 +355,11 @@ def create_order():
         order = get_order_service().create_order(current_user_id, order_data)
         current_app.logger.info(f"CREATE ORDER API: Order created successfully: order={order}")
 
-        # Clear user's cart after successful order creation
-        try:
-            get_cart_service().clear_cart(current_user_id)
-            current_app.logger.info(f"CREATE ORDER API: Cart cleared for user {current_user_id}")
-        except Exception as e:
-            current_app.logger.error(f"CREATE ORDER API: Failed to clear cart: {e}")
+        # Cart clearing is deferred until after Asl belgisi (Tax Committee)
+        # pre-utilisation succeeds for card/click orders — otherwise a 503 from
+        # the Tax Committee would leave the user with a cancelled order AND an
+        # empty cart, with no way to retry. See clear_cart call below the
+        # pre-utilisation block.
 
         # Create delivery record if delivery details provided
         if order.delivery_date and order.delivery_time_slot and not getattr(order, "delivery", None):
@@ -401,7 +400,10 @@ def create_order():
                 pre_utilization_fast_path = bool(pre_utilization_result.get("fast_path"))
             except TaxCommitteeUnavailableError as e:
                 current_app.logger.error(f"CREATE ORDER API: Tax Committee unavailable for order {order.id}: {e}")
-                # Cancel the order so inventory and marking codes are released cleanly
+                # Cancel the order so inventory and marking codes are released cleanly.
+                # Cart is intentionally NOT cleared here — the user can either retry
+                # the card payment (uses cart again) or rescue with cash via
+                # /api/v1/orders/<id>/retry-with-cash (uses this cancelled order_id).
                 try:
                     get_order_service().cancel_order(order.id, reason="tax_committee_unavailable")
                 except Exception:
@@ -409,11 +411,23 @@ def create_order():
                 return error_response(
                     message=get_translation("api.orders.tax_committee_unavailable"),
                     status_code=503,
-                    data={"error_code": "ASL_BELGISI_UNAVAILABLE"},
+                    data={
+                        "error_code": "ASL_BELGISI_UNAVAILABLE",
+                        "cancelled_order_id": order.id,
+                    },
                 )
             except ValidationError:
                 # Bubble up — caught by outer except ValidationError block
                 raise
+
+        # All payment-path-specific failures (Asl belgisi) have passed.
+        # Safe to clear the cart now. Cash orders skip the pre-utilisation
+        # block entirely, so they reach this point directly.
+        try:
+            get_cart_service().clear_cart(current_user_id)
+            current_app.logger.info(f"CREATE ORDER API: Cart cleared for user {current_user_id}")
+        except Exception as e:
+            current_app.logger.error(f"CREATE ORDER API: Failed to clear cart: {e}")
 
         if payment_method_value in {"click", "card", "payme"} and getattr(order, "payment", None):
             payment_link = get_payment_service().create_payment_link(order.payment.id)
@@ -638,6 +652,66 @@ def validate_promo_code():
         return validation_error_response(errors=str(e))
     except Exception as e:
         current_app.logger.error(f"Validate promo code error: {e}")
+        return internal_error_response(message=get_translation("error.server_error"))
+
+
+@orders_bp.route("/<int:order_id>/retry-with-cash", methods=["POST"])
+@jwt_required()
+def retry_order_with_cash(order_id):
+    """Switch a PSP-cancelled order to cash payment.
+
+    Used when the Tax Committee (Asl belgisi) was unavailable during the
+    initial card/click order creation, cancelling the order. The bot's
+    rescue UI calls this endpoint so the customer can complete the same
+    order via cash even if they would normally be COD-restricted (e.g. 2+
+    outstanding COD debts). The COD active-debt cap is intentionally
+    bypassed here; the rescue is audited at the service layer.
+
+    Implementation: clones the cancelled order's items into a fresh PENDING
+    cash order via the canonical create_order pipeline, then mirrors the
+    main create_order endpoint's downstream side-effects (delivery row +
+    auto-assign + cart clear) so the new order behaves identically to any
+    other cash order from this point on.
+    """
+    try:
+        current_user_id = get_jwt_identity()
+        order = get_order_service().rescue_order_after_psp_failure(order_id, current_user_id)
+
+        # Mirror the downstream side-effects of the main create_order endpoint
+        # for cash orders: create delivery row + dispatch auto-assign task.
+        if order.delivery_date and order.delivery_time_slot and not getattr(order, "delivery", None):
+            try:
+                delivery = get_delivery_service().create_delivery(order.id)
+                auto_assign_delivery_task.delay(delivery.id)
+            except Exception:
+                current_app.logger.exception(
+                    f"retry_order_with_cash: delivery setup failed for rescued order {order.id}"
+                )
+
+        # Clear cart — cart was preserved by the original 503 path so the user
+        # could retry. With a successful rescue, drop it so they don't see
+        # stale items next time they open Products.
+        try:
+            get_cart_service().clear_cart(current_user_id)
+        except Exception as e:
+            current_app.logger.error(f"retry_order_with_cash: failed to clear cart: {e}")
+
+        response_data = {"order": serialize_order(order, include_items=True, include_payment=True)}
+        from business_app.services.cash_collection_service import CashCollectionService
+
+        response_data["payment_restrictions"] = CashCollectionService().get_cod_restriction_context(current_user_id)
+        return created_response(data=response_data, message=get_translation("api.orders.created"))
+    except NotFoundError:
+        return not_found_response(message=get_translation("api.orders.not_found"))
+    except ConflictError as e:
+        _rollback_session()
+        return error_response(message=e.message, status_code=409)
+    except ValidationError as e:
+        _rollback_session()
+        return error_response(message=e.message, status_code=400)
+    except Exception as e:
+        _rollback_session()
+        current_app.logger.exception(f"retry_order_with_cash failed for order {order_id}: {e}")
         return internal_error_response(message=get_translation("error.server_error"))
 
 

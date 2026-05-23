@@ -200,9 +200,23 @@ class ProductKeyboards:
     """Product-related keyboards"""
 
     @staticmethod
-    def product_categories(categories: List[Dict], language: str = 'en') -> InlineKeyboardMarkup:
-        """Product categories keyboard"""
+    def product_categories(categories: List[Dict], language: str = 'en',
+                          quick_suggestions: Optional[List[Dict]] = None) -> InlineKeyboardMarkup:
+        """Product categories keyboard, optionally prefixed by Quick Order suggestions.
+
+        `quick_suggestions` is a list of dicts produced by
+        `QuickOrderHandlers.build_quick_suggestions`. Each adds one button row
+        at the top.
+        """
         buttons = []
+
+        if quick_suggestions:
+            for sug in quick_suggestions:
+                label = i18n.get(sug['label_key'], language, **(sug.get('label_args') or {}))
+                buttons.append([{
+                    'text': label,
+                    'callback_data': sug['callback_data'],
+                }])
 
         # Add category buttons in pairs
         for i in range(0, len(categories), 2):
@@ -230,9 +244,27 @@ class ProductKeyboards:
 
     @staticmethod
     def product_list(products: List[Dict], page: int = 1,
-                    total_pages: int = 1, language: str = 'en') -> InlineKeyboardMarkup:
-        """Product list keyboard with pagination"""
+                    total_pages: int = 1, language: str = 'en',
+                    quick_suggestions: Optional[List[Dict]] = None,
+                    single_category: bool = False) -> InlineKeyboardMarkup:
+        """Product list keyboard with pagination.
+
+        When `single_category` is True the products menu skipped the category
+        step, so "Back" must go straight to the main menu (the category list
+        would have been empty). When False, "Back" goes to the category list.
+
+        `quick_suggestions` is rendered as a top section when present (used
+        when the products list is shown directly without a category step).
+        """
         buttons = []
+
+        if quick_suggestions:
+            for sug in quick_suggestions:
+                label = i18n.get(sug['label_key'], language, **(sug.get('label_args') or {}))
+                buttons.append([{
+                    'text': label,
+                    'callback_data': sug['callback_data'],
+                }])
 
         # Add product buttons
         for product in products:
@@ -259,10 +291,12 @@ class ProductKeyboards:
             if nav_row:
                 buttons.append(nav_row)
 
-        # Add back button
+        # Add back button — context-sensitive: when there's only one category
+        # the category list would be empty, so go to main menu instead.
+        back_callback = 'back_to_main' if single_category else 'back_to_categories'
         buttons.append([{
             'text': i18n.get('telegram.back', language),
-            'callback_data': 'back_to_categories'
+            'callback_data': back_callback,
         }])
 
         return KeyboardBuilder.build_inline_keyboard(buttons)
@@ -307,19 +341,65 @@ class ProductKeyboards:
 
         return KeyboardBuilder.build_inline_keyboard(buttons)
 
+    QUANTITY_PRESET_OFFSETS = (3, 6, 10, 13, 18)
+    MAX_QUANTITY = 99
+
+    @staticmethod
+    def _build_quantity_presets(min_order_qty: int,
+                                stock_quantity: Optional[int] = None) -> List[int]:
+        """Build preset quantity values as offsets above the per-product minimum.
+
+        The cart already starts at min_order_qty when an item is first added, so
+        presets are jumps from that floor. We cap at stock_quantity (when known)
+        and at MAX_QUANTITY (99). Returned list is deduplicated and sorted.
+        """
+        upper = ProductKeyboards.MAX_QUANTITY
+        if stock_quantity is not None and stock_quantity > 0:
+            upper = min(upper, stock_quantity)
+
+        candidates = [min_order_qty + offset for offset in ProductKeyboards.QUANTITY_PRESET_OFFSETS]
+        # Keep only values strictly above min (presets are shortcuts, not the floor)
+        # and at-or-below the cap.
+        presets = [v for v in candidates if min_order_qty < v <= upper]
+        return sorted(set(presets))
+
     @staticmethod
     def quantity_selector(product_id: int, current_quantity: int = 1,
-                         language: str = 'en') -> InlineKeyboardMarkup:
-        """Quantity selection keyboard"""
-        buttons = [
-            [
-                {'text': '➖', 'callback_data': f'qty_dec_{product_id}_{current_quantity}'},
-                {'text': str(current_quantity), 'callback_data': 'qty_current'},
-                {'text': '➕', 'callback_data': f'qty_inc_{product_id}_{current_quantity}'}
-            ],
-            [{'text': i18n.get('telegram.cart.checkout', language), 'callback_data': f'checkout'}],
-            [{'text': i18n.get('telegram.back', language), 'callback_data': f'back_to_product_{product_id}'}]
-        ]
+                         language: str = 'en', min_order_qty: int = 1,
+                         stock_quantity: Optional[int] = None) -> InlineKeyboardMarkup:
+        """Quantity selection keyboard with offset-based presets + fine-tune row.
+
+        Layout:
+            [ +3 ] [ +6 ] [ +10 ] [ +13 ] [ +18 ]   (preset jumps from min)
+            [ −1 ]     {qty}     [ +1 ]              (fine-tune)
+            [ Checkout ]
+            [ Back ]
+        """
+        buttons: List[List[Dict[str, str]]] = []
+
+        presets = ProductKeyboards._build_quantity_presets(min_order_qty, stock_quantity)
+        if presets:
+            preset_row = []
+            for value in presets:
+                # Show the absolute target quantity (e.g. "5", "8", "12")
+                # rather than an offset — customers think in terms of how
+                # many they want, not deltas from a hidden floor.
+                preset_row.append({
+                    'text': str(value),
+                    'callback_data': f'qty_set_{product_id}_{value}'
+                })
+            buttons.append(preset_row)
+
+        # Fine-tune row — explicit -1/+1 with a labelled center button so the
+        # number is unambiguously "the current quantity" and not a third action.
+        qty_label = i18n.get('telegram.quantity', language)
+        buttons.append([
+            {'text': '−1', 'callback_data': f'qty_dec_{product_id}_{current_quantity}'},
+            {'text': f'{qty_label}: {current_quantity}', 'callback_data': 'qty_current'},
+            {'text': '+1', 'callback_data': f'qty_inc_{product_id}_{current_quantity}'}
+        ])
+        buttons.append([{'text': i18n.get('telegram.cart.checkout', language), 'callback_data': 'checkout'}])
+        buttons.append([{'text': i18n.get('telegram.back', language), 'callback_data': f'back_to_product_{product_id}'}])
 
         return KeyboardBuilder.build_inline_keyboard(buttons)
 
@@ -382,6 +462,31 @@ class OrderKeyboards:
             [{'text': i18n.get('telegram.back', language), 'callback_data': 'back_to_cart'}]
         ])
 
+        return KeyboardBuilder.build_inline_keyboard(buttons)
+
+    @staticmethod
+    def single_address_confirm(address: Dict, language: str = 'en',
+                              *, back_callback: str = 'back_to_cart') -> InlineKeyboardMarkup:
+        """Confirmation step showing the auto-selected delivery address.
+
+        Used when:
+          * The user has exactly one saved address (single-address auto-skip
+            on the cart checkout flow) → `back_callback='back_to_cart'`.
+          * A Quick Order auto-selected one of several addresses → caller
+            sets `back_callback='menu_products'` so Back returns to the
+            screen the user actually came from.
+
+        The Continue button uses the existing `address_{id}` callback so the
+        downstream payment flow is unchanged.
+        """
+        address_id = address['id']
+        buttons = [
+            [{'text': i18n.get('telegram.checkout.continue', language),
+              'callback_data': f'address_{address_id}'}],
+            [{'text': i18n.get('telegram.address.add_new', language),
+              'callback_data': 'add_new_address_checkout'}],
+            [{'text': i18n.get('telegram.back', language), 'callback_data': back_callback}],
+        ]
         return KeyboardBuilder.build_inline_keyboard(buttons)
 
     @staticmethod

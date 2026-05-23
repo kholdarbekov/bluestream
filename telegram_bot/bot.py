@@ -60,7 +60,8 @@ from handlers import (
     start_handler, main_menu_handler, language_handler,
     product_handlers, order_handlers, subscription_handlers,
     profile_handlers, loyalty_handlers, admin_handlers,
-    support_handlers, payment_handlers, bottle_handlers
+    support_handlers, payment_handlers, bottle_handlers,
+    quick_order_handlers,
 )
 # Import conversation states directly (they are module-level constants)
 from handlers.profile import (
@@ -273,6 +274,11 @@ class WaterBusinessBot:
             CallbackQueryHandler(product_handlers.quantity_handler, pattern="^qty_"),
             CallbackQueryHandler(product_handlers.cart_handler, pattern="^cart_"),
             CallbackQueryHandler(product_handlers.show_cart, pattern="^back_to_cart$"),
+
+            # Quick Order callbacks (Products menu top + order-history reorder)
+            CallbackQueryHandler(quick_order_handlers.handle_repeat_last, pattern="^quick_repeat_last$"),
+            CallbackQueryHandler(quick_order_handlers.handle_usual, pattern="^quick_usual$"),
+            CallbackQueryHandler(quick_order_handlers.handle_reorder_from_history, pattern="^reorder_\\d+$"),
 
             # Order callbacks
             CallbackQueryHandler(order_handlers.orders_menu, pattern="^menu_orders$"),

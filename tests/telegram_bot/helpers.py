@@ -99,6 +99,12 @@ class FakeAPIClientContext:
     async def get_user_orders(self, *_args, **_kwargs):
         return self._method_results.get("get_user_orders")
 
+    async def get_quick_reorder_suggestions(self, *_args, **_kwargs):
+        return self._method_results.get("get_quick_reorder_suggestions")
+
+    async def retry_order_with_cash(self, *_args, **_kwargs):
+        return self._method_results.get("retry_order_with_cash")
+
     async def get_payment_methods(self, *_args, **_kwargs):
         return self._method_results.get("get_payment_methods")
 

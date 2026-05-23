@@ -42,12 +42,15 @@ class TestProductHandlerDeepFlows:
         update.callback_query = DummyCallbackQuery(data="menu_products")
         context = make_context()
 
-        payload = {"categories": [{"id": 1, "name": "Water"}]}
+        # 2+ categories so the products_menu renders the category picker
+        # (1-category would trigger the single-category skip and route into
+        # _render_products_in_category instead — exercised separately).
+        payload = {"categories": [{"id": 1, "name": "Water"}, {"id": 2, "name": "Snacks"}]}
         monkeypatch.setattr(products_module.i18n, "get_user_language", AsyncMock(return_value="en"))
         monkeypatch.setattr(products_module.i18n, "get", _i18n_get)
         monkeypatch.setattr(products_module, "get_auth_token", AsyncMock(return_value="jwt"))
         keyboard = SimpleNamespace(inline_keyboard=[[{"text": "Water"}]])
-        monkeypatch.setattr(products_module.ProductKeyboards, "product_categories", lambda _c, _l: keyboard)
+        monkeypatch.setattr(products_module.ProductKeyboards, "product_categories", lambda *_a, **_k: keyboard)
         monkeypatch.setattr(
             products_module,
             "api_client",
@@ -68,12 +71,14 @@ class TestProductHandlerDeepFlows:
         update.callback_query.edit_message_text = AsyncMock(side_effect=RuntimeError("edit failed"))
         context = make_context()
 
-        payload = {"categories": [{"id": 1, "name": "Water"}]}
+        # 2+ categories so we exercise the category-picker fallback path
+        # (1-category would skip past it via _render_products_in_category).
+        payload = {"categories": [{"id": 1, "name": "Water"}, {"id": 2, "name": "Snacks"}]}
         monkeypatch.setattr(products_module.i18n, "get_user_language", AsyncMock(return_value="en"))
         monkeypatch.setattr(products_module.i18n, "get", _i18n_get)
         monkeypatch.setattr(products_module, "get_auth_token", AsyncMock(return_value="jwt"))
         keyboard = SimpleNamespace(inline_keyboard=[[{"text": "Water"}]])
-        monkeypatch.setattr(products_module.ProductKeyboards, "product_categories", lambda _c, _l: keyboard)
+        monkeypatch.setattr(products_module.ProductKeyboards, "product_categories", lambda *_a, **_k: keyboard)
         monkeypatch.setattr(
             products_module,
             "api_client",
@@ -206,7 +211,7 @@ class TestProductHandlerDeepFlows:
 
         update.callback_query.message.delete.assert_awaited_once()
         update.callback_query.message.reply_text.assert_awaited_once_with(
-            text="🛒 Water\n\ntelegram.quantity:en: 2\ntelegram.price:en: 30,000 UZS",
+            text="🛒 Water\n\ntelegram.quantity:en: 2\ntelegram.total:en: 30,000 UZS",
             reply_markup="qty-kbd",
         )
         update.callback_query.answer.assert_awaited_once()

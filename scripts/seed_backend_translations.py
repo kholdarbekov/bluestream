@@ -5094,6 +5094,49 @@ BACKEND_TRANSLATIONS = {
     },
 
     # ============================================================================
+    # Telegram Quick Order (telegram.quick_order.*)
+    # ============================================================================
+    'telegram.quick_order.repeat_last': {
+        'en': '🔁 Repeat last: {qty}× {product}',
+        'uz': '🔁 Oxirgisini takrorlash: {qty}× {product}',
+        'ru': '🔁 Повторить последний: {qty}× {product}'
+    },
+    'telegram.quick_order.repeat_last_multi': {
+        'en': '🔁 Repeat last order ({n} items)',
+        'uz': '🔁 Oxirgi buyurtmani takrorlash ({n} ta mahsulot)',
+        'ru': '🔁 Повторить последний заказ ({n} товаров)'
+    },
+    'telegram.quick_order.usual': {
+        'en': '⭐ Your usual: {qty}× {product}',
+        'uz': '⭐ Odatdagisi: {qty}× {product}',
+        'ru': '⭐ Ваше обычное: {qty}× {product}'
+    },
+    'telegram.quick_order.no_history': {
+        'en': 'No previous orders found to repeat.',
+        'uz': 'Takrorlash uchun avvalgi buyurtmalar topilmadi.',
+        'ru': 'Нет предыдущих заказов для повтора.'
+    },
+    'telegram.quick_order.unavailable': {
+        'en': 'This product is no longer available. Please pick from the products list.',
+        'uz': 'Bu mahsulot endi mavjud emas. Iltimos, mahsulotlar ro\'yxatidan tanlang.',
+        'ru': 'Этот товар больше недоступен. Пожалуйста, выберите из списка товаров.'
+    },
+
+    # ============================================================================
+    # Telegram Checkout (telegram.checkout.*)
+    # ============================================================================
+    'telegram.checkout.delivering_to': {
+        'en': '📍 Delivering to:',
+        'uz': '📍 Yetkazib berish manzili:',
+        'ru': '📍 Доставка по адресу:'
+    },
+    'telegram.checkout.continue': {
+        'en': '✅ Continue',
+        'uz': '✅ Davom etish',
+        'ru': '✅ Продолжить'
+    },
+
+    # ============================================================================
     # Telegram Payment Method Buttons (telegram.payment_*)
     # ============================================================================
     'telegram.payment_card': {

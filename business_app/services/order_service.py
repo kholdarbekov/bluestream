@@ -65,13 +65,17 @@ class OrderService:
 
     @log_service_call(operation_type="order", track_performance=True)
     @log_business_event(event_type="created", entity_type="order")
-    def create_order(self, user_id: int, order_data: Dict[str, Any]) -> Order:
+    def create_order(self, user_id: int, order_data: Dict[str, Any], *, bypass_cod_check: bool = False) -> Order:
         """
         Create a new order
 
         Args:
             user_id: ID of the user placing the order
             order_data: Order information including items, delivery address, etc.
+            bypass_cod_check: When True, skip the COD active-debt cap. Reserved
+                for the PSP-failure rescue path (see
+                ``rescue_order_after_psp_failure``). Never expose this to the
+                normal create_order API path.
 
         Returns:
             Created Order object
@@ -132,7 +136,7 @@ class OrderService:
                 "business_account": PaymentMethod.BUSINESS_ACCOUNT,
             }
             payment_method = payment_method_map.get(payment_method_str)
-            if payment_method == PaymentMethod.CASH:
+            if payment_method == PaymentMethod.CASH and not bypass_cod_check:
                 from business_app.services.cash_collection_service import CashCollectionService
 
                 CashCollectionService().validate_customer_can_use_cod(user_id)
@@ -1028,6 +1032,105 @@ class OrderService:
             delivery_service.cancel_delivery(order.delivery.id, reason)
 
         return order
+
+    def rescue_order_after_psp_failure(self, cancelled_order_id: int, user_id: int) -> Order:
+        """Clone a tax-committee-cancelled order into a new PENDING cash order.
+
+        Rescue path for the case where a customer attempted a card/click
+        payment, the Tax Committee (Asl belgisi) was unavailable, and the
+        order was cancelled by ``business_app/api/orders.create_order``.
+        Customers with outstanding COD debts can only normally pay via card,
+        so a PSP outage leaves them with no working payment option without
+        this rescue.
+
+        Strategy: rather than mutate the cancelled row back to PENDING (which
+        would require bypassing the order state machine + manually resetting
+        payment status, delivery status, marking codes, etc.), we treat the
+        cancelled order as a "template" and create a brand new order from
+        its items + address + delivery slot. The cancelled row stays as
+        history. The new order goes through the canonical ``create_order``
+        pipeline, so all downstream side-effects (inventory reservation,
+        payment record creation, audit logging, etc.) fire normally — only
+        the COD active-debt cap is bypassed.
+
+        Security: only orders cancelled with reason="tax_committee_unavailable"
+        qualify. User- or admin-cancelled orders cannot use this path.
+
+        Returns the newly created order. Caller is responsible for creating
+        the delivery row + dispatching auto-assign (mirroring the main
+        create_order endpoint).
+        """
+        cancelled = self.get_order(cancelled_order_id, user_id=user_id)
+
+        current_status = cancelled.status
+        if isinstance(current_status, str):
+            try:
+                current_status = OrderStatus(current_status)
+            except ValueError:
+                pass
+
+        if current_status != OrderStatus.CANCELLED:
+            raise ConflictError("Only cancelled orders can be retried with cash")
+
+        # The cancellation reason is stored in OrderStatusHistory.notes (set by
+        # cancel_order → update_order_status with notes=reason). We look at the
+        # most recent CANCELLED transition for this order.
+        last_cancel_history = (
+            OrderStatusHistory.query.filter(
+                OrderStatusHistory.order_id == cancelled.id,
+                OrderStatusHistory.new_status == OrderStatus.CANCELLED,
+            )
+            .order_by(desc(OrderStatusHistory.changed_at), desc(OrderStatusHistory.id))
+            .first()
+        )
+        cancel_notes = ((last_cancel_history.notes if last_cancel_history else "") or "").strip().lower()
+        if "tax_committee_unavailable" not in cancel_notes:
+            raise ConflictError("This order is not eligible for cash retry")
+
+        if not cancelled.order_items:
+            raise ValidationError("Cancelled order has no items to retry")
+        if not cancelled.delivery_address:
+            raise ValidationError("Cancelled order has no delivery address")
+
+        address = cancelled.delivery_address
+        order_data = {
+            "items": [{"product_id": item.product_id, "quantity": item.quantity} for item in cancelled.order_items],
+            "delivery_address": {
+                "delivery_address_id": address.id,
+                "street": address.street_address,
+                "longitude": address.longitude,
+                "latitude": address.latitude,
+            },
+            "delivery_date": cancelled.delivery_date,
+            "delivery_time_slot": cancelled.delivery_time_slot,
+            "delivery_notes": cancelled.delivery_notes,
+            "payment_method": "cash",
+            "order_source": cancelled.order_source or "telegram",
+        }
+
+        new_order = self.create_order(user_id, order_data, bypass_cod_check=True)
+
+        audit_logger.log_event(
+            event_type=AuditEventType.ORDER_CREATED,
+            action="cod_rescue_after_psp_failure",
+            severity=AuditSeverity.HIGH,
+            resource_type="order",
+            resource_id=str(new_order.id),
+            description=(
+                f"Order {new_order.order_number} created as cash rescue for "
+                f"cancelled order {cancelled.order_number} after Asl belgisi "
+                f"unavailability. COD active-debt limit was bypassed."
+            ),
+            additional_data={
+                "rescued_order_id": new_order.id,
+                "rescued_order_number": new_order.order_number,
+                "source_cancelled_order_id": cancelled.id,
+                "source_cancelled_order_number": cancelled.order_number,
+                "user_id": user_id,
+            },
+        )
+
+        return new_order
 
     def _restore_stock_for_order(self, order: Order, reason: str = None):
         """Restore stock quantities for a cancelled order that had stock deducted"""

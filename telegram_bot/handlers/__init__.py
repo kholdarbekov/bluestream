@@ -10,6 +10,7 @@ from handlers.menu import main_menu_handler
 from handlers.language import language_handler
 from handlers.products import product_handlers
 from handlers.orders import order_handlers
+from handlers.quick_order import quick_order_handlers
 from handlers.subscriptions import subscription_handlers
 from handlers.profile import profile_handlers
 from handlers.loyalty import loyalty_handlers

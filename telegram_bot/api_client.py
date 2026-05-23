@@ -275,6 +275,7 @@ class BusinessAPIClient:
                     )
                 else:
                     error_msg = f"HTTP {response.status_code}"
+                    error_data = None
                     try:
                         error_data = response.json()
                         error_msg = error_data.get('message', error_msg)
@@ -293,10 +294,13 @@ class BusinessAPIClient:
                         except Exception as inv_err:
                             logger.warning(f"Failed to invalidate tokens: {inv_err}")
 
+                    # Surface the full error body so callers can read structured
+                    # fields (e.g. `cancelled_order_id` on Asl belgisi 503).
                     return APIResponse(
                         success=False,
                         error=error_msg,
-                        status_code=response.status_code
+                        status_code=response.status_code,
+                        data=error_data,
                     )
 
             except httpx.ConnectError as e:
@@ -657,6 +661,28 @@ class BusinessAPIClient:
         """Get order tracking information with status timeline"""
         return await self._make_request('GET', f'/api/v1/orders/{order_id}/track',
                                        user_token=user_token)
+
+    async def get_quick_reorder_suggestions(self, user_token: str,
+                                            limit: int = 3,
+                                            period_days: int = 90) -> APIResponse:
+        """Get habitual product+quantity suggestions for Quick Order."""
+        return await self._make_request(
+            'GET', '/api/v1/orders/quick-reorder',
+            user_token=user_token,
+            params={'limit': limit, 'period_days': period_days},
+        )
+
+    async def retry_order_with_cash(self, user_token: str, order_id: int) -> APIResponse:
+        """Switch a tax-committee-cancelled order to cash payment.
+
+        Used by the Asl belgisi rescue flow. Bypasses the COD active-debt
+        cap server-side; see business_app/services/order_service.py
+        retry_cancelled_order_with_cash for the security boundary.
+        """
+        return await self._make_request(
+            'POST', f'/api/v1/orders/{order_id}/retry-with-cash',
+            user_token=user_token,
+        )
 
     # Payment methods
     async def get_payment_methods(self, user_token: str) -> APIResponse:

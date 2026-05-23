@@ -464,9 +464,8 @@ class OrderHandlers(BaseHandler):
                 add_address_text = i18n.get('telegram.orders.no_address_prompt', language)
                 keyboard = OrderKeyboards.delivery_addresses([], language)
                 if update.callback_query:
-                    await update.callback_query.edit_message_text(
-                        text=add_address_text,
-                        reply_markup=keyboard
+                    await self._edit_or_replace_callback_message(
+                        update.callback_query, add_address_text, reply_markup=keyboard,
                     )
                     await update.callback_query.answer()
                 else:
@@ -479,14 +478,52 @@ class OrderHandlers(BaseHandler):
                 await self.user_repo.update_user_state(user_id, {'awaiting_input': 'address_location'})
                 return
 
-            # Show address selection
+            # Quick Order auto-selected an address (last order's or default).
+            # Read it before deciding whether to show a picker.
+            quick_order_address_id = context.user_data.get('quick_order_address_id')
+            checkout_source = context.user_data.get('checkout_source', 'cart')
+
+            # Quick Order semantics (per UX requirements):
+            #   * Use the implicit address (from prior order / default).
+            #   * If user has exactly 1 address total, skip confirmation
+            #     entirely and go straight to payment.
+            #   * If user has multiple addresses, show a confirmation card so
+            #     they can verify or change the auto-selected one.
+            if checkout_source == 'quick_order' and quick_order_address_id:
+                # Pick the auto-selected address (preferring the implicit one
+                # if it still exists; otherwise fall back to the first).
+                selected_address = next(
+                    (a for a in addresses if a.get('id') == quick_order_address_id),
+                    addresses[0],
+                )
+                if len(addresses) == 1:
+                    # Single address — no confirmation, go directly to payment.
+                    await self._show_payment_picker(update, context, selected_address['id'])
+                    return
+                # Multiple addresses — show confirmation with the auto-selected
+                # one. Back button returns to the products menu (origin of the
+                # Quick Order flow), not to the (probably empty) cart view.
+                await self._show_address_confirmation(
+                    update, context, selected_address, language,
+                    back_callback='menu_products',
+                )
+                return
+
+            # Regular checkout-from-cart flow.
+            if len(addresses) == 1:
+                await self._show_address_confirmation(
+                    update, context, addresses[0], language,
+                    back_callback='back_to_cart',
+                )
+                return
+
+            # Multi-address picker (regular flow).
             address_text = i18n.get('telegram.orders.select_address', language)
             keyboard = OrderKeyboards.delivery_addresses(addresses, language)
 
             if update.callback_query:
-                await update.callback_query.edit_message_text(
-                    text=address_text,
-                    reply_markup=keyboard
+                await self._edit_or_replace_callback_message(
+                    update.callback_query, address_text, reply_markup=keyboard,
                 )
                 await update.callback_query.answer()
             else:
@@ -500,61 +537,114 @@ class OrderHandlers(BaseHandler):
             await self._handle_error(update)
 
     async def address_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle address selection"""
+        """Handle address selection — extract id then defer to _show_payment_picker."""
         try:
             query = update.callback_query
-            user_id = update.effective_user.id
-            language = await i18n.get_user_language(user_id)
-
-            # Extract address ID
             address_id = int(query.data.split('_')[1])
-
-            # Store selected address and its display info
-            context.user_data['selected_address_id'] = address_id
-            address_map = context.user_data.get('checkout_addresses', {})
-            address_info = address_map.get(address_id, {})
-            context.user_data['selected_address_title'] = address_info.get('title', '')
-            context.user_data['selected_address_full'] = address_info.get('full_address', '')
-
-            async with api_client as client:
-                user_token = await get_auth_token(update, context, client)
-                if not user_token:
-                    await self._handle_auth_error(update, language)
-                    return
-
-                response = await client.get_payment_methods(user_token)
-                if not response.success:
-                    await self._handle_api_error(update, response.error, language)
-                    return
-
-            payment_payload = response.data.get('data', {})
-            payment_methods = self._build_checkout_payment_methods(
-                payment_payload.get('available_methods', []),
-                language,
-            )
-            if not payment_methods:
-                await self._handle_api_error(
-                    update,
-                    "No payment methods are available right now. Please try again later.",
-                    language,
-                )
-                return
-
-            payment_text = i18n.get('telegram.orders.select_payment', language)
-            restrictions = payment_payload.get('payment_restrictions') or {}
-            if restrictions.get('cod_restricted'):
-                payment_text += "\n\n" + self._cod_restriction_notice(restrictions, language)
-            keyboard = OrderKeyboards.payment_methods(payment_methods, language)
-
-            await query.edit_message_text(
-                text=payment_text,
-                reply_markup=keyboard
-            )
-            await query.answer()
-
+            await self._show_payment_picker(update, context, address_id)
         except Exception as e:
             logger.error(f"Error in address handler: {e}")
             await self._handle_error(update)
+
+    async def _show_address_confirmation(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        address: Dict[str, Any],
+        language: str,
+        *,
+        back_callback: str,
+    ) -> None:
+        """Render the 'Delivering to: …' confirmation step.
+
+        Shown either when the user has only one saved address (single-address
+        auto-skip) or when a Quick Order auto-selected one of several
+        addresses. `back_callback` controls where Back navigates — for the
+        cart-driven flow it's 'back_to_cart'; for Quick Order it's the
+        products menu, since that's the screen the user actually came from.
+        """
+        title = address.get('title') or i18n.get('telegram.address.default_title', language)
+        full_address = address.get('full_address') or ''
+        label = i18n.get('telegram.checkout.delivering_to', language)
+        address_text = f"{label}\n*{title}*"
+        if full_address:
+            address_text += f"\n{full_address}"
+        keyboard = OrderKeyboards.single_address_confirm(
+            address, language, back_callback=back_callback,
+        )
+
+        if update.callback_query:
+            await self._edit_or_replace_callback_message(
+                update.callback_query, address_text,
+                reply_markup=keyboard, parse_mode='Markdown',
+            )
+            await update.callback_query.answer()
+        else:
+            await update.message.reply_text(
+                text=address_text, reply_markup=keyboard,
+                parse_mode='Markdown',
+            )
+
+    async def _show_payment_picker(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        address_id: int,
+    ) -> None:
+        """Render the payment-method picker for the given address_id.
+
+        Used by both the regular address_handler (user tapped an address) and
+        the Quick Order flow (address auto-selected from prior order). Stores
+        selected_address_id in context so confirm_order can read it later.
+        """
+        user_id = update.effective_user.id
+        language = await i18n.get_user_language(user_id)
+
+        # Persist the selected address + its display info for downstream steps.
+        context.user_data['selected_address_id'] = address_id
+        address_map = context.user_data.get('checkout_addresses', {})
+        address_info = address_map.get(address_id, {})
+        context.user_data['selected_address_title'] = address_info.get('title', '')
+        context.user_data['selected_address_full'] = address_info.get('full_address', '')
+
+        async with api_client as client:
+            user_token = await get_auth_token(update, context, client)
+            if not user_token:
+                await self._handle_auth_error(update, language)
+                return
+
+            response = await client.get_payment_methods(user_token)
+            if not response.success:
+                await self._handle_api_error(update, response.error, language)
+                return
+
+        payment_payload = response.data.get('data', {})
+        payment_methods = self._build_checkout_payment_methods(
+            payment_payload.get('available_methods', []),
+            language,
+        )
+        if not payment_methods:
+            await self._handle_api_error(
+                update,
+                "No payment methods are available right now. Please try again later.",
+                language,
+            )
+            return
+
+        payment_text = i18n.get('telegram.orders.select_payment', language)
+        restrictions = payment_payload.get('payment_restrictions') or {}
+        if restrictions.get('cod_restricted'):
+            payment_text += "\n\n" + self._cod_restriction_notice(restrictions, language)
+        keyboard = OrderKeyboards.payment_methods(payment_methods, language)
+
+        query = update.callback_query
+        if query:
+            await self._edit_or_replace_callback_message(
+                query, payment_text, reply_markup=keyboard,
+            )
+            await query.answer()
+        else:
+            await update.message.reply_text(payment_text, reply_markup=keyboard)
 
     async def payment_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle payment method selection"""
@@ -589,6 +679,8 @@ class OrderHandlers(BaseHandler):
             context.user_data.pop('selected_address_full', None)
             context.user_data.pop('selected_payment_method', None)
             context.user_data.pop('checkout_addresses', None)
+            context.user_data.pop('checkout_source', None)
+            context.user_data.pop('quick_order_address_id', None)
 
             await query.edit_message_text(
                 text=i18n.get('telegram.action_cancelled', language),
@@ -650,6 +742,15 @@ class OrderHandlers(BaseHandler):
                 if not response.success:
                     # Tax Committee unavailable — show dedicated error with options
                     if response.status_code == 503:
+                        # Stash the cancelled order_id so the cash-rescue button
+                        # can revive THIS order rather than rebuilding from cart.
+                        # Backend returns it under data.cancelled_order_id.
+                        try:
+                            cancelled_order_id = (response.data or {}).get('data', {}).get('cancelled_order_id')
+                        except AttributeError:
+                            cancelled_order_id = None
+                        if cancelled_order_id:
+                            context.user_data['psp_failed_order_id'] = int(cancelled_order_id)
                         error_text = i18n.get('telegram.orders.asl_belgisi_error_message', language)
                         keyboard = OrderKeyboards.asl_belgisi_error(language)
                         await query.edit_message_text(text=error_text, reply_markup=keyboard)
@@ -803,12 +904,68 @@ class OrderHandlers(BaseHandler):
             await self._handle_error(update)
 
     async def select_payment_cash(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Switch payment method to cash and retry order confirmation.
+        """Rescue flow: clone the PSP-cancelled order as a fresh cash order.
 
-        Triggered when the user taps "Pay with cash" on the Asl belgisi error screen.
+        Triggered when the user taps "Pay with cash" on the Asl belgisi error
+        screen. The bot stashed the cancelled order_id on the 503 response;
+        here we call the dedicated rescue endpoint which creates a new cash
+        order from the cancelled order's items, bypassing the COD active-
+        debt cap.
+
+        If the stash is missing (e.g. the user re-entered from a stale
+        screen) we fall back to recreating from cart via confirm_order. That
+        path still respects the COD cap, but at least the button is not
+        silently dead.
         """
-        context.user_data['selected_payment_method'] = 'cash'
-        await self.confirm_order(update, context)
+        try:
+            user_id = update.effective_user.id
+            language = await i18n.get_user_language(user_id)
+            query = update.callback_query
+
+            # Use get() not pop() — if the rescue API call fails we want the
+            # stash to survive so the user can tap "try again" without us
+            # silently degrading to the COD-blocked fallback path.
+            order_id = context.user_data.get('psp_failed_order_id')
+            if not order_id:
+                context.user_data['selected_payment_method'] = 'cash'
+                await self.confirm_order(update, context)
+                return
+
+            async with api_client as client:
+                user_token = await get_auth_token(update, context, client)
+                if not user_token:
+                    await self._handle_auth_error(update, language)
+                    return
+
+                response = await client.retry_order_with_cash(user_token, order_id)
+                if not response.success:
+                    await self._handle_api_error(update, response.error, language)
+                    return
+
+                order = (response.data or {}).get('data', {}).get('order') or {}
+
+            # Rescue succeeded — clear the stash and any other checkout state.
+            for key in (
+                'psp_failed_order_id', 'selected_address_id', 'selected_address_title',
+                'selected_address_full', 'selected_payment_method', 'checkout_addresses',
+                'checkout_source', 'quick_order_address_id',
+            ):
+                context.user_data.pop(key, None)
+
+            success_text = i18n.get('telegram.orders.placed_success', language) + "\n\n"
+            success_text += MessageBuilder.build_order_summary(order, language)
+            success_text += "\n\n" + i18n.get('telegram.orders.cash_note', language)
+
+            keyboard = MenuKeyboards.main_menu(language)
+            await self._edit_or_replace_callback_message(
+                query, success_text, reply_markup=keyboard,
+            )
+            await query.answer(i18n.get('telegram.orders.placed_success', language))
+
+            logger.info(f"Order {order_id} rescued to cash for user {user_id}")
+        except Exception as e:
+            logger.error(f"Error in select_payment_cash rescue: {e}")
+            await self._handle_error(update)
 
     async def _show_order_confirmation(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Show order confirmation screen"""

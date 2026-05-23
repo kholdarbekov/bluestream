@@ -35,6 +35,7 @@ import {
   ReloadOutlined,
   LinkOutlined,
   BarcodeOutlined,
+  WarningOutlined,
 } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { formatDate, formatDateTimeShort } from '../utils/dateUtils';
@@ -116,6 +117,7 @@ const Orders = () => {
   const [searchText, setSearchText] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [dateRange, setDateRange] = useState(null);
+  const [fiscalizationFailedOnly, setFiscalizationFailedOnly] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [isDetailModalVisible, setIsDetailModalVisible] = useState(false);
   const [isStatusModalVisible, setIsStatusModalVisible] = useState(false);
@@ -150,7 +152,7 @@ const Orders = () => {
   const watchedStatusValue = Form.useWatch('status', statusForm);
 
   const { data, isLoading } = useQuery({
-    queryKey: ['orders', pagination, searchText, statusFilter, dateRange],
+    queryKey: ['orders', pagination, searchText, statusFilter, dateRange, fiscalizationFailedOnly],
 
     queryFn: () =>
       adminService.getOrders({
@@ -160,6 +162,7 @@ const Orders = () => {
         status: statusFilter,
         start_date: dateRange?.[0]?.format('YYYY-MM-DD'),
         end_date: dateRange?.[1]?.format('YYYY-MM-DD'),
+        ...(fiscalizationFailedOnly ? { fiscalization_failed: 'true' } : {}),
       }),
 
     placeholderData: keepPreviousData,
@@ -690,6 +693,23 @@ const Orders = () => {
       render: (value, record) => (value || record.payment_method || '—'),
     },
     {
+      title: t('ui.orders.alerts', 'Alerts'),
+      key: 'alerts',
+      width: 170,
+      render: (_, record) => {
+        if (!record.fiscalization_retries_exhausted) return null;
+        return (
+          <Tag
+            color="red"
+            icon={<WarningOutlined />}
+            style={{ margin: 0 }}
+          >
+            {t('ui.orders.fiscalization_retries_exhausted', 'Fiscalization Failed')}
+          </Tag>
+        );
+      },
+    },
+    {
       title: t('ui.orders.order_date', 'Order Date'),
       dataIndex: 'created_at',
       key: 'created_at',
@@ -813,6 +833,17 @@ const Orders = () => {
               format="YYYY-MM-DD"
               placeholder={[t('ui.orders.start_date', 'Start date'), t('ui.orders.end_date', 'End date')]}
             />
+            <Space size={6}>
+              <WarningOutlined style={{ color: fiscalizationFailedOnly ? '#cf1322' : '#bfbfbf' }} />
+              <span>{t('ui.orders.fiscalization_failed_only', 'Fiscalization failed only')}</span>
+              <Switch
+                checked={fiscalizationFailedOnly}
+                onChange={(checked) => {
+                  setFiscalizationFailedOnly(checked);
+                  setPagination((current) => ({ ...current, page: 1 }));
+                }}
+              />
+            </Space>
           </Space>
 
           <Space>

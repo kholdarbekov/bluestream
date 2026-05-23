@@ -417,6 +417,7 @@ class PaymentFiscalizationService:
         fiscalization.status = FiscalizationStatus.PROCESSING
         fiscalization.last_attempt_at = datetime.now(timezone.utc)
         fiscalization.attempts = int(fiscalization.attempts or 0) + 1
+        fiscalization.retries_exhausted_at = None
         db.session.flush()
         self._log_fiscal_step(
             "process_click_fiscalization_marked_processing",
@@ -564,6 +565,7 @@ class PaymentFiscalizationService:
         fiscalization.status = FiscalizationStatus.COMPLETED
         fiscalization.failure_reason = None
         fiscalization.completed_at = datetime.now(timezone.utc)
+        fiscalization.retries_exhausted_at = None
         self._log_fiscal_step(
             "process_click_fiscalization_marked_completed",
             payment=payment,

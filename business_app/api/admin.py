@@ -17,7 +17,7 @@ from shared.redis_keyspace import RedisKeyspace
 from business_app.models.user import User, UserAddress
 from business_app.models.order import Order, OrderItem, OrderItemMarkingCodeAllocation
 from business_app.models.product import Product, ProductCategory, ProductSizeEnum
-from business_app.models.payment import Payment, PaymentTransaction
+from business_app.models.payment import Payment, PaymentTransaction, PaymentFiscalization
 from business_app.models.delivery import (
     Delivery,
     DeliveryPerson,
@@ -1739,6 +1739,13 @@ def get_orders():
                 query = query.filter(Order.created_at <= end_dt)
             except ValueError:
                 return validation_error_response("Invalid end_date format")
+
+        if request.args.get("fiscalization_failed", "").lower() in ("1", "true", "yes"):
+            query = (
+                query.join(Payment, Payment.order_id == Order.id)
+                .join(PaymentFiscalization, PaymentFiscalization.payment_id == Payment.id)
+                .filter(PaymentFiscalization.retries_exhausted_at.isnot(None))
+            )
 
         # Apply sorting
         if sort_by == "total_amount":

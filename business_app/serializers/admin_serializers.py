@@ -727,6 +727,9 @@ def serialize_order_admin(order: Order) -> Dict[str, Any]:
             data["fiscalization_status"] = (
                 fiscalization.status.value if fiscalization and hasattr(fiscalization.status, "value") else None
             )
+            data["fiscalization_retries_exhausted"] = bool(
+                fiscalization and getattr(fiscalization, "retries_exhausted_at", None)
+            )
             data["fiscalization"] = fiscalization.to_dict() if fiscalization else None
         else:
             data["payment_id"] = None
@@ -736,6 +739,7 @@ def serialize_order_admin(order: Order) -> Dict[str, Any]:
             data["provider_transaction_id"] = None
             data["consume_marking_codes"] = False
             data["fiscalization_status"] = None
+            data["fiscalization_retries_exhausted"] = False
 
         if getattr(order, "payment", None):
             from business_app.services.payment_fiscalization_service import PaymentFiscalizationService

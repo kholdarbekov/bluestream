@@ -9,11 +9,13 @@ from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, List
 from flask import current_app
 
-from business_app.models.payment import Payment, PaymentTransaction
+from business_app.models.payment import Payment, PaymentTransaction, PaymentFiscalization
 from business_app.models.order import Order
+from business_app.models.audit import AuditEventType, AuditSeverity
 from business_app.services.payment_service import PaymentService
 from business_app.services.payment_fiscalization_service import PaymentFiscalizationService
 from business_app.services.notification_service import NotificationService
+from business_app.utils.audit_logger import audit_logger
 from business_app.utils.constants import NotificationChannel
 from shared.enums import PaymentMethod, PaymentStatus, OrderStatus
 from business_app import db
@@ -275,6 +277,71 @@ def process_refund(self, payment_id: int, amount: int, reason: str = None):
         raise self.retry(exc=exc)
 
 
+def _mark_fiscalization_retries_exhausted(payment_id: int, exc: Exception) -> None:
+    """Record terminal failure of the Click fiscalization Celery task.
+
+    Called from the task's MaxRetriesExceededError handler. Sets
+    retries_exhausted_at so the admin UI surfaces the order, and writes a
+    CRITICAL audit row for compliance traceability (missed fiscal receipts
+    have direct tax implications).
+    """
+    try:
+        fiscalization = PaymentFiscalization.query.filter_by(payment_id=payment_id).first()
+        if fiscalization is None:
+            logger.error(
+                "Cannot mark retries_exhausted: PaymentFiscalization for payment %s not found",
+                payment_id,
+            )
+            audit_logger.log_event(
+                event_type=AuditEventType.PAYMENT_FAILED,
+                action="payment_fiscalization_retries_exhausted",
+                severity=AuditSeverity.CRITICAL,
+                resource_type="payment_fiscalization",
+                resource_id=str(payment_id),
+                description=f"Click fiscalization gave up after all retries for payment {payment_id}",
+                success=False,
+                error_message=str(exc),
+                additional_data={"payment_id": payment_id},
+            )
+            return
+
+        # Snapshot fields before commit — SQLAlchemy's default expire_on_commit
+        # would otherwise trigger lazy reloads when read after commit, which
+        # would fail under the same DB pressure that caused this exhaustion.
+        fiscalization.retries_exhausted_at = datetime.now(timezone.utc)
+        payment = getattr(fiscalization, "payment", None)
+        order = getattr(payment, "order", None) if payment is not None else None
+        fiscalization_id = fiscalization.id
+        attempts = int(fiscalization.attempts or 0)
+        order_number = getattr(order, "order_number", None)
+        db.session.commit()
+
+        audit_logger.log_event(
+            event_type=AuditEventType.PAYMENT_FAILED,
+            action="payment_fiscalization_retries_exhausted",
+            severity=AuditSeverity.CRITICAL,
+            resource_type="payment_fiscalization",
+            resource_id=str(fiscalization_id),
+            description=(
+                f"Click fiscalization gave up after all retries for payment {payment_id}"
+                + (f" (order {order_number})" if order_number else "")
+            ),
+            success=False,
+            error_message=str(exc),
+            additional_data={
+                "payment_id": payment_id,
+                "order_number": order_number,
+                "attempts": attempts,
+            },
+        )
+    except Exception:
+        db.session.rollback()
+        logger.exception(
+            "Failed to record fiscalization retries-exhausted state for payment %s",
+            payment_id,
+        )
+
+
 @shared_task(bind=True, max_retries=3, default_retry_delay=60, time_limit=300, soft_time_limit=270)
 def process_payment_fiscalization(self, payment_id: int, force: bool = False):
     """Process Click fiscalization asynchronously after payment success."""
@@ -291,7 +358,15 @@ def process_payment_fiscalization(self, payment_id: int, force: bool = False):
     except Exception as exc:
         db.session.rollback()
         logger.error("Payment fiscalization failed for payment %s: %s", payment_id, exc)
-        raise self.retry(exc=exc)
+        try:
+            raise self.retry(exc=exc)
+        except self.MaxRetriesExceededError:
+            logger.error(
+                "Payment fiscalization retries exhausted for payment %s; flagging for admin review",
+                payment_id,
+            )
+            _mark_fiscalization_retries_exhausted(payment_id, exc)
+            return {"success": False, "payment_id": payment_id, "retries_exhausted": True}
 
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=60, time_limit=300, soft_time_limit=270)
@@ -310,7 +385,15 @@ def process_click_fiscalization_task(self, payment_id: int, force: bool = False)
     except Exception as exc:
         db.session.rollback()
         logger.error("Click fiscalization task failed for payment %s: %s", payment_id, exc)
-        raise self.retry(exc=exc)
+        try:
+            raise self.retry(exc=exc)
+        except self.MaxRetriesExceededError:
+            logger.error(
+                "Click fiscalization retries exhausted for payment %s; flagging for admin review",
+                payment_id,
+            )
+            _mark_fiscalization_retries_exhausted(payment_id, exc)
+            return {"success": False, "payment_id": payment_id, "retries_exhausted": True}
 
 
 @shared_task(time_limit=300, soft_time_limit=270)

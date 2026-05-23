@@ -6090,6 +6090,29 @@ ADMIN_UI_MARKING_CODE_TRANSLATIONS = {
 
 BACKEND_TRANSLATIONS.update(ADMIN_UI_MARKING_CODE_TRANSLATIONS)
 
+
+# ===========================================================================
+# Admin UI — Orders page additions for terminally-failed Click fiscalizations
+# (Alerts column badge + filter switch to show only those orders)
+# ===========================================================================
+
+ADMIN_UI_FISCALIZATION_FAILURES_TRANSLATIONS = {
+    'ui.orders.alerts': _ui_tr('Alerts', 'Ogohlantirishlar', 'Оповещения'),
+    'ui.orders.fiscalization_retries_exhausted': _ui_tr(
+        'Fiscalization Failed',
+        'Fiskalizatsiya muvaffaqiyatsiz',
+        'Фискализация не удалась',
+    ),
+    'ui.orders.fiscalization_failed_only': _ui_tr(
+        'Fiscalization failed only',
+        'Faqat muvaffaqiyatsiz fiskalizatsiyalar',
+        'Только сбои фискализации',
+    ),
+}
+
+BACKEND_TRANSLATIONS.update(ADMIN_UI_FISCALIZATION_FAILURES_TRANSLATIONS)
+
+
 def main():
     """Seed backend translation keys"""
     app = create_app()

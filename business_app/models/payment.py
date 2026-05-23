@@ -295,6 +295,7 @@ class PaymentFiscalization(db.Model, TimestampMixin):
     __table_args__ = (
         Index("idx_payment_fiscalizations_status_attempt", "status", "last_attempt_at"),
         Index("idx_payment_fiscalizations_provider_receipt", "provider_receipt_id"),
+        Index("idx_payment_fiscalizations_retries_exhausted", "retries_exhausted_at"),
     )
 
     id = Column(Integer, primary_key=True)
@@ -323,6 +324,7 @@ class PaymentFiscalization(db.Model, TimestampMixin):
     completed_at = Column(DateTime(timezone=True), nullable=True)
     next_retry_at = Column(DateTime(timezone=True), nullable=True)
     tax_committee_utilised_at = Column(DateTime(timezone=True), nullable=True)
+    retries_exhausted_at = Column(DateTime(timezone=True), nullable=True)
 
     payment = relationship("Payment", back_populates="fiscalization")
     marking_code_allocations = relationship(
@@ -351,6 +353,7 @@ class PaymentFiscalization(db.Model, TimestampMixin):
             "tax_committee_utilised_at": (
                 self.tax_committee_utilised_at.isoformat() if self.tax_committee_utilised_at else None
             ),
+            "retries_exhausted_at": (self.retries_exhausted_at.isoformat() if self.retries_exhausted_at else None),
         }
 
 

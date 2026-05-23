@@ -12,7 +12,7 @@ from sqlalchemy import func, or_
 from sqlalchemy.orm import joinedload
 
 from business_app import db
-from business_app.models.payment import CashCollectionEvent, DriverCashSession
+from business_app.models.payment import CashCollectionEvent, DriverCashHandoff, DriverCashSession
 from business_app.models.user import User
 from business_app.utils.audit_logger import AuditEventType, AuditSeverity, audit_logger
 from business_app.utils.constants import (
@@ -48,6 +48,7 @@ class DriverReconciliationService:
     }
     ACTIVE_STATUSES = {
         DriverCashSessionStatus.OPEN.value,
+        DriverCashSessionStatus.PARTIAL.value,
         DriverCashSessionStatus.OVERDUE.value,
     }
     REOPEN_ALLOWED_STATUSES = {
@@ -176,7 +177,11 @@ class DriverReconciliationService:
     def _build_next_actions(self, session: DriverCashSession) -> List[str]:
         status = self._status_value(session.status)
         actions: List[str] = []
-        if status in {DriverCashSessionStatus.OPEN.value, DriverCashSessionStatus.OVERDUE.value}:
+        if status in {
+            DriverCashSessionStatus.OPEN.value,
+            DriverCashSessionStatus.PARTIAL.value,
+            DriverCashSessionStatus.OVERDUE.value,
+        }:
             actions.append("submit_reconciliation")
         if status == DriverCashSessionStatus.SUBMITTED.value:
             actions.append("await_admin_verification")
@@ -195,6 +200,11 @@ class DriverReconciliationService:
         driver = session.driver_user
         events = list(session.cash_collection_events or []) if include_events else []
         stats = event_stats or {}
+        expected_on_hand = self._to_decimal(session.expected_cash_on_hand)
+        cumulative_declared = self._to_decimal(session.declared_cash)
+        remaining = expected_on_hand - cumulative_declared
+        if remaining < Decimal("0.00"):
+            remaining = Decimal("0.00")
         payload.update(
             {
                 "driver_name": driver.full_name if driver else None,
@@ -205,12 +215,20 @@ class DriverReconciliationService:
                 "session_age_days": self._session_age_days(session),
                 "is_warning_due": self._is_warning_due(session),
                 "next_actions": self._build_next_actions(session),
+                "cumulative_declared_cash": float(cumulative_declared),
+                "remaining_cash_to_submit": float(remaining),
             }
         )
         if include_events and "delivery_count" not in stats:
             payload["delivery_count"] = len({event.delivery_id for event in events if event.delivery_id})
         if include_events:
             payload["events"] = [event.to_dict() for event in events]
+            payload["handoffs"] = [
+                handoff.to_dict() for handoff in (session.handoffs or []) if handoff.voided_at is None
+            ]
+            payload["voided_handoffs"] = [
+                handoff.to_dict() for handoff in (session.handoffs or []) if handoff.voided_at is not None
+            ]
         return payload
 
     def _assert_session_transition(self, session: DriverCashSession, *, operation: str) -> None:
@@ -218,11 +236,13 @@ class DriverReconciliationService:
         allowed = {
             "submit": {
                 DriverCashSessionStatus.OPEN.value,
+                DriverCashSessionStatus.PARTIAL.value,
                 DriverCashSessionStatus.SUBMITTED.value,
                 DriverCashSessionStatus.OVERDUE.value,
             },
             "verify": {
                 DriverCashSessionStatus.OPEN.value,
+                DriverCashSessionStatus.PARTIAL.value,
                 DriverCashSessionStatus.SUBMITTED.value,
                 DriverCashSessionStatus.OVERDUE.value,
                 DriverCashSessionStatus.MISMATCH.value,
@@ -244,7 +264,13 @@ class DriverReconciliationService:
         session = (
             DriverCashSession.query.filter(
                 DriverCashSession.driver_user_id == driver_user_id,
-                DriverCashSession.status.in_([DriverCashSessionStatus.OPEN, DriverCashSessionStatus.OVERDUE]),
+                DriverCashSession.status.in_(
+                    [
+                        DriverCashSessionStatus.OPEN,
+                        DriverCashSessionStatus.PARTIAL,
+                        DriverCashSessionStatus.OVERDUE,
+                    ]
+                ),
             )
             .order_by(DriverCashSession.session_started_at.desc(), DriverCashSession.id.desc())
             .first()
@@ -265,6 +291,20 @@ class DriverReconciliationService:
 
         self.refresh_expected_cash(session)
         return session
+
+    def _sum_handoffs(self, session: DriverCashSession) -> Decimal:
+        """Return the sum of unvoided handoff amounts for a session."""
+        if session.id is None:
+            return Decimal("0.00")
+        total = (
+            db.session.query(func.coalesce(func.sum(DriverCashHandoff.amount), 0))
+            .filter(
+                DriverCashHandoff.driver_cash_session_id == session.id,
+                DriverCashHandoff.voided_at.is_(None),
+            )
+            .scalar()
+        )
+        return self._to_decimal(total)
 
     def refresh_expected_cash(self, session: DriverCashSession) -> DriverCashSession:
         gross_cash_collected = (
@@ -293,8 +333,13 @@ class DriverReconciliationService:
         session.warning_due_at = session.warning_due_at or self._build_warning_due_at(session.session_started_at)
         session.submission_due_at = session.submission_due_at or session.warning_due_at
 
+        # declared_cash is the running sum of unvoided handoffs. We keep the
+        # column on the session row for fast reads and admin reports; this
+        # method is the single source of truth that keeps it in sync.
+        handoff_total = self._sum_handoffs(session)
+        session.declared_cash = handoff_total if handoff_total > Decimal("0.00") else None
         if session.declared_cash is not None:
-            session.declared_variance = self._to_decimal(session.declared_cash) - gross
+            session.declared_variance = handoff_total - gross
         else:
             session.declared_variance = Decimal("0.00")
         if session.verified_cash is not None:
@@ -313,52 +358,101 @@ class DriverReconciliationService:
         notes: Optional[str] = None,
         submitted_by_user_id: Optional[int] = None,
     ) -> DriverCashSession:
+        """Record a cash handoff toward closing the driver's active session.
+
+        Each call inserts one ``DriverCashHandoff`` row. The session keeps
+        ``status = PARTIAL`` (or ``OPEN`` until the first handoff) while the
+        running total is below the expected on-hand amount; it transitions to
+        ``SUBMITTED`` once the running total reaches or exceeds the expected
+        amount. Over-submission closes the session with a positive declared
+        variance and does **not** block the driver — the prior auto-MISMATCH
+        on any non-zero driver variance was retired with the partial-handoff
+        rollout because it masked legitimate over-payments and gave us no way
+        to track legitimate under-payments separately.
+
+        When ``declared_cash`` is ``None`` the call resolves to the remaining
+        balance (``expected_cash_on_hand - already-handed-off``), so the
+        "Submit expected cash" button always settles the remainder rather
+        than re-stamping the full expected total.
+        """
         session = self.get_or_create_session(driver_user_id=driver_user_id)
         self._assert_session_transition(session, operation="submit")
 
         now = self._now_utc()
         self.refresh_expected_cash(session)
+        expected_on_hand = self._to_decimal(session.expected_cash_on_hand)
+        prior_declared = self._to_decimal(session.declared_cash)
+
         if declared_cash is None:
-            session.declared_cash = self._to_decimal(session.expected_cash_on_hand)
+            target_amount = expected_on_hand - prior_declared
         else:
-            session.declared_cash = self._to_decimal(declared_cash)
+            target_amount = self._to_decimal(declared_cash)
 
-        session.notes = notes
-        session.submitted_at = now
-        session.session_ended_at = now
-        session.submitted_by_user_id = submitted_by_user_id or driver_user_id
+        if target_amount <= Decimal("0.00"):
+            raise ValidationError("Handoff amount must be positive")
+
+        recorder_id = submitted_by_user_id or driver_user_id
+        handoff = DriverCashHandoff(
+            driver_cash_session_id=session.id,
+            amount=target_amount,
+            occurred_at=now,
+            recorded_by_user_id=recorder_id,
+            notes=notes,
+        )
+        db.session.add(handoff)
+        if notes:
+            session.notes = notes
+        db.session.flush()
+
+        # Recompute declared_cash / variance from the now-current handoff set.
         self.refresh_expected_cash(session)
+        cumulative_declared = self._to_decimal(session.declared_cash)
 
-        if session.declared_variance == Decimal("0.00"):
+        next_session: Optional[DriverCashSession] = None
+        closes_session = cumulative_declared >= expected_on_hand and expected_on_hand > Decimal("0.00")
+
+        if closes_session:
             session.status = DriverCashSessionStatus.SUBMITTED
+            session.submitted_at = now
+            session.session_ended_at = now
+            session.submitted_by_user_id = recorder_id
             session.blocked_from_cod = False
             session.block_reason = None
         else:
-            session.status = DriverCashSessionStatus.MISMATCH
-            session.blocked_from_cod = True
-            session.block_reason = "declared_cash_mismatch"
+            # Partial handoff: keep the session active so the driver can
+            # continue to settle the balance. The first partial moves OPEN/
+            # OVERDUE into PARTIAL; subsequent partials stay PARTIAL.
+            session.status = DriverCashSessionStatus.PARTIAL
+            # Do not stamp submitted_at / session_ended_at / submitted_by:
+            # those mark the close event, which has not happened yet.
 
         session.risk_flags = self._build_risk_flags(session)
         db.session.flush()
 
-        next_session = self.get_or_create_session(driver_user_id=driver_user_id)
-        session._next_active_session = next_session
+        if closes_session:
+            next_session = self.get_or_create_session(driver_user_id=driver_user_id)
+            session._next_active_session = next_session
+        else:
+            session._next_active_session = None
 
         audit_logger.log_event(
             event_type=AuditEventType.PAYMENT_PROCESSED,
-            action="driver_cash_session_submitted",
-            severity=AuditSeverity.MEDIUM if not session.blocked_from_cod else AuditSeverity.HIGH,
+            action=("driver_cash_session_submitted" if closes_session else "driver_cash_handoff_recorded"),
+            severity=AuditSeverity.MEDIUM,
             resource_type="driver_cash_session",
             resource_id=str(session.id),
             additional_data={
                 "driver_user_id": driver_user_id,
                 "session_started_at": (session.session_started_at.isoformat() if session.session_started_at else None),
+                "handoff_id": handoff.id,
+                "handoff_amount": float(target_amount),
                 "expected_cash": float(session.expected_cash or 0),
-                "expected_cash_on_hand": float(session.expected_cash_on_hand or 0),
-                "declared_cash": float(session.declared_cash or 0),
+                "expected_cash_on_hand": float(expected_on_hand),
+                "cumulative_declared_cash": float(cumulative_declared),
                 "declared_variance": float(session.declared_variance or 0),
+                "status": self._status_value(session.status),
                 "blocked_from_cod": session.blocked_from_cod,
-                "next_driver_cash_session_id": next_session.id,
+                "next_driver_cash_session_id": next_session.id if next_session else None,
             },
         )
 
@@ -530,8 +624,9 @@ class DriverReconciliationService:
                 error_code="CASH_SESSION_ACTIVE_CONFLICT",
             )
 
+        now = self._now_utc()
         session.status = DriverCashSessionStatus.OPEN
-        session.reopened_at = self._now_utc()
+        session.reopened_at = now
         session.reopened_by_user_id = actor_user_id
         session.reopened_reason = reason.strip()
         session.reopen_count = (session.reopen_count or 0) + 1
@@ -549,6 +644,16 @@ class DriverReconciliationService:
         # session_ended_at must clear too, otherwise the session looks closed
         # to listings that filter on it.
         session.session_ended_at = None
+
+        # Void all prior handoffs so the driver re-submits from scratch.
+        # We preserve the rows (not delete) for audit; the running sum that
+        # backs declared_cash filters out voided handoffs.
+        for prior_handoff in session.handoffs:
+            if prior_handoff.voided_at is None:
+                prior_handoff.voided_at = now
+                prior_handoff.voided_by_user_id = actor_user_id
+                prior_handoff.void_reason = "session_reopened"
+
         self.refresh_expected_cash(session)
 
         audit_logger.log_event(
@@ -856,11 +961,17 @@ class DriverReconciliationService:
         }
 
     def _apply_session_window_filters(self, query, *, start_date: Optional[Any], end_date: Optional[Any]):
-        # Only genuinely active (open/overdue) sessions count as "ongoing" and stay
-        # visible in every window. Closed sessions use their real end date — note
-        # session_ended_at is NULL for sessions verified/resolved without a driver
-        # submission, so fall back through other close timestamps.
-        is_active = DriverCashSession.status.in_([DriverCashSessionStatus.OPEN, DriverCashSessionStatus.OVERDUE])
+        # Only genuinely active (open/partial/overdue) sessions count as "ongoing"
+        # and stay visible in every window. Closed sessions use their real end
+        # date — note session_ended_at is NULL for sessions verified/resolved
+        # without a driver submission, so fall back through other close timestamps.
+        is_active = DriverCashSession.status.in_(
+            [
+                DriverCashSessionStatus.OPEN,
+                DriverCashSessionStatus.PARTIAL,
+                DriverCashSessionStatus.OVERDUE,
+            ]
+        )
         effective_end = func.coalesce(
             DriverCashSession.session_ended_at,
             DriverCashSession.submitted_at,
@@ -888,6 +999,7 @@ class DriverReconciliationService:
             DriverCashSession.status.in_(
                 [
                     DriverCashSessionStatus.OPEN,
+                    DriverCashSessionStatus.PARTIAL,
                     DriverCashSessionStatus.OVERDUE,
                 ]
             ),
@@ -1035,6 +1147,7 @@ class DriverReconciliationService:
                 "declared_variance": 0.0,
                 "verified_variance": 0.0,
                 "open_session_count": 0,
+                "partial_session_count": 0,
                 "submitted_session_count": 0,
                 "verified_session_count": 0,
                 "resolved_session_count": 0,
@@ -1048,6 +1161,7 @@ class DriverReconciliationService:
         summary = {
             "session_count": 0,
             "open_session_count": 0,
+            "partial_session_count": 0,
             "submitted_session_count": 0,
             "verified_session_count": 0,
             "resolved_session_count": 0,
@@ -1085,6 +1199,9 @@ class DriverReconciliationService:
             if session.status == DriverCashSessionStatus.OPEN:
                 row["open_session_count"] += 1
                 summary["open_session_count"] += 1
+            if session.status == DriverCashSessionStatus.PARTIAL:
+                row["partial_session_count"] += 1
+                summary["partial_session_count"] += 1
             if session.status == DriverCashSessionStatus.SUBMITTED:
                 row["submitted_session_count"] += 1
                 summary["submitted_session_count"] += 1
@@ -1100,7 +1217,11 @@ class DriverReconciliationService:
             is_warning_session = (
                 not session.blocked_from_cod
                 and self._status_value(session.status)
-                in {DriverCashSessionStatus.OPEN.value, DriverCashSessionStatus.OVERDUE.value}
+                in {
+                    DriverCashSessionStatus.OPEN.value,
+                    DriverCashSessionStatus.PARTIAL.value,
+                    DriverCashSessionStatus.OVERDUE.value,
+                }
                 and self._is_warning_due(session)
             )
             if session.status == DriverCashSessionStatus.OVERDUE:

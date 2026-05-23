@@ -415,6 +415,21 @@ STAFF_TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "uz": "Yarashtiruv yuborildi.",
         "ru": "Сверка отправлена.",
     },
+    "staff.delivery.handoff_remaining_cash": {
+        "en": "Submit remaining {amount}",
+        "uz": "Qolgan {amount} ni topshirish",
+        "ru": "Сдать оставшиеся {amount}",
+    },
+    "staff.delivery.remaining_to_submit": {
+        "en": "Remaining to submit",
+        "uz": "Topshiriladigan qolgan summa",
+        "ru": "Осталось сдать",
+    },
+    "staff.delivery.reconciliation_partial_recorded": {
+        "en": "Partial handoff recorded. The session stays open until the remaining cash is submitted.",
+        "uz": "Qisman topshirish yozib olindi. Qolgan summa topshirilmaguncha sessiya ochiq qoladi.",
+        "ru": "Частичная сдача записана. Сессия остаётся открытой, пока не сдадите остаток.",
+    },
     "staff.delivery.expected_cash_label": {
         "en": "Expected cash",
         "uz": "Kutilgan naqd pul",

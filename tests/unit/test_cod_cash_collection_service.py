@@ -737,13 +737,26 @@ class TestCashCollectionService:
             )
 
             recon_service = DriverReconciliationService()
-            session = recon_service.submit_session(
+            # Driver hands over the full expected (4000) so the session closes;
+            # admin then verifies a short count, which produces the blocked-from-cod
+            # MISMATCH state we want to exercise. (Partial submission no longer
+            # auto-blocks — that was the bug fixed alongside the partial-handoff
+            # rollout, so we use the verify path to reach the blocked state.)
+            submitted = recon_service.submit_session(
                 driver_user_id=delivery_driver.id,
-                declared_cash=Decimal("3000.00"),
-                notes="Mismatch created for blocking test.",
+                declared_cash=Decimal("4000.00"),
+                notes="Driver declared all collected cash before counting.",
                 submitted_by_user_id=delivery_driver.id,
             )
-            assert session.blocked_from_cod is True
+            assert submitted.status == DriverCashSessionStatus.SUBMITTED
+            verified = recon_service.verify_session(
+                session_id=submitted.id,
+                verified_cash=Decimal("3000.00"),
+                actor_user_id=delivery_driver.id,
+                reason_code='cash_count_short',
+                notes="Admin counted 1000 less than declared.",
+            )
+            assert verified.blocked_from_cod is True
 
             with pytest.raises(ValidationError, match="blocked from new cash on delivery collections"):
                 cash_service.post_collection(
@@ -1032,7 +1045,7 @@ class TestCashCollectionService:
 
 @pytest.mark.unit
 class TestDriverReconciliationService:
-    def test_mismatch_submission_blocks_driver_and_appears_in_report(
+    def test_verify_short_blocks_driver_and_appears_in_report(
         self,
         app,
         db,
@@ -1043,6 +1056,14 @@ class TestDriverReconciliationService:
         cod_order,
         cod_delivery,
     ):
+        """Driver-declared shorts no longer auto-block; admin verification still does.
+
+        Under the partial-handoff rollout, a driver submitting less than the
+        expected on-hand amount yields a PARTIAL session (still open). Only
+        admin verification with a non-zero variance produces the blocked-from-COD
+        MISMATCH state, and only that path needs to be guarded against
+        bypass-by-future-COD-collection.
+        """
         with app.app_context():
             cash_service = CashCollectionService()
             payment = cash_service.ensure_cod_payment_for_order(cod_order)
@@ -1063,13 +1084,23 @@ class TestDriverReconciliationService:
             recon_service = DriverReconciliationService()
             submitted = recon_service.submit_session(
                 driver_user_id=delivery_driver.id,
-                declared_cash=Decimal("9000.00"),
-                notes="Short by 1000 during handoff",
+                declared_cash=Decimal("10000.00"),
+                notes="Driver declared full amount; admin will recount.",
                 submitted_by_user_id=delivery_driver.id,
             )
+            assert submitted.status == DriverCashSessionStatus.SUBMITTED
+            assert submitted.blocked_from_cod is False
 
-            assert submitted.status == DriverCashSessionStatus.MISMATCH
-            assert submitted.blocked_from_cod is True
+            verified = recon_service.verify_session(
+                session_id=submitted.id,
+                verified_cash=Decimal("9000.00"),
+                actor_user_id=admin_user.id,
+                reason_code='cash_count_short',
+                notes="Admin recount came up 1000 short.",
+            )
+
+            assert verified.status == DriverCashSessionStatus.MISMATCH
+            assert verified.blocked_from_cod is True
             assert recon_service.is_driver_blocked_from_cod(delivery_driver.id) is True
 
             report = recon_service.get_report(period="day", driver_user_id=delivery_driver.id)
@@ -1078,7 +1109,7 @@ class TestDriverReconciliationService:
             assert report["report"][0]["blocked_session_count"] == 1
 
             resolved = recon_service.resolve_session(
-                session_id=submitted.id,
+                session_id=verified.id,
                 actor_user_id=admin_user.id,
                 reason_code='manager_approved_adjustment',
                 resolution_notes="Admin verified the shortage and accepted adjustment.",
@@ -1132,6 +1163,268 @@ class TestDriverReconciliationService:
             assert next_session.driver_user_id == delivery_driver.id
             assert next_session.status == DriverCashSessionStatus.OPEN
             assert next_session.expected_cash_on_hand == Decimal("0.00")
+
+    def test_partial_submission_keeps_session_open(
+        self,
+        app,
+        db,
+        sample_user,
+        delivery_driver,
+        delivery_driver_profile,
+        cod_order,
+        cod_delivery,
+    ):
+        with app.app_context():
+            cash_service = CashCollectionService()
+            cash_service.ensure_cod_payment_for_order(cod_order)
+            db.session.commit()
+            cash_service.post_collection(
+                customer_id=sample_user.id,
+                amount=Decimal("10000.00"),
+                source="delivery_completion",
+                collector_user_id=delivery_driver.id,
+                recorded_by_user_id=delivery_driver.id,
+                order_id=cod_order.id,
+                delivery_id=cod_delivery.id,
+                notes="Collected on delivery.",
+            )
+
+            recon_service = DriverReconciliationService()
+            partial = recon_service.submit_session(
+                driver_user_id=delivery_driver.id,
+                declared_cash=Decimal("3000.00"),
+                submitted_by_user_id=delivery_driver.id,
+            )
+
+            assert partial.status == DriverCashSessionStatus.PARTIAL
+            assert partial.submitted_at is None
+            assert partial.session_ended_at is None
+            assert partial.blocked_from_cod is False
+            assert partial.declared_cash == Decimal("3000.00")
+            assert getattr(partial, "_next_active_session", None) is None
+            # Re-fetching the open session for the same driver yields the same
+            # partial session, not a fresh one.
+            assert recon_service.get_open_session_for_driver(delivery_driver.id).id == partial.id
+
+    def test_two_partial_handoffs_close_session_when_total_meets_expected(
+        self,
+        app,
+        db,
+        sample_user,
+        delivery_driver,
+        delivery_driver_profile,
+        cod_order,
+        cod_delivery,
+    ):
+        with app.app_context():
+            cash_service = CashCollectionService()
+            cash_service.ensure_cod_payment_for_order(cod_order)
+            db.session.commit()
+            cash_service.post_collection(
+                customer_id=sample_user.id,
+                amount=Decimal("10000.00"),
+                source="delivery_completion",
+                collector_user_id=delivery_driver.id,
+                recorded_by_user_id=delivery_driver.id,
+                order_id=cod_order.id,
+                delivery_id=cod_delivery.id,
+                notes="Collected on delivery.",
+            )
+
+            recon_service = DriverReconciliationService()
+            first = recon_service.submit_session(
+                driver_user_id=delivery_driver.id,
+                declared_cash=Decimal("4000.00"),
+                submitted_by_user_id=delivery_driver.id,
+            )
+            assert first.status == DriverCashSessionStatus.PARTIAL
+            assert first.declared_cash == Decimal("4000.00")
+
+            second = recon_service.submit_session(
+                driver_user_id=delivery_driver.id,
+                declared_cash=Decimal("6000.00"),
+                submitted_by_user_id=delivery_driver.id,
+            )
+            assert second.id == first.id
+            assert second.status == DriverCashSessionStatus.SUBMITTED
+            assert second.declared_cash == Decimal("10000.00")
+            assert second.declared_variance == Decimal("0.00")
+            assert second.submitted_at is not None
+            assert second.session_ended_at is not None
+            next_session = getattr(second, "_next_active_session", None)
+            assert next_session is not None
+            assert next_session.id != second.id
+
+    def test_submit_all_after_partial_settles_only_the_remainder(
+        self,
+        app,
+        db,
+        sample_user,
+        delivery_driver,
+        delivery_driver_profile,
+        cod_order,
+        cod_delivery,
+    ):
+        with app.app_context():
+            cash_service = CashCollectionService()
+            cash_service.ensure_cod_payment_for_order(cod_order)
+            db.session.commit()
+            cash_service.post_collection(
+                customer_id=sample_user.id,
+                amount=Decimal("10000.00"),
+                source="delivery_completion",
+                collector_user_id=delivery_driver.id,
+                recorded_by_user_id=delivery_driver.id,
+                order_id=cod_order.id,
+                delivery_id=cod_delivery.id,
+            )
+
+            recon_service = DriverReconciliationService()
+            recon_service.submit_session(
+                driver_user_id=delivery_driver.id,
+                declared_cash=Decimal("3000.00"),
+                submitted_by_user_id=delivery_driver.id,
+            )
+            # The "Submit all" button passes declared_cash=None; the service
+            # must interpret that as "the remainder", not "the full expected".
+            closed = recon_service.submit_session(
+                driver_user_id=delivery_driver.id,
+                declared_cash=None,
+                submitted_by_user_id=delivery_driver.id,
+            )
+            assert closed.status == DriverCashSessionStatus.SUBMITTED
+            assert closed.declared_cash == Decimal("10000.00")
+            # The remainder handoff should have been exactly 7000, not 10000.
+            unvoided = [h for h in closed.handoffs if h.voided_at is None]
+            amounts = sorted(h.amount for h in unvoided)
+            assert amounts == [Decimal("3000.00"), Decimal("7000.00")]
+
+    def test_over_submission_closes_session_without_blocking(
+        self,
+        app,
+        db,
+        sample_user,
+        delivery_driver,
+        delivery_driver_profile,
+        cod_order,
+        cod_delivery,
+    ):
+        with app.app_context():
+            cash_service = CashCollectionService()
+            cash_service.ensure_cod_payment_for_order(cod_order)
+            db.session.commit()
+            cash_service.post_collection(
+                customer_id=sample_user.id,
+                amount=Decimal("10000.00"),
+                source="delivery_completion",
+                collector_user_id=delivery_driver.id,
+                recorded_by_user_id=delivery_driver.id,
+                order_id=cod_order.id,
+                delivery_id=cod_delivery.id,
+            )
+
+            recon_service = DriverReconciliationService()
+            over = recon_service.submit_session(
+                driver_user_id=delivery_driver.id,
+                declared_cash=Decimal("15000.00"),
+                submitted_by_user_id=delivery_driver.id,
+            )
+
+            assert over.status == DriverCashSessionStatus.SUBMITTED
+            assert over.declared_cash == Decimal("15000.00")
+            assert over.declared_variance == Decimal("5000.00")
+            assert over.blocked_from_cod is False
+            assert recon_service.is_driver_blocked_from_cod(delivery_driver.id) is False
+            assert getattr(over, "_next_active_session", None) is not None
+
+    def test_zero_or_negative_handoff_amount_is_rejected(
+        self,
+        app,
+        db,
+        sample_user,
+        delivery_driver,
+        delivery_driver_profile,
+        cod_order,
+        cod_delivery,
+    ):
+        with app.app_context():
+            cash_service = CashCollectionService()
+            cash_service.ensure_cod_payment_for_order(cod_order)
+            db.session.commit()
+            cash_service.post_collection(
+                customer_id=sample_user.id,
+                amount=Decimal("5000.00"),
+                source="delivery_completion",
+                collector_user_id=delivery_driver.id,
+                recorded_by_user_id=delivery_driver.id,
+                order_id=cod_order.id,
+                delivery_id=cod_delivery.id,
+            )
+
+            recon_service = DriverReconciliationService()
+            with pytest.raises(ValidationError, match="positive"):
+                recon_service.submit_session(
+                    driver_user_id=delivery_driver.id,
+                    declared_cash=Decimal("0.00"),
+                    submitted_by_user_id=delivery_driver.id,
+                )
+
+    def test_reopen_voids_existing_handoffs(
+        self,
+        app,
+        db,
+        sample_user,
+        admin_user,
+        delivery_driver,
+        delivery_driver_profile,
+        cod_order,
+        cod_delivery,
+    ):
+        with app.app_context():
+            cash_service = CashCollectionService()
+            cash_service.ensure_cod_payment_for_order(cod_order)
+            db.session.commit()
+            cash_service.post_collection(
+                customer_id=sample_user.id,
+                amount=Decimal("5000.00"),
+                source="delivery_completion",
+                collector_user_id=delivery_driver.id,
+                recorded_by_user_id=delivery_driver.id,
+                order_id=cod_order.id,
+                delivery_id=cod_delivery.id,
+            )
+            recon_service = DriverReconciliationService()
+            closed = recon_service.submit_session(
+                driver_user_id=delivery_driver.id,
+                declared_cash=Decimal("5000.00"),
+                submitted_by_user_id=delivery_driver.id,
+            )
+            assert closed.status == DriverCashSessionStatus.SUBMITTED
+            assert len([h for h in closed.handoffs if h.voided_at is None]) == 1
+
+            # Closing the session opened a fresh next-active session for the
+            # driver. The reopen guard rejects reopen while another active
+            # session exists, so we verify the empty successor first.
+            next_active = getattr(closed, "_next_active_session", None)
+            assert next_active is not None
+            recon_service.verify_session(
+                session_id=next_active.id,
+                verified_cash=Decimal("0.00"),
+                actor_user_id=admin_user.id,
+                reason_code='cash_count_matched',
+                notes="Empty successor closed before reopening original.",
+            )
+
+            reopened = recon_service.reopen_session(
+                session_id=closed.id,
+                actor_user_id=admin_user.id,
+                reason="Order edit forced re-tally.",
+            )
+            assert reopened.status == DriverCashSessionStatus.OPEN
+            assert reopened.submitted_at is None
+            assert reopened.declared_cash is None
+            assert all(h.voided_at is not None for h in reopened.handoffs)
+            assert all(h.void_reason == "session_reopened" for h in reopened.handoffs)
 
     def test_verify_requires_reason_code(
         self,

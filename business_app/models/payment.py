@@ -398,8 +398,8 @@ class DriverCashSession(db.Model, TimestampMixin):
             "uq_driver_cash_sessions_driver_active",
             "driver_user_id",
             unique=True,
-            postgresql_where=sa_text("status IN ('open', 'overdue')"),
-            sqlite_where=sa_text("status IN ('open', 'overdue')"),
+            postgresql_where=sa_text("status IN ('open', 'overdue', 'partial')"),
+            sqlite_where=sa_text("status IN ('open', 'overdue', 'partial')"),
         ),
     )
 
@@ -459,6 +459,12 @@ class DriverCashSession(db.Model, TimestampMixin):
         "CashCollectionEvent",
         back_populates="driver_cash_session",
     )
+    handoffs = relationship(
+        "DriverCashHandoff",
+        back_populates="driver_cash_session",
+        order_by="DriverCashHandoff.occurred_at",
+        cascade="all, delete-orphan",
+    )
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -500,6 +506,46 @@ class DriverCashSession(db.Model, TimestampMixin):
             "reopened_by_user_id": self.reopened_by_user_id,
             "reopened_reason": self.reopened_reason,
             "reopen_count": self.reopen_count or 0,
+        }
+
+
+class DriverCashHandoff(db.Model, TimestampMixin):
+    """One physical cash handoff from a driver toward closing a cash session.
+
+    A session can accumulate multiple handoffs over time; the session stays
+    open (status=PARTIAL) until the sum of unvoided handoff amounts reaches
+    or exceeds `expected_cash_on_hand`, at which point it closes (SUBMITTED).
+    """
+
+    __tablename__ = "driver_cash_handoffs"
+    __table_args__ = (Index("idx_driver_cash_handoffs_session_occurred", "driver_cash_session_id", "occurred_at"),)
+
+    id = Column(Integer, primary_key=True)
+    driver_cash_session_id = Column(Integer, ForeignKey("driver_cash_sessions.id"), nullable=False, index=True)
+    amount = Column(Numeric(precision=12, scale=2), nullable=False)
+    occurred_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC))
+    recorded_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    notes = Column(Text, nullable=True)
+    voided_at = Column(DateTime(timezone=True), nullable=True)
+    voided_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    void_reason = Column(String(255), nullable=True)
+
+    driver_cash_session = relationship("DriverCashSession", back_populates="handoffs")
+    recorded_by_user = relationship("User", foreign_keys=[recorded_by_user_id])
+    voided_by_user = relationship("User", foreign_keys=[voided_by_user_id])
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "driver_cash_session_id": self.driver_cash_session_id,
+            "amount": float(self.amount or 0),
+            "occurred_at": self.occurred_at.isoformat() if self.occurred_at else None,
+            "recorded_by_user_id": self.recorded_by_user_id,
+            "notes": self.notes,
+            "voided_at": self.voided_at.isoformat() if self.voided_at else None,
+            "voided_by_user_id": self.voided_by_user_id,
+            "void_reason": self.void_reason,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
         }
 
 

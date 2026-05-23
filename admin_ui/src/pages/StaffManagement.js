@@ -236,11 +236,17 @@ const StaffManagement = () => {
             title: t('staff:status', 'Status'),
             dataIndex: 'status',
             key: 'status',
-            render: (value, record) => (
-                <Tag color={record.blocked_from_cod ? 'red' : value === 'verified' ? 'green' : 'blue'}>
-                    {value}
-                </Tag>
-            ),
+            render: (value, record) => {
+                let color = 'blue';
+                if (record.blocked_from_cod) {
+                    color = 'red';
+                } else if (value === 'verified') {
+                    color = 'green';
+                } else if (value === 'partial') {
+                    color = 'orange';
+                }
+                return <Tag color={color}>{value}</Tag>;
+            },
         },
         {
             title: t('staff:expected_cash', 'Expected Cash'),

@@ -179,12 +179,27 @@ class DeliveryKeyboards:
     def reconciliation_actions(
         language: str,
         can_submit: bool = True,
+        remaining_amount: float = None,
     ) -> InlineKeyboardMarkup:
-        """Actions for the driver's reconciliation session view."""
+        """Actions for the driver's reconciliation session view.
+
+        When ``remaining_amount`` is provided (i.e. the session is PARTIAL with
+        a known unpaid balance), the primary button reads "Submit remaining
+        {amount}" instead of "Submit expected cash" so the driver sees how much
+        is left to hand off.
+        """
         keyboard = []
         if can_submit:
+            if remaining_amount and remaining_amount > 0:
+                label = i18n.get(
+                    'staff.delivery.handoff_remaining_cash',
+                    language,
+                    amount=f"{remaining_amount:,.0f}",
+                )
+            else:
+                label = i18n.get('staff.delivery.handoff_expected_cash', language)
             keyboard.append([InlineKeyboardButton(
-                f"💵 {i18n.get('staff.delivery.handoff_expected_cash', language)}",
+                f"💵 {label}",
                 callback_data="staff_reconcile_submit_all"
             )])
             keyboard.append([InlineKeyboardButton(

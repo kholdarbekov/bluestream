@@ -48,6 +48,9 @@ const statusColor = (status, blocked) => {
   if (status === 'mismatch' || status === 'overdue') {
     return 'orange';
   }
+  if (status === 'partial') {
+    return 'gold';
+  }
   if (status === 'submitted') {
     return 'blue';
   }
@@ -530,6 +533,7 @@ const DeliveryReports = () => {
             <Select value={statusFilter} onChange={setStatusFilter} style={{ width: 160 }}>
               <Option value="all">{t('staff:all_statuses', 'All statuses')}</Option>
               <Option value="open">{t('staff:open', 'Open')}</Option>
+              <Option value="partial">{t('staff:partial', 'Partial')}</Option>
               <Option value="submitted">{t('staff:submitted', 'Submitted')}</Option>
               <Option value="verified">{t('staff:verified', 'Verified')}</Option>
               <Option value="mismatch">{t('staff:mismatch', 'Mismatch')}</Option>
@@ -746,6 +750,34 @@ const DeliveryReports = () => {
                 message={t('staff:driver_blocked_from_cod', 'Driver is blocked from new COD work until this session is cleared.')}
               />
             ) : null}
+
+            <Divider>{t('staff:cash_handoffs', 'Cash Handoffs')}</Divider>
+            <Table
+              columns={[
+                {
+                  title: t('staff:handoff_occurred_at', 'When'),
+                  dataIndex: 'occurred_at',
+                  key: 'occurred_at',
+                },
+                {
+                  title: t('staff:handoff_amount', 'Amount'),
+                  dataIndex: 'amount',
+                  key: 'amount',
+                  render: (value) => money(value),
+                },
+                {
+                  title: t('staff:handoff_notes', 'Notes'),
+                  dataIndex: 'notes',
+                  key: 'notes',
+                  render: (value) => value || '—',
+                },
+              ]}
+              dataSource={selectedSession.handoffs || []}
+              rowKey="id"
+              pagination={false}
+              size="small"
+              locale={{ emptyText: t('staff:no_handoffs_yet', 'No handoffs yet.') }}
+            />
 
             <Divider>{t('staff:collection_events', 'Collection Events')}</Divider>
             <Table

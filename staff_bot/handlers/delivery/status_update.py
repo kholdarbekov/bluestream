@@ -117,6 +117,12 @@ class StatusUpdateHandler(BaseHandler):
             lines.append(
                 f"\u26a0\ufe0f {i18n.get('staff.delivery.cash_variance_label', language)}: {declared_variance}"
             )
+        if status == 'partial':
+            remaining = session.get('remaining_cash_to_submit') or 0
+            lines.append(
+                f"\U0001f4cc {i18n.get('staff.delivery.remaining_to_submit', language)}: "
+                f"{format_currency(remaining, language=language)}"
+            )
         notes = session.get('notes')
         if notes:
             lines.append(f"\U0001f4ac {notes}")
@@ -579,7 +585,8 @@ class StatusUpdateHandler(BaseHandler):
             text = self._format_session_summary(session, language)
             keyboard = DeliveryKeyboards.reconciliation_actions(
                 language,
-                can_submit=session.get('status') in {'open', 'overdue'},
+                can_submit=session.get('status') in {'open', 'partial', 'overdue'},
+                remaining_amount=session.get('remaining_cash_to_submit'),
             )
 
             if update.callback_query:
@@ -633,8 +640,13 @@ class StatusUpdateHandler(BaseHandler):
 
             await self._clear_delivery_cash_flow(context, update)
             session = response.data or {}
+            title_key = (
+                'staff.delivery.reconciliation_partial_recorded'
+                if session.get('status') == 'partial'
+                else 'staff.delivery.reconciliation_submitted'
+            )
             message = (
-                f"\u2705 {i18n.get('staff.delivery.reconciliation_submitted', language)}"
+                f"\u2705 {i18n.get(title_key, language)}"
                 f"\n\n{self._format_session_summary(session, language)}"
             )
             await query.edit_message_text(
@@ -680,7 +692,12 @@ class StatusUpdateHandler(BaseHandler):
 
             await self._clear_delivery_cash_flow(context, update)
             session = response.data or {}
-            success_title = i18n.get('staff.delivery.reconciliation_submitted', language)
+            title_key = (
+                'staff.delivery.reconciliation_partial_recorded'
+                if session.get('status') == 'partial'
+                else 'staff.delivery.reconciliation_submitted'
+            )
+            success_title = i18n.get(title_key, language)
             message = f"\u2705 {success_title}\n\n{self._format_session_summary(session, language)}"
             await update.message.reply_text(
                 message,

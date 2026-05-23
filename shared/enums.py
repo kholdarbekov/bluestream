@@ -87,6 +87,7 @@ class DriverCashSessionStatus(Enum):
     """Driver cash reconciliation session state."""
 
     OPEN = 'open'
+    PARTIAL = 'partial'
     SUBMITTED = 'submitted'
     VERIFIED = 'verified'
     MISMATCH = 'mismatch'

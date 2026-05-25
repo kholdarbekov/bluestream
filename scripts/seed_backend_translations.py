@@ -1733,6 +1733,96 @@ BACKEND_TRANSLATIONS = {
         'uz': 'Jami yechib olishlar',
         'ru': 'Всего списаний'
     },
+    'ui.analytics.customer_type': {
+        'en': 'Customer Type',
+        'uz': 'Mijoz turi',
+        'ru': 'Тип клиента'
+    },
+    'ui.analytics.days_since_last_order': {
+        'en': 'Days Since Last Order',
+        'uz': 'Oxirgi buyurtmadan beri kunlar',
+        'ru': 'Дней с последнего заказа'
+    },
+    'ui.analytics.days_threshold': {
+        'en': 'Days Threshold',
+        'uz': 'Kunlar chegarasi',
+        'ru': 'Порог в днях'
+    },
+    'ui.analytics.inactive_customers': {
+        'en': 'Inactive Customers',
+        'uz': 'Faol bo\'lmagan mijozlar',
+        'ru': 'Неактивные клиенты'
+    },
+    'ui.analytics.inactive_customers_list': {
+        'en': 'Inactive Customers List',
+        'uz': 'Faol bo\'lmagan mijozlar ro\'yxati',
+        'ru': 'Список неактивных клиентов'
+    },
+    'ui.analytics.inactive_total': {
+        'en': 'Total Inactive',
+        'uz': 'Jami faol bo\'lmaganlar',
+        'ru': 'Всего неактивных'
+    },
+    'ui.analytics.include_never_ordered': {
+        'en': 'Include Never-Ordered',
+        'uz': 'Hech qachon buyurtma qilmaganlarni qo\'shish',
+        'ru': 'Включая никогда не заказывавших'
+    },
+    'ui.analytics.last_order': {
+        'en': 'Last Order',
+        'uz': 'Oxirgi buyurtma',
+        'ru': 'Последний заказ'
+    },
+    'ui.analytics.name': {
+        'en': 'Name',
+        'uz': 'Ismi',
+        'ru': 'Имя'
+    },
+    'ui.analytics.never': {
+        'en': 'Never',
+        'uz': 'Hech qachon',
+        'ru': 'Никогда'
+    },
+    'ui.analytics.phone': {
+        'en': 'Phone',
+        'uz': 'Telefon',
+        'ru': 'Телефон'
+    },
+    'ui.analytics.region': {
+        'en': 'Region',
+        'uz': 'Hudud',
+        'ru': 'Регион'
+    },
+    'ui.analytics.total_orders': {
+        'en': 'Total Orders',
+        'uz': 'Jami buyurtmalar',
+        'ru': 'Всего заказов'
+    },
+    'ui.analytics.total_spent': {
+        'en': 'Total Spent',
+        'uz': 'Jami sarflangan',
+        'ru': 'Всего потрачено'
+    },
+    'ui.analytics.type_all': {
+        'en': 'All',
+        'uz': 'Hammasi',
+        'ru': 'Все'
+    },
+    'ui.analytics.type_grocery': {
+        'en': 'Grocery',
+        'uz': 'Do\'kon',
+        'ru': 'Магазин'
+    },
+    'ui.analytics.type_individual': {
+        'en': 'Individual',
+        'uz': 'Jismoniy shaxs',
+        'ru': 'Физическое лицо'
+    },
+    'ui.analytics.type_workplace': {
+        'en': 'Workplace',
+        'uz': 'Ish joyi',
+        'ru': 'Рабочее место'
+    },
     'ui.loyalty.actions': {
         'en': 'Actions',
         'uz': 'Amallar',
